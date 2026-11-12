@@ -46,7 +46,7 @@ let bind_local st (local : Core.local) place =
   | Synthetic number -> Hashtbl.replace st.frame.synthetic number place
   | Self -> st.frame.self_place <- Some place
 
-let operand_type : Core.operand -> T.ty = function
+let operand_type : Core.operand -> Types.ty = function
   | Place place -> Core_walk.place_type place
   | Value value -> value.type_
 
@@ -57,8 +57,6 @@ let binary : Core.comparison -> Lir.binary = function
   | Less_equal -> Less_equal
   | Greater -> Greater
   | Greater_equal -> Greater_equal
-
-(* Patterns *)
 
 let rec binds_name (pattern : Core.pattern) =
   match pattern.kind with
@@ -101,7 +99,7 @@ let rec expand_alternatives (pattern : Core.pattern) : Core.pattern list =
 type bound_name = {
   local : Core.local;
   name : string;
-  mode : T.mode;
+  mode : Types.mode;
   ty : Ground.ty;
   part : Lir.place;
 }
@@ -114,7 +112,7 @@ type slot = Value_slot of Lir.place | Pointer_slot of Lir.local
    copies implicitly and the name does not change it. Otherwise the name
    aliases the part. *)
 let has_own_local st (bound : bound_name) =
-  bound.mode = Own || (trivial st bound.ty && bound.mode <> Mut)
+  (bound.mode = Own || (trivial st bound.ty && bound.mode <> Mut)) && lent_at st bound.part = None
 
 let rec bound_names st (pattern : Core.pattern) (place : Lir.place) : bound_name list =
   match pattern.kind with
@@ -122,10 +120,13 @@ let rec bound_names st (pattern : Core.pattern) (place : Lir.place) : bound_name
       [ { local; name; mode; ty = ground st pattern.type_; part = place } ]
   | Variant { variant; fields } ->
       List.concat_map
-        (fun (field, inner) -> bound_names st inner (place / Variant_field { variant; field }))
+        (fun (field, inner) ->
+          bound_names st inner (project st place (Variant_field { variant; field })))
         fields
   | Record fields ->
-      List.concat_map (fun (field, inner) -> bound_names st inner (place / Field field)) fields
+      List.concat_map
+        (fun (field, inner) -> bound_names st inner (project st place (Field field)))
+        fields
   | Wildcard | Literal _ | Range _ | Equal_to _ | Alternatives _ -> []
 
 (* Binds a name to its part: moved or copied into a local of its own, or as
@@ -138,17 +139,29 @@ let bind_name st (bound : bound_name) =
   end
   else bind_local st bound.local bound.part
 
-let rec place st (source : Core.place) : Lir.place =
+let rec place st (source : Core.place) : Lir.place = whole st (part st source)
+
+(* A place as the code names it, which may hold a lent value: the base of a
+   field, or what a pattern is matched against. *)
+and part st (source : Core.place) : Lir.place =
   match source with
   | Local { local; _ } -> local_place st local
   | Constant { path; _ } -> static_constant st path
-  | Field { base; field; _ } -> place st base / Field field
+  | Field { base; field; _ } -> project st (part st base) (Field field)
   | Temporary value -> value_place st value
   | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(failure_site st origin)
   | Lent _ -> bug "a lent place that is not a call"
 
 and operand_place st (operand : Core.operand) : Lir.place =
   match operand with Place source -> place st source | Value value -> value_place st value
+
+and operand_part st (operand : Core.operand) : Lir.place =
+  match operand with Place source -> part st source | Value value -> value_place st value
+
+(* The value at a place as a value of its type. A lent value there is
+   copied into one. *)
+and whole st (source : Lir.place) : Lir.place =
+  match lent_at st source with Some lent -> copied_lent st lent source | None -> source
 
 (* Evaluates an expression into a new temporary, which lives until the end
    of the statement. *)
@@ -323,7 +336,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
       in
       let added =
         List.concat_map
-          (fun ((mode : T.mode), evidence) ->
+          (fun ((mode : Types.mode), evidence) ->
             match tasks with
             | Some tasks when mode = Mut && not (List.exists is_tasks evidence) ->
                 locked_evidence st ~tasks evidence
@@ -354,11 +367,11 @@ and into st (value : Core.expression) (destination : Lir.place) =
         match ty with Function f -> f | _ -> bug "a lambda of %s" (Ground.to_string ty)
       in
       nested_function st ~function_type
-        ~output:(match value.type_ with T.Function f -> Some f.output | _ -> None)
+        ~output:(match value.type_ with Types.Function f -> Some f.output | _ -> None)
         ~captures:
           (List.map
              (fun (capture : Core.capture) ->
-               (capture.local, local_place st capture.local, ground st capture.type_))
+               (capture.local, whole st (local_place st capture.local), ground st capture.type_))
              captures)
         ~bind_capture:bind_local
         ~body:(fun inner parameter_places ->
@@ -423,7 +436,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
    temporary, which the callee fills with the default. The returned mask has
    one bit for each parameter with a default, set where the call passes an
    argument. *)
-and evaluate_arguments st (signature : T.signature) substitution (arguments : Core.argument list) =
+and evaluate_arguments st (signature : Types.signature) substitution
+    (arguments : Core.argument list) =
   let parameters = interface_parameters signature in
   if List.length parameters <> List.length arguments then
     bug "a call with %d arguments for %d parameters" (List.length arguments)
@@ -527,9 +541,9 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
   | None, Trait_method { trait; name; self_type; _ } -> (
       (* Through an [any] value, which is the receiver. *)
       let any_type =
-        match T.substitute st.frame.code.substitution self_type with
-        | T.Any reference -> reference
-        | receiver -> bug "a call through any on %s" (T.show receiver)
+        match Types.substitute st.frame.code.substitution self_type with
+        | Types.Any reference -> reference
+        | receiver -> bug "a call through any on %s" (Types.show receiver)
       in
       match List.map (argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
@@ -563,7 +577,7 @@ and capability_defaults st ~capability ~name (arguments : Core.argument list) ev
       match demand st.context Environment.trait_interface capability with
       | Some interface -> (
           match
-            List.find_opt (fun (m : T.trait_method) -> m.method_name = name) interface.methods
+            List.find_opt (fun (m : Types.trait_method) -> m.method_name = name) interface.methods
           with
           | Some declared -> declared.method_receiver
           | None -> bug "%s has no method %s" (Path.show capability) name)
@@ -820,7 +834,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
                 if mode = Mut then
                   bug "a `concurrent for` over %s, which yields `mut` places and not by position"
                     (Path.show path);
-                fun value ~owned -> spawn_with_item st loop value ~owned ~each
+                fun value ~owned -> spawn_with_item st loop (whole st value) ~owned ~each
           in
           inline st path type_arguments ~arguments ~call_site:(site_of st origin)
             ~on_yield:(fun yielded ~owned ~resume ~stop ->
@@ -868,88 +882,254 @@ and pull_cursor st (yielding : Ground.yielding) cursor ~(each : Lir.place -> uni
     ~call_next:(fun destination -> call_next st yielding cursor destination)
     ~body:each
 
-(* The value a method yields with places lent into it.
-
-   Lent to be read, it holds the bytes of each place and owns nothing, so
-   nothing drops it, and the places keep their values.
-
-   Lent to be changed, each place's value is moved into it, and the scope
-   around moves each back as it ends, on every way out. So while the caller
-   has it, it owns what it holds: a field the caller replaces is dropped
-   first, as in any value, and what goes back is whatever the caller left. *)
-and lending st (mode : T.mode) (built : Core.expression) : Lir.place =
-  let changed = mode = Mut in
-  let lent = at (local st.b ~borrowed:(not changed) (Value (ground st built.type_))) in
-  (* Once each place has its value back, what is left owns nothing, and
-     this drop, which comes after them, says so. *)
-  if changed then begin
-    let scope = innermost_scope st in
-    scope.owned <- Drop_value lent :: scope.owned
-  end;
-  let lent_operand source ty ~from =
-    if changed then begin
-      let scope = innermost_scope st in
-      scope.owned <- Give_back { lent = from; source; ty } :: scope.owned;
-      owned st source ty
-    end
-    else Lir.Copy source
-  in
-  construct_lending st built ~borrowed:(not changed) ~lent:lent_operand ~destination:lent
-    ~field_path:lent;
-  lent
-
 (* For a cursor, whose caller keeps what [next] gives it: the value with a
    copy of each place in place of the place, which it owns. *)
 and copied st (built : Core.expression) : Lir.place =
   let copy = temporary st (ground st built.type_) in
-  let copy_of source ty ~from:_ =
-    let fresh_copy = temporary st ty in
-    Glue.copy_into st.context.glue st.b ~destination:fresh_copy ~source ty;
-    owned st fresh_copy ty
-  in
-  construct_lending st built ~borrowed:false ~lent:copy_of ~destination:copy ~field_path:copy;
+  construct_copied st built ~destination:copy;
   copy
 
-(* Builds a construct that has places for fields, at any depth, into
-   [destination]. [lent] gives the operand for a place of a type, and is
-   told where the field will be within the outermost value, [field_path]. A
-   construct inside another is built in a local of its own, which owns
-   nothing where [borrowed]. *)
-and construct_lending st (built : Core.expression) ~borrowed ~lent ~destination ~field_path =
+and construct_copied st (built : Core.expression) ~destination =
   match built.kind with
   | Construct { variant; fields } ->
       let ty = ground st built.type_ in
-      let part name : Lir.projection =
-        match variant with
-        | Some variant -> Variant_field { variant; field = name }
-        | None -> Field name
-      in
       let fields =
         List.map
           (fun (name, (field : Core.operand option)) ->
             match field with
             | Some (Place source) ->
-                ( name,
-                  lent
-                    (snapshot st (place st source))
-                    (ground st (Core_walk.place_type source))
-                    ~from:(field_path / part name) )
+                let field_ty = ground st (Core_walk.place_type source) in
+                let fresh_copy = temporary st field_ty in
+                Glue.copy_into st.context.glue st.b ~destination:fresh_copy
+                  ~source:(place st source) field_ty;
+                (name, owned st fresh_copy field_ty)
             | Some (Value ({ kind = Construct _; _ } as nested))
               when Core_walk.lent_places (Value nested) <> [] ->
-                let ty = ground st nested.type_ in
-                let inner = at (local st.b ~borrowed (Value ty)) in
-                construct_lending st nested ~borrowed ~lent ~destination:inner
-                  ~field_path:(field_path / part name);
-                (name, if borrowed then Lir.Copy inner else owned st inner ty)
+                let nested_ty = ground st nested.type_ in
+                let inner = at (local st.b (Value nested_ty)) in
+                construct_copied st nested ~destination:inner;
+                (name, owned st inner nested_ty)
             | Some (Value value) -> (name, owned st (value_place st value) (ground st value.type_))
             | None ->
-                let default = field_default st ty ~variant ~field:name in
-                in_type_definition st ty (fun () ->
-                    (name, owned st (value_place st default) (ground st default.type_))))
+                let default, default_ty = field_default_place st ty ~variant ~field:name in
+                (name, owned st default default_ty))
           fields
       in
       emit st.b (Assign (destination, Build { ty; variant; fields }))
   | _ -> bug "a value that lends places and is no construct"
+
+(* A field's default value and its type, evaluated in the type's
+   definition, where the default is written. *)
+and field_default_place st ty ~variant ~field =
+  let default = field_default st ty ~variant ~field in
+  in_type_definition st ty (fun () -> (value_place st default, ground st default.type_))
+
+(* The variants of a record or sum type, a record's as one with no name,
+   each with its fields and their types. *)
+and variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list) list =
+  let typed fields =
+    List.map
+      (fun (name, (member : Memory_layout.member)) ->
+        match member with
+        | Typed field_ty -> (name, field_ty)
+        | Raw _ -> bug "a field %s of %s that no Truss type names" name (Ground.to_string ty))
+      fields
+  in
+  match Memory_layout.shape st.context.env ty with
+  | Record fields -> [ (None, typed fields) ]
+  | Sum variants ->
+      List.map (fun (v : Memory_layout.variant_shape) -> (Some v.name, typed v.fields)) variants
+  | Scalar _ | Array _ -> bug "the fields of %s, which has none" (Ground.to_string ty)
+
+(* Writes [build] for each variant that the value at [source], of type
+   [ty], may have, with the variant's fields: once for a record, and for a
+   sum type in a case of a switch on the variant. *)
+and each_variant st ty (source : Lir.place) build =
+  match variants_of st ty with
+  | [ (None, fields) ] -> build None fields
+  | variants ->
+      let after = block st.b in
+      let cases =
+        List.map
+          (fun (variant, fields) ->
+            let case = block st.b in
+            in_block st.b case (fun () ->
+                build variant fields;
+                finish st.b (Goto after));
+            (Option.get variant, case))
+          variants
+      in
+      finish st.b (Switch_variant { place = source; cases; default = None });
+      start st.b after
+
+and field_of variant field : Lir.projection =
+  match variant with Some variant -> Variant_field { variant; field } | None -> Field field
+
+and lent_field (lent : Ground.lent) variant field =
+  List.find_map
+    (fun (lent_field : Ground.lent_field) ->
+      if lent_field.variant = variant && lent_field.field = field then Some lent_field.holds
+      else None)
+    lent.fields
+
+(* Whether a [yield]'s operand is a constructor that lends a place. *)
+and lends_a_place (operand : Core.operand) =
+  match operand with
+  | Value { kind = Construct _; _ } -> Core_walk.lent_places operand <> []
+  | _ -> false
+
+(* The type of the lent value that the current frame's method builds at
+   each [yield], where one of its [yield]s is a constructor that lends a
+   place. Each field that some [yield] gives a place, or that has a type
+   with something to drop, holds an address, and a field that some [yield]
+   gives such a constructor holds a lent value of its own. *)
+and lent_type st (body : Core.block) : Ground.lent option =
+  let mode =
+    match st.frame.code.result with
+    | Yields (mode, _) | Lends (mode, _) -> mode
+    | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
+  in
+  let parts = ref [] in
+  Core_walk.block
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         statement =
+           (fun (node : Core.statement) ->
+             match node.kind with Yield { part; _ } -> parts := part :: !parts | _ -> ());
+       })
+    body;
+  if mode = Own || not (List.exists lends_a_place !parts) then None
+  else Some (lent_type_of st ~writable:(mode = Mut) (yielded_type_of_frame st) !parts)
+
+and lent_type_of st ~writable ty (parts : Core.operand list) : Ground.lent =
+  let field_operands variant name =
+    List.concat_map
+      (fun (part : Core.operand) ->
+        match part with
+        | Value { kind = Construct { variant = constructed; fields }; _ } when constructed = variant
+          -> (
+            match List.assoc_opt name fields with Some (Some field) -> [ field ] | _ -> [])
+        | _ -> [])
+      parts
+  in
+  let lent_field_for variant (name, field_ty) : Ground.lent_field option =
+    let operands = field_operands variant name in
+    let holds : Ground.holds option =
+      if List.exists lends_a_place operands then
+        Some (Nested (lent_type_of st ~writable field_ty operands))
+      else if
+        List.exists (function Core.Place _ -> true | Value _ -> false) operands
+        || not (trivial st field_ty)
+      then Some Address
+      else None
+    in
+    Option.map (fun holds -> { Ground.variant; field = name; holds }) holds
+  in
+  {
+    base = ty;
+    writable;
+    fields =
+      List.concat_map
+        (fun (variant, fields) -> List.filter_map (lent_field_for variant) fields)
+        (variants_of st ty);
+  }
+
+(* Builds what a [yield] lends into [destination], a lent value of type
+   [lent]. A field that holds an address is given the address of a place,
+   or of a temporary that the [yield]'s statement owns, which the method
+   drops once it goes on. *)
+and lend_into st (lent : Ground.lent) (operand : Core.operand) ~destination =
+  match operand with
+  | Value { kind = Construct { variant; fields }; _ } ->
+      let fields =
+        List.map
+          (fun (name, (field : Core.operand option)) ->
+            let holds = lent_field lent variant name in
+            let evaluated () =
+              match field with
+              | Some (Place source) -> snapshot st (part st source)
+              | Some (Value value) -> value_place st value
+              | None -> fst (field_default_place st lent.base ~variant ~field:name)
+            in
+            match (holds, field) with
+            | Some (Nested inner), Some (Value ({ kind = Construct _; _ } as nested)) ->
+                let nested_lent = at (local st.b ~borrowed:true (Value (Lent inner))) in
+                lend_into st inner (Value nested) ~destination:nested_lent;
+                (name, Lir.Copy nested_lent)
+            | Some (Nested inner), _ -> (name, Copy (lent_from st inner (evaluated ())))
+            | Some Address, _ ->
+                (name, Address { place = whole st (evaluated ()); writable = lent.writable })
+            | None, _ -> (name, Copy (whole st (evaluated ()))))
+          fields
+      in
+      emit st.b (Assign (destination, Build { ty = Lent lent; variant; fields }))
+  | Place _ | Value _ ->
+      emit st.b (Assign (destination, Use (Copy (lent_from st lent (operand_part st operand)))))
+
+(* The value at [source] as a lent value of type [lent], which lends its
+   parts. *)
+and lent_from st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+  match lent_at st source with
+  | Some existing when Ground.compare (Lent existing) (Lent lent) = 0 -> source
+  | Some existing -> lend_fields st lent (copied_lent st existing source)
+  | None -> lend_fields st lent source
+
+and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+  let built = at (local st.b ~borrowed:true (Value (Lent lent))) in
+  each_variant st lent.base source (fun variant fields ->
+      let fields =
+        List.map
+          (fun (name, _) ->
+            let field_place = source / field_of variant name in
+            match lent_field lent variant name with
+            | Some Address -> (name, Lir.Address { place = field_place; writable = lent.writable })
+            | Some (Nested inner) -> (name, Copy (lent_from st inner field_place))
+            | None -> (name, Copy field_place))
+          fields
+      in
+      emit st.b (Assign (built, Build { ty = Lent lent; variant; fields })));
+  built
+
+(* A lent value copied into a value of its type, which owns nothing: a
+   variant's block, which the copy has and the lent value does not, is
+   freed as the scope ends. Lent to be changed, each value is moved out of
+   its place instead, and moved back as the scope ends, on every way out,
+   so the caller's changes reach the place. The checker allows this only
+   for a record, so the variant cannot change. *)
+and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+  let ty = lent.base in
+  let copy = at (local st.b ~borrowed:(not lent.writable) (Value ty)) in
+  let scope = innermost_scope st in
+  if lent.writable then begin
+    (match variants_of st ty with
+    | [ (None, _) ] -> ()
+    | _ -> bug "%s is lent to be changed" (Ground.to_string (Lent lent)));
+    scope.owned <- Drop_value copy :: scope.owned
+  end;
+  each_variant st ty source (fun variant fields ->
+      let fields =
+        List.map
+          (fun (name, field_ty) ->
+            let from = whole st (project st source (field_of variant name)) in
+            if lent.writable then begin
+              scope.owned <-
+                Give_back { lent = copy / field_of variant name; source = from; ty = field_ty }
+                :: scope.owned;
+              (name, owned st from field_ty)
+            end
+            else (name, Lir.Copy from))
+          fields
+      in
+      emit st.b (Assign (copy, Build { ty; variant; fields })));
+  (match
+     List.filter_map
+       (fun (v : Memory_layout.variant_shape) -> if v.indirect then Some v.name else None)
+       (match Memory_layout.shape st.context.env ty with Sum variants -> variants | _ -> [])
+   with
+  | [] -> ()
+  | variants -> scope.owned <- Free_blocks { place = copy; variants } :: scope.owned);
+  copy
 
 (* The type that the current frame's method yields. *)
 and yielded_type_of_frame st =
@@ -1063,7 +1243,8 @@ and intrinsic_operation st operation ~type_arguments (arguments : Core.argument 
             (* An intrinsic takes storage and views by place. *)
             if Storage.elements_of ty <> None || Storage.viewed ty <> None then
               Intrinsics.Place evaluated
-            else Intrinsics.Value (if mode = T.Own then owned st evaluated ty else Copy evaluated)
+            else
+              Intrinsics.Value (if mode = Types.Own then owned st evaluated ty else Copy evaluated)
         | Default -> bug "an intrinsic called with an omitted argument")
       arguments
   in
@@ -1482,7 +1663,7 @@ and branch st (condition : Core.expression) ~yes ~no =
       branch st right ~yes ~no
   | Not inner -> branch st inner ~yes:no ~no:yes
   | Matches { value; pattern } ->
-      match_patterns st [ (pattern, operand_place st value) ] ~failed:no;
+      match_patterns st [ (pattern, operand_part st value) ] ~failed:no;
       finish st.b (Goto yes)
   | _ ->
       let value = operand st condition in
@@ -1538,7 +1719,7 @@ and statement st (node : Core.statement) =
               into st value variable;
               bind_local st local variable)
       | Let { pattern; value; else_ } ->
-          let scrutinee = operand_place st value in
+          let scrutinee = operand_part st value in
           let failed = block st.b in
           Option.iter
             (fun else_ ->
@@ -1622,24 +1803,18 @@ and statement st (node : Core.statement) =
               match_patterns st [ (pattern, value) ] ~failed:(block st.b);
               block_into st body None)
       | Yield { mode; part } -> (
-          let lends =
-            match part with
-            | Value ({ kind = Construct _; _ } as built) when Core_walk.lent_places part <> [] ->
-                Some built
-            | _ -> None
-          in
           match st.frame.on_yield with
           | Some on_yield ->
-              let place =
-                match (lends, part, st.frame.yield_into) with
-                | Some built, _, _ -> lending st mode built
+              let place, owned =
+                match (st.frame.lent_into, part, st.frame.yield_into) with
+                | Some (slot, lent), _, _ ->
+                    lend_into st lent part ~destination:slot;
+                    (slot, false)
                 | None, Value value, Some slot ->
                     into st value slot;
-                    slot
-                | None, _, _ -> operand_place st part
-              in
-              let owned =
-                mode = Own || (lends = None && match part with Value _ -> true | Place _ -> false)
+                    (slot, true)
+                | None, Value _, None -> (operand_part st part, true)
+                | None, Place _, _ -> (operand_part st part, mode = Own)
               in
               let resume = block st.b and stop = block st.b in
               on_yield place ~owned ~resume ~stop;
@@ -1658,12 +1833,14 @@ and statement st (node : Core.statement) =
                  [next] gives its caller a value of its own: a value the
                  method made, or a copy of a place it yields. *)
               let ty = yielded_type_of_frame st in
+              let lends = if lends_a_place part then Some part else None in
               let value =
                 match (lends, part) with
                 | Some _, _ when mode = Mut ->
                     unsupported ~at:(site_of st node.origin)
                       "a cursor over a method that lends places to be changed"
-                | Some built, _ -> copied st built
+                | Some _, Value built -> copied st built
+                | Some _, Place _ -> bug "a place that is a constructor"
                 | None, Value value -> value_place st value
                 | None, Place source when trivial st ty -> place st source
                 | None, Place source ->
@@ -1699,7 +1876,7 @@ and test_pattern st (pattern : Core.pattern) (place : Lir.place) ~failed =
       require (Binary ((if inclusive then Less_equal else Less), Copy place, operand st high))
   | Equal_to { value; equal } ->
       let result = temporary st st.context.bool in
-      call_with_places st equal [ place; value_place st value ] ~destination:result;
+      call_with_places st equal [ whole st place; value_place st value ] ~destination:result;
       require (Use (Copy result))
   | Alternatives alternatives ->
       let matched = block st.b in
@@ -1721,10 +1898,12 @@ and test_pattern st (pattern : Core.pattern) (place : Lir.place) ~failed =
       require (Is_variant (place, variant));
       List.iter
         (fun (field, inner) ->
-          test_pattern st inner (place / Variant_field { variant; field }) ~failed)
+          test_pattern st inner (project st place (Variant_field { variant; field })) ~failed)
         fields
   | Record fields ->
-      List.iter (fun (field, inner) -> test_pattern st inner (place / Field field) ~failed) fields
+      List.iter
+        (fun (field, inner) -> test_pattern st inner (project st place (Field field)) ~failed)
+        fields
 
 (* Tests values against patterns, none of which has an alternative that
    binds a name, and then the guard. Goes to [failed] where a pattern or the
@@ -1776,12 +1955,12 @@ and match_patterns st ?guard (patterns : (Core.pattern * Lir.place) list) ~faile
                      (Pointer { target = Value bound.ty; writable = bound.mode = Mut })) ))
       in
       let fill (bound : bound_name) =
+        let part = whole st bound.part in
         match List.assoc_opt bound.local slots with
-        | Some (Value_slot variable) ->
-            emit st.b (Assign (variable, Use (owned st bound.part bound.ty)))
+        | Some (Value_slot variable) -> emit st.b (Assign (variable, Use (owned st part bound.ty)))
         | Some (Pointer_slot pointer) ->
             emit st.b
-              (Assign (at pointer, Use (Address { place = bound.part; writable = bound.mode = Mut })))
+              (Assign (at pointer, Use (Address { place = part; writable = bound.mode = Mut })))
         | None -> bug "an alternative binds `%s`, which the first alternative does not" bound.name
       in
       let matched = block st.b in
@@ -1807,7 +1986,7 @@ and match_patterns st ?guard (patterns : (Core.pattern * Lir.place) list) ~faile
 (* Tests the arms in order. Each arm has its own scope for its names and
    the guard's temporaries, which is dropped where the arm does not match. *)
 and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destination =
-  let places = List.map (operand_place st) scrutinees in
+  let places = List.map (operand_part st) scrutinees in
   let after = block st.b in
   List.iter
     (fun (arm : Core.arm) ->
@@ -1827,7 +2006,7 @@ and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destinat
    [arguments], each by its parameter's index. Each [yield] in the method
    calls [on_yield]. A parameter with no argument takes its default,
    evaluated here. *)
-and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
+and inline ?(several = false) st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     unsupported ~at:call_site "%s, which lends through a call to itself" (Path.show path);
   let parameters, body = body_of st.context path in
@@ -1840,7 +2019,8 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
       synthetic = Hashtbl.create 4;
       self_place = None;
       on_yield = Some on_yield;
-      yield_into;
+      yield_into = None;
+      lent_into = None;
       inlined = path :: caller.inlined;
       reported =
         (if Path.package path = Path.standard_package then
@@ -1848,6 +2028,17 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
          else None);
       exit = Some (exit, List.length st.scopes);
     };
+  let lent_into =
+    Option.map
+      (fun lent -> (at (local st.b ~borrowed:true (Value (Lent lent))), lent))
+      (lent_type st body)
+  in
+  (* A value the method makes to lend is the caller's statement's to drop,
+     after the method has gone on, whichever [yield] made it. *)
+  let yield_into =
+    if several && lent_into = None then Some (temporary st (yielded_type_of_frame st)) else None
+  in
+  st.frame <- { st.frame with lent_into; yield_into };
   in_scope st (fun () ->
       List.iteri
         (fun index (parameter : Core.parameter) ->
@@ -1896,16 +2087,13 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   (* What the method's own scopes owned at a [yield] that the caller went
      on from. *)
   let owned_at_a_yield = ref [] in
-  (* A value the method makes to lend is the caller's statement's to drop,
-     after the method has gone on, whichever [yield] made it. *)
-  let yield_into = if several then Some (temporary st ty) else None in
-  inline ?yield_into st path type_arguments ~arguments ~call_site
+  inline ~several st path type_arguments ~arguments ~call_site
     ~on_yield:(fun place ~owned:_ ~resume ~stop:_ ->
       (match through with
-      | Some (pointer, writable) ->
-          emit st.b (Assign (at pointer, Use (Address { place; writable })));
+      | Some (pointer, writable) when st.frame.lent_into = None ->
+          emit st.b (Assign (at pointer, Use (Address { place = whole st place; writable })));
           lent := Some (at pointer / Deref)
-      | None -> lent := Some place);
+      | _ -> lent := Some place);
       let scopes = List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes in
       let owns_nothing = List.for_all (fun (scope : scope) -> scope.owned = []) scopes in
       if (not several) && Method_yields.each_is_last body && owns_nothing then

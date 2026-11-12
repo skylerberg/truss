@@ -1,34 +1,31 @@
 val resolve_impl :
   Lowering.state ->
-  trait:Definitions.T.trait_reference ->
-  self_type:Definitions.T.ty ->
+  trait:Types.trait_reference ->
+  self_type:Types.ty ->
   evidence:Core.evidence ->
   Path.t * Ground.argument list
 
 val trait_method_key :
   Lowering.state ->
-  trait:Definitions.T.trait_reference ->
+  trait:Types.trait_reference ->
   name:string ->
   receiver:Path.receiver ->
-  self_type:Definitions.T.ty ->
+  self_type:Types.ty ->
   type_arguments:Types.argument list ->
   evidence:Core.evidence ->
   Instance.key
 
-val pass : Lowering.state -> Definitions.T.mode -> Ground.ty -> Lir.place -> Lir.operand option
-val capability_method : Definitions.context -> Path.t -> string -> int * Definitions.T.signature
-
-val entry_signature :
-  Definitions.context -> Definitions.T.signature -> Lir.signature * Convention.result
-
-val any_methods : Definitions.context -> Path.t -> Definitions.T.trait_method list
-val dynamic_slot : Definitions.context -> Path.t -> string -> int * Definitions.T.signature
+val pass : Lowering.state -> Types.mode -> Ground.ty -> Lir.place -> Lir.operand option
+val capability_method : Definitions.context -> Path.t -> string -> int * Types.signature
+val entry_signature : Definitions.context -> Types.signature -> Lir.signature * Convention.result
+val any_methods : Definitions.context -> Path.t -> Types.trait_method list
+val dynamic_slot : Definitions.context -> Path.t -> string -> int * Types.signature
 
 val any_entry_signature :
   Definitions.context ->
-  any:Definitions.T.trait_reference ->
+  any:Types.trait_reference ->
   trait:Path.t ->
-  Definitions.T.signature ->
+  Types.signature ->
   Lir.signature * Convention.result * Path.t list
 
 val implementation_evidence :
@@ -45,8 +42,8 @@ val cursor_into :
   Lowering.state ->
   path:Path.t ->
   type_arguments:Ground.argument list ->
-  signature:Definitions.T.signature ->
-  arguments:(Definitions.T.mode * Ground.ty * Lir.place) list ->
+  signature:Types.signature ->
+  arguments:(Types.mode * Ground.ty * Lir.place) list ->
   mask:int ->
   Lir.place ->
   unit
@@ -54,7 +51,7 @@ val cursor_into :
 val nested_function :
   Lowering.state ->
   function_type:Ground.function_type ->
-  output:Definitions.T.result option ->
+  output:Types.result option ->
   captures:('key * Lir.place * Ground.ty) list ->
   bind_capture:(Lowering.state -> 'key -> Lir.place -> unit) ->
   body:(Lowering.state -> (Lir.place * Ground.mode * Ground.ty) list -> unit) ->
@@ -71,11 +68,11 @@ val call_indirect :
 
 val call_through_any :
   Lowering.state ->
-  any_type:Definitions.T.trait_reference ->
+  any_type:Types.trait_reference ->
   trait:Path.t ->
   name:string ->
   any:Lir.place ->
-  arguments:(Definitions.T.mode * Ground.ty * Lir.place) list ->
+  arguments:(Types.mode * Ground.ty * Lir.place) list ->
   Lir.place ->
   unit
 
@@ -95,15 +92,15 @@ val any_into :
 val provided_evidence :
   Lowering.state ->
   implementation:Lir.operand ->
-  ('a * Path.t * Definitions.T.substitution) list ->
+  ('a * Path.t * Types.substitution) list ->
   ('a * Lir.operand) list
 
 val call_instance :
   Lowering.state ->
   Instance.key ->
-  signature:Definitions.T.signature ->
+  signature:Types.signature ->
   substitution:Types.substitution ->
-  arguments:(Definitions.T.mode * Ground.ty * Lir.place) list ->
+  arguments:(Types.mode * Ground.ty * Lir.place) list ->
   ?mask:int ->
   destination:Lir.place ->
   unit ->
@@ -145,6 +142,6 @@ val trait_call :
   name:string ->
   receiver:Path.receiver ->
   self:Ground.ty ->
-  arguments:(Definitions.T.mode * Ground.ty * Lir.place) list ->
+  arguments:(Types.mode * Ground.ty * Lir.place) list ->
   destination:Lir.place ->
   unit

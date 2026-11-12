@@ -209,6 +209,7 @@ module Code : sig
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Lent_mut_in_variant
     | Task_outlives_yield
 
   type capabilities =

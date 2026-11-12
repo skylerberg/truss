@@ -45,8 +45,6 @@ let readers = Incremental.readers
 let current_in = Incremental.current_in
 let same_outcome = Incremental.same_outcome
 
-(* States and facts in the store *)
-
 let store_of store ~version : Incremental.store =
   {
     id = Store.directory store;

@@ -17,9 +17,6 @@ let registry_root hash = "registry " ^ hash
 let package_root name = "package " ^ Path.show_package name
 let lock_file = "truss.lock"
 let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
-
-(* Paths *)
-
 let parent path = match String.rindex_opt path '/' with Some i -> String.sub path 0 i | None -> ""
 let segments path = if path = "" then [] else String.split_on_char '/' path
 

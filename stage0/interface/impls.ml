@@ -1,7 +1,6 @@
-module T = Types
 module Names = Resolve.Names
 
-let head = function T.Named { path; _ } -> Some path | _ -> None
+let head = function Types.Named { path; _ } -> Some path | _ -> None
 
 let derivable (trait : Path.t) =
   match Well_known.of_path trait with Some (Equal | Hash | Ordered | Default) -> true | _ -> false
@@ -85,13 +84,13 @@ let cursor_trait = Well_known.path Cursor
    function. *)
 let cursor_impl (method_ : Path.t) : Path.t = Derived { type_ = method_; trait = cursor_trait }
 
-let cursor_uses database (type_ : T.ty) =
+let cursor_uses database (type_ : Types.ty) =
   match type_ with
-  | T.Cursor { method_; arguments } -> (
+  | Types.Cursor { method_; arguments } -> (
       match Query.demand database Environment.signature method_ with
       | Some signature -> (
-          match T.substitution_of signature.generics arguments with
-          | Some substitution -> (T.substitute_signature substitution signature).uses
+          match Types.substitution_of signature.generics arguments with
+          | Some substitution -> (Types.substitute_signature substitution signature).uses
           | None -> signature.uses)
       | None -> [])
   | _ -> []
@@ -113,18 +112,22 @@ let cursor_interface database ~method_ =
   with
   | Some ({ output = Yields (_, element); _ } as signature), Some trait_interface ->
       let impl_generics = signature.generics in
-      let for_type = T.Cursor { method_; arguments = Types.generic_arguments signature.generics } in
-      let self : T.substitution = [ ({ owner = cursor_trait; name = "Self" }, T.Type for_type) ] in
-      let of_cursor (declared : T.signature) =
-        let declared = T.substitute_signature self declared in
+      let for_type =
+        Types.Cursor { method_; arguments = Types.generic_arguments signature.generics }
+      in
+      let self : Types.substitution =
+        [ ({ owner = cursor_trait; name = "Self" }, Types.Type for_type) ]
+      in
+      let of_cursor (declared : Types.signature) =
+        let declared = Types.substitute_signature self declared in
         {
           declared with
           uses =
             List.sort_uniq compare
               (List.concat_map
                  (function
-                   | T.Capability_projection { base; trait; _ }
-                     when T.equal base for_type && Path.equal trait.trait cursor_trait ->
+                   | Types.Capability_projection { base; trait; _ }
+                     when Types.equal base for_type && Path.equal trait.trait cursor_trait ->
                        signature.uses
                    | capability -> [ capability ])
                  declared.uses);
@@ -132,7 +135,7 @@ let cursor_interface database ~method_ =
       in
       Some
         {
-          T.impl_generics;
+          Types.impl_generics;
           implements =
             { trait = cursor_trait; trait_arguments = []; associated = [ ("Element", element) ] };
           for_type;
@@ -141,11 +144,11 @@ let cursor_interface database ~method_ =
             List.map (fun name -> (name, signature.uses)) trait_interface.associated_capabilities;
           impl_methods =
             List.map
-              (fun (method_ : T.trait_method) ->
+              (fun (method_ : Types.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  T.method_in_impl ~impl_generics ~impl_uses:[] (of_cursor method_.method_signature)
-                ))
+                  Types.method_in_impl ~impl_generics ~impl_uses:[]
+                    (of_cursor method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;
         }
@@ -162,10 +165,12 @@ let derived_interface database ~type_ ~trait =
   | _ when Option.is_some (cursor_of_impl (Derived { type_; trait })) ->
       cursor_interface database ~method_:type_
   | Some type_interface, Some trait_interface ->
-      let trait_reference : T.trait_reference = { trait; trait_arguments = []; associated = [] } in
+      let trait_reference : Types.trait_reference =
+        { trait; trait_arguments = []; associated = [] }
+      in
       let impl_generics =
         List.map
-          (fun (generic : T.generic) ->
+          (fun (generic : Types.generic) ->
             match generic.kind with
             | Type_generic bounds ->
                 { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
@@ -173,23 +178,24 @@ let derived_interface database ~type_ ~trait =
           type_interface.type_generics
       in
       let for_type =
-        T.Named { path = type_; arguments = Types.generic_arguments type_interface.type_generics }
+        Types.Named
+          { path = type_; arguments = Types.generic_arguments type_interface.type_generics }
       in
-      let self : T.substitution = [ ({ owner = trait; name = "Self" }, T.Type for_type) ] in
+      let self : Types.substitution = [ ({ owner = trait; name = "Self" }, Types.Type for_type) ] in
       Some
         {
-          T.impl_generics;
+          Types.impl_generics;
           implements = trait_reference;
           for_type;
           impl_uses = [];
           capability_sets = [];
           impl_methods =
             List.map
-              (fun (method_ : T.trait_method) ->
+              (fun (method_ : Types.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  T.method_in_impl ~impl_generics ~impl_uses:[]
-                    (T.substitute_signature self method_.method_signature) ))
+                  Types.method_in_impl ~impl_generics ~impl_uses:[]
+                    (Types.substitute_signature self method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;
         }
@@ -201,28 +207,26 @@ let impl_interface database (path : Path.t) =
   | _ -> Query.demand database Environment.impl_interface path
 
 let trait_substitution database (impl : Path.t) =
-  Option.bind (impl_interface database impl) (fun (interface : T.impl_interface) ->
+  Option.bind (impl_interface database impl) (fun (interface : Types.impl_interface) ->
       Option.map
         (fun trait ->
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
         (Query.demand database Environment.trait_interface interface.implements.trait))
 
-(* Matching *)
+let open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
 
-let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false
-
-let rec match_type ~variables (substitution : T.substitution) pattern type_ =
+let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
   match (pattern, type_) with
-  | T.Parameter parameter, _ when List.mem parameter variables -> (
+  | Types.Parameter parameter, _ when List.mem parameter variables -> (
       match List.assoc_opt parameter substitution with
-      | Some (T.Type bound) ->
-          if T.equal bound type_ || open_type type_ then Some substitution else None
-      | Some (T.Value _ | T.Capabilities _) -> None
-      | None -> Some ((parameter, T.Type type_) :: substitution))
+      | Some (Types.Type bound) ->
+          if Types.equal bound type_ || open_type type_ then Some substitution else None
+      | Some (Types.Value _ | Types.Capabilities _) -> None
+      | None -> Some ((parameter, Types.Type type_) :: substitution))
   | _, t when open_type t -> Some substitution
-  | T.Named left, T.Named right when Path.equal left.path right.path ->
+  | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
-  | _ -> if T.equal pattern type_ then Some substitution else None
+  | _ -> if Types.equal pattern type_ then Some substitution else None
 
 and match_arguments ~variables substitution patterns arguments =
   if List.length patterns <> List.length arguments then None
@@ -233,54 +237,38 @@ and match_arguments ~variables substitution patterns arguments =
         | None -> None
         | Some substitution -> (
             match (pattern, argument) with
-            | T.Type pattern, T.Type argument -> match_type ~variables substitution pattern argument
-            | T.Value (T.Value_parameter parameter), T.Value value when List.mem parameter variables
-              -> (
+            | Types.Type pattern, Types.Type argument ->
+                match_type ~variables substitution pattern argument
+            | Types.Value (Types.Value_parameter parameter), Types.Value value
+              when List.mem parameter variables -> (
                 match List.assoc_opt parameter substitution with
-                | Some (T.Value bound) -> if bound = value then Some substitution else None
-                | _ -> Some ((parameter, T.Value value) :: substitution))
-            | T.Value left, T.Value right -> (
+                | Some (Types.Value bound) -> if bound = value then Some substitution else None
+                | _ -> Some ((parameter, Types.Value value) :: substitution))
+            | Types.Value left, Types.Value right -> (
                 if left = right then Some substitution
-                else match right with T.Value_variable _ -> Some substitution | _ -> None)
+                else match right with Types.Value_variable _ -> Some substitution | _ -> None)
             | _ -> None))
       (Some substitution) patterns arguments
 
-(* Evidence *)
-
 type evidence =
-  | From_impl of { impl : Path.t; substitution : T.substitution }
+  | From_impl of { impl : Path.t; substitution : Types.substitution }
   | From_bound
-      (** A bound in scope, on a generic parameter or on an associated type of one, or a trait such
-          a bound requires: the [impl] is found when the code is instantiated. *)
-  | From_any  (** [any Trait] implements its trait. *)
-  | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
-  | Accepted of T.ty
-      (** This type satisfies every bound: it is an [Error], a [Hole], or a type that the statement
-          has not inferred yet. A trait whose definition did not parse is satisfied by every type,
-          with the [Error] of its report. *)
+  | From_any
+  | Built_in
+  | Accepted of Types.ty
 
-(* Whether a trait's method can be called through an [any] value, and if
-   not, why. An [any] value has one compiled version of each method, for
-   the type that it hides. *)
-type through_any =
-  | Callable
-  | Has_generics
-      (** The method has generic parameters of its own, so it has a version for each set of type
-          arguments. *)
-  | Names_self
-      (** A parameter's type or the result's type names [Self], the hidden type, at any depth. An
-          associated type of [Self] does not count: the [any] type fixes it. *)
+type through_any = Callable | Has_generics | Names_self
 
-let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
-  let self : T.parameter = { owner = trait; name = "Self" } in
+let through_any ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
+  let self : Types.parameter = { owner = trait; name = "Self" } in
   let names_self type_ =
     let mentions_self = ref false in
     ignore
-      (T.map
+      (Types.map
          (function
-           | T.Projection { base = T.Parameter base; _ } as projected when base = self ->
+           | Types.Projection { base = Types.Parameter base; _ } as projected when base = self ->
                Some projected
-           | T.Parameter parameter as named when parameter = self ->
+           | Types.Parameter parameter as named when parameter = self ->
                mentions_self := true;
                Some named
            | _ -> None)
@@ -288,10 +276,10 @@ let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
     !mentions_self
   in
   let signature = method_.method_signature in
-  let result = T.result_type signature.output in
+  let result = Types.result_type signature.output in
   if signature.generics <> [] then Has_generics
   else if
-    List.exists (fun (info : T.parameter_info) -> names_self info.type_) signature.parameters
+    List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
     || names_self result
   then Names_self
   else Callable
@@ -300,37 +288,39 @@ let cursor_element database (method_ : Path.t) arguments =
   match Query.demand database Environment.signature method_ with
   | Some ({ output = Yields (_, element); _ } as signature) ->
       Option.map
-        (fun substitution -> T.substitute substitution element)
-        (T.substitution_of signature.generics arguments)
+        (fun substitution -> Types.substitute substitution element)
+        (Types.substitution_of signature.generics arguments)
   | _ -> None
 
 let copyable_path = Properties.copyable_trait
 let plain_path = Properties.plain_trait
 
-(* The bounds in scope where a question is asked: each generic parameter's
-   bounds, as the definition asking declares them. *)
-type bounds = T.parameter -> T.trait_reference list
+type bounds = Types.parameter -> Types.trait_reference list
 
-let required (generics : T.generic list) (substitution : T.substitution) =
+let required (generics : Types.generic list) (substitution : Types.substitution) =
   List.concat_map
-    (fun (generic : T.generic) ->
+    (fun (generic : Types.generic) ->
       match (generic.kind, List.assoc_opt generic.generic substitution) with
-      | Type_generic generic_bounds, Some (T.Type argument) ->
-          List.map (fun bound -> (argument, T.substitute_trait substitution bound)) generic_bounds
+      | Type_generic generic_bounds, Some (Types.Type argument) ->
+          List.map
+            (fun bound -> (argument, Types.substitute_trait substitution bound))
+            generic_bounds
       | _ -> [])
     generics
 
-let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : T.ty)
-    (wanted : T.trait_reference) : evidence option =
+let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : Types.ty)
+    (wanted : Types.trait_reference) : evidence option =
   let arguments_match actual_arguments =
     List.length actual_arguments = List.length wanted.trait_arguments
     && List.for_all2
          (fun wanted actual ->
            match (wanted, actual) with
-           | T.Type wanted, T.Type actual ->
+           | Types.Type wanted, Types.Type actual ->
                open_type wanted || open_type actual
-               || T.equal (normalize database ~bounds wanted) (normalize database ~bounds actual)
-           | T.Value wanted, T.Value actual -> wanted = actual
+               || Types.equal
+                    (normalize database ~bounds wanted)
+                    (normalize database ~bounds actual)
+           | Types.Value wanted, Types.Value actual -> wanted = actual
            | _ -> false)
          wanted.trait_arguments actual_arguments
   in
@@ -345,11 +335,11 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
         else
           match List.assoc_opt name fixed with
           | Some defined ->
-              open_type defined || T.equal (normalize database ~bounds defined) wanted_type
+              open_type defined || Types.equal (normalize database ~bounds defined) wanted_type
           | None -> (
               match (base, wanted_type) with
-              | Some base, T.Projection { base = projected; name = projected_name; _ } ->
-                  T.equal base projected && projected_name = name
+              | Some base, Types.Projection { base = projected; name = projected_name; _ } ->
+                  Types.equal base projected && projected_name = name
               | _ -> false))
       wanted.associated
   in
@@ -360,7 +350,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
   in
   if depth > 32 then None
   else if Option.is_some broken_trait then
-    Option.map (fun report -> Accepted (T.Error report)) broken_trait
+    Option.map (fun report -> Accepted (Types.Error report)) broken_trait
   else if Path.equal wanted.trait copyable_path || Path.equal wanted.trait plain_path then
     let property : Properties.property =
       if Path.equal wanted.trait plain_path then Plain else Copyable
@@ -378,29 +368,29 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
     else None
   else
     match type_ with
-    | T.Error _ | T.Hole | T.Variable _ -> Some (Accepted type_)
-    | T.Cursor { method_; arguments } ->
+    | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
+    | Types.Cursor { method_; arguments } ->
         if Path.equal wanted.trait cursor_trait then
           Option.bind (Query.demand database Environment.signature method_) (fun signature ->
               Option.map
                 (fun substitution -> From_impl { impl = cursor_impl method_; substitution })
-                (T.substitution_of signature.generics arguments))
+                (Types.substitution_of signature.generics arguments))
         else None
-    | T.Never | T.Integer | T.Literal _ | T.Function _ -> None
-    | T.Parameter _ | T.Projection _ ->
+    | Types.Never | Types.Integer | Types.Literal _ | Types.Function _ -> None
+    | Types.Parameter _ | Types.Projection _ ->
         if
           List.exists
-            (fun (bound : T.trait_reference) ->
+            (fun (bound : Types.trait_reference) ->
               Path.equal bound.trait wanted.trait
               && arguments_match bound.trait_arguments
               && associated_match ~base:(Some type_) bound.associated)
             (Properties.known_bounds database ~bounds type_)
         then Some From_bound
         else None
-    | T.Any trait ->
+    | Types.Any trait ->
         if
           List.exists
-            (fun (bound : T.trait_reference) ->
+            (fun (bound : Types.trait_reference) ->
               Path.equal bound.trait wanted.trait
               && arguments_match bound.trait_arguments
               && associated_match ~base:None
@@ -409,12 +399,13 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
             (Properties.bound_closure database ~self:type_ trait)
         then Some From_any
         else None
-    | T.Named { path; _ } ->
+    | Types.Named { path; _ } ->
         let packages =
           List.sort_uniq compare
             (Path.package wanted.trait :: Path.package path
             :: List.filter_map
-                 (function T.Type (T.Named { path; _ }) -> Some (Path.package path) | _ -> None)
+                 (function
+                   | Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
                  wanted.trait_arguments)
         in
         let candidates =
@@ -428,7 +419,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
             | None -> None
             | Some impl -> (
                 let variables =
-                  List.map (fun (generic : T.generic) -> generic.generic) impl.impl_generics
+                  List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
                 in
                 match match_type ~variables [] impl.for_type type_ with
                 | None -> None
@@ -441,7 +432,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                     | Some substitution ->
                         let associated =
                           List.map
-                            (fun (name, type_) -> (name, T.substitute substitution type_))
+                            (fun (name, type_) -> (name, Types.substitute substitution type_))
                             impl.implements.associated
                         in
                         let conditions_hold =
@@ -457,7 +448,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                         else None)))
           candidates
 
-and associated_type database ~bounds ?defining type_ (trait : T.trait_reference) name =
+and associated_type database ~bounds ?defining type_ (trait : Types.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
   | None -> (
@@ -466,22 +457,22 @@ and associated_type database ~bounds ?defining type_ (trait : T.trait_reference)
           match impl_interface database impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
-              Option.map (T.substitute substitution)
+              Option.map (Types.substitute substitution)
                 (List.assoc_opt name interface.implements.associated)
           | None -> None)
       | Some From_bound -> (
           match
             List.find_map
-              (fun (bound : T.trait_reference) -> List.assoc_opt name bound.associated)
+              (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
               (Properties.known_bounds database ~bounds type_)
           with
           | Some fixed -> Some fixed
-          | None -> Some (T.Projection { base = type_; trait; name }))
+          | None -> Some (Types.Projection { base = type_; trait; name }))
       | Some From_any -> (
           match type_ with
-          | T.Any any ->
+          | Types.Any any ->
               List.find_map
-                (fun (bound : T.trait_reference) -> List.assoc_opt name bound.associated)
+                (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
                 (any :: Properties.bound_closure database ~self:type_ any)
           | _ -> None)
       (* [Copyable] and [Plain] have no associated types. *)
@@ -489,12 +480,12 @@ and associated_type database ~bounds ?defining type_ (trait : T.trait_reference)
       (* An associated type of an [Error] or a [Hole] is an [Error] or a
          [Hole] too. An associated type of a type that is not inferred yet
          is unknown. *)
-      | Some (Accepted (T.Variable _)) -> None
+      | Some (Accepted (Types.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
-and capability_set database ~bounds ?(depth = 0) type_ (trait : T.trait_reference) name =
-  let projection = [ T.Capability_projection { base = type_; trait; name } ] in
+and capability_set database ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
+  let projection = [ Types.Capability_projection { base = type_; trait; name } ] in
   if depth > 32 then projection
   else
     match implements database ~bounds ~conditions:false type_ trait with
@@ -502,45 +493,45 @@ and capability_set database ~bounds ?(depth = 0) type_ (trait : T.trait_referenc
         match impl_interface database impl with
         | Some interface ->
             normalize_capabilities database ~bounds ~depth:(depth + 1)
-              (T.substitute_capabilities substitution
+              (Types.substitute_capabilities substitution
                  (Option.value ~default:[] (List.assoc_opt name interface.capability_sets)))
         | None -> [])
-    | Some From_bound | Some (Accepted (T.Variable _)) | None -> projection
+    | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
     | Some (From_any | Built_in | Accepted _) -> []
 
-and normalize_capabilities database ~bounds ?depth (capabilities : T.capability list) =
-  if not (List.exists (function T.Capability_projection _ -> true | _ -> false) capabilities) then
-    capabilities
+and normalize_capabilities database ~bounds ?depth (capabilities : Types.capability list) =
+  if not (List.exists (function Types.Capability_projection _ -> true | _ -> false) capabilities)
+  then capabilities
   else
     List.sort_uniq compare
       (List.concat_map
          (function
-           | T.Capability_projection { base; trait; name } ->
+           | Types.Capability_projection { base; trait; name } ->
                capability_set database ~bounds ?depth (normalize database ~bounds base)
                  { trait with associated = [] } name
            | capability -> [ capability ])
          capabilities)
 
-and normalize database ~bounds ?defining (type_ : T.ty) : T.ty =
+and normalize database ~bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize database ~bounds ?defining in
   let associated_type = associated_type database ~bounds ?defining in
-  T.map
+  Types.map
     ~capabilities:(normalize_capabilities database ~bounds)
     (function
-      | T.Projection { base; trait; name } -> (
+      | Types.Projection { base; trait; name } -> (
           let base = normalize base in
           match base with
-          | T.Variable _ | T.Hole -> Some (T.Projection { base; trait; name })
-          | T.Error _ -> Some base
-          | T.Parameter _ | T.Projection _ -> (
+          | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
+          | Types.Error _ -> Some base
+          | Types.Parameter _ | Types.Projection _ -> (
               match associated_type base trait name with
-              | Some (T.Projection _ as projection) -> Some projection
-              | Some fixed when not (T.is_error fixed) -> Some (normalize fixed)
-              | _ -> Some (T.Projection { base; trait; name }))
+              | Some (Types.Projection _ as projection) -> Some projection
+              | Some fixed when not (Types.is_error fixed) -> Some (normalize fixed)
+              | _ -> Some (Types.Projection { base; trait; name }))
           | _ -> (
               match associated_type base trait name with
               | Some fixed -> Some (normalize fixed)
-              | None -> Some (T.Projection { base; trait; name })))
+              | None -> Some (Types.Projection { base; trait; name })))
       | _ -> None)
     type_
 
@@ -553,10 +544,10 @@ let signature database (path : Path.t) =
           Option.map
             (fun declared ->
               let signature =
-                T.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
-                  (T.substitute_signature substitution declared)
+                Types.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
+                  (Types.substitute_signature substitution declared)
               in
-              let bounds = T.bounds_of signature.generics in
+              let bounds = Types.bounds_of signature.generics in
               { signature with uses = normalize_capabilities database ~bounds signature.uses })
             (Query.demand database Environment.signature
                (Method { owner = impl.implements.trait; name; receiver }))

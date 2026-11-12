@@ -1,16 +1,14 @@
 (* Cost bounds: what a counter counts, how, and the constants an [O(...)]
    bound is proven with. The proof program that increases the counters is
    [Translate]'s. *)
+module Symbol = Logic.Symbol
 
-module L = Logic
-module S = Logic.Symbol
-
-let zero = L.Integer Z.zero
+let zero = Logic.Integer Z.zero
 
 (* What a [calls(...)] clause counts: calls through a function value,
    which is its term in the definition proven, or calls of a capability's
    methods, or of one of them. *)
-type target = Through of L.term | Capability of Path.t | Capability_method of Path.t * string
+type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
 type resource = Time | Allocations | Allocated_bytes | Calls of target
 
 (* A counter counts in units, for an [O(...)] bound, or exactly, for a bound
@@ -41,61 +39,65 @@ let covers ~clause ~counter =
 (* The constants of one [O(...)] bound: two symbols, which each query that
    mentions them pins to one pair from the list, tried in order. *)
 type constants = {
-  factor : L.symbol;
-  addend : L.symbol;
+  factor : Logic.symbol;
+  addend : Logic.symbol;
   mutable pairs : (Z.t * Z.t) list;
       (** Cut to the first when the bound is assumed of another function in a cycle, which is proven
           with that pair. *)
 }
 
 let pairs = [ (Z.shift_left Z.one 17, Z.shift_left Z.one 16); (Z.shift_left Z.one 17, Z.zero) ]
-let constants group = { factor = S.Cost_factor group; addend = S.Cost_addend group; pairs }
+
+let constants group =
+  { factor = Symbol.Cost_factor group; addend = Symbol.Cost_addend group; pairs }
 
 (* [c * f + d]. *)
 let bound constants f =
-  L.Operation
-    ("+", [ L.Operation ("*", [ L.Symbol constants.factor; f ]); L.Symbol constants.addend ])
+  Logic.Operation
+    ( "+",
+      [ Logic.Operation ("*", [ Logic.Symbol constants.factor; f ]); Logic.Symbol constants.addend ]
+    )
 
 let pin constants (factor, addend) =
-  L.(
+  Logic.(
     equal (Symbol constants.factor) (Integer factor)
     &&& equal (Symbol constants.addend) (Integer addend))
 
 let plus a b =
   match (a, b) with
-  | L.Integer x, L.Integer y -> L.Integer (Z.add x y)
-  | (L.Integer x, other | other, L.Integer x) when Z.equal x Z.zero -> other
-  | _ -> L.Operation ("+", [ a; b ])
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.add x y)
+  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.zero -> other
+  | _ -> Logic.Operation ("+", [ a; b ])
 
 let minus a b =
   match (a, b) with
-  | L.Integer x, L.Integer y -> L.Integer (Z.sub x y)
-  | other, L.Integer x when Z.equal x Z.zero -> other
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.sub x y)
+  | other, Logic.Integer x when Z.equal x Z.zero -> other
   | _ when a = b -> zero
-  | _ -> L.Operation ("-", [ a; b ])
+  | _ -> Logic.Operation ("-", [ a; b ])
 
 let times a b =
   match (a, b) with
-  | L.Integer x, L.Integer y -> L.Integer (Z.mul x y)
-  | (L.Integer x, other | other, L.Integer x) when Z.equal x Z.one -> other
-  | (L.Integer x, _ | _, L.Integer x) when Z.equal x Z.zero -> zero
-  | _ -> L.Operation ("*", [ a; b ])
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.mul x y)
+  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.one -> other
+  | (Logic.Integer x, _ | _, Logic.Integer x) when Z.equal x Z.zero -> zero
+  | _ -> Logic.Operation ("*", [ a; b ])
 
-let at_most a b = L.Operation ("<=", [ a; b ])
+let at_most a b = Logic.Operation ("<=", [ a; b ])
 
 let at_least_zero term =
   match term with
-  | L.Integer value -> L.Integer (Z.max value Z.zero)
-  | _ -> L.ite (L.Operation (">=", [ term; zero ])) term zero
+  | Logic.Integer value -> Logic.Integer (Z.max value Z.zero)
+  | _ -> Logic.ite (Logic.Operation (">=", [ term; zero ])) term zero
 
 let larger a b =
   match (a, b) with
-  | L.Integer x, L.Integer y -> L.Integer (Z.max x y)
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.max x y)
   | _ when a = b -> a
-  | _ -> L.ite (L.Operation (">=", [ a; b ])) a b
+  | _ -> Logic.ite (Logic.Operation (">=", [ a; b ])) a b
 
 (* A callee's [O(g)], in units. *)
-let units g = plus (at_least_zero g) (L.int 1)
+let units g = plus (at_least_zero g) (Logic.int 1)
 
 (* [log] and [power]: [log(n)] rounds log2(n + 1) up, so [log(0)] is 0,
    and [power(b, e)] is [b] to the [e]. *)
@@ -105,26 +107,27 @@ let units g = plus (at_least_zero g) (L.int 1)
    [log] rounds up. The halving is stated once, not again for [n / 2], so
    no fact makes the solver unfold [log] forever. *)
 let log_facts n ~halving =
-  let log n = L.Apply (S.Cost_log, [ n ]) in
+  let log n = Logic.Apply (Symbol.Cost_log, [ n ]) in
   let basic =
-    L.(
+    Logic.(
       Operation ("<=", [ int 0; log n ])
       &&& (Operation ("<=", [ n; int 0 ]) ==> equal (log n) (int 0))
       &&& (Operation (">=", [ n; int 0 ]) ==> Operation ("<=", [ log n; n ])))
   in
   if halving then
-    let half = L.Operation ("div", [ n; L.int 2 ]) in
+    let half = Logic.Operation ("div", [ n; Logic.int 2 ]) in
     ( [
         basic;
-        L.(Operation (">=", [ n; int 1 ]) ==> equal (log n) (Operation ("+", [ log half; int 1 ])));
+        Logic.(
+          Operation (">=", [ n; int 1 ]) ==> equal (log n) (Operation ("+", [ log half; int 1 ])));
       ],
       Some half )
   else ([ basic ], None)
 
 (* [log] grows with its argument, between two terms it is applied to. *)
 let log_order a b =
-  let log n = L.Apply (S.Cost_log, [ n ]) in
-  L.(
+  let log n = Logic.Apply (Symbol.Cost_log, [ n ]) in
+  Logic.(
     Operation ("<=", [ a; b ])
     ==> Operation ("<=", [ log a; log b ])
     &&& (Operation ("<=", [ b; a ]) ==> Operation ("<=", [ log b; log a ])))
@@ -133,9 +136,9 @@ let log_order a b =
    for a base of at least 1 or 2; and, as a step stated once, [b] times
    [power(b, e - 1)] from 1 up, with [e - 1]. *)
 let power_facts base exponent =
-  let power e = L.Apply (S.Cost_power, [ base; e ]) in
-  let previous = L.Operation ("-", [ exponent; L.int 1 ]) in
-  ( L.
+  let power e = Logic.Apply (Symbol.Cost_power, [ base; e ]) in
+  let previous = Logic.Operation ("-", [ exponent; Logic.int 1 ]) in
+  ( Logic.
       [
         equal exponent (int 0) ==> equal (power exponent) (int 1);
         Operation (">=", [ base; int 1 ])
@@ -145,14 +148,14 @@ let power_facts base exponent =
         &&& Operation (">=", [ exponent; int 0 ])
         ==> Operation (">", [ power exponent; exponent ]);
       ],
-    ( L.(
+    ( Logic.(
         Operation (">=", [ exponent; int 1 ])
         ==> equal (power exponent) (Operation ("*", [ base; power previous ]))),
       previous ) )
 
 let power_order base a b =
-  let power e = L.Apply (S.Cost_power, [ base; e ]) in
-  L.(
+  let power e = Logic.Apply (Symbol.Cost_power, [ base; e ]) in
+  Logic.(
     Operation (">=", [ base; int 1 ])
     ==> (Operation ("<=", [ a; b ])
         ==> Operation ("<=", [ power a; power b ])
@@ -165,22 +168,23 @@ let power_order base a b =
 let rec normalize term =
   let rec linear coefficient term (sums, constant) =
     match term with
-    | L.Integer value -> (sums, Z.add constant (Z.mul coefficient value))
-    | L.Operation ("+", arguments) ->
+    | Logic.Integer value -> (sums, Z.add constant (Z.mul coefficient value))
+    | Logic.Operation ("+", arguments) ->
         List.fold_left
           (fun sums_and_constant argument -> linear coefficient argument sums_and_constant)
           (sums, constant) arguments
-    | L.Operation ("-", [ inner ]) -> linear (Z.neg coefficient) inner (sums, constant)
-    | L.Operation ("-", first :: rest) ->
+    | Logic.Operation ("-", [ inner ]) -> linear (Z.neg coefficient) inner (sums, constant)
+    | Logic.Operation ("-", first :: rest) ->
         List.fold_left
           (fun sums_and_constant argument -> linear (Z.neg coefficient) argument sums_and_constant)
           (linear coefficient first (sums, constant))
           rest
-    | L.Operation ("*", [ L.Integer k; inner ]) | L.Operation ("*", [ inner; L.Integer k ]) ->
+    | Logic.Operation ("*", [ Logic.Integer k; inner ])
+    | Logic.Operation ("*", [ inner; Logic.Integer k ]) ->
         linear (Z.mul coefficient k) inner (sums, constant)
     | other -> (
         match inner other with
-        | L.Operation ("+", _) as sum -> linear coefficient sum (sums, constant)
+        | Logic.Operation ("+", _) as sum -> linear coefficient sum (sums, constant)
         | other -> add_atom coefficient other (sums, constant))
   and add_atom coefficient other (sums, constant) =
     let rec add = function
@@ -190,52 +194,55 @@ let rec normalize term =
     in
     (add sums, constant)
   and inner = function
-    | L.Apply (S.Cost_most, [ a; b ]) -> (
+    | Logic.Apply (Symbol.Cost_most, [ a; b ]) -> (
         (* What both choices add is outside the larger of them. *)
         let a = normalize a
         and b = normalize b in
         (* Each summand with its coefficient, so that a term both choices
            take away is shared as one both add is. *)
         let rec summands coefficient = function
-          | L.Operation ("+", parts) -> List.concat_map (summands coefficient) parts
-          | L.Operation ("-", [ inner ]) -> summands (Z.neg coefficient) inner
-          | L.Operation ("-", first :: rest) ->
+          | Logic.Operation ("+", parts) -> List.concat_map (summands coefficient) parts
+          | Logic.Operation ("-", [ inner ]) -> summands (Z.neg coefficient) inner
+          | Logic.Operation ("-", first :: rest) ->
               summands coefficient first @ List.concat_map (summands (Z.neg coefficient)) rest
-          | L.Operation ("*", [ L.Integer k; inner ]) -> summands (Z.mul coefficient k) inner
-          | L.Integer _ -> []
+          | Logic.Operation ("*", [ Logic.Integer k; inner ]) ->
+              summands (Z.mul coefficient k) inner
+          | Logic.Integer _ -> []
           | other -> [ (other, coefficient) ]
         in
         match List.filter (fun part -> List.mem part (summands Z.one b)) (summands Z.one a) with
-        | [] -> L.Apply (S.Cost_most, [ a; b ])
+        | [] -> Logic.Apply (Symbol.Cost_most, [ a; b ])
         | common ->
             let shared =
               List.fold_left
-                (fun total (atom, coefficient) -> plus total (times (L.Integer coefficient) atom))
+                (fun total (atom, coefficient) ->
+                  plus total (times (Logic.Integer coefficient) atom))
                 zero common
             in
-            L.Operation
+            Logic.Operation
               ( "+",
                 [
                   shared;
-                  L.Apply (S.Cost_most, [ normalize (minus a shared); normalize (minus b shared) ]);
+                  Logic.Apply
+                    (Symbol.Cost_most, [ normalize (minus a shared); normalize (minus b shared) ]);
                 ] ))
-    | L.Apply (name, arguments) -> L.Apply (name, List.map normalize arguments)
-    | L.Is (constructor, argument) -> L.Is (constructor, normalize argument)
-    | L.Operation (name, arguments) when not (List.mem name [ "+"; "-" ]) ->
-        L.Operation (name, List.map normalize arguments)
+    | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map normalize arguments)
+    | Logic.Is (constructor, argument) -> Logic.Is (constructor, normalize argument)
+    | Logic.Operation (name, arguments) when not (List.mem name [ "+"; "-" ]) ->
+        Logic.Operation (name, List.map normalize arguments)
     | other -> other
   in
   let sums, constant = linear Z.one term ([], Z.zero) in
   let sums = List.filter (fun (_, c) -> not (Z.equal c Z.zero)) sums in
-  let scaled (atom, c) = times (L.Integer c) atom in
+  let scaled (atom, c) = times (Logic.Integer c) atom in
   let positive = List.filter (fun (_, c) -> Z.sign c > 0) sums in
   let negative =
     List.filter_map (fun (atom, c) -> if Z.sign c < 0 then Some (atom, Z.neg c) else None) sums
   in
   let total = List.fold_left (fun total entry -> plus total (scaled entry)) zero positive in
   let total =
-    if Z.sign constant >= 0 then plus total (L.Integer constant)
-    else minus total (L.Integer (Z.neg constant))
+    if Z.sign constant >= 0 then plus total (Logic.Integer constant)
+    else minus total (Logic.Integer (Z.neg constant))
   in
   List.fold_left (fun total entry -> minus total (scaled entry)) total negative
 
@@ -244,7 +251,8 @@ let rec normalize term =
    joined. *)
 let rec since ~start total =
   match total with
-  | L.Operation ("ite", [ condition; a; b ]) -> L.ite condition (since ~start a) (since ~start b)
+  | Logic.Operation ("ite", [ condition; a; b ]) ->
+      Logic.ite condition (since ~start a) (since ~start b)
   | _ -> normalize (minus total start)
 
 (* Finding a bound for one iteration of a loop, or one call of a lambda.
@@ -264,18 +272,18 @@ let flip = function Grows -> Shrinks | Shrinks -> Grows | Both -> Both
 (* Each choice, [ite], becomes the larger of its branches, which is above
    it whichever is taken. *)
 let rec choices_as_most = function
-  | L.Operation ("ite", [ _; a; b ]) ->
-      L.Apply (S.Cost_most, [ choices_as_most a; choices_as_most b ])
-  | L.Apply (name, arguments) -> L.Apply (name, List.map choices_as_most arguments)
-  | L.Operation (name, arguments) -> L.Operation (name, List.map choices_as_most arguments)
-  | L.Is (constructor, argument) -> L.Is (constructor, choices_as_most argument)
+  | Logic.Operation ("ite", [ _; a; b ]) ->
+      Logic.Apply (Symbol.Cost_most, [ choices_as_most a; choices_as_most b ])
+  | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map choices_as_most arguments)
+  | Logic.Operation (name, arguments) -> Logic.Operation (name, List.map choices_as_most arguments)
+  | Logic.Is (constructor, argument) -> Logic.Is (constructor, choices_as_most argument)
   | other -> other
 
 let rec most_as_choices = function
-  | L.Apply (S.Cost_most, [ a; b ]) -> larger (most_as_choices a) (most_as_choices b)
-  | L.Apply (name, arguments) -> L.Apply (name, List.map most_as_choices arguments)
-  | L.Operation (name, arguments) -> L.Operation (name, List.map most_as_choices arguments)
-  | L.Is (constructor, argument) -> L.Is (constructor, most_as_choices argument)
+  | Logic.Apply (Symbol.Cost_most, [ a; b ]) -> larger (most_as_choices a) (most_as_choices b)
+  | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map most_as_choices arguments)
+  | Logic.Operation (name, arguments) -> Logic.Operation (name, List.map most_as_choices arguments)
+  | Logic.Is (constructor, argument) -> Logic.Is (constructor, most_as_choices argument)
   | other -> other
 
 (* The parts of a term that vary, each with how the term changes with it.
@@ -292,15 +300,16 @@ let varying_parts varies term =
   let rec walk polarity term =
     if varies term then
       match term with
-      | L.Operation ("+", arguments) -> List.iter (walk polarity) arguments
-      | L.Operation ("-", [ inner ]) -> walk (flip polarity) inner
-      | L.Operation ("-", first :: rest) ->
+      | Logic.Operation ("+", arguments) -> List.iter (walk polarity) arguments
+      | Logic.Operation ("-", [ inner ]) -> walk (flip polarity) inner
+      | Logic.Operation ("-", first :: rest) ->
           walk polarity first;
           List.iter (walk (flip polarity)) rest
-      | L.Operation ("*", [ L.Integer k; inner ]) | L.Operation ("*", [ inner; L.Integer k ]) ->
+      | Logic.Operation ("*", [ Logic.Integer k; inner ])
+      | Logic.Operation ("*", [ inner; Logic.Integer k ]) ->
           walk (if Z.sign k >= 0 then polarity else flip polarity) inner
-      | L.Operation ("*", arguments) | L.Apply ((S.Cost_most | S.Cost_log | S.Cost_power), arguments)
-        ->
+      | Logic.Operation ("*", arguments)
+      | Logic.Apply ((Symbol.Cost_most | Symbol.Cost_log | Symbol.Cost_power), arguments) ->
           List.iter (walk polarity) arguments
       | _ -> add term polarity
   in
@@ -310,18 +319,18 @@ let varying_parts varies term =
 (* Each comparison in a fact, as [(smaller, larger)]. *)
 let rec comparisons fact =
   match fact with
-  | L.Operation ("and", parts) -> List.concat_map comparisons parts
-  | L.Operation ("=>", [ _; conclusion ]) -> comparisons conclusion
-  | L.Operation (("<=" | "<"), [ a; b ]) -> [ (a, b) ]
-  | L.Operation ((">=" | ">"), [ a; b ]) -> [ (b, a) ]
-  | L.Operation ("=", [ a; b ]) -> [ (a, b); (b, a) ]
+  | Logic.Operation ("and", parts) -> List.concat_map comparisons parts
+  | Logic.Operation ("=>", [ _; conclusion ]) -> comparisons conclusion
+  | Logic.Operation (("<=" | "<"), [ a; b ]) -> [ (a, b) ]
+  | Logic.Operation ((">=" | ">"), [ a; b ]) -> [ (b, a) ]
+  | Logic.Operation ("=", [ a; b ]) -> [ (a, b); (b, a) ]
   | _ -> []
 
 (* A literal at the end of a built-in integer type's range, which every
    value of the type is known to be within: a bound, but too loose to
    help, so the last one chosen. *)
 let is_type_end = function
-  | L.Integer value ->
+  | Logic.Integer value ->
       List.exists
         (fun bits ->
           let power = Z.shift_left Z.one bits in
@@ -360,7 +369,7 @@ let bound_on ~varies ~facts cost =
             else
               match bound_of ~varies ~facts part polarity with
               | Some bound ->
-                  Some (normalize (L.replace ~from:part ~into:(choices_as_most bound) cost))
+                  Some (normalize (Logic.replace ~from:part ~into:(choices_as_most bound) cost))
               | None -> None)
           parts
       in

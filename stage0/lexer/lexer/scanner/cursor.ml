@@ -50,7 +50,6 @@ let span = Source.span
 let byte cursor index =
   if index < cursor.length then Char.code (String.unsafe_get cursor.text index) else -1
 
-(* Reports an error with one of the lexer's codes. *)
 let report cursor ?notes ?fixes ~code span message =
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?notes ?fixes ~code:(Lexer code) span message)

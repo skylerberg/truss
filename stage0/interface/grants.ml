@@ -1,4 +1,3 @@
-module T = Types
 module Names = Resolve.Names
 
 (* The capability a grant's entry names: a prelude capability by its name,
@@ -27,10 +26,7 @@ let written (path : Path.t) =
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
   | _ -> Path.show path
 
-type grant = {
-  capabilities : Path.t list;
-  unknown : string list;  (** The entries that name no capability *)
-}
+type grant = { capabilities : Path.t list; unknown : string list }
 
 let granted =
   Query.query ~name:"granted" ~phase:Phases.interfaces ~saved:true
@@ -53,7 +49,7 @@ let granted =
            (fun (entry : Manifest.dependency) -> entry.package = dependency)
            (Query.demand database Workspace.dependencies package)))
 
-let missing database ~package ~of_ (uses : T.capability list) =
+let missing database ~package ~of_ (uses : Types.capability list) =
   if of_ = package || of_ = Path.standard_package then []
   else
     let granted =
@@ -63,7 +59,7 @@ let missing database ~package ~of_ (uses : T.capability list) =
     in
     List.filter_map
       (function
-        | T.Capability path when not (List.exists (Path.equal path) granted) -> Some path
+        | Types.Capability path when not (List.exists (Path.equal path) granted) -> Some path
         | _ -> None)
       (List.sort_uniq compare uses)
 
@@ -85,7 +81,7 @@ let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) 
             List.sort_uniq compare
               (interface.impl_uses
               @ List.concat_map
-                  (fun (_, _, (signature : T.signature)) -> signature.uses)
+                  (fun (_, _, (signature : Types.signature)) -> signature.uses)
                   interface.impl_methods) )
           :: List.concat_map
                (fun (argument, bound) ->
@@ -97,14 +93,14 @@ let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) 
 
 let messages database ~package impls =
   List.concat_map
-    (fun (impl, (interface : T.impl_interface), uses) ->
+    (fun (impl, (interface : Types.impl_interface), uses) ->
       let of_ = Path.package impl in
       List.map
         (message
            ~what:
              (Printf.sprintf "The `impl` of `%s` for `%s`"
-                (T.show_trait interface.implements)
-                (T.show interface.for_type))
+                (Types.show_trait interface.implements)
+                (Types.show interface.for_type))
            ~of_)
         (missing database ~package ~of_ uses))
     impls

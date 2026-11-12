@@ -49,18 +49,16 @@ let elaborate_code (context : Lower.context) (instance : Lir.t) =
    method's cursor and another constant's value through the queries below,
    so that each is made once and what read it is known. *)
 let rec fresh_context lowering database =
-  let context = Lower.context ~checks:lowering.checks database lowering.target in
-  (context.cursor_fields :=
-     fun yielding ->
-       let f, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-       Yields.cursor_fields context.env ~evidence:(Lower.pulled_evidence context yielding f) f);
-  (context.constant :=
-     fun path ->
-       match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
-       | Compiled (Data data) -> Some data.value
-       | Evaluate _ -> None
-       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path));
-  context
+  Lower.context ~checks:lowering.checks
+    ~cursor_fields:(fun context yielding ->
+      let f, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
+      Yields.cursor_fields context.env ~evidence:(Lower.pulled_evidence context yielding f) f)
+    ~constant:(fun _ path ->
+      match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
+      | Compiled (Data data) -> Some data.value
+      | Evaluate _ -> None
+      | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
+    database lowering.target
 
 (* A pulled method's version, with its drops elaborated. *)
 and pulled =
@@ -214,7 +212,6 @@ let recursion =
       in
       Reachable.groups ~edges wanted)
 
-(* The group an instance is in, if it is in one. *)
 let group =
   Query.query ~name:"group" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
     (fun database (lowering, key) ->
@@ -582,8 +579,6 @@ let outcomes =
 
 let show_outcome outcome = fst (List.find (fun (_, o) -> o = outcome) outcomes)
 
-(* One test's result: its outcome, its message and echo output, if any, how
-   long it ran, and whether it came from the kept results. *)
 type record = {
   outcome : outcome;
   message : string option;
@@ -682,8 +677,6 @@ let parse_report text =
    the machine, so those tests run again. *)
 let is_cacheable record = record.outcome = Passed && record.message = None && record.echo = None
 
-(* Where test results are kept, by the key of the code each test can run.
-   The database keeps them in its store. *)
 type results = { find : string -> string option; add : string -> string -> unit }
 
 (* A kept result is a pass, so it is only the microseconds of the run that

@@ -192,8 +192,6 @@ let parse source tokens =
       (fun (a : Diagnostic.t) (b : Diagnostic.t) -> compare a.span.start b.span.start)
       diagnostics )
 
-(* The documents' examples *)
-
 type example = Example_definition | Example_signature
 
 let example_definition source tokens piece =

@@ -1,7 +1,5 @@
 (* Looks up a member, the name after a dot: fields, methods of a type, trait
    methods, and static members of a type. *)
-
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
@@ -30,17 +28,20 @@ let own_constant database owner name =
 let trait_methods database trait name =
   match Query.demand database Environment.trait_interface trait with
   | Some interface ->
-      List.filter (fun (method_ : T.trait_method) -> method_.method_name = name) interface.methods
+      List.filter
+        (fun (method_ : Types.trait_method) -> method_.method_name = name)
+        interface.methods
   | None -> []
 
 let trait_method database trait name receiver =
   List.find_opt
-    (fun (method_ : T.trait_method) -> method_.method_receiver = receiver)
+    (fun (method_ : Types.trait_method) -> method_.method_receiver = receiver)
     (trait_methods database trait name)
 
 let substitution_for database path arguments =
   match Query.demand database Environment.type_interface path with
-  | Some interface -> Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+  | Some interface ->
+      Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
   | None -> []
 
 let fields database path arguments =
@@ -49,8 +50,8 @@ let fields database path arguments =
       let substitution = substitution_for database path arguments in
       Some
         (List.map
-           (fun (field : T.field) ->
-             { field with field_type = T.substitute substitution field.field_type })
+           (fun (field : Types.field) ->
+             { field with field_type = Types.substitute substitution field.field_type })
            fields)
   | _ -> None
 
@@ -60,13 +61,13 @@ let variants database path arguments =
       let substitution = substitution_for database path arguments in
       Some
         (List.map
-           (fun (variant : T.variant) ->
+           (fun (variant : Types.variant) ->
              {
                variant with
                fields =
                  Option.map
-                   (List.map (fun (field : T.field) ->
-                        { field with field_type = T.substitute substitution field.field_type }))
+                   (List.map (fun (field : Types.field) ->
+                        { field with field_type = Types.substitute substitution field.field_type }))
                    variant.fields;
              })
            variants)

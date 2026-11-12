@@ -1,8 +1,5 @@
 (* What lowering reads: its context, and the code and the signature of the
    instance being lowered. *)
-
-module S = Syntax
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
@@ -15,15 +12,8 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
-      (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
   checks : bool;
-      (** Whether the program checks, as it runs, each operation that is undefined or wrong where
-          its precondition does not hold: an index, a slice, arithmetic, a shift, a call of the C
-          library, and [unreachable]. No [requires] clause is evaluated. *)
-  constant : (Path.t -> Lir.static_value option) ref;
-      (** Another constant's value, where it folds, which the driver reads through whatever keeps
-          each constant's lowering, so that one is folded once and what reads it is known *)
+  constant : Path.t -> Lir.static_value option;
 }
 
 (* The standard library's text types print as quoted text and its lists and
@@ -36,34 +26,39 @@ let debug_form : Ground.ty -> Glue.debug_form = function
       | _ -> Structure)
   | _ -> Structure
 
-let context ?(checks = false) database target =
-  let cursor_fields = ref (fun _ -> bug "no driver gives cursors their fields") in
-  let monomorphic : Monomorphic.context =
+let context ?(checks = false)
+    ?(cursor_fields = fun _ _ -> bug "no driver gives cursors their fields")
+    ?(constant = fun _ path -> bug "no driver gives the value of %s" (Path.show path)) database
+    target =
+  let rec monomorphic : Monomorphic.context =
     {
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
       normalize = Interface.Impls.normalize database ~bounds:(fun _ -> []);
       normalize_capabilities = Interface.Impls.normalize_capabilities database ~bounds:(fun _ -> []);
-      cursor_fields = (fun yielding -> !cursor_fields yielding);
+      cursor_fields = (fun yielding -> cursor_fields (Lazy.force context) yielding);
     }
+  and context =
+    lazy
+      (let env = Memory_layout.create target ~shape_of:(Monomorphic.shape monomorphic) in
+       let usize = Monomorphic.builtin USize in
+       {
+         database;
+         env;
+         glue =
+           Glue.create env
+             ~representation:(Monomorphic.representation monomorphic)
+             ~usize ~debug_form ();
+         monomorphic;
+         types =
+           { usize; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
+         bool = Monomorphic.builtin Bool;
+         checks;
+         constant = (fun path -> constant (Lazy.force context) path);
+       })
   in
-  let env = Memory_layout.create target ~shape_of:(Monomorphic.shape monomorphic) in
-  let usize = Monomorphic.builtin USize in
-  {
-    database;
-    env;
-    glue =
-      Glue.create env ~representation:(Monomorphic.representation monomorphic) ~usize ~debug_form ();
-    monomorphic;
-    types = { usize; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
-    bool = Monomorphic.builtin Bool;
-    cursor_fields;
-    checks;
-    constant = ref (fun path -> bug "no driver gives the value of %s" (Path.show path));
-  }
+  Lazy.force context
 
 let test_key path = Instance.Code { path; type_arguments = [] }
-
-(* Finding the code of an instance *)
 
 (* Where a function is written, and what its generic parameters stand for in
    this instance. Its body is in the core form of the definition. *)
@@ -73,9 +68,9 @@ type code = {
   enclosing_impl : Path.t option;
       (** The [impl] this is a method of, whether the [impl] writes it or leaves it to its trait *)
   text : string;  (** The definition's source text, for positions and messages *)
-  result : T.result;
-  substitution : T.substitution;
-  uses : T.capability list;
+  result : Types.result;
+  substitution : Types.substitution;
+  uses : Types.capability list;
   real : Path.t list;
       (** The capabilities the code gets the real implementations of, as [main]'s do: an external
           test's [uses] *)
@@ -134,7 +129,8 @@ let written context path =
   | _ -> None
 
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~anchor ~enclosing_impl (key, _, _) ~(interface : T.signature) ~substitution =
+  let function_code ~anchor ~enclosing_impl (key, _, _) ~(interface : Types.signature) ~substitution
+      =
     {
       definition_key = key;
       anchor;
@@ -144,7 +140,8 @@ let code_of context (path : Path.t) type_arguments : code =
       substitution;
       uses = interface.uses;
       real = [];
-      has_defaults = List.exists (fun (p : T.parameter_info) -> p.has_default) interface.parameters;
+      has_defaults =
+        List.exists (fun (p : Types.parameter_info) -> p.has_default) interface.parameters;
     }
   in
   match path with
@@ -153,12 +150,14 @@ let code_of context (path : Path.t) type_arguments : code =
       match demand context Names.definition key with
       | Some { kind = Test _; _ } ->
           {
-            (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns T.unit)) with
+            (unwritten ~definition_key:key ~anchor:path ~substitution:[]
+               ~result:(Returns Types.unit))
+            with
             text = text_of context key;
             real =
               (match demand context Environment.interface path with
               | Some (Test_interface uses) ->
-                  List.filter_map (function T.Capability path -> Some path | _ -> None) uses
+                  List.filter_map (function Types.Capability path -> Some path | _ -> None) uses
               | _ -> []);
           }
       | _ -> bug "%s is not a test" (Path.show path))
@@ -186,12 +185,13 @@ let code_of context (path : Path.t) type_arguments : code =
               let of_impl = List.filteri (fun i _ -> i < count) substitution in
               let of_trait =
                 List.map
-                  (fun (parameter, argument) -> (parameter, T.substitute_argument of_impl argument))
+                  (fun (parameter, argument) ->
+                    (parameter, Types.substitute_argument of_impl argument))
                   (trait_substitution context impl)
               in
               let own_generics =
                 List.filter
-                  (fun (generic : T.generic) -> not (Path.equal generic.generic.owner trait))
+                  (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
                   trait_signature.generics
               in
               let own = List.filteri (fun i _ -> i >= count) type_arguments in
@@ -205,7 +205,7 @@ let panic_path = Monomorphic.panic_capability
 let evidence_for context = Monomorphic.evidence_for context.monomorphic
 
 (* How a function's result is passed, and whether it returns at all. *)
-let result_of context substitution (result : T.result) =
+let result_of context substitution (result : Types.result) =
   match result with
   | Returns Never -> (Convention.Nothing, false)
   | Returns ty ->
@@ -216,8 +216,8 @@ let result_of context substitution (result : T.result) =
    the result pointer when the result is too large, each parameter, the
    mask of defaults passed when there are defaults, and then the evidence
    for each capability it uses. *)
-let lir_signature context substitution ~(parameters : (T.mode * T.ty) list) ~has_defaults
-    ?(uses = []) (result : T.result) : Lir.signature * Convention.result =
+let lir_signature context substitution ~(parameters : (Types.mode * Types.ty) list) ~has_defaults
+    ?(uses = []) (result : Types.result) : Lir.signature * Convention.result =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
   let result_ty, returns = result_of context substitution result in
   let written =
@@ -229,12 +229,12 @@ let lir_signature context substitution ~(parameters : (T.mode * T.ty) list) ~has
   let evidence = List.map (fun _ -> Convention.evidence) (evidence_for context substitution uses) in
   (Convention.signature ~returns (written @ mask @ evidence) result_ty, result_ty)
 
-let has_defaults (signature : T.signature) =
-  List.exists (fun (p : T.parameter_info) -> p.has_default) signature.parameters
+let has_defaults (signature : Types.signature) =
+  List.exists (fun (p : Types.parameter_info) -> p.has_default) signature.parameters
 
-let interface_parameters (signature : T.signature) =
+let interface_parameters (signature : Types.signature) =
   (match signature.receiver with
     | Some (receiver, ty) ->
-        [ ((match receiver with Mut -> T.Mut | Own -> Own | Read | Static -> Read), ty) ]
+        [ ((match receiver with Mut -> Types.Mut | Own -> Own | Read | Static -> Read), ty) ]
     | None -> [])
-  @ List.map (fun (info : T.parameter_info) -> (info.mode, info.type_)) signature.parameters
+  @ List.map (fun (info : Types.parameter_info) -> (info.mode, info.type_)) signature.parameters

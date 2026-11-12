@@ -3,19 +3,19 @@
    named functions and constructors. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 
 (* Checks the arguments of a call whose callee is unknown, so that their own
    errors are reported. The call has the given type. *)
-let arguments_alone state env (arguments : argument list) (type_ : T.ty) =
+let arguments_alone state env (arguments : argument list) (type_ : Types.ty) =
   List.iter (fun (argument : argument) -> ignore (expression state env argument.value)) arguments;
   type_
 
@@ -30,7 +30,7 @@ let mark_of (value : expression) : Core.mark option =
 let rec function_value_call state env (value : expression) (callee : expression) arguments =
   let callee_type = normalize state (expression state env callee) in
   match callee_type with
-  | T.Function function_type ->
+  | Types.Function function_type ->
       if List.length function_type.inputs <> List.length arguments then
         report state Too_many_arguments value.span
           (Printf.sprintf "This function takes %d arguments, and %d are given."
@@ -54,19 +54,19 @@ let rec function_value_call state env (value : expression) (callee : expression)
                    labels."
             | None -> ());
             let mode, input = List.nth function_type.inputs index in
-            let parameter : T.parameter_info =
+            let parameter : Types.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
             let mode = check_argument state env argument.value parameter in
             {
-              C.expression = argument.value.id;
+              Tables.expression = argument.value.id;
               parameter_index = index;
               mode;
               mark = mark_of argument.value;
             })
           pairs
       in
-      let result = T.result_type function_type.output in
+      let result = Types.result_type function_type.output in
       note_lending state value function_type.output;
       state.tables.calls.(value.id) <-
         Some
@@ -79,7 +79,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
           };
       Form.register_call ~function_value:callee state value;
       result
-  | T.Error _ | T.Hole -> arguments_alone state env arguments callee_type
+  | Types.Error _ | Types.Hole -> arguments_alone state env arguments callee_type
   | _ ->
       arguments_alone state env arguments
         (error state Not_callable callee.span
@@ -89,7 +89,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
 (* Checks one argument against its parameter's type and mode. Returns the
    mode it is passed with, which is the parameter's mode except for a field
    of a yielded constructor that lends a place. *)
-and check_argument state env (value : expression) (parameter : T.parameter_info) =
+and check_argument state env (value : expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
     | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
@@ -113,10 +113,10 @@ and check_argument state env (value : expression) (parameter : T.parameter_info)
    by its label, or to the parameter with the same name if the argument is a
    bare name, or else to the first parameter. Then the arguments must be in
    parameter order. *)
-and match_arguments state (value : expression) (parameters : T.parameter_info list)
+and match_arguments state (value : expression) (parameters : Types.parameter_info list)
     (arguments : argument list) ~record =
   let named =
-    List.mapi (fun index (parameter : T.parameter_info) -> (parameter.name, index)) parameters
+    List.mapi (fun index (parameter : Types.parameter_info) -> (parameter.name, index)) parameters
   in
   let bare_name (argument : argument) =
     let rec name_of (expression : expression) =
@@ -290,7 +290,7 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
 (* Checks the matched arguments. Arguments that are not lambdas are checked
    first, in order. Then each lambda is checked, when the types of its
    parameters are inferred. *)
-and check_arguments state env (parameters : T.parameter_info list) matched ~offset =
+and check_arguments state env (parameters : Types.parameter_info list) matched ~offset =
   let is_lambda ((argument : argument), _) =
     match argument.value.kind with Lambda _ -> true | _ -> false
   in
@@ -298,7 +298,7 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
     let parameter = List.nth parameters index in
     let mode = check_argument state env argument.value parameter in
     {
-      C.expression = argument.value.id;
+      Tables.expression = argument.value.id;
       parameter_index = index + offset;
       mode;
       mark = mark_of argument.value;
@@ -309,10 +309,10 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
   let order = List.map (fun ((argument : argument), _) -> argument.value.id) matched in
   List.filter_map
     (fun id ->
-      List.find_opt (fun (checked : C.argument) -> checked.expression = id) (first @ lambdas))
+      List.find_opt (fun (checked : Tables.argument) -> checked.expression = id) (first @ lambdas))
     order
 
-and named_call state env ?expected (value : expression) path (signature : T.signature)
+and named_call state env ?expected (value : expression) path (signature : Types.signature)
     ~type_arguments arguments =
   let instance = instantiate state value.span signature in
   explicit_type_arguments state value instance type_arguments;
@@ -325,8 +325,8 @@ and named_call state env ?expected (value : expression) path (signature : T.sign
   let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
   let callee =
     match Intrinsic.operation_of_path path with
-    | Some operation -> C.Intrinsic { operation; type_arguments = instance.type_arguments }
-    | None -> C.Function { path; type_arguments = instance.type_arguments }
+    | Some operation -> Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
+    | None -> Tables.Function { path; type_arguments = instance.type_arguments }
   in
   check_specification_call state env value signature;
   finish_call state value callee instance checked left_out
@@ -339,7 +339,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
     | Some written -> written
     | None -> instantiate_type state value.span type_path
   in
-  let type_ = T.Named { path = type_path; arguments = type_arguments } in
+  let type_ = Types.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> unify_as_hint state type_ expected | None -> ());
   let fields =
     match variant with
@@ -358,7 +358,9 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
         match Members.variants state.database type_path type_arguments with
         | Some variants -> (
             match
-              List.find_opt (fun (written : T.variant) -> written.variant_name = variant) variants
+              List.find_opt
+                (fun (written : Types.variant) -> written.variant_name = variant)
+                variants
             with
             | Some { fields = Some fields; _ } -> Some fields
             | Some { fields = None; _ } ->
@@ -383,9 +385,9 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
   | Some fields ->
       let parameters =
         List.map
-          (fun (field : T.field) ->
+          (fun (field : Types.field) ->
             {
-              T.name = field.field_name;
+              Types.name = field.field_name;
               mode = Own;
               type_ = field.field_type;
               has_default = field.field_has_default;

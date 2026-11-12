@@ -1,42 +1,22 @@
 open Syntax
-module T = Types
 module Names = Resolve.Names
-
-type state = {
-  database : Query.context;
-  key : Names.key;
-  definition : definition;
-  lowered : Environment.lowered_interface;
-  mutable diagnostics : Syntax.diagnostic list;
-}
-
-let reported state ?fixes code (span : span) message =
-  let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
-  state.diagnostics <- diagnostic :: state.diagnostics;
-  Diagnostic.reported diagnostic
-
-let report state ?fixes code span message = ignore (reported state ?fixes code span message)
-
-let bounds state parameter =
-  Option.value ~default:[] (List.assoc_opt parameter state.lowered.bounds)
-
-let implements state type_ trait =
-  Impls.implements state.database ~bounds:(bounds state) type_ trait
+open Checking
+open Impl_checks
 
 (* Bounds on the arguments of a written type *)
 
 let bound_diagnostics database ~package ~bounds named =
   let diagnostic code (span : span) message = Diagnostic.make ~code span message in
   List.concat_map
-    (fun ((span : span), (type_ : T.ty)) ->
+    (fun ((span : span), (type_ : Types.ty)) ->
       match type_ with
       | Named { path; arguments } -> (
           match
             Option.bind (Query.demand database Environment.type_interface path)
-              (fun (interface : T.type_interface) ->
+              (fun (interface : Types.type_interface) ->
                 Option.map
                   (Impls.required interface.type_generics)
-                  (T.substitution_of interface.type_generics arguments))
+                  (Types.substitution_of interface.type_generics arguments))
           with
           | Some required ->
               List.concat_map
@@ -46,7 +26,7 @@ let bound_diagnostics database ~package ~bounds named =
                       [
                         diagnostic (Types Unsatisfied_bound) span
                           (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
-                             (T.show type_) (T.show argument) (T.show_trait bound));
+                             (Types.show type_) (Types.show argument) (Types.show_trait bound));
                       ]
                   | Some evidence ->
                       List.map
@@ -63,19 +43,18 @@ let check_bounds state =
       state.lowered.named
     @ state.diagnostics
 
-(* Visibility *)
-
 let rec mentioned = function
-  | T.Named { path; arguments } -> path :: List.concat_map mentioned_argument arguments
-  | T.Function { inputs; output; _ } ->
-      List.concat_map (fun (_, type_) -> mentioned type_) inputs @ mentioned (T.result_type output)
-  | T.Any trait -> trait.trait :: List.concat_map mentioned_argument trait.trait_arguments
-  | T.Projection { base; _ } -> mentioned base
+  | Types.Named { path; arguments } -> path :: List.concat_map mentioned_argument arguments
+  | Types.Function { inputs; output; _ } ->
+      List.concat_map (fun (_, type_) -> mentioned type_) inputs
+      @ mentioned (Types.result_type output)
+  | Types.Any trait -> trait.trait :: List.concat_map mentioned_argument trait.trait_arguments
+  | Types.Projection { base; _ } -> mentioned base
   | _ -> []
 
 and mentioned_argument = function
-  | T.Type type_ -> mentioned type_
-  | T.Value _ | T.Capabilities _ -> []
+  | Types.Type type_ -> mentioned type_
+  | Types.Value _ | Types.Capabilities _ -> []
 
 let visibility_of state (path : Path.t) =
   match path with
@@ -101,8 +80,6 @@ let check_private_in_public state types (span : span) =
                  (Path.show path) (Path.show path))
         | _ -> ())
       (List.sort_uniq Path.compare (List.concat_map mentioned types))
-
-(* Methods *)
 
 let check_method_location state (head : type_head) =
   let owner =
@@ -132,20 +109,20 @@ let check_method_location state (head : type_head) =
 
 (* Every type a signature mentions: its parameters, its result, and the
    bounds of its generic parameters. *)
-let signature_types (signature : T.signature) =
-  T.result_type signature.output
-  :: List.map (fun (parameter : T.parameter_info) -> parameter.type_) signature.parameters
+let signature_types (signature : Types.signature) =
+  Types.result_type signature.output
+  :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
   @ List.concat_map
-      (fun (generic : T.generic) ->
+      (fun (generic : Types.generic) ->
         match generic.kind with
-        | Type_generic bounds -> List.map (fun bound -> T.Any bound) bounds
+        | Type_generic bounds -> List.map (fun bound -> Types.Any bound) bounds
         | _ -> [])
       signature.generics
 
 let main_message =
   "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`."
 
-let check_main state (signature : T.signature) span =
+let check_main state (signature : Types.signature) span =
   let list_of_string =
     match signature.parameters with
     | [
@@ -166,8 +143,6 @@ let check_main state (signature : T.signature) span =
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
     report state Main_signature span main_message
-
-(* Types *)
 
 let check_duplicates state what (names : name list) =
   ignore
@@ -209,15 +184,15 @@ let remove_derived (clause : type_clause) (traits : path_type list) (written : p
           | Some previous -> delete previous.span.stop written.span.stop
           | None -> delete written.span.start written.span.stop))
 
-let check_derives state (interface : T.type_interface) (clauses : type_clause list) resolved =
+let check_derives state (interface : Types.type_interface) (clauses : type_clause list) resolved =
   let field_types =
     match interface.shape with
-    | Record fields -> List.map (fun (field : T.field) -> field.field_type) fields
+    | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
     | Sum variants ->
         List.concat_map
-          (fun (variant : T.variant) ->
+          (fun (variant : Types.variant) ->
             List.map
-              (fun (field : T.field) -> field.field_type)
+              (fun (field : Types.field) -> field.field_type)
               (Option.value ~default:[] variant.fields))
           variants
     | Todo_type | Builtin_type _ | Error_shape _ -> []
@@ -226,8 +201,10 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
      trait, as [impl Equal for Option[Value: Equal]]. *)
   let derived_bounds trait parameter =
     if
-      List.exists (fun (generic : T.generic) -> generic.generic = parameter) interface.type_generics
-    then bounds state parameter @ [ { T.trait; trait_arguments = []; associated = [] } ]
+      List.exists
+        (fun (generic : Types.generic) -> generic.generic = parameter)
+        interface.type_generics
+    then bounds state parameter @ [ { Types.trait; trait_arguments = []; associated = [] } ]
     else bounds state parameter
   in
   List.iter
@@ -273,7 +250,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                       let allocates =
                         match interface.shape with
                         | Sum variants ->
-                            List.exists (fun (variant : T.variant) -> variant.indirect) variants
+                            List.exists (fun (variant : Types.variant) -> variant.indirect) variants
                         | _ -> false
                       in
                       if (not property_holds) || (Well_known.is Plain trait && allocates) then
@@ -300,7 +277,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                              shown);
                     List.iter
                       (fun type_ ->
-                        let wanted : T.trait_reference =
+                        let wanted : Types.trait_reference =
                           { trait; trait_arguments = []; associated = [] }
                         in
                         if
@@ -312,7 +289,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                             (Printf.sprintf
                                "A field of type `%s` does not implement `%s`, so `%s` cannot be \
                                 derived."
-                               (T.show type_) shown shown))
+                               (Types.show type_) shown shown))
                       field_types
                   end
               | _ -> ())
@@ -339,8 +316,6 @@ let check_no_capability_parameter state what (name : name) (generics : generic_p
       | Type_parameter _ | Value_parameter _ | Generic_error -> ())
     generics
 
-(* Traits *)
-
 let check_trait_cycle state (requires : path_type list) =
   let rec reaches seen path =
     if Path.equal path state.key.path then true
@@ -363,21 +338,21 @@ let check_trait_cycle state (requires : path_type list) =
    version of a method that a trait it requires declares, and may not
    declare the same version again. *)
 let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path : Path.t)
-    (trait : T.trait_interface) =
+    (trait : Types.trait_interface) =
   let inherited =
     List.concat_map
-      (fun (required : T.trait_reference) ->
+      (fun (required : Types.trait_reference) ->
         List.concat_map
-          (fun (bound : T.trait_reference) ->
+          (fun (bound : Types.trait_reference) ->
             match Query.demand state.database Environment.trait_interface bound.trait with
             | Some interface ->
                 List.map
-                  (fun (method_ : T.trait_method) ->
+                  (fun (method_ : Types.trait_method) ->
                     ((method_.method_name, method_.method_receiver), bound.trait))
                   interface.methods
             | None -> [])
           (Properties.bound_closure state.database
-             ~self:(T.Parameter { owner = trait_path; name = "Self" })
+             ~self:(Types.Parameter { owner = trait_path; name = "Self" })
              required))
       trait.requires
   in
@@ -390,39 +365,38 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
            (Path.show from) name.text (Path.show_receiver receiver))
   | None -> ()
 
-(* [impl]s *)
-
 (* The prover checks a law once, for every instantiation of the [impl]'s
    generic parameters, and reads the proof for all of them. So the proof
    can assume of a parameter only what the [impl] requires of it: with a
    bound that the [impl] lacks, the law would be taken as proven for types
    that the proof's reasoning does not cover. The proof's parameters are
    the [impl]'s by position. *)
-let check_proof_bounds state (written : type_head) (generics : T.generic list)
-    (impl : T.impl_interface) =
+let check_proof_bounds state (written : type_head) (generics : Types.generic list)
+    (impl : Types.impl_interface) =
   if List.length generics = List.length impl.impl_generics then begin
-    let renaming : T.substitution =
+    let renaming : Types.substitution =
       List.map2
-        (fun (proof : T.generic) (of_impl : T.generic) ->
+        (fun (proof : Types.generic) (of_impl : Types.generic) ->
           ( proof.generic,
             match of_impl.kind with
-            | Type_generic _ -> T.Type (T.Parameter of_impl.generic)
-            | Value_generic -> T.Value (T.Value_parameter of_impl.generic)
-            | Capability_generic -> T.Capabilities [ T.Capability_parameter of_impl.generic ] ))
+            | Type_generic _ -> Types.Type (Types.Parameter of_impl.generic)
+            | Value_generic -> Types.Value (Types.Value_parameter of_impl.generic)
+            | Capability_generic ->
+                Types.Capabilities [ Types.Capability_parameter of_impl.generic ] ))
         generics impl.impl_generics
     in
-    let impl_bounds = T.bounds_of impl.impl_generics in
+    let impl_bounds = Types.bounds_of impl.impl_generics in
     List.iteri
-      (fun index ((proof : T.generic), (of_impl : T.generic)) ->
+      (fun index ((proof : Types.generic), (of_impl : Types.generic)) ->
         match proof.kind with
         | Type_generic bounds ->
             List.iter
-              (fun (bound : T.trait_reference) ->
+              (fun (bound : Types.trait_reference) ->
                 if
                   Option.is_none
                     (Impls.implements state.database ~bounds:impl_bounds
-                       (T.Parameter of_impl.generic)
-                       (T.substitute_trait renaming bound))
+                       (Types.Parameter of_impl.generic)
+                       (Types.substitute_trait renaming bound))
                 then
                   let span =
                     match List.nth_opt written.generics index with
@@ -433,396 +407,11 @@ let check_proof_bounds state (written : type_head) (generics : T.generic list)
                     (Printf.sprintf
                        "The `impl` does not require `%s: %s`, so this proof cannot assume it: the \
                         law is proven for every type that the `impl` is for."
-                       proof.generic.name (T.show_trait bound)))
+                       proof.generic.name (Types.show_trait bound)))
               bounds
         | Value_generic | Capability_generic -> ())
       (List.combine generics impl.impl_generics)
   end
-
-let show_signature (signature : T.signature) =
-  Printf.sprintf "(%s)%s"
-    (String.concat ", "
-       ((match signature.receiver with
-          | Some (Read, _) -> [ "self" ]
-          | Some (Mut, _) -> [ "mut self" ]
-          | Some (Own, _) -> [ "own self" ]
-          | _ -> [])
-       @ List.map
-           (fun (parameter : T.parameter_info) ->
-             parameter.name ^ ": " ^ T.show_mode parameter.mode ^ T.show parameter.type_)
-           signature.parameters))
-    (T.show_output signature.output)
-
-(* Whether two types agree, where an error on either side agrees with
-   anything, since it was reported already. *)
-let rec agrees (left : T.ty) (right : T.ty) =
-  match (left, right) with
-  | T.Error _, _ | _, T.Error _ -> true
-  | T.Named left, T.Named right ->
-      Path.equal left.path right.path
-      && List.length left.arguments = List.length right.arguments
-      && List.for_all2
-           (fun left right ->
-             match (left, right) with
-             | T.Type left, T.Type right -> agrees left right
-             | left, right -> left = right)
-           left.arguments right.arguments
-  | T.Function left, T.Function right ->
-      List.length left.inputs = List.length right.inputs
-      && List.for_all2
-           (fun (left_mode, left) (right_mode, right) ->
-             left_mode = right_mode && agrees left right)
-           left.inputs right.inputs
-      && agrees_result left.output right.output
-  | _ -> T.equal left right
-
-and agrees_result (left : T.result) (right : T.result) =
-  match (left, right) with
-  | Returns left, Returns right -> agrees left right
-  | Yields (left_mode, left), Yields (right_mode, right)
-  | Lends (left_mode, left), Lends (right_mode, right) ->
-      left_mode = right_mode && agrees left right
-  | _ -> false
-
-(* An [impl]'s view of its trait: the trait, the substitution for the
-   trait's [Self] and parameters, and the trait's types under that
-   substitution, in which [Self] is the [impl]'s type and each associated
-   type of [Self] is the definition given by this [impl] or by the [impl] of
-   a required trait. An associated type that the trait declares and the
-   [impl] does not define is an error wherever a method's signature mentions
-   it. The [impl] itself reports it, once. The trait's sets of capabilities
-   are read in the same way: each associated capability set of [Self] is the
-   set that this [impl] defines. *)
-type view = {
-  trait : T.trait_interface;
-  shown_trait : string;
-  substitution : T.substitution;
-  impl_bounds : T.parameter -> T.trait_reference list;
-  normalize : T.ty -> T.ty;
-  normalize_capabilities : T.capability list -> T.capability list;
-  missing_associated : (string * Syntax.diagnostic) list;
-}
-
-let compiler_implements (impl : T.impl_interface) =
-  Path.equal impl.implements.trait Properties.copyable_trait
-  || Path.equal impl.implements.trait Properties.plain_trait
-  || Path.equal impl.implements.trait Properties.storable_trait
-
-let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type) =
-  let shown_trait = Names.spell_path trait_path.path in
-  let impl_bounds parameter =
-    match
-      List.find_opt (fun (generic : T.generic) -> generic.generic = parameter) impl.impl_generics
-    with
-    | Some { kind = Type_generic bounds; _ } -> bounds
-    | _ -> bounds parameter
-  in
-  if Well_known.is Panic impl.implements.trait || compiler_implements impl then None
-  else
-    Option.map
-      (fun (trait : T.trait_interface) ->
-        let substitution =
-          Properties.trait_substitution trait ~self:impl.for_type impl.implements
-        in
-        let missing_associated =
-          List.filter_map
-            (fun (associated : T.associated_type) ->
-              if List.mem_assoc associated.associated_name impl.implements.associated then None
-              else
-                Some
-                  ( associated.associated_name,
-                    Diagnostic.make ~code:(Types Missing_member) trait_path.span
-                      (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares."
-                         associated.associated_name shown_trait) ))
-            trait.associated_types
-        in
-        let normalize type_ =
-          T.map
-            (function
-              | T.Projection { base; trait = projected; name } when T.equal base impl.for_type -> (
-                  match
-                    ( List.assoc_opt name impl.implements.associated,
-                      List.assoc_opt name missing_associated )
-                  with
-                  | Some fixed, _ -> Some fixed
-                  | None, Some missing when Path.equal projected.trait impl.implements.trait ->
-                      Some (T.Error (Diagnostic.reported missing))
-                  | None, _ ->
-                      Impls.associated_type database ~bounds:impl_bounds impl.for_type projected
-                        name)
-              | _ -> None)
-            (T.substitute substitution type_)
-        in
-        let normalize_capabilities capabilities =
-          List.sort_uniq compare
-            (List.concat_map
-               (function
-                 | T.Capability_projection { base; trait = projected; name }
-                   when T.equal base impl.for_type
-                        && Path.equal projected.trait impl.implements.trait ->
-                     Option.value ~default:[] (List.assoc_opt name impl.capability_sets)
-                 | capability ->
-                     Impls.normalize_capabilities database ~bounds:impl_bounds [ capability ])
-               (T.substitute_capabilities substitution capabilities))
-        in
-        {
-          trait;
-          shown_trait;
-          substitution;
-          impl_bounds;
-          normalize;
-          normalize_capabilities;
-          missing_associated;
-        })
-      (Query.demand database Environment.trait_interface impl.implements.trait)
-
-(* The checks of an [impl]'s own header: it defines every member that its
-   trait requires, and its type implements the traits that the trait
-   requires. Each method written inside it is checked against the trait's
-   method as a definition of its own. *)
-let check_impl state (written_members : impl_member line list) (impl : T.impl_interface)
-    (trait_path : path_type) =
-  let database = state.database in
-  if Well_known.is Panic impl.implements.trait then
-    report state Implements_panic trait_path.span
-      "Nothing can implement `Panic`, since a panic cannot be caught."
-  else if compiler_implements impl then
-    report state Implements_built_in trait_path.span
-      (Printf.sprintf
-         "The compiler implements `%s` from a type's fields; no `impl` of it can be written."
-         (Names.spell_path trait_path.path))
-  else
-    match impl_view database ~bounds:(bounds state) impl trait_path with
-    | None -> ()
-    | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
-        let check_evidence_grants (span : span) evidence =
-          state.diagnostics <-
-            List.map
-              (Diagnostic.make ~code:(Capabilities Not_granted) span)
-              (Grants.evidence_messages database ~package:state.key.module_.package
-                 ~bounds:impl_bounds evidence)
-            @ state.diagnostics
-        in
-        state.diagnostics <- List.map snd missing_associated @ state.diagnostics;
-        let written_methods =
-          List.filter_map
-            (fun (member : Names.key) ->
-              match member.path with
-              | Method { name; receiver; _ } -> Some (name, receiver)
-              | _ -> None)
-            (Query.demand database Names.contained state.key)
-        in
-        (* The [impl] must define every method without a body. For a
-           capability that is every method, because a capability's methods
-           have no bodies. *)
-        List.iter
-          (fun (method_ : T.trait_method) ->
-            let is_written =
-              List.exists
-                (fun (name, receiver) ->
-                  name = method_.method_name
-                  && (trait.is_capability || receiver = method_.method_receiver))
-                written_methods
-            in
-            if (not is_written) && not method_.provided then
-              report state Missing_member trait_path.span
-                (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
-                   method_.method_name
-                   (show_signature (T.map_signature normalize method_.method_signature))
-                   shown_trait))
-          trait.methods;
-        List.iter
-          (fun (associated : T.associated_type) ->
-            match List.assoc_opt associated.associated_name impl.implements.associated with
-            | None -> ()
-            | Some chosen ->
-                (* Each associated type that the [impl] defines must satisfy
-                   the bounds that the trait declares for it. *)
-                List.iter
-                  (fun bound ->
-                    let bound = T.substitute_trait substitution bound in
-                    match Impls.implements database ~bounds:impl_bounds chosen bound with
-                    | None ->
-                        report state Unsatisfied_bound trait_path.span
-                          (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
-                             shown_trait associated.associated_name (T.show_trait bound)
-                             (T.show chosen))
-                    | Some evidence -> check_evidence_grants trait_path.span evidence)
-                  associated.associated_bounds)
-          trait.associated_types;
-        ignore
-          (List.fold_left
-             (fun defined (line : impl_member line) ->
-               match line.kind with
-               | Associated_definition (name, _) ->
-                   if
-                     not
-                       (List.exists
-                          (fun (associated : T.associated_type) ->
-                            associated.associated_name = name.text)
-                          trait.associated_types)
-                   then
-                     report state Extra_member name.span
-                       (Printf.sprintf "`%s` declares no associated type `%s`." shown_trait
-                          name.text);
-                   defined
-               | Capability_definition (name, _) ->
-                   if not (List.mem name.text trait.associated_capabilities) then
-                     report state Extra_member name.span
-                       (Printf.sprintf "`%s` declares no associated capability set `%s`."
-                          shown_trait name.text)
-                   else if List.mem name.text defined then
-                     report state Extra_member name.span
-                       (Printf.sprintf
-                          "This `impl` already defines `%s`. List every capability in one \
-                           definition, separated by commas."
-                          name.text);
-                   name.text :: defined
-               | Impl_member_error -> defined)
-             [] written_members);
-        (* The traits a trait requires are implemented for the same type. *)
-        List.iter
-          (fun (required : T.trait_reference) ->
-            let required = T.substitute_trait substitution required in
-            match Impls.implements database ~bounds:impl_bounds impl.for_type required with
-            | None ->
-                report state Missing_required_impl trait_path.span
-                  (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
-                     (T.show_trait required) (T.show impl.for_type))
-            | Some evidence -> check_evidence_grants trait_path.span evidence)
-          trait.requires;
-        if (not trait.is_capability) && impl.impl_uses <> [] then
-          report state Impl_uses trait_path.span
-            "Only an `impl` of a capability can have `uses`. A trait's methods can use only what \
-             the trait declares."
-
-(* A method written inside an [impl], against the method its trait
-   declares. *)
-let check_impl_method state (name : name) (receiver : Path.receiver) (written : T.signature)
-    (impl : T.impl_interface) (trait_path : path_type) =
-  match impl_view state.database ~bounds:(bounds state) impl trait_path with
-  | None -> ()
-  | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (
-      let declared =
-        List.find_opt
-          (fun (method_ : T.trait_method) ->
-            method_.method_name = name.text
-            && (trait.is_capability || method_.method_receiver = receiver))
-          trait.methods
-      in
-      match declared with
-      | None ->
-          report state Extra_member name.span
-            (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
-      | Some declared ->
-          let replaceable (signature : T.signature) =
-            signature.uses = [] && signature.terminates
-            && List.for_all
-                 (fun (info : T.parameter_info) -> info.mode <> T.Mut)
-                 signature.parameters
-            && match signature.receiver with Some (Mut, _) -> false | _ -> true
-          in
-          if declared.provided && not (replaceable declared.method_signature) then
-            report state Not_replaceable name.span
-              (Printf.sprintf
-                 "`%s` gives `%s` a body, which an `impl` can replace only by a version proven to \
-                  give the same result, and so only when the provided one is pure, has a `time` \
-                  clause, and changes none of its arguments, so that its body is what it means."
-                 shown_trait name.text);
-          if trait.is_capability && not (receiver = Read || receiver = Mut) then
-            report state Wrong_receiver name.span
-              "A capability's implementation takes `self`, or `mut self` if it changes its own \
-               state."
-          else begin
-            (* The method's own generic parameters and [uses], after the
-               [impl]'s, which every method written inside it has. *)
-            let written =
-              {
-                written with
-                generics =
-                  List.filteri
-                    (fun index _ -> index >= List.length impl.impl_generics)
-                    written.generics;
-                uses =
-                  List.filter
-                    (fun capability -> not (List.mem capability impl.impl_uses))
-                    written.uses;
-              }
-            in
-            (* The trait method's own generic parameters are substituted by
-               the [impl] method's, by position. *)
-            let expected =
-              T.map_signature normalize
-                (T.substitute_signature
-                   (Option.value ~default:[]
-                      (T.substitution_of declared.method_signature.generics
-                         (Types.generic_arguments written.generics)))
-                   declared.method_signature)
-            in
-            let expected =
-              if trait.is_capability then { expected with receiver = written.receiver }
-              else expected
-            in
-            let expected = { expected with uses = normalize_capabilities expected.uses } in
-            let parameters_agree =
-              List.length expected.parameters = List.length written.parameters
-              && List.for_all2
-                   (fun (left : T.parameter_info) (right : T.parameter_info) ->
-                     left.name = right.name && left.mode = right.mode
-                     && agrees left.type_ right.type_)
-                   expected.parameters written.parameters
-            in
-            let receivers_agree =
-              Option.map fst expected.receiver = Option.map fst written.receiver
-            in
-            let generics_agree =
-              List.length expected.generics = List.length written.generics
-              && List.for_all2
-                   (fun (expected_generic : T.generic) (given_generic : T.generic) ->
-                     match (expected_generic.kind, given_generic.kind) with
-                     | Type_generic expected_bounds, Type_generic given_bounds ->
-                         (* No stronger bounds than the trait's. *)
-                         List.for_all
-                           (fun (bound : T.trait_reference) ->
-                             List.exists
-                               (fun (allowed : T.trait_reference) ->
-                                 Path.equal allowed.trait bound.trait)
-                               expected_bounds)
-                           given_bounds
-                     | left, right -> left = right)
-                   expected.generics written.generics
-            in
-            if
-              not
-                (parameters_agree && receivers_agree && generics_agree
-                && agrees_result expected.output written.output)
-            then
-              report state Signature_mismatch name.span
-                (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text
-                   name.text (show_signature expected) shown_trait)
-            else
-              (* A caller of a capability holds only that capability, so the
-                 implementation can use the capabilities that its [impl]
-                 declares and no others. *)
-              let allowed = if trait.is_capability then [] else expected.uses in
-              if
-                not
-                  (List.for_all
-                     (fun capability -> List.mem capability allowed)
-                     (normalize_capabilities written.uses))
-              then
-                report state Impl_uses name.span
-                  (if trait.is_capability then
-                     Printf.sprintf
-                       "`%s` implements a capability, so it can use only what its `impl` declares \
-                        with `uses`."
-                       name.text
-                   else
-                     Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
-                       name.text shown_trait)
-          end)
-
-(* The definition *)
 
 let check state =
   let database = state.database in
@@ -862,7 +451,7 @@ let check state =
             (* The proofs of callers in other packages read a [transparent]
                function's body as its definition, which only the body of a
                function in the logic is. *)
-            (if lowered.transparent && not (T.body_is_definition lowered) then
+            (if lowered.transparent && not (Types.body_is_definition lowered) then
                let span =
                  match signature.name with Plain_name name | Member_name (_, name) -> name.span
                in
@@ -886,23 +475,23 @@ let check state =
             (match Query.demand database Summary.trait_header trait.trait with
             | Some header when not (List.mem law.text header.laws) ->
                 report state Unknown_member law.span
-                  (Printf.sprintf "`%s` has no law `%s`." (T.show_trait trait) law.text)
+                  (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
             | _ -> ());
             (* A head with the wrong number of parameters is reported as that. *)
             let arity_matches =
               match for_type with
-              | T.Named { path; _ } -> (
+              | Types.Named { path; _ } -> (
                   match Query.demand database Summary.generics_of path with
                   | Some expected -> List.length expected = List.length generics
                   | None -> true)
               | _ -> true
             in
-            if arity_matches && not (T.is_error for_type) then
+            if arity_matches && not (Types.is_error for_type) then
               match implements state for_type trait with
               | None ->
                   report state No_impl type_.span
                     (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
-                       (T.show for_type) (T.show_trait trait))
+                       (Types.show for_type) (Types.show_trait trait))
               | Some (Impls.From_impl { impl; _ }) ->
                   Option.iter
                     (check_proof_bounds state type_ generics)
@@ -926,12 +515,12 @@ let check state =
             if definition.visibility = Public then
               check_private_in_public state
                 (match interface.shape with
-                | Record fields -> List.map (fun (field : T.field) -> field.field_type) fields
+                | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
                 | Sum variants ->
                     List.concat_map
-                      (fun (variant : T.variant) ->
+                      (fun (variant : Types.variant) ->
                         List.map
-                          (fun (field : T.field) -> field.field_type)
+                          (fun (field : Types.field) -> field.field_type)
                           (Option.value ~default:[] variant.fields))
                       variants
                 | _ -> [])
@@ -940,9 +529,9 @@ let check state =
             check_no_capability_parameter state "the trait" name generics;
             check_trait_cycle state requires;
             check_private_in_public state
-              (List.map (fun (bound : T.trait_reference) -> T.Any bound) trait.requires
+              (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires
               @ List.concat_map
-                  (fun (method_ : T.trait_method) -> signature_types method_.method_signature)
+                  (fun (method_ : Types.trait_method) -> signature_types method_.method_signature)
                   trait.methods)
               name.span
         | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->

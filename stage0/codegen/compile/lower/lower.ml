@@ -33,9 +33,8 @@ type context = Definitions.context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
   checks : bool;
-  constant : (Path.t -> Lir.static_value option) ref;
+  constant : Path.t -> Lir.static_value option;
 }
 
 let context = Definitions.context
@@ -120,7 +119,7 @@ let pulled context (yielding : Ground.yielding) :
   let owned =
     List.filter_map
       (fun (arrives, mode, ty, bit) ->
-        if mode = T.Own && not (trivial st ty) then
+        if mode = Types.Own && not (trivial st ty) then
           Option.map
             (fun local ->
               ( local,
@@ -137,11 +136,6 @@ let pulled context (yielding : Ground.yielding) :
   Core_form.block_into st body None;
   (finish_function st ~first:[] ~rest:parameter_locals (), owned)
 
-(* Code run while compiling, for a tagged template's check: a template of
-   the literal texts and no parts, given to the tag's [from_template]'s
-   clauses that can run, each worked out and written out as a [Bool], in
-   order. A clause that reads the template's parts is not asked of it; the
-   prover asks only those that read its literals. *)
 let code_state context path =
   let code = code_of context path [] in
   (enter context (frame_of code ~inlined:[ path ]), code)
@@ -154,8 +148,6 @@ let from_template_contract context from_template : Core.parameter * Core.conditi
       (parameter, contract.requires)
   | _ -> bug "%s does not take one template" (Path.show from_template)
 
-(* The positions, among a tag's [from_template]'s clauses, of those a
-   template check works out. *)
 let template_checked context from_template =
   let _, requires = from_template_contract context from_template in
   List.concat
@@ -188,9 +180,6 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
-(* Code run while compiling, for a call whose arguments are known: the
-   function, which is not generic, called with each argument a constant,
-   and its result written out. *)
 let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
   let st, _ = code_state context function_ in
   start st.b (block st.b);

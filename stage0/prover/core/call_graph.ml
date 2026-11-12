@@ -12,7 +12,6 @@
 
 open Syntax
 module Names = Resolve.Names
-module T = Types
 
 type edge =
   | Calls of Path.t  (** A call, or a function named as a value. *)
@@ -20,7 +19,7 @@ type edge =
 
 type t = (Path.t * edge list) list
 
-let head_of (ty : T.ty) = match ty with Named { path; _ } -> Some path | _ -> None
+let head_of (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
 (* The traits a trait requires, and itself, so that using an [impl] of
    [Ordered] also uses one of [Equal]. *)
@@ -29,7 +28,7 @@ let rec traits_with_required database (trait : Path.t) =
   | Some (Interface.Environment.Trait_interface interface) ->
       trait
       :: List.concat_map
-           (fun (required : T.trait_reference) -> traits_with_required database required.trait)
+           (fun (required : Types.trait_reference) -> traits_with_required database required.trait)
            interface.requires
   | _ -> [ trait ]
 
@@ -86,21 +85,22 @@ let impls_used database impls (callee : Core.callee) =
   match callee with
   | Function { path; type_arguments } -> (
       match Query.demand database Interface.Environment.signature path with
-      | Some (signature : T.signature) ->
+      | Some (signature : Types.signature) ->
           let rec pairs generics arguments =
             match (generics, arguments) with
-            | (generic : T.generic) :: generics, T.Type ty :: arguments ->
+            | (generic : Types.generic) :: generics, Types.Type ty :: arguments ->
                 (generic, ty) :: pairs generics arguments
             | _ :: generics, _ :: arguments -> pairs generics arguments
             | _ -> []
           in
           List.concat_map
-            (fun ((generic : T.generic), ty) ->
+            (fun ((generic : Types.generic), ty) ->
               match generic.kind with
               | Type_generic bounds ->
                   let traits =
                     List.concat_map
-                      (fun (bound : T.trait_reference) -> traits_with_required database bound.trait)
+                      (fun (bound : Types.trait_reference) ->
+                        traits_with_required database bound.trait)
                       bounds
                   in
                   impls_for impls traits ty
@@ -122,7 +122,7 @@ let integer_trait owner =
   || Well_known.is Unsigned_integer owner
 
 let integer_types =
-  List.filter (fun builtin -> T.is_integer_type (T.builtin builtin)) Intrinsic.builtins
+  List.filter (fun builtin -> Types.is_integer_type (Types.builtin builtin)) Intrinsic.builtins
 
 let dispatched (called : Core.callee) =
   match called with
@@ -173,7 +173,7 @@ let edges database impls (body : Core.block) =
                       impls
                   then [ method_ ]
                   else [])
-                (impls_for impls [ trait.trait ] (T.builtin builtin)))
+                (impls_for impls [ trait.trait ] (Types.builtin builtin)))
             integer_types
         in
         add
@@ -224,7 +224,6 @@ let build database package =
 
 let graph = Query.query ~phase:Phases.proofs ~name:"call_graph" ~show:Path.show_package build
 
-(* The methods an [impl] writes. *)
 let impl_methods database impl =
   List.concat_map
     (fun (written, _, _, methods) -> if Path.equal written impl then methods else [])

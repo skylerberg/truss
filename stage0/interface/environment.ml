@@ -1,29 +1,27 @@
 open Syntax
-module T = Types
 module Names = Resolve.Names
 
 type interface =
-  | Function_interface of T.signature
-  | Type_interface of T.type_interface
-  | Trait_interface of T.trait_interface
-  | Impl_interface of T.impl_interface
-  | Constant_interface of T.constant_interface
-  | Test_interface of T.capability list
-  | Theorem_interface of T.signature
+  | Function_interface of Types.signature
+  | Type_interface of Types.type_interface
+  | Trait_interface of Types.trait_interface
+  | Impl_interface of Types.impl_interface
+  | Constant_interface of Types.constant_interface
+  | Test_interface of Types.capability list
+  | Theorem_interface of Types.signature
   | Law_proof_interface of {
-      generics : T.generic list;
-      trait : T.trait_reference;
+      generics : Types.generic list;
+      trait : Types.trait_reference;
       law : string;
-      for_type : T.ty;
-    }  (** The subject of a law's proof: a law of a trait, for a type's [impl]. *)
+      for_type : Types.ty;
+    }
   | Error_interface of Diagnostic.reported
-      (** A definition whose header did not parse: everything is accepted of it. *)
 
 type lowered_interface = {
   interface : interface;
   diagnostics : Syntax.diagnostic list;
-  named : (span * T.ty) list;  (** Each named type written, for checking its bounds. *)
-  bounds : (T.parameter * T.trait_reference list) list;  (** The generic parameters' bounds. *)
+  named : (span * Types.ty) list;
+  bounds : (Types.parameter * Types.trait_reference list) list;
 }
 
 (* The type a head names, and the generic parameters it declares, which
@@ -40,12 +38,12 @@ let head_type context owner (head : type_head) =
                (if List.length expected = 1 then "parameter" else "parameters")
                (List.length generics))
       | _ -> ());
-      let arguments = T.generic_arguments generics in
+      let arguments = Types.generic_arguments generics in
       let type_ =
         match Intrinsic.builtin_of_path type_path with
-        | Some Never -> T.Never
-        | Some Integer -> T.Integer
-        | _ -> T.Named { path = type_path; arguments }
+        | Some Never -> Types.Never
+        | Some Integer -> Types.Integer
+        | _ -> Types.Named { path = type_path; arguments }
       in
       (generics, type_)
   | Some (Definition (((Trait | Capability) as kind), _)) ->
@@ -54,24 +52,25 @@ let head_type context owner (head : type_head) =
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (Names.spell_path head.path)
              (Names.kind_name (Names.kind_of_named kind))) )
-  | Some (Unknown report) -> (generics, T.Error report)
+  | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
 
-let trait_self_parameter trait : T.parameter = { owner = trait; name = "Self" }
+let trait_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 
 (* The fields of a shape, in the order of their names. The order of
    declaration is not part of a shape, so reordering a type's fields changes
    no result that reads the shape. *)
 let fields context (written : field list) =
   List.stable_sort
-    (fun (left : T.field) (right : T.field) -> String.compare left.field_name right.field_name)
+    (fun (left : Types.field) (right : Types.field) ->
+      String.compare left.field_name right.field_name)
     (List.filter_map
        (fun (field : field) ->
          match field.kind with
          | Field_declaration { name; type_; default } ->
              Some
                {
-                 T.field_name = name.text;
+                 Types.field_name = name.text;
                  field_type = Lower.type_ context type_;
                  field_has_default = Option.is_some default;
                }
@@ -82,19 +81,19 @@ let fields context (written : field list) =
    without the methods written inside it. *)
 type container =
   | Trait_parts of {
-      trait_generics : T.generic list;
-      requires : T.trait_reference list;
-      associated_types : T.associated_type list;
+      trait_generics : Types.generic list;
+      requires : Types.trait_reference list;
+      associated_types : Types.associated_type list;
       associated_capabilities : string list;
-      laws : (string * (string * T.ty) list) list;
+      laws : (string * (string * Types.ty) list) list;
     }
   | Capability_parts
   | Impl_parts of {
-      impl_generics : T.generic list;
-      implements : T.trait_reference;
-      for_type : T.ty;
-      impl_uses : T.capability list;
-      capability_sets : (string * T.capability list) list;
+      impl_generics : Types.generic list;
+      implements : Types.trait_reference;
+      for_type : Types.ty;
+      impl_uses : Types.capability list;
+      capability_sets : (string * Types.capability list) list;
     }
   | Broken of Diagnostic.reported  (** An [impl] whose trait name does not resolve to a trait. *)
 
@@ -106,12 +105,16 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
   | Trait { generics; requires; members; _ } ->
       let trait_generics = Lower.generics context path generics in
       let self_parameter = trait_self_parameter path in
-      let self_trait : T.trait_reference =
-        { trait = path; trait_arguments = T.generic_arguments trait_generics; associated = [] }
+      let self_trait : Types.trait_reference =
+        { trait = path; trait_arguments = Types.generic_arguments trait_generics; associated = [] }
       in
       Hashtbl.replace context.bounds self_parameter [ self_trait ];
       let context =
-        { context with self_type = Some (T.Parameter self_parameter); self_trait = Some self_trait }
+        {
+          context with
+          self_type = Some (Types.Parameter self_parameter);
+          self_trait = Some self_trait;
+        }
       in
       let requires = Lower.trait_bounds context requires in
       let associated_types =
@@ -121,7 +124,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
             | Associated_type (name, bounds) ->
                 Some
                   {
-                    T.associated_name = name.text;
+                    Types.associated_name = name.text;
                     associated_bounds = Lower.trait_bounds context bounds;
                   }
             | Associated_capability _ | Law _ | Trait_member_error -> None)
@@ -188,8 +191,8 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
                       Lower.capabilities { context with self_capabilities = sets } written
                     in
                     let defined_by_this_impl = function
-                      | T.Capability_projection { base; trait; _ } ->
-                          T.equal base for_type && Path.equal trait.trait implements.trait
+                      | Types.Capability_projection { base; trait; _ } ->
+                          Types.equal base for_type && Path.equal trait.trait implements.trait
                       | _ -> false
                     in
                     if List.exists defined_by_this_impl set then begin
@@ -238,15 +241,16 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
    enclosing declaration did not parse, or when it is an [impl] whose trait
    name does not resolve to a trait. *)
 type header = {
-  self_type : T.ty option;
-  self_trait : T.trait_reference option;
-  self_associated : (string * T.ty) list;
-  self_capabilities : (string * T.capability list) list;
-  header_bounds : (T.parameter * T.trait_reference list) list;
-  header_generics : T.generic list;
+  self_type : Types.ty option;
+  self_trait : Types.trait_reference option;
+  self_associated : (string * Types.ty) list;
+  self_capabilities : (string * Types.capability list) list;
+  header_bounds : (Types.parameter * Types.trait_reference list) list;
+  header_generics : Types.generic list;
       (** The generic parameters of an [impl], which precede those of a method written inside it. A
           trait's parameters are supplied at each call of its method, with [Self]. *)
-  header_uses : T.capability list;  (** An [impl]'s [uses], which are each of its methods' too. *)
+  header_uses : Types.capability list;
+      (** An [impl]'s [uses], which are each of its methods' too. *)
 }
 
 let bounds_of (context : Lower.context) =
@@ -315,7 +319,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         | Function_interface signature ->
             Some
               {
-                T.method_name = name;
+                Types.method_name = name;
                 method_receiver = (if is_capability then Path.Static else receiver);
                 method_signature = signature;
                 provided;
@@ -357,7 +361,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         match definition.kind with
         | Function { signature; _ } | Method_declaration signature ->
             let lowered =
-              T.method_in_impl ~impl_generics:container.header_generics
+              Types.method_in_impl ~impl_generics:container.header_generics
                 ~impl_uses:container.header_uses
                 (Lower.signature context ~owner:path ~head:[] ~self_type:container.self_type
                    signature)
@@ -368,7 +372,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
               lowered.terminates
               ||
               match (path, container.self_trait) with
-              | Method { name; receiver; _ }, Some (implements : T.trait_reference) -> (
+              | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
                   match
                     Summary.definition database
                       (Method { owner = implements.trait; name; receiver })
@@ -402,22 +406,22 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
               context )
         | Type_definition { generics; body; clauses; _ } ->
             let type_generics = Lower.generics context path generics in
-            let self = T.Named { path; arguments = T.generic_arguments type_generics } in
+            let self = Types.Named { path; arguments = Types.generic_arguments type_generics } in
             let context = { context with self_type = Some self } in
             let shape =
               match body with
-              | Fields written -> T.Record (fields context written)
+              | Fields written -> Types.Record (fields context written)
               | Variants variants ->
-                  T.Sum
+                  Types.Sum
                     (List.map
                        (fun (variant : variant) ->
                          {
-                           T.variant_name = variant.name.text;
+                           Types.variant_name = variant.name.text;
                            fields = Option.map (fields context) variant.fields;
                            indirect = variant.indirect;
                          })
                        variants)
-              | Type_todo -> T.Todo_type
+              | Type_todo -> Types.Todo_type
             in
             let derives =
               List.concat_map
@@ -604,18 +608,16 @@ let in_declared_order database path ~variant ~name fields =
       List.stable_sort (fun left right -> compare (position left) (position right)) fields
   | None -> fields
 
-(* Built-in types *)
-
-let builtin_shape builtin : T.type_interface =
-  let element : T.parameter = { owner = Intrinsic.builtin_path builtin; name = "Element" } in
-  let count : T.parameter = { owner = Intrinsic.builtin_path builtin; name = "count" } in
-  let type_generics : T.generic list =
+let builtin_shape builtin : Types.type_interface =
+  let element : Types.parameter = { owner = Intrinsic.builtin_path builtin; name = "Element" } in
+  let count : Types.parameter = { owner = Intrinsic.builtin_path builtin; name = "count" } in
+  let type_generics : Types.generic list =
     match builtin with
     | Array ->
         [ { generic = element; kind = Type_generic [] }; { generic = count; kind = Value_generic } ]
     | Storage | View -> [ { generic = element; kind = Type_generic [] } ]
     | Shared ->
-        let storable : T.trait_reference =
+        let storable : Types.trait_reference =
           { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
         in
         [
@@ -680,9 +682,9 @@ let impl_interface =
       | Some (Error_interface report) ->
           Some
             {
-              T.impl_generics = [];
+              Types.impl_generics = [];
               implements = { trait = path; trait_arguments = []; associated = [] };
-              for_type = T.Error report;
+              for_type = Types.Error report;
               impl_uses = [];
               capability_sets = [];
               impl_methods = [];
@@ -694,5 +696,5 @@ let constant_type =
   Query.query ~name:"constant_type" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Constant_interface constant) -> Some constant.constant_type
-      | Some (Error_interface report) -> Some (T.Error report)
+      | Some (Error_interface report) -> Some (Types.Error report)
       | _ -> None)

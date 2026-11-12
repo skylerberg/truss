@@ -23,18 +23,23 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
-      (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
   checks : bool;
       (** Whether the program checks, as it runs, each operation that is undefined or wrong where
           its precondition does not hold: an index, a slice, arithmetic, a shift, a call of the C
           library, and [unreachable]. No [requires] clause is evaluated. *)
-  constant : (Path.t -> Lir.static_value option) ref;
-      (** Another constant's value, where it folds, which the driver reads through whatever keeps
-          each constant's lowering, so that one is folded once and what reads it is known *)
+  constant : Path.t -> Lir.static_value option;  (** Another constant's value, where it folds *)
 }
 
-val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
+val context :
+  ?checks:bool ->
+  ?cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+  ?constant:(context -> Path.t -> Lir.static_value option) ->
+  Query.context ->
+  Memory_layout.target ->
+  context
+(** The driver gives [cursor_fields], a pulled method's cursor fields, from its pulled lowering, and
+    [constant] from whatever keeps each constant's lowering, so that each is made once and what
+    reads it is known. *)
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
    test, before drop elaboration. *)
@@ -81,7 +86,9 @@ val test_key : Path.t -> Instance.key
 
 (* Code run while compiling, for a tagged template's check: a template of
    the literal texts and no parts, given to the tag's [from_template]'s
-   clauses that can run, each worked out and written out as a [Bool]. *)
+   clauses that can run, each worked out and written out as a [Bool], in
+   order. A clause that reads the template's parts is not asked of it; the
+   prover asks only those that read its literals. *)
 val template_check : context -> Instance.key -> from_template:Path.t -> texts:string list -> Lir.t
 
 (* The positions, among a tag's [from_template]'s clauses, of those a

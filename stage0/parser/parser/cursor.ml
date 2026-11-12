@@ -106,7 +106,6 @@ let restarted cursor =
   in
   { restarted with next_id = cursor.next_id }
 
-(* A new node's id. *)
 let fresh_id cursor =
   let id = !(cursor.next_id) in
   cursor.next_id := id + 1;
@@ -185,8 +184,6 @@ let accept_keyword cursor keyword =
   end
   else false
 
-(* Positions *)
-
 let span cursor span = Syntax.Span.of_source ~base:cursor.base span
 
 (* The end of the token before the current one, which is where a node that
@@ -211,8 +208,6 @@ let text cursor (span : Source.span) =
    so the parser reports nothing that is missing before it. *)
 let inserted_closer (token : Token.t) =
   match token.kind with Punctuation (Close _) -> token.span.start = token.span.stop | _ -> false
-
-(* Diagnostics *)
 
 (* Whether a diagnostic means the parser recovered: that the source is not
    valid Truss, so the tree there is what the parser inferred, as opposed
@@ -284,8 +279,6 @@ let expect_keyword cursor keyword =
   if not (accept_keyword cursor keyword) then
     fail cursor (Printf.sprintf "`%s`" (keyword_spelling keyword))
 
-(* Nesting *)
-
 let nested cursor parse =
   if cursor.depth >= nesting_limit then begin
     report cursor Nesting_too_deep (peek cursor).span
@@ -319,12 +312,9 @@ let check_chain_length cursor ~length =
     raise Failed
   end
 
-(* Recovery *)
-
 let closer cursor index =
   if index >= cursor.first && index < cursor.stop then cursor.closers.(index - cursor.first) else -1
 
-(* Skips to the token at [limit]. *)
 let skip_to cursor limit =
   while cursor.index < min limit cursor.stop do
     advance cursor

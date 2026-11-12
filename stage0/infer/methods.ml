@@ -3,20 +3,20 @@
    methods. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 open Calls
 
 let rec call state env ?expected (value : expression) (callee : expression)
-    (arguments : argument list) : T.ty =
+    (arguments : argument list) : Types.ty =
   match callee.kind with
   | Member (base, member) -> (
       match static_ state base with
@@ -60,18 +60,18 @@ and call_named state env ?expected (value : expression) (callee : expression)
           register_expression state value (fun () ->
               let first = build_expression state first.value in
               Identical (first, build_expression state second.value));
-          T.bool
+          Types.bool
       | _ ->
           report state
             (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
             value.span "`identical` takes two values of one type.";
-          arguments_alone state env arguments T.bool)
+          arguments_alone state env arguments Types.bool)
   | Specification_function function_ -> (
       let bound_method =
         match (function_, arguments) with
         | Time, [ { value = { kind = Member (base, member); _ }; _ } ] -> (
             match static_ state base with
-            | Some (Static_type (T.Parameter _ as type_)) -> Some (type_, member)
+            | Some (Static_type (Types.Parameter _ as type_)) -> Some (type_, member)
             | _ -> None)
         | _ -> None
       in
@@ -92,10 +92,10 @@ and call_named state env ?expected (value : expression) (callee : expression)
                       (fun (argument : argument) -> build_expression state argument.value)
                       arguments;
                 });
-          arguments_alone state env arguments T.Integer)
+          arguments_alone state env arguments Types.Integer)
   | Definition (Type, path) -> (
       match named_type state callee path type_arguments with
-      | T.Named { arguments = type_arguments; _ } ->
+      | Types.Named { arguments = type_arguments; _ } ->
           construct state env ?expected ~type_arguments value path None arguments
       | _ -> construct state env ?expected value path None arguments)
   | Variant (type_path, variant) ->
@@ -106,13 +106,13 @@ and call_named state env ?expected (value : expression) (callee : expression)
           named_call state env ?expected value path signature
             ~type_arguments:(Option.value ~default:[] type_arguments)
             arguments
-      | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+      | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition ((Trait | Capability), _) | Type_parameter _ | Capability_parameter _ ->
       arguments_alone state env arguments
         (error state Not_callable callee.span
            (Printf.sprintf "`%s` is not a function or a type, so it cannot be called." name.text))
-  | Unknown report -> arguments_alone state env arguments (T.Error report)
+  | Unknown report -> arguments_alone state env arguments (Types.Error report)
   | Local _ | Law_parameter _ | Value_parameter _
   | Definition (Constant, _)
   | Field _ | Result_value | Yielded | Finished ->
@@ -123,15 +123,15 @@ and call_named state env ?expected (value : expression) (callee : expression)
    call of a method of a trait that bounds a type parameter. If the bounds
    have several versions of the method, the term names the read-only
    version. *)
-and method_time state (value : expression) (type_ : T.ty) (member : name) =
+and method_time state (value : expression) (type_ : Types.ty) (member : name) =
   let versions =
     List.fold_left
-      (fun methods (bound : T.trait_reference) ->
+      (fun methods (bound : Types.trait_reference) ->
         List.fold_left
-          (fun methods (method_ : T.trait_method) ->
+          (fun methods (method_ : Types.trait_method) ->
             if
               List.exists
-                (fun ((other : T.trait_reference), (known : T.trait_method)) ->
+                (fun ((other : Types.trait_reference), (known : Types.trait_method)) ->
                   Path.equal other.trait bound.trait
                   && known.method_receiver = method_.method_receiver)
                 methods
@@ -148,7 +148,7 @@ and method_time state (value : expression) (type_ : T.ty) (member : name) =
     | several -> (
         match
           List.filter
-            (fun (_, (method_ : T.trait_method)) -> method_.method_receiver = Read)
+            (fun (_, (method_ : Types.trait_method)) -> method_.method_receiver = Read)
             several
         with
         | [ read_only ] -> Some read_only
@@ -167,7 +167,7 @@ and method_time state (value : expression) (type_ : T.ty) (member : name) =
                  type_arguments = [];
                  evidence = Bound;
                }));
-      T.Integer
+      Types.Integer
   | None, [] ->
       error state Unknown_member member.span
         (Printf.sprintf "`%s` has no method `%s`: no trait that bounds it declares one."
@@ -182,14 +182,14 @@ and method_time state (value : expression) (type_ : T.ty) (member : name) =
 (* [Type.name(...)]: a variant constructor, a static method, or a method
    called in full form with its receiver as the first argument. *)
 and static_call state env ?expected (value : expression) type_ (member : name) arguments =
-  let ambiguous (traits : T.trait_reference list) =
+  let ambiguous (traits : Types.trait_reference list) =
     arguments_alone state env arguments
       (error state Ambiguous_method member.span
          (Printf.sprintf
             "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to say \
              which."
             (show state type_) member.text
-            (String.concat ", " (List.map (fun trait -> "`" ^ T.show_trait trait ^ "`") traits))))
+            (String.concat ", " (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits))))
   in
   let wrong_receiver () =
     arguments_alone state env arguments
@@ -206,9 +206,9 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
   match type_ with
-  | T.Named { path; arguments = type_arguments } when names_variant member ->
+  | Types.Named { path; arguments = type_arguments } when names_variant member ->
       construct state env ?expected ~type_arguments value path (Some member.text) arguments
-  | T.Named { path; _ } -> (
+  | Types.Named { path; _ } -> (
       match List.assoc_opt Path.Static (Members.own_methods state.database path member.text) with
       | Some method_path -> (
           match function_signature state method_path with
@@ -221,12 +221,12 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                   (fun index _ ->
                     index
                     < List.length
-                        (match type_ with T.Named { arguments; _ } -> arguments | _ -> []))
+                        (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
                   instance.type_arguments
               in
               ignore
                 (Unify.unify_arguments state.unifier head
-                   (match type_ with T.Named { arguments; _ } -> arguments | _ -> []));
+                   (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []));
               (match (expected, instance.signature.output) with
               | Some expected, Returns output -> unify_as_hint state output expected
               | _ -> ());
@@ -238,9 +238,9 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               in
               check_specification_call state env value signature;
               finish_call state value
-                (C.Function { path = method_path; type_arguments = instance.type_arguments })
+                (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
                 instance checked left_out
-          | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+          | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
           | None -> bug "the method `%s` has no signature" (Path.show method_path))
       | None -> (
           (* A static trait method, as in [Int64.from(count)]. *)
@@ -266,7 +266,9 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                       end;
                       if not (unify state receiver_type type_) then
                         mismatch state inner.span ~expected:type_ ~actual:receiver_type;
-                      let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
+                      let mode : Types.mode =
+                        match wanted with Mut -> Mut | Own -> Own | _ -> Read
+                      in
                       check_mode state env receiver.value
                         { name = "self"; mode; type_; has_default = false }
                         receiver_type;
@@ -282,29 +284,30 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                   | _ ->
                       arguments_alone state env arguments
                         (match Members.broken state.database path with
-                        | Some report -> T.Error report
+                        | Some report -> Types.Error report
                         | None ->
                             error state Unknown_member member.span
                               (Printf.sprintf "`%s` has no method `%s`." (show state type_)
                                  member.text))))))
-  | T.Parameter parameter -> (
+  | Types.Parameter parameter -> (
       (* A method of a trait bound: the static method, or the version that
          the first argument's mark selects. Two bounds on the same trait
          differ only in the trait's type arguments, which the call's
          arguments determine. *)
       let without_self =
         List.fold_left
-          (fun methods (bound : T.trait_reference) ->
+          (fun methods (bound : Types.trait_reference) ->
             match Members.trait_method state.database bound.trait member.text Static with
             | Some method_
               when not
                      (List.exists
-                        (fun ((other : T.trait_reference), _) -> Path.equal other.trait bound.trait)
+                        (fun ((other : Types.trait_reference), _) ->
+                          Path.equal other.trait bound.trait)
                         methods) ->
                 methods @ [ (bound, method_) ]
             | _ -> methods)
           []
-          (Properties.known_bounds state.database ~bounds:(bounds state) (T.Parameter parameter))
+          (Properties.known_bounds state.database ~bounds:(bounds state) (Types.Parameter parameter))
       in
       match (without_self, versions state type_ member.text) with
       | [ (trait, method_) ], _ ->
@@ -320,7 +323,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | None ->
               error state Unknown_member member.span
                 (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text)))
-  | T.Error _ | T.Hole -> arguments_alone state env arguments type_
+  | Types.Error _ | Types.Hole -> arguments_alone state env arguments type_
   | _ ->
       arguments_alone state env arguments
         (error state Unknown_member member.span
@@ -330,7 +333,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
    such as [Int64.from(count)] or [Self.empty()]. The trait's type arguments
    are inferred from the call's arguments, never from the expected type. *)
 and trait_method_through_type state env ?expected:_ ?trait_arguments (value : expression) self_type
-    (trait : T.trait_reference) (method_ : T.trait_method) arguments =
+    (trait : Types.trait_reference) (method_ : Types.trait_method) arguments =
   let trait_generics =
     match Query.demand state.database Environment.trait_interface trait.trait with
     | Some interface -> interface.trait_generics
@@ -344,17 +347,17 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     | Some written when List.length written = List.length trait_generics -> written
     | Some written ->
         report state Arity value.span
-          (Printf.sprintf "`%s` takes %d type %s, and %d %s given." (T.show_trait trait)
+          (Printf.sprintf "`%s` takes %d type %s, and %d %s given." (Types.show_trait trait)
              (List.length trait_generics)
              (if List.length trait_generics = 1 then "argument" else "arguments")
              (List.length written)
              (if List.length written = 1 then "is" else "are"));
-        List.map (fun (_ : T.generic) -> T.Type (fresh state)) trait_generics
-    | None -> List.map (fun (_ : T.generic) -> T.Type (fresh state)) trait_generics
+        List.map (fun (_ : Types.generic) -> Types.Type (fresh state)) trait_generics
+    | None -> List.map (fun (_ : Types.generic) -> Types.Type (fresh state)) trait_generics
   in
   let extra =
-    (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type self_type)
-    :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
+    (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type self_type)
+    :: Option.value ~default:[] (Types.substitution_of trait_generics trait_arguments)
   in
   let instance = instantiate state value.span ~extra method_.method_signature in
   let parameters = instance.signature.parameters in
@@ -363,13 +366,13 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     | Some (receiver, receiver_type) -> (
         match arguments with
         | first :: rest ->
-            let mode : T.mode = match receiver with Mut -> Mut | Own -> Own | _ -> Read in
-            let parameter : T.parameter_info =
+            let mode : Types.mode = match receiver with Mut -> Mut | Own -> Own | _ -> Read in
+            let parameter : Types.parameter_info =
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
             let mode = check_argument state env first.value parameter in
             ignore (default_literal state self_type);
-            ( [ { C.expression = first.value.id; parameter_index = 0; mode; mark = None } ],
+            ( [ { Tables.expression = first.value.id; parameter_index = 0; mode; mark = None } ],
               1,
               parameters,
               rest )
@@ -381,7 +384,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     receiver_argument @ check_arguments state env parameters matched ~offset:receiver_offset
   in
   let reference = { trait with trait_arguments } in
-  let result = T.result_type instance.signature.output in
+  let result = Types.result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let own_arguments =
     List.filteri
@@ -446,14 +449,14 @@ and capability_call state env (value : expression) capability (member : name) ar
         match_arguments state value instance.signature.parameters arguments ~record:false
       in
       let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
-      let result = T.result_type instance.signature.output in
+      let result = Types.result_type instance.signature.output in
       state.tables.calls.(value.id) <-
         Some
           {
             callee = Capability_method { capability; name = member.text };
             arguments = checked;
             omitted_defaults = left_out;
-            uses = [ T.Capability capability ];
+            uses = [ Types.Capability capability ];
             callee_result = result;
           };
       Form.register_call state value;
@@ -484,7 +487,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
        place can be copied for an [own] version. *)
     match List.assoc_opt wanted versions with
     | Some method_path -> Some (wanted, method_path)
-    | None when lent_mode = Some T.Mut && List.mem_assoc Path.Read versions ->
+    | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read versions ->
         Some (Path.Read, List.assoc Path.Read versions)
     | None when (not marked) && ((not place) || plain state receiver_type) -> (
         match List.assoc_opt Path.Own versions with
@@ -513,7 +516,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
   in
   (* A place that calls a method with only a [mut] or an [own] version lacks
      its mark. The fix adds the mark. *)
-  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> T.ty =
+  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun versions ->
     let has receiver = List.exists (fun (version, _) -> version = receiver) versions in
     if (not marked) && place && (has Path.Mut || has Path.Own) then begin
@@ -526,7 +529,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) versions)
   in
   match receiver_type with
-  | T.Error _ | T.Hole ->
+  | Types.Error _ | Types.Hole ->
       List.iter
         (fun (argument : argument) -> ignore (expression state env argument.value))
         arguments;
@@ -536,20 +539,20 @@ and method_call state env ?expected (value : expression) (base : expression) (me
       | Ok [] ->
           let candidates =
             match receiver_type with
-            | T.Named { path; arguments } -> (
+            | Types.Named { path; arguments } -> (
                 match Members.fields state.database path arguments with
-                | Some fields -> List.map (fun (field : T.field) -> field.field_name) fields
+                | Some fields -> List.map (fun (field : Types.field) -> field.field_name) fields
                 | None -> [])
             | _ -> []
           in
           let broken =
             match receiver_type with
-            | T.Named { path; _ } -> Members.broken state.database path
+            | Types.Named { path; _ } -> Members.broken state.database path
             | _ -> None
           in
           arguments_alone state env arguments
             (match broken with
-            | Some report -> T.Error report
+            | Some report -> Types.Error report
             | None ->
                 error state Unknown_member member.span
                   ~fixes:
@@ -594,7 +597,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
           error state Ambiguous_method member.span
             ~fixes:
               (List.map
-                 (fun (trait : T.trait_reference) ->
+                 (fun (trait : Types.trait_reference) ->
                    let name =
                      match trait.trait with Top { name; _ } -> name | path -> Path.show path
                    in
@@ -614,12 +617,14 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
     ~(receiver : expression) ~receiver_type method_path arguments =
   match function_signature state method_path with
   | None -> bug "the method `%s` has no signature" (Path.show method_path)
-  | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+  | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
   | Some (Ok signature) ->
       let instance = instantiate state value.span signature in
       explicit_type_arguments
         ~head:
-          (match receiver_type with T.Named { arguments; _ } -> List.length arguments | _ -> 0)
+          (match receiver_type with
+          | Types.Named { arguments; _ } -> List.length arguments
+          | _ -> 0)
         state value instance type_arguments;
       (match instance.signature.receiver with
       | Some (_, self_type) ->
@@ -635,7 +640,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
       let checked = check_arguments state env instance.signature.parameters matched ~offset:1 in
       let receiver_argument =
         {
-          C.expression = receiver.id;
+          Tables.expression = receiver.id;
           parameter_index = 0;
           mode =
             (match signature.receiver with
@@ -647,11 +652,11 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
       in
       check_specification_call state env value signature;
       finish_call state value
-        (C.Function { path = method_path; type_arguments = instance.type_arguments })
+        (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
         instance (receiver_argument :: checked) left_out
 
 and trait_method_call state env (value : expression) ~(receiver : expression) ~receiver_type
-    (trait : T.trait_reference) (method_ : T.trait_method) ~type_arguments arguments =
+    (trait : Types.trait_reference) (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
     match Query.demand state.database Environment.trait_interface trait.trait with
     | Some interface -> interface.trait_generics
@@ -659,14 +664,14 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let trait_arguments =
     if List.length trait.trait_arguments = List.length trait_generics then trait.trait_arguments
-    else List.map (fun (_ : T.generic) -> T.Type (fresh state)) trait_generics
+    else List.map (fun (_ : Types.generic) -> Types.Type (fresh state)) trait_generics
   in
   let extra =
-    (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type receiver_type)
-    :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
+    (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type receiver_type)
+    :: Option.value ~default:[] (Types.substitution_of trait_generics trait_arguments)
   in
   (match receiver_type with
-  | T.Any _ -> (
+  | Types.Any _ -> (
       match Impls.through_any ~trait:trait.trait method_ with
       | Callable -> ()
       | Has_generics ->
@@ -690,17 +695,17 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let checked = check_arguments state env instance.signature.parameters matched ~offset:1 in
   let reference = { trait with trait_arguments } in
-  let result = T.result_type instance.signature.output in
+  let result = Types.result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let receiver_argument =
     {
-      C.expression = receiver.id;
+      Tables.expression = receiver.id;
       parameter_index = 0;
       mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
       mark = None;
     }
   in
-  let evidence = match receiver_type with T.Any _ -> C.Dynamic | _ -> C.Built_in in
+  let evidence = match receiver_type with Types.Any _ -> Tables.Dynamic | _ -> Tables.Built_in in
   state.tables.calls.(value.id) <-
     Some
       {
@@ -721,11 +726,11 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
       };
   Form.register_call state value;
   (match receiver_type with
-  | T.Any _ -> ()
+  | Types.Any _ -> ()
   | _ -> resolve_evidence state value receiver_type reference);
   match instance.signature.output with
   | Yields _ ->
-      T.Cursor
+      Types.Cursor
         {
           method_ =
             Method

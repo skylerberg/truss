@@ -6,37 +6,36 @@ open Definitions
 open Lowering
 open Lir_builder
 
-(* Calls *)
-
 (* The [impl] that evidence stands for in this instance, with the type
    arguments for the [impl]'s generic parameters. *)
-let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : Core.evidence) =
-  let substitute = T.substitute st.frame.code.substitution in
+let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Core.evidence) =
+  let substitute = Types.substitute st.frame.code.substitution in
   let impl, arguments =
     match evidence with
     | Impl { impl; arguments } ->
         ( impl,
-          List.map (fun (p, a) -> (p, T.substitute_argument st.frame.code.substitution a)) arguments
-        )
+          List.map
+            (fun (p, a) -> (p, Types.substitute_argument st.frame.code.substitution a))
+            arguments )
     | Bound -> (
         let self = st.context.monomorphic.normalize (substitute self_type) in
         match
           Interface.Impls.implements st.context.database
             ~bounds:(fun _ -> [])
             self
-            (let trait = T.substitute_trait st.frame.code.substitution trait in
+            (let trait = Types.substitute_trait st.frame.code.substitution trait in
              {
                trait with
                trait_arguments =
                  List.map
                    (function
-                     | T.Type ty -> T.Type (st.context.monomorphic.normalize ty)
+                     | Types.Type ty -> Types.Type (st.context.monomorphic.normalize ty)
                      | argument -> argument)
                    trait.trait_arguments;
              })
         with
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
-        | _ -> bug "no impl of %s for %s" (T.show_trait trait) (T.show self))
+        | _ -> bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
     | Dynamic -> bug "a call through any, which reaches no one instance"
   in
   let impl_interface =
@@ -46,7 +45,7 @@ let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : Core.ev
   in
   let impl_arguments =
     List.map
-      (fun (generic : T.generic) ->
+      (fun (generic : Types.generic) ->
         match List.assoc_opt generic.generic arguments with
         | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
         | None -> bug "the impl's parameter %s is not bound" generic.generic.name)
@@ -55,7 +54,7 @@ let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : Core.ev
   (impl, impl_arguments)
 
 (* The instance a trait method's call reaches, once the types are known. *)
-let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type ~type_arguments
+let trait_method_key st ~(trait : Types.trait_reference) ~name ~receiver ~self_type ~type_arguments
     ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl st ~trait ~self_type ~evidence in
   Instance.Code
@@ -72,14 +71,14 @@ let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type 
    value. *)
 (* The operand that gives a place to a parameter that takes it as
    [lir_ty]. *)
-let operand_as st (mode : T.mode) ty (place : Lir.place) (lir_ty : Lir.ty option) =
+let operand_as st (mode : Types.mode) ty (place : Lir.place) (lir_ty : Lir.ty option) =
   match lir_ty with
   | None -> None
-  | Some (Pointer _) when mode = T.Own -> Some (Lir.Moved_address place)
+  | Some (Pointer _) when mode = Types.Own -> Some (Lir.Moved_address place)
   | Some (Pointer { writable; _ }) -> Some (Lir.Address { place; writable })
   | Some _ -> ( match mode with Own -> Some (owned st place ty) | Read | Mut -> Some (Copy place))
 
-let pass st (mode : T.mode) ty place =
+let pass st (mode : Types.mode) ty place =
   operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
 
 let hold st mode ty place =
@@ -91,8 +90,8 @@ let hold st mode ty place =
    its signature. *)
 (* A method's slot in a table whose first method is at [first], and its
    signature. *)
-let method_slot ~first ~missing (methods : T.trait_method list) name =
-  match List.find_index (fun (m : T.trait_method) -> m.method_name = name) methods with
+let method_slot ~first ~missing (methods : Types.trait_method list) name =
+  match List.find_index (fun (m : Types.trait_method) -> m.method_name = name) methods with
   | Some index -> (first + index, (List.nth methods index).method_signature)
   | None -> missing ()
 
@@ -107,7 +106,7 @@ let capability_method context capability name =
 
 (* The C signature of an entry in a capability's table, which every caller
    and every entry agree on: the evidence, then the method's own. *)
-let entry_signature context (signature : T.signature) =
+let entry_signature context (signature : Types.signature) =
   let lir, result =
     lir_signature context []
       ~parameters:(interface_parameters { signature with receiver = None })
@@ -117,7 +116,7 @@ let entry_signature context (signature : T.signature) =
 
 (* Whether a trait's method has an entry in an [any] table: the checker
    lets a call through [any] reach it, and it returns a value. *)
-let callable_through_any trait (m : T.trait_method) =
+let callable_through_any trait (m : Types.trait_method) =
   m.method_receiver <> Static
   && Interface.Impls.through_any ~trait m = Callable
   && match m.method_signature.output with Returns _ -> true | _ -> false
@@ -136,7 +135,7 @@ let dynamic_slot context trait name =
 (* What a trait's [Self] and parameters stand for in a method called
    through an [any] type: [Self] is the [any] type, which fixes each
    associated type. *)
-let any_substitution context ~(any : T.trait_reference) trait : T.substitution =
+let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
   match demand context Environment.trait_interface trait with
   | Some interface ->
       let reference =
@@ -144,13 +143,13 @@ let any_substitution context ~(any : T.trait_reference) trait : T.substitution =
         else
           match
             List.find_opt
-              (fun (bound : T.trait_reference) -> Path.equal bound.trait trait)
-              (Interface.Properties.bound_closure context.database ~self:(T.Any any) any)
+              (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
+              (Interface.Properties.bound_closure context.database ~self:(Types.Any any) any)
           with
           | Some bound -> bound
-          | None -> bug "%s is not a trait of %s" (Path.show trait) (T.show (T.Any any))
+          | None -> bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
       in
-      Interface.Properties.trait_substitution interface ~self:(T.Any any) reference
+      Interface.Properties.trait_substitution interface ~self:(Types.Any any) reference
   | None -> bug "no interface for %s" (Path.show trait)
 
 (* An entry in an [any] table: its C signature, which is the value's
@@ -161,7 +160,7 @@ let any_substitution context ~(any : T.trait_reference) trait : T.substitution =
    no evidence for it: the caller cannot name the capabilities of the type
    that the value hides, and the checker converts a value to [any] only
    where each set of its type is empty. *)
-let any_entry_signature context ~any ~trait (signature : T.signature) =
+let any_entry_signature context ~any ~trait (signature : Types.signature) =
   let substitution = any_substitution context ~any trait in
   let lir, result =
     lir_signature context substitution
@@ -221,7 +220,7 @@ let evidence_of st capability =
           in
           let type_arguments =
             List.map
-              (fun (g : T.generic) ->
+              (fun (g : Types.generic) ->
                 match List.assoc_opt g.generic st.frame.code.substitution with
                 | Some a -> Monomorphic.ground_argument st.context.monomorphic [] a
                 | None -> bug "an unbound parameter of %s" (Path.show impl))
@@ -242,8 +241,8 @@ let cursor_evidence context (yielding : Ground.yielding) =
 (* Writes a cursor over a yielding method to [destination]. The cursor holds
    the call's arguments, in the order of the pulled method's parameters:
    its own, then the mask of defaults passed. *)
-let cursor_into st ~path ~type_arguments ~(signature : T.signature)
-    ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask destination =
+let cursor_into st ~path ~type_arguments ~(signature : Types.signature)
+    ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ~mask destination =
   let held = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
   let mask = if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [] in
   let fields =
@@ -269,7 +268,7 @@ let cursor_into st ~path ~type_arguments ~(signature : T.signature)
    takes, then the evidence for what its type uses, which whoever calls it
    passes: that is the only evidence its code can reach. [output] is what
    the lambda returns, which a [?] in it returns early. *)
-let nested_function st ~(function_type : Ground.function_type) ~(output : T.result option)
+let nested_function st ~(function_type : Ground.function_type) ~(output : Types.result option)
     ~(captures : ('key * Lir.place * Ground.ty) list)
     ~(bind_capture : state -> 'key -> Lir.place -> unit)
     ~(body : state -> (Lir.place * Ground.mode * Ground.ty) list -> unit) destination =
@@ -304,6 +303,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : T.resu
         synthetic = Hashtbl.copy st.frame.synthetic;
         on_yield = None;
         yield_into = None;
+        lent_into = None;
         exit = None;
         code =
           (match output with
@@ -348,7 +348,7 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lir.place
     List.concat
       (List.map2
          (fun ((mode : Ground.mode), ty) place ->
-           let mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+           let mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
            Option.to_list (pass st mode ty place))
          function_type.parameters places)
     @ List.map (evidence_of st) function_type.uses
@@ -371,8 +371,8 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lir.place
 
 (* Calls a method through an [any] value: the entry in its table, given the
    value's pointer, then the arguments, then the evidence the method uses. *)
-let call_through_any st ~(any_type : T.trait_reference) ~trait ~name ~(any : Lir.place)
-    ~(arguments : (T.mode * Ground.ty * Lir.place) list) destination =
+let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lir.place)
+    ~(arguments : (Types.mode * Ground.ty * Lir.place) list) destination =
   let slot, signature = dynamic_slot st.context trait name in
   let lir_signature, result, capabilities =
     any_entry_signature st.context ~any:any_type ~trait signature
@@ -490,10 +490,10 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) des
    implementation. *)
 let provided_evidence st ~(implementation : Lir.operand) provides =
   List.map
-    (fun (capability, impl, (arguments : T.substitution)) ->
+    (fun (capability, impl, (arguments : Types.substitution)) ->
       let type_arguments =
         List.map
-          (fun (g : T.generic) ->
+          (fun (g : Types.generic) ->
             match List.assoc_opt g.generic arguments with
             | Some a ->
                 Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution a
@@ -515,17 +515,17 @@ let called (key : Instance.key) : Instance.key =
 
 (* The mask of a call that passes every argument: a bit for each parameter
    that has a default. *)
-let all_passed (signature : T.signature) =
+let all_passed (signature : Types.signature) =
   let defaulted =
-    List.length (List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters)
+    List.length (List.filter (fun (p : Types.parameter_info) -> p.has_default) signature.parameters)
   in
   (1 lsl defaulted) - 1
 
 (* Calls an instance with an argument in a place for each parameter. [mask]
    says which of the parameters with defaults were passed, where the call
    left some to the callee; without it every argument is one to use. *)
-let call_instance st key ~(signature : T.signature) ~substitution
-    ~(arguments : (T.mode * Ground.ty * Lir.place) list) ?mask ~destination () =
+let call_instance st key ~(signature : Types.signature) ~substitution
+    ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ?mask ~destination () =
   let mask = match mask with Some mask -> mask | None -> all_passed signature in
   let lir_signature, result =
     lir_signature st.context substitution ~parameters:(interface_parameters signature)
@@ -540,8 +540,6 @@ let call_instance st key ~(signature : T.signature) ~substitution
   emit st.b
     (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
-
-(* Expressions *)
 
 (* A number literal's value. *)
 type literal = Integer_value of Z.t | Float_value of float
@@ -579,7 +577,6 @@ let static_constant st path : Lir.place =
   | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
   | None -> bug "no type for the constant %s" (Path.show path)
 
-(* A [List]'s storage field, the storage's type, and the element type. *)
 let list_parts monomorphic ty =
   match Monomorphic.shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
@@ -735,7 +732,7 @@ let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~des
       let interface = impl_interface st.context impl in
       let type_arguments =
         List.map
-          (fun (g : T.generic) ->
+          (fun (g : Types.generic) ->
             match List.assoc_opt g.generic substitution with
             | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
             | None -> bug "an unbound parameter of %s" (Path.show impl))

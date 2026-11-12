@@ -121,7 +121,6 @@ let regions fork (blocks : Lir.basic_block array) =
   in
   match first with Some first -> from first | None -> bug "fork %d has no region" fork
 
-(* The locals a block names. *)
 let block_locals (block : Lir.basic_block) =
   let locals = ref Locals.empty in
   let visitor : Lir.visitor =

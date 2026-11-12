@@ -1,21 +1,17 @@
 (* The state of the ownership check of one definition: its locals, its
    source text, and the diagnostics reported so far. *)
-
-module T = Types
-
 (* How a local is bound: it owns its value, it borrows a place read-only, or
    it borrows a place [mut] for a call, an iteration, or a block. *)
 type kind = Owned | Borrowed | Borrowed_mut
 
 type context = {
   database : Query.context;
-  bounds : T.parameter -> T.trait_reference list;
+  bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
   marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
-      (** Each argument written with a [mut] or [own], by the origin of the value passed. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
-  types : (Core.local, T.ty) Hashtbl.t;
+  types : (Core.local, Types.ty) Hashtbl.t;
   mutable parameters : Core.local list;
   yields : bool;
       (** The definition is a yielding method. The caller's loop may [break] at a [yield]. *)
@@ -44,7 +40,7 @@ let holds_function context type_ =
    type does not count: the callee treats its value as any other view, so
    the view rules track it. *)
 let stores_function context (callee : Core.callee) position =
-  let declared (signature : T.signature) =
+  let declared (signature : Types.signature) =
     let index = if Option.is_some signature.receiver then position - 1 else position in
     match List.nth_opt signature.parameters index with
     | Some parameter when index >= 0 -> List.mem parameter.name signature.stores_functions
@@ -55,11 +51,11 @@ let stores_function context (callee : Core.callee) position =
       Option.fold ~none:false ~some:declared (Interface.Impls.signature context.database path)
   | Trait_method { trait; name; receiver; _ } ->
       Option.fold ~none:false
-        ~some:(fun (method_ : T.trait_method) -> declared method_.method_signature)
+        ~some:(fun (method_ : Types.trait_method) -> declared method_.method_signature)
         (Infer.Members.trait_method context.database trait.trait name receiver)
   | Capability_method { capability; name } ->
       List.exists
-        (fun (method_ : T.trait_method) -> declared method_.method_signature)
+        (fun (method_ : Types.trait_method) -> declared method_.method_signature)
         (Infer.Members.trait_methods context.database capability name)
   | Intrinsic _ -> false
   | Indirect _ -> true
@@ -72,7 +68,10 @@ let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
-let kind_of_mode : T.mode -> kind = function Own -> Owned | Read -> Borrowed | Mut -> Borrowed_mut
+let kind_of_mode : Types.mode -> kind = function
+  | Own -> Owned
+  | Read -> Borrowed
+  | Mut -> Borrowed_mut
 
 let kind context (root : Place.root) =
   match root with

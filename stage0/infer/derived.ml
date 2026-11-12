@@ -6,8 +6,6 @@
    the record from each field's default. A method with a default body in the
    trait, such as [not_equal], uses the trait's core form and is not
    generated here. *)
-
-module T = Types
 module Impls = Interface.Impls
 module Environment = Interface.Environment
 
@@ -53,7 +51,7 @@ let form database (path : Path.t) : Core.t option =
             { patterns = [ pattern ]; guard = None; body; origin }
           in
           let self_type = interface.for_type in
-          let bounds = T.bounds_of interface.impl_generics in
+          let bounds = Types.bounds_of interface.impl_generics in
           let result =
             match signature.output with
             | Returns type_ -> type_
@@ -74,7 +72,7 @@ let form database (path : Path.t) : Core.t option =
                   ]
               | Some (Static, _) | None -> [])
             @ List.map
-                (fun (info : T.parameter_info) : Core.parameter ->
+                (fun (info : Types.parameter_info) : Core.parameter ->
                   {
                     local = local ();
                     name = info.name;
@@ -94,7 +92,7 @@ let form database (path : Path.t) : Core.t option =
              [of_type]. The evidence is the type's [impl], or a bound if the
              type is a generic parameter. *)
           let method_of (wanted : Path.t) name (receiver : Path.receiver) of_type arguments type_ =
-            let reference : T.trait_reference =
+            let reference : Types.trait_reference =
               { trait = wanted; trait_arguments = []; associated = [] }
             in
             let evidence : Core.evidence =
@@ -131,7 +129,7 @@ let form database (path : Path.t) : Core.t option =
             | Sum variants ->
                 Some
                   (List.map
-                     (fun (variant : T.variant) ->
+                     (fun (variant : Types.variant) ->
                        (variant.variant_name, Option.value variant.fields ~default:[]))
                      variants)
             | Record _ -> None
@@ -146,15 +144,15 @@ let form database (path : Path.t) : Core.t option =
              [base]. *)
           let record_parts base =
             List.map
-              (fun (field : T.field) ->
+              (fun (field : Types.field) ->
                 ( field,
                   Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
           (* The fields of a variant are reachable only through a pattern.
              The pattern binds each field, borrowed from the matched value. *)
-          let bound named (fields : T.field list) =
-            List.map (fun (field : T.field) -> (field, local (), named field.field_name)) fields
+          let bound named (fields : Types.field list) =
+            List.map (fun (field : Types.field) -> (field, local (), named field.field_name)) fields
           in
           let binding variant bound : Core.pattern =
             pattern self_type
@@ -163,7 +161,7 @@ let form database (path : Path.t) : Core.t option =
                    variant;
                    fields =
                      List.map
-                       (fun ((field : T.field), local, name) ->
+                       (fun ((field : Types.field), local, name) ->
                          ( field.field_name,
                            pattern field.field_type
                              (Bind { local; name; is_var = false; mode = Read }) ))
@@ -172,7 +170,7 @@ let form database (path : Path.t) : Core.t option =
           in
           let parts bound =
             List.map
-              (fun ((field : T.field), local, _) ->
+              (fun ((field : Types.field), local, _) ->
                 (field, Core.Local { local; type_ = field.field_type; origin }))
               bound
           in
@@ -182,7 +180,7 @@ let form database (path : Path.t) : Core.t option =
              record, or, for a sum type, to the fields of each variant in a
              [match] with one arm per variant. *)
           let of_self type_
-              (each : string option -> int -> (T.field * Core.place) list -> Core.block) =
+              (each : string option -> int -> (Types.field * Core.place) list -> Core.block) =
             match variants with
             | None -> each None 0 (record_parts self_place)
             | Some variants ->
@@ -202,7 +200,8 @@ let form database (path : Path.t) : Core.t option =
           (* Matches [other]. If [other] is the same variant as [self], the
              result is [same] applied to the fields of [other]. If it is a
              different variant, the result is [different ()]. *)
-          let of_other other type_ variant (mine : (T.field * Core.place) list) ~same ~different =
+          let of_other other type_ variant (mine : (Types.field * Core.place) list) ~same ~different
+              =
             match variant with
             | None -> same (record_parts other)
             | Some variant ->
@@ -218,7 +217,7 @@ let form database (path : Path.t) : Core.t option =
                           else [ arm (pattern self_type Wildcard) (giving (different ())) ]);
                      })
           in
-          let bool = T.bool and unit = T.unit in
+          let bool = Types.bool and unit = Types.unit in
           let trait_name = match trait with Top { name; _ } -> name | _ -> Path.show trait in
           let body : Core.block =
             match (trait_name, name) with
@@ -226,7 +225,7 @@ let form database (path : Path.t) : Core.t option =
                 let other = other_place () in
                 let each_equal mine theirs =
                   List.fold_left2
-                    (fun so_far ((field : T.field), mine) (_, theirs) ->
+                    (fun so_far ((field : Types.field), mine) (_, theirs) ->
                       let this =
                         method_of trait "equal" Read field.field_type
                           [ read mine; read theirs ]
@@ -284,7 +283,8 @@ let form database (path : Path.t) : Core.t option =
                                      {
                                        mode = Read;
                                        value =
-                                         Value (node (T.builtin UInt64) (Integer (Z.of_int number)));
+                                         Value
+                                           (node (Types.builtin UInt64) (Integer (Z.of_int number)));
                                        mark = None;
                                      };
                                  ];
@@ -297,7 +297,7 @@ let form database (path : Path.t) : Core.t option =
                       statements =
                         (if variant = None then [] else [ write index ])
                         @ List.map
-                            (fun ((field : T.field), mine) ->
+                            (fun ((field : Types.field), mine) ->
                               statement
                                 (Evaluate
                                    (method_of trait "hash" Read field.field_type
@@ -311,7 +311,7 @@ let form database (path : Path.t) : Core.t option =
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
                 let declared variant fields =
                   Environment.in_declared_order database type_ ~variant
-                    ~name:(fun ((field : T.field), _) -> field.field_name)
+                    ~name:(fun ((field : Types.field), _) -> field.field_name)
                     fields
                 in
                 (* Compares field by field, in declaration order. The first
@@ -319,7 +319,7 @@ let form database (path : Path.t) : Core.t option =
                 let rec in_turn mine theirs =
                   match (mine, theirs) with
                   | [], _ | _, [] -> ordering "Equal"
-                  | ((field : T.field), mine) :: rest, (_, theirs) :: rest_of_theirs -> (
+                  | ((field : Types.field), mine) :: rest, (_, theirs) :: rest_of_theirs -> (
                       let compared =
                         method_of trait "compare" Read field.field_type
                           [ read mine; read theirs ]
@@ -354,7 +354,7 @@ let form database (path : Path.t) : Core.t option =
                                    ];
                                }))
                 in
-                let number = T.builtin UInt32 in
+                let number = Types.builtin UInt32 in
                 match variants with
                 | None | Some [ _ ] ->
                     of_self result (fun variant _ mine ->
@@ -436,7 +436,7 @@ let form database (path : Path.t) : Core.t option =
                           variant = None;
                           fields =
                             List.map
-                              (fun (field : T.field) ->
+                              (fun (field : Types.field) ->
                                 ( field.field_name,
                                   Some
                                     (Core.Value

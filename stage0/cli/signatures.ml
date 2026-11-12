@@ -104,7 +104,6 @@ let kind_word : Resolve.Names.kind -> string = function
   | Test -> "test"
   | Law_proof -> "law proof"
 
-(* The parts of a definition that its users read. *)
 let parts = [ "interface"; "signature"; "shape" ]
 
 (* The signature of the definition at [path], as [text] gives it. *)
@@ -113,8 +112,6 @@ let of_path context path =
   | Some key -> text context ~body:false ~opaque:false key
   | None -> None
 
-(* A signature under a label, as in [    was: fn f()], with each further
-   line indented under the first. *)
 let labeled label signature =
   let indent = String.make (String.length label) ' ' in
   String.concat "\n"

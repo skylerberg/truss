@@ -6,7 +6,6 @@
    a body. *)
 
 open Syntax
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
@@ -22,8 +21,6 @@ let declarations database package = Query.demand database Names.package_declarat
 
 let definition database declaration =
   Query.demand database Names.definition (Names.key_of declaration)
-
-(* Contracts, as written *)
 
 let written kind (clauses : clause list) =
   List.filter_map
@@ -57,20 +54,18 @@ let contract ~(before : clause list) ~(after : clause list) =
        else []);
     ]
 
-(* Signatures *)
-
-let uses_more : T.capability -> change = function
+let uses_more : Types.capability -> change = function
   | Capability path -> Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
   | (Capability_parameter _ | Capability_projection _) as capability ->
-      Breaks (Printf.sprintf "uses `%s`, which it did not" (T.show_capability capability))
+      Breaks (Printf.sprintf "uses `%s`, which it did not" (Types.show_capability capability))
   | Capability_variable _ ->
       Compiler_bug.bug ~stage:"Compatibility" "a signature holds an unknown set of capabilities"
 
-let signature ~(before : T.signature) ~(after : T.signature) =
+let signature ~(before : Types.signature) ~(after : Types.signature) =
   let same_parameters =
     List.length before.parameters = List.length after.parameters
     && List.for_all2
-         (fun (was : T.parameter_info) (now : T.parameter_info) ->
+         (fun (was : Types.parameter_info) (now : Types.parameter_info) ->
            was.name = now.name && was.mode = now.mode && was.type_ = now.type_
            && (now.has_default || not was.has_default))
          before.parameters after.parameters
@@ -78,7 +73,7 @@ let signature ~(before : T.signature) ~(after : T.signature) =
   let gained_default =
     same_parameters
     && List.exists2
-         (fun (was : T.parameter_info) (now : T.parameter_info) ->
+         (fun (was : Types.parameter_info) (now : Types.parameter_info) ->
            now.has_default && not was.has_default)
          before.parameters after.parameters
   in
@@ -107,7 +102,7 @@ let signature ~(before : T.signature) ~(after : T.signature) =
 (* How far a yielding method can be pulled as a cursor: for every element,
    for one that copies implicitly, or not at all. A user that pulls it
    relies on that, though it is worked out from the method's body. *)
-let pulled database path (signature : T.signature) =
+let pulled database path (signature : Types.signature) =
   match (Query.demand database Ownership.pullable path, signature.output) with
   | Pullable, _ -> 2
   | Yields_places, Yields (_, element)
@@ -116,7 +111,8 @@ let pulled database path (signature : T.signature) =
   | Yields_places, _ -> 1
   | (Yields_mut | Recursive), _ -> 0
 
-let pulling ~before ~after path (old_signature : T.signature) (new_signature : T.signature) =
+let pulling ~before ~after path (old_signature : Types.signature) (new_signature : Types.signature)
+    =
   match (old_signature.output, new_signature.output) with
   | Yields _, Yields _ ->
       let was = pulled before path old_signature and is = pulled after path new_signature in
@@ -127,7 +123,7 @@ let pulling ~before ~after path (old_signature : T.signature) (new_signature : T
 
 (* The body of a [transparent] function is its definition in the proofs of
    callers in other packages, so another body can break those proofs. *)
-let transparent_body ~(before : T.signature) ~(after : T.signature)
+let transparent_body ~(before : Types.signature) ~(after : Types.signature)
     ~(before_definition : definition option) ~(after_definition : definition option) =
   let written (definition : definition option) =
     match definition with
@@ -146,8 +142,6 @@ let clauses_of (definition : definition option) =
   | Some { kind = Theorem { clauses; _ }; _ } -> clauses
   | _ -> []
 
-(* Types *)
-
 let type_clauses (definition : definition option) select =
   match definition with
   | Some { kind = Type_definition { clauses; _ }; _ } ->
@@ -159,7 +153,7 @@ let invariants definition =
     | Type_invariant value -> Some (Syntax_print.expression value)
     | _ -> None)
 
-let type_ ~(before : T.type_interface) ~(after : T.type_interface) ~before_definition
+let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~before_definition
     ~after_definition =
   List.concat
     [
@@ -181,8 +175,6 @@ let type_ ~(before : T.type_interface) ~(after : T.type_interface) ~before_defin
        else []);
     ]
 
-(* Traits and capabilities *)
-
 (* The clauses of a method written inside a trait or a capability, which
    is a definition of its own. *)
 let member_clauses database (owner : Path.t) name receiver =
@@ -201,14 +193,14 @@ let laws (definition : definition option) =
            members)
   | _ -> []
 
-let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_definition
+let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_definition
     ~after_definition ~clauses_before ~clauses_after =
-  let same (was : T.trait_method) (now : T.trait_method) =
+  let same (was : Types.trait_method) (now : Types.trait_method) =
     was.method_name = now.method_name && was.method_receiver = now.method_receiver
   in
   let methods =
     List.concat_map
-      (fun (was : T.trait_method) ->
+      (fun (was : Types.trait_method) ->
         let named change =
           match change with
           | Breaks what -> Breaks (Printf.sprintf "its method `%s` %s" was.method_name what)
@@ -229,7 +221,7 @@ let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_def
   in
   let gained =
     List.filter_map
-      (fun (now : T.trait_method) ->
+      (fun (now : Types.trait_method) ->
         if List.exists (fun was -> same was now) before.methods then None
         else if now.provided then
           Some (Grows (Printf.sprintf "has the method `%s`" now.method_name))
@@ -260,8 +252,6 @@ let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_def
       gained;
     ]
 
-(* Constants *)
-
 let constant_value database path (definition : definition option) =
   match Query.demand database Interface.Constants.value_of path with
   | Some _ as value -> `Value value
@@ -270,18 +260,17 @@ let constant_value database path (definition : definition option) =
       | Some { kind = Constant { value; _ }; _ } -> `Written (Syntax_print.expression value)
       | _ -> `Value None)
 
-(* [impl]s *)
-
 let impls database package =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
         match Query.demand database Environment.impl_interface declaration.path with
-        | Some (impl : T.impl_interface) when not impl.impl_broken ->
+        | Some (impl : Types.impl_interface) when not impl.impl_broken ->
             Some
               ( declaration.path,
-                Printf.sprintf "the `impl` of `%s` for `%s`" (T.show_trait impl.implements)
-                  (T.show impl.for_type),
+                Printf.sprintf "the `impl` of `%s` for `%s`"
+                  (Types.show_trait impl.implements)
+                  (Types.show impl.for_type),
                 impl.capability_sets )
         | _ -> None
       else None)
@@ -360,7 +349,8 @@ let compare ~before ~after package =
                     public_change path
                       (Breaks
                          (Printf.sprintf "has `%s` in its `%s`, which it did not: %s"
-                            (T.show_capability capability) name shown)))
+                            (Types.show_capability capability)
+                            name shown)))
                   (missing_from was is)
                 @
                 if missing_from is was <> [] then

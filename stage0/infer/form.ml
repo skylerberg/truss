@@ -3,11 +3,10 @@
    register how the core node of a syntax node is built. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 open State
+open Instantiation
 
 let build_expression_by_id state (id : id) : Core.expression =
   match state.form.expression_builders.(id) with
@@ -17,21 +16,21 @@ let build_expression_by_id state (id : id) : Core.expression =
 (* The operand for a parameter with the given mode. A [Read] or [Mut]
    parameter borrows a place, so it receives the place itself. In every
    other case the parameter receives a value. *)
-let operand (mode : T.mode) (node : Core.expression) : Core.operand =
+let operand (mode : Types.mode) (node : Core.expression) : Core.operand =
   match (mode, node.kind) with (Read | Mut), Use place -> Place place | _ -> Value node
 
-let checked_call state (id : id) : C.call =
+let checked_call state (id : id) : Tables.call =
   match state.tables.calls.(id) with
   | Some call -> call
   | None -> bug "the checker recorded no call for a call node"
 
-let evidence : C.evidence -> Core.evidence = function
+let evidence : Tables.evidence -> Core.evidence = function
   | Impl { impl; arguments } -> Impl { impl; arguments }
   | Bound -> Bound
   | Dynamic -> Dynamic
   | Built_in -> bug "a built-in method has no core evidence"
 
-let callee (callee : C.callee) : Core.callee =
+let callee (callee : Tables.callee) : Core.callee =
   match callee with
   | Function { path; type_arguments } -> Function { path; type_arguments }
   | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = inferred } ->
@@ -43,13 +42,13 @@ let callee (callee : C.callee) : Core.callee =
 
 (* One argument per parameter, in parameter order. A parameter with no
    argument is [Default]. *)
-let arguments state (call : C.call) : Core.argument list =
+let arguments state (call : Tables.call) : Core.argument list =
   List.init
     (List.length call.arguments + List.length call.omitted_defaults)
     (fun index ->
       match
         List.find_opt
-          (fun (argument : C.argument) -> argument.parameter_index = index)
+          (fun (argument : Tables.argument) -> argument.parameter_index = index)
           call.arguments
       with
       | Some argument ->
@@ -62,7 +61,7 @@ let arguments state (call : C.call) : Core.argument list =
       | None -> Default)
 
 (* [function_value] is the callee expression of an indirect call. *)
-let core_call state ~lends ?function_value (call : C.call) : Core.call =
+let core_call state ~lends ?function_value (call : Tables.call) : Core.call =
   {
     callee =
       (match (call.callee, function_value) with
@@ -85,18 +84,18 @@ let arithmetic_traits : (Well_known.t * string * Intrinsic.operation) list =
     (Negate, "negate", Negate);
   ]
 
-let is_number type_ = T.is_integer_type type_ || T.is_float_type type_
+let is_number type_ = Types.is_integer_type type_ || Types.is_float_type type_
 
 (* Whether values of the type are compared with built-in equality. *)
 let is_built_in_scalar type_ =
-  is_number type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
+  is_number type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_
 
 (* The built-in operation that a trait method call is, if the receiver is a
    built-in number: [left.add(right)] is [Add], the same as [left + right]. *)
-let built_in_operation (trait : T.trait_reference) name self_type =
+let built_in_operation (trait : Types.trait_reference) name self_type =
   if
     is_number self_type
-    && List.for_all (fun argument -> argument = T.Type self_type) trait.trait_arguments
+    && List.for_all (fun argument -> argument = Types.Type self_type) trait.trait_arguments
   then
     List.find_map
       (fun (known, method_, operation) ->
@@ -105,11 +104,11 @@ let built_in_operation (trait : T.trait_reference) name self_type =
   else None
 
 (* The call's argument expressions, in parameter order. *)
-let argument_expressions state (call : C.call) =
+let argument_expressions state (call : Tables.call) =
   List.map
-    (fun (argument : C.argument) -> build_expression_by_id state argument.expression)
+    (fun (argument : Tables.argument) -> build_expression_by_id state argument.expression)
     (List.sort
-       (fun (left : C.argument) (right : C.argument) ->
+       (fun (left : Tables.argument) (right : Tables.argument) ->
          compare left.parameter_index right.parameter_index)
        call.arguments)
 
@@ -122,8 +121,10 @@ let constructor_fields state type_ variant type_arguments =
     | Some variant ->
         Option.bind (Members.variants state.database type_ type_arguments) (fun variants ->
             Option.bind
-              (List.find_opt (fun (written : T.variant) -> written.variant_name = variant) variants)
-              (fun (written : T.variant) -> written.fields))
+              (List.find_opt
+                 (fun (written : Types.variant) -> written.variant_name = variant)
+                 variants)
+              (fun (written : Types.variant) -> written.fields))
   in
   match fields with
   | Some fields -> fields
@@ -171,14 +172,14 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       let declared = constructor_fields state type_ variant type_arguments in
       let written =
         List.map
-          (fun (argument : C.argument) ->
+          (fun (argument : Tables.argument) ->
             ( (List.nth declared argument.parameter_index).field_name,
               Some (operand argument.mode (build_expression_by_id state argument.expression)) ))
           recorded.arguments
       in
       let defaulted =
         List.filter_map
-          (fun (field : T.field) ->
+          (fun (field : Types.field) ->
             if List.mem_assoc field.field_name written then None else Some (field.field_name, None))
           declared
       in
@@ -228,17 +229,17 @@ let function_value state (value : expression) : Core.kind =
    fields and constructs the variant. *)
 let variant_value state (value : expression) type_path variant : Core.kind =
   match type_of state value with
-  | T.Function { output = Returns (T.Named { arguments; _ } as variant_type); _ } ->
+  | Types.Function { output = Returns (Types.Named { arguments; _ } as variant_type); _ } ->
       let fields =
         List.map
-          (fun (field : T.field) -> (field, fresh_synthetic_local state))
+          (fun (field : Types.field) -> (field, fresh_synthetic_local state))
           (constructor_fields state type_path (Some variant) arguments)
       in
       Lambda
         {
           parameters =
             List.map
-              (fun ((field : T.field), local) : Core.pattern ->
+              (fun ((field : Types.field), local) : Core.pattern ->
                 {
                   id = fresh_node_id state;
                   origin = value.id;
@@ -258,7 +259,7 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                           variant = Some variant;
                           fields =
                             List.map
-                              (fun ((field : T.field), local) ->
+                              (fun ((field : Types.field), local) ->
                                 ( field.field_name,
                                   Some
                                     (Core.Value
@@ -298,11 +299,9 @@ let self_type state (env : env) =
   | Some type_ -> final_type state type_
   | None -> bug "`self` is used outside a method"
 
-(* The place of [self]. *)
 let self_local state (env : env) ~origin : Core.place =
   Local { local = Self; type_ = self_type state env; origin }
 
-(* The place of a constant's static data. *)
 let constant_place state ~origin (path : Path.t) : Core.place =
   match Query.demand state.database Environment.constant_type path with
   | Some type_ -> Constant { path; type_; origin }
@@ -323,7 +322,9 @@ let range_record state (value : expression) start stop ~inclusive : Core.kind =
   | Some start, Some stop ->
       let start = build_expression state start in
       let stop = build_expression state stop in
-      let inclusive = synthetic_expression state ~origin:value.id T.bool (Core.Boolean inclusive) in
+      let inclusive =
+        synthetic_expression state ~origin:value.id Types.bool (Core.Boolean inclusive)
+      in
       record [ ("start", start); ("stop", stop); ("inclusive", inclusive) ]
   | _ -> bug "a range without both bounds is valid only inside a slice"
 
@@ -331,9 +332,9 @@ let range_record state (value : expression) start stop ~inclusive : Core.kind =
    [impl]'s interface. An [impl] is declared in the package of its type or
    of its capability. The search covers the type's package, the current
    package, and the standard library. *)
-let capability_impls (state : state) (type_ : T.ty) =
+let capability_impls (state : state) (type_ : Types.ty) =
   match type_ with
-  | T.Named { path; _ } ->
+  | Types.Named { path; _ } ->
       List.filter_map
         (fun (trait, _) ->
           if Interface.Summary.kind_of state.database trait = Some Capability then
@@ -356,7 +357,7 @@ let provide state (implementations : expression list) (body : block) : Core.kind
   let implementations =
     List.map
       (fun (implementation : expression) : Core.implementation ->
-        let mode : T.mode = match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read in
+        let mode : Types.mode = match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read in
         let node = build_expression state implementation in
         {
           origin = implementation.id;
@@ -368,8 +369,6 @@ let provide state (implementations : expression list) (body : block) : Core.kind
       implementations
   in
   Provide { implementations; body = build_block state body }
-
-(* Strings *)
 
 let builder_method name receiver : Core.callee =
   Function
@@ -390,7 +389,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
   | rest ->
       let make = synthetic_expression state ~origin in
       let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
-      let builder_type = T.named (Well_known.path Text_builder) [] in
+      let builder_type = Types.named (Well_known.path Text_builder) [] in
       let builder = fresh_synthetic_local state in
       let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
       let call callee arguments : Core.kind = Call { callee; arguments; lends = None; uses = [] } in
@@ -415,7 +414,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
           [
             statement
               (Evaluate
-                 (make T.unit
+                 (make Types.unit
                     (call (builder_method "write" Mut)
                        [
                          Passed { mode = Mut; value = Place builder_place; mark = None };
@@ -425,19 +424,19 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                              value =
                                Value
                                  (make
-                                    (T.named (Well_known.path String_slice) [])
+                                    (Types.named (Well_known.path String_slice) [])
                                     (String written.value));
                              mark = None;
                            };
                        ])));
           ]
       in
-      let display part (conversion : C.call option) =
+      let display part (conversion : Tables.call option) =
         match conversion with
         | Some recorded ->
             statement
               (Evaluate
-                 (make T.unit
+                 (make Types.unit
                     (Call
                        {
                          callee = callee recorded.callee;
@@ -481,24 +480,24 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
 (* A list literal, desugared to a block: allocate storage with capacity for
    the elements, push each element, and convert the storage to a list with
    [List.from_storage]. *)
-let list_literal state ~origin (element : T.ty) (elements : Core.expression list) : Core.kind =
+let list_literal state ~origin (element : Types.ty) (elements : Core.expression list) : Core.kind =
   let make = synthetic_expression state ~origin in
   let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
   let storage_type =
-    T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
+    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let storage = fresh_synthetic_local state in
   let intrinsic operation type_ arguments =
     make type_
       (Call
          {
-           callee = Intrinsic { operation; type_arguments = [ T.Type element ] };
+           callee = Intrinsic { operation; type_arguments = [ Types.Type element ] };
            arguments;
            lends = None;
            uses = [];
          })
   in
-  let capacity = make (T.builtin USize) (Integer (Z.of_int (List.length elements))) in
+  let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length elements))) in
   let let_storage =
     statement
       (Let
@@ -522,7 +521,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
       (fun element ->
         statement
           (Evaluate
-             (intrinsic Storage_push T.unit
+             (intrinsic Storage_push Types.unit
                 [
                   Passed
                     {
@@ -540,7 +539,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
       value =
         Some
           (make
-             (T.named (Well_known.path List) [ element ])
+             (Types.named (Well_known.path List) [ element ])
              (Call
                 {
                   callee =
@@ -553,7 +552,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                               name = "from_storage";
                               receiver = Static;
                             };
-                        type_arguments = [ T.Type element ];
+                        type_arguments = [ Types.Type element ];
                       };
                   arguments =
                     [
@@ -575,7 +574,8 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
 (* A tagged string, desugared to a call of the tag type's [from_template]
    with a [Template] record. The record holds the literal text segments and
    the interpolated values, each converted to the tag's [Part] type. *)
-let tagged_string state (value : expression) (literal : string_literal) ~(part : T.ty) : Core.kind =
+let tagged_string state (value : expression) (literal : string_literal) ~(part : Types.ty) :
+    Core.kind =
   let recorded = checked_template state literal in
   let from_template =
     match recorded.from_template with
@@ -585,21 +585,23 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
   let make = synthetic_expression state ~origin:value.id in
   let list element elements =
     make
-      (T.named (Well_known.path List) [ element ])
+      (Types.named (Well_known.path List) [ element ])
       (list_literal state ~origin:value.id element elements)
   in
-  let literal_type = T.named (Well_known.path Literal) [] in
+  let literal_type = Types.named (Well_known.path Literal) [] in
   let texts =
     List.map
       (fun (written : Syntax.text) ->
         make literal_type
           (record
-             [ ("text", make (T.named (Well_known.path String_slice) []) (String written.value)) ]))
+             [
+               ("text", make (Types.named (Well_known.path String_slice) []) (String written.value));
+             ]))
       (literal.first :: List.map snd literal.rest)
   in
   let parts =
     List.map2
-      (fun ((written : expression), _) (conversion : C.call option) ->
+      (fun ((written : expression), _) (conversion : Tables.call option) ->
         match conversion with
         | Some call ->
             synthetic_expression state ~origin:written.id call.callee_result
@@ -610,7 +612,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
   let texts = list literal_type texts in
   let template =
     make
-      (T.named (Well_known.path Template) [ part ])
+      (Types.named (Well_known.path Template) [ part ])
       (record [ ("literals", texts); ("parts", list part parts) ])
   in
   Template
@@ -629,8 +631,6 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
                uses = from_template.uses;
              });
     }
-
-(* Patterns *)
 
 let pattern_type state (id : id) =
   match state.tables.scrutinee_types.(id) with
@@ -662,7 +662,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
                 };
           }
     | None ->
-        bug "a pattern compares values of `%s`, which does not implement `Equal`" (T.show type_)
+        bug "a pattern compares values of `%s`, which does not implement `Equal`" (Types.show type_)
 
 (* A constant used as a pattern, or as a bound of a range pattern. *)
 let pattern_constant state (id : id) : Core.kind =
@@ -680,22 +680,20 @@ let pattern_literal state (id : id) (written : Syntax.literal) : Core.kind =
   | Literal_integer _, _ -> bug "an integer pattern has no value"
 
 (* The fields a pattern matches, in declaration order. *)
-let pattern_fields state (fields : T.field list) (matched : (string * pattern) list) =
+let pattern_fields state (fields : Types.field list) (matched : (string * pattern) list) =
   List.filter_map
-    (fun (field : T.field) ->
+    (fun (field : Types.field) ->
       Option.map
         (fun written -> (field.field_name, build_pattern state written))
         (List.assoc_opt field.field_name matched))
     fields
 
-(* Operators *)
-
 (* Converts a built-in integer to [Integer]. An expression of any other
    type is returned unchanged. *)
 let to_integer state (node : Core.expression) : Core.expression =
-  if node.type_ = T.Integer || not (integer_type state node.type_) then node
+  if node.type_ = Types.Integer || not (integer_type state node.type_) then node
   else
-    synthetic_expression state ~origin:node.origin T.Integer
+    synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })
 
 let operation_of : binary -> Intrinsic.operation = function
@@ -721,7 +719,7 @@ let operator state (value : expression) operation (operands : expression list) :
     {
       operation;
       arguments =
-        (if type_of state value = T.Integer then List.map (to_integer state) arguments
+        (if type_of state value = Types.Integer then List.map (to_integer state) arguments
          else arguments);
     }
 
@@ -741,7 +739,7 @@ let built_in_comparison state operator (left : expression) (right : expression) 
   let left = build_expression state left in
   let right = build_expression state right in
   let left, right =
-    if T.equal left.type_ right.type_ then (left, right)
+    if Types.equal left.type_ right.type_ then (left, right)
     else (to_integer state left, to_integer state right)
   in
   Compare { comparison = comparison_of operator; left; right }
@@ -774,7 +772,9 @@ let comparison state (value : expression) operator (left : expression) (right : 
               };
           }
       in
-      let not_ kind : Core.kind = Not (synthetic_expression state ~origin:value.id T.bool kind) in
+      let not_ kind : Core.kind =
+        Not (synthetic_expression state ~origin:value.id Types.bool kind)
+      in
       match operator with
       | Equal -> call.kind
       | Not_equal -> Not call
@@ -798,7 +798,7 @@ let is_executable state (condition : Core.expression) =
         | _ -> false)
     | Trait_method { trait; name; receiver; _ } ->
         List.exists
-          (fun (method_ : T.trait_method) ->
+          (fun (method_ : Types.trait_method) ->
             method_.method_receiver = receiver && method_.method_signature.specification_only)
           (Members.trait_methods state.database trait.trait name)
     | Capability_method _ | Intrinsic _ | Indirect _ -> false
@@ -808,7 +808,7 @@ let is_executable state (condition : Core.expression) =
       Core_walk.ignore_all with
       expression =
         (fun (node : Core.expression) ->
-          if node.type_ = T.Integer then executable := false;
+          if node.type_ = Types.Integer then executable := false;
           match node.kind with
           | Quantified _ | Result | Old _ | Yielded | Finished | Identical _
           | Specification_function _ | Method_time _
@@ -847,11 +847,11 @@ let compound_assign state (written : statement) (target : expression) (value : e
             let mode index =
               match
                 List.find_opt
-                  (fun (argument : C.argument) -> argument.parameter_index = index)
+                  (fun (argument : Tables.argument) -> argument.parameter_index = index)
                   recorded.arguments
               with
               | Some argument -> argument.mode
-              | None -> T.Read
+              | None -> Types.Read
             in
             ( Call
                 {
@@ -876,18 +876,18 @@ let compound_assign state (written : statement) (target : expression) (value : e
       value = synthetic_expression state ~origin:written.id target_type kind;
     }
 
-(* The cursor type that a call of a yielding method returns. *)
-let cursor_type (call : C.call) : T.ty =
+let cursor_type (call : Tables.call) : Types.ty =
   match call.callee with
-  | Function { path; type_arguments } -> T.Cursor { method_ = path; arguments = type_arguments }
+  | Function { path; type_arguments } -> Types.Cursor { method_ = path; arguments = type_arguments }
   | Trait_method { trait; name; receiver; type_arguments; _ } ->
-      T.Cursor
+      Types.Cursor
         { method_ = Method { owner = trait.trait; name; receiver }; arguments = type_arguments }
   | _ -> bug "a loop iterates over a call that cannot yield"
 
 (* The iteration of a [for] loop. *)
 (* The call of a value's [each] that a loop over the value makes. *)
-let each_of state (call : C.call) (mode : T.mode) (iterable : expression) : Core.expression =
+let each_of state (call : Tables.call) (mode : Types.mode) (iterable : expression) : Core.expression
+    =
   let receiver = build_expression state iterable in
   synthetic_expression state ~origin:iterable.id (cursor_type call)
     (Call
@@ -907,7 +907,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
       match (State.called iterable, type_of state iterable) with
       (* The iterable is itself a call of a yielding method, which makes a
          cursor: the loop iterates over that call. *)
-      | Some written_call, T.Cursor _ -> Yielding_call (build_expression state written_call)
+      | Some written_call, Types.Cursor _ -> Yielding_call (build_expression state written_call)
       | _ ->
           (* The iterable is a value, even if a call computes it: the loop
              calls the value's [each]. *)
@@ -915,7 +915,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
   | Some (Pulled { cursor }), _ ->
       let next : Core.callee option =
         match cursor with
-        | T.Cursor _ -> None
+        | Types.Cursor _ -> None
         | _ -> (
             let trait = trait_reference Impls.cursor_trait in
             match implements state cursor trait with
@@ -931,7 +931,8 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
                        evidence = evidence (evidence_of implementation);
                      })
             | None ->
-                bug "a loop iterates over `%s`, which does not implement `Cursor`" (T.show cursor))
+                bug "a loop iterates over `%s`, which does not implement `Cursor`"
+                  (Types.show cursor))
       in
       Cursor { cursor = place_of (build_expression state iterable); next }
   | _ -> bug "the checker recorded no iteration for a `for` loop"
@@ -978,32 +979,32 @@ let loop_clause state (clause : loop_clause) : Core.loop_clause =
 let early_exit (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
   match tasks with
   | [] -> exit
-  | _ -> Task_exit { tasks; exit = synthetic_expression state ~origin T.Never exit }
+  | _ -> Task_exit { tasks; exit = synthetic_expression state ~origin Types.Never exit }
 
 (* [inner?], desugared to a match. The first variant of the operand's type
    is the success variant: its arm evaluates to the variant's field. The
    second is the failure variant: its arm returns the failure variant of
    the function's result type, with the same fields. *)
-let try_ state (value : expression) (inner : expression) ~(output : T.ty)
+let try_ state (value : expression) (inner : expression) ~(output : Types.ty)
     ~(exited_tasks : Core.task list) : Core.kind =
   let scrutinee = build_expression state inner in
-  let variants (type_ : T.ty) =
+  let variants (type_ : Types.ty) =
     match type_ with
-    | T.Named { path; arguments } -> (
+    | Types.Named { path; arguments } -> (
         match Members.variants state.database path arguments with
         | Some [ success; failure ] -> (success, failure)
-        | _ -> bug "`?` on `%s`" (T.show type_))
-    | _ -> bug "`?` on `%s`" (T.show type_)
+        | _ -> bug "`?` on `%s`" (Types.show type_))
+    | _ -> bug "`?` on `%s`" (Types.show type_)
   in
   let success, failure = variants scrutinee.type_ in
   let _, returned_failure = variants output in
   let make = synthetic_expression state ~origin:value.id in
   (* A pattern that binds every field of [variant] to a synthetic local,
      and an expression that reads each of those locals. *)
-  let bind_fields (variant : T.variant) : Core.pattern * (string * Core.expression) list =
+  let bind_fields (variant : Types.variant) : Core.pattern * (string * Core.expression) list =
     let fields =
       List.map
-        (fun (field : T.field) -> (field, fresh_synthetic_local state))
+        (fun (field : Types.field) -> (field, fresh_synthetic_local state))
         (Option.value ~default:[] variant.fields)
     in
     ( {
@@ -1016,7 +1017,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
               variant = variant.variant_name;
               fields =
                 List.map
-                  (fun ((field : T.field), local) : (string * Core.pattern) ->
+                  (fun ((field : Types.field), local) : (string * Core.pattern) ->
                     ( field.field_name,
                       {
                         id = fresh_node_id state;
@@ -1028,7 +1029,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
             };
       },
       List.map
-        (fun ((field : T.field), local) ->
+        (fun ((field : Types.field), local) ->
           ( field.field_name,
             make field.field_type
               (Core.Use (Local { local; type_ = field.field_type; origin = value.id })) ))
@@ -1052,7 +1053,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
               statements = [];
               value =
                 Some
-                  (make T.Never
+                  (make Types.Never
                      (early_exit exited_tasks state ~origin:value.id
                         (Return
                            (Some
@@ -1062,7 +1063,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
                                       variant = Some returned_failure.variant_name;
                                       fields =
                                         List.map2
-                                          (fun (field : T.field) (_, field_value) ->
+                                          (fun (field : Types.field) (_, field_value) ->
                                             (field.field_name, Some (Core.Value field_value)))
                                           (Option.value ~default:[] returned_failure.fields)
                                           failure_fields;
@@ -1078,11 +1079,11 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
 let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let origin = value.id in
   let make = synthetic_expression state ~origin in
-  let usize = T.builtin USize in
+  let usize = Types.builtin USize in
   let path, type_arguments =
     match Core_walk.place_type base with
-    | T.Named { path; arguments } -> (path, arguments)
-    | type_ -> bug "a slice of `%s`" (T.show type_)
+    | Types.Named { path; arguments } -> (path, arguments)
+    | type_ -> bug "a slice of `%s`" (Types.show type_)
   in
   let call name (arguments : Core.argument list) result =
     make result
@@ -1121,12 +1122,12 @@ let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive
    with capacity for the entries, insert each entry, and evaluate to the
    collection. [entries] holds the arguments of each insertion. A literal
    with no entries is the call that creates the collection. *)
-let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
+let inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
     (entries : Core.expression list list) : Core.kind =
   let path, type_arguments =
     match type_ with
-    | T.Named { path; arguments } -> (path, arguments)
-    | _ -> bug "a set or map literal of type `%s`" (T.show type_)
+    | Types.Named { path; arguments } -> (path, arguments)
+    | _ -> bug "a set or map literal of type `%s`" (Types.show type_)
   in
   let make = synthetic_expression state ~origin in
   let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
@@ -1140,7 +1141,7 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
            uses = [];
          })
   in
-  let capacity = make (T.builtin USize) (Integer (Z.of_int (List.length entries))) in
+  let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length entries))) in
   let created =
     call "with_capacity" Static
       [ Passed { mode = Read; value = Value capacity; mark = None } ]
@@ -1177,7 +1178,7 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
                          (fun argument : Core.argument ->
                            Passed { mode = Own; value = Value argument; mark = None })
                          entry)
-                    T.unit)))
+                    Types.unit)))
           entries
       in
       Block { statements = bind :: inserts; value = Some (make type_ (Use collection)) }
@@ -1186,16 +1187,16 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
    A list or a set literal is desugared to calls. *)
 let collection_literal state (value : expression) (elements : Core.expression list) : Core.kind =
   match type_of state value with
-  | T.Named { path; arguments = [ T.Type element ] } when Well_known.is List path ->
+  | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
       list_literal state ~origin:value.id element elements
-  | T.Named { path; _ } as type_ when Well_known.is Set path ->
+  | Types.Named { path; _ } as type_ when Well_known.is Set path ->
       inserted_literal state ~origin:value.id type_ ~name:"set" ~insert:"insert"
         (List.map (fun element -> [ element ]) elements)
-  | T.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
+  | Types.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
       Collection_literal { elements; construction = Array }
-  | T.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
+  | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }
-  | type_ -> bug "a collection literal of type `%s`" (T.show type_)
+  | type_ -> bug "a collection literal of type `%s`" (Types.show type_)
 
 (* A map literal. A [Map] literal is desugared to calls of [insert_absent],
    which requires that the key is not in the map yet, so the prover checks
@@ -1203,8 +1204,8 @@ let collection_literal state (value : expression) (elements : Core.expression li
 let map_literal state (value : expression) (entries : (Core.expression * Core.expression) list) :
     Core.kind =
   match type_of state value with
-  | T.Named { path; _ } as type_ when Well_known.is Map path ->
+  | Types.Named { path; _ } as type_ when Well_known.is Map path ->
       inserted_literal state ~origin:value.id type_ ~name:"map" ~insert:"insert_absent"
         (List.map (fun (key, entry) -> [ key; entry ]) entries)
-  | T.Named { path; _ } when Well_known.is Finite_map path -> Map_literal { entries }
-  | type_ -> bug "a map literal of type `%s`" (T.show type_)
+  | Types.Named { path; _ } when Well_known.is Finite_map path -> Map_literal { entries }
+  | type_ -> bug "a map literal of type `%s`" (Types.show type_)

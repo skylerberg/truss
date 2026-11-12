@@ -12,24 +12,12 @@ type key =
   | Cursor_next of Ground.yielding
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
-      (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
-          method on its implementation with the evidence that implementation captured *)
   | Table of { impl : Path.t; type_arguments : Ground.argument list }
-      (** A capability [impl]'s table of entries, one for each of the capability's methods *)
-  | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
+  | Program_main of Path.t
   | Any_entry of key
-      (** The entry for an [impl]'s method in an [any] table: takes a pointer to the value *)
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
-      (** The table of an [any] value of a type and trait: the type's drop, then an entry for each
-          of the trait's methods *)
   | Locked_entry of { capability : Path.t; name : string }
-      (** The entry of a capability's locking table for one of its methods. It locks the mutex of
-          the evidence it is called with, calls the implementation's entry, and unlocks the mutex.
-      *)
   | Locked_table of Path.t
-      (** A capability's locking table: a [Locked_entry] for each of its methods. A [provide mut]
-          whose body can use [Tasks] builds its evidence with this table, so that calls of one
-          implementation by several tasks are mutually exclusive. *)
 
 let rank = function
   | Code _ -> 0
@@ -193,7 +181,22 @@ let rec mangle_ty (ty : Ground.ty) =
              associated)
       ^ marker "End"
   | Cursor yielding -> marker "Cursor" ^ mangle_yielding yielding ^ marker "End"
+  | Lent lent -> mangle_lent lent
   | Never -> marker "Never"
+
+and mangle_lent ({ base; writable; fields } : Ground.lent) =
+  marker "Lent"
+  ^ (if writable then marker "Mut" else "")
+  ^ mangle_ty base
+  ^ String.concat ""
+      (List.map
+         (fun ({ variant; field; holds } : Ground.lent_field) ->
+           marker "Field"
+           ^ Option.fold ~none:"" ~some:(fun variant -> text variant ^ marker "Variant") variant
+           ^ text field
+           ^ match holds with Address -> marker "Address" | Nested lent -> mangle_lent lent)
+         fields)
+  ^ marker "End"
 
 and mangle_argument = function
   | Ground.Type ty -> mangle_ty ty

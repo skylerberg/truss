@@ -13,7 +13,6 @@ let check database module_ =
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 let not_proven text code = Support.one_diagnostic ~check text code
 
-(* The codes of a file's diagnostics. *)
 let codes text =
   let database = Support.setup [ ("app::main", text) ] in
   Support.codes (check database (Support.module_of "app::main"))
@@ -752,14 +751,6 @@ let () =
       proven (tagged "  ensures self.first == old(self.first)\n"));
   test "a constructor lent `mut` stores the caller's change in the place it lends" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
-  test "a variant lent `mut` stores back only into the place it lends" (fun () ->
-      let maybe ensures =
-        "type Pair(first: Int64, second: Int64)\n\n\
-         fn Pair.maybe(mut self) lends mut Option[Int64]\n" ^ ensures
-        ^ "{\n  yield Some(mut self.second)\n}\n"
-      in
-      proven (maybe "  ensures self.first == old(self.first)\n");
-      not_proven (maybe "  ensures self.second == old(self.second)\n") "prover.ensures");
   test "a caller of a constructor lent `mut` keeps what the method's contract says" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"

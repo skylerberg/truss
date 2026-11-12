@@ -10,11 +10,7 @@
    the patterns' literals and ranges split the type into. Strings have
    infinitely many values, so only a pattern that matches everything
    covers them. An arm with a guard never covers its pattern. *)
-
-module T = Types
 module Members = Infer.Members
-
-(* The space of patterns *)
 
 type constructor =
   | Variant of string
@@ -49,7 +45,7 @@ let integer_range type_ =
       Some (Z.neg (Z.shift_left Z.one (width - 1)), Z.pred (Z.shift_left Z.one (width - 1)))
     else Some (Z.zero, Z.pred (Z.shift_left Z.one width))
   in
-  match T.builtin_of type_ with
+  match Types.builtin_of type_ with
   | Some Int8 -> bits true 8
   | Some Int16 -> bits true 16
   | Some Int32 -> bits true 32
@@ -65,23 +61,23 @@ let integer_range type_ =
    type's arguments substituted. *)
 let fields_of context type_ constructor =
   match (type_, constructor) with
-  | T.Named { path; arguments }, Variant name -> (
+  | Types.Named { path; arguments }, Variant name -> (
       match Members.variants context.database path arguments with
       | Some variants -> (
           match
-            List.find_opt (fun (variant : T.variant) -> variant.variant_name = name) variants
+            List.find_opt (fun (variant : Types.variant) -> variant.variant_name = name) variants
           with
           | Some variant -> Option.value ~default:[] variant.fields
           | None -> [])
       | None -> [])
-  | T.Named { path; arguments }, Record ->
+  | Types.Named { path; arguments }, Record ->
       Option.value ~default:[] (Members.fields context.database path arguments)
   | _ -> []
 
 (* A constant, an interval, a [Bool], or a string has no fields, which
    [fields_of] gives as none. *)
 let field_types context type_ constructor =
-  List.map (fun (field : T.field) -> field.field_type) (fields_of context type_ constructor)
+  List.map (fun (field : Types.field) -> field.field_type) (fields_of context type_ constructor)
 
 let arity context type_ constructor = List.length (fields_of context type_ constructor)
 
@@ -184,25 +180,24 @@ and fielded ?replace context type_ constructor (written : (string * Core.pattern
   Constructed
     ( constructor,
       List.map
-        (fun (declared : T.field) ->
+        (fun (declared : Types.field) ->
           match List.assoc_opt declared.field_name written with
           | Some inner -> space ?replace context inner
           | None -> Wild)
         (fields_of context type_ constructor) )
-
-(* Matrices *)
 
 type row = space list
 
 (* The constructors of a type, when there are finitely many to list. *)
 let constructors context type_ =
   match type_ with
-  | T.Named { path; arguments } -> (
+  | Types.Named { path; arguments } -> (
       match Members.shape context.database path with
       | Some (Sum _) -> (
           match Members.variants context.database path arguments with
           | Some variants ->
-              Some (List.map (fun (variant : T.variant) -> Variant variant.variant_name) variants)
+              Some
+                (List.map (fun (variant : Types.variant) -> Variant variant.variant_name) variants)
           | None -> None)
       | Some (Record _) -> Some [ Record ]
       | Some (Builtin_type Bool) -> Some [ Boolean false; Boolean true ]
@@ -278,7 +273,7 @@ let signature context type_ (column : space list) =
 
 (* A value the rows miss, as patterns, for one column of each type, or
    [None] if the rows cover every value. *)
-let rec missing context (types : T.ty list) (rows : row list) : space list option =
+let rec missing context (types : Types.ty list) (rows : row list) : space list option =
   match types with
   | [] -> if rows = [] then Some [] else None
   | type_ :: rest_types -> (
@@ -302,7 +297,7 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
          keeps recursive types from being expanded without end. *)
       let present = List.concat_map head_constructors column in
       match (type_, signature context type_ column) with
-      | (T.Error _ | T.Hole | T.Never), _ -> None
+      | (Types.Error _ | Types.Hole | Types.Never), _ -> None
       | _, Some all
         when all <> []
              && List.for_all
@@ -331,7 +326,7 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
 (* Whether a row is useful after the rows before it: whether some value it
    matches matches none of them. *)
 let useful context types rows (row : row) =
-  let rec is_useful (types : T.ty list) (rows : row list) (row : row) =
+  let rec is_useful (types : Types.ty list) (rows : row list) (row : row) =
     match (types, row) with
     | [], [] -> rows = []
     | type_ :: rest_types, first :: rest -> (
@@ -395,7 +390,7 @@ let rec show context type_ (pattern : space) =
       let fields = fields_of context type_ constructor in
       let shown =
         List.map2
-          (fun (field : T.field) argument -> show context field.field_type argument)
+          (fun (field : Types.field) argument -> show context field.field_type argument)
           fields
           (if List.length arguments = List.length fields then arguments
            else List.map (fun _ -> Wild) fields)
@@ -411,16 +406,14 @@ let rec show context type_ (pattern : space) =
           Printf.sprintf "%s(%s)" name
             (String.concat ", "
                (List.map2
-                  (fun (field : T.field) shown ->
+                  (fun (field : Types.field) shown ->
                     if shown = "_" then field.field_name ^ ": _"
                     else field.field_name ^ ": " ^ shown)
                   fields shown)))
 
 let show_row context types row = String.concat ", " (List.map2 (show context) types row)
 
-(* Checking *)
-
-let operand_type : Core.operand -> T.ty = function
+let operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.place_type core_place
   | Value value -> value.type_
 
@@ -429,14 +422,16 @@ let operand_type : Core.operand -> T.ty = function
    is written. *)
 let has_error context type_ =
   let rec contains_error seen = function
-    | T.Error _ | T.Hole -> true
-    | T.Named { path; arguments } -> (
-        List.exists (function T.Type type_ -> contains_error seen type_ | _ -> false) arguments
+    | Types.Error _ | Types.Hole -> true
+    | Types.Named { path; arguments } -> (
+        List.exists
+          (function Types.Type type_ -> contains_error seen type_ | _ -> false)
+          arguments
         || (not (List.exists (Path.equal path) seen))
            &&
            let seen = path :: seen in
            let fields_fail fields =
-             List.exists (fun (field : T.field) -> contains_error seen field.field_type) fields
+             List.exists (fun (field : Types.field) -> contains_error seen field.field_type) fields
            in
            match Members.shape context.database path with
            | Some (Error_shape _) -> true
@@ -447,7 +442,7 @@ let has_error context type_ =
                match Members.variants context.database path arguments with
                | Some variants ->
                    List.exists
-                     (fun (variant : T.variant) ->
+                     (fun (variant : Types.variant) ->
                        fields_fail (Option.value ~default:[] variant.fields))
                      variants
                | None -> false)

@@ -25,7 +25,6 @@ let local_type (tables : Infer.tables) id =
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
-(* The span of the expression with that id. *)
 let expression_span (definition : definition) id =
   let span = ref None in
   let rec visit (value : expression) =
@@ -64,8 +63,6 @@ let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infe
   | Type_definition { name; body = Type_todo; _ } ->
       { offset = name.span.start; expected = None; scope = [] } :: values
   | _ -> values
-
-(* What is at a position *)
 
 type explanation = {
   text : string;  (** The name or expression as written *)

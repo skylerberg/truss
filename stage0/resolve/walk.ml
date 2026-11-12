@@ -96,8 +96,6 @@ let reported state ?fixes code (span : span) message =
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
 let set state (name : name) target = state.names.(name.id) <- Some target
 
-(* Closest names *)
-
 let unknown state (name : name) ~what candidates =
   let fixes =
     match Diagnostic.closest name.text candidates with
@@ -114,11 +112,7 @@ let unknown state (name : name) ~what candidates =
        (reported state ~fixes Unknown_name name.span
           (Printf.sprintf "Nothing named `%s` is %s." name.text what)))
 
-(* The file's own definitions *)
-
 let file_item state text = Query.demand state.database Names.find (state.module_, text)
-
-(* Modules *)
 
 let module_of_names state (first : name) (rest : name list) =
   let failed report =
@@ -185,8 +179,6 @@ let in_module state module_ (name : name) ~types =
       in
       unknown state name ~what:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
-
-(* Types *)
 
 let prelude_type state text =
   match Prelude.find_type text with
@@ -293,8 +285,6 @@ and count_name state scope (name : name) =
                      "`%s` in a type argument must be a value generic parameter or a constant."
                      name.text))))
 
-(* Clauses *)
-
 and clause state scope (clause : clause) =
   let specification = { scope with specification = in_specification } in
   match clause.kind with
@@ -331,8 +321,6 @@ and clause state scope (clause : clause) =
       | Big_o value | At_most value | Exactly value -> expression state bound value
       | Finite -> ())
   | Clause_error -> ()
-
-(* Values *)
 
 (* A lowercase name used as a value. *)
 and local_value state scope (name : name) =
@@ -598,8 +586,6 @@ and arm state scope (arm_ : arm) =
   let guarded = match arm_.guard with Some guard -> condition state inner guard | None -> inner in
   ignore (statement state guarded arm_.body)
 
-(* Bindings *)
-
 (* Declares a value name, reporting it if it hides another. *)
 and declare_value state scope (name : name) =
   let hides what =
@@ -723,8 +709,6 @@ and range_end state scope (end_ : range_end) =
                       a constant."
                      name.text))))
 
-(* Statements *)
-
 and block state scope (block_ : block) =
   ignore
     (List.fold_left
@@ -821,8 +805,6 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop
   | Invariant value -> expression state specification value
   | Loop_decreases measures -> List.iter (expression state specification) measures
   | Loop_cost cost -> clause state scope { kind = Cost cost; span = written.span; id = written.id }
-
-(* Generic parameters *)
 
 let declare_type state scope (name : name) target =
   let hides what =
@@ -935,8 +917,6 @@ let field_names (fields_ : field list) =
     (fun (field : field) ->
       match field.kind with Field_declaration { name; _ } -> Some name.text | Field_error -> None)
     fields_
-
-(* The definition *)
 
 (* The generic parameters of the trait or the [impl] a method is written
    inside, which the method's own tree does not hold: they are in scope as

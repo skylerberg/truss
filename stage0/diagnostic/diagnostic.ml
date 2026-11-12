@@ -201,6 +201,7 @@ module Code = struct
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Lent_mut_in_variant
     | Task_outlives_yield
 
   type capabilities =
@@ -239,7 +240,6 @@ module Code = struct
     | Instantiation_cycle
     | Duplicate_test
 
-  (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
@@ -465,6 +465,7 @@ module Code = struct
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
+    | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Task_outlives_yield -> "task_outlives_yield"
 
   let capabilities_name code =
@@ -544,11 +545,6 @@ let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
 
-(* Suggestions *)
-
-(* The optimal string alignment distance: insertions, deletions,
-   substitutions, and swaps of two neighboring letters, the usual typos,
-   each count one. *)
 let edit_distance left right =
   let rows = String.length left + 1 and columns = String.length right + 1 in
   let table = Array.make_matrix rows columns 0 in
@@ -657,8 +653,6 @@ let shown diagnostics =
     | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
   in
   take 0 0 diagnostics
-
-(* Rendering *)
 
 let location source offset =
   let line, column = Source.position source offset in

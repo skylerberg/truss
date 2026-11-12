@@ -20,7 +20,6 @@ let declarations database (module_ : Path.module_) =
   Query.demand database Names.declarations module_
   |> List.filter (fun (d : Names.declaration) -> d.ordinal = 0)
 
-(* Every module of a package. *)
 let package_modules database package = Query.demand database Workspace.modules package
 
 (* Whether the packages a command is about can see a definition: anything

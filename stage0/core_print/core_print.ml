@@ -1,5 +1,4 @@
 open Core
-module T = Types
 
 type names = (local, string) Hashtbl.t
 
@@ -10,9 +9,12 @@ let local (names : names) (core_local : local) =
   | Named id, None -> Printf.sprintf "local#%d" id
   | Synthetic number, None -> Printf.sprintf "synthetic#%d" number
 
-let mode = T.show_mode
+let mode = Types.show_mode
 let list show items = String.concat ", " (List.map show items)
-let type_arguments = function [] -> "" | arguments -> "[" ^ list T.show_argument arguments ^ "]"
+
+let type_arguments = function
+  | [] -> ""
+  | arguments -> "[" ^ list Types.show_argument arguments ^ "]"
 
 let comparison = function
   | Equal -> "=="
@@ -47,7 +49,7 @@ let rec expression names (node : expression) =
             " capturing " ^ list (fun (capture : capture) -> local names capture.local) captures)
         (block names body)
   | Construct { variant; fields } ->
-      Printf.sprintf "%s%s(%s)" (T.show node.type_)
+      Printf.sprintf "%s%s(%s)" (Types.show node.type_)
         (match variant with Some variant -> "." ^ variant | None -> "")
         (list
            (fun (name, field) ->
@@ -82,7 +84,8 @@ let rec expression names (node : expression) =
         | From_integer -> "from_integer")
         (expression value)
   | To_any { value; trait; evidence = source } ->
-      Printf.sprintf "any %s(%s by %s)" (T.show_trait trait) (expression value) (evidence source)
+      Printf.sprintf "any %s(%s by %s)" (Types.show_trait trait) (expression value)
+        (evidence source)
   | If { condition; then_; else_ } ->
       Printf.sprintf "if %s %s%s" (expression condition) (block names then_)
         (match else_ with Some else_ -> " else " ^ block names else_ | None -> "")
@@ -127,7 +130,7 @@ let rec expression names (node : expression) =
       Printf.sprintf "%s %s { %s }"
         (match quantifier with Forall -> "forall" | Exists -> "exists")
         (match bound with
-        | Over_type { name; type_; _ } -> name ^ ": " ^ T.show type_
+        | Over_type { name; type_; _ } -> name ^ ": " ^ Types.show type_
         | Over_range { pattern = matched; start; stop; inclusive } ->
             Printf.sprintf "%s in %s%s%s" (pattern names matched) (expression start)
               (if inclusive then "..=" else "..")
@@ -152,7 +155,7 @@ and construction = function Array -> "array" | Specification_only -> "specificat
 and callee names = function
   | Function { path; type_arguments = arguments } -> Path.show path ^ type_arguments arguments
   | Trait_method { trait; name; self_type; evidence = source; _ } ->
-      Printf.sprintf "%s.%s for %s by %s" (T.show_trait trait) name (T.show self_type)
+      Printf.sprintf "%s.%s for %s by %s" (Types.show_trait trait) name (Types.show self_type)
         (evidence source)
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
@@ -313,7 +316,7 @@ let names_of (definition : definition) : names =
   names
 
 let parameter names (written : parameter) =
-  Printf.sprintf "%s%s: %s%s" (mode written.mode) written.name (T.show written.type_)
+  Printf.sprintf "%s%s: %s%s" (mode written.mode) written.name (Types.show written.type_)
     (match written.default with Some value -> " = " ^ expression names value | None -> "")
 
 let definition (definition : definition) =

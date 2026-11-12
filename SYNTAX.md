@@ -1424,6 +1424,12 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
   changes to a marked field reach the place when the lend ends. A field
   without the mark is a value, and a change to it ends with the lend. Two
   places lent `mut` by one `yield` must be different places.
+- **A place lent `mut` cannot be inside a variant,** at any depth. After
+  `yield Some(mut self.second)`, the caller could change the variant, as
+  `mut pair.maybe() = None` does, and `self.second` would be left without a
+  value: a use after free. To lend an `Option` to be changed, the method
+  yields a local `Option` with `yield mut` and stores what the caller left
+  in it after the `yield`, as Swift's `_modify` accessors do.
 - **The value owns none of what it was lent.** It holds each lent place's
   value for as long as it is lent, and `self` is lent whole for that time,
   as it is when one part is lent.
@@ -3614,8 +3620,7 @@ truss = "0.1"
 
 [dependencies]
 forecast = []
-"truss::toml" = []
-"truss::http" = ["NetworkClient", "Handles", "Clock"]
+"truss::postgres" = ["NetworkClient", "Handles", "Clock"]
 ```
 
 - **`name`** is a `lower_snake_case` name, or two joined by `::`, an owner
@@ -3680,8 +3685,7 @@ kept in version control.
 ```text
 format 1
 acme::geometry_v2 2.1.3 6f1c2f0f8f0b7a1e3d9c4a5b6e7d8c9f0a1b2c3d4e5f60718293a4b5c6d7e8f9
-truss::http 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, Handles, NetworkClient
-truss::toml 1.9.4 a3b1c5d7e9f20416283a4c6e8f0b2d4f6a8c0e2f4b6d8a0c2e4f6b8d0a2c4e6f
+truss::postgres 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, Handles, NetworkClient
 ```
 
 - The first line names the format. Each line after it is one package: its

@@ -85,7 +85,6 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
-(* The functions the fuzzer can run. *)
 let runnable database =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
