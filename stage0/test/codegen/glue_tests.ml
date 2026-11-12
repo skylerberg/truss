@@ -192,5 +192,3 @@ let () =
                 (Return (Some (copy 9)));
             ];
         ])
-
-let () = Harness.finish ()

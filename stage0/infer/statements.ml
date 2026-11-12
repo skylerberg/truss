@@ -350,7 +350,7 @@ and loop_clause state env (clause : loop_clause) =
   | Invariant value -> check state env value T.bool
   | Loop_decreases measures ->
       List.iter (fun measure -> ignore (expression state env measure)) measures
-  | Loop_cost { resource; bound } -> (
+  | Loop_cost { resource; bound; _ } -> (
       check_resource state resource;
       match bound with
       | Big_o value | At_most value | Exactly value -> ignore (expression state env value)

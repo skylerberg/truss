@@ -1947,7 +1947,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       match frame.updating with
       | Some term -> Some (frame, term)
       | None -> unsupported (at frame node) "an update's target outside an update")
-  | Quantified { quantifier; binder; body } -> quantified context frame node quantifier binder body
+  | Quantified { quantifier; binder; body } -> quantified context frame quantifier binder body
   | Yielded -> (
       (* What the nearest loop or method hands out: a loop's own parts, or
          else, in a lending or yielding method's body, the method's. *)
@@ -2324,7 +2324,7 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
   else
     Option.map (fun frame -> (frame, L.Boolean true)) (join_frames context (List.map fst reached))
 
-and quantified context frame (node : expression) (quantifier : Syntax.quantifier) binder body =
+and quantified context frame (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
     let mark = context.fresh in
     (* The body runs only for the values the premise admits, which may be
@@ -5849,7 +5849,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       (Locals.empty, Locals.empty, None)
       bindings
   in
-  let self_of part self = Option.map fst self
+  let self_of self = Option.map fst self
   and self_type_of part self =
     Option.map (fun (_, ty) -> T.substitute (substitution_of part) ty) self
   in
@@ -5861,8 +5861,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       locals;
       types;
       old_locals = locals;
-      self = self_of part self;
-      old_self = self_of part self;
+      self = self_of self;
+      old_self = self_of self;
       self_type = self_type_of part self;
       result = None;
       checking = false;
@@ -6226,8 +6226,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
               locals = exit_locals;
               types;
               old_locals = entry_locals;
-              self = self_of part exit_self;
-              old_self = self_of part entry_self;
+              self = self_of exit_self;
+              old_self = self_of entry_self;
               self_type = self_type_of part entry_self;
               result = Some result;
               checking = false;
@@ -6258,7 +6258,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                     {
                       ensures_frame with
                       locals = entry_locals;
-                      self = self_of part entry_self;
+                      self = self_of entry_self;
                       yielded = None;
                     }
                   else ensures_frame

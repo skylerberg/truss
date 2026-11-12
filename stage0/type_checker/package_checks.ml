@@ -525,8 +525,7 @@ let check_tests database (package : Path.package) =
          else (name :: seen, found))
        ([], []) tests)
 
-(* The package *)
-
+(* A package's errors, by its name. *)
 let check =
   Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Path.show_package ~saved:true
     (fun database package_name ->

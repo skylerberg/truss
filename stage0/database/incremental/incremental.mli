@@ -98,8 +98,6 @@ val freeze : ?fixed:bool -> t -> unit
     inputs are a package's whose sources never change, such as the standard library's; the others
     are an earlier state of what is being worked on. *)
 
-val is_frozen : t -> bool
-val bases : t -> t list
 val context : t -> context
 
 val observer : t -> context
@@ -181,9 +179,6 @@ val unshared : t -> t -> node list
 val identity : node -> string
 (** What names a node in every engine: a hash of its input or query and its key. *)
 
-val counterpart : node -> t -> node option
-(** The node with the same query or input and key in another engine, if it has one. *)
-
 val current_in : node -> t -> node option
 (** The same, computed there if it is a result the other engine does not have; for an input, the
     same input if the other engine has a cell for it. *)
@@ -205,10 +200,6 @@ type store = {
 (** How an engine keeps values by fingerprint, and facts by key. *)
 
 val attach : t -> store -> unit
-
-val fingerprint : t -> node -> string option
-(** The name of a node's value in the store: the hash of its bytes. [None] for a result that raised,
-    or whose value holds functions, or when no store is attached. *)
 
 val record : t -> unit
 (** Keeps a fact for each saved result computed since the last call: its value under the key of what

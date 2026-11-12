@@ -1,8 +1,8 @@
 (** The interfaces of definitions, as queries.
 
-    [lowered] lowers a definition's outward-facing part and keeps what lowering reported. The other
-    queries project one interface out of it by path, so a definition's diagnostics changing never
-    re-checks a definition that reads its interface. *)
+    [lowered_interface] lowers a definition's outward-facing part and keeps what lowering reported.
+    The other queries project one interface out of it by path, so a definition's diagnostics
+    changing never re-checks a definition that reads its interface. *)
 
 type interface =
   | Function_interface of Types.signature
@@ -21,7 +21,7 @@ type interface =
   | Error_interface of Diagnostic.reported
       (** A definition whose header did not parse: everything is accepted of it. *)
 
-type lowered = {
+type lowered_interface = {
   interface : interface;
   diagnostics : Diagnostic.t list;
   named : (Syntax.span * Types.ty) list;  (** Each named type written, for checking its bounds. *)
@@ -34,9 +34,9 @@ val lower :
   Resolve.Names.key ->
   Syntax.definition ->
   Resolve.resolved ->
-  lowered * Lower.context
+  lowered_interface * Lower.context
 
-val lowered : (Resolve.Names.key, lowered option) Query.query
+val lowered_interface : (Resolve.Names.key, lowered_interface option) Query.query
 
 val interface : (Path.t, interface option) Query.query
 (** The interface a path names, from its definition with ordinal 0. *)

@@ -10,7 +10,6 @@ type system = { os : os; architecture : architecture }
 
 val oses : os list
 val architectures : architecture list
-val os_name : os -> string
 val system_name : system -> string
 
 val host : system option

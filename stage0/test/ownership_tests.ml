@@ -2272,5 +2272,3 @@ let () =
             "fn f(flag: Bool, box: own Box) -> Bool {\n  %s && take(own box) && take(own box)\n}\n"
             chain)
         "ownership.use_after_move")
-
-let () = finish ()

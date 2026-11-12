@@ -2,9 +2,6 @@
    and the C emitter both follow these rules, so a caller and its callee
    always agree. *)
 
-(* Values up to this many bytes are passed and returned by value. *)
-val by_value_limit : int
-
 (* How a parameter of a type and mode arrives: by value, or as a pointer,
    [writable] for [mut] and large [own] parameters. A read-only value that
    holds an array's elements in its own bytes arrives as a pointer whatever

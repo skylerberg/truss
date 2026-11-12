@@ -610,6 +610,9 @@ let check_definition context (definition : Core.definition) =
     }
     definition
 
+(* A definition's pattern errors, in its own offsets: arms not covered,
+   unreachable arms and alternatives, and refutable patterns where only
+   irrefutable ones may go. *)
 let definition_diagnostics =
   Query.query ~name:"pattern_diagnostics" ~phase:Phases.bodies ~saved:true
     ~show:Resolve.Names.show_key (fun database key ->

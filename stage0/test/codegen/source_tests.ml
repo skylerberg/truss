@@ -1,6 +1,5 @@
 (* Truss source compiled with the standard library and run: the basics. *)
 
-open Memory_layout
 open Codegen_support
 
 let () =
@@ -355,5 +354,3 @@ test "negated" {
 }
 |}
         "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")
-
-let () = Harness.finish ()

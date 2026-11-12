@@ -95,10 +95,6 @@ val is_well_known : Well_known.t -> ty -> bool
 (** Whether a type is the well-known type or an instantiation of it: [is_well_known List] holds for
     [List[Int64]]. *)
 
-val integer_types : Intrinsic.builtin list
-(** The built-in integer types, which an integer literal can fill. *)
-
-val float_types : Intrinsic.builtin list
 val is_integer_type : ty -> bool
 val is_signed : ty -> bool
 val is_float_type : ty -> bool
@@ -129,11 +125,6 @@ val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 (** Whether [f] holds for a type or any of its parts, the parts {!map} visits. [resolve] is applied
     to each type before it is tested and taken apart, for a type with variables bound elsewhere. *)
 
-val map_capabilities : (capability list -> capability list) -> ty -> ty
-(** A type with every set of capabilities in it rewritten: the [uses] of each function type and each
-    capability argument, at any depth. *)
-
-val map_argument_capabilities : (capability list -> capability list) -> argument -> argument
 val has_capability_variable : capability list -> bool
 
 val capabilities_unsolved : capability list -> bool
@@ -189,8 +180,6 @@ val generic_arguments : generic list -> argument list
 
 val bounds_of : generic list -> parameter -> trait_reference list
 (** The bounds a list of generics gives one type parameter. *)
-
-val capability_parameters : generic list -> parameter list
 
 val substitution_of : generic list -> argument list -> substitution option
 (** What stands for each of a definition's generic parameters, given its arguments in order, or

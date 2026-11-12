@@ -601,7 +601,7 @@ let check_monitor_callbacks checking implementations =
           (Form.capability_impls state implementation.type_))
     implementations
 
-let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
+let check (state : state) (lowered : Environment.lowered_interface) (form : Core.t) =
   let checking = { state; spans = Syntax_walk.spans state.definition; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
@@ -643,7 +643,7 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
          capability is the scope's [implemented_capability]. *)
       let implemented_capability =
         Option.bind (Query.demand state.database Names.container state.key) (fun container ->
-            match Query.demand state.database Environment.lowered container with
+            match Query.demand state.database Environment.lowered_interface container with
             | Some { interface = Impl_interface impl; _ }
               when Interface.Summary.kind_of state.database impl.implements.trait = Some Capability
               ->

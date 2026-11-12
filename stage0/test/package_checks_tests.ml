@@ -392,5 +392,3 @@ let () =
          trait Mark[Other] {}\n\n\
          impl Mark[Box[Element]] for Box[Element] {}\n\n\
          impl Mark[Element] for Box[Element] {}\n")
-
-let () = finish ()

@@ -13,12 +13,7 @@ let expect_log engine expected =
 let unit_query ?(phase = Phases.syntax) name compute =
   Query.query ~name ~phase ~show:(fun () -> "") compute
 
-type build = {
-  files : (string, string) Query.input;
-  length : (string, int) Query.query;
-  parity : (string, int) Query.query;
-  total : (unit, int) Query.query;
-}
+type build = { files : (string, string) Query.input; total : (unit, int) Query.query }
 
 (* A small build: two "files" as inputs, a length per file, and a total that
    reads the lengths' parities. The lengths are of an earlier phase than
@@ -38,7 +33,7 @@ let build () =
         let first = Query.demand database parity "a" in
         first + Query.demand database parity "b")
   in
-  { files; length; parity; total }
+  { files; total }
 
 let fill engine build =
   Engine.set engine build.files "a" "one";
@@ -685,5 +680,3 @@ let () =
       if Engine.audit ~before:Phases.proofs engine <> [] then
         fail "the audit computed a result of a later phase";
       if Engine.audit engine = [] then fail "the whole audit found nothing")
-
-let () = finish ()

@@ -1828,5 +1828,3 @@ let () =
       fine
         (helper "internal "
        ^ "public fn hidden(value: Int64) -> Int64\n  cost time O(1)\n{\n  half(value)\n}\n"))
-
-let () = finish ()

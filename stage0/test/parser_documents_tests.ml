@@ -20,7 +20,8 @@ let () =
 (* The documents *)
 
 let markdown_files =
-  Sys.readdir "../.." |> Array.to_list
+  Sys.readdir (Harness.workspace_path ".")
+  |> Array.to_list
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
 
@@ -87,5 +88,3 @@ let () =
           "fn f() { x = 0.. }\n";
           "type T = | \n";
         ])
-
-let () = finish ()

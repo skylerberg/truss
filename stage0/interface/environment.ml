@@ -19,7 +19,7 @@ type interface =
   | Error_interface of Diagnostic.reported
       (** A definition whose header did not parse: everything is accepted of it. *)
 
-type lowered = {
+type lowered_interface = {
   interface : interface;
   diagnostics : Diagnostic.t list;
   named : (span * T.ty) list;  (** Each named type written, for checking its bounds. *)
@@ -522,14 +522,15 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     },
     context )
 
-(* The lowered form of a definition, with the context in which its bodies
-   are checked. The interface of a trait, an [impl], or a capability is
-   assembled from its header and from the interface of each method written
-   inside it. Each method's interface reads only the header, so neither
-   query depends on the other. *)
-let rec lowered =
+(* The lowered interface of a definition, with what lowering reported. The
+   interface of a trait, an [impl], or a capability is assembled from its
+   header and from the interface of each method written inside it. Each
+   method's interface reads only the header, so neither query depends on
+   the other. *)
+let rec lowered_interface =
   lazy
-    (Query.query ~name:"lowered" ~phase:Phases.interfaces ~show:Names.show_key (fun database key ->
+    (Query.query ~name:"lowered_interface" ~phase:Phases.interfaces ~show:Names.show_key
+       (fun database key ->
          match
            (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
          with
@@ -542,11 +543,11 @@ and lower database key definition resolved =
   lower_definition database
     ~interface_of:(fun member ->
       Option.map
-        (fun (lowered : lowered) -> lowered.interface)
-        (Query.demand database (Lazy.force lowered) member))
+        (fun (lowered : lowered_interface) -> lowered.interface)
+        (Query.demand database (Lazy.force lowered_interface) member))
     key definition resolved
 
-let lowered = Lazy.force lowered
+let lowered_interface = Lazy.force lowered_interface
 
 let interface =
   Query.query ~name:"interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
@@ -554,7 +555,9 @@ let interface =
     (fun database path ->
       match Query.demand database Summary.key path with
       | Some key ->
-          Option.map (fun lowered -> lowered.interface) (Query.demand database lowered key)
+          Option.map
+            (fun lowered -> lowered.interface)
+            (Query.demand database lowered_interface key)
       | None -> None)
 
 (* The names of a type's fields in declaration order: of a record under
