@@ -60,7 +60,7 @@ type state = {
   text : string;
   mutable tables : C.t;
   form : form;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
   mutable law_parameters : (string * T.ty) list;
@@ -78,19 +78,29 @@ type state = {
 
 val reported :
   state ->
-  ?fixes:Diagnostic.fix list ->
+  ?fixes:Syntax.span Diagnostic.fix list ->
   Diagnostic.Code.types ->
   Syntax.span ->
   string ->
   Diagnostic.reported
 
 val report :
-  state -> ?fixes:Diagnostic.fix list -> Diagnostic.Code.types -> Syntax.span -> string -> unit
+  state ->
+  ?fixes:Syntax.span Diagnostic.fix list ->
+  Diagnostic.Code.types ->
+  Syntax.span ->
+  string ->
+  unit
 
 val bug : ('a, unit, string, 'b) format4 -> 'a
 
 val error :
-  state -> ?fixes:Diagnostic.fix list -> Diagnostic.Code.types -> Syntax.span -> string -> T.ty
+  state ->
+  ?fixes:Syntax.span Diagnostic.fix list ->
+  Diagnostic.Code.types ->
+  Syntax.span ->
+  string ->
+  T.ty
 
 val source : state -> Syntax.span -> string
 val fresh_node_id : state -> int
@@ -105,9 +115,9 @@ val build_pattern : state -> Syntax.pattern -> Core.pattern
 val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
 val place_of : Core.expression -> Core.place
 val fresh_synthetic_local : state -> Core.local
-val fix : string -> Diagnostic.edit list -> Diagnostic.fix
-val replace : Syntax.span -> string -> Diagnostic.edit
-val insert : int -> string -> Diagnostic.edit
+val fix : string -> Syntax.span Diagnostic.edit list -> Syntax.span Diagnostic.fix
+val replace : Syntax.span -> string -> Syntax.span Diagnostic.edit
+val insert : int -> string -> Syntax.span Diagnostic.edit
 val current_frame : state -> frame option
 val record : state -> Syntax.expression -> Types.ty -> unit
 val defer : state -> (unit -> bool) -> unit

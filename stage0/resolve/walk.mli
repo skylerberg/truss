@@ -50,12 +50,17 @@ type state = {
   module_ : Path.module_;
   names : target option array;
   brackets : bracket option array;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   mutable holes : (Syntax.id * (string * value) list) list;
 }
 
 val report :
-  state -> ?fixes:Diagnostic.fix list -> Diagnostic.Code.resolve -> Syntax.span -> string -> unit
+  state ->
+  ?fixes:Syntax.span Diagnostic.fix list ->
+  Diagnostic.Code.resolve ->
+  Syntax.span ->
+  string ->
+  unit
 
 val definition :
   state -> path:Path.t -> ?container:Path.t * Syntax.definition -> Syntax.definition -> unit

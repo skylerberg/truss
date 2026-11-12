@@ -142,7 +142,7 @@ let proven database key states =
   with
   | Some (_, base), Some text ->
       List.for_all
-        (fun (state : Prover.state) ->
+        (fun (state : Diagnostic.span Prover.state) ->
           state.span.stop <= base
           || state.span.start >= base + String.length text
           || state.failure = None)

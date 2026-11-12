@@ -48,7 +48,7 @@ type type_check_result = Body.type_check_result = {
   tables : tables;
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
   evidence : Path.package list;  (** The packages whose [impl]s met a bound in the definition *)
 }
 

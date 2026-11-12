@@ -249,7 +249,7 @@ let check_fixes_work text =
       let before = codes ~lexer_only text in
       let codes = codes ~lexer_only in
       List.iter
-        (fun (fix : Diagnostic.fix) ->
+        (fun (fix : Diagnostic.span Diagnostic.fix) ->
           let rec remove_one = function
             | [] -> []
             | code :: rest -> if code = diagnostic.code then rest else code :: remove_one rest

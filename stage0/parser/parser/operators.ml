@@ -103,7 +103,7 @@ let fix cursor (whole : span) edits =
   let whole_source = Cursor.absolute cursor whole in
   let shifted =
     List.map
-      (fun (edit : Diagnostic.edit) ->
+      (fun (edit : Diagnostic.span Diagnostic.edit) ->
         {
           edit with
           span =

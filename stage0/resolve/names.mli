@@ -76,6 +76,6 @@ val spans : (key, Syntax.span array option) Query.query
 val base : (key, (Path.module_ * int) option) Query.query
 
 val per_definition :
-  Query.context -> Path.module_ -> (key -> Diagnostic.t list) -> Diagnostic.t list
+  Query.context -> Path.module_ -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
 
 val text : (key, string option) Query.query

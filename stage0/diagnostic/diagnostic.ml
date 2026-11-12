@@ -514,23 +514,25 @@ module Code = struct
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
-type edit = { span : span; replacement : string }
-type fix = { title : string; edits : edit list }
+type 'span edit = { span : 'span; replacement : string }
+type 'span fix = { title : string; edits : 'span edit list }
 
-type t = {
+type 'span diagnostic = {
   code : Code.t;
   message : string;
-  span : span;
-  notes : (span * string) list;
-  fixes : fix list;
+  span : 'span;
+  notes : ('span * string) list;
+  fixes : 'span fix list;
 }
+
+type t = span diagnostic
 
 let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span; notes; fixes }
 
 type reported = Reported
 
-let reported (_ : t) = Reported
-let recovered (_ : span) = Reported
+let reported (_ : _ diagnostic) = Reported
+let recovered _ = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert offset replacement = { span = Source.zero_width offset; replacement }
@@ -582,32 +584,36 @@ let closest text candidates =
   in
   Option.map fst best
 
-let move offset diagnostic =
-  let move_span (span : span) = Source.span (span.start + offset) (span.stop + offset) in
+let map_spans convert diagnostic =
   {
     diagnostic with
-    span = move_span diagnostic.span;
-    notes = List.map (fun (span, note) -> (move_span span, note)) diagnostic.notes;
+    span = convert diagnostic.span;
+    notes = List.map (fun (span, note) -> (convert span, note)) diagnostic.notes;
     fixes =
       List.map
         (fun fix ->
           {
             fix with
             edits =
-              List.map (fun (edit : edit) -> { edit with span = move_span edit.span }) fix.edits;
+              List.map
+                (fun (edit : _ edit) ->
+                  { span = convert edit.span; replacement = edit.replacement })
+                fix.edits;
           })
         diagnostic.fixes;
   }
 
-let apply_fix text fix =
+let apply_fix text (fix : span fix) =
   (* Edits at the same offset apply in the order they are listed. *)
   let edits =
-    List.stable_sort (fun (a : edit) (b : edit) -> compare a.span.start b.span.start) fix.edits
+    List.stable_sort
+      (fun (a : span edit) (b : span edit) -> compare a.span.start b.span.start)
+      fix.edits
   in
   let buffer = Buffer.create (String.length text) in
   let position =
     List.fold_left
-      (fun position (edit : edit) ->
+      (fun position (edit : span edit) ->
         if edit.span.start < position then invalid_arg "Diagnostic.apply_fix: overlapping edits";
         Buffer.add_substring buffer text position (edit.span.start - position);
         Buffer.add_string buffer edit.replacement;
@@ -697,10 +703,7 @@ let render source diagnostic =
   (* The line holding the start of the span, with the part of the span on that
      line marked. *)
   let start = diagnostic.span.start in
-  let line_start =
-    let line_start = Source.line_start source start in
-    if line_start = 0 then Source.byte_order_mark_length source else line_start
-  in
+  let line_start = Source.line_start source start in
   let line_end = Source.line_end source start in
   let line = String.sub text line_start (line_end - line_start) in
   let _, start_column = Source.position source start in
@@ -732,7 +735,7 @@ let render source diagnostic =
     (fun fix ->
       Printf.bprintf buffer "  fix: %s\n" fix.title;
       List.iter
-        (fun (edit : edit) ->
+        (fun (edit : span edit) ->
           let original = String.sub text edit.span.start (edit.span.stop - edit.span.start) in
           Printf.bprintf buffer "    %s at %s\n"
             (if edit.span.start = edit.span.stop then "insert " ^ quote edit.replacement
@@ -780,7 +783,7 @@ let to_json_object source diagnostic =
       (fun fix ->
         let edits =
           List.map
-            (fun (edit : edit) ->
+            (fun (edit : span edit) ->
               Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
                 edit.span.stop (json_string edit.replacement))
             fix.edits

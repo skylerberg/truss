@@ -21,7 +21,7 @@ type interface =
 
 type lowered_interface = {
   interface : interface;
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
   named : (span * T.ty) list;  (** Each named type written, for checking its bounds. *)
   bounds : (T.parameter * T.trait_reference list) list;  (** The generic parameters' bounds. *)
 }

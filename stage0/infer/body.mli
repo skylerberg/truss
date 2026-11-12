@@ -7,7 +7,7 @@ module Lower = Interface.Lower
 type type_check_result = {
   tables : Tables.published;
   core : Core.t option;
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
   evidence : Path.package list;
 }
 

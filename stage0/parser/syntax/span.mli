@@ -4,6 +4,10 @@
 type t = private { start : int; stop : int }
 
 val make : int -> int -> t
+val zero_width : int -> t
 
-val to_source : t -> Source.span
-(** The same offsets as a {!Source.span}. *)
+val to_source : base:int -> t -> Source.span
+(** The span in its file's offsets, for the definition at [base]. *)
+
+val of_source : base:int -> Source.span -> t
+(** The span relative to [base]. Raises [Invalid_argument] if the span starts before [base]. *)

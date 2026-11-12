@@ -20,7 +20,7 @@ type obligation = {
   span : span;
   message : string;
   cited : (Names.key * span) option;
-  fixes : Diagnostic.fix list;
+  fixes : Syntax.span Diagnostic.fix list;
   query : L.query;
   contracts_alone : L.query option;
   values : (L.symbol * string) list;

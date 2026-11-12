@@ -7,11 +7,11 @@ type state = {
   key : Names.key;
   definition : definition;
   lowered : Environment.lowered_interface;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
 }
 
 let reported state ?fixes code (span : span) message =
-  let diagnostic = Diagnostic.make ?fixes ~code:(Types code) (Syntax.Span.to_source span) message in
+  let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
 
@@ -26,9 +26,7 @@ let implements state type_ trait =
 (* Bounds on the arguments of a written type *)
 
 let bound_diagnostics database ~package ~bounds named =
-  let diagnostic code (span : span) message =
-    Diagnostic.make ~code (Syntax.Span.to_source span) message
-  in
+  let diagnostic code (span : span) message = Diagnostic.make ~code span message in
   List.concat_map
     (fun ((span : span), (type_ : T.ty)) ->
       match type_ with
@@ -190,7 +188,7 @@ let field_names (fields : field list) =
 (* The edit that removes one trait from a [derives] clause, or the whole
    clause when it is the only one. *)
 let remove_derived (clause : type_clause) (traits : path_type list) (written : path_type) =
-  let delete start stop = Diagnostic.delete (Source.span start stop) in
+  let delete start stop = Diagnostic.delete (Span.make start stop) in
   match traits with
   | [ _ ] -> delete clause.span.start clause.span.stop
   | _ -> (
@@ -502,7 +500,7 @@ type view = {
   impl_bounds : T.parameter -> T.trait_reference list;
   normalize : T.ty -> T.ty;
   normalize_capabilities : T.capability list -> T.capability list;
-  missing_associated : (string * Diagnostic.t) list;
+  missing_associated : (string * Syntax.diagnostic) list;
 }
 
 let compiler_implements (impl : T.impl_interface) =
@@ -533,8 +531,7 @@ let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type
               else
                 Some
                   ( associated.associated_name,
-                    Diagnostic.make ~code:(Types Missing_member)
-                      (Syntax.Span.to_source trait_path.span)
+                    Diagnostic.make ~code:(Types Missing_member) trait_path.span
                       (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares."
                          associated.associated_name shown_trait) ))
             trait.associated_types
@@ -601,7 +598,7 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
         let check_evidence_grants (span : span) evidence =
           state.diagnostics <-
             List.map
-              (Diagnostic.make ~code:(Capabilities Not_granted) (Syntax.Span.to_source span))
+              (Diagnostic.make ~code:(Capabilities Not_granted) span)
               (Grants.evidence_messages database ~package:state.key.module_.package
                  ~bounds:impl_bounds evidence)
             @ state.diagnostics
@@ -963,7 +960,7 @@ let diagnostics =
           let state = { database; key; definition; lowered; diagnostics = [] } in
           check state;
           List.sort
-            (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
               compare (left.span, left.code) (right.span, right.code))
             (lowered.diagnostics @ state.diagnostics)
       | _ -> [])

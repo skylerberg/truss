@@ -8,8 +8,13 @@ let zero_width position = span position position
 
 type t = { path : string; text : string; line_starts : int array }
 
+let byte_order_mark = "\xEF\xBB\xBF"
+
 let compute_line_starts text =
-  let starts = Dynarray.of_list [ 0 ] in
+  let first =
+    if String.starts_with ~prefix:byte_order_mark text then String.length byte_order_mark else 0
+  in
+  let starts = Dynarray.of_list [ first ] in
   let length = String.length text in
   String.iteri
     (fun index character ->
@@ -25,9 +30,6 @@ let create ~path text = { path; text; line_starts = compute_line_starts text }
 let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
 let path source = source.path
 let text source = source.text
-
-let byte_order_mark_length source =
-  if String.starts_with ~prefix:"\xEF\xBB\xBF" source.text then 3 else 0
 
 (* The index of the line holding [offset], counting from 0. *)
 let line_index source offset =
@@ -52,11 +54,6 @@ let line_end source offset =
 
 type units = Bytes | Scalar_values | Utf_16_code_units
 
-(* Where the columns of a line start counting: after the byte order mark on
-   the first line. *)
-let first_column source index =
-  max source.line_starts.(index) (if index = 0 then byte_order_mark_length source else 0)
-
 (* The width in [units] of the character at [at], and its width in bytes. *)
 let step units text at =
   let decoded = String.get_utf_8_uchar text at in
@@ -76,7 +73,7 @@ let location units source offset =
       let counted, width = step units source.text at in
       count (at + width) (column + counted)
   in
-  (index, count (first_column source index) 0)
+  (index, count source.line_starts.(index) 0)
 
 let position source offset =
   let line, column = location Scalar_values source offset in
@@ -92,7 +89,6 @@ let offset units source ~line ~column =
         let units, width = step units source.text at in
         walk (at + width) (counted + units)
     in
-    walk (first_column source line) 0
+    walk source.line_starts.(line) 0
 
-let starts_line source offset =
-  offset = line_start source offset || offset = byte_order_mark_length source
+let starts_line source offset = offset = line_start source offset

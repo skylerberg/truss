@@ -13,11 +13,9 @@ val split : Token.t array -> piece list
 
 val is_use : Token.t array -> piece -> bool
 
-type relative_diagnostics
-(** A piece's diagnostics, relative to its base, so that a piece that only moved has the same ones.
-    They cannot be shown until {!placed} puts them in the file's offsets. *)
-
-type 'value parsed = { value : 'value Syntax.item; diagnostics : relative_diagnostics }
+type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnostic list }
+(** A piece's diagnostics are relative to its base, so that a piece that only moved has the same
+    ones. *)
 
 val placed : _ parsed -> Diagnostic.t list
 (** A piece's diagnostics, moved by its base to their place in the file. *)

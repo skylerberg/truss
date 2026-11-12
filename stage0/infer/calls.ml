@@ -48,9 +48,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
                   ~fixes:
                     [
                       fix "Remove the label."
-                        [
-                          Diagnostic.delete (Source.span label.span.start argument.value.span.start);
-                        ];
+                        [ Diagnostic.delete (Span.make label.span.start argument.value.span.start) ];
                     ]
                   "A call through a function value passes its arguments by position, without \
                    labels."

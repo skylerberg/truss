@@ -6,7 +6,7 @@
    not give what either meant. They are applied in the next round once the
    file is checked again. *)
 let chosen (diagnostics : Diagnostic.t list) =
-  let overlaps (a : Diagnostic.edit) (b : Diagnostic.edit) =
+  let overlaps (a : Diagnostic.span Diagnostic.edit) (b : Diagnostic.span Diagnostic.edit) =
     (a.span.start < b.span.stop && b.span.start < a.span.stop)
     || (a.span.start = b.span.start && (a.span.start = a.span.stop || b.span.start = b.span.stop))
   in
@@ -17,7 +17,8 @@ let chosen (diagnostics : Diagnostic.t list) =
       | [ fix ] ->
           let clear =
             List.for_all
-              (fun (edit : Diagnostic.edit) -> not (List.exists (overlaps edit) !taken))
+              (fun (edit : Diagnostic.span Diagnostic.edit) ->
+                not (List.exists (overlaps edit) !taken))
               fix.edits
           in
           if clear then taken := fix.edits @ !taken;
@@ -27,10 +28,10 @@ let chosen (diagnostics : Diagnostic.t list) =
 
 (* Applies non-overlapping edits to a text, from the last to the first, so
    each edit's offsets still hold when it is applied. *)
-let apply text (edits : Diagnostic.edit list) =
-  List.sort (fun (a : Diagnostic.edit) b -> compare b.span.start a.span.start) edits
+let apply text (edits : Diagnostic.span Diagnostic.edit list) =
+  List.sort (fun (a : Diagnostic.span Diagnostic.edit) b -> compare b.span.start a.span.start) edits
   |> List.fold_left
-       (fun text (edit : Diagnostic.edit) ->
+       (fun text (edit : Diagnostic.span Diagnostic.edit) ->
          String.sub text 0 edit.span.start ^ edit.replacement
          ^ String.sub text edit.span.stop (String.length text - edit.span.stop))
        text

@@ -15,7 +15,7 @@ type context = {
   yields : bool;
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   mutable moves : Core.id list;
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
 }
@@ -29,7 +29,7 @@ val span : context -> Core.origin -> Syntax.span
 
 val report :
   context ->
-  ?fixes:Diagnostic.fix list ->
+  ?fixes:Syntax.span Diagnostic.fix list ->
   ?notes:(Syntax.span * string) list ->
   Diagnostic.Code.ownership ->
   Syntax.span ->
@@ -40,5 +40,5 @@ val kind : context -> Place.root -> kind
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
 val collect : context -> Core.definition -> unit
-val copy_at : context -> Core.origin -> Diagnostic.edit list
+val copy_at : context -> Core.origin -> Syntax.span Diagnostic.edit list
 val with_mark : context -> Core.origin -> Syntax.span
