@@ -28,6 +28,7 @@
   library_use_tests
   scale_tests)
  (libraries
+  process
   harness
   substring
   compiler_bug

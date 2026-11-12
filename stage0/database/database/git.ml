@@ -2,8 +2,8 @@
    directory. *)
 
 let run ?environment ~directory arguments =
-  match Process.run ?environment "git" ("-C" :: directory :: arguments) with
-  | 0, output, _ -> Some output
+  match Process.output ?environment "git" ("-C" :: directory :: arguments) with
+  | 0, output -> Some output
   | _ | (exception Unix.Unix_error _) -> None
 
 let common_directory directory =
