@@ -1,0 +1,1258 @@
+use standard::compression
+use standard::html
+use standard::intrinsic
+use standard::json
+use standard::network
+use standard::serialization
+use standard::streams
+use standard::text
+use standard::time
+use standard::url
+
+public type Method =
+  | Get
+  | Head
+  | Post
+  | Put
+  | Patch
+  | Delete
+  | Options
+  | Connect
+  | Trace
+  | Other(name: String)
+  derives Equal
+
+public fn Method.from_name(name: StringSlice) -> Method
+  cost time finite
+{
+  if name == "GET".slice() {
+    Method.Get
+  } else if name == "HEAD".slice() {
+    Method.Head
+  } else if name == "POST".slice() {
+    Method.Post
+  } else if name == "PUT".slice() {
+    Method.Put
+  } else if name == "PATCH".slice() {
+    Method.Patch
+  } else if name == "DELETE".slice() {
+    Method.Delete
+  } else if name == "OPTIONS".slice() {
+    Method.Options
+  } else if name == "CONNECT".slice() {
+    Method.Connect
+  } else if name == "TRACE".slice() {
+    Method.Trace
+  } else {
+    Method.Other(name: name.to_string())
+  }
+}
+
+impl Display for Method {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Get => mut output.write("GET")
+      Head => mut output.write("HEAD")
+      Post => mut output.write("POST")
+      Put => mut output.write("PUT")
+      Patch => mut output.write("PATCH")
+      Delete => mut output.write("DELETE")
+      Options => mut output.write("OPTIONS")
+      Connect => mut output.write("CONNECT")
+      Trace => mut output.write("TRACE")
+      Other(name) => mut output.write(name.slice())
+    }
+  }
+}
+
+public type Status(code: UInt16)
+  derives Equal, Hash, Ordered
+
+public let Status.switching_protocols: Status = Status(code: 101)
+public let Status.ok: Status = Status(code: 200)
+public let Status.created: Status = Status(code: 201)
+public let Status.accepted: Status = Status(code: 202)
+public let Status.no_content: Status = Status(code: 204)
+public let Status.moved_permanently: Status = Status(code: 301)
+public let Status.found: Status = Status(code: 302)
+public let Status.see_other: Status = Status(code: 303)
+public let Status.not_modified: Status = Status(code: 304)
+public let Status.temporary_redirect: Status = Status(code: 307)
+public let Status.permanent_redirect: Status = Status(code: 308)
+public let Status.bad_request: Status = Status(code: 400)
+public let Status.unauthorized: Status = Status(code: 401)
+public let Status.forbidden: Status = Status(code: 403)
+public let Status.not_found: Status = Status(code: 404)
+public let Status.method_not_allowed: Status = Status(code: 405)
+public let Status.request_timeout: Status = Status(code: 408)
+public let Status.conflict: Status = Status(code: 409)
+public let Status.gone: Status = Status(code: 410)
+public let Status.length_required: Status = Status(code: 411)
+public let Status.content_too_large: Status = Status(code: 413)
+public let Status.unsupported_media_type: Status = Status(code: 415)
+public let Status.unprocessable_content: Status = Status(code: 422)
+public let Status.too_many_requests: Status = Status(code: 429)
+public let Status.request_header_fields_too_large: Status = Status(code: 431)
+public let Status.internal_server_error: Status = Status(code: 500)
+public let Status.not_implemented: Status = Status(code: 501)
+public let Status.bad_gateway: Status = Status(code: 502)
+public let Status.service_unavailable: Status = Status(code: 503)
+public let Status.gateway_timeout: Status = Status(code: 504)
+public let Status.http_version_not_supported: Status = Status(code: 505)
+
+public fn Status.reason(self) -> StringSlice {
+  match self.code {
+    100 => "Continue"
+    101 => "Switching Protocols"
+    200 => "OK"
+    201 => "Created"
+    202 => "Accepted"
+    204 => "No Content"
+    301 => "Moved Permanently"
+    302 => "Found"
+    303 => "See Other"
+    304 => "Not Modified"
+    307 => "Temporary Redirect"
+    308 => "Permanent Redirect"
+    400 => "Bad Request"
+    401 => "Unauthorized"
+    403 => "Forbidden"
+    404 => "Not Found"
+    405 => "Method Not Allowed"
+    408 => "Request Timeout"
+    409 => "Conflict"
+    410 => "Gone"
+    411 => "Length Required"
+    413 => "Content Too Large"
+    415 => "Unsupported Media Type"
+    422 => "Unprocessable Content"
+    429 => "Too Many Requests"
+    431 => "Request Header Fields Too Large"
+    500 => "Internal Server Error"
+    501 => "Not Implemented"
+    502 => "Bad Gateway"
+    503 => "Service Unavailable"
+    504 => "Gateway Timeout"
+    505 => "HTTP Version Not Supported"
+    _ => ""
+  }.slice()
+}
+
+public fn Status.is_success(self) -> Bool {
+  self.code >= 200 && self.code < 300
+}
+
+public type Header(name: String, value: String)
+  derives Equal
+
+public opaque type Headers(entries: List[Header])
+  derives Equal
+
+fn same_name(first: StringSlice, second: StringSlice) -> Bool
+  cost time finite
+{
+  if first.length() != second.length() {
+    return false
+  }
+  for index in 0..first.length() {
+    let a = first.byte(index)
+    let b = second.byte(index)
+    let lower_a = if 65 <= a && a <= 90 { a + 32 } else { a }
+    let lower_b = if 65 <= b && b <= 90 { b + 32 } else { b }
+    if lower_a != lower_b {
+      return false
+    }
+  }
+  true
+}
+
+public fn Headers.new() -> Headers {
+  Headers(entries: [])
+}
+
+public fn Headers.length(self) -> USize {
+  self.entries.length()
+}
+
+public fn Headers.entries(self) -> Slice[Header] {
+  self.entries.slice()
+}
+
+public fn Headers.get(self, name: StringSlice) -> Option[StringSlice] {
+  for entry in self.entries {
+    if same_name(entry.name.slice(), second: name) {
+      return Some(entry.value.slice())
+    }
+  }
+  None
+}
+
+public fn Headers.contains(self, name: StringSlice) -> Bool {
+  self.get(name) is Some(_)
+}
+
+public fn Headers.add(mut self, name: StringSlice, value: StringSlice) {
+  mut self.entries.push(Header(name: name.to_string(), value: value.to_string()))
+}
+
+public fn Headers.remove(mut self, name: StringSlice) {
+  mut self.entries.retain(fn(entry) { !same_name(entry.name.slice(), second: name) })
+}
+
+public fn Headers.set(mut self, name: StringSlice, value: StringSlice) {
+  mut self.remove(name)
+  mut self.add(name, value: value)
+}
+
+fn has_token(header: Option[StringSlice], token: StringSlice) -> Bool {
+  match header {
+    Some(value) => {
+      for part in value.split(",") {
+        if same_name(part.trim(), second: token) {
+          return true
+        }
+      }
+      false
+    }
+    None => false
+  }
+}
+
+public type Request(method: Method, target: String, headers: Headers = Headers(entries: []), body: List[UInt8] = [])
+
+public fn Request.path(self) -> StringSlice {
+  match self.target.slice().find("?") {
+    Some(at) => self.target.slice().part(0, to: at)
+    None => self.target.slice()
+  }
+}
+
+public fn Request.query(self) -> Option[StringSlice] {
+  match self.target.slice().find("?") {
+    Some(at) => Some(self.target.slice().part(at + 1, to: self.target.length()))
+    None => None
+  }
+}
+
+public fn Request.query_parameter(self, name: StringSlice) -> Option[String] {
+  match self.query() {
+    Some(query) => match url::decode_query(query) {
+      Ok(parameters) => {
+        for parameter in parameters {
+          if parameter.name.slice() == name {
+            return Some(parameter.value.copy())
+          }
+        }
+        None
+      }
+      Err(_) => None
+    }
+    None => None
+  }
+}
+
+public fn Request.header(self, name: StringSlice) -> Option[StringSlice] {
+  self.headers.get(name)
+}
+
+public fn Request.text(self) -> Result[String, text::Utf8Error] {
+  String.from_utf8(self.body.copy())
+}
+
+public fn Request.json[Item: serialization::Deserialize](self) -> Result[Item, json::Error] {
+  match json::parse_bytes(self.body.slice()) {
+    Ok(value) => match json::from_value[Item](own value) {
+      Ok(item) => Ok(own item)
+      Err(error) => Err(json::Error.Deserialize(error: own error))
+    }
+    Err(error) => Err(json::Error.Parse(error: error))
+  }
+}
+
+public type Response(status: Status, headers: Headers = Headers(entries: []), body: List[UInt8] = [])
+
+public fn Response.new(status: Status = Status.ok) -> Response {
+  Response(status: status)
+}
+
+public fn Response.text(body: StringSlice, status: Status = Status.ok) -> Response {
+  var headers = Headers.new()
+  mut headers.add("Content-Type", value: "text/plain; charset=utf-8")
+  Response(status: status, headers: own headers, body: body.bytes().to_list())
+}
+
+public fn Response.html(page: html::Html, status: Status = Status.ok) -> Response {
+  var headers = Headers.new()
+  mut headers.add("Content-Type", value: "text/html; charset=utf-8")
+  Response(status: status, headers: own headers, body: page.text().bytes().to_list())
+}
+
+public fn Response.json[Item: serialization::Serialize](item: Item, status: Status = Status.ok) -> Response {
+  var headers = Headers.new()
+  mut headers.add("Content-Type", value: "application/json")
+  let text = json::encode(item)
+  Response(status: status, headers: own headers, body: text.slice().bytes().to_list())
+}
+
+fn accepts_gzip(header: Option[StringSlice]) -> Bool {
+  match header {
+    Some(value) => {
+      for part in value.split(",") {
+        let coding = part.trim()
+        let name = match coding.find(";") {
+          Some(at) => coding.part(0, to: at).trim()
+          None => coding
+        }
+        if same_name(name, second: "gzip") || same_name(name, second: "*") {
+          return !coding.contains("q=0") || coding.contains("q=0.")
+        }
+      }
+      false
+    }
+    None => false
+  }
+}
+
+fn is_compressible(content_type: Option[StringSlice]) -> Bool {
+  match content_type {
+    Some(value) => value.starts_with("text/") || value.starts_with("application/json")
+      || value.starts_with("application/javascript") || value.starts_with("application/xml")
+      || value.starts_with("image/svg+xml")
+    None => false
+  }
+}
+
+public fn Response.compressed(own self, request: Request) -> Response {
+  var response = own self
+  if response.body.length() < 1024 || response.headers.contains("Content-Encoding")
+    || !accepts_gzip(request.headers.get("Accept-Encoding")) || !is_compressible(response.headers.get("Content-Type"))
+  {
+    return response
+  }
+  response.body = compression::compress(response.body.slice(), format: compression::Format.Gzip, level: compression::Level.Fastest)
+  mut response.headers.set("Content-Encoding", value: "gzip")
+  mut response.headers.add("Vary", value: "Accept-Encoding")
+  response
+}
+
+public fn Response.with_header(own self, name: StringSlice, value: StringSlice) -> Response {
+  var response = own self
+  mut response.headers.set(name, value: value)
+  response
+}
+
+public fn Response.text_body(self) -> Result[String, text::Utf8Error] {
+  String.from_utf8(self.body.copy())
+}
+
+public type Error =
+  | Malformed(message: String)
+  | HeadTooLarge
+  | BodyTooLarge
+  | Closed
+  | System(error: SystemError)
+  | Unsupported(message: String)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Malformed(message) => {
+        mut output.write("malformed HTTP: ")
+        mut output.write(message.slice())
+      }
+      HeadTooLarge => mut output.write("the request line and headers are too large")
+      BodyTooLarge => mut output.write("the body is too large")
+      Closed => mut output.write("the connection closed before the message ended")
+      System(error) => error.display(mut output)
+      Unsupported(message) => mut output.write(message.slice())
+    }
+  }
+}
+
+fn malformed(message: StringSlice) -> Error {
+  Error.Malformed(message: message.to_string())
+}
+
+fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error] {
+  match own outcome {
+    Ok(value) => Ok(own value)
+    Err(error) => Err(Error.System(error: error))
+  }
+}
+
+let weekday_names: Array[String, 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+let month_names: Array[String, 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+fn push_two_digits(output: mut String, value: UInt8) {
+  if value < 10 {
+    mut output.push("0")
+  }
+  mut output.push("${value}".slice())
+}
+
+public fn format_date(instant: Instant) -> String {
+  let moment = instant.date_time()
+  let date = moment.date
+  let clock = moment.time
+  var output = ""
+  let weekday: USize = intrinsic::convert(date.weekday().number_from_monday())
+  mut output.push(if weekday >= 1 && weekday <= 7 { weekday_names[weekday - 1].slice() } else { "Mon".slice() })
+  mut output.push(", ")
+  push_two_digits(mut output, value: date.day())
+  mut output.push(" ")
+  let month: USize = intrinsic::convert(date.month().number())
+  mut output.push(if month >= 1 && month <= 12 { month_names[month - 1].slice() } else { "Jan".slice() })
+  mut output.push(" ")
+  mut output.push("${date.year()}".slice())
+  mut output.push(" ")
+  push_two_digits(mut output, value: clock.hour())
+  mut output.push(":")
+  push_two_digits(mut output, value: clock.minute())
+  mut output.push(":")
+  push_two_digits(mut output, value: clock.second())
+  mut output.push(" GMT")
+  output
+}
+
+fn month_number(name: StringSlice) -> Option[UInt8] {
+  let count: USize = 12
+  for index in 0..count {
+    if same_name(month_names[index].slice(), second: name) {
+      return Some(intrinsic::convert(index + 1))
+    }
+  }
+  None
+}
+
+fn number_of(text: StringSlice) -> Option[UInt32] {
+  match UInt32.parse(text.trim()) {
+    Ok(number) => Some(number)
+    Err(_) => None
+  }
+}
+
+fn clock_of(text: StringSlice) -> Option[time::TimeOfDay] {
+  let parts: List[StringSlice] = List.collect(text.split(":"))
+  if parts.length() != 3 {
+    return None
+  }
+  match number_of(parts[0]), number_of(parts[1]), number_of(parts[2]) {
+    Some(hour), Some(minute), Some(second) => {
+      if hour > 23 || minute > 59 || second > 60 {
+        return None
+      }
+      time::TimeOfDay.new(intrinsic::convert(hour), minute: intrinsic::convert(minute), second: intrinsic::convert(if second == 60 { 59 } else { second }))
+    }
+    _, _, _ => None
+  }
+}
+
+public fn parse_date(text: StringSlice) -> Option[Instant] {
+  let words: List[StringSlice] = List.collect(text.split_whitespace())
+  var day: Option[UInt32] = None
+  var month: Option[UInt8] = None
+  var year: Option[UInt32] = None
+  var clock: Option[time::TimeOfDay] = None
+  if words.length() == 6 && words[5] == "GMT".slice() {
+    day = number_of(words[1])
+    month = month_number(words[2])
+    year = number_of(words[3])
+    clock = clock_of(words[4])
+  } else if words.length() == 4 && words[3] == "GMT".slice() {
+    let parts: List[StringSlice] = List.collect(words[1].split("-"))
+    if parts.length() == 3 {
+      day = number_of(parts[0])
+      month = month_number(parts[1])
+      year = match number_of(parts[2]) {
+        Some(short) => Some(if short < 70 { 2000 + short } else if short < 100 { 1900 + short } else { short })
+        None => None
+      }
+    }
+    clock = clock_of(words[2])
+  } else if words.length() == 5 {
+    month = month_number(words[1])
+    day = number_of(words[2])
+    clock = clock_of(words[3])
+    year = number_of(words[4])
+  }
+  match day, month, year, clock {
+    Some(day_number), Some(month_found), Some(year_number), Some(time_of_day) => {
+      if day_number > 31 || year_number > 9999 {
+        return None
+      }
+      match time::Date.new(intrinsic::convert(year_number), month: month_found, day: intrinsic::convert(day_number)) {
+        Some(date) => date.at(time_of_day).instant(0)
+        None => None
+      }
+    }
+    _, _, _, _ => None
+  }
+}
+
+public type Limits(head_bytes: USize = 65536, body_bytes: USize = 8388608)
+  derives Equal
+
+type Head(method: Method, target: String, version_one_zero: Bool, headers: Headers)
+
+fn line_text(bytes: own List[UInt8]) -> Result[String, Error] {
+  var line = own bytes
+  if line.length() > 0 && line[line.length() - 1] == 10 {
+    mut line.truncate(line.length() - 1)
+  }
+  if line.length() > 0 && line[line.length() - 1] == 13 {
+    mut line.truncate(line.length() - 1)
+  }
+  match String.from_utf8(own line) {
+    Ok(text) => Ok(own text)
+    Err(_) => Err(malformed("a line that is not UTF-8"))
+  }
+}
+
+fn read_line[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  budget: mut USize,
+) -> Result[Option[String], Error]
+  uses Handles
+{
+  var bytes: List[UInt8] = []
+  let count = system(mut reader.read_until(10, buffer: mut bytes, limit: budget))?
+  if count == 0 {
+    return Ok(None)
+  }
+  budget = budget.saturating_subtract(count)
+  if bytes.is_empty() || bytes[bytes.length() - 1] != 10 {
+    return if budget == 0 { Err(Error.HeadTooLarge) } else { Err(Error.Closed) }
+  }
+  Ok(Some(line_text(own bytes)?))
+}
+
+fn is_token_byte(byte: UInt8) -> Bool {
+  (48 <= byte && byte <= 57) || (65 <= byte && byte <= 90) || (97 <= byte && byte <= 122)
+    || byte == 33 || byte == 35 || byte == 36 || byte == 37 || byte == 38 || byte == 39 || byte == 42 || byte == 43
+    || byte == 45 || byte == 46 || byte == 94 || byte == 95 || byte == 96 || byte == 124 || byte == 126
+}
+
+fn is_token(text: StringSlice) -> Bool {
+  if text.is_empty() {
+    return false
+  }
+  for byte in text.bytes() {
+    if !is_token_byte(byte) {
+      return false
+    }
+  }
+  true
+}
+
+fn read_headers[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  budget: mut USize,
+) -> Result[Headers, Error]
+  uses Handles
+{
+  var headers = Headers.new()
+  while true {
+    match read_line(mut reader, budget: mut budget)? {
+      None => return Err(Error.Closed)
+      Some(line) => {
+        if line.is_empty() {
+          return Ok(own headers)
+        }
+        let text = line.slice()
+        if text.byte(0) == 32 || text.byte(0) == 9 {
+          return Err(malformed("a header folded onto a second line"))
+        }
+        match text.find(":") {
+          Some(colon) => {
+            let name = text.part(0, to: colon)
+            if !is_token(name) {
+              return Err(malformed("a header name that is not a token"))
+            }
+            let value = text.part(colon + 1, to: text.length()).trim()
+            mut headers.add(name, value: value)
+          }
+          None => return Err(malformed("a header line without a colon"))
+        }
+      }
+    }
+  }
+}
+
+fn read_head[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  limits: Limits,
+) -> Result[Option[Head], Error]
+  uses Handles
+{
+  var budget = limits.head_bytes
+  var request_line = ""
+  var blank = true
+  while blank {
+    match read_line(mut reader, budget: mut budget)? {
+      None => return Ok(None)
+      Some(line) => {
+        blank = line.is_empty()
+        request_line = own line
+      }
+    }
+  }
+  let parts: List[StringSlice] = List.collect(request_line.slice().split(" "))
+  if parts.length() != 3 || !is_token(parts[0]) || parts[1].is_empty() {
+    return Err(malformed("a request line that is not a method, a target, and a version"))
+  }
+  let version = parts[2]
+  if version != "HTTP/1.1".slice() && version != "HTTP/1.0".slice() {
+    return Err(Error.Unsupported(message: "an HTTP version other than 1.0 and 1.1"))
+  }
+  let headers = read_headers(mut reader, budget: mut budget)?
+  Ok(Some(Head(
+    method: Method.from_name(parts[0]),
+    target: parts[1].to_string(),
+    version_one_zero: version == "HTTP/1.0".slice(),
+    headers: own headers,
+  )))
+}
+
+fn content_length(headers: Headers) -> Result[Option[USize], Error] {
+  var found: Option[USize] = None
+  for entry in headers.entries() {
+    if same_name(entry.name.slice(), second: "Content-Length") {
+      let digits = entry.value.slice()
+      var digits_only = !digits.is_empty()
+      for byte in digits.bytes() {
+        if byte < 48 || byte > 57 {
+          digits_only = false
+        }
+      }
+      if !digits_only {
+        return Err(malformed("a Content-Length that is not a number"))
+      }
+      match USize.parse(digits) {
+        Ok(length) => {
+          if found is Some(other) && other != length {
+            return Err(malformed("two different Content-Length headers"))
+          }
+          found = Some(length)
+        }
+        Err(_) => return Err(Error.BodyTooLarge)
+      }
+    }
+  }
+  Ok(found)
+}
+
+fn read_exactly[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  count: USize,
+  body: mut List[UInt8],
+) -> Result[Unit, Error]
+  uses Handles
+{
+  var left = count
+  while left > 0 {
+    let got = system(mut reader.read(mut body, limit: left))?
+    if got == 0 {
+      return Err(Error.Closed)
+    }
+    left = left.saturating_subtract(got)
+  }
+  Ok(Unit)
+}
+
+fn read_chunked[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  limits: Limits,
+) -> Result[List[UInt8], Error]
+  uses Handles
+{
+  var body: List[UInt8] = []
+  var budget = limits.head_bytes
+  while true {
+    let line = match read_line(mut reader, budget: mut budget)? {
+      Some(line) => own line
+      None => return Err(Error.Closed)
+    }
+    let size_text = match line.slice().find(";") {
+      Some(at) => line.slice().part(0, to: at).trim()
+      None => line.slice().trim()
+    }
+    let size = match USize.parse_radix(size_text, radix: 16) {
+      Ok(size) => size
+      Err(_) => return Err(malformed("a chunk size that is not a hexadecimal number"))
+    }
+    if size == 0 {
+      let _ = read_headers(mut reader, budget: mut budget)?
+      return Ok(own body)
+    }
+    if size > limits.body_bytes || body.length() > limits.body_bytes - size {
+      return Err(Error.BodyTooLarge)
+    }
+    read_exactly(mut reader, count: size, body: mut body)?
+    match read_line(mut reader, budget: mut budget)? {
+      Some(ending) => {
+        if !ending.is_empty() {
+          return Err(malformed("a chunk that does not end its line"))
+        }
+      }
+      None => return Err(Error.Closed)
+    }
+  }
+}
+
+fn read_body[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  headers: Headers,
+  limits: Limits,
+) -> Result[List[UInt8], Error]
+  uses Handles
+{
+  let length = content_length(headers)?
+  match headers.get("Transfer-Encoding") {
+    Some(coding) => {
+      if length is Some(_) {
+        return Err(malformed("both Transfer-Encoding and Content-Length"))
+      }
+      let codings: List[StringSlice] = List.collect(coding.split(","))
+      match codings.last() {
+        Some(last) => {
+          if !same_name(last.trim(), second: "chunked") {
+            return Err(Error.Unsupported(message: "a transfer coding other than chunked"))
+          }
+        }
+        None => return Err(malformed("an empty Transfer-Encoding"))
+      }
+      read_chunked(mut reader, limits: limits)
+    }
+    None => match length {
+      Some(count) => {
+        if count > limits.body_bytes {
+          return Err(Error.BodyTooLarge)
+        }
+        var body: List[UInt8] = List.with_capacity(count)
+        read_exactly(mut reader, count: count, body: mut body)?
+        Ok(own body)
+      }
+      None => Ok([])
+    }
+  }
+}
+
+fn has_body(status: Status) -> Bool {
+  !(status.code < 200 || status.code == 204 || status.code == 304)
+}
+
+fn push_text(bytes: mut List[UInt8], text: StringSlice) {
+  mut bytes.append_slice(text.bytes())
+}
+
+fn response_head(response: Response, date: StringSlice, close: Bool) -> List[UInt8] {
+  var head: List[UInt8] = List.with_capacity(256)
+  push_text(mut head, text: "HTTP/1.1 ")
+  push_text(mut head, text: "${response.status.code}".slice())
+  push_text(mut head, text: " ")
+  push_text(mut head, text: response.status.reason())
+  push_text(mut head, text: "\r\n")
+  for entry in response.headers.entries() {
+    if !same_name(entry.name.slice(), second: "Content-Length") && !same_name(entry.name.slice(), second: "Connection")
+      && !same_name(entry.name.slice(), second: "Transfer-Encoding")
+    {
+      push_text(mut head, text: entry.name.slice())
+      push_text(mut head, text: ": ")
+      push_text(mut head, text: entry.value.slice())
+      push_text(mut head, text: "\r\n")
+    }
+  }
+  if !response.headers.contains("Date") {
+    push_text(mut head, text: "Date: ")
+    push_text(mut head, text: date)
+    push_text(mut head, text: "\r\n")
+  }
+  if has_body(response.status) {
+    push_text(mut head, text: "Content-Length: ")
+    push_text(mut head, text: "${response.body.length()}".slice())
+    push_text(mut head, text: "\r\n")
+  }
+  if close {
+    push_text(mut head, text: "Connection: close\r\n")
+  }
+  push_text(mut head, text: "\r\n")
+  head
+}
+
+fn write_response[Sink: streams::Writer](
+  sink: mut Sink,
+  response: Response,
+  date: StringSlice,
+  head_only: Bool,
+  close: Bool,
+) -> Result[Unit, SystemError]
+  uses Handles
+{
+  var bytes = response_head(response, date: date, close: close)
+  let body = !head_only && has_body(response.status)
+  if body && response.body.length() <= 16384 {
+    mut bytes.append_slice(response.body.slice())
+    mut sink.write_all(bytes.slice())?
+  } else {
+    mut sink.write_all(bytes.slice())?
+    if body {
+      mut sink.write_all(response.body.slice())?
+    }
+  }
+  mut sink.flush()
+}
+
+fn timeout_of(seconds: Int64) -> Option[Duration] {
+  if seconds > 0 && seconds <= 1000000000 { Some(Duration.seconds(seconds)) } else { None }
+}
+
+fn error_status(error: Error) -> Status {
+  match error {
+    HeadTooLarge => Status.request_header_fields_too_large
+    BodyTooLarge => Status.content_too_large
+    Unsupported(_) => Status.not_implemented
+    _ => Status.bad_request
+  }
+}
+
+public type ServerOptions(limits: Limits = Limits(), timeout_seconds: Int64 = 30)
+  derives Equal
+
+fn serve_connection[capability Granted](
+  connection: own network::Connection,
+  handler: (fn(Request) -> Response uses Granted),
+  options: ServerOptions,
+)
+  uses Handles, Clock, Granted
+{
+  var opened = own connection
+  let _ = mut opened.set_no_delay(true)
+  let timeout = timeout_of(options.timeout_seconds)
+  let _ = mut opened.set_read_timeout(timeout)
+  let _ = mut opened.set_write_timeout(timeout)
+  var reader = streams::BufferedReader.new(own opened, capacity: 16384)
+  var open = true
+  while open {
+    match read_head(mut reader, limits: options.limits) {
+      Ok(None) => open = false
+      Ok(Some(head)) => {
+        if has_token(head.headers.get("Expect"), token: "100-continue") {
+          let _ = mut reader.source().write_all("HTTP/1.1 100 Continue\r\n\r\n".bytes())
+        }
+        match read_body(mut reader, headers: head.headers, limits: options.limits) {
+          Ok(body) => {
+            let close = if head.version_one_zero {
+              !has_token(head.headers.get("Connection"), token: "keep-alive")
+            } else {
+              has_token(head.headers.get("Connection"), token: "close")
+            }
+            let head_only = head.method == Method.Head
+            let request = Request(method: own head.method, target: own head.target, headers: own head.headers, body: own body)
+            let response = handler(request)
+            let date = format_date(Clock.now())
+            if write_response(mut reader.source(), response: response, date: date.slice(), head_only: head_only, close: close) is Err(_) {
+              open = false
+            }
+            if close {
+              open = false
+            }
+          }
+          Err(error) => {
+            let response = Response.text("${error}".slice(), status: error_status(error))
+            let date = format_date(Clock.now())
+            let _ = write_response(mut reader.source(), response: response, date: date.slice(), head_only: false, close: true)
+            open = false
+          }
+        }
+      }
+      Err(error) => {
+        if error != Error.Closed && !(error is System(_)) {
+          let response = Response.text("${error}".slice(), status: error_status(error))
+          let date = format_date(Clock.now())
+          let _ = write_response(mut reader.source(), response: response, date: date.slice(), head_only: false, close: true)
+        }
+        open = false
+      }
+    }
+  }
+  let _ = mut reader.source().shut_down(network::Direction.Both)
+}
+
+public fn serve[capability Granted](
+  listener: mut network::Listener,
+  handler: (fn(Request) -> Response uses Granted),
+  options: ServerOptions = ServerOptions(),
+)
+  uses Tasks, Handles, Clock, Granted
+{
+  concurrent for accepted in mut listener.connections() {
+    if accepted is Err(Cancelled) {
+      return
+    }
+    serve_accepted(own accepted, handler: handler, options: options)
+  }
+}
+
+fn serve_accepted[capability Granted](
+  accepted: own Result[network::Connection, SystemError],
+  handler: (fn(Request) -> Response uses Granted),
+  options: ServerOptions,
+)
+  uses Handles, Clock, Granted
+{
+  match own accepted {
+    Ok(connection) => serve_connection(own connection, handler: handler, options: options)
+    Err(_) => Clock.sleep(Duration.milliseconds(10))
+  }
+}
+
+type Segment =
+  | Fixed(text: String)
+  | Named(name: String)
+  | Rest(name: String)
+  derives Equal
+
+public opaque type Route(method: Option[Method], segments: List[Segment], trailing_slash: Bool)
+  derives Equal
+
+public opaque type Parameters(names: List[String], values: List[String])
+  derives Equal
+
+public fn Parameters.get(self, name: StringSlice) -> Option[StringSlice] {
+  for index in 0..self.names.length() {
+    if self.names[index].slice() == name && index < self.values.length() {
+      return Some(self.values[index].slice())
+    }
+  }
+  None
+}
+
+fn path_pieces(path: StringSlice) -> List[StringSlice]
+  cost time finite
+{
+  var pieces: List[StringSlice] = []
+  var start: USize = 0
+  for index in 0..path.length() {
+    if path.byte(index) == 47 {
+      if start <= index {
+        mut pieces.push(path.part(start, to: index))
+      }
+      start = index + 1
+    }
+  }
+  if start <= path.length() {
+    mut pieces.push(path.part(start, to: path.length()))
+  }
+  pieces
+}
+
+fn is_parameter_name(name: StringSlice) -> Bool
+  cost time finite
+{
+  if name.is_empty() {
+    return false
+  }
+  for byte in name.bytes() {
+    if !((48 <= byte && byte <= 57) || (65 <= byte && byte <= 90) || (97 <= byte && byte <= 122) || byte == 95) {
+      return false
+    }
+  }
+  true
+}
+
+fn parse_route(text: StringSlice) -> Option[Route]
+  cost time finite
+{
+  var method: Option[Method] = None
+  var path = text
+  match text.find(" ") {
+    Some(space) => {
+      let name = text.part(0, to: space)
+      if name.is_empty() {
+        return None
+      }
+      for byte in name.bytes() {
+        if byte < 65 || byte > 90 {
+          return None
+        }
+      }
+      method = Some(Method.from_name(name))
+      path = text.part(space + 1, to: text.length())
+    }
+    None => {}
+  }
+  if !path.starts_with("/") {
+    return None
+  }
+  var segments: List[Segment] = []
+  var names: List[String] = []
+  let pieces = path_pieces(path.part(1, to: path.length()))
+  for index in 0..pieces.length() {
+    let piece = pieces[index]
+    let last = index + 1 == pieces.length()
+    if piece.starts_with("{") && piece.ends_with("}") && piece.length() >= 2 {
+      let inside = piece.part(1, to: piece.length() - 1)
+      let rest = inside.ends_with("...")
+      let name = if rest && inside.length() >= 3 { inside.part(0, to: inside.length() - 3) } else { inside }
+      if !is_parameter_name(name) || (rest && !last) {
+        return None
+      }
+      for known in names {
+        if known.slice() == name {
+          return None
+        }
+      }
+      mut names.push(name.to_string())
+      mut segments.push(if rest { Segment.Rest(name: name.to_string()) } else { Segment.Named(name: name.to_string()) })
+    } else if piece.contains("{") || piece.contains("}") {
+      return None
+    } else if !(last && piece.is_empty()) {
+      mut segments.push(Segment.Fixed(text: piece.to_string()))
+    }
+  }
+  let trailing_slash = path.length() > 1 && path.ends_with("/")
+  Some(Route(method: own method, segments: own segments, trailing_slash: trailing_slash))
+}
+
+public fn Route.parse(text: StringSlice) -> Option[Route] {
+  parse_route(text)
+}
+
+public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  literals.length() == 1 && parse_route(literals[0].text()) is Some(_)
+}
+
+impl FromTemplate for Route {
+  type Part = String
+
+  fn from_template(template: Template[String]) -> Route
+    requires is_valid_template(template.literals)
+  {
+    let text = if template.literals.length() > 0 { template.literals[0].text() } else { "/".slice() }
+    match parse_route(text) {
+      Some(route) => own route
+      None => Route(method: None, segments: [], trailing_slash: false)
+    }
+  }
+}
+
+fn method_allows(route: Option[Method], method: Method) -> Bool {
+  match route {
+    None => true
+    Some(wanted) => wanted == method || (wanted == Method.Get && method == Method.Head)
+  }
+}
+
+public fn Request.matches(self, route: Route) -> Option[Parameters] {
+  if !method_allows(route.method.copy(), method: self.method.copy()) {
+    return None
+  }
+  let path = self.path()
+  if !path.starts_with("/") {
+    return None
+  }
+  var pieces = path_pieces(path.part(1, to: path.length()))
+  let empty_last = pieces.last() is Some(last) && last.is_empty()
+  if empty_last {
+    let _ = mut pieces.pop()
+  }
+  var names: List[String] = []
+  var values: List[String] = []
+  var index: USize = 0
+  for segment in route.segments {
+    match segment {
+      Fixed(text) => {
+        if index >= pieces.length() || pieces[index] != text.slice() {
+          return None
+        }
+        index += 1
+      }
+      Named(name) => {
+        if index >= pieces.length() || pieces[index].is_empty() {
+          return None
+        }
+        match url::decode_component(pieces[index]) {
+          Ok(value) => {
+            mut names.push(name.copy())
+            mut values.push(own value)
+          }
+          Err(_) => return None
+        }
+        index += 1
+      }
+      Rest(name) => {
+        var joined = ""
+        while index < pieces.length() {
+          if joined.length() > 0 {
+            mut joined.push("/")
+          }
+          mut joined.push(pieces[index])
+          index += 1
+        }
+        mut names.push(name.copy())
+        mut values.push(own joined)
+      }
+    }
+  }
+  let ends_with_slash = path.length() > 1 && path.ends_with("/")
+  if index < pieces.length() || (ends_with_slash != route.trailing_slash && !(route.segments.last() is Some(Rest(_)))) {
+    return None
+  }
+  Some(Parameters(names: own names, values: own values))
+}
+
+public type ClientOptions(timeout_seconds: Int64 = 30, limits: Limits = Limits(head_bytes: 65536, body_bytes: 67108864))
+  derives Equal
+
+fn read_until_closed[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  limit: USize,
+) -> Result[List[UInt8], Error]
+  uses Handles
+{
+  var body: List[UInt8] = []
+  var more = true
+  while more {
+    let room = limit.saturating_subtract(body.length())
+    if room == 0 {
+      return Err(Error.BodyTooLarge)
+    }
+    let got = system(mut reader.read(mut body, limit: if room > 65536 { 65536 } else { room }))?
+    more = got > 0
+  }
+  Ok(own body)
+}
+
+fn read_response[Source: streams::Reader](
+  reader: mut streams::BufferedReader[Source],
+  head_only: Bool,
+  limits: Limits,
+) -> Result[Response, Error]
+  uses Handles
+{
+  var budget = limits.head_bytes
+  while true {
+    let line = match read_line(mut reader, budget: mut budget)? {
+      Some(line) => own line
+      None => return Err(Error.Closed)
+    }
+    let text = line.slice()
+    if !(text.starts_with("HTTP/1.1 ") || text.starts_with("HTTP/1.0 ")) || text.length() < 12 {
+      return Err(malformed("a status line that is not HTTP/1.1"))
+    }
+    let code = match UInt16.parse(text.part(9, to: 12)) {
+      Ok(code) => code
+      Err(_) => return Err(malformed("a status code that is not three digits"))
+    }
+    let headers = read_headers(mut reader, budget: mut budget)?
+    let status = Status(code: code)
+    if code >= 100 && code < 200 && code != 101 {
+      continue
+    }
+    if head_only || !has_body(status) {
+      return Ok(Response(status: status, headers: own headers, body: []))
+    }
+    let body = if headers.contains("Transfer-Encoding") || headers.contains("Content-Length") {
+      read_body(mut reader, headers: headers, limits: limits)?
+    } else {
+      read_until_closed(mut reader, limit: limits.body_bytes)?
+    }
+    if has_token(headers.get("Content-Encoding"), token: "gzip") {
+      var plain_headers = own headers
+      mut plain_headers.remove("Content-Encoding")
+      mut plain_headers.remove("Content-Length")
+      return match compression::decompress(body.slice(), format: compression::Format.Gzip, limit: limits.body_bytes) {
+        Ok(plain) => Ok(Response(status: status, headers: own plain_headers, body: own plain))
+        Err(_) => Err(malformed("a gzip body that does not decompress"))
+      }
+    }
+    return Ok(Response(status: status, headers: own headers, body: own body))
+  }
+}
+
+fn request_head(method: Method, url: url::Url, headers: Headers, body_length: USize) -> List[UInt8] {
+  var head: List[UInt8] = List.with_capacity(256)
+  push_text(mut head, text: "${method}".slice())
+  push_text(mut head, text: " ")
+  let path = url.path()
+  push_text(mut head, text: if path.is_empty() { "/".slice() } else { path })
+  match url.query() {
+    Some(query) => {
+      push_text(mut head, text: "?")
+      push_text(mut head, text: query)
+    }
+    None => {}
+  }
+  push_text(mut head, text: " HTTP/1.1\r\n")
+  if !headers.contains("Host") {
+    push_text(mut head, text: "Host: ")
+    match url.host() {
+      Some(host) => push_text(mut head, text: "${host}".slice())
+      None => {}
+    }
+    match url.port() {
+      Some(port) => push_text(mut head, text: ":${port}".slice())
+      None => {}
+    }
+    push_text(mut head, text: "\r\n")
+  }
+  for entry in headers.entries() {
+    if !same_name(entry.name.slice(), second: "Content-Length") && !same_name(entry.name.slice(), second: "Connection") {
+      push_text(mut head, text: entry.name.slice())
+      push_text(mut head, text: ": ")
+      push_text(mut head, text: entry.value.slice())
+      push_text(mut head, text: "\r\n")
+    }
+  }
+  if body_length > 0 || method == Method.Post || method == Method.Put || method == Method.Patch {
+    push_text(mut head, text: "Content-Length: ")
+    push_text(mut head, text: "${body_length}".slice())
+    push_text(mut head, text: "\r\n")
+  }
+  push_text(mut head, text: "Connection: close\r\n\r\n")
+  head
+}
+
+public fn send(
+  method: Method,
+  url: url::Url,
+  headers: Headers = Headers(entries: []),
+  body: List[UInt8] = [],
+  options: ClientOptions = ClientOptions(),
+) -> Result[Response, Error]
+  uses NetworkClient, Handles
+{
+  if url.scheme() != "http".slice() {
+    return Err(Error.Unsupported(message: "a URL whose scheme is not http"))
+  }
+  let host = match url.host() {
+    Some(host) => "${host}"
+    None => return Err(malformed("a URL with no host"))
+  }
+  let port = url.port_or_default().unwrap_or(80)
+  let timeout = timeout_of(options.timeout_seconds)
+  var connection = system(network::connect(host.slice(), port: port, timeout: timeout))?
+  let _ = mut connection.set_read_timeout(timeout)
+  let _ = mut connection.set_write_timeout(timeout)
+  let head_only = method == Method.Head
+  var bytes = request_head(method, url: url, headers: headers, body_length: body.length())
+  mut bytes.append_slice(body.slice())
+  system(mut connection.write_all(bytes.slice()))?
+  var reader = streams::BufferedReader.new(own connection, capacity: 16384)
+  read_response(mut reader, head_only: head_only, limits: options.limits)
+}
+
+public fn get(address: StringSlice, options: ClientOptions = ClientOptions()) -> Result[Response, Error]
+  uses NetworkClient, Handles
+{
+  match url::parse(address) {
+    Ok(parsed) => send(Method.Get, url: parsed, options: options)
+    Err(_) => Err(malformed("an address that is not a URL"))
+  }
+}
