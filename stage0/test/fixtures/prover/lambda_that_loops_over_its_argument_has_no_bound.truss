@@ -6,7 +6,7 @@ fn each(items: List[UInt32], visit: (fn(UInt32) cost time finite))
   }
 }
 
-fn run_example(items: List[UInt32])
+fn f(items: List[UInt32])
   cost time O(items.length())
 {
   each(items, visit: fn(item) {

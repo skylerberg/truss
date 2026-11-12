@@ -67,30 +67,22 @@ let pin constants (factor, addend) =
 
 let plus left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.add left_value right_value)
-  | (Logic.Integer left_value, other | other, Logic.Integer left_value)
-    when Z.equal left_value Z.zero ->
-      other
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.add x y)
+  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.zero -> other
   | _ -> Logic.Operation ("+", [ left; right ])
 
 let minus left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.sub left_value right_value)
-  | other, Logic.Integer left_value when Z.equal left_value Z.zero -> other
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.sub x y)
+  | other, Logic.Integer x when Z.equal x Z.zero -> other
   | _ when left = right -> zero
   | _ -> Logic.Operation ("-", [ left; right ])
 
 let times left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.mul left_value right_value)
-  | (Logic.Integer left_value, other | other, Logic.Integer left_value)
-    when Z.equal left_value Z.one ->
-      other
-  | (Logic.Integer left_value, _ | _, Logic.Integer left_value) when Z.equal left_value Z.zero ->
-      zero
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.mul x y)
+  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.one -> other
+  | (Logic.Integer x, _ | _, Logic.Integer x) when Z.equal x Z.zero -> zero
   | _ -> Logic.Operation ("*", [ left; right ])
 
 let at_most left right = Logic.Operation ("<=", [ left; right ])
@@ -102,8 +94,7 @@ let at_least_zero term =
 
 let larger left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.max left_value right_value)
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.max x y)
   | _ when left = right -> left
   | _ -> Logic.ite (Logic.Operation (">=", [ left; right ])) left right
 

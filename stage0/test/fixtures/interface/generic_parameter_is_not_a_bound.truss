@@ -1,3 +1,3 @@
-fn run_example[First, Second: First](value: own Second) -> Second {
+fn f[First, Second: First](value: own Second) -> Second {
   value
 }

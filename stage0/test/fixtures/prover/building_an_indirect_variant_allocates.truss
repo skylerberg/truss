@@ -2,7 +2,7 @@ type Tree =
   | Leaf
   | indirect Node(left: Tree, right: Tree)
 
-fn run_example() -> Tree
+fn f() -> Tree
   cost allocations == 0
 {
   Tree.Node(left: Tree.Leaf, right: Tree.Leaf)

@@ -1,4 +1,4 @@
-fn run_example[Item](value: Item) -> Bool
+fn f[Item](value: Item) -> Bool
   ensures identical(value, value)
 {
   true

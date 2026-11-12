@@ -12,6 +12,6 @@ impl Add[Int64] for Meters {
   fn add(self, right: Int64) -> Meters { todo }
 }
 
-fn run_example(length: Meters, extra: Int64) -> Meters {
+fn f(length: Meters, extra: Int64) -> Meters {
   length + extra
 }

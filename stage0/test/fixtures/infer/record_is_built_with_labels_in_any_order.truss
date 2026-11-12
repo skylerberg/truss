@@ -1,5 +1,5 @@
-type Point(first_number: Int64, second_number: Int64)
+type Point(x: Int64, y: Int64)
 
-fn run_example() -> Point {
-  Point(second_number: 1, first_number: 0)
+fn f() -> Point {
+  Point(y: 1, x: 0)
 }

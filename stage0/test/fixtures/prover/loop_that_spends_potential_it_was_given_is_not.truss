@@ -1,4 +1,4 @@
-fn run_example(meter: mut Meter, count: UInt32)
+fn f(meter: mut Meter, count: UInt32)
   cost time O(count)
 {
   for _ in 0..count {

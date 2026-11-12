@@ -1,4 +1,4 @@
-fn run_example(go: Bool) -> UInt8
+fn f(go: Bool) -> UInt8
   ensures go ==> result == 1
   ensures !go ==> result == 0
 {

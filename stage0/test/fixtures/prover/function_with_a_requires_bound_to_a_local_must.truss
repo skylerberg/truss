@@ -4,7 +4,7 @@ fn below_three(index: USize) -> USize
   index
 }
 
-fn run_example() -> USize {
-  let second_example = below_three
-  second_example(5)
+fn f() -> USize {
+  let g = below_three
+  g(5)
 }

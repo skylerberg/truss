@@ -1,4 +1,4 @@
-fn run_example(count: UInt32, items: List[Int64])
+fn f(count: UInt32, items: List[Int64])
   requires count <= items.length()
 {
 }

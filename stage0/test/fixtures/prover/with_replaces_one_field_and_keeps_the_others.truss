@@ -1,7 +1,7 @@
-fn run_example(point: Point) -> Point
-  requires point.first_number < 100
-  ensures result.first_number == point.first_number + 1
-  ensures result.second_number == point.second_number
+fn f(point: Point) -> Point
+  requires point.x < 100
+  ensures result.x == point.x + 1
+  ensures result.y == point.y
 {
-  point with (first_number: point.first_number + 1)
+  point with (x: point.x + 1)
 }

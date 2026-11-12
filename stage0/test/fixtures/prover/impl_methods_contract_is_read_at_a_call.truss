@@ -12,7 +12,7 @@ impl Next for Counter {
   }
 }
 
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result == 5
 {
   Counter(count: 5).next()

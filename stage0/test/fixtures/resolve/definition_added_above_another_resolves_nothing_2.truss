@@ -1,5 +1,5 @@
-fn third_number() {}
+fn z() {}
 
-fn first_value() -> Int64 { 1 }
+fn a() -> Int64 { 1 }
 
-fn run_example() -> Int64 { first_value() }
+fn f() -> Int64 { a() }

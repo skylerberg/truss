@@ -4,7 +4,7 @@ fn fetch(item: Int64) -> Result[Int64, Int64]
   Ok(item)
 }
 
-fn second_example(items: List[Int64]) -> Result[Int64, Int64]
+fn g(items: List[Int64]) -> Result[Int64, Int64]
   uses Tasks, Clock
 {
   for item in items {

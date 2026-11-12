@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   let base = 1
   let small: UInt8 = base
   let medium: UInt16 = base

@@ -1,8 +1,8 @@
-type Point(first_number: Int64, second_number: Int64)
+type Point(x: Int64, y: Int64)
 
 let side: Int64 = 7
 let area: Int64 = side * side
-let corner: Point = Point(first_number: 2 * 2, second_number: -3)
+let corner: Point = Point(x: 2 * 2, y: -3)
 let ages: Map[String, Int64] = ["grace": 85, "ada": 36]
 let colors: Set[String] = ["red", "green", "red"]
 let welcome: String = "hello ada"
@@ -10,7 +10,7 @@ let maybe: Option[Int64] = Some(3 * 3)
 
 test "constants" {
   assert area == 49
-  assert corner.first_number == 4 && corner.second_number == -3
+  assert corner.x == 4 && corner.y == -3
   assert ages.length() == 2
   assert ages.contains("ada")
   assert colors.length() == 2

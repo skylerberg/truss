@@ -1,6 +1,6 @@
 fn keep(text: own String) {}
 
-fn run_example(present: Option[String]) {
+fn f(present: Option[String]) {
   if present is Some(text) {
     keep(own text)
   }

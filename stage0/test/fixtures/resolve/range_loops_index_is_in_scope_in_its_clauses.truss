@@ -1,4 +1,4 @@
-fn run_example(count: USize) {
+fn f(count: USize) {
   for index in 0..count
     invariant index <= count
   {

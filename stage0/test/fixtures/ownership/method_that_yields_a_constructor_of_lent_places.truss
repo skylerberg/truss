@@ -1,5 +1,5 @@
 
-fn run_example(shelf: Shelf) {
+fn f(shelf: Shelf) {
   var cursor = shelf.numbered()
   let _ = mut cursor.next()
 }

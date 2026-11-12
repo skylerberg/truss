@@ -6,7 +6,7 @@ use standard::map
 fn strictly_ascending[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]]) -> Bool
   cost time finite
 {
-  forall first in 0..entries.length() => forall second in 0..entries.length() => first < second ==> entries[first].key < entries[second].key
+  forall i in 0..entries.length() => forall j in 0..entries.length() => i < j ==> entries[i].key < entries[j].key
 }
 
 theorem ascending_below[Key: Ordered, Value](
@@ -20,7 +20,7 @@ theorem ascending_below[Key: Ordered, Value](
   requires bound <= last
   requires last < entries.length()
   requires entries[last].key <= key
-  ensures forall index in 0..bound => entries[index].key < key
+  ensures forall i in 0..bound => entries[i].key < key
   decreases bound
   cost time finite
 {
@@ -41,7 +41,7 @@ theorem ascending_above[Key: Ordered, Value](
   requires first < bound
   requires bound <= entries.length()
   requires key <= entries[first].key
-  ensures forall index in bound..entries.length() => key < entries[index].key
+  ensures forall i in bound..entries.length() => key < entries[i].key
   decreases entries.length() - bound
   cost time finite
 {
@@ -58,8 +58,8 @@ fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[
       && self.entries.model()[index].key <= key
       && key <= self.entries.model()[index].key
     Err(index) => index <= self.entries.length()
-      && (forall position in 0..index => self.entries.model()[position].key < key)
-      && (forall position in index..self.entries.length() => key < self.entries.model()[position].key)
+      && (forall i in 0..index => self.entries.model()[i].key < key)
+      && (forall i in index..self.entries.length() => key < self.entries.model()[i].key)
   }
   cost time O(log(self.entries.length()) * time(Key.compare))
 {
@@ -68,8 +68,8 @@ fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[
   while low < high
     invariant low <= high
     invariant high <= self.entries.length()
-    invariant forall position in 0..low => self.entries.model()[position].key < key
-    invariant forall position in high..self.entries.length() => key < self.entries.model()[position].key
+    invariant forall i in 0..low => self.entries.model()[i].key < key
+    invariant forall i in high..self.entries.length() => key < self.entries.model()[i].key
     decreases high - low
     cost time O((log(self.entries.length()) - log(high - low)) * time(Key.compare))
   {
@@ -128,8 +128,8 @@ theorem absent_where_split[Key: Ordered, Value](
   split: USize,
 )
   requires split <= map.entries.length()
-  requires forall position in 0..split => map.entries.model()[position].key < key
-  requires forall position in split..map.entries.length() => key < map.entries.model()[position].key
+  requires forall i in 0..split => map.entries.model()[i].key < key
+  requires forall i in split..map.entries.length() => key < map.entries.model()[i].key
   ensures map.search(key) is Err(_)
   cost time finite
 {
@@ -191,12 +191,12 @@ fn merged[Key: Ordered, Value](
   while left.length() > 0 || right.length() > 0
     invariant strictly_ascending(left.model())
     invariant strictly_ascending(right.model())
-    invariant forall earlier in 0..descending.length() => forall later in 0..descending.length() =>
-      earlier < later ==> descending.model()[later].key < descending.model()[earlier].key
-    invariant forall earlier in 0..left.length() => forall later in 0..descending.length() =>
-      left.model()[earlier].key < descending.model()[later].key
-    invariant forall earlier in 0..right.length() => forall later in 0..descending.length() =>
-      right.model()[earlier].key < descending.model()[later].key
+    invariant forall i in 0..descending.length() => forall j in 0..descending.length() =>
+      i < j ==> descending.model()[j].key < descending.model()[i].key
+    invariant forall i in 0..left.length() => forall j in 0..descending.length() =>
+      left.model()[i].key < descending.model()[j].key
+    invariant forall i in 0..right.length() => forall j in 0..descending.length() =>
+      right.model()[i].key < descending.model()[j].key
     decreases left.length() + right.length()
   {
     var from_left = right.length() == 0
@@ -291,14 +291,14 @@ public fn collections::SortedMap[Key: Ordered, Value].get(self, key: Key) lends 
 fn collections::SortedMap[Key: Ordered, Value].replace_value_at(mut self, position: USize, value: own Value) -> Value
   requires position < self.entries.length()
   ensures self.entries.length() == old(self.entries.length())
-  ensures forall index in 0..self.entries.length() =>
-    identical(self.entries.model()[index].key, old(self.entries.model())[index].key)
+  ensures forall i in 0..self.entries.length() =>
+    identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
   cost time O(1)
 {
   let previous = map::exchange(mut self.entries[position].value, value: own value)
   proof {
-    assert forall index in 0..self.entries.length() =>
-      identical(self.entries.model()[index].key, old(self.entries.model())[index].key)
+    assert forall i in 0..self.entries.length() =>
+      identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
   }
   previous
 }
@@ -476,8 +476,8 @@ public fn collections::SortedMap[Key: Ordered, Value].pop_last(mut self) -> Opti
 
 fn collections::SortedMap[Key: Ordered, Value].index_at_or_after(self, key: Key) -> USize
   ensures result <= self.entries.length()
-  ensures forall position in 0..result => self.entries.model()[position].key < key
-  ensures forall position in result..self.entries.length() => key <= self.entries.model()[position].key
+  ensures forall i in 0..result => self.entries.model()[i].key < key
+  ensures forall i in result..self.entries.length() => key <= self.entries.model()[i].key
   cost time O(log(self.entries.length()) * time(Key.compare))
 {
   match self.search(key) {
@@ -494,8 +494,8 @@ fn collections::SortedMap[Key: Ordered, Value].index_at_or_after(self, key: Key)
 
 fn collections::SortedMap[Key: Ordered, Value].index_after(self, key: Key) -> USize
   ensures result <= self.entries.length()
-  ensures forall position in 0..result => self.entries.model()[position].key <= key
-  ensures forall position in result..self.entries.length() => key < self.entries.model()[position].key
+  ensures forall i in 0..result => self.entries.model()[i].key <= key
+  ensures forall i in result..self.entries.length() => key < self.entries.model()[i].key
   cost time O(log(self.entries.length()) * time(Key.compare))
 {
   match self.search(key) {
@@ -574,7 +574,7 @@ public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Rang
   while index < end
     invariant first <= index
     invariant index <= self.entries.length()
-    invariant forall position in first..end => range.contains(self.entries.model()[position].key)
+    invariant forall i in first..end => range.contains(self.entries.model()[i].key)
     decreases self.entries.length() - index
   {
     yield self.entries[index]
@@ -595,12 +595,12 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
   for index in 0..count
     invariant entries.length() == count
     invariant retained <= index
-    invariant forall earlier in 0..retained => forall later in 0..retained =>
-      earlier < later ==> entries.model()[earlier].key < entries.model()[later].key
-    invariant forall earlier in 0..retained => forall later in index..count =>
-      entries.model()[earlier].key < entries.model()[later].key
-    invariant forall earlier in index..count => forall later in index..count =>
-      earlier < later ==> entries.model()[earlier].key < entries.model()[later].key
+    invariant forall i in 0..retained => forall j in 0..retained =>
+      i < j ==> entries.model()[i].key < entries.model()[j].key
+    invariant forall i in 0..retained => forall j in index..count =>
+      entries.model()[i].key < entries.model()[j].key
+    invariant forall i in index..count => forall j in index..count =>
+      i < j ==> entries.model()[i].key < entries.model()[j].key
   {
     if keep(entries[index]) {
       mut entries.swap(retained, second: index)
@@ -763,9 +763,9 @@ public fn collections::SortedMap[Key: Ordered, Value].values(mut self) yields mu
 impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
   fn equal(self, other: collections::SortedMap[Key, Value]) -> Bool
     ensures result == (self.entries.length() == other.entries.length()
-      && forall position in 0..self.entries.length() =>
-        self.entries.model()[position].key == other.entries.model()[position].key
-          && self.entries.model()[position].value == other.entries.model()[position].value)
+      && forall i in 0..self.entries.length() =>
+        self.entries.model()[i].key == other.entries.model()[i].key
+          && self.entries.model()[i].value == other.entries.model()[i].value)
   {
     if self.entries.length() != other.entries.length() {
       return false
@@ -773,9 +773,9 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
     var index: USize = 0
     while index < self.entries.length()
       invariant index <= self.entries.length()
-      invariant forall position in 0..index =>
-        self.entries.model()[position].key == other.entries.model()[position].key
-          && self.entries.model()[position].value == other.entries.model()[position].value
+      invariant forall i in 0..index =>
+        self.entries.model()[i].key == other.entries.model()[i].key
+          && self.entries.model()[i].value == other.entries.model()[i].value
       decreases self.entries.length() - index
     {
       if self.entries[index].key != other.entries[index].key || self.entries[index].value != other.entries[index].value {

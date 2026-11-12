@@ -3,6 +3,6 @@ capability Store {
     requires slot < 4
 }
 
-fn run_example() uses Store {
+fn f() uses Store {
   Store.put(9)
 }

@@ -8,7 +8,7 @@ fn bump(count: mut Int64) -> Bool
   false
 }
 
-fn run_example(value: Int64) -> Int64
+fn f(value: Int64) -> Int64
   ensures value == 1 ==> result == 1
   ensures value != 1 ==> result == 0
 {

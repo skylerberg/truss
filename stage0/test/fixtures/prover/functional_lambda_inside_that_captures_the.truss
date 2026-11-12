@@ -1,9 +1,9 @@
 theorem wrongly_constant()
-  ensures apply(fn(first_number) {
-      var held = apply(fn(_) { first_number }, value: true)
+  ensures apply(fn(x) {
+      var held = apply(fn(_) { x }, value: true)
       held
-    }, value: true) == apply(fn(first_number) {
-      var held = apply(fn(_) { first_number }, value: true)
+    }, value: true) == apply(fn(x) {
+      var held = apply(fn(_) { x }, value: true)
       held
     }, value: false)
 {

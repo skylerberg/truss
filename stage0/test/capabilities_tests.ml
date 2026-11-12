@@ -25,7 +25,7 @@ let () =
       let key : Resolve.Names.key =
         {
           module_ = module_of "app::main";
-          path = Top { module_ = module_of "app::main"; name = "run_example" };
+          path = Top { module_ = module_of "app::main"; name = "f" };
           ordinal = 0;
         }
       in
@@ -77,10 +77,8 @@ let () =
       let call =
         "{\n  numbers.visit_all(fn(value) {\n    let _ = Clock.now()\n    let _ = value\n  })\n}\n"
       in
-      fine (visitor ^ "fn run_example(numbers: Numbers)\n  uses Clock\n" ^ call);
-      one_diagnostic
-        (visitor ^ "fn run_example(numbers: Numbers)\n" ^ call)
-        "capabilities.not_available");
+      fine (visitor ^ "fn f(numbers: Numbers)\n  uses Clock\n" ^ call);
+      one_diagnostic (visitor ^ "fn f(numbers: Numbers)\n" ^ call) "capabilities.not_available");
   test "a capability parameter's set must be available at the call" (fun () ->
       one_diagnostic Fixtures.Capabilities.capability_parameters_set_must_be_available_at_the
         "capabilities.not_available");

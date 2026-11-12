@@ -1,4 +1,4 @@
-fn run_example[Source](source: Source)
+fn f[Source](source: Source)
   uses Source.Uses
 {
 }

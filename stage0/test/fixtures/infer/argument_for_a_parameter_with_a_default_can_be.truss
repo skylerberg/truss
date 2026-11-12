@@ -1,5 +1,5 @@
 fn connect(host: Int64, port: UInt16 = 443) {}
 
-fn run_example() {
+fn f() {
   connect(1)
 }

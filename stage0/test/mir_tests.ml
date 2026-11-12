@@ -89,8 +89,7 @@ let printed text =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
-        if key.path = Path.Top { module_ = module_of "app::main"; name = "second_example" } then
-          Some key
+        if key.path = Path.Top { module_ = module_of "app::main"; name = "g" } then Some key
         else None)
       (Query.demand database Resolve.Names.declarations (module_of "app::main"))
   with

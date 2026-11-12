@@ -1,7 +1,7 @@
-fn run_example(count: USize) {
-  for step_index in 0..count
+fn f(count: USize) {
+  for i in 0..count
     cost time O(missing)
   {
-    let _ = step_index
+    let _ = i
   }
 }

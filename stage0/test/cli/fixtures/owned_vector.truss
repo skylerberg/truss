@@ -1,7 +1,7 @@
-public type Vector(first_number: Int64)
+public type Vector(x: Int64)
 
 public fn Vector.length(self) -> Int64 {
-  self.first_number
+  self.x
 }
 
 public fn double(value: Int64) -> Int64

@@ -85,16 +85,24 @@ It does not mean everyday vocabulary.
    A word on this list is fine as part of a longer name that says what the
    value is, such as `found_type` against `expected_type`.
 
-   Do not name a value, a parameter, or a module alias with one letter:
-   write `builder`, not `b`; `index`, not `i`; `Types.ty`, not `T.ty`.
-   A letter says nothing about the value, and the next author copies it.
-   Three uses keep a letter:
+   Do not use a letter where the value has a name: write `builder`, not
+   `b`; `store`, not `t`; `Types.ty`, not `T.ty`. A letter in place of a
+   name says nothing about the value, and the next author copies it.
+
+   A letter is the right name where it is the convention, and a longer
+   name would read worse:
 
    | Use | Example |
    |---|---|
+   | Mathematics: coordinates, real arguments, counts in a formula | `x`, `y`, `n` |
+   | An index in a quantifier or a short loop | `forall i in 0..n`, `i < j` |
    | A module's main type, by the OCaml convention | `type t`, `Store.t` |
    | A type variable | `'a`, `'value` |
    | A name a published specification gives, so the code reads against it | SHA-2's `a` to `h` |
+   | A test's program, where the name stands for nothing | `fn f(x: Int64)` |
+
+   Rename for the reader, not for the rule: a new name must say more than
+   the letter did.
 
 8. **Do not copy the style of existing text.** Much of this repository
    describes around standard terms in everyday words. Fix that text; do not

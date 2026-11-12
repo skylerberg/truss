@@ -5,7 +5,7 @@ fn work(size: UInt32)
   }
 }
 
-fn run_example(items: List[UInt32], size: UInt32)
+fn f(items: List[UInt32], size: UInt32)
   cost time O(items.length() * (size + 1))
 {
   for item in items {

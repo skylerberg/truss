@@ -6,7 +6,7 @@ fn spin(items: List[Int64]) -> Bool
   true
 }
 
-fn run_example(items: List[Int64]) -> Bool
+fn f(items: List[Int64]) -> Bool
   cost time O(items.length())
 {
   forall index in 0..items.length() => index >= 0 && spin(items)

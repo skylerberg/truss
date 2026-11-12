@@ -1,3 +1,3 @@
-fn run_example() -> fn(Int64) -> Int64 {
+fn f() -> fn(Int64) -> Int64 {
   fn(item) { item }
 }

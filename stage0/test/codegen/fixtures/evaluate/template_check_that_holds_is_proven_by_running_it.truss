@@ -1,4 +1,4 @@
 
-fn run_example(name: String) -> Shout {
+fn f(name: String) -> Shout {
   Shout"hey ${name.copy()}!"
 }

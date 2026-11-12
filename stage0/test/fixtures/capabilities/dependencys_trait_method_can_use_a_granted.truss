@@ -1,6 +1,6 @@
 use clock_library::time
 
-fn run_example(wall: time::Wall) -> Instant
+fn f(wall: time::Wall) -> Instant
   uses Clock
 {
   wall.stamp()

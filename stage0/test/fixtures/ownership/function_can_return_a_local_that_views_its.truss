@@ -1,4 +1,4 @@
-fn run_example(items: List[Int64]) -> Slice[Int64] {
+fn f(items: List[Int64]) -> Slice[Int64] {
   let part = items[0..2]
   let again = part
   again

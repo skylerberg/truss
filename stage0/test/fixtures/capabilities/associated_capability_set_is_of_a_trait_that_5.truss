@@ -1,4 +1,4 @@
-fn run_example[capability Granted]()
+fn f[capability Granted]()
   uses Granted.Uses
 {
 }

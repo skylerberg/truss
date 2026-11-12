@@ -4,7 +4,7 @@ fn digits(value: UInt64) -> USize
   todo
 }
 
-fn run_example(value: UInt64) -> USize
+fn f(value: UInt64) -> USize
   cost time O(1)
 {
   digits(value)

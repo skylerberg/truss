@@ -1,4 +1,4 @@
-fn run_example(value: Int8) -> Int8
+fn f(value: Int8) -> Int8
   requires value >= 0
   ensures result == Int8.maximum
 {

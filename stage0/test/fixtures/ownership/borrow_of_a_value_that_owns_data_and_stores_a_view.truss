@@ -1,4 +1,4 @@
-fn run_example(items: List[Int64]) -> USize {
+fn f(items: List[Int64]) -> USize {
   var labeled = Labeled(view: items[..], name: "a".copy())
   let borrowed = labeled
   labeled = Labeled(view: items[..], name: "b".copy())

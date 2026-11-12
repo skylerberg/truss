@@ -2,7 +2,7 @@ type Tree =
   | Leaf
   | indirect Node(left: Tree)
 
-fn run_example(tree: Tree) -> Int64 {
+fn f(tree: Tree) -> Int64 {
   match tree {
     Node(Lef) => 1
     Leaf => 2

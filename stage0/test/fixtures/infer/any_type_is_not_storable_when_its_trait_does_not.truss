@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   let task: any Task = any Count(value: 1)
   keep(own task)
 }

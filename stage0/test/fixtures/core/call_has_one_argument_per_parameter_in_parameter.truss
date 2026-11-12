@@ -1,5 +1,5 @@
 fn connect(host: Int64, port: UInt16 = 443, secure: Bool = true) {}
 
-fn second_example() {
+fn g() {
   connect(1, secure: false)
 }

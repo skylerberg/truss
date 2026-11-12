@@ -11,7 +11,7 @@ impl Hits for Counter {
   }
 }
 
-fn run_example(flag: Bool, visit: (fn() -> Bool uses Hits cost time finite)) -> Bool
+fn f(flag: Bool, visit: (fn() -> Bool uses Hits cost time finite)) -> Bool
   uses Hits
   cost calls(visit) == 0
 {

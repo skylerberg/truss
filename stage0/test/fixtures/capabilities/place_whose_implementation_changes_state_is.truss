@@ -8,7 +8,7 @@ impl Tally for Counter {
   fn add(mut self) { self.count += 1 }
 }
 
-fn run_example() {
+fn f() {
   var counter = Counter(count: 0)
   provide counter {
   }

@@ -1,11 +1,11 @@
 
-fn fib(limit_count: Int64) -> Int64 {
-  if limit_count < 2 {
-    return limit_count
+fn fib(n: Int64) -> Int64 {
+  if n < 2 {
+    return n
   }
   parallel {
-    let left = fib(limit_count - 1)
-    let right = fib(limit_count - 2)
+    let left = fib(n - 1)
+    let right = fib(n - 2)
   }
   left.wrapping_add(right)
 }

@@ -1,6 +1,6 @@
 fn bump(count: mut Int64) {}
 
-fn run_example() {
+fn f() {
   var count = 0
   bump(count)
 }

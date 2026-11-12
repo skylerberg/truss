@@ -1,4 +1,4 @@
-fn run_example(items: List[Int64]) {
+fn f(items: List[Int64]) {
   for item in mut items {
     item = 0
   }

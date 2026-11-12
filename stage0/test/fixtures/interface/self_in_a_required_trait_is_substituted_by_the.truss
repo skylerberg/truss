@@ -2,4 +2,4 @@ trait Summable: Add[Self] {}
 
 type Needs[Value: Add[Value]](value: Value)
 
-fn run_example[Item: Summable](items: Needs[Item]) {}
+fn f[Item: Summable](items: Needs[Item]) {}

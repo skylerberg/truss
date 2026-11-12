@@ -2,6 +2,6 @@ fn each(count: USize, visit: fn(USize) -> Int64) -> Int64 {
   todo
 }
 
-fn run_example(items: List[Int64]) -> Int64 {
-  each(items.length(), visit: fn(step_index) { items[step_index] })
+fn f(items: List[Int64]) -> Int64 {
+  each(items.length(), visit: fn(i) { items[i] })
 }

@@ -1,3 +1,3 @@
-fn run_example() -> any Runner {
+fn f() -> any Runner {
   any Owner(items: [1, 2, 3])
 }

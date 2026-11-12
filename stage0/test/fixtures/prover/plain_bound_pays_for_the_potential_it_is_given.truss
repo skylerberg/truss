@@ -1,4 +1,4 @@
-fn run_example(meter: mut Meter)
+fn f(meter: mut Meter)
   cost time O(1 + meter.credit)
 {
   mut meter.spend()

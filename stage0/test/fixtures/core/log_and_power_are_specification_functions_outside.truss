@@ -1,4 +1,4 @@
-fn second_example(value: UInt64) -> USize
+fn g(value: UInt64) -> USize
   ensures result <= log(value) + 1
   ensures power(2, result) >= 1
 {

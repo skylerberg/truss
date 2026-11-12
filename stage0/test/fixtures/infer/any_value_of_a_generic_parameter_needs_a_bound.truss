@@ -1,4 +1,4 @@
-fn run_example[Input: Source](input: own Input) -> Int64 {
+fn f[Input: Source](input: own Input) -> Int64 {
   let source: any Source[Item = Int64] = any input
   source.first()
 }

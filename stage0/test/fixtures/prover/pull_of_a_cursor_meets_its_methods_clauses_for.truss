@@ -1,4 +1,4 @@
-fn run_example(couple: Couple) -> Int64
+fn f(couple: Couple) -> Int64
   requires couple.first == 1 && couple.second == 1
   ensures result == 1
 {

@@ -1,6 +1,6 @@
 let limit: Int64 = 10
 
-fn run_example(value: Int64) -> Bool {
+fn f(value: Int64) -> Bool {
   match value {
     limit => true
     _ => false

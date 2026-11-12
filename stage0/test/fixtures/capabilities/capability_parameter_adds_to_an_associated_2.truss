@@ -1,4 +1,4 @@
-fn run_example() -> Int64 {
+fn f() -> Int64 {
   var gauge = Gauge(last: 0)
   folded(mut gauge, step: fn(value) { value })
 }

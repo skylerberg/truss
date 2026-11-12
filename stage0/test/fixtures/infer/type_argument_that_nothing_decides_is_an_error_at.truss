@@ -2,6 +2,6 @@ fn make[Value]() -> Int64 {
   1
 }
 
-fn run_example() -> Int64 {
+fn f() -> Int64 {
   make()
 }

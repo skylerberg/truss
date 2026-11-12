@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   let job: any Job = any Count(value: 1)
   keep(own job)
 }

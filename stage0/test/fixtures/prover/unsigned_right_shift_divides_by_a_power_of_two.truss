@@ -1,4 +1,4 @@
-fn run_example(value: UInt64) -> UInt64
+fn f(value: UInt64) -> UInt64
   ensures result == value / 4
 {
   value >> 2

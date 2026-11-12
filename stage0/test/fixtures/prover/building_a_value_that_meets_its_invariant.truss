@@ -1,4 +1,4 @@
-fn run_example(low: Int64) -> Span
+fn f(low: Int64) -> Span
   requires low <= 0
 {
   Span(low, high: 0)

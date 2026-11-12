@@ -29,14 +29,14 @@ type source = {
       (** The ways to mutate or move the place, each with a name. *)
 }
 
-let mut_method = "first_value mut method"
+let mut_method = "a mut method"
 
 (* The ways to mutate any place that stores a list. *)
 let of_place place =
   [
     (mut_method, [ Printf.sprintf "mut %s.push(4)" place ]);
     ("an assignment", [ Printf.sprintf "%s = [9]" place ]);
-    ("first_value mut argument", [ Printf.sprintf "change(mut %s)" place ]);
+    ("a mut argument", [ Printf.sprintf "change(mut %s)" place ]);
     ("an assignment to an element", [ Printf.sprintf "%s[0] = 5" place ]);
   ]
 
@@ -63,7 +63,7 @@ let sources =
         :: of_place "holder.items";
     };
     {
-      source = "first_value mut parameter";
+      source = "a mut parameter";
       header = Printf.sprintf "fn %s(flag: Bool, data: mut List[Int64]) {";
       declare = [];
       place = "data";

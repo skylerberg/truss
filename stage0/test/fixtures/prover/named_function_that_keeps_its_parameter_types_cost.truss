@@ -4,7 +4,7 @@ fn same(value: UInt32) -> UInt32
   value
 }
 
-fn run_example() -> UInt32
+fn f() -> UInt32
   cost time O(1)
 {
   run(same)

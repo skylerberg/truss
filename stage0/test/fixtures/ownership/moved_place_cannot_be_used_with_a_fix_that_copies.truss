@@ -1,4 +1,4 @@
-fn run_example(items: own List[Int64]) {
+fn f(items: own List[Int64]) {
   keep(own items)
   look(items)
 }

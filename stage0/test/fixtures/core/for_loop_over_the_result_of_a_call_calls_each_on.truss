@@ -2,7 +2,7 @@ fn make() -> List[Int64] {
   todo
 }
 
-fn second_example() {
+fn g() {
   for item in make() {
     let _ = item
   }

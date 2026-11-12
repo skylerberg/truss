@@ -1,4 +1,4 @@
-fn run_example(letter: Character) -> Int64 {
+fn f(letter: Character) -> Int64 {
   match letter {
     Character"a"..=Character"z" => 1
     _ => 2

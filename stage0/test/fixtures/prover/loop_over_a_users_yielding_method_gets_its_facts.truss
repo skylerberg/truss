@@ -1,4 +1,4 @@
-fn run_example(couple: Couple) -> USize
+fn f(couple: Couple) -> USize
   ensures result == 2
 {
   var seen: USize = 0

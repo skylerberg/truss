@@ -1,5 +1,5 @@
 fn need[Value: Ordered](value: Value) {}
 
-fn run_example(point: Point) {
+fn f(point: Point) {
   need(point)
 }

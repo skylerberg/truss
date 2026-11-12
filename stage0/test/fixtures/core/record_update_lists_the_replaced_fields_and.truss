@@ -1,5 +1,5 @@
 type Config(port: Int64, host: String)
 
-fn second_example(config: Config, port: Int64) -> Config {
+fn g(config: Config, port: Int64) -> Config {
   config with (port)
 }

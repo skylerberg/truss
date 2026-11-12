@@ -1,4 +1,4 @@
-fn run_example(count: Int64) -> Int64 {
+fn f(count: Int64) -> Int64 {
   match count {
     ExitCode.success => 1
     _ => 0

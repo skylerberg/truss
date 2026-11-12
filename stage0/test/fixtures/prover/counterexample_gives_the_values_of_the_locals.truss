@@ -1,4 +1,4 @@
-fn run_example(items: List[Int64], value: USize) -> Int64 {
+fn f(items: List[Int64], value: USize) -> Int64 {
   var at: USize = 0
   if value > 5 {
     at = value

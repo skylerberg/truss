@@ -6,6 +6,6 @@ impl Multiply[Int64] for Duration2 {
   fn multiply(self, right: Int64) -> Duration2 { todo }
 }
 
-fn run_example(duration: Duration2) -> Duration2 {
+fn f(duration: Duration2) -> Duration2 {
   duration * 2
 }

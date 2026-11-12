@@ -517,11 +517,7 @@ let () =
   test "a type is shown with its methods" (fun () ->
       let root = package [ ("main.truss", Fixtures.type_is_shown_with_its_methods) ] in
       expect_strings
-        ~expected:
-          [
-            "public type Point(first_number: Int64, second_number: Int64)";
-            "public fn Point.sum(self) -> Int64";
-          ]
+        ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (shown root "demo::main::Point"))
 
 (* Holes *)
@@ -716,8 +712,8 @@ let () =
       let root = package [ ("main.truss", Fixtures.renaming_a_method_rewrites_its_calls) ] in
       if rename root "demo::main::Point.get" "value" <> 0 then fail "refused";
       let text = read root "main.truss" in
-      if not (contains text "fn Point.value(self)" && contains text "Point(first_number: 1).value()")
-      then fail "wrote %s" text)
+      if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
+        fail "wrote %s" text)
 
 (* Comparing with a commit, and other worktrees *)
 
@@ -1481,7 +1477,7 @@ let () =
           match New_command.run ~directory:root ~name with
           | exception Project.Cannot_run _ -> ()
           | _ -> fail "made %s" name)
-        [ "Weather"; "weather__x"; "1st"; ""; "first_value::second_value::third_value" ]);
+        [ "Weather"; "weather__x"; "1st"; ""; "a::b::c" ]);
   test "a new package with an owner is made in a directory named without it" (fun () ->
       let root = directory [] in
       if quietly (fun () -> New_command.run ~directory:root ~name:"acme::weather") <> 0 then

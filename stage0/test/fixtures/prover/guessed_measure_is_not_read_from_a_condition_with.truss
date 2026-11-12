@@ -8,13 +8,13 @@ fn take(count: mut Int64) -> Int64
   count + 1
 }
 
-fn run_example()
+fn f()
   cost time finite
 {
-  var step_index: Int64 = 0
-  while take(mut step_index) < 10
-    invariant step_index > -100
+  var i: Int64 = 0
+  while take(mut i) < 10
+    invariant i > -100
   {
-    step_index += 1
+    i += 1
   }
 }

@@ -1,6 +1,6 @@
 type Sized(view: Slice[Int64], count: USize)
 
-fn run_example(other: List[Int64]) -> USize {
+fn f(other: List[Int64]) -> USize {
   let sized = Sized(view: other[..], count: 0)
   let changed = sized with (view: make().slice())
   changed.view.length()

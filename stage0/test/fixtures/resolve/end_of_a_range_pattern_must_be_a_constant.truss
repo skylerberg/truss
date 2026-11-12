@@ -1,4 +1,4 @@
-fn run_example(value: Int64) -> Bool {
+fn f(value: Int64) -> Bool {
   match value {
     0..=top => true
     _ => false

@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   var tally = Tally(count: 0)
   let scheduler = Scheduler(turn: 0)
   provide mut tally {

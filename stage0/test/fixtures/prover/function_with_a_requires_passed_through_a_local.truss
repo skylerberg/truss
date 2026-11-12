@@ -8,7 +8,7 @@ fn call(visit: (fn(index: Int64) -> Int64 requires index < 2)) -> Int64 {
   visit(1)
 }
 
-fn run_example() -> Int64 {
-  let second_example: fn(Int64) -> Int64 = below_one
-  call(visit: second_example)
+fn f() -> Int64 {
+  let g: fn(Int64) -> Int64 = below_one
+  call(visit: g)
 }

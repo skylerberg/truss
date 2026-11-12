@@ -2,7 +2,7 @@ trait Mapper {
   fn apply[Output](self, value: Output) -> Output
 }
 
-type Point(first_number: Int64)
+type Point(x: Int64)
 
 impl Mapper for Point {
   fn apply[Output](self, value: Output) -> Output { todo }

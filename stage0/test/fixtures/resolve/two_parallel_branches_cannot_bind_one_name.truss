@@ -1,7 +1,7 @@
-fn run_example() -> Int64 {
+fn f() -> Int64 {
   parallel {
-    let first_value = 1
-    let first_value = 2
+    let a = 1
+    let a = 2
   }
-  first_value
+  a
 }

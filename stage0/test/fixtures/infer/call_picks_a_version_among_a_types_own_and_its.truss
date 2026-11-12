@@ -18,7 +18,7 @@ impl Cleared for Counter {
 
 fn Counter.label(own self) -> Int64 { todo }
 
-fn run_example(counter: mut Counter) -> Int64 {
+fn f(counter: mut Counter) -> Int64 {
   let read = counter.label()
   let cleared = mut counter.label()
   let built = Counter(count: 3).label()

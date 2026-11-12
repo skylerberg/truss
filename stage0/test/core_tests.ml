@@ -67,12 +67,12 @@ let printed_body text name =
 
 let expect_definition name text expected =
   test name (fun () ->
-      let actual = printed_definition text "second_example" in
+      let actual = printed_definition text "g" in
       if actual <> expected then fail "found:\n%s" actual)
 
 let expect_body name text expected =
   test name (fun () ->
-      let actual = printed_body text "second_example" in
+      let actual = printed_body text "g" in
       if actual <> expected then fail "found:\n%s" actual)
 
 let meters = Fixtures.Core.meters
@@ -214,7 +214,7 @@ let () =
 (* Specifications *)
 
 let () =
-  expect_definition "first_value `requires` clause with a quantifier is not executable"
+  expect_definition "a `requires` clause with a quantifier is not executable"
     Fixtures.Core.requires_clause_with_a_quantifier_is_not
     "fn(items: List[Int64], limit: Int64)\n\
      requires (limit > 0)\n\
@@ -365,7 +365,7 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn second_example(items: List[Int64], config: Config) -> Int64 {\n\
+                 fn g(items: List[Int64], config: Config) -> Int64 {\n\
                 \  var hole = todo\n\
                 \  " ^ statement ^ "\n  config.port\n}\n" );
             ]))
@@ -416,7 +416,7 @@ let () =
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
-          if Path.show key.path = "app::main::second_example" then
+          if Path.show key.path = "app::main::g" then
             match Query.demand database Infer.core key with
             | Some form ->
                 Core_walk.definition
@@ -444,7 +444,7 @@ let () =
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
-          if Path.show key.path = "app::main::second_example" then
+          if Path.show key.path = "app::main::g" then
             match Query.demand database Infer.core key with
             | Some form ->
                 Core_walk.definition
@@ -607,8 +607,8 @@ let () =
      place other.first) && Equal.equal for Second by a bound(place self.second, place \
      other.second)) }";
   expect_derived
-    "first_value sum type's derived equal compares the fields of matching variants, and is false \
-     for different variants"
+    "a sum type's derived equal compares the fields of matching variants, and is false for \
+     different variants"
     light "Light" "Equal" "equal" Read
     "fn(self: Light, other: Light)\n\
      { match place self { Off => { (place other is Off) } Dim(level: level) => { match place other \

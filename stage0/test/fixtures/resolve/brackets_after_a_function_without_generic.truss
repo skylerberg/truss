@@ -1,5 +1,5 @@
 fn count() -> Int64 { 0 }
 
-fn run_example() -> Int64 {
+fn f() -> Int64 {
   count[0]
 }

@@ -1,5 +1,5 @@
 type Sorted[Element: Ordered](items: List[Element])
 
-type Point(first_number: Int64)
+type Point(x: Int64)
 
-fn run_example(points: Sorted[Point]) {}
+fn f(points: Sorted[Point]) {}

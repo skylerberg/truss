@@ -6,12 +6,12 @@ trait Sub: Base {
   fn get(self) -> Self.Key
 }
 
-type Probe(first_number: Int64)
+type P(x: Int64)
 
-impl Base for Probe {
+impl Base for P {
   type Key = Int64
 }
 
-impl Sub for Probe {
+impl Sub for P {
   fn get(self) -> String { todo }
 }

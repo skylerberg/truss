@@ -4,7 +4,7 @@ fn Queue.take(mut self) -> Option[List[Int64]] {
   todo
 }
 
-fn second_example(queue: mut Queue) -> USize {
+fn g(queue: mut Queue) -> USize {
   if mut queue.take() is Some(first) {
     return first.length()
   }

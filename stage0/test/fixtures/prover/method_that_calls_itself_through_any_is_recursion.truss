@@ -14,7 +14,7 @@ impl Check for Loop {
   }
 }
 
-fn run_example() -> Bool
+fn f() -> Bool
   cost time finite
 {
   Loop().check()

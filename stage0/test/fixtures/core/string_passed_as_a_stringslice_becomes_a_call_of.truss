@@ -1,5 +1,5 @@
 fn greet(text: StringSlice) {}
 
-fn second_example(name: String) {
+fn g(name: String) {
   greet(name)
 }

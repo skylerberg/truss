@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   let body = todo
   let _ = body + 1
 }

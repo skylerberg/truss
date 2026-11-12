@@ -1,4 +1,4 @@
-fn run_example() -> UInt8
+fn f() -> UInt8
   uses Dice
   ensures result <= 6
 {
