@@ -20,3 +20,5 @@ let to_string bug =
   String.concat ""
     (Printf.sprintf "%s: %s" bug.stage bug.message
     :: List.map (fun doing -> "\n  while " ^ doing) bug.doing)
+
+let () = Printexc.register_printer (function Bug bug -> Some (to_string bug) | _ -> None)

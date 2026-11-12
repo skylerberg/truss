@@ -1,5 +1,9 @@
 use standard::json
+use standard::network
+use standard::serialization
 use standard::streams
+use standard::url
+use standard::uuid
 
 fn kind_of(text: StringSlice) -> Option[json::ParseErrorKind] {
   match json::parse(text) {
@@ -105,31 +109,18 @@ test "a value is written as compact text and as indented text" {
 }
 
 type Player(name: String, score: Int64, tags: List[String], rank: Option[UInt8])
-  derives Equal
+  derives Equal, serialization::Serialize, serialization::Deserialize
 
-impl json::Encode for Player {
-  fn to_json(self) -> json::Value {
-    var members: Map[String, json::Value] = [:]
-    members["name"] = self.name.to_json()
-    members["score"] = self.score.to_json()
-    members["tags"] = self.tags.to_json()
-    members["rank"] = self.rank.to_json()
-    json::Value.Object(members: own members)
-  }
-}
+type Shape =
+  | Point
+  | Circle(radius: Float64)
+  | Labelled(label: String, inner: Player)
+  derives Equal, serialization::Serialize, serialization::Deserialize
 
-impl json::Decode for Player {
-  fn from_json(value: json::Value) -> Result[Player, json::DecodeError] {
-    Ok(Player(
-      name: value.field("name")?,
-      score: value.field("score")?,
-      tags: value.field("tags")?,
-      rank: value.optional_field("rank")?,
-    ))
-  }
-}
+type Settings(user_name: String, retry_count: UInt32 = 3, shapes: List[Shape] = [])
+  derives Equal, serialization::Serialize, serialization::Deserialize
 
-test "a type that implements Encode and Decode goes to JSON and back" {
+test "a type that derives Serialize and Deserialize goes to JSON and back" {
   let player = Player(name: "Ada", score: 12, tags: ["a", "b"], rank: Some(3))
   let text = json::encode(player)
   assert text == "{\"name\":\"Ada\",\"score\":12,\"tags\":[\"a\",\"b\"],\"rank\":3}"
@@ -137,24 +128,67 @@ test "a type that implements Encode and Decode goes to JSON and back" {
   assert decoded == Ok(own player)
   let unranked: Result[Player, json::Error] = json::decode("{\"name\":\"Bo\",\"score\":-1,\"tags\":[]}")
   assert unranked == Ok(Player(name: "Bo", score: -1, tags: [], rank: None))
+  assert json::encode(Player(name: "Bo", score: 0, tags: [], rank: None)) == "{\"name\":\"Bo\",\"score\":0,\"tags\":[],\"rank\":null}"
   assert json::encode_pretty([1, 2]) == "[\n  1,\n  2\n]"
 }
 
-test "decode says which member has the wrong type or is missing" {
+test "a sum type's variant is its name, or an object that holds its fields under its name" {
+  let shapes: List[Shape] = [
+    Shape.Point,
+    Shape.Circle(radius: 1.5),
+    Shape.Labelled(label: "x", inner: Player(name: "Cy", score: 1, tags: [], rank: None)),
+  ]
+  let text = json::encode(shapes)
+  assert text
+    == "[\"Point\",{\"Circle\":{\"radius\":1.5}},{\"Labelled\":{\"label\":\"x\",\"inner\":{\"name\":\"Cy\",\"score\":1,\"tags\":[],\"rank\":null}}}]"
+  let decoded: Result[List[Shape], json::Error] = json::decode(text)
+  assert decoded == Ok(own shapes)
+  let unknown: Result[Shape, json::Error] = json::decode("\"Square\"")
+  assert unknown is Err(Deserialize(error)) && "${error}".contains("Square")
+  let inside: Result[Shape, json::Error] = json::decode("{\"Circle\":{\"radius\":\"big\"}}")
+  assert inside is Err(Deserialize(wrong)) && wrong.path == "/Circle/radius"
+}
+
+test "a field with a default may be missing, and names may be written in camel case" {
+  let read: Result[Settings, json::Error] = json::decode("{\"user_name\":\"ada\"}")
+  assert read == Ok(Settings(user_name: "ada"))
+  let settings = Settings(user_name: "bo", retry_count: 5, shapes: [Shape.Point])
+  let text = json::encode(settings, names: json::Names.CamelCase)
+  assert text == "{\"userName\":\"bo\",\"retryCount\":5,\"shapes\":[\"Point\"]}"
+  let back: Result[Settings, json::Error] = json::decode(text, names: json::Names.CamelCase)
+  assert back == Ok(own settings)
+  let snake: Result[Settings, json::Error] = json::decode(text)
+  assert snake is Err(Deserialize(missing)) && missing.path == "/user_name"
+}
+
+type Event(at: Instant, id: uuid::Uuid, source: network::IpAddress, link: url::Url)
+  derives Equal, serialization::Serialize, serialization::Deserialize
+
+test "instants, UUIDs, addresses, and URLs are written as their text" {
+  let text = "{\"at\":\"2024-01-02T03:04:05Z\",\"id\":\"0b8f5e3c-1d2a-4f6b-9c7e-2a4d6f8b0c1e\",\"source\":\"10.0.0.1\",\"link\":\"https://example.com/a\"}"
+  let read: Result[Event, json::Error] = json::decode(text)
+  assert read is Ok(event) && json::encode(event) == text
+  let wrong: Result[Event, json::Error] = json::decode("{\"at\":\"yesterday\",\"id\":\"x\",\"source\":\"x\",\"link\":\"x\"}")
+  assert wrong is Err(Deserialize(error)) && error.path == "/at" && "${error}".contains("instant")
+}
+
+test "deserialize says which member has the wrong type or is missing" {
   let wrong: Result[Player, json::Error] = json::decode("{\"name\":\"Ada\",\"score\":\"high\",\"tags\":[]}")
-  assert wrong is Err(Decode(mismatch)) && mismatch.path == "/score"
+  assert wrong is Err(Deserialize(mismatch)) && mismatch.path == "/score"
   let missing: Result[Player, json::Error] = json::decode("{\"name\":\"Ada\",\"score\":1}")
-  assert missing is Err(Decode(absent)) && "${absent}".contains("tags")
+  assert missing is Err(Deserialize(absent)) && "${absent}".contains("tags")
   let nested: Result[Player, json::Error] = json::decode("{\"name\":\"Ada\",\"score\":1,\"tags\":[\"a\",2]}")
-  assert nested is Err(Decode(inner)) && inner.path == "/tags/1"
+  assert nested is Err(Deserialize(inner)) && inner.path == "/tags/1"
   let outside: Result[Player, json::Error] = json::decode("{\"name\":\"Ada\",\"score\":1,\"tags\":[],\"rank\":256}")
-  assert outside is Err(Decode(range)) && range.path == "/rank"
+  assert outside is Err(Deserialize(range)) && range.path == "/rank"
   let broken: Result[Player, json::Error] = json::decode("{\"name\":")
   assert broken is Err(Parse(_))
   let numbers: Result[List[UInt8], json::Error] = json::decode("[0, 255]")
   assert numbers == Ok([0, 255])
   let table: Result[Map[String, Bool], json::Error] = json::decode("{\"on\": true, \"off\": false}")
   assert table is Ok(flags) && flags.length() == 2 && flags["on"] && !flags["off"]
+  let untyped: Result[json::Value, json::Error] = json::decode("{\"a\":[1,2.5,null,true,\"x\"]}")
+  assert untyped is Ok(value) && value.to_text() == "{\"a\":[1,2.5,null,true,\"x\"]}"
 }
 
 test "a value is read from a reader and written to a writer" {

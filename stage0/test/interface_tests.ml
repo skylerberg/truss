@@ -119,6 +119,20 @@ let () =
   test "only a record derives Default" (fun () ->
       one_diagnostic "type Light =\n  | Off\n  | On\n  derives Default\n" "types.cannot_derive";
       no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
+  test "deriving Serialize needs every field to implement it" (fun () ->
+      one_diagnostic
+        "use standard::serialization\n\n\
+         type Opaque(x: Int64)\n\n\
+         type Point(inner: Opaque)\n\
+        \  derives serialization::Serialize\n"
+        "types.cannot_derive";
+      no_diagnostics
+        [
+          ( "app::main",
+            "use standard::serialization\n\n\
+             type Point(x: Int64, tags: List[String] = [])\n\
+            \  derives serialization::Serialize, serialization::Deserialize\n" );
+        ]);
   test "deriving Ordered needs Equal derived too" (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
   test "a generic type derives under conditions on its parameters" (fun () ->
