@@ -1,6 +1,6 @@
-(* The documents agree with the parser: every example parses, GRAMMAR.md's
-   grammar accepts exactly the inputs the parser accepts, and
-   GRAMMAR.md lists the words the parser recognizes by spelling. *)
+(* The documents agree with the parser: every example parses, the grammar of
+   SPECIFICATION.md accepts exactly the inputs the parser accepts, and
+   SPECIFICATION.md lists the words the parser recognizes by spelling. *)
 
 open Harness
 open Parse_support
@@ -8,10 +8,10 @@ open Parse_support
 (* The documents agree with the code *)
 
 let () =
-  test "GRAMMAR.md lists the words the parser recognizes by spelling" (fun () ->
+  test "SPECIFICATION.md lists the words the parser recognizes by spelling" (fun () ->
       let listed =
         Documents.words
-          (Documents.block_after (document "GRAMMAR.md")
+          (Documents.block_after (document "SPECIFICATION.md")
              "name resolution gives the rest their meaning")
       in
       let missing = List.filter (fun word -> not (List.mem word listed)) Parser.spelled_words in
@@ -54,7 +54,7 @@ let () =
       List.iteri
         (fun index text ->
           test
-            (Printf.sprintf "%s block %d is accepted by GRAMMAR.md's grammar" name (index + 1))
+            (Printf.sprintf "%s block %d is accepted by the grammar" name (index + 1))
             (fun () ->
               let tokens, items, _ = snippet text in
               List.iter
@@ -69,11 +69,11 @@ let () =
     markdown_files
 
 let () =
-  test "GRAMMAR.md's grammar accepts a file" (fun () ->
-      let text = Fixtures.Parser_documents.grammar_mds_grammar_accepts_a_file in
+  test "the grammar accepts a file" (fun () ->
+      let text = Fixtures.Parser_documents.the_grammar_accepts_a_file in
       let tokens, _ = Lexer.lex (source text) in
       if not (Reference.accepts Reference.file (Array.to_list tokens)) then fail "rejected");
-  test "GRAMMAR.md's grammar rejects every input the parser rejects" (fun () ->
+  test "the grammar rejects every input the parser rejects" (fun () ->
       List.iter
         (fun text ->
           let tokens, _ = Lexer.lex (source text) in

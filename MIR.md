@@ -211,7 +211,7 @@ These are its rules:
 7. **A `for` loop** evaluates its range or its call before the first
    iteration.
 
-SYNTAX.md and DESIGN.md state the rules that a programmer can observe.
+SPECIFICATION.md states the rules that a programmer can observe.
 
 ## Primitive operations
 

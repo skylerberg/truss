@@ -79,17 +79,21 @@ develop as well as make it easier to bootstrap the compiler in parts.
     `TRUSS_SKIP_LIBRARY_PROOFS`, which makes `standard_library_tests` say it
     is skipped and stop, and the proofs' jobs build and run that one
     executable.
-  - **The proofs are dealt out to several runners.** `TRUSS_PROOF_SHARE`
-    names a run's share as `index/count`, and `standard_library_tests` then
-    checks and proves only that share's modules. The modules are dealt out
-    by the size of their source, so the shares take about as long as each
-    other. When the proofs' jobs become the longest again, add a share: one
-    more entry in the workflow's list.
-  - **Solver answers are cached between runs.** Most of proving the
-    standard library is the solver. The cache key of an answer is the query
-    text, the solver version, and the step limit. A run restores the cache
-    from `main` and solves only the queries whose text changed. Only pushes
-    to `main` save the cache. Each share of the proofs keeps its own.
+  - **The proofs are dealt out to several runners, and to each of a
+    runner's cores.** `TRUSS_PROOF_SHARE` names a process's share as
+    `index/count`, and `standard_library_tests` then checks and proves only
+    that share's modules. The prover translates on one core, so each runner
+    starts one process for each of its cores, each with a share and a
+    state of its own (`.github/scripts/prove-share.sh`). The modules are
+    dealt out by their measured weights, so the shares take about as long
+    as each other. When the proofs' jobs become the longest again, add a
+    runner: one more entry in the workflow's list.
+  - **Solver answers are cached between runs.** The cache key of an answer
+    is the query text, the solver version, and the step limit. A run
+    restores the cache from `main` and solves only the queries whose text
+    changed. Only pushes to `main` save the cache. Each runner of the proofs
+    keeps its own. With the answers cached, most of a run is translating
+    the library's definitions into queries.
   - **A new push to a pull request cancels the run it replaces.**
 - **A pull request that takes out a recent merge fails,** before anything is
   built (`.github/scripts/reverts.sh`). Several sessions fetch into one
@@ -124,10 +128,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
 Each document has one job, and a fact is stated in one of them:
 
-- **[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-  [GRAMMAR.md](GRAMMAR.md) define Truss:** its semantics and their reasons,
-  how it is written, and its exact grammar. They describe the language, whether
-  or not stage0 builds all of it yet.
+- **[SPECIFICATION.md](SPECIFICATION.md) and [PACKAGES.md](PACKAGES.md)
+  define Truss,** its grammar and the rules of the language and of
+  packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
+  language, whether or not stage0 builds all of it yet.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
   [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
@@ -216,7 +220,7 @@ Every stage of stage0 is tested the same way:
   a function of its reads, or a result the database left stale, fails
   whichever test met it.
 - **Checks against the documents are tests,** as long as each one states a
-  single property, such as "GRAMMAR.md's keyword list matches the lexer's",
+  single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".
 - **One test can be run alone.** With `TRUSS_TEST` set, a test executable
   runs only the tests whose names contain it, for working on one:

@@ -1,10 +1,9 @@
 # Truss Parser
 
 This document describes the stage0 parser, in [`stage0/`](stage0). It
-implements the syntactic grammar in [GRAMMAR.md](GRAMMAR.md), reads the
-tokens described in [LEXER.md](LEXER.md), and follows the rules in
-[SYNTAX.md](SYNTAX.md) and [DESIGN.md](DESIGN.md). Each departure from those
-documents is stated here.
+implements the syntactic grammar of [SPECIFICATION.md](SPECIFICATION.md),
+reads the tokens described in [LEXER.md](LEXER.md), and follows the rules of
+SPECIFICATION.md. Each departure from them is stated here.
 
 The parser takes one file's token array from the lexer and returns a syntax
 tree for each definition and a list of diagnostics. Like the lexer, it always
@@ -31,7 +30,7 @@ It does not:
   or a binding, and an expression such as `List[String]` before a `.` is one
   node whether it names a type or a value. Name resolution decides, without
   changing the tree's shape (see
-  [GRAMMAR.md](GRAMMAR.md#constructs-resolved-after-parsing)).
+  [SPECIFICATION.md](SPECIFICATION.md#constructs-resolved-after-parsing)).
 - check that a bare argument after the first names a parameter, which needs
   the callee's signature, or that the expression after `mut` or `own` starts
   with a place, which needs name resolution (see
@@ -212,7 +211,7 @@ from the spans, and the token at a position from the lexer's token array.
 ### Shape
 
 The tree types, in [`stage0/parser/syntax/syntax.mli`](stage0/parser/syntax/syntax.mli),
-follow GRAMMAR.md closely. Most of the tree is made of one record,
+follow SPECIFICATION.md closely. Most of the tree is made of one record,
 `'kind node`, which holds a construct's kind, its span, and its id: an
 expression is an `expression_kind node`, and patterns, types, clauses,
 parameters, fields, and the rest are nodes the same way. Statements and the
@@ -282,7 +281,7 @@ Precedence in Truss is a partial order: some pairs of operators have no
 relative precedence, and need parentheses. A parser can enforce that in two
 ways:
 
-- **Encode the partial order in the grammar,** as GRAMMAR.md and
+- **Encode the partial order in the grammar,** as SPECIFICATION.md and
   `truss.mly` do. A combination that needs parentheses is then a syntax
   error at the second operator, such as "unexpected `==`" in
   `flags & mask == 0`, and a good fix needs both operands, which the parser
@@ -396,7 +395,7 @@ function.
 - **`let ... else`.** After the expression of a `let` or `var`, an `else`
   starts the `else` block. If the expression ends with `}`, as an `if` or
   `match` does, that is an error, with a fix that puts the expression in
-  parentheses. GRAMMAR.md leaves this rule to a check after parsing.
+  parentheses. SPECIFICATION.md leaves this rule to a check after parsing.
 - **Bodies on the next line.** The function that expects a body skips one
   `NEWLINE` before its `{`. It is called only where a body must follow:
   after a signature and its clauses, a loop header, an `if` or `while`
@@ -442,7 +441,7 @@ against that table, never against a string literal elsewhere.
 - **`cost potential expression`** is accepted only on a type.
 - **Inside a bound,** `time(...)`, `calls(...)`, `log(...)`, and
   `power(...)` parse as ordinary calls; name resolution resolves them, as
-  GRAMMAR.md specifies.
+  SPECIFICATION.md specifies.
 
 ## Checks on a whole definition
 
@@ -538,7 +537,7 @@ To avoid cascading errors:
 
 ### Syntax from other languages
 
-SYNTAX.md's rule is that each common habit gets its own error and an exact
+Each common habit of another language gets its own error and an exact
 fix. The lexer handles the habits it can fix from the tokens alone. The rest
 need the surrounding tokens, so the parsing functions recognize each one at
 the point where the grammar has already rejected a token. A recognizer

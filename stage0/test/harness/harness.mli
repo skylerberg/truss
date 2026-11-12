@@ -48,5 +48,5 @@ val markdown_documents : unit -> string list
 (** The names of the Markdown documents at the root of the repository, in order. *)
 
 val workspace_path : string -> string
-(** The path of a file of the repository, given from the workspace root, such as ["SYNTAX.md"],
-    whatever directory the executable runs in. *)
+(** The path of a file of the repository, given from the workspace root, such as
+    ["SPECIFICATION.md"], whatever directory the executable runs in. *)

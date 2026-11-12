@@ -997,9 +997,8 @@ let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
-let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
-let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
+let create ?(checks = true) ?(file_name = Workspace.file_path) ~want
     ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
     settings =
   let lowering = { target; checks } in

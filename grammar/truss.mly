@@ -1,4 +1,4 @@
-/* The grammar from GRAMMAR.md, written for Menhir so that it can be checked
+/* The grammar of SPECIFICATION.md, written for Menhir so that it can be checked
    for conflicts with `menhir --explain truss.mly`. Semantic actions are
    empty; this file checks the grammar's shape, not its output.
 
