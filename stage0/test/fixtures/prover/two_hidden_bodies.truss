@@ -1,0 +1,13 @@
+public fn double(n: Int64) -> Int64
+  requires n < 1000 && n > -1000
+  cost time O(1)
+{
+  n * 2
+}
+
+public fn identity(n: Int64) -> Int64
+  ensures result == n
+  cost time O(1)
+{
+  n
+}

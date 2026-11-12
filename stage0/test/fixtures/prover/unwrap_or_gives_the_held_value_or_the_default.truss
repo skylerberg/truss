@@ -1,0 +1,17 @@
+type Digit(value: UInt8)
+  invariant value >= 1 && value <= 9
+
+fn digit_from_number(number: USize) -> Option[Digit] {
+  if number >= 1 && number <= 9 {
+    Some(Digit(UInt8.try_from(number).unwrap_or(1)))
+  } else {
+    None
+  }
+}
+
+fn held_or_default(value: Option[Int64]) -> Int64
+  ensures !(value is Some(held) && result != held)
+  ensures value is Some(_) || result == 0
+{
+  value.unwrap_or(0)
+}

@@ -1,0 +1,17 @@
+fn to_index(value: UInt8) -> USize
+  ensures result == value
+{
+  USize.from(value)
+}
+
+fn to_signed(value: UInt16) -> Int32
+  ensures result == value
+{
+  Int32.from(value)
+}
+
+fn to_wider(value: Int8) -> Int64
+  ensures result == value
+{
+  Int64.from(value)
+}

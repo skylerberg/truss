@@ -67,18 +67,25 @@ develop as well as make it easier to bootstrap the compiler in parts.
     its changes. Only pushes to `main` save it, trimmed so that it stays
     quick to restore.
   - **The build, formatting, the opam file, and the compiler's tests are one
-    dune run,** so they overlap. Four things run beside it, each on a
+    dune run,** so they overlap. Five things run beside it, each on a
     runner of its own: the codegen tests, the codegen tests again under
     AddressSanitizer and UndefinedBehaviorSanitizer, the programs that use
-    several threads under ThreadSanitizer, and the standard library's
-    proofs. ThreadSanitizer cannot run beside the other sanitizers, and its
-    tests take as long as theirs, so it has a job of its own.
-  - **The standard library's proofs have their own jobs.** They are the
-    longest test, and the one that grows with the library, so they do not
-    share a runner's cores with the rest. The dune run sets
-    `TRUSS_SKIP_LIBRARY_PROOFS`, which makes `standard_library_tests` say it
-    is skipped and stop, and the proofs' jobs build and run that one
-    executable.
+    several threads under ThreadSanitizer, the prover's and the code
+    database's tests, and the standard library's proofs. ThreadSanitizer
+    cannot run beside the other sanitizers, and its tests take as long as
+    theirs, so it has a job of its own.
+  - **The longest suites have their own jobs.** The standard library's
+    proofs grow with the library, and `prover_tests` and `database_tests`
+    take twice as long as any other suite of the compiler's, so none of
+    them share the check's cores, which the other suites keep busy. The
+    dune run sets `TRUSS_SKIP_SUITES` to the three executables' names,
+    which makes each say it is skipped and stop.
+  - **A suite on a runner of its own runs as several processes.** One
+    process runs its tests one after another on one core, so the job
+    starts each suite twice, with `TRUSS_TEST_SHARE` set to `0/2` and
+    `1/2`: each process runs every other test
+    (`.github/scripts/test-shares.sh`). Each repeats the suite's setup, so
+    a suite runs this way only on cores that would otherwise be idle.
   - **The proofs are dealt out to several runners, and to each of a
     runner's cores.** `TRUSS_PROOF_SHARE` names a process's share as
     `index/count`, and `standard_library_tests` then checks and proves only
@@ -132,6 +139,8 @@ Each document has one job, and a fact is stated in one of them:
   define Truss,** its grammar and the rules of the language and of
   packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
   language, whether or not stage0 builds all of it yet.
+- **The Markdown files beside the modules of [`standard/`](standard)
+  document the standard library,** each its module's types and functions.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
   [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
@@ -225,3 +234,5 @@ Every stage of stage0 is tested the same way:
 - **One test can be run alone.** With `TRUSS_TEST` set, a test executable
   runs only the tests whose names contain it, for working on one:
   `TRUSS_TEST=standard::text _build/default/stage0/test/standard_library_tests.exe`.
+  A test must not depend on what an earlier test did, since `TRUSS_TEST`
+  and `TRUSS_TEST_SHARE` run it without the tests before it.

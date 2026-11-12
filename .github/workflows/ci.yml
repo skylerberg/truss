@@ -19,8 +19,9 @@ env:
 
 jobs:
   # The build, the formatting, the opam file, and the compiler's tests, in
-  # one dune run so that they overlap. The tests of generated code and the
-  # standard library's proofs run in jobs of their own.
+  # one dune run so that they overlap. The tests of generated code, the
+  # prover's and the code database's tests, and the standard library's
+  # proofs run in jobs of their own.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -56,7 +57,7 @@ jobs:
       # which leaves out stage0/test/codegen.
       - name: Build, check formatting and truss.opam, and test the compiler
         env:
-          TRUSS_SKIP_LIBRARY_PROOFS: "1"
+          TRUSS_SKIP_SUITES: standard_library_tests,prover_tests,database_tests
         run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest @grammar/runtest
 
       - name: Check that truss.opam matches dune-project
@@ -72,6 +73,36 @@ jobs:
         with:
           path: ~/.cache/dune
           key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+
+  # The prover's and the code database's tests: the longest of the
+  # compiler's own, and the check's cores are busy with the rest, so they
+  # run on a runner of their own, each suite as two processes, which keep
+  # its four cores busy.
+  prover-and-database-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: opam
+        uses: ./.github/actions/opam
+        with:
+          opam-version: ${{ env.OPAM_VERSION }}
+          opam-sha256: ${{ env.OPAM_SHA256 }}
+          ocaml-version: ${{ env.OCAML_VERSION }}
+
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+          restore-keys: dune-${{ steps.opam.outputs.key }}-
+
+      - uses: ./.github/actions/z3
+
+      - name: Test the prover and the code database
+        run: |
+          opam exec -- dune build ./stage0/test/prover_tests.exe ./stage0/test/database_tests.exe
+          cd _build/default/stage0/test
+          "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" 2 ./prover_tests.exe ./database_tests.exe
 
   # The tests of generated code, which compile and run C: the longest tests
   # after the proofs, so they run beside the check, on a runner of their own.

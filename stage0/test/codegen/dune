@@ -88,6 +88,7 @@
   documents)
  (deps
   (glob_files %{workspace_root}/*.md)
+  (glob_files_rec %{workspace_root}/standard/*.md)
   (glob_files library/*.truss)))
 
 (rule
