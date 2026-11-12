@@ -1,16 +1,15 @@
 open Syntax
-module T = Types
 
 type context = {
   database : Query.context;
   resolved : Resolve.resolved;
-  bounds : (T.parameter, T.trait_reference list) Hashtbl.t;
-  self_type : T.ty option;  (** What [Self] means here. *)
-  self_trait : T.trait_reference option;
-  self_associated : (string * T.ty) list;
-  self_capabilities : (string * T.capability list) list;
+  bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
+  self_type : Types.ty option;  (** What [Self] means here. *)
+  self_trait : Types.trait_reference option;
+  self_associated : (string * Types.ty) list;
+  self_capabilities : (string * Types.capability list) list;
   diagnostics : Syntax.diagnostic list ref;
-  named : (span * T.ty) list ref;
+  named : (span * Types.ty) list ref;
 }
 
 let create database resolved =
@@ -32,7 +31,7 @@ let reported context code (span : span) message =
   Diagnostic.reported diagnostic
 
 let report context code span message = ignore (reported context code span message)
-let error context code span message = T.Error (reported context code span message)
+let error context code span message = Types.Error (reported context code span message)
 let bug format = Compiler_bug.bug ~stage:"Interface" format
 let target context (name : name) = context.resolved.names.(name.id)
 
@@ -50,19 +49,19 @@ let parameter_of context (name : name) =
 
 let show_path (path : path) = Resolve.Names.spell_path path
 
-let rec type_ context (written : type_expression) : T.ty =
+let rec type_ context (written : type_expression) : Types.ty =
   match written.kind with
   | Path_type path -> path_type context path
   | Self_type None -> (
-      match self context written.span with Ok self -> self | Error report -> T.Error report)
+      match self context written.span with Ok self -> self | Error report -> Types.Error report)
   | Self_type (Some key) -> self_associated context written.span key
   | Associated (base, key) -> (
       match parameter_of context base with
-      | Ok parameter -> associated context (T.Parameter parameter) parameter key
-      | Error report -> T.Error report)
+      | Ok parameter -> associated context (Types.Parameter parameter) parameter key
+      | Error report -> Types.Error report)
   | Any_type path -> (
       match trait_reference context path with
-      | Ok (trait : T.trait_reference) ->
+      | Ok (trait : Types.trait_reference) ->
           (* A method that mentions an associated type could not be called
              through [any] otherwise. *)
           let open_names =
@@ -81,10 +80,10 @@ let rec type_ context (written : type_expression) : T.ty =
               (Printf.sprintf
                  "`any %s` must fix every associated type of its trait, such as `%s[%s = ...]`."
                  (show_path path.path) (show_path path.path) (List.hd open_names));
-          T.Any trait
-      | Error report -> T.Error report)
-  | Function_type function_type -> T.Function (function_type_ context function_type)
-  | Type_error -> T.Error (Resolve.Parts.recovery_report written.span)
+          Types.Any trait
+      | Error report -> Types.Error report)
+  | Function_type function_type -> Types.Function (function_type_ context function_type)
+  | Type_error -> Types.Error (Resolve.Parts.recovery_report written.span)
 
 (* What [Self] means, which only lowering knows: resolution cannot tell a
    method of a type from a function. *)
@@ -101,7 +100,7 @@ and self_associated context (span : span) (key : name) =
   | Some fixed -> fixed
   | None -> (
       match (self context span, context.self_trait) with
-      | Error report, _ -> T.Error report
+      | Error report, _ -> Types.Error report
       | Ok _, None ->
           error context Unknown_associated_type key.span
             (Printf.sprintf
@@ -118,13 +117,13 @@ and self_associated context (span : span) (key : name) =
               | Some declaring_trait ->
                   let trait =
                     if Path.equal declaring_trait trait.trait then trait
-                    else { T.trait = declaring_trait; trait_arguments = []; associated = [] }
+                    else { Types.trait = declaring_trait; trait_arguments = []; associated = [] }
                   in
-                  T.Projection { base = self; trait; name = key.text }
+                  Types.Projection { base = self; trait; name = key.text }
               | None ->
                   error context Unknown_associated_type key.span
-                    (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait)
-                       key.text))))
+                    (Printf.sprintf "`%s` declares no associated type `%s`."
+                       (Types.show_trait trait) key.text))))
 
 (* The trait that declares an associated type, or with [capability] an
    associated capability set: the trait itself, or one that it requires. *)
@@ -141,7 +140,7 @@ and associated context base parameter (key : name) =
   let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
   let associated_type =
     List.find_map
-      (fun (bound : T.trait_reference) ->
+      (fun (bound : Types.trait_reference) ->
         match List.assoc_opt key.text bound.associated with
         | Some fixed -> Some fixed
         | None -> (
@@ -149,9 +148,9 @@ and associated context base parameter (key : name) =
             | Some declaring_trait ->
                 let trait =
                   if Path.equal declaring_trait bound.trait then bound
-                  else { T.trait = declaring_trait; trait_arguments = []; associated = [] }
+                  else { Types.trait = declaring_trait; trait_arguments = []; associated = [] }
                 in
-                Some (T.Projection { base; trait; name = key.text })
+                Some (Types.Projection { base; trait; name = key.text })
             | None -> None))
       bounds
   in
@@ -164,32 +163,32 @@ and associated context base parameter (key : name) =
 and arguments context (path : path_type) =
   List.filter_map
     (function
-      | Type_argument written -> Some (T.Type (type_ context written))
-      | Count (value, _) -> Some (T.Value (T.Known value))
+      | Type_argument written -> Some (Types.Type (type_ context written))
+      | Count (value, _) -> Some (Types.Value (Types.Known value))
       | Count_name name -> Some (count_name context name)
       | Constraint _ -> None)
     path.arguments
 
-and count_name context (name : name) : T.argument =
+and count_name context (name : name) : Types.argument =
   match target context name with
-  | Some (Value_parameter parameter) -> T.Value (T.Value_parameter parameter)
+  | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
       if not (Constants.is_usize context.database path) then
-        T.Type
+        Types.Type
           (error context Arity name.span
              (Printf.sprintf "`%s` in a type argument must be a constant of type `USize`." name.text))
       else
         match Query.demand context.database Constants.value_of path with
-        | Some value -> T.Value (T.Known value)
+        | Some value -> Types.Value (Types.Known value)
         | None ->
-            T.Type
+            Types.Type
               (error context Arity name.span
                  (Printf.sprintf
                     "The value of `%s` cannot be worked out: a constant used in a type cannot \
                      refer to itself, and is made of literals, arithmetic, and other such \
                      constants."
                     name.text)))
-  | Some (Unknown report) -> T.Type (T.Error report)
+  | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> bug "`%s` is not resolved as a type argument" name.text
 
 and check_arity context (path : path_type) shown expected =
@@ -222,7 +221,7 @@ and check_arity context (path : path_type) shown expected =
             | _ -> ())
           written expected
 
-and path_type context (path : path_type) : T.ty =
+and path_type context (path : path_type) : Types.ty =
   let shown = show_path path.path in
   match target context path.path.last with
   | Some (Type_parameter parameter) ->
@@ -230,18 +229,18 @@ and path_type context (path : path_type) : T.ty =
         report context Arity path.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." shown)
       end;
-      T.Parameter parameter
+      Types.Parameter parameter
   | Some (Capability_parameter _) ->
       error context Not_a_type path.span
         (Printf.sprintf "`%s` is a capability parameter, not a type." shown)
   | Some (Definition (Type, definition_path)) -> (
       match Intrinsic.builtin_of_path definition_path with
-      | Some Never -> T.Never
-      | Some Integer -> T.Integer
+      | Some Never -> Types.Never
+      | Some Integer -> Types.Integer
       | Some _ | None ->
           check_arity context path shown
             (Query.demand context.database Summary.generics_of definition_path);
-          let type_ = T.Named { path = definition_path; arguments = arguments context path } in
+          let type_ = Types.Named { path = definition_path; arguments = arguments context path } in
           context.named := (path.span, type_) :: !(context.named);
           type_)
   | Some (Definition (Trait, _)) ->
@@ -250,13 +249,13 @@ and path_type context (path : path_type) : T.ty =
            shown shown)
   | Some (Definition (Capability, _)) ->
       error context Not_a_type path.span (Printf.sprintf "`%s` is a capability, not a type." shown)
-  | Some (Unknown report) -> T.Error report
+  | Some (Unknown report) -> Types.Error report
   | _ -> bug "`%s` is not resolved as a type" shown
 
 and trait_reference ?(capability = false) context (path : path_type) :
-    (T.trait_reference, Diagnostic.reported) Stdlib.result =
+    (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
-  let trait_reference_of trait : (T.trait_reference, Diagnostic.reported) Stdlib.result =
+  let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
     check_arity context path shown (Query.demand context.database Summary.generics_of trait);
     let associated =
       List.sort compare
@@ -283,17 +282,17 @@ and trait_reference ?(capability = false) context (path : path_type) :
 and trait_bounds context paths =
   List.filter_map (fun path -> Result.to_option (trait_reference context path)) paths
 
-and capability_path context (path : path_type) : T.capability list =
+and capability_path context (path : path_type) : Types.capability list =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Capability_parameter parameter) -> [ T.Capability_parameter parameter ]
+  | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
   | Some (Type_parameter _) ->
       report context Not_a_capability path.span
         (Printf.sprintf
            "`%s` is a type parameter. A capability parameter is declared `capability %s`." shown
            shown);
       []
-  | Some (Definition (Capability, path_)) -> [ T.Capability path_ ]
+  | Some (Definition (Capability, path_)) -> [ Types.Capability path_ ]
   | Some (Definition _) ->
       report context Not_a_capability path.span (Printf.sprintf "`%s` is not a capability." shown);
       []
@@ -305,18 +304,18 @@ and capability_path context (path : path_type) : T.capability list =
    that requires the trait that does. *)
 and capability_projection context base traits (key : name) =
   List.find_map
-    (fun (bound : T.trait_reference) ->
+    (fun (bound : Types.trait_reference) ->
       Option.map
         (fun declaring_trait ->
           let trait =
             if Path.equal declaring_trait bound.trait then { bound with associated = [] }
-            else { T.trait = declaring_trait; trait_arguments = []; associated = [] }
+            else { Types.trait = declaring_trait; trait_arguments = []; associated = [] }
           in
-          T.Capability_projection { base; trait; name = key.text })
+          Types.Capability_projection { base; trait; name = key.text })
         (declaring ~capability:true context bound.trait key.text))
     traits
 
-and capability context (written : capability_reference) : T.capability list =
+and capability context (written : capability_reference) : Types.capability list =
   match written.kind with
   | Capability_path path -> capability_path context path
   | Self_capabilities key -> (
@@ -338,14 +337,14 @@ and capability context (written : capability_reference) : T.capability list =
               | None ->
                   report context Unknown_associated_capability key.span
                     (Printf.sprintf "`%s` declares no associated capability set `%s`."
-                       (T.show_trait trait) key.text);
+                       (Types.show_trait trait) key.text);
                   [])))
   | Associated_capabilities (base, key) -> (
       match parameter_of context base with
       | Error _ -> []
       | Ok parameter -> (
           let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
-          match capability_projection context (T.Parameter parameter) bounds key with
+          match capability_projection context (Types.Parameter parameter) bounds key with
           | Some projection -> [ projection ]
           | None ->
               report context Unknown_associated_capability key.span
@@ -356,16 +355,17 @@ and capability context (written : capability_reference) : T.capability list =
 and capabilities context written =
   List.sort_uniq compare (List.concat_map (capability context) written)
 
-and mode = function None -> T.Read | Some Mut -> T.Mut | Some Own -> T.Own
+and mode = function None -> Types.Read | Some Mut -> Types.Mut | Some Own -> Types.Own
 
-and function_type_ context (written : function_type) : T.function_type =
+and function_type_ context (written : function_type) : Types.function_type =
   {
     inputs =
       List.map
         (fun (written_mode, input) -> (mode written_mode, type_ context input))
         written.inputs;
     output =
-      T.Returns (match written.output with Some output -> type_ context output | None -> T.unit);
+      Types.Returns
+        (match written.output with Some output -> type_ context output | None -> Types.unit);
     uses = uses context written.clauses;
     costs = costs context written.clauses;
   }
@@ -380,7 +380,7 @@ and uses context clauses =
    capability's calls: a type cannot name a parameter, whose calls a
    function's own clauses count. *)
 and costs context clauses =
-  let counted (path : path_type) (method_ : name option) : T.resource option =
+  let counted (path : path_type) (method_ : name option) : Types.resource option =
     let shown = show_path path.path in
     match target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
@@ -406,7 +406,7 @@ and costs context clauses =
     (fun (clause : clause) ->
       match clause.kind with
       | Cost cost ->
-          let resource : T.resource option =
+          let resource : Types.resource option =
             match cost.resource with
             | Time -> Some Time
             | Allocations -> Some Allocations
@@ -425,19 +425,21 @@ and costs context clauses =
           let constant (value : expression) =
             match value.kind with Integer value -> Some value | _ -> None
           in
-          let bound : T.cost_bound =
+          let bound : Types.cost_bound =
             match cost.bound with
             | Finite -> Finite_cost
             | Big_o _ -> Order_of
             | At_most value -> No_more_than (constant value)
             | Exactly value -> Exactly_cost (constant value)
           in
-          Option.map (fun resource -> { T.amortized = cost.amortized; resource; bound }) resource
+          Option.map
+            (fun resource -> { Types.amortized = cost.amortized; resource; bound })
+            resource
       | _ -> None)
     clauses
 
-let generics context owner (written : generic_parameter list) : T.generic list =
-  let parameter (name : name) : T.parameter = { owner; name = name.text } in
+let generics context owner (written : generic_parameter list) : Types.generic list =
+  let parameter (name : name) : Types.parameter = { owner; name = name.text } in
   let declared =
     List.filter_map
       (fun (generic : generic_parameter) ->
@@ -454,9 +456,9 @@ let generics context owner (written : generic_parameter list) : T.generic list =
       | `Type bounds ->
           let bounds = trait_bounds context bounds in
           Hashtbl.replace context.bounds parameter bounds;
-          { T.generic = parameter; kind = Type_generic bounds }
-      | `Value _ -> { T.generic = parameter; kind = Value_generic }
-      | `Capability -> { T.generic = parameter; kind = Capability_generic })
+          { Types.generic = parameter; kind = Type_generic bounds }
+      | `Value _ -> { Types.generic = parameter; kind = Value_generic }
+      | `Capability -> { Types.generic = parameter; kind = Capability_generic })
     declared
 
 (* The types that exist only in specifications: [Integer], and the
@@ -465,9 +467,9 @@ let specification_type (path : Path.t) =
   match path with Top { module_; _ } -> module_ = Well_known.specification | _ -> false
 
 let mentions_integer =
-  T.exists (function
-    | T.Integer -> true
-    | T.Named { path; _ } -> specification_type path
+  Types.exists (function
+    | Types.Integer -> true
+    | Types.Named { path; _ } -> specification_type path
     | _ -> false)
 
 (* A signature, given the generics of the head before it and the type of
@@ -478,7 +480,7 @@ let terminates (clauses : clause list) =
       match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
     clauses
 
-let signature context ~owner ~head ~self_type (written : signature) : T.signature =
+let signature context ~owner ~head ~self_type (written : signature) : Types.signature =
   let own = generics context owner written.generics in
   let generics_ = head @ own in
   let receiver =
@@ -497,7 +499,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
         | Named_parameter { name; mode = written_mode; type_ = written_type; default } ->
             Some
               {
-                T.name = name.text;
+                Types.name = name.text;
                 mode = mode written_mode;
                 type_ = type_ context written_type;
                 has_default = Option.is_some default;
@@ -507,13 +509,13 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
   in
   let output =
     match written.result with
-    | None -> T.Returns T.unit
-    | Some (Returns result) -> T.Returns (type_ context result)
-    | Some (Yields (written_mode, result)) -> T.Yields (mode written_mode, type_ context result)
-    | Some (Lends (written_mode, result)) -> T.Lends (mode written_mode, type_ context result)
+    | None -> Types.Returns Types.unit
+    | Some (Returns result) -> Types.Returns (type_ context result)
+    | Some (Yields (written_mode, result)) -> Types.Yields (mode written_mode, type_ context result)
+    | Some (Lends (written_mode, result)) -> Types.Lends (mode written_mode, type_ context result)
   in
   let terminates = terminates written.clauses in
-  let result_type = T.result_type output in
+  let result_type = Types.result_type output in
   {
     generics = generics_;
     receiver;
@@ -525,11 +527,11 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
       (* [Model]'s method returns a mathematical value. *)
       Well_known.is Model owner || mentions_integer result_type
       || List.exists
-           (fun (parameter : T.parameter_info) -> mentions_integer parameter.type_)
+           (fun (parameter : Types.parameter_info) -> mentions_integer parameter.type_)
            parameters;
     stores_functions =
       List.filter_map
-        (fun (parameter : T.parameter_info) ->
+        (fun (parameter : Types.parameter_info) ->
           match (parameter.mode, parameter.type_) with
           | Own, Function _ -> Some parameter.name
           | _ -> None)

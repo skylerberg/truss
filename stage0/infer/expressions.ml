@@ -17,8 +17,6 @@
    file through [Hooks], which this file sets. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -33,16 +31,16 @@ open Operators
 open Statements
 open Values
 
-let rec expression state env ?expected (value : expression) : T.ty =
+let rec expression state env ?expected (value : expression) : Types.ty =
   let type_ = expression_kind state env ?expected value in
   record state value type_;
   type_
 
-and check state env (value : expression) (expected : T.ty) =
+and check state env (value : expression) (expected : Types.ty) =
   let actual = expression state env ~expected value in
   coerce state env value ~actual ~expected
 
-and expression_kind state env ?expected (value : expression) : T.ty =
+and expression_kind state env ?expected (value : expression) : Types.ty =
   match value.kind with
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
@@ -58,10 +56,10 @@ and expression_kind state env ?expected (value : expression) : T.ty =
          type that the statement infers. *)
       defer state (fun () ->
           match resolve state type_ with
-          | T.Literal _ | T.Variable _ -> false
+          | Types.Literal _ | Types.Variable _ -> false
           | resolved ->
               let rounded =
-                if T.is_builtin Float32 resolved then Literals.float32 ~significand ~exponent
+                if Types.is_builtin Float32 resolved then Literals.float32 ~significand ~exponent
                 else Literals.float64 ~significand ~exponent
               in
               (match rounded with
@@ -71,7 +69,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
                   report state Literal_out_of_range value.span
                     (Printf.sprintf
                        "This literal is too large for `%s`; it would round to infinity."
-                       (T.show resolved)));
+                       (Types.show resolved)));
               true);
       type_
   | String literal -> (
@@ -82,20 +80,20 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       | None -> string_literal state env ?expected value literal)
   | True | False ->
       register_expression state value (fun () -> Boolean (value.kind = True));
-      T.bool
+      Types.bool
   | Todo -> (
       register_expression state value (fun () -> Todo);
-      match expected with Some expected -> expected | None -> T.Hole)
+      match expected with Some expected -> expected | None -> Types.Hole)
   | Unreachable ->
       register_expression state value (fun () -> Unreachable);
-      T.Never
+      Types.Never
   | Break | Continue ->
       let (exit : exit), (kind : Core.kind) =
         match value.kind with Break -> (Break_exit, Break) | _ -> (Continue_exit, Continue)
       in
       register_expression state value (fun () ->
           Form.early_exit (tasks_exited_by exit env.enclosing) state ~origin:value.id kind);
-      T.Never
+      Types.Never
   | Self_value -> (
       (* A lambda that reads [self] captures it. In the list of references,
          [self] is the definition's own id. *)
@@ -123,7 +121,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       (match marked_call state inner with
       | Some call_id ->
           state.receiver_modes <-
-            (call_id, match mode with Mut -> T.Mut | Own -> T.Own) :: state.receiver_modes
+            (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.receiver_modes
       | None -> ());
       let type_ = expression state env ?expected inner in
       if mode = Mut && Option.is_none (marked_call state inner) then
@@ -146,7 +144,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
               value = Form.operand mode (build_expression state tested);
               pattern = build_pattern state written;
             });
-      T.bool
+      Types.bool
   | Range { start; stop; inclusive; _ } ->
       let element =
         match (start, stop) with
@@ -162,19 +160,19 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       in
       register_expression state value (fun () ->
           Form.range_record state value start stop ~inclusive);
-      T.Named { path = Well_known.path Range; arguments = [ T.Type element ] }
+      Types.Named { path = Well_known.path Range; arguments = [ Types.Type element ] }
   | Quantified { quantifier; binder; body } ->
       (match binder with
       | Binder_in (written, collection) ->
           let element = element_of_collection state env ~quantifier:value collection in
-          pattern state env written element ~mode:T.Read
+          pattern state env written element ~mode:Types.Read
       | Binder_type (bound, written) ->
           if not env.specification then
             report state Specification_only value.span
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
-          declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:T.Read);
-      check state env body T.bool;
+          declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:Types.Read);
+      check state env body Types.bool;
       register_expression state value (fun () ->
           let binder : Core.binder =
             match binder with
@@ -199,7 +197,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
                 | _ -> Over_collection { pattern; collection = build_expression state collection })
           in
           Quantified { quantifier; binder; body = build_expression state body });
-      T.bool
+      Types.bool
   | Echo inner ->
       let type_ = expression state env ?expected inner in
       register_expression state value (fun () -> Echo (build_expression state inner));
@@ -213,11 +211,11 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
       | None, Some (Returns output) ->
-          if not (unify state output T.unit) then
-            mismatch state value.span ~expected:output ~actual:T.unit
+          if not (unify state output Types.unit) then
+            mismatch state value.span ~expected:output ~actual:Types.unit
       | Some inner, _ -> ignore (expression state env inner)
       | None, _ -> ());
-      T.Never
+      Types.Never
   | Parenthesized inner ->
       let type_ = expression state env ?expected inner in
       alias_expression state value inner;
@@ -234,7 +232,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Block body ->
       register_expression state value (fun () -> Block (build_block state body));
       block_value state env ?expected body
-  | Expression_error -> T.Error (Resolve.Parts.recovery_report value.span)
+  | Expression_error -> Types.Error (Resolve.Parts.recovery_report value.span)
 
 (* [receiver.name] used as a value: a field, or a static member of a type. *)
 and member_value state env (value : expression) (base : expression) (member : name) =
@@ -246,7 +244,7 @@ and member_value state env (value : expression) (base : expression) (member : na
   | None -> (
       let base_type = normalize state (expression state env base) in
       match base_type with
-      | T.Error _ | T.Hole -> base_type
+      | Types.Error _ | Types.Hole -> base_type
       | _ ->
           register_expression state value (fun () ->
               Use
@@ -285,9 +283,10 @@ and is_field state env (inner : expression) (member : name) =
     | None -> expression state env inner
   in
   match normalize state base_type with
-  | T.Named { path; arguments } -> (
+  | Types.Named { path; arguments } -> (
       match Members.fields state.database path arguments with
-      | Some fields -> List.exists (fun (field : T.field) -> field.field_name = member.text) fields
+      | Some fields ->
+          List.exists (fun (field : Types.field) -> field.field_name = member.text) fields
       | None -> false)
   | _ -> false
 
@@ -302,10 +301,11 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
       (* A slice: a view of a range of the collection. *)
-      Option.iter (fun start -> check state env start (T.builtin USize)) start;
-      Option.iter (fun stop -> check state env stop (T.builtin USize)) stop;
+      Option.iter (fun start -> check state env start (Types.builtin USize)) start;
+      Option.iter (fun stop -> check state env stop (Types.builtin USize)) stop;
       record state range
-        (T.Named { path = Well_known.path Range; arguments = [ T.Type (T.builtin USize) ] });
+        (Types.Named
+           { path = Well_known.path Range; arguments = [ Types.Type (Types.builtin USize) ] });
       register_expression state value (fun () ->
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in
@@ -313,25 +313,25 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
           Form.slice state value base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match base_type with
-      | T.Named { path; arguments = T.Type element :: _ }
+      | Types.Named { path; arguments = Types.Type element :: _ }
         when Well_known.is List path || Well_known.is Slice path
              || Intrinsic.builtin_of_path path = Some Array ->
-          T.Named { path = Well_known.path Slice; arguments = [ T.Type element ] }
-      | T.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
+          Types.Named { path = Well_known.path Slice; arguments = [ Types.Type element ] }
+      | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
           error state Not_indexable value.span
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
-      | T.Error _ | T.Hole -> base_type
+      | Types.Error _ | Types.Hole -> base_type
       | _ ->
           error state Not_indexable value.span
             (Printf.sprintf "`%s` cannot be sliced." (show state base_type)))
   | [ Item key ] -> (
-      if T.is_well_known String base_type || T.is_well_known String_slice base_type then begin
+      if Types.is_well_known String base_type || Types.is_well_known String_slice base_type then begin
         error state Not_indexable value.span
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
       else
         match base_type with
-        | T.Error _ | T.Hole ->
+        | Types.Error _ | Types.Hole ->
             ignore (expression state env key);
             base_type
         | _ -> (

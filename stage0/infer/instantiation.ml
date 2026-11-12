@@ -1,6 +1,5 @@
 open Syntax
 open State
-module T = Types
 module Environment = Interface.Environment
 
 (* A bound that an [impl] satisfies makes this definition depend on the
@@ -20,14 +19,14 @@ let check_evidence_grants state (span : span) evidence =
    reuses that report instead of adding a second one. *)
 let error_at state ?fixes code (value : expression) message =
   match head state value with
-  | Some { target = Unknown report; _ } -> T.Error report
+  | Some { target = Unknown report; _ } -> Types.Error report
   | _ -> error state ?fixes code value.span message
 
 (* An expression before a [.] or a [(] that names a type, a trait, or a
    capability instead of a value. *)
 type static_ =
-  | Static_type of T.ty
-  | Static_trait of Path.t * T.argument list option
+  | Static_type of Types.ty
+  | Static_trait of Path.t * Types.argument list option
       (** The trait's type arguments, if they are written. *)
   | Static_capability of Path.t
 
@@ -40,7 +39,7 @@ type static_ =
    the trait, and with the name of an associated type and the type the
    [impl] defines if those differ. A capability that the [impl] uses and
    that its package is not granted is reported at [at]. *)
-let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
+let require state ~(at : span) type_ (bound : Types.trait_reference) ~unmet =
   let trait = { bound with associated = [] } in
   defer state (fun () ->
       let type_ = normalize state type_ in
@@ -84,7 +83,7 @@ let require_bounds state (span : span) ?of_type generics substitution =
                 (match of_type with
                 | Some type_ -> Printf.sprintf "`%s`" (show state type_)
                 | None -> "This")
-                (T.show argument) (T.show_trait bound)
+                (Types.show argument) (Types.show_trait bound)
             in
             report state Unsatisfied_bound span
               (match other with
@@ -97,11 +96,11 @@ let fresh_arguments state (path : Path.t) =
   match Query.demand state.database Environment.type_interface path with
   | Some interface ->
       List.map
-        (fun (generic : T.generic) ->
+        (fun (generic : Types.generic) ->
           match generic.kind with
-          | Value_generic -> T.Value (Unify.fresh_value state.unifier)
-          | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities (Unify.fresh_capability_variable state.unifier))
+          | Value_generic -> Types.Value (Unify.fresh_value state.unifier)
+          | Type_generic _ -> Types.Type (fresh state)
+          | Capability_generic -> Types.Capabilities (Unify.fresh_capability_variable state.unifier))
         interface.type_generics
   | None -> []
 
@@ -109,8 +108,10 @@ let require_type_bounds state span path arguments =
   match Query.demand state.database Environment.type_interface path with
   | Some interface ->
       Option.iter
-        (require_bounds state span ~of_type:(T.Named { path; arguments }) interface.type_generics)
-        (T.substitution_of interface.type_generics arguments)
+        (require_bounds state span
+           ~of_type:(Types.Named { path; arguments })
+           interface.type_generics)
+        (Types.substitution_of interface.type_generics arguments)
   | None -> ()
 
 (* Fresh inference variables for the generic parameters of a type, each
@@ -129,7 +130,7 @@ let rec static_ state (value : expression) : static_ option =
       if Option.is_some type_arguments then
         report state Arity value.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
-      Some (Static_type (T.Parameter parameter))
+      Some (Static_type (Types.Parameter parameter))
   | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
       Some (Static_trait (path, Option.map (written_arguments state) type_arguments))
   | _, Some { target = Definition (Capability, path); _ } -> Some (Static_capability path)
@@ -141,9 +142,9 @@ let rec static_ state (value : expression) : static_ option =
 and named_type state (value : expression) path type_arguments =
   let type_ arguments =
     match Intrinsic.builtin_of_path path with
-    | Some Never -> T.Never
-    | Some Integer -> T.Integer
-    | _ -> T.Named { path; arguments }
+    | Some Never -> Types.Never
+    | Some Integer -> Types.Integer
+    | _ -> Types.Named { path; arguments }
   in
   match type_arguments with
   | None -> type_ (instantiate_type state value.span path)
@@ -153,7 +154,7 @@ and named_type state (value : expression) path type_arguments =
       | Some expected when List.length expected <> List.length arguments ->
           report state Arity value.span
             (Printf.sprintf "`%s` takes %d %s, and %d %s given."
-               (T.show (Named { path; arguments = [] }))
+               (Types.show (Named { path; arguments = [] }))
                (List.length expected)
                (if List.length expected = 1 then "argument" else "arguments")
                (List.length arguments)
@@ -173,15 +174,15 @@ and written_arguments state items =
           None)
     items
 
-and type_argument_of_expression state (value : expression) : T.argument =
+and type_argument_of_expression state (value : expression) : Types.argument =
   match (value.kind, head state value) with
-  | Integer value, _ -> T.Value (Known value)
-  | _, Some { target = Value_parameter parameter; _ } -> T.Value (Value_parameter parameter)
+  | Integer value, _ -> Types.Value (Known value)
+  | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
       match Query.demand state.database Interface.Constants.value_of path with
-      | Some value -> T.Value (Known value)
+      | Some value -> Types.Value (Known value)
       | None ->
-          T.Type
+          Types.Type
             (error state Arity value.span
                (Printf.sprintf
                   "The value of `%s` cannot be worked out: a constant used in a type cannot refer \
@@ -189,37 +190,39 @@ and type_argument_of_expression state (value : expression) : T.argument =
                   name.text)))
   | _ -> (
       match static_ state value with
-      | Some (Static_type type_) -> T.Type type_
+      | Some (Static_type type_) -> Types.Type type_
       | Some (Static_trait _ | Static_capability _) | None ->
-          T.Type (error_at state Not_a_type value "A type argument is a type, or a `USize` value."))
+          Types.Type
+            (error_at state Not_a_type value "A type argument is a type, or a `USize` value."))
 
 type instance = {
-  signature : T.signature;
-  substitution : T.substitution;
-  type_arguments : T.argument list;
+  signature : Types.signature;
+  substitution : Types.substitution;
+  type_arguments : Types.argument list;
 }
 
 (* Instantiates a signature at a use: its generic parameters are replaced
    by fresh inference variables, each required to satisfy its bounds. *)
-let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
+let instantiate state (span : span) ?(extra = []) (signature : Types.signature) =
   let substitution =
     List.map
-      (fun (generic : T.generic) ->
+      (fun (generic : Types.generic) ->
         ( generic.generic,
           match generic.kind with
-          | Value_generic -> T.Value (Unify.fresh_value state.unifier)
-          | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities (Unify.fresh_capability_variable state.unifier) ))
+          | Value_generic -> Types.Value (Unify.fresh_value state.unifier)
+          | Type_generic _ -> Types.Type (fresh state)
+          | Capability_generic -> Types.Capabilities (Unify.fresh_capability_variable state.unifier)
+        ))
       signature.generics
     @ extra
   in
   require_bounds state span signature.generics substitution;
   {
-    signature = T.substitute_signature substitution signature;
+    signature = Types.substitute_signature substitution signature;
     substitution;
     type_arguments =
       List.map
-        (fun (generic : T.generic) -> List.assoc generic.generic substitution)
+        (fun (generic : Types.generic) -> List.assoc generic.generic substitution)
         signature.generics;
   }
 

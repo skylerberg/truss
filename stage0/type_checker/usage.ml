@@ -3,7 +3,6 @@
    resolution. *)
 
 open Syntax
-module T = Types
 
 type context = {
   resolved : Resolve.resolved;
@@ -114,7 +113,7 @@ let check_unused context (definition : definition) =
     (pattern_bindings definition)
 
 let diverges context (value : expression) =
-  match context.tables.types.(value.id) with Some T.Never -> true | _ -> false
+  match context.tables.types.(value.id) with Some Types.Never -> true | _ -> false
 
 (* Whether a statement diverges, from types alone. *)
 let rec statement_diverges context (written : statement) =

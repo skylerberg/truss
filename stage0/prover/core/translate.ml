@@ -15,11 +15,9 @@
    never assumed because the prover could not read the code around it. *)
 
 open Core
-module T = Types
-module L = Logic
-module S = Logic.Symbol
+module Symbol = Logic.Symbol
 
-let variable ?(numbers = []) label = S.Variable { label; numbers }
+let variable ?(numbers = []) label = Symbol.Variable { label; numbers }
 
 module Names = Resolve.Names
 module Code = Diagnostic.Code
@@ -53,7 +51,12 @@ type evaluation = { from_template : Path.t; texts : string list; clause : int }
 (* A call whose arguments are all known, of a function that is compiled and
    not generic: its term in the logic, which running it can give a value.
    A [Bool] is 0 or 1, in its arguments and its result. *)
-type known_call = { function_ : Path.t; arguments : Z.t list; term : L.term; result_is_bool : bool }
+type known_call = {
+  function_ : Path.t;
+  arguments : Z.t list;
+  term : Logic.term;
+  result_is_bool : bool;
+}
 
 type obligation = {
   code : Code.prover;
@@ -63,21 +66,21 @@ type obligation = {
       (** The clause it comes from, in the definition that states it, where that is not the one
           being proven: a callee's [requires]. *)
   fixes : span Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
-  query : L.query;
-  contracts_alone : L.query option;
+  query : Logic.query;
+  contracts_alone : Logic.query option;
       (** The query without what unfolding callees' definitions gave, where it has any: asked when
           the query runs out of steps, since a callee's contract can be enough where its definition
           is too much for the solver. *)
-  values : (L.symbol * string) list;
+  values : (Logic.symbol * string) list;
       (** Each prover symbol a counterexample shows, with its name. *)
-  locals : (L.symbol * string) list;
+  locals : (Logic.symbol * string) list;
       (** The locals whose values are symbols where the obligation is made, with their names: asked
           for only once the query has a counterexample, so the query's key stays its own. *)
   constants : Costs.constants list;
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
   evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
   known_calls : known_call list;  (** The calls its query mentions that running code can give. *)
-  decisions : (string * string option * L.term * L.term) list;
+  decisions : (string * string option * Logic.term * Logic.term) list;
       (** Each [if] and [match] arm of the definition before it, in order: what to say where its
           condition holds and, for an [if], where it does not, where it is reached, and its
           condition, whose values a counterexample tells. *)
@@ -135,36 +138,36 @@ type loop_exits = { mutable breaks : frame list; mutable continues : frame list 
    tasks it leaves end: the tasks, innermost first, where it was, and what
    it does then. *)
 and leaving = { tasks : Core.task list; at : frame; exit : exit_ }
-and exit_ = Returning of L.term option | Breaking | Continuing
+and exit_ = Returning of Logic.term option | Breaking | Continuing
 
 (* Where a path is: the value of each local, the values on entry for
    [old], the path's condition, and what [self] and [result] are. *)
 and frame = {
   source : source;
-  locals : L.term Locals.t;
-  types : T.ty Locals.t;  (** Each local's type, as it was bound. *)
-  old_locals : L.term Locals.t;
-  self : L.term option;
-  old_self : L.term option;
-  result : L.term option;
-  condition : L.term;
+  locals : Logic.term Locals.t;
+  types : Types.ty Locals.t;  (** Each local's type, as it was bound. *)
+  old_locals : Logic.term Locals.t;
+  self : Logic.term option;
+  old_self : Logic.term option;
+  result : Logic.term option;
+  condition : Logic.term;
   checking : bool;  (** Whether obligations are made here; not in a callee's clauses. *)
-  bound : L.symbol list;  (** Symbols bound by quantifiers around this point. *)
-  binders : (L.symbol * L.sort * L.term) list;
+  bound : Logic.symbol list;  (** Symbols bound by quantifiers around this point. *)
+  binders : (Logic.symbol * Logic.sort * Logic.term) list;
       (** The quantifiers around this point, innermost first: each bound symbol, its sort, and the
           premise it ranges over. *)
   loop : loop_exits option;
-  substitution : T.substitution;
+  substitution : Types.substitution;
       (** The type arguments of the callee whose clauses are read here, for its generic types. *)
-  self_type : T.ty option;  (** The type of [self], whose fields an invariant names. *)
-  yielded : L.term option;
+  self_type : Types.ty option;  (** The type of [self], whose fields an invariant names. *)
+  yielded : Logic.term option;
       (** What [yielded] names here: the parts a lending or yielding callee yielded, or the values a
           [for] loop's earlier iterations received. *)
-  finished : L.term option;  (** What [finished] names here. *)
-  yielded_so_far : L.term option;
+  finished : Logic.term option;  (** What [finished] names here. *)
+  yielded_so_far : Logic.term option;
       (** In a lending or yielding method's own body, the parts it has yielded so far. *)
-  updating : L.term option;  (** What the target of an update holds before it. *)
-  spent : (Costs.counter * L.term) list;
+  updating : Logic.term option;  (** What the target of an update holds before it. *)
+  spent : (Costs.counter * Logic.term) list;
       (** Each counter's value here: what the code proven has spent since it began. *)
 }
 
@@ -176,30 +179,30 @@ type changed = { changed_locals : Core.local list; changes_self : bool }
    potential, also with that potential, from what it held on entry. *)
 type loop_rule =
   | Clause_bound of Core.cost * Costs.constants option
-  | Per_iteration of { per : L.term; per_held : (L.term * L.term) option }
+  | Per_iteration of { per : Logic.term; per_held : (Logic.term * Logic.term) option }
 
 type loop_cost = {
   counter : Costs.counter;
-  entry : L.term;  (** The counter on entry to the loop. *)
+  entry : Logic.term;  (** The counter on entry to the loop. *)
   rule : loop_rule;
-  held : (frame -> L.term) option;  (** The potential of what the loop changes. *)
+  held : (frame -> Logic.term) option;  (** The potential of what the loop changes. *)
 }
 
 (* Which elements an index or a range reaches: one, or the run from a start
    to before a stop. *)
-type place_value = One of L.term | Run of L.term * L.term
+type place_value = One of Logic.term | Run of Logic.term * Logic.term
 
 (* Where a cursor came from: a call to a yielding method, whose clauses
    each pull meets, read in [method_frame] with the call's arguments. *)
-type cursor = { method_frame : frame; own : part; element : T.ty }
+type cursor = { method_frame : frame; own : part; element : Types.ty }
 
 (* What one iteration of a loop that receives parts receives: whether
    there is another part, the part, the parts received through it, and how
    the loop's own state moves on, as a cursor does when pulled. *)
 type received = {
-  has_another : L.term;
-  element : L.term;
-  through : L.term;
+  has_another : Logic.term;
+  element : Logic.term;
+  through : Logic.term;
   advance : frame -> frame;
 }
 
@@ -211,7 +214,7 @@ type loop_start = {
   loop_costs : loop_cost list;
   fresh_mark : int;
   facts_mark : int;
-  preserved : (string * T.ty * L.term * (frame -> L.term option)) list;
+  preserved : (string * Types.ty * Logic.term * (frame -> Logic.term option)) list;
   havocked : frame;
 }
 
@@ -219,24 +222,24 @@ type loop_start = {
    mode, what was written for it, if anything, its type, and its value. *)
 type passed = {
   position : int;
-  mode : T.mode;
+  mode : Types.mode;
   operand : operand option;  (** [None] for a default. *)
-  type_ : T.ty;
-  term : L.term;
-  run : (L.term * L.term) option;
+  type_ : Types.ty;
+  term : Logic.term;
+  run : (Logic.term * Logic.term) option;
       (** A slice argument's bounds, as the argument was evaluated, for writing back what a [mut]
           callee changes. *)
 }
 
 (* A fact stated once in a definition's proof, by what it is about. *)
 type stated =
-  | In_range of L.symbol  (** That a symbol's values are in its type's range. *)
-  | Value_of of L.symbol  (** What a constant's value is. *)
-  | Definition_of of L.symbol  (** A pure function's definition, for every argument. *)
-  | Contract_of of L.symbol  (** A pure function's [ensures], for every valid argument. *)
-  | Exclusive of L.symbol  (** That at most one of a symbol's kind holds. *)
-  | Array_length of L.symbol  (** The length of an array's model, by the model's function. *)
-  | Ranked_model of L.symbol  (** That a model is below its value, by the model's function. *)
+  | In_range of Logic.symbol  (** That a symbol's values are in its type's range. *)
+  | Value_of of Logic.symbol  (** What a constant's value is. *)
+  | Definition_of of Logic.symbol  (** A pure function's definition, for every argument. *)
+  | Contract_of of Logic.symbol  (** A pure function's [ensures], for every valid argument. *)
+  | Exclusive of Logic.symbol  (** That at most one of a symbol's kind holds. *)
+  | Array_length of Logic.symbol  (** The length of an array's model, by the model's function. *)
+  | Ranked_model of Logic.symbol  (** That a model is below its value, by the model's function. *)
   | Ranked_elements of string  (** That a sequence's elements are below it, by its type's key. *)
 
 type context = {
@@ -247,31 +250,31 @@ type context = {
           its function type's. *)
   mutable parameters : Core.parameter list;  (** The definition's, for its callbacks' [requires]. *)
   measures : expression list;  (** Its [decreases], for its recursive calls. *)
-  mutable declarations : L.declaration list;
-  declared : (L.symbol, unit) Hashtbl.t;
+  mutable declarations : Logic.declaration list;
+  declared : (Logic.symbol, unit) Hashtbl.t;
   datatypes : (string, unit) Hashtbl.t;  (** The sorts declared as datatypes, by name. *)
   stated : (stated, unit) Hashtbl.t;
-  mutable facts : L.term list;  (** Reversed. *)
-  unfolded : (L.term, unit) Hashtbl.t;
+  mutable facts : Logic.term list;  (** Reversed. *)
+  unfolded : (Logic.term, unit) Hashtbl.t;
       (** The facts that come from unfolding a callee's definition, which a query that runs out of
           steps is asked again without. *)
   mutable obligations : obligation list;  (** Reversed. *)
   mutable fresh : int;
-  mutable values : (L.symbol * string) list;  (** For counterexamples. *)
+  mutable values : (Logic.symbol * string) list;  (** For counterexamples. *)
   local_names : (Core.local, string) Hashtbl.t;  (** Each local's name, as its pattern binds it. *)
-  mutable returns : (frame * L.term option) list;
+  mutable returns : (frame * Logic.term option) list;
   mutable leaving : leaving list;  (** The early exits of the [concurrent] code being read. *)
-  mutable lent_back : (T.ty * L.term * L.term) list;
+  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
       (** Each part a lending method lends [mut]: its type, as it was lent, and as it came back. *)
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   disjoint : (int * int) list;
       (** The ownership check's pairs of indexes, by the origin of each, that must differ. *)
   mutable indexes : (int * (place_value * span)) list;
       (** The value of each such index or range, once read. *)
-  mutable evaluated_keys : (Core.id * L.term) list;
+  mutable evaluated_keys : (Core.id * Logic.term) list;
       (** The terms of the index keys of the target of the assignment being translated, by node.
           Reading and storing the target look them up, so that no key is evaluated twice. *)
-  mutable yielded_part : (T.ty * [ `Lends | `Yields ]) option;
+  mutable yielded_part : (Types.ty * [ `Lends | `Yields ]) option;
       (** In a lending or yielding method's body, the type of the parts it yields. *)
   mutable yield_ensures : (expression list * expression list) option;
       (** Its [ensures]: the clauses for each [yield], which mention [result], and the others. *)
@@ -284,45 +287,47 @@ type context = {
   mutable groups : Costs.constants list;  (** Every bound's constants, made so far. *)
   counter_numbers : (Costs.counter, int) Hashtbl.t;
       (** Each counter's number, which names the constants of its bounds. *)
-  fresh_order : (L.symbol, int) Hashtbl.t;
+  fresh_order : (Logic.symbol, int) Hashtbl.t;
       (** Each fresh symbol's number, to tell what a loop made. *)
-  mutable logs : (L.term * bool) list;  (** Each term [log] is applied to, and whether halved. *)
-  mutable powers : (L.term * L.term) list;  (** Each base and exponent [power] is applied to. *)
-  mutable lambda_times : (L.term * (L.term * obligation list)) list;
+  mutable logs : (Logic.term * bool) list;
+      (** Each term [log] is applied to, and whether halved. *)
+  mutable powers : (Logic.term * Logic.term) list;
+      (** Each base and exponent [power] is applied to. *)
+  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
       (** A lambda's bound on the time of one call, and the obligations that show it, made only once
           the bound is used. *)
-  mutable lambda_captures : (L.term * Core.local list) list;  (** What each lambda captures. *)
-  lambda_definitions : (L.symbol, L.term) Hashtbl.t;
+  mutable lambda_captures : (Logic.term * Core.local list) list;  (** What each lambda captures. *)
+  lambda_definitions : (Logic.symbol, Logic.term) Hashtbl.t;
       (** Each functional lambda's definition, by its symbol, which names what it captures. *)
-  mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
-  models : (string, (L.term -> L.term) option) Hashtbl.t;
+  mutable potentials : Logic.term list;  (** Each value's potential whose definition is a fact. *)
+  models : (string, (Logic.term -> Logic.term) option) Hashtbl.t;
       (** Each type's model function, by the types' keys, which reading it takes the standard
           library's impls to find, and which is asked at every potential. *)
   holds_potential : (string, bool) Hashtbl.t;  (** Whether each type can hold potential. *)
-  buffers : (string, (T.ty * (L.term -> L.term)) option) Hashtbl.t;
+  buffers : (string, (Types.ty * (Logic.term -> Logic.term)) option) Hashtbl.t;
       (** Each type's elements and model as a buffer's, where it is one. *)
-  mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
+  mutable equalities : Logic.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
-  mutable decisions : (string * string option * L.term * L.term) list;
+  mutable decisions : (string * string option * Logic.term * Logic.term) list;
       (** Each [if] and [match] arm read so far, reversed. *)
-  mutable iteration_returns : (Core.origin * T.ty option) list;
+  mutable iteration_returns : (Core.origin * Types.ty option) list;
       (** Each [return] from an iteration of a [concurrent for], by its loop, with the type of its
           value: taken where the loop ends. *)
   reveal : bool;
       (** Whether callees in other packages are read as their own package reads them, bodies
           included, to tell whether seeing a hidden body would prove an obligation. *)
-  mutable entry : L.symbol list;
+  mutable entry : Logic.symbol list;
       (** The symbols of the definition's parameters and [self] as they arrive. *)
-  mutable hidden_bodies : (L.symbol * (string * bool)) list;
+  mutable hidden_bodies : (Logic.symbol * (string * bool)) list;
       (** Each callee in another package whose body would define it but is not [transparent]: its
           symbol, with its name and whether it can be marked so. *)
-  mutable cursors : (L.term * cursor) list;  (** Where each cursor value came from. *)
+  mutable cursors : (Logic.term * cursor) list;  (** Where each cursor value came from. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
-  mutable unfinished : L.term list;
+  mutable unfinished : Logic.term list;
       (** The condition of each path a [todo] ends in the [proof] block being read. *)
-  mutable call_targets : (L.term * Core.local) list;
+  mutable call_targets : (Logic.term * Core.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
   mutable passed_values : int list;
       (** Each named function passed straight to a parameter, which the call checks against what the
@@ -333,15 +338,15 @@ type context = {
   ranking : bool;
       (** Whether the definition proven may show a recursive call ends by being on a part of its
           parameters, the one use of the order of parts, which is stated only then. *)
-  mutable scopes : (L.symbol * L.term list ref) list;
+  mutable scopes : (Logic.symbol * Logic.term list ref) list;
       (** Each quantifier whose body is being read, innermost first, by its bound symbol, with the
           facts made in its body that name it. *)
-  quantifier_facts : (L.term, L.term list) Hashtbl.t;
+  quantifier_facts : (Logic.term, Logic.term list) Hashtbl.t;
       (** Each quantifier read, with the facts its body made that name its bound symbol. *)
-  mutable quantifier_symbols : L.symbol list;
+  mutable quantifier_symbols : Logic.symbol list;
       (** Every quantifier's bound symbol, which a fact stated outside its quantifier must not name.
       *)
-  mutable validating : T.ty list;
+  mutable validating : Types.ty list;
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
           through another's invariant is read once. *)
@@ -353,7 +358,7 @@ let reading_package context = if context.reveal then None else Some (Path.packag
 
 (* Symbols and facts *)
 
-let declare context (declaration : L.declaration) =
+let declare context (declaration : Logic.declaration) =
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->
       if not (Hashtbl.mem context.declared name) then begin
@@ -368,11 +373,12 @@ let declare context (declaration : L.declaration) =
 let value_symbol context frame name sort =
   match List.rev frame.binders with
   | [] ->
-      declare context (L.Constant (name, sort));
-      L.Symbol name
+      declare context (Logic.Constant (name, sort));
+      Logic.Symbol name
   | outermost_first ->
-      declare context (L.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
-      L.Apply (name, List.map (fun (bound, _, _) -> L.Symbol bound) outermost_first)
+      declare context
+        (Logic.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
+      Logic.Apply (name, List.map (fun (bound, _, _) -> Logic.Symbol bound) outermost_first)
 
 (* A name no other symbol of the query has, for a bound variable. *)
 let fresh_name context label =
@@ -391,12 +397,12 @@ let mentions_fresh_after context mark term =
     match Hashtbl.find_opt context.fresh_order name with Some n -> n > mark | None -> false
   in
   let rec walk = function
-    | L.Symbol name -> is_fresh_after name
-    | L.Integer _ | L.Boolean _ | L.Bits _ -> false
-    | L.Apply (name, arguments) -> is_fresh_after name || List.exists walk arguments
-    | L.Operation (_, arguments) -> List.exists walk arguments
-    | L.Is (_, argument) -> walk argument
-    | L.Forall (_, body) | L.Exists (_, body) -> walk body
+    | Logic.Symbol name -> is_fresh_after name
+    | Logic.Integer _ | Logic.Boolean _ | Logic.Bits _ -> false
+    | Logic.Apply (name, arguments) -> is_fresh_after name || List.exists walk arguments
+    | Logic.Operation (_, arguments) -> List.exists walk arguments
+    | Logic.Is (_, argument) -> walk argument
+    | Logic.Forall (_, body) | Logic.Exists (_, body) -> walk body
   in
   walk term
 
@@ -406,15 +412,15 @@ let mentions_fresh_after context mark term =
    parameter, where it has no meaning outside. *)
 let closed_over_binders frame term =
   let names = List.map (fun (name, _, _) -> name) frame.binders in
-  if L.mentions (List.filter (fun name -> not (List.mem name names)) frame.bound) term then None
-  else if not (L.mentions names term) then Some term
+  if Logic.mentions (List.filter (fun name -> not (List.mem name names)) frame.bound) term then None
+  else if not (Logic.mentions names term) then Some term
   else
     let outermost_first = List.rev frame.binders in
     Some
-      (L.Forall
+      (Logic.Forall
          ( List.map (fun (name, sort, _) -> (name, sort)) outermost_first,
-           L.( ==> )
-             (L.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
+           Logic.( ==> )
+             (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
 (* A fact that names bound symbols, kept with the innermost quantifier
@@ -422,7 +428,7 @@ let closed_over_binders frame term =
    quantifier's. A goal that quantifiers are skolemized in has it as a
    hypothesis, where it costs the solver nothing to instantiate. *)
 let in_scope context frame term =
-  let named = List.filter (fun name -> L.mentions [ name ] term) frame.bound in
+  let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
   if List.for_all (fun name -> List.mem_assoc name context.scopes) named then
     match List.find_opt (fun (name, _) -> List.mem name named) context.scopes with
     | Some (_, facts) -> facts := term :: !facts
@@ -445,7 +451,7 @@ let scope_facts context names =
 let with_quantifier_facts ?(binders = []) context term =
   let stated bound fact =
     List.for_all
-      (fun name -> List.mem name bound || not (L.mentions [ name ] fact))
+      (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))
       context.quantifier_symbols
   in
   let rec walk positive bound term =
@@ -456,21 +462,24 @@ let with_quantifier_facts ?(binders = []) context term =
           (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term)) )
     in
     match term with
-    | L.Forall (symbols, body) when positive ->
+    | Logic.Forall (symbols, body) when positive ->
         let bound, facts = facts symbols in
         let body = walk positive bound body in
-        L.Forall
-          (symbols, match facts with [] -> body | facts -> L.( ==> ) (L.conjunction facts) body)
-    | L.Exists (symbols, body) when not positive ->
+        Logic.Forall
+          ( symbols,
+            match facts with [] -> body | facts -> Logic.( ==> ) (Logic.conjunction facts) body )
+    | Logic.Exists (symbols, body) when not positive ->
         let bound, facts = facts symbols in
         let body = walk positive bound body in
-        L.Exists
-          (symbols, match facts with [] -> body | facts -> L.( &&& ) (L.conjunction facts) body)
-    | L.Operation ((("and" | "or") as operator), parts) ->
-        L.Operation (operator, List.map (walk positive bound) parts)
-    | L.Operation ("=>", [ premise; conclusion ]) ->
-        L.Operation ("=>", [ walk (not positive) bound premise; walk positive bound conclusion ])
-    | L.Operation ("not", [ inner ]) -> L.Operation ("not", [ walk (not positive) bound inner ])
+        Logic.Exists
+          ( symbols,
+            match facts with [] -> body | facts -> Logic.( &&& ) (Logic.conjunction facts) body )
+    | Logic.Operation ((("and" | "or") as operator), parts) ->
+        Logic.Operation (operator, List.map (walk positive bound) parts)
+    | Logic.Operation ("=>", [ premise; conclusion ]) ->
+        Logic.Operation ("=>", [ walk (not positive) bound premise; walk positive bound conclusion ])
+    | Logic.Operation ("not", [ inner ]) ->
+        Logic.Operation ("not", [ walk (not positive) bound inner ])
     | term -> term
   in
   walk true binders term
@@ -480,17 +489,17 @@ let with_quantifier_facts ?(binders = []) context term =
    many such facts and the solver spends its steps on them, but kept with
    its quantifier. *)
 let fact context frame term =
-  if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
+  if not (Logic.mentions frame.bound term) then context.facts <- term :: context.facts
   else in_scope context frame term
 
 (* A fact is guarded by its path's condition, and kept with its
    quantifier where either names a bound symbol, as [fact] says. *)
 let assume context frame term =
   match term with
-  | L.Boolean true -> ()
+  | Logic.Boolean true -> ()
   | _ ->
-      let guarded = L.( ==> ) frame.condition term in
-      if not (L.mentions frame.bound term || L.mentions frame.bound frame.condition) then
+      let guarded = Logic.( ==> ) frame.condition term in
+      if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
         context.facts <- guarded :: context.facts
       else in_scope context frame guarded
 
@@ -534,39 +543,39 @@ let truss_of_goal context term =
   let named = ref false in
   let all printed = if List.mem None printed then None else Some (List.filter_map Fun.id printed) in
   let rec atom = function
-    | L.Symbol symbol ->
+    | Logic.Symbol symbol ->
         let printed = name symbol in
         if printed <> None then named := true;
         printed
-    | L.Integer value -> Some (Z.to_string value)
-    | L.Boolean value -> Some (if value then "true" else "false")
+    | Logic.Integer value -> Some (Z.to_string value)
+    | Logic.Boolean value -> Some (if value then "true" else "false")
     | _ -> None
   and value term = arithmetic 0 term
   and arithmetic level = function
-    | L.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
+    | Logic.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
         let inner = if operator = "+" then 1 else 2 in
         Option.map
           (fun printed -> parenthesized level inner (String.concat (" " ^ operator ^ " ") printed))
           (all (List.map (arithmetic inner) parts))
-    | L.Operation ("-", [ left; right ]) ->
+    | Logic.Operation ("-", [ left; right ]) ->
         Option.map
           (fun printed -> parenthesized level 1 (String.concat " - " printed))
           (all [ arithmetic 1 left; arithmetic 2 right ])
-    | L.Operation ("-", [ inner ]) ->
+    | Logic.Operation ("-", [ inner ]) ->
         Option.map (fun printed -> parenthesized level 3 ("-" ^ printed)) (arithmetic 3 inner)
-    | L.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
+    | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
     | term -> atom term
   and parenthesized level inner text = if inner < level then "(" ^ text ^ ")" else text
   and print = function
-    | L.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
+    | Logic.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
         match (value left, value right) with
         | Some left, Some right ->
             Some (Printf.sprintf "%s %s %s" left (if operator = "=" then "==" else operator) right)
         | _ -> None)
-    | L.Operation ("and", parts) -> joined " && " parts
-    | L.Operation ("or", parts) -> joined " || " parts
-    | L.Operation ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
-    | L.Operation ("=>", [ premise; conclusion ]) -> (
+    | Logic.Operation ("and", parts) -> joined " && " parts
+    | Logic.Operation ("or", parts) -> joined " || " parts
+    | Logic.Operation ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
+    | Logic.Operation ("=>", [ premise; conclusion ]) -> (
         match (print premise, print conclusion) with
         | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
         | _ -> None)
@@ -578,8 +587,10 @@ let truss_of_goal context term =
   in
   let printed =
     match term with
-    | L.Operation ("and", parts) -> Option.map (String.concat " && ") (all (List.map print parts))
-    | L.Operation ("or", parts) -> Option.map (String.concat " || ") (all (List.map print parts))
+    | Logic.Operation ("and", parts) ->
+        Option.map (String.concat " && ") (all (List.map print parts))
+    | Logic.Operation ("or", parts) ->
+        Option.map (String.concat " || ") (all (List.map print parts))
     | term -> print term
   in
   if !named then printed else None
@@ -599,8 +610,8 @@ let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message 
         | [] when frame.source.key = Some context.home && frame.checking -> (
             let goal =
               match frame.condition with
-              | L.Boolean true -> goal
-              | condition -> L.( ==> ) condition goal
+              | Logic.Boolean true -> goal
+              | condition -> Logic.( ==> ) condition goal
             in
             match truss_of_goal context goal with
             | Some required -> add_requires context frame required
@@ -615,36 +626,36 @@ let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message 
    what it shows is used. *)
 and obligation_at ?evaluation context frame code span message goal =
   if not frame.checking then None
-  else if not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition) then
+  else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
     Some (make_obligation ?evaluation context frame code span message goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
       match scope_facts context names with
       | [] -> goal
-      | facts -> L.( ==> ) (L.conjunction facts) goal
+      | facts -> Logic.( ==> ) (Logic.conjunction facts) goal
     in
-    match closed_over_binders frame (L.( ==> ) frame.condition goal) with
+    match closed_over_binders frame (Logic.( ==> ) frame.condition goal) with
     | Some closed ->
         Some
           (make_obligation ?evaluation context
-             { frame with condition = L.Boolean true }
+             { frame with condition = Logic.Boolean true }
              code span message closed)
     | None -> None
 
 and make_obligation ?evaluation context frame code span message goal =
   let query =
-    L.prune
+    Logic.prune
       {
         declarations = List.rev context.declarations;
         facts = List.rev context.facts;
-        goal = L.( ==> ) frame.condition goal;
+        goal = Logic.( ==> ) frame.condition goal;
       }
   in
   let contracts_alone =
     if List.exists (Hashtbl.mem context.unfolded) query.facts then
       Some
-        (L.prune
+        (Logic.prune
            {
              query with
              facts = List.filter (fun fact -> not (Hashtbl.mem context.unfolded fact)) query.facts;
@@ -655,7 +666,7 @@ and make_obligation ?evaluation context frame code span message goal =
     List.filter
       (fun (group : Costs.constants) ->
         let names = [ group.factor; group.addend ] in
-        L.mentions names query.goal || List.exists (L.mentions names) query.facts)
+        Logic.mentions names query.goal || List.exists (Logic.mentions names) query.facts)
       context.groups
   in
   let known_calls =
@@ -669,7 +680,9 @@ and make_obligation ?evaluation context frame code span message goal =
     List.sort_uniq compare
       (List.filter_map
          (fun (symbol, name) ->
-           if L.mentions [ symbol ] query.goal || List.exists (L.mentions [ symbol ]) query.facts
+           if
+             Logic.mentions [ symbol ] query.goal
+             || List.exists (Logic.mentions [ symbol ]) query.facts
            then Some name
            else None)
          context.hidden_bodies)
@@ -689,13 +702,13 @@ and make_obligation ?evaluation context frame code span message goal =
       Locals.fold
         (fun local term shown ->
           match (term, Hashtbl.find_opt context.local_names local) with
-          | L.Symbol symbol, Some name
+          | Logic.Symbol symbol, Some name
             when not (List.mem_assoc symbol context.values || List.mem_assoc symbol shown) ->
               (symbol, name) :: shown
           | _ -> shown)
         frame.locals
         (match frame.result with
-        | Some (L.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
+        | Some (Logic.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
             [ (symbol, "result") ]
         | _ -> []);
     constants;
@@ -708,8 +721,8 @@ and occurs part term =
   term = part
   ||
   match term with
-  | L.Forall (_, body) | L.Exists (_, body) -> occurs part body
-  | term -> List.exists (occurs part) (L.arguments term)
+  | Logic.Forall (_, body) | Logic.Exists (_, body) -> occurs part body
+  | term -> List.exists (occurs part) (Logic.arguments term)
 
 (* Where a node came from in its form's text, by its origin. *)
 let span_of (source : source) origin =
@@ -729,17 +742,17 @@ let at frame (node : expression) = span_of frame.source node.origin
 
 (* Types *)
 
-let builtin ty = T.builtin_of ty
+let builtin ty = Types.builtin_of ty
 
-let bounds (ty : T.ty) =
-  if T.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF) else T.integer_range ty
+let bounds (ty : Types.ty) =
+  if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF) else Types.integer_range ty
 
-let width (ty : T.ty) = Option.map fst (T.integer_bits ty)
-let is_numeric (ty : T.ty) = match ty with T.Integer -> true | _ -> bounds ty <> None
+let width (ty : Types.ty) = Option.map fst (Types.integer_bits ty)
+let is_numeric (ty : Types.ty) = match ty with Types.Integer -> true | _ -> bounds ty <> None
 
 (* A float type's widths in the solver's floating-point theory: its
    exponent's, and its significand's, with the hidden bit. *)
-let float_format (ty : T.ty) =
+let float_format (ty : Types.ty) =
   match builtin ty with Some Float32 -> Some (8, 24) | Some Float64 -> Some (11, 53) | _ -> None
 
 (* A float literal, bit for bit. *)
@@ -749,48 +762,55 @@ let float_literal (exponent, significand) value =
     else Z.extract (Z.of_int64 (Int64.bits_of_float value)) 0 64
   in
   let fraction = significand - 1 in
-  L.Operation
+  Logic.Operation
     ( "fp",
       [
-        L.Bits (1, Z.extract bits (exponent + fraction) 1);
-        L.Bits (exponent, Z.extract bits fraction exponent);
-        L.Bits (fraction, Z.extract bits 0 fraction);
+        Logic.Bits (1, Z.extract bits (exponent + fraction) 1);
+        Logic.Bits (exponent, Z.extract bits fraction exponent);
+        Logic.Bits (fraction, Z.extract bits 0 fraction);
       ] )
 
 (* IEEE 754 arithmetic, rounding to nearest with ties to even, and the
    lawful [==] and ordering of floats: every NaN is equal to every other
    and ordered after every number, and otherwise IEEE's, so [-0.0 == 0.0]. *)
-let float_operation name left right = L.Operation (name, [ L.Operation ("RNE", []); left; right ])
-let is_nan value = L.Operation ("fp.isNaN", [ value ])
+let float_operation name left right =
+  Logic.Operation (name, [ Logic.Operation ("RNE", []); left; right ])
+
+let is_nan value = Logic.Operation ("fp.isNaN", [ value ])
 
 (* A float cut toward zero, as a real number. *)
 let truncated value =
-  L.Operation
-    ("fp.to_real", [ L.Operation ("fp.roundToIntegral", [ L.Operation ("RTZ", []); value ]) ])
+  Logic.Operation
+    ( "fp.to_real",
+      [ Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ]) ] )
 
 let float_equal left right =
-  L.(Operation ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
+  Logic.(Operation ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
 
 let float_less left right =
-  L.(not_ (is_nan left) &&& is_nan right ||| Operation ("fp.lt", [ left; right ]))
+  Logic.(not_ (is_nan left) &&& is_nan right ||| Operation ("fp.lt", [ left; right ]))
 
-let is_bool ty = T.is_builtin Bool ty
+let is_bool ty = Types.is_builtin Bool ty
 
-(* A type's name in the logic, unique across modules, as [T.show] is not. *)
-let rec type_key (ty : T.ty) =
+(* A type's name in the logic, unique across modules, as [Types.show] is not. *)
+let rec type_key (ty : Types.ty) =
   match ty with
   | Named { path; arguments = [] } -> Path.show path
   | Named { path; arguments } ->
       Path.show path ^ "[" ^ String.concat ", " (List.map argument_key arguments) ^ "]"
-  | _ -> T.show ty
+  | _ -> Types.show ty
 
-and argument_key = function T.Type ty -> type_key ty | argument -> T.show_argument argument
+and argument_key = function
+  | Types.Type ty -> type_key ty
+  | argument -> Types.show_argument argument
 
-let constructor_name (ty : T.ty) variant =
-  let type_name = match ty with Named { path = Top { name; _ }; _ } -> name | _ -> T.show ty in
-  S.Constructor { type_key = type_key ty; type_name; variant }
+let constructor_name (ty : Types.ty) variant =
+  let type_name =
+    match ty with Named { path = Top { name; _ }; _ } -> name | _ -> Types.show ty
+  in
+  Symbol.Constructor { type_key = type_key ty; type_name; variant }
 
-let selector_name ty variant field = S.Field { type_key = type_key ty; variant; field }
+let selector_name ty variant field = Symbol.Field { type_key = type_key ty; variant; field }
 let is_standard_equal = Well_known.is Equal
 let equal_trait = Well_known.path Equal
 
@@ -801,25 +821,25 @@ let end_scope ~(outer : frame) (frame : frame) =
 
 (* A callee's generics paired with its type arguments, as the frame sees
    them. *)
-let callee_substitution frame (signature : T.signature) type_arguments =
-  let rec pair (generics : T.generic list) arguments =
+let callee_substitution frame (signature : Types.signature) type_arguments =
+  let rec pair (generics : Types.generic list) arguments =
     match (generics, arguments) with
     | generic :: generics, argument :: arguments ->
-        (generic.generic, T.substitute_argument frame.substitution argument)
+        (generic.generic, Types.substitute_argument frame.substitution argument)
         :: pair generics arguments
     | _ -> []
   in
   pair signature.generics type_arguments
 
 (* A type's interface, when it is a type whose fields this package sees. *)
-let visible_type context (ty : T.ty) =
+let visible_type context (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when builtin ty = None -> (
       match Query.demand context.database Interface.Environment.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque) || Path.package path = Path.package context.current ->
           let substitution =
-            Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+            Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
           in
           Some (interface, substitution)
       | _ -> None)
@@ -831,11 +851,11 @@ let visible_type context (ty : T.ty) =
 let constructors context ty =
   match visible_type context ty with
   | Some (interface, substitution) -> (
-      let fields (list : T.field list) =
+      let fields (list : Types.field list) =
         List.sort compare
           (List.map
-             (fun (field : T.field) ->
-               (field.field_name, T.substitute substitution field.field_type))
+             (fun (field : Types.field) ->
+               (field.field_name, Types.substitute substitution field.field_type))
              list)
       in
       match interface.shape with
@@ -844,7 +864,7 @@ let constructors context ty =
           Some
             (List.sort compare
                (List.map
-                  (fun (variant : T.variant) ->
+                  (fun (variant : Types.variant) ->
                     ( Some variant.variant_name,
                       match variant.fields with Some list -> fields list | None -> [] ))
                   variants))
@@ -856,32 +876,34 @@ let constructors context ty =
 let declared_fields context ty variant =
   match visible_type context ty with
   | Some (interface, substitution) -> (
-      let fields (list : T.field list) =
+      let fields (list : Types.field list) =
         List.map
-          (fun (field : T.field) -> (field.field_name, T.substitute substitution field.field_type))
+          (fun (field : Types.field) ->
+            (field.field_name, Types.substitute substitution field.field_type))
           list
       in
       match (interface.shape, variant) with
       | Record list, None -> Some (fields list)
       | Sum variants, Some name -> (
-          match List.find_opt (fun (v : T.variant) -> v.variant_name = name) variants with
+          match List.find_opt (fun (v : Types.variant) -> v.variant_name = name) variants with
           | Some { fields = Some list; _ } -> Some (fields list)
           | Some { fields = None; _ } -> Some []
           | None -> None)
       | _ -> None)
   | None -> None
 
-let rec sort_of context (ty : T.ty) : L.sort =
+let rec sort_of context (ty : Types.ty) : Logic.sort =
   if is_numeric ty then Int
   else if is_bool ty then Bool
   else
     match (ty, float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
-    | _ when T.equal ty T.unit ->
+    | _ when Types.equal ty Types.unit ->
         (* One value, so any two are equal. *)
         if not (Hashtbl.mem context.datatypes "Unit") then begin
           Hashtbl.replace context.datatypes "Unit" ();
-          context.declarations <- L.Datatype ("Unit", [ (S.Unit, []) ]) :: context.declarations
+          context.declarations <-
+            Logic.Datatype ("Unit", [ (Symbol.Unit, []) ]) :: context.declarations
         end;
         Uninterpreted "Unit"
     | Function function_type, _ ->
@@ -896,7 +918,7 @@ let rec sort_of context (ty : T.ty) : L.sort =
                (* Marked first, so a recursive type's fields find it declared. *)
                Hashtbl.replace context.datatypes name ();
                let declaration =
-                 L.Datatype
+                 Logic.Datatype
                    ( name,
                      List.map
                        (fun (variant, fields) ->
@@ -914,9 +936,10 @@ let rec sort_of context (ty : T.ty) : L.sort =
 
 (* Whether [==] on a type is the solver's equality: built in with identity
    semantics, or derived from fields that all are. *)
-let rec structural context ?(seen = []) (ty : T.ty) =
-  if is_numeric ty || is_bool ty || T.is_builtin Character ty || T.equal ty T.unit then true
-  else if List.exists (T.equal ty) seen then true
+let rec structural context ?(seen = []) (ty : Types.ty) =
+  if is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit then
+    true
+  else if List.exists (Types.equal ty) seen then true
   else
     match (visible_type context ty, constructors context ty) with
     | Some (interface, _), Some shape ->
@@ -934,7 +957,7 @@ let rec structural context ?(seen = []) (ty : T.ty) =
 (* The size of a built-in scalar on the 64-bit targets the address space
    is taken from. A type of another size, which may be zero, has none. *)
 let scalar_bytes element : int option =
-  match T.builtin_of element with
+  match Types.builtin_of element with
   | Some (Int8 | UInt8 | Bool) -> Some 1
   | Some (Int16 | UInt16) -> Some 2
   | Some (Int32 | UInt32 | Float32 | Character) -> Some 4
@@ -945,15 +968,15 @@ let in_range ty term =
   match bounds ty with
   | Some (low, high) ->
       let in_bounds =
-        L.(Operation ("<=", [ Integer low; term ]) &&& Operation ("<=", [ term; Integer high ]))
+        Logic.(Operation ("<=", [ Integer low; term ]) &&& Operation ("<=", [ term; Integer high ]))
       in
-      if T.is_builtin Character ty then
-        L.(
+      if Types.is_builtin Character ty then
+        Logic.(
           in_bounds
           &&& not_
                 (Operation ("<=", [ int 0xD800; term ]) &&& Operation ("<=", [ term; int 0xDFFF ])))
       else in_bounds
-  | None -> L.Boolean true
+  | None -> Logic.Boolean true
 
 let counter_number context counter =
   match Hashtbl.find_opt context.counter_numbers counter with
@@ -976,23 +999,24 @@ let once context stated make =
 let canonical_binders term =
   let count = ref 0 in
   let rec walk renamed = function
-    | L.Symbol name -> (
+    | Logic.Symbol name -> (
         match List.assoc_opt name renamed with
-        | Some other -> L.Symbol other
-        | None -> L.Symbol name)
-    | (L.Integer _ | L.Boolean _ | L.Bits _ | L.Apply _ | L.Operation _ | L.Is _) as term ->
-        L.map_arguments (walk renamed) term
-    | L.Forall (bound, body) ->
+        | Some other -> Logic.Symbol other
+        | None -> Logic.Symbol name)
+    | ( Logic.Integer _ | Logic.Boolean _ | Logic.Bits _ | Logic.Apply _ | Logic.Operation _
+      | Logic.Is _ ) as term ->
+        Logic.map_arguments (walk renamed) term
+    | Logic.Forall (bound, body) ->
         let bound, renamed = rename renamed bound in
-        L.Forall (bound, walk renamed body)
-    | L.Exists (bound, body) ->
+        Logic.Forall (bound, walk renamed body)
+    | Logic.Exists (bound, body) ->
         let bound, renamed = rename renamed bound in
-        L.Exists (bound, walk renamed body)
+        Logic.Exists (bound, walk renamed body)
   and rename renamed bound =
     List.fold_right
       (fun (name, sort) (bound, renamed) ->
         incr count;
-        let other = S.Variable { label = "binder"; numbers = [ !count ] } in
+        let other = Symbol.Variable { label = "binder"; numbers = [ !count ] } in
         ((other, sort) :: bound, (name, other) :: renamed))
       bound ([], renamed)
   in
@@ -1019,7 +1043,7 @@ let bind frame local ty term =
 let substituted context frame ty =
   Interface.Impls.normalize context.database
     ~bounds:(fun _ -> [])
-    (T.substitute frame.substitution ty)
+    (Types.substitute frame.substitution ty)
 
 let type_of context frame (node : expression) = substituted context frame node.type_
 
@@ -1033,15 +1057,15 @@ let local_type context frame local =
    [String] does in its own package, unfolds to. *)
 let mentions_potential term =
   let rec walk = function
-    | L.Apply ((S.Potential _ | S.Slack _), _) -> true
-    | L.Forall (_, body) | L.Exists (_, body) -> walk body
-    | term -> List.exists walk (L.arguments term)
+    | Logic.Apply ((Symbol.Potential _ | Symbol.Slack _), _) -> true
+    | Logic.Forall (_, body) | Logic.Exists (_, body) -> walk body
+    | term -> List.exists walk (Logic.arguments term)
   in
   walk term
 
 (* Paths *)
 
-let restrict frame condition = { frame with condition = L.( &&& ) frame.condition condition }
+let restrict frame condition = { frame with condition = Logic.( &&& ) frame.condition condition }
 
 (* Joins paths: the condition is that one of them was taken, and each
    local whose values differ gets a fresh symbol each path defines. *)
@@ -1050,17 +1074,17 @@ let join context ?value_type frames =
   | [] -> None
   | [ (frame, value) ] -> Some (frame, value)
   | (first, _) :: _ ->
-      let condition = L.disjunction (List.map (fun (frame, _) -> frame.condition) frames) in
+      let condition = Logic.disjunction (List.map (fun (frame, _) -> frame.condition) frames) in
       (* The joined condition is named, so that each later fact on the path
          names it rather than repeating every branch's condition, which
          would grow with each join. *)
       let condition =
         match condition with
-        | L.Boolean _ | L.Symbol _ -> condition
-        | _ when L.mentions first.bound condition -> condition
+        | Logic.Boolean _ | Logic.Symbol _ -> condition
+        | _ when Logic.mentions first.bound condition -> condition
         | _ ->
-            let path = fresh context first "path" L.Bool in
-            fact context first (L.equal path condition);
+            let path = fresh context first "path" Logic.Bool in
+            fact context first (Logic.equal path condition);
             path
       in
       let merged = { first with condition } in
@@ -1073,8 +1097,8 @@ let join context ?value_type frames =
         | _
           when List.exists
                  (fun ((frame : frame), term) ->
-                   L.mentions first.bound frame.condition
-                   || match term with Some term -> L.mentions first.bound term | None -> false)
+                   Logic.mentions first.bound frame.condition
+                   || match term with Some term -> Logic.mentions first.bound term | None -> false)
                  values -> (
             (* Inside a quantifier, a fact about a fresh symbol could not
                mention the bound variable, so the value is an [ite]. *)
@@ -1084,7 +1108,7 @@ let join context ?value_type frames =
                   (List.fold_left
                      (fun otherwise ((frame : frame), term) ->
                        match term with
-                       | Some term -> L.ite frame.condition term otherwise
+                       | Some term -> Logic.ite frame.condition term otherwise
                        | None -> otherwise)
                      last earlier)
             | _ -> None)
@@ -1093,7 +1117,8 @@ let join context ?value_type frames =
             List.iter
               (fun ((frame : frame), term) ->
                 match term with
-                | Some term -> fact context first (L.( ==> ) frame.condition (L.equal symbol term))
+                | Some term ->
+                    fact context first (Logic.( ==> ) frame.condition (Logic.equal symbol term))
                 | None -> ())
               values;
             Some symbol
@@ -1104,7 +1129,7 @@ let join context ?value_type frames =
             let sort =
               match local_type context first id with
               | Some ty -> sort_of context ty
-              | None -> ( match term with L.Boolean _ -> L.Bool | _ -> L.Int)
+              | None -> ( match term with Logic.Boolean _ -> Logic.Bool | _ -> Logic.Int)
             in
             match define "joined" sort (fun frame _ -> Locals.find_opt id frame.locals) with
             | Some joined -> joined
@@ -1138,7 +1163,7 @@ let join context ?value_type frames =
           | Some own, Some joined when own <> joined -> (own, joined) :: renamed
           | _ -> renamed
         in
-        List.fold_left (fun amount (from, into) -> L.replace ~from ~into amount) amount renamed
+        List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed
       in
       (* A counter where paths join is what the path taken spent: a fresh
          symbol defined as a choice between them, which a loop's bound on
@@ -1162,17 +1187,17 @@ let join context ?value_type frames =
                   match List.rev values with
                   | (_, last) :: earlier ->
                       List.fold_left
-                        (fun otherwise (condition, value) -> L.ite condition value otherwise)
+                        (fun otherwise (condition, value) -> Logic.ite condition value otherwise)
                         last earlier
                   | [] -> term
                 in
                 (* A choice that names a potential stays a choice, so that a
                    loop sees the potential each path changed, which the
                    potential the loop holds cancels. *)
-                if L.mentions first.bound choice || mentions_potential choice then (key, choice)
+                if Logic.mentions first.bound choice || mentions_potential choice then (key, choice)
                 else
-                  let symbol = fresh context first "spent" L.Int in
-                  fact context first (L.equal symbol choice);
+                  let symbol = fresh context first "spent" Logic.Int in
+                  fact context first (Logic.equal symbol choice);
                   (key, symbol))
           first.spent
       in
@@ -1187,7 +1212,7 @@ let join context ?value_type frames =
             match
               define "parts"
                 (sort_of context
-                   (T.Named { path = Well_known.path Sequence; arguments = [ T.Type part ] }))
+                   (Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }))
                 (fun frame _ -> frame.yielded_so_far)
             with
             | Some joined -> Some joined
@@ -1248,7 +1273,7 @@ let source_at ?reading_package database (path : Path.t) =
         | Some key, _ -> Some (source_of database key core, substitution, Written)
         | None, Method { owner; name; receiver } ->
             Option.bind (Interface.Impls.impl_interface database owner)
-              (fun (impl : T.impl_interface) ->
+              (fun (impl : Types.impl_interface) ->
                 Option.map
                   (fun key -> (source_of database key core, substitution, Provided))
                   (Query.demand database Interface.Summary.key
@@ -1257,11 +1282,11 @@ let source_at ?reading_package database (path : Path.t) =
 
 (* What a trait's clauses and laws are read with for a type: [Self] the
    type, and each of the trait's parameters its argument. *)
-let trait_substitution database (trait : T.trait_reference) (ty : T.ty) =
+let trait_substitution database (trait : Types.trait_reference) (ty : Types.ty) =
   let generics =
     match Query.demand database Interface.Environment.interface trait.trait with
     | Some (Interface.Environment.Trait_interface interface) ->
-        List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics
+        List.map (fun (generic : Types.generic) -> generic.generic) interface.trait_generics
     | _ -> []
   in
   let rec pair generics arguments =
@@ -1269,7 +1294,8 @@ let trait_substitution database (trait : T.trait_reference) (ty : T.ty) =
     | generic :: generics, argument :: arguments -> (generic, argument) :: pair generics arguments
     | _ -> []
   in
-  ({ T.owner = trait.trait; name = "Self" }, T.Type ty) :: pair generics trait.trait_arguments
+  ({ Types.owner = trait.trait; name = "Self" }, Types.Type ty)
+  :: pair generics trait.trait_arguments
 
 (* A form's clauses about what it defines. *)
 let part_of ?(inherited = false) callee =
@@ -1296,7 +1322,7 @@ let body_of callee = match callee.core.definition with Function { body; _ } -> b
 (* Whether a pattern binds a part of what it matches [mut]. *)
 let rec lends_mut (pattern : pattern) =
   match pattern.kind with
-  | Bind { mode = T.Mut; _ } -> true
+  | Bind { mode = Types.Mut; _ } -> true
   | Variant { fields; _ } | Record fields -> List.exists (fun (_, inner) -> lends_mut inner) fields
   | Alternatives alternatives -> List.exists lends_mut alternatives
   | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> false
@@ -1309,9 +1335,9 @@ let holds_todo body =
 (* The [proof]s written for a trait's laws on a type, in the package: each
    law's name, with the proof's source, the renaming of the proof's generic
    parameters to the type's arguments, and the proof's parameters and body. *)
-let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
-  let same_argument (left : T.argument) (right : T.argument) =
-    match (left, right) with Type left, Type right -> T.equal left right | _ -> left = right
+let law_proofs database package (trait : Types.trait_reference) (for_type : Types.ty) =
+  let same_argument (left : Types.argument) (right : Types.argument) =
+    match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
   in
   List.concat_map
     (fun module_ ->
@@ -1324,12 +1350,12 @@ let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
           | Law_proof, Some (Interface.Environment.Law_proof_interface proven)
             when Path.equal proven.trait.trait trait.trait -> (
               let variables =
-                List.map (fun (generic : T.generic) -> generic.generic) proven.generics
+                List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
               in
               match Interface.Impls.match_type ~variables [] proven.for_type for_type with
               | Some renaming
                 when List.equal same_argument
-                       (List.map (T.substitute_argument renaming) proven.trait.trait_arguments)
+                       (List.map (Types.substitute_argument renaming) proven.trait.trait_arguments)
                        trait.trait_arguments -> (
                   match source_at_key database (Names.key_of declaration) with
                   | Some
@@ -1356,7 +1382,7 @@ let impl_unfinished database (key : Names.key) =
 (* Whether an [impl]'s law is not shown: the [impl] is unfinished, so its
    laws wait, or the law's proof holds a [todo]. A proof that assumes it
    has a hole there. *)
-let law_unshown database (impl : Path.t) (trait : T.trait_reference) for_type name =
+let law_unshown database (impl : Path.t) (trait : Types.trait_reference) for_type name =
   match Query.demand database Interface.Summary.key impl with
   | Some key ->
       impl_unfinished database key
@@ -1381,7 +1407,7 @@ let is_functional walk =
           | Call { arguments; _ } ->
               if
                 List.exists
-                  (function Passed { mode = T.Mut; _ } -> true | Passed _ | Default -> false)
+                  (function Passed { mode = Types.Mut; _ } -> true | Passed _ | Default -> false)
                   arguments
               then fine := false;
               Core_walk.expression_children visit node
@@ -1417,12 +1443,14 @@ let make_contract database path ~own ~others ~body =
   let signature = Interface.Impls.signature database path in
   let pure =
     match signature with
-    | Some (signature : T.signature) -> (
+    | Some (signature : Types.signature) -> (
         (* A function of its arguments: it may take them [own], but
            changes none of the caller's. *)
         signature.uses = []
         && signature.terminates
-        && List.for_all (fun (info : T.parameter_info) -> info.mode <> T.Mut) signature.parameters
+        && List.for_all
+             (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
+             signature.parameters
         && match signature.receiver with Some (Mut, _) -> false | _ -> true)
     | None -> false
   in
@@ -1476,7 +1504,7 @@ let provided_body database (trait : Path.t) name receiver =
 (* A trait method's contract: the [impl]'s own clauses with the trait's,
    when the call is known to reach one [impl], and the trait's alone
    through a bound or [any]. *)
-let method_contract ?reading_package database (trait : T.trait_reference) name receiver
+let method_contract ?reading_package database (trait : Types.trait_reference) name receiver
     (evidence : evidence) =
   let trait_side = trait_part database trait.trait name receiver in
   match evidence with
@@ -1568,7 +1596,7 @@ let comparison (comparison : comparison) =
   | Greater_equal -> Some ">="
   | Not_equal -> None
 
-let rec expression context frame (node : expression) : (frame * L.term) option =
+let rec expression context frame (node : expression) : (frame * Logic.term) option =
   if frame.source.key = Some context.home then
     match List.assoc_opt node.id context.evaluated_keys with
     | Some term -> Some (frame, term)
@@ -1593,7 +1621,7 @@ and note_place context frame (node : expression) place =
   then begin
     context.indexes <- (origin, (place, at frame node)) :: context.indexes;
     let outside index start stop =
-      L.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
+      Logic.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
     in
     List.iter
       (fun (first, second) ->
@@ -1602,16 +1630,16 @@ and note_place context frame (node : expression) place =
           | Some (a, (first_span : span)), Some (b, (second_span : span)) ->
               let apart =
                 match (a, b) with
-                | One a, One b -> L.not_ (L.equal a b)
+                | One a, One b -> Logic.not_ (Logic.equal a b)
                 | One index, Run (start, stop) | Run (start, stop), One index ->
                     outside index start stop
                 | Run (start, stop), Run (other_start, other_stop) ->
-                    L.disjunction
+                    Logic.disjunction
                       [
-                        L.Operation ("<=", [ stop; other_start ]);
-                        L.Operation ("<=", [ other_stop; start ]);
-                        L.Operation ("<=", [ stop; start ]);
-                        L.Operation ("<=", [ other_stop; other_start ]);
+                        Logic.Operation ("<=", [ stop; other_start ]);
+                        Logic.Operation ("<=", [ other_stop; start ]);
+                        Logic.Operation ("<=", [ stop; start ]);
+                        Logic.Operation ("<=", [ other_stop; other_start ]);
                       ]
               in
               let text (span : span) =
@@ -1654,7 +1682,7 @@ and place_value context frame (place : place) =
         raise
           (Foreign_unsupported
              (Printf.sprintf "a field of `%s`, whose fields the prover does not see"
-                (T.show base_type)));
+                (Types.show base_type)));
       ignore (sort_of context base_type);
       (frame, field_of context frame base_type None field (substituted context frame type_) term)
   | Lent node | Temporary node -> value context frame node
@@ -1692,12 +1720,12 @@ and escaping_callback context frame local =
       local_type context frame local )
   with
   | ( Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ },
-      Some (T.Function function_type) )
+      Some (Types.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
       let arguments = callback_arguments context frame function_type.inputs in
       check_callback_contract context frame
         (span_of frame.source (List.hd requires).origin)
-        ~name inputs requires arguments ~promised:(L.Boolean true)
+        ~name inputs requires arguments ~promised:(Logic.Boolean true)
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
 
@@ -1717,12 +1745,13 @@ and check_forwarded_callback context frame (node : expression) (call_ : call) (p
   with
   | Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ } -> (
       match parameter_type context frame call_ passed.position with
-      | Some (T.Function expected) when List.length expected.inputs = List.length inputs ->
+      | Some (Types.Function expected) when List.length expected.inputs = List.length inputs ->
           let arguments = callback_arguments context frame expected.inputs in
           let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
           check_callback_contract context frame (at frame node) ~name inputs requires arguments
             ~promised:
-              (L.conjunction (callback_facts context frame call_ passed.position known arguments))
+              (Logic.conjunction
+                 (callback_facts context frame call_ passed.position known arguments))
             ~why:"is passed for a parameter that may not promise what it requires"
       | _ -> escaping_callback context frame local)
   | _ -> ()
@@ -1739,15 +1768,15 @@ and check_callback_contract context frame span ~name inputs requires arguments ~
         (snd (clause_value context inside clause)))
     requires
 
-and expression_kind context frame (node : expression) : (frame * L.term) option =
+and expression_kind context frame (node : expression) : (frame * Logic.term) option =
   let source = frame.source in
   match node.kind with
-  | Integer number -> Some (frame, L.Integer number)
+  | Integer number -> Some (frame, Logic.Integer number)
   | Float number -> (
       match float_format (type_of context frame node) with
       | Some format -> Some (frame, float_literal format number)
       | None -> unsupported (at frame node) "a float literal without a float type")
-  | Boolean value -> Some (frame, L.Boolean value)
+  | Boolean value -> Some (frame, Logic.Boolean value)
   | String text -> Some (frame, text_value context frame (type_of context frame node) text)
   | Template { literals; call = template_call } ->
       Some (tagged_template context frame node literals template_call)
@@ -1784,7 +1813,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Slice _ -> unsupported (at frame node) "a slice whose call is not of `slice_range`"
   | Call call_ -> (
       match resolved_call context frame node call_ with
-      | Some _ when T.equal (type_of context frame node) T.Never ->
+      | Some _ when Types.equal (type_of context frame node) Types.Never ->
           (* A call that gives [Never] does not return, so the path ends. *)
           None
       | translated -> translated)
@@ -1798,33 +1827,33 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
           if float_format operand_type <> None then
             match compared with
             | Equal -> float_equal a b
-            | Not_equal -> L.not_ (float_equal a b)
+            | Not_equal -> Logic.not_ (float_equal a b)
             | Less -> float_less a b
-            | Less_equal -> L.( ||| ) (float_less a b) (float_equal a b)
+            | Less_equal -> Logic.( ||| ) (float_less a b) (float_equal a b)
             | Greater -> float_less b a
-            | Greater_equal -> L.( ||| ) (float_less b a) (float_equal a b)
+            | Greater_equal -> Logic.( ||| ) (float_less b a) (float_equal a b)
           else
             match comparison compared with
             | Some symbol when compared = Equal ->
                 ignore symbol;
-                L.equal a b
-            | Some symbol -> L.Operation (symbol, [ a; b ])
-            | None -> L.not_ (L.equal a b) )
+                Logic.equal a b
+            | Some symbol -> Logic.Operation (symbol, [ a; b ])
+            | None -> Logic.not_ (Logic.equal a b) )
   | Not inner ->
       let frame, term = value context frame inner in
-      Some (frame, L.not_ term)
+      Some (frame, Logic.not_ term)
   | And (left, right) ->
       let frame, left_value = value context frame left in
-      short_circuit context frame right ~runs:left_value ~otherwise:(L.Boolean false) ~binds:true
-        (L.( &&& ) left_value)
+      short_circuit context frame right ~runs:left_value ~otherwise:(Logic.Boolean false)
+        ~binds:true (Logic.( &&& ) left_value)
   | Or (left, right) ->
       let frame, left_value = value context frame left in
-      short_circuit context frame right ~runs:(L.not_ left_value) ~otherwise:(L.Boolean true)
-        ~binds:false (L.( ||| ) left_value)
+      short_circuit context frame right ~runs:(Logic.not_ left_value)
+        ~otherwise:(Logic.Boolean true) ~binds:false (Logic.( ||| ) left_value)
   | Implies (left, right) ->
       let frame, left_value = value context frame left in
-      short_circuit context frame right ~runs:left_value ~otherwise:(L.Boolean true) ~binds:false
-        (L.( ==> ) left_value)
+      short_circuit context frame right ~runs:left_value ~otherwise:(Logic.Boolean true)
+        ~binds:false (Logic.( ==> ) left_value)
   | Matches { value = tested; pattern } ->
       let tested_type = operand_type context frame tested in
       let frame, term = operand_value context frame tested in
@@ -1849,7 +1878,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
              lambda's where it is written. *)
           (match (converted.kind, type_of context frame converted, type_of context frame node) with
           | (Function_value _ | Lambda _), _, _ -> ()
-          | _, T.Function actual, T.Function expected
+          | _, Types.Function actual, Types.Function expected
             when not (List.for_all (fun cost -> List.mem cost actual.costs) expected.costs) ->
               unsupported (at frame node) "a function value's costs"
           | _ -> ());
@@ -1858,7 +1887,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       | From_integer ->
           let ty = type_of context frame node in
           oblige context frame Out_of_range (at frame node)
-            (Printf.sprintf "`%s` may not fit in `%s`." (quote source node.origin) (T.show ty))
+            (Printf.sprintf "`%s` may not fit in `%s`." (quote source node.origin) (Types.show ty))
             (in_range ty term);
           Some (frame, term))
   | To_any { value = inner; _ } ->
@@ -1868,8 +1897,8 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       let frame =
         spend context frame (fun (counter : Costs.counter) ->
             match (counter.resource, counter.counting) with
-            | Allocations, _ -> L.int 1
-            | Allocated_bytes, Units -> L.int 1
+            | Allocations, _ -> Logic.int 1
+            | Allocated_bytes, Units -> Logic.int 1
             | Allocated_bytes, (At_most | Exactly) -> unknown_amount context frame counter
             | (Time | Calls _), _ -> Costs.zero)
       in
@@ -1894,7 +1923,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
             List.fold_left
               (fun after (implementation : implementation) ->
                 match (implementation.mode, implementation.value) with
-                | T.Mut, Place place ->
+                | Types.Mut, Place place ->
                     let after = havoc_root context after place in
                     (match root_of place with
                     | Some Self -> (
@@ -1924,7 +1953,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       None
   | Unreachable ->
       oblige context frame Unreachable (at frame node) "This `unreachable` may be reached."
-        (L.Boolean false);
+        (Logic.Boolean false);
       None
   | Todo ->
       (* What follows a [todo] on its path is not shown, and a build refuses
@@ -1934,7 +1963,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
         context.unfinished <- frame.condition :: context.unfinished
       end;
       Some
-        ( { frame with condition = L.Boolean false },
+        ( { frame with condition = Logic.Boolean false },
           arrive context frame "todo" (type_of context frame node) )
   | Break -> (
       match frame.loop with
@@ -1978,7 +2007,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       let frame, first_value = value context frame first in
       let frame, second_value = value context frame second in
       extensional context frame (type_of context frame first) first_value second_value;
-      Some (frame, L.equal first_value second_value)
+      Some (frame, Logic.equal first_value second_value)
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
@@ -2057,15 +2086,15 @@ and short_circuit context frame right ~runs ~otherwise ~binds combine =
     Some ((if binds then { after with condition = frame.condition } else frame), combine right_value)
   else
     match
-      join context ~value_type:T.bool
-        [ (after, Some right_value); (restrict frame (L.not_ runs), Some otherwise) ]
+      join context ~value_type:Types.bool
+        [ (after, Some right_value); (restrict frame (Logic.not_ runs), Some otherwise) ]
     with
     | Some (joined, Some term) -> Some (joined, term)
-    | Some (joined, None) -> Some (joined, L.Boolean true)
+    | Some (joined, None) -> Some (joined, Logic.Boolean true)
     | None -> None
 
-and equal_of context frame (ty : T.ty) a b =
-  if structural context ty then L.equal a b
+and equal_of context frame (ty : Types.ty) a b =
+  if structural context ty then Logic.equal a b
   else if float_format ty <> None then float_equal a b
   else
     match written_equal context ty a b with
@@ -2086,77 +2115,77 @@ and written_equal context ty a b =
       with
       | Some contract when contract.pure ->
           let symbol =
-            S.Function
+            Symbol.Function
               {
                 callee = Path.Method { owner = impl; name = "equal"; receiver = Read };
                 instance = [ type_key ty ];
               }
           in
           let sort = sort_of context ty in
-          declare context (L.Function (symbol, [ sort; sort ], L.Bool));
-          Some (L.Apply (symbol, [ a; b ]))
+          declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
+          Some (Logic.Apply (symbol, [ a; b ]))
       | _ -> None)
   | _ -> None
 
-and derived_equal context frame (ty : T.ty) a b =
+and derived_equal context frame (ty : Types.ty) a b =
   let sort = sort_of context ty in
-  let symbol = S.Equal (type_key ty) in
-  declare context (L.Function (symbol, [ sort; sort ], L.Bool));
-  let equal = L.Apply (symbol, [ a; b ]) in
+  let symbol = Symbol.Equal (type_key ty) in
+  declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
+  let equal = Logic.Apply (symbol, [ a; b ]) in
   (match (visible_type context ty, constructors context ty) with
   | Some (interface, _), Some shape
     when List.exists is_standard_equal interface.derives
          && (not (List.mem equal context.equalities))
-         && not (L.mentions frame.bound equal) ->
+         && not (Logic.mentions frame.bound equal) ->
       context.equalities <- equal :: context.equalities;
       let fields_equal (variant, fields) =
-        L.conjunction
+        Logic.conjunction
           (List.map
              (fun (field, field_type) ->
                let selector = selector_name ty variant field in
-               let a = L.Apply (selector, [ a ]) and b = L.Apply (selector, [ b ]) in
-               if structural context field_type then L.equal a b
+               let a = Logic.Apply (selector, [ a ]) and b = Logic.Apply (selector, [ b ]) in
+               if structural context field_type then Logic.equal a b
                else if float_format field_type <> None then float_equal a b
                else
                  match written_equal context field_type a b with
                  | Some equal -> equal
                  | None ->
                      (* Unfolded only when it is compared itself. *)
-                     let symbol = S.Equal (type_key field_type) in
+                     let symbol = Symbol.Equal (type_key field_type) in
                      declare context
-                       (L.Function
+                       (Logic.Function
                           ( symbol,
                             [ sort_of context field_type; sort_of context field_type ],
-                            L.Bool ));
-                     L.Apply (symbol, [ a; b ]))
+                            Logic.Bool ));
+                     Logic.Apply (symbol, [ a; b ]))
              fields)
       in
       let defined =
         match shape with
         | [ ((None, _) as record) ] -> fields_equal record
         | variants ->
-            L.disjunction
+            Logic.disjunction
               (List.map
                  (fun ((variant, _) as one) ->
-                   let is_variant term = L.Is (constructor_name ty variant, term) in
-                   L.(is_variant a &&& is_variant b &&& fields_equal one))
+                   let is_variant term = Logic.Is (constructor_name ty variant, term) in
+                   Logic.(is_variant a &&& is_variant b &&& fields_equal one))
                  variants)
       in
-      fact context frame (L.equal equal defined)
+      fact context frame (Logic.equal equal defined)
   | _ -> ());
   equal
 
 (* An operation the solver knows only by the range of its result. *)
 and opaque_operation context frame ty name arguments =
-  let sorts = List.map (fun _ -> L.Int) arguments in
+  let sorts = List.map (fun _ -> Logic.Int) arguments in
   let integer =
     Option.map
       (fun bits -> (bits, match bounds ty with Some (low, _) -> Z.sign low < 0 | None -> false))
       (width ty)
   in
-  let symbol = S.Opaque_operation { operation = name; type_key = type_key ty; integer } in
-  declare context (L.Function (symbol, sorts, sort_of context ty));
-  let term = L.Apply (symbol, arguments) in
+  let symbol = Symbol.Opaque_operation { operation = name; type_key = type_key ty; integer } in
+  declare context (Logic.Function (symbol, sorts, sort_of context ty));
+  let term = Logic.Apply (symbol, arguments) in
   assume context frame (in_range ty term);
   term
 
@@ -2181,7 +2210,7 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
       | Subtract, [ a; b ] -> float_operation "fp.sub" a b
       | Multiply, [ a; b ] -> float_operation "fp.mul" a b
       | Divide, [ a; b ] -> float_operation "fp.div" a b
-      | Negate, [ a ] -> L.Operation ("fp.neg", [ a ])
+      | Negate, [ a ] -> Logic.Operation ("fp.neg", [ a ])
       | _ -> arrive context frame "operator" ty
     in
     (frame, result)
@@ -2193,12 +2222,12 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
         in
         (frame, arithmetic ?operand ?divisor context frame node ty operation left right)
     | Negate, [ inner ] ->
-        let negated = L.Operation ("-", [ inner ]) in
+        let negated = Logic.Operation ("-", [ inner ]) in
         if bounds ty <> None then
           oblige context frame Overflow span
-            (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (T.show ty))
+            (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (Types.show ty))
             (in_range ty negated)
-        else if ty <> T.Integer then unsupported span "negating a value of `%s`" (T.show ty);
+        else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
         (frame, negated)
     | Complement, [ inner ] -> (frame, opaque_operation context frame ty "complement" [ inner ])
     | (Shift_left | Shift_right), [ left; right ] ->
@@ -2212,22 +2241,22 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
                 | None -> [])
               (Printf.sprintf "The shift amount `%s` may not be less than %d."
                  (quote source amount.origin) bits)
-              L.(Operation ("<", [ right; int bits ]))
-        | None -> unsupported span "a shift of `%s`" (T.show ty));
+              Logic.(Operation ("<", [ right; int bits ]))
+        | None -> unsupported span "a shift of `%s`" (Types.show ty));
         let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
         let shifted = opaque_operation context frame ty name [ left; right ] in
         (* An unsigned shift multiplies or divides by a power of two: to the
            left exactly, where the product fits. *)
         (match bounds ty with
-        | Some (low, high) when Z.equal low Z.zero && not (L.mentions frame.bound right) ->
-            let scale = power_of context frame (L.int 2) right in
+        | Some (low, high) when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
+            let scale = power_of context frame (Logic.int 2) right in
             assume context frame
               (match operation with
               | Shift_left ->
-                  L.(
+                  Logic.(
                     Operation ("<=", [ Operation ("*", [ left; scale ]); Integer high ])
                     ==> equal shifted (Operation ("*", [ left; scale ])))
-              | _ -> L.equal shifted (L.truncated_divide left scale))
+              | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
         | _ -> ());
         (frame, shifted)
     | (Bit_and | Bit_or | Bit_xor), [ left; right ] ->
@@ -2238,24 +2267,26 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
            power of two both operands are below. *)
         (match bounds ty with
         | Some (low, _) when Z.equal low Z.zero -> (
-            let at_most bound = L.Operation ("<=", [ term; bound ]) in
+            let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
             match operation with
-            | Bit_and -> assume context frame L.(at_most left &&& at_most right)
+            | Bit_and -> assume context frame Logic.(at_most left &&& at_most right)
             | _ ->
-                let sum = L.Operation ("+", [ left; right ]) in
+                let sum = Logic.Operation ("+", [ left; right ]) in
                 if operation = Bit_or then
                   assume context frame
-                    L.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
+                    Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
                 assume context frame (at_most sum);
-                declare context (L.Function (S.Cost_power, [ L.Int; L.Int ], L.Int));
-                let exponent = L.Symbol (variable "exponent") in
+                declare context
+                  (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+                let exponent = Logic.Symbol (variable "exponent") in
                 let below value =
-                  L.Operation ("<", [ value; L.Apply (S.Cost_power, [ L.int 2; exponent ]) ])
+                  Logic.Operation
+                    ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
                 in
                 assume context frame
-                  (L.Forall
-                     ( [ (variable "exponent", L.Int) ],
-                       L.(
+                  (Logic.Forall
+                     ( [ (variable "exponent", Logic.Int) ],
+                       Logic.(
                          Operation ("<=", [ int 0; exponent ])
                          &&& below left &&& below right ==> below term) )))
         | _ -> ());
@@ -2268,11 +2299,11 @@ and arithmetic ?operand ?divisor context frame (node : expression) ty
   let span = at frame node in
   let exact =
     match operation with
-    | Add -> L.Operation ("+", [ left; right ])
-    | Subtract -> L.Operation ("-", [ left; right ])
-    | Multiply -> L.Operation ("*", [ left; right ])
-    | Divide -> L.truncated_divide left right
-    | _ -> L.truncated_remainder left right
+    | Add -> Logic.Operation ("+", [ left; right ])
+    | Subtract -> Logic.Operation ("-", [ left; right ])
+    | Multiply -> Logic.Operation ("*", [ left; right ])
+    | Divide -> Logic.truncated_divide left right
+    | _ -> Logic.truncated_remainder left right
   in
   (match operation with
   | Divide | Remainder ->
@@ -2284,26 +2315,26 @@ and arithmetic ?operand ?divisor context frame (node : expression) ty
           | Some text -> add_requires context frame (text ^ " != 0")
           | None -> [])
         (Printf.sprintf "The divisor in `%s` may be zero." (quote source node.origin))
-        (L.not_ (L.equal right (L.int 0)))
+        (Logic.not_ (Logic.equal right (Logic.int 0)))
   | _ -> ());
   (match bounds ty with
   | Some (low, _) when operation = Divide || operation = Remainder ->
       if Z.sign low < 0 then
         oblige context frame Overflow span
           (Printf.sprintf "`%s` may overflow `%s`: the least value over -1."
-             (quote source node.origin) (T.show ty))
-          (L.not_ L.(equal left (Integer low) &&& equal right (int (-1))))
+             (quote source node.origin) (Types.show ty))
+          (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
-      let unsigned = Z.sign low = 0 && not (T.is_builtin Character ty) in
+      let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
       oblige context frame Overflow span
         ~fixes:
           (match operand with
           | Some operand -> overflow_fix context frame ty operation operand left right
           | None -> [])
-        (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (T.show ty))
+        (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (Types.show ty))
         (match operation with
-        | (Add | Multiply) when unsigned -> L.Operation ("<=", [ exact; Integer high ])
-        | Subtract when unsigned -> L.Operation ("<=", [ Integer low; exact ])
+        | (Add | Multiply) when unsigned -> Logic.Operation ("<=", [ exact; Integer high ])
+        | Subtract when unsigned -> Logic.Operation ("<=", [ Integer low; exact ])
         | _ -> in_range ty exact)
   | None -> ());
   exact
@@ -2319,24 +2350,26 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
          test )
        :: context.decisions);
   let then_result = block_value context (restrict frame test) then_ in
-  let otherwise = restrict frame (L.not_ test) in
+  let otherwise = restrict frame (Logic.not_ test) in
   let else_result =
     match else_ with
     | Some block_ -> block_value context otherwise block_
-    | None -> Some (otherwise, L.Boolean true)
+    | None -> Some (otherwise, Logic.Boolean true)
   in
   let ty = type_of context frame node in
-  let carries_value = else_ <> None && not (T.equal ty T.unit || ty = T.Never) in
+  let carries_value = else_ <> None && not (Types.equal ty Types.unit || ty = Types.Never) in
   let reached = List.filter_map Fun.id [ then_result; else_result ] in
   if carries_value then
     match
       join context ~value_type:ty (List.map (fun (frame, term) -> (frame, Some term)) reached)
     with
     | Some (frame, Some term) -> Some (frame, term)
-    | Some (frame, None) -> Some (frame, L.Boolean true)
+    | Some (frame, None) -> Some (frame, Logic.Boolean true)
     | None -> None
   else
-    Option.map (fun frame -> (frame, L.Boolean true)) (join_frames context (List.map fst reached))
+    Option.map
+      (fun frame -> (frame, Logic.Boolean true))
+      (join_frames context (List.map fst reached))
 
 and quantified context frame (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
@@ -2371,38 +2404,38 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
                 | Some start, Some total -> Costs.since ~start total
                 | _ -> Costs.zero
               in
-              if mentions_fresh_after context mark spent || L.mentions [ bound_symbol ] spent then
-                unknown_amount context frame counter
+              if mentions_fresh_after context mark spent || Logic.mentions [ bound_symbol ] spent
+              then unknown_amount context frame counter
               else
                 match counter.counting with
                 | Units ->
                     Costs.plus
-                      (Costs.times (Costs.at_least_zero count) (Costs.plus spent (L.int 1)))
-                      (L.int 1)
+                      (Costs.times (Costs.at_least_zero count) (Costs.plus spent (Logic.int 1)))
+                      (Logic.int 1)
                 | At_most | Exactly ->
                     if spent = Costs.zero then Costs.zero else unknown_amount context frame counter)
       | _ -> frame
     in
     let term =
       match quantifier with
-      | Forall -> L.Forall (bound, L.( ==> ) premise body_value)
-      | Exists -> L.Exists (bound, L.( &&& ) premise body_value)
+      | Forall -> Logic.Forall (bound, Logic.( ==> ) premise body_value)
+      | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
     if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
     Some (frame, term)
   in
   let symbol = fresh_name context "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
-  let each = L.Symbol symbol in
+  let each = Logic.Symbol symbol in
   (* Over a collection's elements: by index into its sequence, or each
      value its set contains, each matched against the binding's pattern,
      which names its parts and leaves out what it does not match. *)
-  let over_collection (pattern : pattern) (collection_type : T.ty) collected span =
+  let over_collection (pattern : pattern) (collection_type : Types.ty) collected span =
     let element = substituted context frame pattern.type_ in
     let set_path = Well_known.path Set in
     match collection_type with
     | Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
-        let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
+        let finite = Types.Named { path = finite_set_path; arguments = [ Types.Type element ] } in
         let model =
           if Path.equal path finite_set_path then Some collected
           else model_as context collection_type collected ~model:finite
@@ -2410,12 +2443,12 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
         let model =
           match model with
           | Some model -> model
-          | None -> unsupported span "a quantifier over `%s`" (T.show collection_type)
+          | None -> unsupported span "a quantifier over `%s`" (Types.show collection_type)
         in
         let matched, inner = pattern_match context inner pattern each element in
         make symbol (sort_of context element)
-          (L.( &&& )
-             (finite_function context finite "contains" L.Bool
+          (Logic.( &&& )
+             (finite_function context finite "contains" Logic.Bool
                 [ (each, sort_of context element) ]
                 model)
              matched)
@@ -2433,13 +2466,13 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
                 let length = sequence_length context element sequence in
                 let matched, inner = pattern_match context inner pattern element_value element in
                 make ~count:length symbol Int
-                  L.(
+                  Logic.(
                     Operation ("<=", [ int 0; each ])
                     &&& Operation ("<", [ each; length ])
                     &&& matched)
                   inner
-            | None -> unsupported span "a quantifier over `%s`" (T.show collection_type))
-        | None -> unsupported span "a quantifier over `%s`" (T.show collection_type))
+            | None -> unsupported span "a quantifier over `%s`" (Types.show collection_type))
+        | None -> unsupported span "a quantifier over `%s`" (Types.show collection_type))
   in
   match binder with
   | Over_type { local; type_; _ } ->
@@ -2448,7 +2481,7 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
       let ty = substituted context frame type_ in
       let inner = bind inner local ty each in
       make symbol (sort_of context ty)
-        (L.( &&& ) (in_range ty each) (validity context inner ~assuming:true ty each))
+        (Logic.( &&& ) (in_range ty each) (validity context inner ~assuming:true ty each))
         inner
   | Over_range { pattern; start; stop; inclusive } ->
       let _, low = value context frame start in
@@ -2457,12 +2490,12 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
         pattern_match context inner pattern each (substituted context frame pattern.type_)
       in
       let premise =
-        L.(
+        Logic.(
           Operation ("<=", [ low; each ])
           &&& Operation ((if inclusive then "<=" else "<"), [ each; high ]))
       in
       let count =
-        if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low
+        if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1) else Costs.minus high low
       in
       make ~count symbol Int premise inner
   | Over_collection { pattern; collection } ->
@@ -2485,26 +2518,26 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
 (* A [USize] generic argument's value: a number, or what the parameter
    stands for here, or the parameter itself, a constant the solver knows
    nothing more of. *)
-and value_term context frame (value : T.value) =
+and value_term context frame (value : Types.value) =
   match value with
   | Value_parameter parameter -> (
       match List.assoc_opt parameter frame.substitution with
-      | Some (T.Value argument) when argument <> Value_parameter parameter ->
+      | Some (Types.Value argument) when argument <> Value_parameter parameter ->
           value_term context frame argument
       | _ -> substituted_value_term context value)
   | Known _ | Value_variable _ -> substituted_value_term context value
 
 (* A value already substituted: a number, or a generic, which is a [USize]
    on every path. *)
-and substituted_value_term context (value : T.value) =
+and substituted_value_term context (value : Types.value) =
   match value with
-  | Known number -> L.Integer number
+  | Known number -> Logic.Integer number
   | Value_parameter parameter ->
-      let symbol = S.Generic_value { owner = parameter.owner; name = parameter.name } in
+      let symbol = Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
       once context (In_range symbol) (fun () ->
-          declare context (L.Constant (symbol, Int));
-          context.facts <- in_range (T.builtin USize) (L.Symbol symbol) :: context.facts);
-      L.Symbol symbol
+          declare context (Logic.Constant (symbol, Int));
+          context.facts <- in_range (Types.builtin USize) (Logic.Symbol symbol) :: context.facts);
+      Logic.Symbol symbol
   | Value_variable _ -> raise (Foreign_unsupported "an unsolved size")
 
 (* The value of an intrinsic's [USize] generic argument, by the generic's
@@ -2512,23 +2545,25 @@ and substituted_value_term context (value : T.value) =
 and generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
   let generics = (Intrinsic_signatures.signature operation).generics in
   List.find_map
-    (fun ((generic : T.generic), argument) ->
+    (fun ((generic : Types.generic), argument) ->
       match argument with
-      | T.Value value when generic.generic.name = name -> Some (value_term context frame value)
+      | Types.Value value when generic.generic.name = name -> Some (value_term context frame value)
       | _ -> None)
     (try List.combine generics type_arguments with Invalid_argument _ -> [])
 
 (* An array's elements: a sequence as long as its type says. *)
-and array_model context frame (ty : T.ty) term =
+and array_model context frame (ty : Types.ty) term =
   match ty with
-  | Named { arguments = [ T.Type element; T.Value count ]; _ } -> (
+  | Named { arguments = [ Types.Type element; Types.Value count ]; _ } -> (
       match model_of context ty term ~element with
       | Some sequence ->
           assume context frame
-            (L.equal (sequence_length context element sequence) (value_term context frame count));
+            (Logic.equal
+               (sequence_length context element sequence)
+               (value_term context frame count));
           sequence
-      | None -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show ty))))
-  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show ty)))
+      | None -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty))))
+  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty)))
 
 (* Calls *)
 
@@ -2694,11 +2729,11 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
     List.fold_left
       (fun frame (passed : passed) ->
         match (passed.mode, passed.operand) with
-        | T.Mut, Some (Place place) -> (
+        | Types.Mut, Some (Place place) -> (
             let changed = arrive context frame "changed" passed.type_ in
             try store context frame place changed
             with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame place)
-        | T.Mut, Some (Value { kind = Slice { base; _ }; _ }) -> (
+        | Types.Mut, Some (Value { kind = Slice { base; _ }; _ }) -> (
             (* The callee changes the elements of the run the slice views,
                and nothing else of its owner: the slice read again after the
                call is a view of the new run, which the callee's
@@ -2711,13 +2746,13 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
         | _ -> frame)
       frame values
   in
-  let arguments_of (type_arguments : T.argument list) =
-    List.map (T.substitute_argument frame.substitution) type_arguments
+  let arguments_of (type_arguments : Types.argument list) =
+    List.map (Types.substitute_argument frame.substitution) type_arguments
   in
   let generics_of path =
     match Interface.Impls.signature context.database path with
-    | Some (signature : T.signature) ->
-        List.map (fun (generic : T.generic) -> generic.generic) signature.generics
+    | Some (signature : Types.signature) ->
+        List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
     | None -> []
   in
   (* Pairs generic parameters with arguments, leaving out those already
@@ -2748,7 +2783,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           signature_terminates context (Path.Method { owner = capability; name; receiver = Static })
       | Indirect _ -> (
           match through with
-          | Some (T.Function function_type, _, _) -> T.terminates function_type
+          | Some (Types.Function function_type, _, _) -> Types.terminates function_type
           | _ -> false)
       | Intrinsic _ -> true
     in
@@ -2756,7 +2791,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       oblige context frame Termination span
         "This call may not end, since what it calls has no `time` clause, so neither may this \
          function."
-        (L.Boolean false);
+        (Logic.Boolean false);
     let impls =
       Query.demand context.database Call_graph.package_impls (Path.package context.current)
     in
@@ -2776,7 +2811,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                 here. Such a use passes no arguments the prover can compare, so the recursion \
                 cannot be shown to end: write it as a direct call on a part."
                (Path.show impl))
-            (L.Boolean false))
+            (Logic.Boolean false))
       (Call_graph.impls_used context.database impls call_.callee)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function
@@ -2818,7 +2853,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
         ->
           (* [==] on a type with identity semantics is the solver's
              equality. *)
-          Some (frame, L.equal a b)
+          Some (frame, Logic.equal a b)
       | "equal", Impl { impl = Derived _; _ }, [ a; b ] when Path.equal trait.trait equal_trait ->
           (* A derived [impl] is defined by the rule that derived it. *)
           Some (frame, equal_of context frame self_type a b)
@@ -2830,7 +2865,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                 "A call of `from_template` through a bound or `any` cannot see what the tag \
                  requires of its template: build the value with a template, where the tag is \
                  known."
-                (L.Boolean false)
+                (Logic.Boolean false)
           | _ -> ());
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
           (* The trait's clauses are about [Self] and the trait's parameters. *)
@@ -2844,7 +2879,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                 let impl_substitution =
                   List.map
                     (fun (parameter, argument) ->
-                      (parameter, T.substitute_argument frame.substitution argument))
+                      (parameter, Types.substitute_argument frame.substitution argument))
                     impl_arguments
                 in
                 let path = Path.Method { owner = impl; name; receiver } in
@@ -2855,7 +2890,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             if part.inherited then trait_substitution else own_substitution
           in
           with_contract ~substitution_of
-            ~instance:(List.map argument_key (T.Type self_type :: arguments))
+            ~instance:(List.map argument_key (Types.Type self_type :: arguments))
             path
             (method_contract ?reading_package:(reading_package context) context.database trait name
                receiver evidence))
@@ -2865,13 +2900,13 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       let frame =
         match through with
         | _ when context.counters = [] -> frame
-        | Some (T.Function function_type, callee_term, _) ->
+        | Some (Types.Function function_type, callee_term, _) ->
             spend context frame (function_value_amount context frame function_type callee_term)
         | _ -> spend context frame (unknown_amount context frame)
       in
       let result =
         match through with
-        | Some (T.Function function_type, callee_term, _) when in_the_logic function_type ->
+        | Some (Types.Function function_type, callee_term, _) when in_the_logic function_type ->
             let term =
               applied context function_type callee_term
                 (List.map (fun (passed : passed) -> passed.term) values)
@@ -2887,7 +2922,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       List.iter
         (fun (passed : passed) ->
           match (passed.mode, passed.operand) with
-          | T.Mut, Some operand -> (
+          | Types.Mut, Some operand -> (
               try
                 assume_valid context frame passed.type_
                   (snd (operand_value context { frame with checking = false } operand))
@@ -2913,7 +2948,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
         List.map
           (fun (passed : passed) ->
             match (passed.mode, passed.operand) with
-            | T.Mut, Some operand -> (
+            | Types.Mut, Some operand -> (
                 try snd (operand_value context { frame with checking = false } operand)
                 with Unsupported _ | Foreign_unsupported _ -> passed.term)
             | _ -> passed.term)
@@ -2921,7 +2956,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       in
       let types =
         List.filter_map
-          (function T.Type ty -> Some (substituted context frame ty) | _ -> None)
+          (function Types.Type ty -> Some (substituted context frame ty) | _ -> None)
           type_arguments
       in
       let result =
@@ -2929,13 +2964,13 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
         | Array_model, [ array ] -> array_model context frame array.type_ array.term
         | Array_take_view, [ array; part; start ] -> (
             match (array.type_, changed) with
-            | Named { arguments = T.Type element :: _; _ }, after :: _ ->
+            | Named { arguments = Types.Type element :: _; _ }, after :: _ ->
                 let before = array_model context frame array.type_ array.term in
                 let run = buffer_model context View element part.term in
                 oblige context frame Requires (at frame node)
                   (Printf.sprintf "`%s` may not take back a view within the array."
                      (quote frame.source node.origin))
-                  L.(
+                  Logic.(
                     Operation
                       ( "<=",
                         [
@@ -2945,17 +2980,17 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                 run_replaced context frame element ~before
                   ~after:(array_model context frame array.type_ after)
                   ~start:start.term
-                  ~stop:(L.Operation ("+", [ start.term; sequence_length context element run ]))
+                  ~stop:(Logic.Operation ("+", [ start.term; sequence_length context element run ]))
                   ~run:(Some run);
                 arrive context frame "result" result_type
             | _ -> arrive context frame "result" result_type)
         | Array_view, [ array ] -> (
             (* A view of the array's elements. *)
             match array.type_ with
-            | Named { arguments = T.Type element :: _; _ } ->
+            | Named { arguments = Types.Type element :: _; _ } ->
                 let view = arrive context frame "view" result_type in
                 assume context frame
-                  (L.equal
+                  (Logic.equal
                      (buffer_model context View element view)
                      (array_model context frame array.type_ array.term));
                 view
@@ -2964,12 +2999,12 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             (* The element at [index], lent to change until the lend ends,
                where the array takes back what the borrower left. *)
             match array.type_ with
-            | Named { arguments = T.Type element :: _; _ } -> (
+            | Named { arguments = Types.Type element :: _; _ } -> (
                 let model = array_model context frame array.type_ array.term in
                 oblige context frame Requires (at frame node)
                   (Printf.sprintf "`%s` may not be within the array."
                      (quote frame.source node.origin))
-                  L.(
+                  Logic.(
                     Operation ("<=", [ int 0; index.term ])
                     &&& Operation ("<", [ index.term; sequence_length context element model ]));
                 match sequence_at context element model index.term with
@@ -2980,12 +3015,12 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             (* The array's elements, moved into storage with room for exactly
                them. *)
             match array.type_ with
-            | Named { arguments = [ T.Type element; T.Value count ]; _ } ->
+            | Named { arguments = [ Types.Type element; Types.Value count ]; _ } ->
                 let storage = arrive context frame "storage" result_type in
                 let elements = buffer_model context Storage element storage in
                 let count = value_term context frame count in
                 assume context frame
-                  L.(
+                  Logic.(
                     equal elements (array_model context frame array.type_ array.term)
                     &&& equal (sequence_length context element elements) count
                     &&& equal (buffer_capacity context element storage) count);
@@ -2995,16 +3030,16 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             (* The storage's elements, moved into an array, which must be
                exactly as many as the array's count. *)
             match result_type with
-            | Named { arguments = [ T.Type element; T.Value count ]; _ } ->
+            | Named { arguments = [ Types.Type element; Types.Value count ]; _ } ->
                 let elements = buffer_model context Storage element storage.term in
                 let count = value_term context frame count in
                 oblige context frame Requires (at frame node)
                   (Printf.sprintf "`%s` may not have as many elements as the array's count."
                      (quote frame.source node.origin))
-                  (L.equal (sequence_length context element elements) count);
+                  (Logic.equal (sequence_length context element elements) count);
                 let array = arrive context frame "array" result_type in
                 assume context frame
-                  (L.equal (array_model context frame result_type array) elements);
+                  (Logic.equal (array_model context frame result_type array) elements);
                 array
             | _ -> arrive context frame "array" result_type)
         | _ -> intrinsic context frame ~node operation types operands ~changed result_type
@@ -3019,9 +3054,9 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
    comparisons, and [fits] are exact; and [convert] keeps a value that
    fits. Anything else is known by its type alone. *)
 and handle_descriptor context handle =
-  let handle_sort = sort_of context (T.builtin Handle) in
-  declare context (L.Function (S.Handle_descriptor, [ handle_sort ], L.Int));
-  L.Apply (S.Handle_descriptor, [ handle ])
+  let handle_sort = sort_of context (Types.builtin Handle) in
+  declare context (Logic.Function (Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
+  Logic.Apply (Symbol.Handle_descriptor, [ handle ])
 
 and intrinsic context frame ~node (operation : Intrinsic.operation) types operands ~changed
     result_type =
@@ -3039,13 +3074,13 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       element :: _ ) ->
       buffer_operation context frame ~node operation element operands ~changed known
   | Compare_bytes, _ ->
-      buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
+      buffer_operation context frame ~node operation (Types.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
   | Libc_number number, _ -> libc_number context frame number
   | (System_is_os _ | System_is_architecture _), _ ->
       (* The system a program runs on is one for the whole run, and it is at
          most one operating system and one architecture. *)
-      let symbol operation = S.System (Intrinsic.operation_name operation) in
+      let symbol operation = Symbol.System (Intrinsic.operation_name operation) in
       let kind =
         List.filter
           (fun (other : Intrinsic.operation) ->
@@ -3055,7 +3090,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
             | _ -> false)
           Intrinsic.operations
       in
-      List.iter (fun other -> declare context (L.Constant (symbol other, L.Bool))) kind;
+      List.iter (fun other -> declare context (Logic.Constant (symbol other, Logic.Bool))) kind;
       once context
         (Exclusive (symbol operation))
         (fun () ->
@@ -3065,10 +3100,11 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
                 (fun later second ->
                   if later > index then
                     context.facts <-
-                      L.(not_ (Symbol (symbol first) &&& Symbol (symbol second))) :: context.facts)
+                      Logic.(not_ (Symbol (symbol first) &&& Symbol (symbol second)))
+                      :: context.facts)
                 kind)
             kind);
-      L.Symbol (symbol operation)
+      Logic.Symbol (symbol operation)
   | View_address, element :: _ when scalar_bytes element <> None -> (
       (* A view's elements lie in memory, so they end within the address
          space, and a view with any is not at zero. *)
@@ -3076,7 +3112,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       | [ view ], Some bytes ->
           let length = sequence_length context element (buffer_model context View element view) in
           assume context frame
-            L.(
+            Logic.(
               Operation
                 ( "<=",
                   [
@@ -3089,15 +3125,15 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
   | Environment_entry, _ ->
       (* An entry is a C string without its end, so none of its bytes is
          zero. *)
-      let byte = T.builtin UInt8 in
+      let byte = Types.builtin UInt8 in
       let model = buffer_model context View byte known in
       let length = sequence_length context byte model in
-      (match sequence_at context byte model (L.Symbol (variable "entry.index")) with
+      (match sequence_at context byte model (Logic.Symbol (variable "entry.index")) with
       | Some at ->
           assume context frame
-            (L.Forall
-               ( [ (variable "entry.index", L.Int) ],
-                 L.(
+            (Logic.Forall
+               ( [ (variable "entry.index", Logic.Int) ],
+                 Logic.(
                    Operation ("<=", [ int 0; Symbol (variable "entry.index") ])
                    &&& Operation ("<", [ Symbol (variable "entry.index"); length ])
                    ==> not_ (equal at (int 0))) ))
@@ -3108,20 +3144,20 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
          from. *)
       match operands with
       | [ descriptor ] ->
-          assume context frame (L.equal (handle_descriptor context known) descriptor);
+          assume context frame (Logic.equal (handle_descriptor context known) descriptor);
           known
       | _ -> known)
   | Handle_descriptor, _ -> (
       match operands with
       | [ handle ] ->
           let descriptor = handle_descriptor context handle in
-          assume context frame (in_range (T.builtin Int32) descriptor);
+          assume context frame (in_range (Types.builtin Int32) descriptor);
           descriptor
       | _ -> known)
   | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
       match operands with
       | [ left; right ] ->
-          L.Operation ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
+          Logic.Operation ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
       | _ -> known)
   | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _ when float_format ty <> None
     -> (
@@ -3129,25 +3165,26 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       match operands with
       | [ value ] -> (
           match operation with
-          | Square_root -> L.Operation ("fp.sqrt", [ L.Operation ("RNE", []); value ])
-          | Floor -> L.Operation ("fp.roundToIntegral", [ L.Operation ("RTN", []); value ])
-          | Ceiling -> L.Operation ("fp.roundToIntegral", [ L.Operation ("RTP", []); value ])
-          | Truncate -> L.Operation ("fp.roundToIntegral", [ L.Operation ("RTZ", []); value ])
-          | _ -> L.Operation ("fp.roundToIntegral", [ L.Operation ("RNE", []); value ]))
+          | Square_root -> Logic.Operation ("fp.sqrt", [ Logic.Operation ("RNE", []); value ])
+          | Floor -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
+          | Ceiling -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
+          | Truncate ->
+              Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
+          | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
       | _ -> known)
   | Fused_multiply_add, ty :: _ when float_format ty <> None -> (
       match operands with
       | [ value; multiplier; addend ] ->
-          L.Operation ("fp.fma", [ L.Operation ("RNE", []); value; multiplier; addend ])
+          Logic.Operation ("fp.fma", [ Logic.Operation ("RNE", []); value; multiplier; addend ])
       | _ -> known)
   | Is_nan, ty :: _ when float_format ty <> None -> (
       match operands with [ value ] -> is_nan value | _ -> known)
   | From_bits, [ bits; target ] when bounds bits <> None -> (
       match (operands, float_format target, width bits) with
       | [ value ], Some (exponent, significand), Some width ->
-          L.Operation
+          Logic.Operation
             ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-              [ L.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
+              [ Logic.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
       | _ -> known)
   | To_bits, [ source; bits ] when bounds bits <> None -> (
       (* A float's bits are those that make it again, which every float but
@@ -3155,7 +3192,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       match (operands, float_format source, width bits) with
       | [ value ], Some (exponent, significand), Some width ->
           assume context frame
-            L.(
+            Logic.(
               not_ (is_nan value)
               ==> equal
                     (Operation
@@ -3169,8 +3206,9 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
          size, rounded down, which is its upper word signed or not. *)
       match (operands, width ty) with
       | [ left; right ], Some bits ->
-          L.Operation
-            ("div", [ L.Operation ("*", [ left; right ]); L.Integer (Z.shift_left Z.one bits) ])
+          Logic.Operation
+            ( "div",
+              [ Logic.Operation ("*", [ left; right ]); Logic.Integer (Z.shift_left Z.one bits) ] )
       | _ -> known)
   | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
       let name =
@@ -3188,20 +3226,20 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
           oblige context frame Requires (at frame node)
             (Printf.sprintf
                "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its range."
-               (quote frame.source node.origin) (T.show target))
+               (quote frame.source node.origin) (Types.show target))
             (float_fits target value);
-          L.Operation ("to_int", [ truncated value ])
+          Logic.Operation ("to_int", [ truncated value ])
       | _ -> known)
   | Convert, [ source; target ] when bounds source <> None && float_format target <> None -> (
       (* An integer becomes the float nearest it, ties to even, as the
          compiled cast rounds: exactly it, where the float can hold it. *)
       match (operands, float_format target) with
       | [ value ], Some (exponent, significand) ->
-          L.Operation
+          Logic.Operation
             ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-              [ L.Operation ("RNE", []); L.Operation ("to_real", [ value ]) ] )
+              [ Logic.Operation ("RNE", []); Logic.Operation ("to_real", [ value ]) ] )
       | _ -> known)
-  | Convert, [ _; target ] when T.is_builtin Character target -> (
+  | Convert, [ _; target ] when Types.is_builtin Character target -> (
       (* A [Character] is made from an integer only when the integer is a
          Unicode scalar value, which the conversion does not check. *)
       match operands with
@@ -3244,9 +3282,10 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
     match extent with
     | Counted { by; each } ->
         Option.map
-          (fun value -> if each = 1 then value else L.Operation ("*", [ L.int each; value ]))
+          (fun value ->
+            if each = 1 then value else Logic.Operation ("*", [ Logic.int each; value ]))
           (value_of by)
-    | Exactly elements -> Some (L.int elements)
+    | Exactly elements -> Some (Logic.int elements)
     | Number number -> Some (libc_number context frame number)
     | Through_zero -> None
   in
@@ -3255,7 +3294,7 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
       (Printf.sprintf "`%s` may not %s." (quote frame.source node.origin) what)
       condition
   in
-  let element_of scalar = T.builtin (Intrinsic.libc_builtin scalar) in
+  let element_of scalar = Types.builtin (Intrinsic.libc_builtin scalar) in
   let length element sequence = sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->
@@ -3267,25 +3306,25 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
           let model term = buffer_model context Storage element term in
           let capacity term = buffer_capacity context element term in
           assume context frame
-            L.(
+            Logic.(
               equal (length element (model after)) (length element (model before))
               &&& equal (capacity after) (capacity before));
           match (passes, count extent) with
           | Room _, counted ->
-              assume context frame (L.equal (model after) (model before));
+              assume context frame (Logic.equal (model after) (model before));
               Option.iter
                 (fun counted ->
                   needs "have the room it writes into"
-                    (L.Operation
+                    (Logic.Operation
                        ( "<=",
                          [
-                           L.Operation ("+", [ length element (model before); counted ]);
+                           Logic.Operation ("+", [ length element (model before); counted ]);
                            capacity before;
                          ] )))
                 counted
           | _, Some counted ->
               needs "have the elements it changes"
-                (L.Operation ("<=", [ counted; length element (model before) ]))
+                (Logic.Operation ("<=", [ counted; length element (model before) ]))
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
           let element = element_of scalar in
@@ -3293,11 +3332,11 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
           match count extent with
           | Some counted ->
               needs "have the elements it reads"
-                (L.Operation ("<=", [ counted; length element elements ]))
+                (Logic.Operation ("<=", [ counted; length element elements ]))
           | None ->
-              let last = L.Operation ("-", [ length element elements; L.int 1 ]) in
+              let last = Logic.Operation ("-", [ length element elements; Logic.int 1 ]) in
               needs "end with a zero, which it reads up to"
-                L.(
+                Logic.(
                   Operation (">=", [ length element elements; int 1 ])
                   &&&
                   match sequence_at context element elements last with
@@ -3308,7 +3347,7 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
   (match Option.bind at_most value_of with
   | Some bound ->
       assume context frame
-        L.(Operation (">=", [ known; int 0 ]) ==> Operation ("<=", [ known; bound ]))
+        Logic.(Operation (">=", [ known; int 0 ]) ==> Operation ("<=", [ known; bound ]))
   | None -> ());
   known
 
@@ -3316,11 +3355,11 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
    [PATH_MAX]: one constant, whatever call gives it, so the room a caller
    makes for it and the room a function needs are the same term. *)
 and libc_number context frame (number : Libc.number) =
-  let symbol = S.Libc_number (Libc.number_name number) in
-  declare context (L.Constant (symbol, L.Int));
-  let term = L.Symbol symbol in
+  let symbol = Symbol.Libc_number (Libc.number_name number) in
+  declare context (Logic.Constant (symbol, Logic.Int));
+  let term = Logic.Symbol symbol in
   assume context frame
-    (in_range (T.builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
+    (in_range (Types.builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
   term
 
 (* Whether a float is a number that, cut toward zero, is in an integer
@@ -3329,22 +3368,22 @@ and float_fits target value =
   match bounds target with
   | Some (low, high) ->
       let cut = truncated value in
-      L.(
+      Logic.(
         not_ (is_nan value)
         &&& not_ (Operation ("fp.isInfinite", [ value ]))
         &&& Operation ("<=", [ Integer low; cut ])
         &&& Operation ("<=", [ cut; Integer high ]))
-  | None -> L.Boolean false
+  | None -> Logic.Boolean false
 
 and integer_intrinsic context frame ~node (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
-    | Add | Wrapping_add | Add_overflows -> L.Operation ("+", [ left; right ])
-    | Subtract | Wrapping_subtract | Subtract_overflows -> L.Operation ("-", [ left; right ])
-    | Divide -> L.truncated_divide left right
-    | Remainder -> L.truncated_remainder left right
-    | _ -> L.Operation ("*", [ left; right ])
+    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
+    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
+    | Divide -> Logic.truncated_divide left right
+    | Remainder -> Logic.truncated_remainder left right
+    | _ -> Logic.Operation ("*", [ left; right ])
   in
   match (operation, integer, types, operands) with
   (* An integer operation is defined where its operator is, so it has the
@@ -3355,36 +3394,36 @@ and integer_intrinsic context frame ~node (operation : Intrinsic.operation) type
       assume context frame (in_range ty result);
       result
   | Negate, Some _, ty :: _, [ value ] ->
-      let result = L.Operation ("-", [ value ]) in
+      let result = Logic.Operation ("-", [ value ]) in
       oblige context frame Overflow (at frame node)
-        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (T.show ty))
+        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (Types.show ty))
         (in_range ty result);
       result
   | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
       let modulus = Z.succ (Z.sub high low) in
-      L.Operation
+      Logic.Operation
         ( "+",
           [
-            L.Integer low;
-            L.Operation
+            Logic.Integer low;
+            Logic.Operation
               ( "mod",
                 [
-                  L.Operation ("-", [ exact operation left right; L.Integer low ]);
-                  L.Integer modulus;
+                  Logic.Operation ("-", [ exact operation left right; Logic.Integer low ]);
+                  Logic.Integer modulus;
                 ] );
           ] )
   | (Add_overflows | Subtract_overflows | Multiply_overflows), Some _, ty :: _, [ left; right ] ->
-      L.not_ (in_range ty (exact operation left right))
+      Logic.not_ (in_range ty (exact operation left right))
   | Equal, None, ty :: _, [ left; right ] when float_format ty <> None -> float_equal left right
   | Less, None, ty :: _, [ left; right ] when float_format ty <> None -> float_less left right
-  | Equal, Some _, _, [ left; right ] -> L.equal left right
-  | Less, Some _, _, [ left; right ] -> L.Operation ("<", [ left; right ])
+  | Equal, Some _, _, [ left; right ] -> Logic.equal left right
+  | Less, Some _, _, [ left; right ] -> Logic.Operation ("<", [ left; right ])
   | Fits, Some _, [ _; target ], [ value ] when bounds target <> None -> in_range target value
   | Fits, None, [ source; target ], [ value ]
     when float_format source <> None && bounds target <> None ->
       float_fits target value
   | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
-      assume context frame L.(in_range target value ==> equal known value);
+      assume context frame Logic.(in_range target value ==> equal known value);
       known
   | (Leading_zeros | Trailing_zeros | Count_ones), Some (low, _), ty :: _, [ value ] -> (
       (* Each count of bits is a function of the value, at most the width,
@@ -3396,9 +3435,9 @@ and integer_intrinsic context frame ~node (operation : Intrinsic.operation) type
       match width ty with
       | Some bits ->
           let count name =
-            let symbol = S.Bit_count { count = name; width = bits } in
-            declare context (L.Function (symbol, [ L.Int ], L.Int));
-            L.Apply (symbol, [ value ])
+            let symbol = Symbol.Bit_count { count = name; width = bits } in
+            declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
+            Logic.Apply (symbol, [ value ])
           in
           let leading = count "leading_zeros"
           and trailing = count "trailing_zeros"
@@ -3407,14 +3446,14 @@ and integer_intrinsic context frame ~node (operation : Intrinsic.operation) type
             match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
           in
           assume context frame
-            L.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
-          (if Z.equal low Z.zero && not (L.mentions frame.bound value) then
-             let power exponent = power_of context frame (L.int 2) exponent in
-             let width = L.int bits in
-             let nonzero = L.not_ (L.equal value (L.int 0)) in
-             let below_highest = L.Operation ("-", [ width; leading ]) in
+            Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
+          (if Z.equal low Z.zero && not (Logic.mentions frame.bound value) then
+             let power exponent = power_of context frame (Logic.int 2) exponent in
+             let width = Logic.int bits in
+             let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
+             let below_highest = Logic.Operation ("-", [ width; leading ]) in
              List.iter (assume context frame)
-               L.
+               Logic.
                  [
                    Operation ("<=", [ int 0; leading ])
                    &&& Operation ("<=", [ leading; width ])
@@ -3457,7 +3496,7 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
     && List.for_all
          (fun capture ->
            match captured capture with
-           | Some term -> not (L.mentions frame.bound term)
+           | Some term -> not (Logic.mentions frame.bound term)
            | None -> false)
          captures
   then
@@ -3465,7 +3504,7 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
        that names one is still left out. *)
     let _, term =
       read_lambda ~capture_free:true context
-        { frame with binders = []; condition = L.Boolean true }
+        { frame with binders = []; condition = Logic.Boolean true }
         node parameters captures body ~facts
     in
     (frame, term)
@@ -3476,14 +3515,14 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
   let span = at frame node in
   let ty = type_of context frame node in
   let function_type =
-    match ty with T.Function function_type -> function_type | _ -> unsupported span "a lambda"
+    match ty with Types.Function function_type -> function_type | _ -> unsupported span "a lambda"
   in
   if List.length parameters <> List.length function_type.inputs then
     unsupported span "a lambda with a different number of parameters";
   (* A lambda's body runs only where it is called, which may be nowhere, so
      what its path assumes is only where it is called: what the body
      assumes of its arguments, or of what it calls, holds of no other path. *)
-  let called = fresh context frame "called" L.Bool in
+  let called = fresh context frame "called" Logic.Bool in
   let inside = { (restrict frame called) with result = None; loop = None; updating = None } in
   let start_fresh = context.fresh
   and start_facts = List.length context.facts
@@ -3505,7 +3544,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
      for it. *)
   let promised =
     List.filter_map
-      (fun (cost : T.cost) ->
+      (fun (cost : Types.cost) ->
         let counting : Costs.counting option =
           match cost.bound with
           | Order_of -> Some Units
@@ -3530,8 +3569,8 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
                     (Lambda_bound { lambda = node.id; counter = counter_number context counter })
                 in
                 context.groups <- constants :: context.groups;
-                declare context (L.Constant (constants.factor, L.Int));
-                declare context (L.Constant (constants.addend, L.Int));
+                declare context (Logic.Constant (constants.factor, Logic.Int));
+                declare context (Logic.Constant (constants.addend, Logic.Int));
                 Some constants
               end
               else None
@@ -3567,7 +3606,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
   let ended = ref [] in
   let saved_returns = context.returns and saved_terminates = context.terminates in
   context.returns <- [];
-  context.terminates <- T.terminates function_type;
+  context.terminates <- Types.terminates function_type;
   let pending =
     Fun.protect
       ~finally:(fun () ->
@@ -3596,7 +3635,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
             List.iter2
               (fun (pattern : pattern) (mode, input) ->
                 match (mode, pattern.kind) with
-                | T.Mut, Bind { local; _ } -> (
+                | Types.Mut, Bind { local; _ } -> (
                     match Locals.find_opt local exit_.locals with
                     | Some term ->
                         check_valid context exit_ span (substituted context frame input) term
@@ -3611,19 +3650,19 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
         List.iter
           (fun (exit_ : frame) ->
             List.iter
-              (fun (counter, (bound : T.cost_bound), constants) ->
+              (fun (counter, (bound : Types.cost_bound), constants) ->
                 let spent = spent_of exit_ counter in
                 let goal =
                   match (bound, constants) with
                   | Order_of, Some constants ->
-                      Costs.at_most spent (Costs.bound constants (L.int 1))
-                  | No_more_than (Some k), _ -> Costs.at_most spent (L.Integer k)
-                  | Exactly_cost (Some k), _ -> L.equal spent (L.Integer k)
-                  | _ -> L.Boolean true
+                      Costs.at_most spent (Costs.bound constants (Logic.int 1))
+                  | No_more_than (Some k), _ -> Costs.at_most spent (Logic.Integer k)
+                  | Exactly_cost (Some k), _ -> Logic.equal spent (Logic.Integer k)
+                  | _ -> Logic.Boolean true
                 in
                 oblige context exit_ Cost span
                   (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
-                     (T.show ty))
+                     (Types.show ty))
                   goal)
               promised)
           exits;
@@ -3696,7 +3735,7 @@ and add_lambda_facts context frame ~capture_free function_type term ~called ~arg
      is renamed, as a value the body made is, to a function of the
      arguments. *)
   let captures_fresh = function
-    | S.Lambda _ as name when not (Hashtbl.mem context.fresh_order name) -> (
+    | Symbol.Lambda _ as name when not (Hashtbl.mem context.fresh_order name) -> (
         match Hashtbl.find_opt context.lambda_definitions name with
         | Some defined -> mentions_fresh_after context start_fresh defined
         | None -> false)
@@ -3707,60 +3746,63 @@ and add_lambda_facts context frame ~capture_free function_type term ~called ~arg
       List.mapi
         (fun index (_, input) ->
           (variable "lambda.argument" ~numbers:[ index ], sort_of context input))
-        function_type.T.inputs
+        function_type.Types.inputs
     in
-    let variables = List.map (fun (name, _) -> L.Symbol name) parameters in
+    let variables = List.map (fun (name, _) -> Logic.Symbol name) parameters in
     let renamed = Hashtbl.create 16 in
-    (match called with L.Symbol name -> Hashtbl.replace renamed name (L.Boolean true) | _ -> ());
+    (match called with
+    | Logic.Symbol name -> Hashtbl.replace renamed name (Logic.Boolean true)
+    | _ -> ());
     List.iter2
       (fun argument variable ->
-        match argument with L.Symbol name -> Hashtbl.replace renamed name variable | _ -> ())
+        match argument with Logic.Symbol name -> Hashtbl.replace renamed name variable | _ -> ())
       arguments variables;
     (* Inside a quantifier, a value made in the body is a function of its
        bound values, and becomes one of those and the arguments. *)
     let functions = Hashtbl.create 8 in
     List.iter
       (function
-        | L.Constant (name, sort) when not (Hashtbl.mem renamed name) ->
+        | Logic.Constant (name, sort) when not (Hashtbl.mem renamed name) ->
             let is_fresh_in_body =
               match Hashtbl.find_opt context.fresh_order name with
               | Some order -> order > start_fresh && order <= end_fresh
               | None -> captures_fresh name
             in
             if is_fresh_in_body then begin
-              let over = S.Over name in
-              declare context (L.Function (over, List.map snd parameters, sort));
-              Hashtbl.replace renamed name (L.Apply (over, variables))
+              let over = Symbol.Over name in
+              declare context (Logic.Function (over, List.map snd parameters, sort));
+              Hashtbl.replace renamed name (Logic.Apply (over, variables))
             end
-        | L.Function (name, inputs, sort) when frame.binders <> [] -> (
+        | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Hashtbl.find_opt context.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
-                let over = S.Over name in
-                declare context (L.Function (over, inputs @ List.map snd parameters, sort));
+                let over = Symbol.Over name in
+                declare context (Logic.Function (over, inputs @ List.map snd parameters, sort));
                 Hashtbl.replace functions name over
             | _ -> ())
         | _ -> ())
       declared_here;
     let rec over = function
-      | L.Symbol name as symbol -> Option.value (Hashtbl.find_opt renamed name) ~default:symbol
-      | (L.Integer _ | L.Boolean _ | L.Bits _) as term -> term
-      | L.Apply (name, _)
-        when match called with L.Apply (called_name, _) -> called_name = name | _ -> false ->
-          L.Boolean true
-      | L.Apply (name, arguments) when Hashtbl.mem functions name ->
-          L.Apply (Hashtbl.find functions name, List.map over arguments @ variables)
-      | (L.Apply _ | L.Operation _ | L.Is _) as term -> L.map_arguments over term
-      | L.Forall (bound, body) -> L.Forall (bound, over body)
-      | L.Exists (bound, body) -> L.Exists (bound, over body)
+      | Logic.Symbol name as symbol -> Option.value (Hashtbl.find_opt renamed name) ~default:symbol
+      | (Logic.Integer _ | Logic.Boolean _ | Logic.Bits _) as term -> term
+      | Logic.Apply (name, _)
+        when match called with Logic.Apply (called_name, _) -> called_name = name | _ -> false ->
+          Logic.Boolean true
+      | Logic.Apply (name, arguments) when Hashtbl.mem functions name ->
+          Logic.Apply (Hashtbl.find functions name, List.map over arguments @ variables)
+      | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments over term
+      | Logic.Forall (bound, body) -> Logic.Forall (bound, over body)
+      | Logic.Exists (bound, body) -> Logic.Exists (bound, over body)
     in
-    let premise = over (L.conjunction premises) in
+    let premise = over (Logic.conjunction premises) in
     let applied_here = applied context function_type term variables in
     let statements =
       List.map over shown
       @ List.filter_map
           (fun ((exit_ : frame), value) ->
             Option.map
-              (fun value -> L.( ==> ) (over exit_.condition) (L.equal applied_here (over value)))
+              (fun value ->
+                Logic.( ==> ) (over exit_.condition) (Logic.equal applied_here (over value)))
               value)
           ended
     in
@@ -3768,7 +3810,7 @@ and add_lambda_facts context frame ~capture_free function_type term ~called ~arg
        for each of them, closed over the quantifier. *)
     List.iter
       (fun statement ->
-        let stated = L.Forall (parameters, L.( ==> ) premise statement) in
+        let stated = Logic.Forall (parameters, Logic.( ==> ) premise statement) in
         if frame.bound = [] || capture_free then context.facts <- stated :: context.facts
         else
           match closed_over_binders frame stated with
@@ -3794,7 +3836,8 @@ and without_costs : 'a. _ -> (unit -> 'a) -> 'a =
    are the same function, so a bound and a loop's bound that both write
    [(row) => row.length()] mean the same sum. A body whose value needs a
    fresh symbol, or that the prover cannot read, gives no definition. *)
-and lambda_definition context frame (function_type : T.function_type) parameters (body : block) =
+and lambda_definition context frame (function_type : Types.function_type) parameters (body : block)
+    =
   if not (in_the_logic function_type && is_functional_block body) then None
   else
     let bound = parameters_of context frame function_type in
@@ -3803,7 +3846,7 @@ and lambda_definition context frame (function_type : T.function_type) parameters
           List.fold_left2
             (fun inside (pattern : pattern) ((name, _), (_, input)) ->
               snd
-                (pattern_match context inside pattern (L.Symbol name)
+                (pattern_match context inside pattern (Logic.Symbol name)
                    (substituted context frame input)))
             inside parameters
             (List.combine bound function_type.inputs))
@@ -3816,25 +3859,25 @@ and lambda_definition context frame (function_type : T.function_type) parameters
         let named_by_position =
           List.fold_left
             (fun term (index, (name, _)) ->
-              L.replace ~from:(L.Symbol name)
-                ~into:(L.Symbol (variable "parameter" ~numbers:[ index ]))
+              Logic.replace ~from:(Logic.Symbol name)
+                ~into:(Logic.Symbol (variable "parameter" ~numbers:[ index ]))
                 term)
             defined
             (List.mapi (fun index parameter -> (index, parameter)) bound)
         in
-        let symbol = S.Lambda { sorts = List.map snd bound; definition = named_by_position } in
-        let sort = sort_of context (T.Function function_type) in
+        let symbol = Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position } in
+        let sort = sort_of context (Types.Function function_type) in
         (* A lambda that captures a quantifier's bound symbol is a function
            of it. *)
         let term =
-          if L.mentions frame.bound defined then value_symbol context frame symbol sort
+          if Logic.mentions frame.bound defined then value_symbol context frame symbol sort
           else value_symbol context { frame with binders = [] } symbol sort
         in
         let application =
-          applied context function_type term (List.map (fun (name, _) -> L.Symbol name) bound)
+          applied context function_type term (List.map (fun (name, _) -> Logic.Symbol name) bound)
         in
         Hashtbl.replace context.lambda_definitions symbol defined;
-        fact context frame (L.Forall (bound, L.equal application defined));
+        fact context frame (Logic.Forall (bound, Logic.equal application defined));
         (* Its body's value is in the range of the body's type, which may be
            narrower than the function type's [Integer]. *)
         let rec unconverted (node : expression) =
@@ -3845,18 +3888,18 @@ and lambda_definition context frame (function_type : T.function_type) parameters
         (match body.value with
         | Some last -> (
             match in_range (type_of context frame (unconverted last)) application with
-            | L.Boolean true -> ()
+            | Logic.Boolean true -> ()
             | range ->
                 (* For arguments of the parameters' types, which the body
                    was read with. *)
                 let arguments_in_range =
-                  L.conjunction
+                  Logic.conjunction
                     (List.map2
                        (fun (name, _) (_, input) ->
-                         in_range (substituted context frame input) (L.Symbol name))
+                         in_range (substituted context frame input) (Logic.Symbol name))
                        bound function_type.inputs)
                 in
-                fact context frame (L.Forall (bound, L.( ==> ) arguments_in_range range)))
+                fact context frame (Logic.Forall (bound, Logic.( ==> ) arguments_in_range range)))
         | None -> ());
         Some term
     | _ -> None
@@ -3892,17 +3935,17 @@ and body_over context frame bound body bind =
    equal to it. *)
 and named_term context ty term =
   let rec holds_call = function
-    | L.Apply (S.Function _, _) -> true
-    | L.Forall (_, body) | L.Exists (_, body) -> holds_call body
-    | term -> List.exists holds_call (L.arguments term)
+    | Logic.Apply (Symbol.Function _, _) -> true
+    | Logic.Forall (_, body) | Logic.Exists (_, body) -> holds_call body
+    | term -> List.exists holds_call (Logic.arguments term)
   in
   if not (holds_call term) then term
   else
-    let symbol = S.Argument term in
-    let named = L.Symbol symbol in
+    let symbol = Symbol.Argument term in
+    let named = Logic.Symbol symbol in
     once context (Value_of symbol) (fun () ->
-        declare context (L.Constant (symbol, sort_of context ty));
-        context.facts <- L.equal named term :: context.facts);
+        declare context (Logic.Constant (symbol, sort_of context ty));
+        context.facts <- Logic.equal named term :: context.facts);
     named
 
 (* A part's frame, for reading its clauses, with its parameters bound to
@@ -3927,7 +3970,7 @@ and part_frame frame (part : part) ~arguments ~substitution =
     old_locals = locals;
     self = Option.map fst self;
     old_self = Option.map fst self;
-    self_type = Option.map (fun (_, ty) -> T.substitute substitution ty) self;
+    self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
     result = None;
     checking = false;
     loop = None;
@@ -3952,7 +3995,7 @@ and callback_facts context frame (call_ : call) position known arguments =
             when List.length inputs = List.length arguments ->
               let substitution =
                 match Interface.Impls.signature context.database path with
-                | Some (signature : T.signature) ->
+                | Some (signature : Types.signature) ->
                     callee_substitution frame signature type_arguments
                 | None -> []
               in
@@ -4014,7 +4057,7 @@ and updating_helper context (call_ : call) =
    [impl]. The [impl] is of the trait with these arguments, so a type with
    an [impl] of [Scale[Int64]] and one of [Scale[Bool]] reaches each by its
    own. *)
-and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
+and concrete_impl context (trait : Types.trait_reference) (ty : Types.ty) =
   match ty with
   | Named { path; _ } ->
       let own impl =
@@ -4030,7 +4073,9 @@ and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
               match Interface.Impls.impl_interface context.database impl with
               | Some interface -> (
                   let variables =
-                    List.map (fun (generic : T.generic) -> generic.generic) interface.impl_generics
+                    List.map
+                      (fun (generic : Types.generic) -> generic.generic)
+                      interface.impl_generics
                   in
                   match
                     Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
@@ -4074,13 +4119,13 @@ and current_bounds context : Interface.Impls.bounds =
         | Some signature -> signature.generics
         | None -> impl_generics current)
   in
-  fun parameter -> T.bounds_of generics parameter
+  fun parameter -> Types.bounds_of generics parameter
 
 (* A trait's laws, and those of the traits it requires, as facts about a
    type, each quantified over its parameters. A law is shown for each
    [impl] written by hand, by the [impl], so it is a fact wherever the
    trait's methods are used. *)
-and assume_laws context frame ~at (trait : T.trait_reference) (ty : T.ty) =
+and assume_laws context frame ~at (trait : Types.trait_reference) (ty : Types.ty) =
   let key = laws_key trait ty in
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
@@ -4088,7 +4133,7 @@ and assume_laws context frame ~at (trait : T.trait_reference) (ty : T.ty) =
       (fun path ->
         let required =
           if Path.equal path trait.trait then trait
-          else { T.trait = path; trait_arguments = []; associated = [] }
+          else { Types.trait = path; trait_arguments = []; associated = [] }
         in
         let substitution = trait_substitution context.database required ty in
         let impl = Option.map fst (concrete_impl context required ty) in
@@ -4106,7 +4151,7 @@ and assume_laws context frame ~at (trait : T.trait_reference) (ty : T.ty) =
       (Call_graph.traits_with_required context.database trait.trait)
   end
 
-and laws_key (trait : T.trait_reference) ty = T.show_trait trait ^ " for " ^ type_key ty
+and laws_key (trait : Types.trait_reference) ty = Types.show_trait trait ^ " for " ^ type_key ty
 
 and laws_of context trait =
   match
@@ -4148,39 +4193,40 @@ and law_frame frame source ~substitution (law : law) terms =
 
 and law_parameter_types ~substitution (law : law) =
   List.map
-    (fun (parameter : Core.parameter) -> T.substitute substitution parameter.type_)
+    (fun (parameter : Core.parameter) -> Types.substitute substitution parameter.type_)
     law.parameters
 
 and law_fact context frame source ~substitution (law : law) =
   let types = law_parameter_types ~substitution law in
-  if List.exists (fun ty -> T.is_error ty) types then None
+  if List.exists (fun ty -> Types.is_error ty) types then None
   else begin
     context.fresh <- context.fresh + 1;
     let symbols =
       List.mapi
-        (fun index _ -> S.Variable { label = "law"; numbers = [ context.fresh; index ] })
+        (fun index _ -> Symbol.Variable { label = "law"; numbers = [ context.fresh; index ] })
         types
     in
     let inside =
       law_frame
         { frame with bound = symbols @ frame.bound }
         source ~substitution law
-        (List.map (fun s -> L.Symbol s) symbols)
+        (List.map (fun s -> Logic.Symbol s) symbols)
     in
     try
       let premise =
-        L.conjunction
+        Logic.conjunction
           (List.map (fun clause -> snd (clause_value context inside clause)) law.requires)
       in
       let range =
-        L.conjunction (List.map2 (fun symbol ty -> in_range ty (L.Symbol symbol)) symbols types)
+        Logic.conjunction
+          (List.map2 (fun symbol ty -> in_range ty (Logic.Symbol symbol)) symbols types)
       in
       match without_costs context (fun () -> block_value context inside law.body) with
       | Some (_, holds) ->
           Some
-            (L.Forall
+            (Logic.Forall
                ( List.map2 (fun symbol ty -> (symbol, sort_of context ty)) symbols types,
-                 L.( ==> ) (L.( &&& ) range premise) holds ))
+                 Logic.( ==> ) (Logic.( &&& ) range premise) holds ))
       | None -> None
     with Unsupported _ | Foreign_unsupported _ -> None
   end
@@ -4188,36 +4234,36 @@ and law_fact context frame source ~substitution (law : law) =
 (* Sequences of handed-out parts, through the same functions in the
    logic that the contracts of [standard::specification] are about. *)
 and sequence_path : Path.t = Well_known.path Sequence
-and sequence_type element = T.Named { path = sequence_path; arguments = [ T.Type element ] }
+and sequence_type element = Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
 
 and sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
-  let symbol = S.Function { callee = path; instance = [ type_key element ] } in
-  declare context (L.Function (symbol, [ sort_of context (sequence_type element) ], L.Int));
-  L.Apply (symbol, [ term ])
+  let symbol = Symbol.Function { callee = path; instance = [ type_key element ] } in
+  declare context (Logic.Function (symbol, [ sort_of context (sequence_type element) ], Logic.Int));
+  Logic.Apply (symbol, [ term ])
 
 (* A sequence's sum, by [standard::specification]'s [Sequence.sum], over a
    measure of its elements. *)
 and sequence_sum context element term measure =
   let path = Path.Method { owner = sequence_path; name = "sum"; receiver = Read } in
-  let symbol = S.Function { callee = path; instance = [ type_key element ] } in
+  let symbol = Symbol.Function { callee = path; instance = [ type_key element ] } in
   declare context
-    (L.Function
+    (Logic.Function
        ( symbol,
          [
            sort_of context (sequence_type element);
-           sort_of context (T.Function (measure_type element));
+           sort_of context (Types.Function (measure_type element));
          ],
-         L.Int ));
-  L.Apply (symbol, [ term; measure ])
+         Logic.Int ));
+  Logic.Apply (symbol, [ term; measure ])
 
 (* The type of a sum's measure: [fn(Element) -> Integer cost time finite]. *)
-and measure_type element : T.function_type =
+and measure_type element : Types.function_type =
   {
-    inputs = [ (T.Read, element) ];
-    output = Returns T.Integer;
+    inputs = [ (Types.Read, element) ];
+    output = Returns Types.Integer;
     uses = [];
-    costs = [ { amortized = false; resource = T.Time; bound = Finite_cost } ];
+    costs = [ { amortized = false; resource = Types.Time; bound = Finite_cost } ];
   }
 
 (* [sequence_at], for a sequence whose elements the prover reads. *)
@@ -4236,24 +4282,24 @@ and sequence_at context element term index =
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
-      let symbol = S.Function { callee = path; instance = [ type_key sequence ] } in
+      let symbol = Symbol.Function { callee = path; instance = [ type_key sequence ] } in
       declare context
-        (L.Function (symbol, [ sort_of context sequence; L.Int ], sort_of context element));
-      let at sequence index = L.Apply (symbol, [ sequence; index ]) in
+        (Logic.Function (symbol, [ sort_of context sequence; Logic.Int ], sort_of context element));
+      let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
       (* An element of a sequence of parts is below the sequence, as a
          field is below its value, so recursion on an element ends. *)
       if context.ranking && constructors context element <> None then
         once context
           (Ranked_elements (type_key sequence))
           (fun () ->
-            let each = S.Variable { label = "ranked.sequence"; numbers = [] }
-            and index = S.Variable { label = "ranked.index"; numbers = [] } in
-            let ranked = L.Symbol each and position = L.Symbol index in
+            let each = Symbol.Variable { label = "ranked.sequence"; numbers = [] }
+            and index = Symbol.Variable { label = "ranked.index"; numbers = [] } in
+            let ranked = Logic.Symbol each and position = Logic.Symbol index in
             let below = rank context element (at ranked position) in
             context.facts <-
-              L.Forall
-                ( [ (each, sort_of context sequence); (index, L.Int) ],
-                  L.(
+              Logic.Forall
+                ( [ (each, sort_of context sequence); (index, Logic.Int) ],
+                  Logic.(
                     Operation ("<=", [ int 0; position ])
                     &&& Operation ("<", [ position; sequence_length context element ranked ])
                     ==> (Operation ("<=", [ int 0; below ])
@@ -4266,18 +4312,18 @@ and sequence_at context element term index =
    the one fact about sequences their contracts cannot state, since a
    contract describes a result. It is stated for each two that are
    compared, which keeps the solver from comparing every two it knows. *)
-and extensional context frame (ty : T.ty) a b =
+and extensional context frame (ty : Types.ty) a b =
   match ty with
-  | Named { path; arguments = [ T.Type element ] } when Path.equal path sequence_path -> (
+  | Named { path; arguments = [ Types.Type element ] } when Path.equal path sequence_path -> (
       let index = fresh_name context "index" in
       match
-        ( sequence_at context element a (L.Symbol index),
-          sequence_at context element b (L.Symbol index) )
+        ( sequence_at context element a (Logic.Symbol index),
+          sequence_at context element b (Logic.Symbol index) )
       with
       | Some at_a, Some at_b ->
           let length = sequence_length context element in
           fact context frame
-            L.(
+            Logic.(
               equal (length a) (length b)
               &&& Forall
                     ( [ (index, Int) ],
@@ -4291,46 +4337,46 @@ and extensional context frame (ty : T.ty) a b =
       (* A set by what it contains, and a map by its keys and their values. *)
       let finite_map = Path.equal path finite_map_path in
       match arguments with
-      | T.Type key :: rest ->
+      | Types.Type key :: rest ->
           let each = fresh_name context "key" in
           let function_ name output inputs = finite_function context ty name output inputs in
           let key_sort = sort_of context key in
           let has =
             function_
               (if finite_map then "contains_key" else "contains")
-              L.Bool
-              [ (L.Symbol each, key_sort) ]
+              Logic.Bool
+              [ (Logic.Symbol each, key_sort) ]
           in
           let same =
             if finite_map then
               match rest with
-              | [ T.Type value_type ] ->
+              | [ Types.Type value_type ] ->
                   let get =
-                    function_ "get" (sort_of context value_type) [ (L.Symbol each, key_sort) ]
+                    function_ "get" (sort_of context value_type) [ (Logic.Symbol each, key_sort) ]
                   in
-                  L.(equal (has a) (has b) &&& (has a ==> equal (get a) (get b)))
-              | _ -> L.equal (has a) (has b)
-            else L.equal (has a) (has b)
+                  Logic.(equal (has a) (has b) &&& (has a ==> equal (get a) (get b)))
+              | _ -> Logic.equal (has a) (has b)
+            else Logic.equal (has a) (has b)
           in
           fact context frame
-            L.(Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same) ==> equal a b)
+            Logic.(Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same) ==> equal a b)
       | _ -> ())
   | _ -> ()
 
 (* A method of a [FiniteSet] or a [FiniteMap], as a function in the logic,
    applied to a value of it and the inputs given with their sorts. *)
-and finite_function context (ty : T.ty) name output inputs =
+and finite_function context (ty : Types.ty) name output inputs =
   match ty with
   | Named { path; arguments } ->
       let symbol =
-        S.Function
+        Symbol.Function
           {
             callee = Path.Method { owner = path; name; receiver = Read };
             instance = List.map argument_key arguments;
           }
       in
-      declare context (L.Function (symbol, sort_of context ty :: List.map snd inputs, output));
-      fun term -> L.Apply (symbol, term :: List.map fst inputs)
+      declare context (Logic.Function (symbol, sort_of context ty :: List.map snd inputs, output));
+      fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
   | _ -> fun term -> term
 
 and finite_set_path : Path.t = Well_known.path Finite_set
@@ -4352,8 +4398,8 @@ and list_literal context frame (node : expression) items =
   in
   let element =
     match ty with
-    | Named { arguments = T.Type element :: _; _ } -> element
-    | _ -> unsupported span "a literal of `%s`" (T.show ty)
+    | Named { arguments = Types.Type element :: _; _ } -> element
+    | _ -> unsupported span "a literal of `%s`" (Types.show ty)
   in
   let literal =
     match sequence_of context frame ty ~element values with
@@ -4361,7 +4407,7 @@ and list_literal context frame (node : expression) items =
     | None -> (
         match set_of context frame ty ~element values with
         | Some literal -> literal
-        | None -> unsupported span "a literal of `%s`" (T.show ty))
+        | None -> unsupported span "a literal of `%s`" (Types.show ty))
   in
   (frame, literal)
 
@@ -4378,29 +4424,29 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
   let base_type = place_type context frame base in
   let element =
     match base_type with
-    | Named { arguments = T.Type element :: _; _ } -> element
-    | _ -> unsupported span "a slice of `%s`" (T.show base_type)
+    | Named { arguments = Types.Type element :: _; _ } -> element
+    | _ -> unsupported span "a slice of `%s`" (Types.show base_type)
   in
   let frame, collection = place_value context frame base in
   let model =
     match model_of context base_type collection ~element with
     | Some model -> model
-    | None -> unsupported span "a slice of `%s`" (T.show base_type)
+    | None -> unsupported span "a slice of `%s`" (Types.show base_type)
   in
   let length = sequence_length context element model in
   let frame, low =
-    match start with Some start -> value context frame start | None -> (frame, L.int 0)
+    match start with Some start -> value context frame start | None -> (frame, Logic.int 0)
   in
   let frame, high =
     match stop with
     | Some stop ->
         let frame, high = value context frame stop in
-        (frame, if inclusive then Costs.plus high (L.int 1) else high)
+        (frame, if inclusive then Costs.plus high (Logic.int 1) else high)
     | None -> (frame, length)
   in
   oblige context frame Requires span
     (Printf.sprintf "`%s` may not be within the collection." (quote frame.source node.origin))
-    L.(
+    Logic.(
       Operation ("<=", [ int 0; low ])
       &&& Operation ("<=", [ low; high ])
       &&& Operation ("<=", [ high; length ]));
@@ -4410,17 +4456,17 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
   (match model_of context slice_type viewed ~element with
   | Some viewed_model -> (
       let count = Costs.minus high low in
-      assume context frame (L.equal (sequence_length context element viewed_model) count);
+      assume context frame (Logic.equal (sequence_length context element viewed_model) count);
       let position = fresh_name context "index" in
       match
-        ( sequence_at context element viewed_model (L.Symbol position),
-          sequence_at context element model (Costs.plus low (L.Symbol position)) )
+        ( sequence_at context element viewed_model (Logic.Symbol position),
+          sequence_at context element model (Costs.plus low (Logic.Symbol position)) )
       with
       | Some inside, Some outside ->
           assume context frame
-            (L.Forall
-               ( [ (position, L.Int) ],
-                 L.(
+            (Logic.Forall
+               ( [ (position, Logic.Int) ],
+                 Logic.(
                    Operation ("<=", [ int 0; Symbol position ])
                    &&& Operation ("<", [ Symbol position; count ])
                    ==> equal inside outside) ))
@@ -4516,7 +4562,7 @@ and tagged_template context frame (node : expression) texts (template_call : exp
       | None -> unsupported span "a tagged template whose tag the prover cannot read")
   | _ -> unsupported span "a tagged template whose tag the prover cannot read"
 
-and sequence_of context frame (ty : T.ty) ~element values =
+and sequence_of context frame (ty : Types.ty) ~element values =
   let literal = arrive context frame "literal" ty in
   let sequence =
     match ty with
@@ -4529,11 +4575,11 @@ and sequence_of context frame (ty : T.ty) ~element values =
     (fun sequence ->
       assume_valid context frame ty literal;
       assume context frame
-        (L.equal (sequence_length context element sequence) (L.int (List.length values)));
+        (Logic.equal (sequence_length context element sequence) (Logic.int (List.length values)));
       List.iteri
         (fun index item ->
-          match sequence_at context element sequence (L.int index) with
-          | Some at -> assume context frame (L.equal at item)
+          match sequence_at context element sequence (Logic.int index) with
+          | Some at -> assume context frame (Logic.equal at item)
           | None -> ())
         values;
       literal)
@@ -4541,8 +4587,8 @@ and sequence_of context frame (ty : T.ty) ~element values =
 
 (* A [Set] or a [FiniteSet] of these elements: one that contains each of
    them and nothing else, so no more of them than were written. *)
-and set_of context frame (ty : T.ty) ~element values =
-  let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
+and set_of context frame (ty : Types.ty) ~element values =
+  let finite = Types.Named { path = finite_set_path; arguments = [ Types.Type element ] } in
   let literal = arrive context frame "literal" ty in
   let model =
     match ty with
@@ -4554,12 +4600,12 @@ and set_of context frame (ty : T.ty) ~element values =
       assume_valid context frame ty literal;
       let element_sort = sort_of context element in
       let contains value =
-        finite_function context finite "contains" L.Bool [ (value, element_sort) ] model
+        finite_function context finite "contains" Logic.Bool [ (value, element_sort) ] model
       in
       List.iter (fun value -> assume context frame (contains value)) values;
       only_members context frame "value" element_sort contains values;
-      let size = finite_function context finite "size" L.Int [] model in
-      assume context frame (Costs.at_most size (L.int (List.length values)));
+      let size = finite_function context finite "size" Logic.Int [] model in
+      assume context frame (Costs.at_most size (Logic.int (List.length values)));
       literal)
     model
 
@@ -4568,10 +4614,10 @@ and set_of context frame (ty : T.ty) ~element values =
 and only_members context frame label sort contains members =
   let each = fresh_name context label in
   assume context frame
-    (L.Forall
+    (Logic.Forall
        ( [ (each, sort) ],
-         L.( ==> ) (contains (L.Symbol each))
-           (L.disjunction (List.map (L.equal (L.Symbol each)) members)) ))
+         Logic.( ==> ) (contains (Logic.Symbol each))
+           (Logic.disjunction (List.map (Logic.equal (Logic.Symbol each)) members)) ))
 
 (* A specification's [FiniteMap] written out: each key with its value, and
    no other keys. Its keys must be distinct. *)
@@ -4579,8 +4625,8 @@ and map_literal context frame (node : expression) entries =
   let ty = type_of context frame node in
   let key_type, value_type =
     match ty with
-    | Named { arguments = [ T.Type key; T.Type value_type ]; _ } -> (key, value_type)
-    | _ -> unsupported (at frame node) "a literal of `%s`" (T.show ty)
+    | Named { arguments = [ Types.Type key; Types.Type value_type ]; _ } -> (key, value_type)
+    | _ -> unsupported (at frame node) "a literal of `%s`" (Types.show ty)
   in
   let frame, terms =
     List.fold_left
@@ -4598,51 +4644,58 @@ and map_literal context frame (node : expression) entries =
             oblige context frame Disjoint (at frame other_key)
               (Printf.sprintf "The key `%s` may equal an earlier key of this map."
                  (quote frame.source other_key.origin))
-              (L.not_ (equal_of context frame key_type key_term other_term)))
+              (Logic.not_ (equal_of context frame key_type key_term other_term)))
         terms)
     terms;
   let finite =
-    T.Named { path = finite_map_path; arguments = [ T.Type key_type; T.Type value_type ] }
+    Types.Named
+      { path = finite_map_path; arguments = [ Types.Type key_type; Types.Type value_type ] }
   in
   let literal = arrive context frame "literal" ty in
   let model =
     match ty with
     | Named { path; _ } when Path.equal path finite_map_path -> literal
-    | _ -> unsupported (at frame node) "a literal of `%s`" (T.show ty)
+    | _ -> unsupported (at frame node) "a literal of `%s`" (Types.show ty)
   in
   assume_valid context frame ty literal;
   let key_sort = sort_of context key_type in
-  let has key = finite_function context finite "contains_key" L.Bool [ (key, key_sort) ] model in
+  let has key =
+    finite_function context finite "contains_key" Logic.Bool [ (key, key_sort) ] model
+  in
   let get key =
     finite_function context finite "get" (sort_of context value_type) [ (key, key_sort) ] model
   in
   List.iter
-    (fun (_, key, entry) -> assume context frame L.(has key &&& equal (get key) entry))
+    (fun (_, key, entry) -> assume context frame Logic.(has key &&& equal (get key) entry))
     terms;
   only_members context frame "key" key_sort has (List.map (fun (_, key, _) -> key) terms);
   assume context frame
-    (L.equal (finite_function context finite "size" L.Int [] model) (L.int (List.length terms)));
+    (Logic.equal
+       (finite_function context finite "size" Logic.Int [] model)
+       (Logic.int (List.length terms)));
   (frame, literal)
 
 (* Text as a value whose model is its UTF-8 bytes. A literal is one value
    for its text and type, so two literals with the same text are the same
    value, as a key written twice is the same key. *)
-and text_value context frame (ty : T.ty) text =
-  let symbol = S.Literal { type_key = type_key ty; text } in
-  let literal = L.Symbol symbol in
+and text_value context frame (ty : Types.ty) text =
+  let symbol = Symbol.Literal { type_key = type_key ty; text } in
+  let literal = Logic.Symbol symbol in
   once context (Value_of symbol) (fun () ->
-      declare context (L.Constant (symbol, sort_of context ty));
+      declare context (Logic.Constant (symbol, sort_of context ty));
       assume_valid context
-        { frame with condition = L.Boolean true; bound = []; binders = [] }
+        { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
-      let byte = T.builtin UInt8 in
+      let byte = Types.builtin UInt8 in
       let holds model =
         context.facts <-
-          L.equal (sequence_length context byte model) (L.int (String.length text)) :: context.facts;
+          Logic.equal (sequence_length context byte model) (Logic.int (String.length text))
+          :: context.facts;
         String.iteri
           (fun index character ->
-            match sequence_at context byte model (L.int index) with
-            | Some at -> context.facts <- L.equal at (L.int (Char.code character)) :: context.facts
+            match sequence_at context byte model (Logic.int index) with
+            | Some at ->
+                context.facts <- Logic.equal at (Logic.int (Char.code character)) :: context.facts
             | None -> ())
           text
       in
@@ -4650,26 +4703,27 @@ and text_value context frame (ty : T.ty) text =
       (* Where its field is seen, the text is also its storage's, which is
          what its potential is read from. *)
       match constructors context ty with
-      | Some [ (None, [ (field, Named { path; arguments = [ T.Type element ] }) ]) ]
-        when Intrinsic.builtin_of_path path = Some Storage && T.equal element byte ->
+      | Some [ (None, [ (field, Named { path; arguments = [ Types.Type element ] }) ]) ]
+        when Intrinsic.builtin_of_path path = Some Storage && Types.equal element byte ->
           holds
-            (buffer_model context Storage byte (L.Apply (selector_name ty None field, [ literal ])))
+            (buffer_model context Storage byte
+               (Logic.Apply (selector_name ty None field, [ literal ])))
       | _ -> ());
   literal
 
 (* A value's model, by the standard library's [impl] of [Model] for its
    type, as a call of [model()] would read it. *)
-and model_of context (ty : T.ty) term ~element =
+and model_of context (ty : Types.ty) term ~element =
   model_as context ty term ~model:(sequence_type element)
 
 (* A value's model of the given type, by the standard library's [impl] of
    [Model] for its type, as a call of [model()] would read it. *)
-and model_as context (ty : T.ty) term ~(model : T.ty) =
+and model_as context (ty : Types.ty) term ~(model : Types.ty) =
   Option.map (fun model_of -> model_of term) (model_function context ty ~model)
 
 (* A type's [model()], as a function of its values, if the standard library
    gives it one. *)
-and model_function context (ty : T.ty) ~(model : T.ty) =
+and model_function context (ty : Types.ty) ~(model : Types.ty) =
   let key = type_key ty ^ " " ^ type_key model in
   match Hashtbl.find_opt context.models key with
   | Some model_fn -> model_fn
@@ -4678,7 +4732,7 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       Hashtbl.replace context.models key model_fn;
       model_fn
 
-and find_model_function context (ty : T.ty) ~(model : T.ty) =
+and find_model_function context (ty : Types.ty) ~(model : Types.ty) =
   let model_trait = Well_known.path Model in
   match
     Call_graph.impls_for
@@ -4687,42 +4741,42 @@ and find_model_function context (ty : T.ty) ~(model : T.ty) =
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = S.Function { callee = path; instance = [ type_key ty ] } in
-      declare context (L.Function (symbol, [ sort_of context ty ], sort_of context model));
+      let symbol = Symbol.Function { callee = path; instance = [ type_key ty ] } in
+      declare context (Logic.Function (symbol, [ sort_of context ty ], sort_of context model));
       model_ranked context ty ~model symbol;
       (* An array's model is its elements, as many as its type says. *)
       (match ty with
-      | Named { path; arguments = [ T.Type element; T.Value count ] }
+      | Named { path; arguments = [ Types.Type element; Types.Value count ] }
         when Intrinsic.builtin_of_path path = Some Array ->
           once context (Array_length symbol) (fun () ->
-              let each = S.Variable { label = "array.value"; numbers = [] } in
-              let elements = L.Apply (symbol, [ L.Symbol each ]) in
+              let each = Symbol.Variable { label = "array.value"; numbers = [] } in
+              let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
               context.facts <-
-                L.Forall
+                Logic.Forall
                   ( [ (each, sort_of context ty) ],
-                    L.equal
+                    Logic.equal
                       (sequence_length context element elements)
                       (substituted_value_term context count) )
                 :: context.facts)
       | _ -> ());
-      Some (fun term -> L.Apply (symbol, [ term ]))
+      Some (fun term -> Logic.Apply (symbol, [ term ]))
   | [] -> None
 
 (* A value's model is no higher in the order of parts than the value, so
    an element of a list's model is below the list. [symbol] is the model's
    function. *)
-and model_ranked context (ty : T.ty) ~(model : T.ty) symbol =
+and model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
   if context.ranking then
     once context (Ranked_model symbol) (fun () ->
-        let each = S.Variable { label = "ranked.value"; numbers = [] } in
+        let each = Symbol.Variable { label = "ranked.value"; numbers = [] } in
         context.facts <-
-          L.Forall
+          Logic.Forall
             ( [ (each, sort_of context ty) ],
-              L.Operation
+              Logic.Operation
                 ( "<=",
                   [
-                    rank context model (L.Apply (symbol, [ L.Symbol each ]));
-                    rank context ty (L.Symbol each);
+                    rank context model (Logic.Apply (symbol, [ Logic.Symbol each ]));
+                    rank context ty (Logic.Symbol each);
                   ] ) )
           :: context.facts)
 
@@ -4732,14 +4786,14 @@ and cursor_trait : Path.t = Well_known.path Cursor
 
 and cursor_yielded context cursor_type element cursor =
   let sort = sort_of context cursor_type in
-  let symbol = S.Cursor_yielded (type_key cursor_type) in
-  declare context (L.Function (symbol, [ sort ], sort_of context (sequence_type element)));
-  L.Apply (symbol, [ cursor ])
+  let symbol = Symbol.Cursor_yielded (type_key cursor_type) in
+  declare context (Logic.Function (symbol, [ sort ], sort_of context (sequence_type element)));
+  Logic.Apply (symbol, [ cursor ])
 
 and cursor_ended context cursor_type cursor =
-  let symbol = S.Cursor_ended (type_key cursor_type) in
-  declare context (L.Function (symbol, [ sort_of context cursor_type ], L.Bool));
-  L.Apply (symbol, [ cursor ])
+  let symbol = Symbol.Cursor_ended (type_key cursor_type) in
+  declare context (Logic.Function (symbol, [ sort_of context cursor_type ], Logic.Bool));
+  Logic.Apply (symbol, [ cursor ])
 
 (* A pull: [Some] of a part that meets the method's clauses for each part,
    after which the cursor has handed it out too and the method's other
@@ -4748,13 +4802,13 @@ and cursor_ended context cursor_type cursor =
    cursor that is left is a new value, from the same call. *)
 and pull context frame (cursor_method : cursor) cursor ~cursor_type =
   let element = cursor_method.element in
-  let option_type = T.Named { path = option_path; arguments = [ T.Type element ] } in
+  let option_type = Types.Named { path = option_path; arguments = [ Types.Type element ] } in
   ignore (sort_of context option_type);
   let later = arrive context frame "cursor" cursor_type in
   context.cursors <- (later, cursor_method) :: context.cursors;
   let pulled = arrive context frame "pulled" option_type in
-  let some = L.Is (constructor_name option_type (Some "Some"), pulled) in
-  let part = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
+  let some = Logic.Is (constructor_name option_type (Some "Some"), pulled) in
+  let part = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
   let before = cursor_yielded context cursor_type element cursor in
   let clauses (at : frame) ~each ~result ~yielded ~finished =
     let inside =
@@ -4773,22 +4827,22 @@ and pull context frame (cursor_method : cursor) cursor ~cursor_type =
           assume context at (snd (clause_value context inside clause)))
       cursor_method.own.ensures
   in
-  assume context frame (L.( ==> ) (cursor_ended context cursor_type cursor) (L.not_ some));
+  assume context frame (Logic.( ==> ) (cursor_ended context cursor_type cursor) (Logic.not_ some));
   let handed = restrict frame some in
   assume_valid context handed element part;
   clauses handed ~each:true ~result:(Some part) ~yielded:before ~finished:None;
   let through = appended context handed element before part in
   assume context handed
-    L.(
+    Logic.(
       equal (cursor_yielded context cursor_type element later) through
       &&& not_ (cursor_ended context cursor_type later));
-  clauses handed ~each:false ~result:None ~yielded:through ~finished:(Some (L.Boolean false));
-  let none = restrict frame (L.not_ some) in
+  clauses handed ~each:false ~result:None ~yielded:through ~finished:(Some (Logic.Boolean false));
+  let none = restrict frame (Logic.not_ some) in
   assume context none
-    L.(
+    Logic.(
       equal (cursor_yielded context cursor_type element later) before
       &&& cursor_ended context cursor_type later);
-  clauses none ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
+  clauses none ~each:false ~result:None ~yielded:before ~finished:(Some (Logic.Boolean true));
   (pulled, later)
 
 and option_path : Path.t = Well_known.path Option
@@ -4796,13 +4850,13 @@ and option_path : Path.t = Well_known.path Option
 (* A sequence of parts with nothing in it. *)
 and empty_parts context frame element =
   let parts = fresh context frame "parts" (sort_of context (sequence_type element)) in
-  assume context frame (L.equal (sequence_length context element parts) (L.int 0));
+  assume context frame (Logic.equal (sequence_length context element parts) (Logic.int 0));
   parts
 
 (* A sequence of parts about which only its length is known. *)
 and some_parts context frame element =
   let parts = fresh context frame "parts" (sort_of context (sequence_type element)) in
-  assume context frame L.(Operation (">=", [ sequence_length context element parts; int 0 ]));
+  assume context frame Logic.(Operation (">=", [ sequence_length context element parts; int 0 ]));
   parts
 
 (* The parts, with one more after them. *)
@@ -4810,22 +4864,22 @@ and appended context frame element parts part =
   let longer = fresh context frame "parts" (sort_of context (sequence_type element)) in
   let length = sequence_length context element parts in
   assume context frame
-    L.(
+    Logic.(
       Operation (">=", [ length; int 0 ])
       &&& equal (sequence_length context element longer) (Operation ("+", [ length; int 1 ])));
   (match (sequence_at context element longer length, frame.bound) with
-  | Some last, _ -> assume context frame (L.equal last part)
+  | Some last, _ -> assume context frame (Logic.equal last part)
   | None, _ -> ());
   let index = fresh_name context "index" in
   (match
-     ( sequence_at context element longer (L.Symbol index),
-       sequence_at context element parts (L.Symbol index) )
+     ( sequence_at context element longer (Logic.Symbol index),
+       sequence_at context element parts (Logic.Symbol index) )
    with
   | Some after, Some before ->
       assume context frame
-        (L.Forall
-           ( [ (index, L.Int) ],
-             L.(
+        (Logic.Forall
+           ( [ (index, Logic.Int) ],
+             Logic.(
                Operation ("<=", [ int 0; Symbol index ])
                &&& Operation ("<", [ Symbol index; length ])
                ==> equal after before) ))
@@ -4834,15 +4888,15 @@ and appended context frame element parts part =
      [Sequence.append]'s contract says. *)
   let measure = fresh_name context "measure" in
   assume context frame
-    (L.Forall
-       ( [ (measure, sort_of context (T.Function (measure_type element))) ],
-         L.equal
-           (sequence_sum context element longer (L.Symbol measure))
-           (L.Operation
+    (Logic.Forall
+       ( [ (measure, sort_of context (Types.Function (measure_type element))) ],
+         Logic.equal
+           (sequence_sum context element longer (Logic.Symbol measure))
+           (Logic.Operation
               ( "+",
                 [
-                  sequence_sum context element parts (L.Symbol measure);
-                  applied context (measure_type element) (L.Symbol measure) [ part ];
+                  sequence_sum context element parts (Logic.Symbol measure);
+                  applied context (measure_type element) (Logic.Symbol measure) [ part ];
                 ] )) ));
   longer
 
@@ -4855,7 +4909,7 @@ and mentions_result clause =
 
 and signature_terminates context path =
   match Interface.Impls.signature context.database path with
-  | Some (signature : T.signature) -> signature.terminates
+  | Some (signature : Types.signature) -> signature.terminates
   | None -> true
 
 (* Data *)
@@ -4869,30 +4923,31 @@ and field_of context frame ty variant field field_type term =
   if context.ranking then begin
     let below = rank context field_type part in
     assume context frame
-      L.(Operation ("<=", [ int 0; below ]) &&& Operation ("<", [ below; rank context ty term ]))
+      Logic.(
+        Operation ("<=", [ int 0; below ]) &&& Operation ("<", [ below; rank context ty term ]))
   end;
   part
 
 (* A field of a value: of one built here, what it was built from. *)
 and selected context ty variant field term =
   match (term, constructors context ty) with
-  | L.Apply (name, arguments), Some shape when name = constructor_name ty variant -> (
+  | Logic.Apply (name, arguments), Some shape when name = constructor_name ty variant -> (
       let fields = Option.value (List.assoc_opt variant shape) ~default:[] in
       match List.find_index (fun (named, _) -> named = field) fields with
       | Some index when index < List.length arguments -> List.nth arguments index
-      | _ -> L.Apply (selector_name ty variant field, [ term ]))
-  | _ -> L.Apply (selector_name ty variant field, [ term ])
+      | _ -> Logic.Apply (selector_name ty variant field, [ term ]))
+  | _ -> Logic.Apply (selector_name ty variant field, [ term ])
 
 (* A value's place in the order of parts, as Dafny's datatypes have one:
    any field is below the value it is in. *)
 and rank context ty term =
-  let symbol = S.Rank (type_key ty) in
-  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
-  L.Apply (symbol, [ term ])
+  let symbol = Symbol.Rank (type_key ty) in
+  declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
+  Logic.Apply (symbol, [ term ])
 
 (* The form of a type, which holds its fields' defaults, its invariants,
    and its potential. *)
-and type_source context (ty : T.ty) =
+and type_source context (ty : Types.ty) =
   match ty with
   | Named { path; _ } -> (
       match
@@ -4905,7 +4960,7 @@ and type_source context (ty : T.ty) =
   | _ -> None
 
 (* A frame for reading a type's own clauses about a value of it. *)
-and type_frame context frame source (ty : T.ty) ~self =
+and type_frame context frame source (ty : Types.ty) ~self =
   let substitution = match visible_type context ty with Some (_, s) -> s | None -> [] in
   {
     frame with
@@ -4945,13 +5000,13 @@ and named_function context frame (node : expression) path type_arguments contrac
           can compare, so the recursion cannot be shown to end: write it as a direct call on a \
           part."
          (Path.show path))
-      (L.Boolean false);
+      (Logic.Boolean false);
   let ty = type_of context frame node in
   (* A function with a [requires], used as a value anywhere but passed
      straight to a parameter, which checks it, has a type that keeps no
      [requires], so it must accept every argument of that type. *)
   (match (ty, contract.parts) with
-  | T.Function function_type, own :: _
+  | Types.Function function_type, own :: _
     when own.requires <> [] && frame.checking && not (List.mem node.id context.passed_values) ->
       let inputs = callback_arguments context frame function_type.inputs in
       if List.length own.parameters = List.length inputs then begin
@@ -4966,24 +5021,24 @@ and named_function context frame (node : expression) path type_arguments contrac
               (Printf.sprintf
                  "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its \
                   `%s` may not hold."
-                 (Path.show path) (T.show ty) (quote own.callee clause.origin))
+                 (Path.show path) (Types.show ty) (quote own.callee clause.origin))
               (snd (clause_value context inside clause)))
           own.requires
       end
   | _ -> ());
   let instance =
-    List.map argument_key (List.map (T.substitute_argument frame.substitution) type_arguments)
+    List.map argument_key (List.map (Types.substitute_argument frame.substitution) type_arguments)
   in
-  let symbol = S.Function_value { callee = path; instance } in
-  declare context (L.Constant (symbol, sort_of context ty));
-  let term = L.Symbol symbol in
+  let symbol = Symbol.Function_value { callee = path; instance } in
+  declare context (Logic.Constant (symbol, sort_of context ty));
+  let term = Logic.Symbol symbol in
   (* Applied, a pure function named as a value is the function: its body,
      where it has a definition that holds for every argument, and
      otherwise the function in the logic. *)
   (match ty with
-  | T.Function function_type when in_the_logic function_type && contract.pure ->
+  | Types.Function function_type when in_the_logic function_type && contract.pure ->
       let parameters = parameters_of context frame function_type in
-      let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+      let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
       let defined =
         match contract.definition with
         | Some (part, body)
@@ -5003,17 +5058,19 @@ and named_function context frame (node : expression) path type_arguments contrac
         match defined with
         | Some defined -> defined
         | None ->
-            let output = match function_type.output with Returns output -> output | _ -> T.unit in
-            let function_symbol = S.Function { callee = path; instance } in
+            let output =
+              match function_type.output with Returns output -> output | _ -> Types.unit
+            in
+            let function_symbol = Symbol.Function { callee = path; instance } in
             declare context
-              (L.Function (function_symbol, List.map snd parameters, sort_of context output));
-            let value = L.Apply (function_symbol, inputs) in
+              (Logic.Function (function_symbol, List.map snd parameters, sort_of context output));
+            let value = Logic.Apply (function_symbol, inputs) in
             if instance = [] then
               contract_for_every_argument context frame contract parameters value;
             value
       in
       fact context frame
-        (L.Forall (parameters, L.equal (applied context function_type term inputs) value))
+        (Logic.Forall (parameters, Logic.equal (applied context function_type term inputs) value))
   | _ -> ());
   let constant_time =
     List.exists
@@ -5029,20 +5086,21 @@ and named_function context frame (node : expression) path type_arguments contrac
   in
   (if constant_time then
      let time = time_of context frame ty term in
-     fact context frame (L.equal time (L.int 1)));
+     fact context frame (Logic.equal time (Logic.int 1)));
   term
 
 (* What a pure function's contract says of its value for every argument:
    where its [requires] holds, its [ensures] does. Its clauses are read over
    the parameters as a quantifier's body is. *)
 and contract_for_every_argument context frame (contract : contract) parameters value =
-  let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+  let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
   let over =
     {
       frame with
       bound = List.map fst parameters @ frame.bound;
       binders =
-        List.rev_map (fun (name, sort) -> (name, sort, L.Boolean true)) parameters @ frame.binders;
+        List.rev_map (fun (name, sort) -> (name, sort, Logic.Boolean true)) parameters
+        @ frame.binders;
       checking = false;
     }
   in
@@ -5062,7 +5120,7 @@ and contract_for_every_argument context frame (contract : contract) parameters v
       | [] -> []
     in
     let requires_of parts =
-      L.conjunction
+      Logic.conjunction
         (List.concat_map
            (fun (part : part) ->
              List.map (fun clause -> snd (clause_value context (read part) clause)) part.requires)
@@ -5075,7 +5133,7 @@ and contract_for_every_argument context frame (contract : contract) parameters v
         List.iter
           (fun clause ->
             let ensured = snd (clause_value context (read part) clause) in
-            match closed_over_binders over (L.( ==> ) required ensured) with
+            match closed_over_binders over (Logic.( ==> ) required ensured) with
             | Some closed -> context.facts <- closed :: context.facts
             | None -> ())
           part.ensures)
@@ -5090,11 +5148,11 @@ and check_named_callback context frame (call_ : call) (passed : passed) (named :
   let span = at frame named in
   let own = List.hd contract.parts in
   match parameter_type context frame call_ passed.position with
-  | Some (T.Function expected) ->
+  | Some (Types.Function expected) ->
       let inputs = callback_arguments context frame expected.inputs in
       let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
       let promised =
-        L.conjunction (callback_facts context frame call_ passed.position known inputs)
+        Logic.conjunction (callback_facts context frame call_ passed.position known inputs)
       in
       let at_call = restrict frame promised in
       (if List.length own.parameters = List.length inputs then
@@ -5113,14 +5171,15 @@ and check_named_callback context frame (call_ : call) (passed : passed) (named :
                (snd (clause_value context inside clause)))
            own.requires);
       List.iter
-        (fun (cost : T.cost) ->
+        (fun (cost : Types.cost) ->
           if not (keeps_cost context path contract cost) then
             oblige context frame Cost span
               (Printf.sprintf
                  "`%s` does not promise what this parameter's type, `%s`, asks of a function \
                   passed for it."
-                 (Path.show path) (T.show (T.Function expected)))
-              (L.Boolean false))
+                 (Path.show path)
+                 (Types.show (Types.Function expected)))
+              (Logic.Boolean false))
         expected.costs
   | _ ->
       if own.requires <> [] || own.costs <> [] then
@@ -5132,15 +5191,15 @@ and parameter_type context frame (call_ : call) index =
   match call_.callee with
   | Function { path; type_arguments } -> (
       match Interface.Impls.signature context.database path with
-      | Some (signature : T.signature) ->
+      | Some (signature : Types.signature) ->
           let types =
             (match signature.receiver with
               | Some ((Read | Mut | Own), ty) -> [ ty ]
               | Some (Static, _) | None -> [])
-            @ List.map (fun (info : T.parameter_info) -> info.type_) signature.parameters
+            @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
           in
           Option.map
-            (T.substitute (callee_substitution frame signature type_arguments))
+            (Types.substitute (callee_substitution frame signature type_arguments))
             (List.nth_opt types index)
       | None -> None)
   | _ -> None
@@ -5148,7 +5207,7 @@ and parameter_type context frame (call_ : call) index =
 (* Whether a named function's cost clauses imply one a function type asks
    for, which can only be a constant: a constant [O(...)], or a number of
    at most, or exactly, what is asked. *)
-and keeps_cost context path (contract : contract) (asked : T.cost) =
+and keeps_cost context path (contract : contract) (asked : Types.cost) =
   let constant (value : expression) = match value.kind with Integer k -> Some k | _ -> None in
   let same (cost : Core.cost) =
     match (asked.resource, cost.resource) with
@@ -5185,7 +5244,7 @@ and constant_value context frame path =
   | Some ({ core = { definition = Constant defined; _ }; _ } as constant_source) ->
       (* A constant is one value, a symbol whose value is stated once, as
          a fact of mathematics, wherever it is used. *)
-      let symbol = S.Constant path in
+      let symbol = Symbol.Constant path in
       let empty =
         {
           frame with
@@ -5195,27 +5254,27 @@ and constant_value context frame path =
           checking = false;
           self = None;
           updating = None;
-          condition = L.Boolean true;
+          condition = Logic.Boolean true;
           bound = [];
           binders = [];
         }
       in
       once context (Value_of symbol) (fun () ->
           let ty = type_of context empty defined in
-          declare context (L.Constant (symbol, sort_of context ty));
+          declare context (Logic.Constant (symbol, sort_of context ty));
           let _, defined_value = without_costs context (fun () -> value context empty defined) in
-          context.facts <- L.equal (L.Symbol symbol) defined_value :: context.facts);
-      L.Symbol symbol
+          context.facts <- Logic.equal (Logic.Symbol symbol) defined_value :: context.facts);
+      Logic.Symbol symbol
   | _ -> raise (Foreign_unsupported "a constant with errors")
 
 (* Building a record or a variant: its constructor, with each field given
    or defaulted. *)
 and construct context frame (node : expression) variant (fields : (string * operand option) list) =
   let ty = type_of context frame node in
-  if T.equal ty T.unit then begin
+  if Types.equal ty Types.unit then begin
     (* The one value of [Unit]. *)
-    ignore (sort_of context T.unit);
-    (frame, L.Apply (S.Unit, []))
+    ignore (sort_of context Types.unit);
+    (frame, Logic.Apply (Symbol.Unit, []))
   end
   else
     let frame, field_terms =
@@ -5239,7 +5298,7 @@ and construct context frame (node : expression) variant (fields : (string * oper
           | Some term -> term
           | None -> unsupported (at frame node) "a field left out"
         in
-        let built = L.Apply (constructor_name ty variant, List.map field_value shaped) in
+        let built = Logic.Apply (constructor_name ty variant, List.map field_value shaped) in
         check_built context frame node ty built;
         (frame, built)
     | None ->
@@ -5263,50 +5322,50 @@ and field_default context frame (node : expression) ty variant field =
    condition, and the frame with the names bound. A name bound is the part
    of the value it names, which means something only where the condition
    holds, and is used only there. *)
-and pattern_match context frame (pattern : pattern) term ty : L.term * frame =
+and pattern_match context frame (pattern : pattern) term ty : Logic.term * frame =
   let span = at frame { id = pattern.id; origin = pattern.origin; type_ = ty; kind = Todo } in
   match pattern.kind with
-  | Wildcard -> (L.Boolean true, frame)
+  | Wildcard -> (Logic.Boolean true, frame)
   | Bind { local; name; _ } ->
       Hashtbl.replace context.local_names local name;
-      (L.Boolean true, bind frame local ty term)
+      (Logic.Boolean true, bind frame local ty term)
   | Literal literal ->
       let frame, expected = value context frame literal in
-      (L.equal term expected, frame)
+      (Logic.equal term expected, frame)
   | Range { start; stop; inclusive } ->
       let _, low = value context frame start in
       let _, high = value context frame stop in
-      ( L.(
+      ( Logic.(
           Operation ("<=", [ low; term ])
           &&& Operation ((if inclusive then "<=" else "<"), [ term; high ])),
         frame )
   | Equal_to { value = { kind = String text; _ }; _ } -> (
       (* Text matches when its bytes are the pattern's. *)
-      let byte = T.builtin UInt8 in
+      let byte = Types.builtin UInt8 in
       match model_of context ty term ~element:byte with
       | Some model ->
-          ( L.conjunction
-              (L.equal (sequence_length context byte model) (L.int (String.length text))
+          ( Logic.conjunction
+              (Logic.equal (sequence_length context byte model) (Logic.int (String.length text))
               :: List.init (String.length text) (fun index ->
-                  match sequence_at context byte model (L.int index) with
-                  | Some at -> L.equal at (L.int (Char.code text.[index]))
-                  | None -> L.Boolean false)),
+                  match sequence_at context byte model (Logic.int index) with
+                  | Some at -> Logic.equal at (Logic.int (Char.code text.[index]))
+                  | None -> Logic.Boolean false)),
             frame )
-      | None -> unsupported span "a string pattern on `%s`" (T.show ty))
+      | None -> unsupported span "a string pattern on `%s`" (Types.show ty))
   | Equal_to { value = compared; _ } ->
       let _, expected = value context frame compared in
       (equal_of context frame ty term expected, frame)
   | Variant { variant; fields } ->
       ignore (sort_of context ty);
       if constructors context ty = None then
-        unsupported span "a variant of `%s`, which the prover does not see" (T.show ty);
-      let test = L.Is (constructor_name ty (Some variant), term) in
+        unsupported span "a variant of `%s`, which the prover does not see" (Types.show ty);
+      let test = Logic.Is (constructor_name ty (Some variant), term) in
       let condition, frame = fields_match context frame span ty (Some variant) term fields in
-      (L.( &&& ) test condition, frame)
+      (Logic.( &&& ) test condition, frame)
   | Record fields ->
       ignore (sort_of context ty);
       if constructors context ty = None then
-        unsupported span "the fields of `%s`, which the prover does not see" (T.show ty);
+        unsupported span "the fields of `%s`, which the prover does not see" (Types.show ty);
       fields_match context frame span ty None term fields
   | Alternatives alternatives ->
       (* Each alternative binds the same names, each the part of the value
@@ -5325,7 +5384,7 @@ and pattern_match context frame (pattern : pattern) term ty : L.term * frame =
                     List.fold_left
                       (fun otherwise (condition, (after : frame)) ->
                         match Locals.find_opt id after.locals with
-                        | Some part -> L.ite condition part otherwise
+                        | Some part -> Logic.ite condition part otherwise
                         | None -> otherwise)
                       (Locals.find id last.locals) earlier
                 | [] -> Locals.find id first.locals)
@@ -5335,7 +5394,7 @@ and pattern_match context frame (pattern : pattern) term ty : L.term * frame =
                  first.locals)
       in
       let types = match matched with (_, first) :: _ -> first.types | [] -> frame.types in
-      (L.disjunction (List.map fst matched), { frame with locals = bound; types })
+      (Logic.disjunction (List.map fst matched), { frame with locals = bound; types })
 
 and fields_match context frame span type_ variant term (fields : (string * pattern) list) =
   let declared =
@@ -5347,17 +5406,17 @@ and fields_match context frame span type_ variant term (fields : (string * patte
       | Some field_type ->
           let part = field_of context frame type_ variant name field_type term in
           let inner, frame = pattern_match context frame subpattern part field_type in
-          (L.( &&& ) condition inner, frame)
+          (Logic.( &&& ) condition inner, frame)
       | None -> unsupported span "the field `%s`" name)
-    (L.Boolean true, frame) fields
+    (Logic.Boolean true, frame) fields
 
 (* Each binding a pattern lends [mut] from the value it matches, with how
    the value is rebuilt from what the binding holds when the lend ends:
    through the variants and fields that lead to it, each other field kept. *)
 and lent_bindings context frame (pattern : pattern) ty :
-    (Core.local * (L.term -> L.term -> L.term)) list =
+    (Core.local * (Logic.term -> Logic.term -> Logic.term)) list =
   match pattern.kind with
-  | Bind { local; mode = T.Mut; _ } -> [ (local, fun _ part -> part) ]
+  | Bind { local; mode = Types.Mut; _ } -> [ (local, fun _ part -> part) ]
   | Variant { variant; fields } -> fields_lent context frame ty (Some variant) fields
   | Record fields -> fields_lent context frame ty None fields
   | Alternatives alternatives ->
@@ -5384,7 +5443,7 @@ and fields_lent context frame ty variant (fields : (string * pattern) list) =
                 (fun (local, rebuild) ->
                   ( local,
                     fun whole part ->
-                      L.Apply
+                      Logic.Apply
                         ( constructor_name ty variant,
                           List.map
                             (fun (other, _) ->
@@ -5407,7 +5466,7 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
   in
   let scrutinee_values = List.rev scrutinee_values in
   let result_type = type_of context frame node in
-  let carries_value = not (T.equal result_type T.unit || result_type = T.Never) in
+  let carries_value = not (Types.equal result_type Types.unit || result_type = Types.Never) in
   let scoped = end_scope ~outer:frame in
   (* Each arm is tried where no arm before it was taken: where its patterns
      did not match, or they did and its guard, which may change locals, was
@@ -5427,8 +5486,8 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
               List.fold_left2
                 (fun (condition, frame) pattern (term, ty) ->
                   let inner, frame = pattern_match context frame pattern term ty in
-                  (L.( &&& ) condition inner, frame))
-                (L.Boolean true, current) arm_.patterns scrutinee_values
+                  (Logic.( &&& ) condition inner, frame))
+                (Logic.Boolean true, current) arm_.patterns scrutinee_values
             in
             let entered = restrict bound condition in
             (match arm_.patterns with
@@ -5448,10 +5507,10 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
               match arm_.guard with
               | Some guard ->
                   let after, test = value context entered guard in
-                  (restrict after test, [ scoped (restrict after (L.not_ test)) ])
+                  (restrict after test, [ scoped (restrict after (Logic.not_ test)) ])
               | None -> (entered, [])
             in
-            untaken := join_frames context (restrict current (L.not_ condition) :: passed_over);
+            untaken := join_frames context (restrict current (Logic.not_ condition) :: passed_over);
             (* What an arm leaves in each binding lent [mut] goes back into
                the scrutinee where the arm ends, however it ends. *)
             let lent =
@@ -5506,11 +5565,11 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
   if carries_value then
     match join context ~value_type:result_type (List.map (fun (f, t) -> (f, Some t)) reached) with
     | Some (joined, Some term) -> Some (scoped joined, term)
-    | Some (joined, None) -> Some (scoped joined, L.Boolean true)
+    | Some (joined, None) -> Some (scoped joined, Logic.Boolean true)
     | None -> None
   else
     Option.map
-      (fun joined -> (scoped joined, L.Boolean true))
+      (fun joined -> (scoped joined, Logic.Boolean true))
       (join_frames context (List.map fst reached))
 
 (* [with]: a record with some fields replaced, each update a path of
@@ -5524,14 +5583,14 @@ and with_ context frame (node : expression) base updates =
     | [], _ -> replacement
     | field :: rest, Some [ (None, fields) ] ->
         ignore (sort_of context ty);
-        L.Apply
+        Logic.Apply
           ( constructor_name ty None,
             List.map
               (fun (name_, field_type) ->
                 let current = selected context ty None name_ term in
                 if name_ = field then replace field_type current rest replacement else current)
               fields )
-    | _ -> unsupported span "`with` on `%s`" (T.show ty)
+    | _ -> unsupported span "`with` on `%s`" (Types.show ty)
   in
   let frame, term =
     List.fold_left
@@ -5546,7 +5605,7 @@ and with_ context frame (node : expression) base updates =
 (* Type invariants. *)
 
 (* A type's invariants, and the form to read them in. *)
-and invariants_of context (ty : T.ty) =
+and invariants_of context (ty : Types.ty) =
   match type_source context ty with
   | Some ({ core = { definition = Type { invariants = _ :: _ as invariants; _ }; _ }; _ } as source)
     ->
@@ -5560,33 +5619,33 @@ and invariants_of context (ty : T.ty) =
    here it is assumed where a value arrives and shown where one leaves, and
    never unfolded. *)
 and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) ty term =
-  if List.exists (T.equal ty) seen || List.exists (T.equal ty) context.validating then
-    L.Boolean true
+  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
+    Logic.Boolean true
   else
     let validating = context.validating in
     context.validating <- ty :: validating;
     Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
     let own =
       match invariants_of context ty with
-      | _ when not own -> L.Boolean true
+      | _ when not own -> Logic.Boolean true
       | Some _ when constructors context ty = None ->
-          let symbol = S.Valid (type_key ty) in
-          declare context (L.Function (symbol, [ sort_of context ty ], L.Bool));
-          L.Apply (symbol, [ term ])
+          let symbol = Symbol.Valid (type_key ty) in
+          declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Bool));
+          Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (
           let inner = type_frame context frame source ty ~self:(Some term) in
           try
-            L.conjunction
+            Logic.conjunction
               (List.map (fun invariant -> snd (clause_value context inner invariant)) written)
-          with Unsupported _ | Foreign_unsupported _ when assuming -> L.Boolean true)
-      | None -> L.Boolean true
+          with Unsupported _ | Foreign_unsupported _ when assuming -> Logic.Boolean true)
+      | None -> Logic.Boolean true
     in
     let fields =
-      if not deep then L.Boolean true
+      if not deep then Logic.Boolean true
       else
         match constructors context ty with
         | Some shape ->
-            L.conjunction
+            Logic.conjunction
               (List.concat_map
                  (fun (variant, fields) ->
                    List.map
@@ -5596,25 +5655,25 @@ and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) t
                            (selected context ty variant field term)
                        in
                        match (variant, part) with
-                       | _, L.Boolean true -> part
+                       | _, Logic.Boolean true -> part
                        | Some name_, _ ->
-                           L.( ==> ) (L.Is (constructor_name ty (Some name_), term)) part
+                           Logic.( ==> ) (Logic.Is (constructor_name ty (Some name_), term)) part
                        | None, _ -> part)
                      fields)
                  shape)
-        | None -> L.Boolean true
+        | None -> Logic.Boolean true
     in
-    L.( &&& ) own fields
+    Logic.( &&& ) own fields
 
 and assume_valid context frame ty term =
   assume context frame (validity context frame ~assuming:true ty term)
 
 and check_valid context frame span ty term ~deep ~when_ =
   match validity context frame ~assuming:false ~deep ty term with
-  | L.Boolean true -> ()
+  | Logic.Boolean true -> ()
   | valid ->
       oblige context frame Invariant span
-        (Printf.sprintf "The invariant of `%s` may not hold %s." (T.show ty) when_)
+        (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_)
         valid
 
 and check_built context frame (node : expression) ty term =
@@ -5626,7 +5685,8 @@ and check_built context frame (node : expression) ty term =
    holds at every call of it instead. *)
 and requires_fix context frame (part : part) (clause : expression) term (values : passed list) =
   let fixed name =
-    List.mem name context.entry || match name with S.Constant _ | S.Literal _ -> true | _ -> false
+    List.mem name context.entry
+    || match name with Symbol.Constant _ | Symbol.Literal _ -> true | _ -> false
   in
   let operand_origin = function
     | Value (expression : expression) -> Some expression.origin
@@ -5656,7 +5716,8 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
         | _ -> None)
       (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
   in
-  if frame.source.key <> Some context.home || not (List.for_all fixed (L.free_symbols term)) then []
+  if frame.source.key <> Some context.home || not (List.for_all fixed (Logic.free_symbols term))
+  then []
   else
     let clause_span = span_of part.callee clause.origin in
     let clause_text = quote part.callee clause.origin in
@@ -5699,9 +5760,9 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
 and parameter_operand context frame (operand : expression) term =
   if
     frame.source.key = Some context.home
-    && (not (L.quantified term))
+    && (not (Logic.quantified term))
     &&
-    match L.free_symbols term with
+    match Logic.free_symbols term with
     | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
     | [] -> false
   then
@@ -5725,7 +5786,7 @@ and parameter_operand context frame (operand : expression) term =
 and overflow_fix context frame ty (operation : Intrinsic.operation) (operand : expression) left
     right =
   match (bounds ty, right, parameter_operand context frame operand left) with
-  | Some (low, high), L.Integer k, Some text -> (
+  | Some (low, high), Logic.Integer k, Some text -> (
       let clause relation limit =
         if Z.leq low limit && Z.leq limit high then
           add_requires context frame (Printf.sprintf "%s %s %s" text relation (Z.to_string limit))
@@ -5754,7 +5815,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     if contract.pure && contract.result_kind <> `Yields then
       List.map
         (fun (passed : passed) ->
-          if passed.mode = T.Mut || L.mentions frame.bound passed.term then passed
+          if passed.mode = Types.Mut || Logic.mentions frame.bound passed.term then passed
           else { passed with term = named_term context passed.type_ passed.term })
         values
     else values
@@ -5807,7 +5868,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   in
   let self_of self = Option.map fst self
   and self_type_of part self =
-    Option.map (fun (_, ty) -> T.substitute (substitution_of part) ty) self
+    Option.map (fun (_, ty) -> Types.substitute (substitution_of part) ty) self
   in
   let entry_frame (part : part) =
     let locals, types, self = bind (bindings part) in
@@ -5849,7 +5910,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
         oblige context frame Termination span
           "This recursive call may not be on a part of its parameters: give the function a \
            `decreases` clause."
-          L.(
+          Logic.(
             conjunction (List.map (fun b -> Operation ("<=", [ int 0; b ])) before)
             &&& lexicographically_less before after)
     | [], _ | _, [] ->
@@ -5858,7 +5919,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
              "This call to `%s` may not end: it calls back here, and both need a `decreases` \
               clause for the prover to show that the recursion ends."
              (Path.show path))
-          (L.Boolean false)
+          (Logic.Boolean false)
     | measures, callee_measures ->
         let current_frame =
           { frame with checking = false; locals = frame.old_locals; self = frame.old_self }
@@ -5907,14 +5968,14 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           part.requires)
       requiring
   in
-  let required = L.conjunction required in
+  let required = Logic.conjunction required in
   (* Each part's [ensures] holds where its [requires] does: a trait's, of
      an [impl]'s method whose own precondition is weaker, only where the
      trait's holds too. *)
   let required_by (part : part) =
     if List.memq part requiring then required
     else
-      L.conjunction
+      Logic.conjunction
         (List.map
            (fun (clause : expression) -> snd (clause_value context (entry_frame part) clause))
            part.requires)
@@ -5931,7 +5992,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     List.filter_map
       (fun (passed : passed) ->
         match (passed.mode, passed.operand) with
-        | T.Mut, Some operand -> (
+        | Types.Mut, Some operand -> (
             try
               Some
                 ( passed.position,
@@ -5950,7 +6011,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       contract.pure && contract.result_kind <> `Yields
       && List.length own_arguments = List.length own_bound
     then begin
-      let symbol = S.Function { callee = path; instance } in
+      let symbol = Symbol.Function { callee = path; instance } in
       let sorts =
         List.mapi
           (fun index ((parameter : Core.parameter), _) ->
@@ -5960,16 +6021,16 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                 sort_of context
                   (Interface.Impls.normalize context.database
                      ~bounds:(fun _ -> [])
-                     (T.substitute (substitution_of own) parameter.type_)))
+                     (Types.substitute (substitution_of own) parameter.type_)))
           own_bound
       in
-      declare context (L.Function (symbol, sorts, sort_of context result_type));
+      declare context (Logic.Function (symbol, sorts, sort_of context result_type));
       (match (path, own_bound) with
       | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
           model_ranked context
             (Interface.Impls.normalize context.database
                ~bounds:(fun _ -> [])
-               (T.substitute (substitution_of own) self.type_))
+               (Types.substitute (substitution_of own) self.type_))
             ~model:result_type symbol
       | _ -> ());
       applied_as := Some (symbol, sorts);
@@ -5979,7 +6040,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
          &&
          match Interface.Impls.signature context.database path with
          | Some signature -> (
-             T.body_is_definition signature && (not signature.transparent)
+             Types.body_is_definition signature
+             && (not signature.transparent)
              (* A body that is a [todo] would define nothing if it were seen. *)
              &&
              match
@@ -5991,24 +6053,26 @@ and contract_call context frame (node : expression) (call_ : call) path contract
        then
          let markable = match path with Method { owner = Impl _; _ } -> false | _ -> true in
          context.hidden_bodies <- (symbol, (Path.show path, markable)) :: context.hidden_bodies);
-      let term = L.Apply (symbol, own_arguments) in
+      let term = Logic.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       (* Called on a quantifier's bound values, where that fact would name
          them, the result is in its type's range for every argument, which
          is true of a pure function: outside its [requires] its value is
          one the logic leaves free. *)
-      if bounds result_type <> None && List.exists (L.mentions after.bound) own_arguments then
+      if bounds result_type <> None && List.exists (Logic.mentions after.bound) own_arguments then
         once context (In_range symbol) (fun () ->
             let parameters =
               List.mapi
-                (fun index sort -> (S.Variable { label = "ranged"; numbers = [ index ] }, sort))
+                (fun index sort ->
+                  (Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
                 sorts
             in
             context.facts <-
-              L.Forall
+              Logic.Forall
                 ( parameters,
                   in_range result_type
-                    (L.Apply (symbol, List.map (fun (name, _) -> L.Symbol name) parameters)) )
+                    (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters))
+                )
               :: context.facts);
       note_known_call context call_ path term own_arguments;
       term
@@ -6024,7 +6088,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
      if the part is, which is checked below. *)
   let left_valid =
     match (contract.result_kind, call_.lends, lent_final) with
-    | `Lends, Some T.Mut, Some leave ->
+    | `Lends, Some Types.Mut, Some leave ->
         Some (validity context after ~assuming:false ~deep:true result_type (leave result), leave)
     | _ -> None
   in
@@ -6038,12 +6102,12 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   let is_updating_helper = updating_helper context call_ in
   List.iter
     (fun (passed : passed) ->
-      if passed.mode = T.Mut && not (is_updating_helper && passed.position = 0) then
+      if passed.mode = Types.Mut && not (is_updating_helper && passed.position = 0) then
         match List.assoc_opt passed.position changed with
         | Some term ->
             let valid = validity context after ~assuming:true passed.type_ term in
             assume context after
-              (match left_valid with Some (left, _) -> L.( ==> ) left valid | None -> valid)
+              (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
         | None -> ())
     values;
   if not (List.exists (Path.equal path) context.instantiating) then begin
@@ -6051,16 +6115,16 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     (* The definition, unfolded once, where the [requires] holds. A body
        the prover cannot read is simply not unfolded. *)
     (match contract.definition with
-    | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) ->
+    | Some (part, body) when not (List.exists (Logic.mentions after.bound) own_arguments) ->
         let unfolding =
           if in_quantifier then
-            { (entry_frame part) with condition = L.Boolean true; bound = []; binders = [] }
+            { (entry_frame part) with condition = Logic.Boolean true; bound = []; binders = [] }
           else { (entry_frame part) with condition = after.condition }
         in
         let mark = List.length context.facts in
         (try
            match block_value context unfolding body with
-           | Some (_, defined) -> state (L.( ==> ) required (L.equal result defined))
+           | Some (_, defined) -> state (Logic.( ==> ) required (Logic.equal result defined))
            | None -> ()
          with Unsupported _ | Foreign_unsupported _ -> ());
         List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
@@ -6073,11 +6137,13 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                 let parameters =
                   List.mapi
                     (fun index sort ->
-                      (S.Variable { label = "defined"; numbers = [ index ] }, sort))
+                      (Symbol.Variable { label = "defined"; numbers = [ index ] }, sort))
                     sorts
                 in
-                let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
-                let outside = { after with bound = []; binders = []; condition = L.Boolean true } in
+                let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+                let outside =
+                  { after with bound = []; binders = []; condition = Logic.Boolean true }
+                in
                 match
                   body_over context outside parameters body (fun inside ->
                       part_frame inside part
@@ -6086,11 +6152,11 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                 with
                 | Some defined ->
                     context.facts <-
-                      L.Forall (parameters, L.equal (L.Apply (symbol, inputs)) defined)
+                      Logic.Forall (parameters, Logic.equal (Logic.Apply (symbol, inputs)) defined)
                       :: context.facts
                 | None -> ())
         | None -> ())
-    | (None | Some _) when List.exists (L.mentions after.bound) own_arguments -> (
+    | (None | Some _) when List.exists (Logic.mentions after.bound) own_arguments -> (
         (* Called on a quantifier's bound values, a callee known by its
            contract alone, or with a [requires], has its [ensures] stated
            once, for every valid argument where its [requires] holds. *)
@@ -6100,26 +6166,26 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                 let parameters =
                   List.mapi
                     (fun index sort ->
-                      (S.Variable { label = "ensured"; numbers = [ index ] }, sort))
+                      (Symbol.Variable { label = "ensured"; numbers = [ index ] }, sort))
                     sorts
                 in
-                let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+                let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
                 let outside =
                   {
                     after with
                     bound = List.map fst parameters;
                     binders = [];
-                    condition = L.Boolean true;
+                    condition = Logic.Boolean true;
                     checking = false;
                   }
                 in
                 let mark = context.fresh in
                 let valid =
-                  L.conjunction
+                  Logic.conjunction
                     (List.map2
                        (fun ((parameter : Core.parameter), _) input ->
                          validity context outside ~assuming:true
-                           (T.substitute (substitution_of own) parameter.type_)
+                           (Types.substitute (substitution_of own) parameter.type_)
                            input)
                        own_bound inputs)
                 in
@@ -6138,7 +6204,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                              ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
                              ~substitution:(substitution_of part))
                           with
-                          result = Some (L.Apply (symbol, inputs));
+                          result = Some (Logic.Apply (symbol, inputs));
                           checking = false;
                         }
                       in
@@ -6150,13 +6216,14 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                       | _ when List.mem None required -> None
                       | ensures ->
                           Some
-                            L.(
+                            Logic.(
                               conjunction (List.filter_map Fun.id required) ==> conjunction ensures))
                     contract.parts
                 in
                 if ensured <> [] && not (mentions_fresh_after context mark valid) then
                   context.facts <-
-                    L.Forall (parameters, L.( ==> ) valid (L.conjunction ensured)) :: context.facts)
+                    Logic.Forall (parameters, Logic.( ==> ) valid (Logic.conjunction ensured))
+                    :: context.facts)
         | None -> ())
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
@@ -6202,7 +6269,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                 {
                   ensures_frame with
                   yielded = Some (appended context after result_type none left);
-                  finished = Some (L.Boolean true);
+                  finished = Some (Logic.Boolean true);
                 }
             | `Returns | `Yields -> ensures_frame
           in
@@ -6224,7 +6291,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                     (* A pure call's [ensures], where its [requires] holds, is a
                    fact of mathematics, true whether or not a quantifier's
                    body around it runs. *)
-                    state (L.( ==> ) (required_by part) term))
+                    state (Logic.( ==> ) (required_by part) term))
             part.ensures)
         (* A yielding method's clauses are about each part it yields and
          how it ends, which each pull of the cursor it makes meets. *)
@@ -6242,14 +6309,14 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   else check_left ();
   (if contract.result_kind = `Yields then
      match result_type with
-     | T.Cursor _ as cursor_type -> (
+     | Types.Cursor _ as cursor_type -> (
          match Interface.Impls.signature context.database path with
          | Some { output = Yields (_, element); _ } ->
-             let element = T.substitute (substitution_of own) element in
+             let element = Types.substitute (substitution_of own) element in
              let cursor_method = { method_frame = entry_frame own; own; element } in
              context.cursors <- (result, cursor_method) :: context.cursors;
              assume context after
-               L.(
+               Logic.(
                  equal
                    (sequence_length context element
                       (cursor_yielded context cursor_type element result))
@@ -6266,7 +6333,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       (fun total (passed : passed) ->
         let ty = passed.type_ in
         match passed.mode with
-        | T.Mut -> (
+        | Types.Mut -> (
             match List.assoc_opt passed.position changed with
             | Some later ->
                 Costs.plus total
@@ -6274,8 +6341,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                      (potential context after ty later)
                      (potential context frame ty passed.term))
             | None -> total)
-        | T.Own -> Costs.minus total (potential context frame ty passed.term)
-        | T.Read -> total)
+        | Types.Own -> Costs.minus total (potential context frame ty passed.term)
+        | Types.Read -> total)
       (match contract.result_kind with
       | `Yields -> Costs.zero
       | `Lends -> (
@@ -6299,7 +6366,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             step_amount context after call_ values counter
         | _ ->
             (* A trait's method that promises only that it ends takes at most
-               [time(T.method)] for the type it is called on. *)
+               [time(Types.method)] for the type it is called on. *)
             let ends_in =
               match call_.callee with
               | Trait_method _ when signature_terminates context path ->
@@ -6324,22 +6391,22 @@ and note_known_call context (call_ : call) path term arguments =
     | _ -> false
   in
   let literal = function
-    | L.Integer value -> Some value
-    | L.Boolean value -> Some (if value then Z.one else Z.zero)
+    | Logic.Integer value -> Some value
+    | Logic.Boolean value -> Some (if value then Z.one else Z.zero)
     | _ -> None
   in
   let values = List.filter_map literal arguments in
   match Interface.Impls.signature context.database path with
   | Some
       ({ specification_only = false; generics = []; output = Returns result; _ } as signature :
-        T.signature)
+        Types.signature)
     when direct
          (* Running a callee reads its body, which a caller in another
             package may read only when it is [transparent]. *)
          && (Path.package path = Path.package context.current || signature.transparent)
          && List.length values = List.length arguments
          && (is_numeric result || is_bool result)
-         && not (T.equal result T.Integer) ->
+         && not (Types.equal result Types.Integer) ->
       if not (List.exists (fun (known : known_call) -> known.term = term) context.known_calls) then
         context.known_calls <-
           { function_ = path; arguments = values; term; result_is_bool = is_bool result }
@@ -6363,7 +6430,7 @@ and structural_parameters context frame (own : part) =
              | _ -> []))
        own.parameters)
 
-and is_datatype ty = match ty with T.Named _ -> builtin ty = None | _ -> false
+and is_datatype ty = match ty with Types.Named _ -> builtin ty = None | _ -> false
 
 and argument_at_index (values : passed list) index =
   match
@@ -6372,16 +6439,16 @@ and argument_at_index (values : passed list) index =
       values
   with
   | Some term -> term
-  | None -> L.Boolean false
+  | None -> Logic.Boolean false
 
 and lexicographically_less before after =
   match (before, after) with
-  | [ b ], [ a ] -> L.(Operation ("<=", [ int 0; b ]) &&& Operation ("<", [ a; b ]))
+  | [ b ], [ a ] -> Logic.(Operation ("<=", [ int 0; b ]) &&& Operation ("<", [ a; b ]))
   | b :: before, a :: after ->
-      L.(
+      Logic.(
         Operation ("<=", [ int 0; b ])
         &&& (Operation ("<", [ a; b ]) ||| (equal a b &&& lexicographically_less before after)))
-  | _ -> L.Boolean true
+  | _ -> Logic.Boolean true
 
 (* Costs: what each step spends. *)
 
@@ -6420,7 +6487,7 @@ and loop_counters locals (body : block) =
   List.rev !counters
 
 (* Each counter, increased by what one step spends of it. *)
-and spend context frame (amount : Costs.counter -> L.term) =
+and spend context frame (amount : Costs.counter -> Logic.term) =
   if context.counters = [] then frame
   else
     {
@@ -6435,16 +6502,16 @@ and spend context frame (amount : Costs.counter -> L.term) =
 
 (* An amount nothing bounds: at least zero, or one for a call's time. *)
 and unknown_amount context frame (counter : Costs.counter) =
-  let amount = fresh context frame "spent" L.Int in
+  let amount = fresh context frame "spent" Logic.Int in
   let least = match counter.resource with Time -> 1 | _ -> 0 in
-  assume context frame (L.Operation ("<=", [ L.int least; amount ]));
+  assume context frame (Logic.Operation ("<=", [ Logic.int least; amount ]));
   amount
 
 (* An amount from zero to [bound], for a counter that counts exactly. *)
 and bounded_amount context frame bound =
-  let amount = fresh context frame "spent" L.Int in
+  let amount = fresh context frame "spent" Logic.Int in
   assume context frame
-    L.(Operation ("<=", [ int 0; amount ]) &&& Operation ("<=", [ amount; bound ]));
+    Logic.(Operation ("<=", [ int 0; amount ]) &&& Operation ("<=", [ amount; bound ]));
   amount
 
 (* Whether a cost clause is about a counter's resource. A [calls] clause's
@@ -6472,7 +6539,7 @@ and promised_amount context frame (counter : Costs.counter) (bound : bound) ~eva
         match assumed with
         | Some constants ->
             let hypothesis = Costs.at_least_zero (Costs.bound constants g) in
-            if counter.resource = Time then Costs.plus hypothesis (L.int 1) else hypothesis
+            if counter.resource = Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
         | None -> Costs.units g
       in
       Costs.minus amount change
@@ -6549,7 +6616,8 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
       parts
   in
   match counter.resource with
-  | Calls target when call_reaches context after uses values target = L.Boolean false -> Costs.zero
+  | Calls target when call_reaches context after uses values target = Logic.Boolean false ->
+      Costs.zero
   | Calls (Through term) -> (
       let reaches = call_reaches context after uses values (Through term) in
       (* Each parameter the function value is passed for must have a
@@ -6570,11 +6638,11 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
           List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero clauses
       | _ -> spent_where reaches (unknown_amount context after counter))
   | _ -> (
-      (* [time(T.method)] is the most one call takes plus the potential it
+      (* [time(Types.method)] is the most one call takes plus the potential it
          makes, so a call that makes potential has paid for it. *)
       let within_time time =
         Costs.minus
-          (Costs.plus time (L.int 1))
+          (Costs.plus time (Logic.int 1))
           (match change with Some change -> growth change | None -> Costs.zero)
       in
       match (first_clauses (), counter.resource, counter.counting, ends_in) with
@@ -6589,18 +6657,19 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
 and call_reaches context frame uses (values : passed list) (target : Costs.target) =
   match target with
   | Through term ->
-      L.disjunction
+      Logic.disjunction
         (List.map
            (fun (passed : passed) ->
-             if lambda_captures_target context passed.term term then L.Boolean true
+             if lambda_captures_target context passed.term term then Logic.Boolean true
              else may_be_target context frame passed.term passed.type_ term)
            values)
   | Capability path | Capability_method (path, _) ->
-      L.Boolean
+      Logic.Boolean
         (List.exists
            (function
-             | T.Capability used -> Path.equal used path
-             | T.Capability_parameter _ | T.Capability_projection _ | T.Capability_variable _ ->
+             | Types.Capability used -> Path.equal used path
+             | Types.Capability_parameter _ | Types.Capability_projection _
+             | Types.Capability_variable _ ->
                  true)
            uses)
 
@@ -6608,22 +6677,23 @@ and call_reaches context frame uses (values : passed list) (target : Costs.targe
    itself, or a value of its sort that may equal it, as one chosen by [if]
    or read from a field may. *)
 and may_be_target context frame term ty target =
-  if term = target then L.Boolean true
+  if term = target then Logic.Boolean true
   else
     match List.assoc_opt target context.call_targets with
     | Some local -> (
         match (ty, local_type context frame local) with
-        | T.Function _, Some target_type when sort_of context ty = sort_of context target_type ->
-            L.equal term target
-        | _ -> L.Boolean false)
-    | None -> L.Boolean false
+        | Types.Function _, Some target_type when sort_of context ty = sort_of context target_type
+          ->
+            Logic.equal term target
+        | _ -> Logic.Boolean false)
+    | None -> Logic.Boolean false
 
 (* An amount spent only where [condition] holds. *)
 and spent_where condition amount =
   match condition with
-  | L.Boolean true -> amount
-  | L.Boolean false -> Costs.zero
-  | condition -> L.ite condition amount Costs.zero
+  | Logic.Boolean true -> amount
+  | Logic.Boolean false -> Costs.zero
+  | condition -> Logic.ite condition amount Costs.zero
 
 and lambda_captures_target context lambda target =
   match
@@ -6635,36 +6705,38 @@ and lambda_captures_target context lambda target =
 (* What a call through a function value spends: its [time], which is one
    unit for a function type with an [O(...)] bound, and its type's clauses
    for other resources. *)
-and function_value_amount context frame (function_type : T.function_type) callee_term
+and function_value_amount context frame (function_type : Types.function_type) callee_term
     (counter : Costs.counter) =
   let clause resource =
-    List.find_opt (fun (cost : T.cost) -> cost.resource = resource) function_type.costs
+    List.find_opt (fun (cost : Types.cost) -> cost.resource = resource) function_type.costs
   in
   let by_clause resource =
     match (clause resource, counter.counting) with
-    | Some { bound = Order_of; _ }, Units -> L.int 1
-    | Some { bound = No_more_than (Some k) | Exactly_cost (Some k); _ }, Units -> L.Integer k
+    | Some { bound = Order_of; _ }, Units -> Logic.int 1
+    | Some { bound = No_more_than (Some k) | Exactly_cost (Some k); _ }, Units -> Logic.Integer k
     | Some { bound = No_more_than (Some k); _ }, (At_most | Exactly) ->
-        bounded_amount context frame (L.Integer k)
-    | Some { bound = Exactly_cost (Some k); _ }, (At_most | Exactly) -> L.Integer k
+        bounded_amount context frame (Logic.Integer k)
+    | Some { bound = Exactly_cost (Some k); _ }, (At_most | Exactly) -> Logic.Integer k
     | _ -> unknown_amount context frame counter
   in
   match counter.resource with
-  | Time -> time_of context frame (T.Function function_type) callee_term
-  | Allocations -> by_clause T.Allocations
-  | Allocated_bytes -> by_clause T.Allocated_bytes
+  | Time -> time_of context frame (Types.Function function_type) callee_term
+  | Allocations -> by_clause Types.Allocations
+  | Allocated_bytes -> by_clause Types.Allocated_bytes
   | Calls (Through term) ->
       if lambda_captures_target context callee_term term then unknown_amount context frame counter
       else
         spent_where
-          (may_be_target context frame callee_term (T.Function function_type) term)
-          (L.int 1)
+          (may_be_target context frame callee_term (Types.Function function_type) term)
+          (Logic.int 1)
   | Calls (Capability path | Capability_method (path, _)) ->
       if
         List.exists
           (function
-            | T.Capability used -> Path.equal used path
-            | T.Capability_parameter _ | T.Capability_projection _ | T.Capability_variable _ -> true)
+            | Types.Capability used -> Path.equal used path
+            | Types.Capability_parameter _ | Types.Capability_projection _
+            | Types.Capability_variable _ ->
+                true)
           function_type.uses
       then unknown_amount context frame counter
       else Costs.zero
@@ -6681,7 +6753,9 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   let length sequence = sequence_length context element sequence in
   (* No buffer is larger than C lets an object be, half the address space,
      so a buffer's length fits an [ISize] as well as a [USize]. *)
-  let fits value = L.(Operation ("<=", [ int 0; value ]) &&& in_range (T.builtin ISize) value) in
+  let fits value =
+    Logic.(Operation ("<=", [ int 0; value ]) &&& in_range (Types.builtin ISize) value)
+  in
   let model builtin term =
     let sequence = buffer_model context builtin element term in
     assume context frame (fits (length sequence));
@@ -6694,7 +6768,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   let storage term =
     let sequence = model Intrinsic.Storage term in
     assume context frame
-      L.(Operation ("<=", [ length sequence; capacity term ]) &&& fits (capacity term));
+      Logic.(Operation ("<=", [ length sequence; capacity term ]) &&& fits (capacity term));
     sequence
   in
   let needs ?(what = "have the room it writes into") condition =
@@ -6703,35 +6777,35 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       condition
   in
   let keeps_capacity () =
-    assume context frame (L.equal (capacity (List.hd changed)) (capacity (List.hd operands)))
+    assume context frame (Logic.equal (capacity (List.hd changed)) (capacity (List.hd operands)))
   in
   let at = element_at context element in
   let bound () = fresh_name context "index" in
   let in_interval index low high =
-    L.(Operation ("<=", [ low; index ]) &&& Operation ("<", [ index; high ]))
+    Logic.(Operation ("<=", [ low; index ]) &&& Operation ("<", [ index; high ]))
   in
   let all name low high body =
-    L.Forall ([ (name, L.Int) ], L.(in_interval (Symbol name) low high ==> body))
+    Logic.Forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
-  let in_bounds index sequence = in_interval index (L.int 0) (length sequence) in
+  let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
   let each_sum relation =
     let measure = fresh_name context "measure" in
-    L.Forall
-      ( [ (measure, sort_of context (T.Function (measure_type element))) ],
+    Logic.Forall
+      ( [ (measure, sort_of context (Types.Function (measure_type element))) ],
         relation
-          (fun sequence -> sequence_sum context element sequence (L.Symbol measure))
-          (fun value -> applied context (measure_type element) (L.Symbol measure) [ value ]) )
+          (fun sequence -> sequence_sum context element sequence (Logic.Symbol measure))
+          (fun value -> applied context (measure_type element) (Logic.Symbol measure) [ value ]) )
   in
   let changed_storage () = storage (List.hd changed) in
   match (operation, operands) with
   | Storage_model, [ buffer ] -> storage buffer
   | View_model, [ buffer ] -> view buffer
   | Storage_empty, _ ->
-      assume context frame (L.equal (length (storage known)) (L.int 0));
+      assume context frame (Logic.equal (length (storage known)) (Logic.int 0));
       known
   | Storage_with_capacity, [ room ] ->
       assume context frame
-        L.(equal (length (storage known)) (int 0) &&& equal (capacity known) room);
+        Logic.(equal (length (storage known)) (int 0) &&& equal (capacity known) room);
       known
   | Storage_length, [ buffer ] -> length (storage buffer)
   | View_length, [ buffer ] -> length (view buffer)
@@ -6739,95 +6813,101 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       ignore (storage buffer);
       capacity buffer
   | Storage_set_capacity, [ buffer; room ] ->
-      needs (L.Operation (">=", [ room; length (storage buffer) ]));
-      assume context frame (L.equal (changed_storage ()) (storage buffer));
-      assume context frame (L.equal (capacity (List.hd changed)) room);
+      needs (Logic.Operation (">=", [ room; length (storage buffer) ]));
+      assume context frame (Logic.equal (changed_storage ()) (storage buffer));
+      assume context frame (Logic.equal (capacity (List.hd changed)) room);
       known
   | Storage_lengthen, [ buffer; by ] ->
       (* What the C library wrote into its room is the storage's. *)
       let before = storage buffer and after = changed_storage () in
-      needs (L.Operation ("<=", [ L.Operation ("+", [ length before; by ]); capacity buffer ]));
+      needs
+        (Logic.Operation ("<=", [ Logic.Operation ("+", [ length before; by ]); capacity buffer ]));
       keeps_capacity ();
       let k = bound () in
-      assume context frame (L.equal (length after) (L.Operation ("+", [ length before; by ])));
       assume context frame
-        (all k (L.int 0) (length before) (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+        (Logic.equal (length after) (Logic.Operation ("+", [ length before; by ])));
+      assume context frame
+        (all k (Logic.int 0) (length before)
+           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
       known
   | Storage_shorten, [ buffer; shorter ] ->
       (* The first [shorter] elements, in the same room. *)
       let before = storage buffer and after = changed_storage () in
       needs ~what:"be given a length at most the storage's"
-        (L.Operation ("<=", [ shorter; length before ]));
+        (Logic.Operation ("<=", [ shorter; length before ]));
       keeps_capacity ();
       let k = bound () in
-      assume context frame (L.equal (length after) shorter);
+      assume context frame (Logic.equal (length after) shorter);
       assume context frame
-        (all k (L.int 0) shorter (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+        (all k (Logic.int 0) shorter
+           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
       known
   | Storage_push, [ buffer; value ] ->
-      needs (L.Operation ("<", [ length (storage buffer); capacity buffer ]));
+      needs (Logic.Operation ("<", [ length (storage buffer); capacity buffer ]));
       keeps_capacity ();
       let longer = appended context frame element (storage buffer) value in
-      assume context frame (L.equal (changed_storage ()) longer);
+      assume context frame (Logic.equal (changed_storage ()) longer);
       known
   | Storage_pop, [ _ ] ->
       keeps_capacity ();
       let longer = appended context frame element (changed_storage ()) known in
-      assume context frame (L.equal (storage (List.hd operands)) longer);
+      assume context frame (Logic.equal (storage (List.hd operands)) longer);
       known
   | Storage_insert, [ buffer; index; value ] ->
       let before = storage buffer and after = changed_storage () in
-      needs (L.Operation ("<", [ length before; capacity buffer ]));
+      needs (Logic.Operation ("<", [ length before; capacity buffer ]));
       keeps_capacity ();
       let k = bound () in
       assume context frame
-        (L.conjunction
+        (Logic.conjunction
            [
-             L.Operation ("<=", [ L.int 0; index ]);
-             L.Operation ("<=", [ index; length before ]);
-             L.equal (length after) (L.Operation ("+", [ length before; L.int 1 ]));
-             L.equal (at after index) value;
+             Logic.Operation ("<=", [ Logic.int 0; index ]);
+             Logic.Operation ("<=", [ index; length before ]);
+             Logic.equal (length after) (Logic.Operation ("+", [ length before; Logic.int 1 ]));
+             Logic.equal (at after index) value;
            ]);
       assume context frame
-        (all k (L.int 0) index (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+        (all k (Logic.int 0) index
+           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
       let k = bound () in
       assume context frame
         (all k index (length before)
-           (L.equal
-              (at after (L.Operation ("+", [ L.Symbol k; L.int 1 ])))
-              (at before (L.Symbol k))));
+           (Logic.equal
+              (at after (Logic.Operation ("+", [ Logic.Symbol k; Logic.int 1 ])))
+              (at before (Logic.Symbol k))));
       let k = bound () in
       assume context frame
         (all k
-           (L.Operation ("+", [ index; L.int 1 ]))
+           (Logic.Operation ("+", [ index; Logic.int 1 ]))
            (length after)
-           (L.equal (at after (L.Symbol k))
-              (at before (L.Operation ("-", [ L.Symbol k; L.int 1 ])))));
+           (Logic.equal (at after (Logic.Symbol k))
+              (at before (Logic.Operation ("-", [ Logic.Symbol k; Logic.int 1 ])))));
       assume context frame
         (each_sum (fun sum measure ->
-             L.equal (sum after) (L.Operation ("+", [ sum before; measure value ]))));
+             Logic.equal (sum after) (Logic.Operation ("+", [ sum before; measure value ]))));
       known
   | Storage_remove, [ buffer; index ] ->
       keeps_capacity ();
       let before = storage buffer and after = changed_storage () in
       let k = bound () in
       assume context frame
-        (L.conjunction
+        (Logic.conjunction
            [
              in_bounds index before;
-             L.equal (length after) (L.Operation ("-", [ length before; L.int 1 ]));
-             L.equal known (at before index);
+             Logic.equal (length after) (Logic.Operation ("-", [ length before; Logic.int 1 ]));
+             Logic.equal known (at before index);
            ]);
       assume context frame
-        (all k (L.int 0) index (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+        (all k (Logic.int 0) index
+           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
       let k = bound () in
       assume context frame
         (all k index (length after)
-           (L.equal (at after (L.Symbol k))
-              (at before (L.Operation ("+", [ L.Symbol k; L.int 1 ])))));
+           (Logic.equal (at after (Logic.Symbol k))
+              (at before (Logic.Operation ("+", [ Logic.Symbol k; Logic.int 1 ])))));
       assume context frame
         (each_sum (fun sum measure ->
-             L.equal (sum before) (L.Operation ("+", [ sum after; measure known ]))));
+             Logic.equal (sum before) (Logic.Operation ("+", [ sum after; measure known ]))));
       known
   | (Storage_swap | View_swap), [ buffer; first; second ] ->
       let before, after =
@@ -6839,21 +6919,21 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       in
       let k = bound () in
       assume context frame
-        (L.conjunction
+        (Logic.conjunction
            [
              in_bounds first before;
              in_bounds second before;
-             L.equal (length after) (length before);
-             L.equal (at after first) (at before second);
-             L.equal (at after second) (at before first);
+             Logic.equal (length after) (length before);
+             Logic.equal (at after first) (at before second);
+             Logic.equal (at after second) (at before first);
            ]);
       assume context frame
-        (all k (L.int 0) (length before)
-           L.(
+        (all k (Logic.int 0) (length before)
+           Logic.(
              not_ (equal (Symbol k) first)
              &&& not_ (equal (Symbol k) second)
              ==> equal (at after (Symbol k)) (at before (Symbol k))));
-      assume context frame (each_sum (fun sum _ -> L.equal (sum after) (sum before)));
+      assume context frame (each_sum (fun sum _ -> Logic.equal (sum after) (sum before)));
       known
   | (Storage_at | Storage_at_mut), [ buffer; index ] ->
       assume context frame (in_bounds index (storage buffer));
@@ -6866,7 +6946,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
          storage keeps its elements; a static one gets a buffer of its own,
          so its capacity may change. *)
       assume context frame
-        L.(equal (view known) (storage buffer) &&& equal (changed_storage ()) (storage buffer));
+        Logic.(equal (view known) (storage buffer) &&& equal (changed_storage ()) (storage buffer));
       known
   | (Storage_take_view | View_take_view), [ owner; part; start ] ->
       (* The owner's elements from [start] are the view's, which changed
@@ -6876,33 +6956,34 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
         else (storage owner, changed_storage ())
       in
       let run = view part in
-      needs L.(Operation ("<=", [ Operation ("+", [ start; length run ]); length before ]));
+      needs Logic.(Operation ("<=", [ Operation ("+", [ start; length run ]); length before ]));
       if operation = Storage_take_view then keeps_capacity ();
       run_replaced context frame element ~before ~after ~start
-        ~stop:(L.Operation ("+", [ start; length run ]))
+        ~stop:(Logic.Operation ("+", [ start; length run ]))
         ~run:(Some run);
       known
   | View_at, [ buffer; index ] ->
       assume context frame (in_bounds index (view buffer));
       at (view buffer) index
   | Storage_view, [ buffer ] ->
-      assume context frame (L.equal (view known) (storage buffer));
+      assume context frame (Logic.equal (view known) (storage buffer));
       known
   | Compare_bytes, [ left; right ] -> byte_order context (view left) (view right)
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
       let k = bound () in
       assume context frame
-        (L.conjunction
+        (Logic.conjunction
            [
-             L.Operation ("<=", [ L.int 0; start ]);
-             L.Operation ("<=", [ start; stop ]);
-             L.Operation ("<=", [ stop; length whole ]);
-             L.equal (length part) (L.Operation ("-", [ stop; start ]));
+             Logic.Operation ("<=", [ Logic.int 0; start ]);
+             Logic.Operation ("<=", [ start; stop ]);
+             Logic.Operation ("<=", [ stop; length whole ]);
+             Logic.equal (length part) (Logic.Operation ("-", [ stop; start ]));
            ]);
       assume context frame
-        (all k (L.int 0) (length part)
-           (L.equal (at part (L.Symbol k)) (at whole (L.Operation ("+", [ start; L.Symbol k ])))));
+        (all k (Logic.int 0) (length part)
+           (Logic.equal (at part (Logic.Symbol k))
+              (at whole (Logic.Operation ("+", [ start; Logic.Symbol k ])))));
       known
   | _ -> known
 
@@ -6910,28 +6991,28 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
    lexicographic order, below zero, zero, or above zero, which is zero
    exactly when they are the same bytes, and is a total order. *)
 and byte_order context left right =
-  let sequence = sort_of context (sequence_type (T.builtin UInt8)) in
-  let symbol = S.Compare_bytes_order in
+  let sequence = sort_of context (sequence_type (Types.builtin UInt8)) in
+  let symbol = Symbol.Compare_bytes_order in
   let first = not (Hashtbl.mem context.declared symbol) in
-  declare context (L.Function (symbol, [ sequence; sequence ], L.Int));
-  let order a b = L.Apply (symbol, [ a; b ]) in
+  declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
+  let order a b = Logic.Apply (symbol, [ a; b ]) in
   if first then begin
-    let a = L.Symbol (variable "bytes.first")
-    and b = L.Symbol (variable "bytes.second")
-    and c = L.Symbol (variable "bytes.third") in
-    let over names body = L.Forall (List.map (fun name -> (name, sequence)) names, body) in
+    let a = Logic.Symbol (variable "bytes.first")
+    and b = Logic.Symbol (variable "bytes.second")
+    and c = Logic.Symbol (variable "bytes.third") in
+    let over names body = Logic.Forall (List.map (fun name -> (name, sequence)) names, body) in
     context.facts <-
       over
         [ variable "bytes.first"; variable "bytes.second" ]
-        L.(
+        Logic.(
           Operation ("<=", [ int (-1); order a b ])
           &&& Operation ("<=", [ order a b; int 1 ])
           &&& (equal (order a b) (int 0) ==> equal a b)
           &&& equal (order b a) (Operation ("-", [ order a b ])))
-      :: over [ variable "bytes.first" ] (L.equal (order a a) (L.int 0))
+      :: over [ variable "bytes.first" ] (Logic.equal (order a a) (Logic.int 0))
       :: over
            [ variable "bytes.first"; variable "bytes.second"; variable "bytes.third" ]
-           L.(
+           Logic.(
              Operation ("<", [ order a b; int 0 ])
              &&& Operation ("<", [ order b c; int 0 ])
              ==> Operation ("<", [ order a c; int 0 ]))
@@ -6941,84 +7022,89 @@ and byte_order context left right =
 
 (* How many elements a storage has room for, as a function of it. *)
 and buffer_capacity context element term =
-  let ty = T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] } in
-  let symbol = S.Capacity (type_key ty) in
-  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
-  L.Apply (symbol, [ term ])
+  let ty =
+    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+  in
+  let symbol = Symbol.Capacity (type_key ty) in
+  declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
+  Logic.Apply (symbol, [ term ])
 
 (* The sequence a storage or a view holds, as a function of it. *)
 and buffer_model context (builtin : Intrinsic.builtin) element term =
-  let ty = T.Named { path = Intrinsic.builtin_path builtin; arguments = [ T.Type element ] } in
-  let symbol = S.Model (type_key ty) in
+  let ty =
+    Types.Named { path = Intrinsic.builtin_path builtin; arguments = [ Types.Type element ] }
+  in
+  let symbol = Symbol.Model (type_key ty) in
   declare context
-    (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
-  L.Apply (symbol, [ term ])
+    (Logic.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
+  Logic.Apply (symbol, [ term ])
 
 (* Whether a call through a value of a function type is a function in the
    logic: it ends, uses no capabilities, changes none of its arguments, and
    returns its result. *)
-and in_the_logic (function_type : T.function_type) =
-  T.terminates function_type && function_type.uses = []
-  && List.for_all (fun (mode, _) -> mode <> T.Mut) function_type.inputs
+and in_the_logic (function_type : Types.function_type) =
+  Types.terminates function_type && function_type.uses = []
+  && List.for_all (fun (mode, _) -> mode <> Types.Mut) function_type.inputs
   && match function_type.output with Returns _ -> true | _ -> false
 
 (* A function value applied to its arguments, through the [apply] of its
    type's sorts. *)
-and applied context (function_type : T.function_type) callee arguments =
+and applied context (function_type : Types.function_type) callee arguments =
   let inputs = List.map (fun (_, input) -> sort_of context input) function_type.inputs in
   let output =
-    sort_of context (match function_type.output with Returns output -> output | _ -> T.unit)
+    sort_of context (match function_type.output with Returns output -> output | _ -> Types.unit)
   in
-  let value_sort = sort_of context (T.Function function_type) in
-  let symbol = S.Apply ((value_sort :: inputs) @ [ output ]) in
-  declare context (L.Function (symbol, value_sort :: inputs, output));
-  L.Apply (symbol, callee :: arguments)
+  let value_sort = sort_of context (Types.Function function_type) in
+  let symbol = Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
+  declare context (Logic.Function (symbol, value_sort :: inputs, output));
+  Logic.Apply (symbol, callee :: arguments)
 
 (* Bound names for each input of a function type, at this depth of
    quantifiers. *)
-and parameters_of context frame (function_type : T.function_type) =
+and parameters_of context frame (function_type : Types.function_type) =
   let depth = List.length frame.bound in
   List.mapi
     (fun index (_, input) ->
-      ( S.Variable { label = "parameter"; numbers = [ depth; index ] },
+      ( Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
         sort_of context (substituted context frame input) ))
     function_type.inputs
 
-and time_of context frame (ty : T.ty) term =
+and time_of context frame (ty : Types.ty) term =
   let sort = sort_of context ty in
-  let symbol = S.Time sort in
-  declare context (L.Function (symbol, [ sort ], L.Int));
-  let time = L.Apply (symbol, [ term ]) in
-  fact context frame (L.Operation ("<=", [ L.int 1; time ]));
+  let symbol = Symbol.Time sort in
+  declare context (Logic.Function (symbol, [ sort ], Logic.Int));
+  let time = Logic.Apply (symbol, [ term ]) in
+  fact context frame (Logic.Operation ("<=", [ Logic.int 1; time ]));
   (match ty with
-  | T.Function { costs; _ }
-    when List.exists (fun (cost : T.cost) -> cost.resource = T.Time && cost.bound = Order_of) costs
-    ->
-      fact context frame (L.equal time (L.int 1))
+  | Types.Function { costs; _ }
+    when List.exists
+           (fun (cost : Types.cost) -> cost.resource = Types.Time && cost.bound = Order_of)
+           costs ->
+      fact context frame (Logic.equal time (Logic.int 1))
   | _ -> ());
   (match List.assoc_opt term context.lambda_times with
   | Some (bound, showing) ->
       (* The bound is used, so the obligations that show it are made. *)
       context.lambda_times <- List.remove_assoc term context.lambda_times;
       context.obligations <- List.rev_append showing context.obligations;
-      fact context frame (L.equal time (Costs.larger (L.int 1) bound))
+      fact context frame (Logic.equal time (Costs.larger (Logic.int 1) bound))
   | None -> ());
   time
 
 (* What building a record or a variant spends: one allocation, of its
    block, for a variant that is held by reference. *)
-and construct_amount context frame (ty : T.ty) variant (counter : Costs.counter) =
+and construct_amount context frame (ty : Types.ty) variant (counter : Costs.counter) =
   match counter.resource with
   | (Allocations | Allocated_bytes) when not (indirect context ty variant) -> Costs.zero
-  | Allocations -> L.int 1
-  | Allocated_bytes when counter.counting = Units -> L.int 1
+  | Allocations -> Logic.int 1
+  | Allocated_bytes when counter.counting = Units -> Logic.int 1
   | Allocated_bytes ->
       (* The size of the variant's block, which is fixed and not known
          here. *)
-      let symbol = S.Block_bytes { type_key = type_key ty; variant } in
-      declare context (L.Constant (symbol, L.Int));
-      fact context frame (L.Operation ("<=", [ L.int 1; L.Symbol symbol ]));
-      L.Symbol symbol
+      let symbol = Symbol.Block_bytes { type_key = type_key ty; variant } in
+      declare context (Logic.Constant (symbol, Logic.Int));
+      fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
+      Logic.Symbol symbol
   | Time | Calls _ -> Costs.zero
 
 (* What a call whose contract is not read spends. *)
@@ -7034,7 +7120,7 @@ and step_amount context frame (call_ : call) (values : passed list) (counter : C
               match List.find_opt (fun (passed : passed) -> passed.position = position) values with
               | Some passed -> (
                   match passed.type_ with
-                  | T.Named { path; arguments = [ T.Type element ] } -> (
+                  | Types.Named { path; arguments = [ Types.Type element ] } -> (
                       match Intrinsic.builtin_of_path path with
                       | Some ((Storage | View) as builtin) ->
                           sequence_length context element
@@ -7057,17 +7143,19 @@ and step_amount context frame (call_ : call) (values : passed list) (counter : C
               in
               match amount_term with
               | Some amount_term when resource = Allocations || counting = Units ->
-                  L.ite (L.Operation (">", [ amount_term; L.int 0 ])) (L.int 1) (L.int 0)
+                  Logic.ite
+                    (Logic.Operation (">", [ amount_term; Logic.int 0 ]))
+                    (Logic.int 1) (Logic.int 0)
               | _ -> unknown_amount context frame counter)
           | Unknown_allocations, _, _ -> unknown_amount context frame counter)
       | Calls _ -> Costs.zero)
   | Capability_method { capability; name } -> (
       let direct =
         match counter.resource with
-        | Calls (Capability path) when Path.equal path capability -> L.int 1
+        | Calls (Capability path) when Path.equal path capability -> Logic.int 1
         | Calls (Capability_method (path, method_))
           when Path.equal path capability && method_ = name ->
-            L.int 1
+            Logic.int 1
         | _ -> Costs.zero
       in
       match counter.resource with
@@ -7095,13 +7183,13 @@ and step_amount context frame (call_ : call) (values : passed list) (counter : C
             (unknown_amount context frame counter)
       | _ -> unknown_amount context frame counter)
 
-and indirect context (ty : T.ty) variant =
+and indirect context (ty : Types.ty) variant =
   match (ty, variant) with
   | Named { path; _ }, Some variant -> (
       match Query.demand context.database Interface.Environment.interface path with
       | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
           List.exists
-            (fun (written : T.variant) -> written.variant_name = variant && written.indirect)
+            (fun (written : Types.variant) -> written.variant_name = variant && written.indirect)
             variants
       | _ -> false)
   | _ -> false
@@ -7126,9 +7214,9 @@ and specification_function context frame (node : expression) (measure : specific
         | _ -> node
       in
       (match bounds (type_of context frame (unconverted argument)) with
-      | Some (_, high) when not (L.mentions frame.bound n) ->
+      | Some (_, high) when not (Logic.mentions frame.bound n) ->
           fact context frame
-            L.(
+            Logic.(
               Operation ("<=", [ n; Integer high ])
               ==> Operation ("<=", [ log; int (Z.numbits high) ]))
       | _ -> ());
@@ -7139,7 +7227,7 @@ and specification_function context frame (node : expression) (measure : specific
   | _ -> unsupported (at frame node) "this specification function"
 
 and log_of context frame n =
-  declare context (L.Function (S.Cost_log, [ L.Int ], L.Int));
+  declare context (Logic.Function (Symbol.Cost_log, [ Logic.Int ], Logic.Int));
   let rec add n ~halving =
     match List.assoc_opt n context.logs with
     | Some true -> ()
@@ -7152,18 +7240,20 @@ and log_of context frame n =
         List.iter (fact context frame) facts;
         Option.iter (fun half -> add half ~halving:false) half
   in
-  if not (L.mentions frame.bound n) then add n ~halving:true;
+  if not (Logic.mentions frame.bound n) then add n ~halving:true;
   (* Of a number, it is the number's bit length: the smallest integer at
      least log2(n + 1). *)
   (match n with
-  | L.Integer k ->
+  | Logic.Integer k ->
       fact context frame
-        (L.equal (L.Apply (S.Cost_log, [ n ])) (L.int (if Z.sign k <= 0 then 0 else Z.numbits k)))
+        (Logic.equal
+           (Logic.Apply (Symbol.Cost_log, [ n ]))
+           (Logic.int (if Z.sign k <= 0 then 0 else Z.numbits k)))
   | _ -> ());
-  L.Apply (S.Cost_log, [ n ])
+  Logic.Apply (Symbol.Cost_log, [ n ])
 
 and power_of context frame base exponent =
-  declare context (L.Function (S.Cost_power, [ L.Int; L.Int ], L.Int));
+  declare context (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
@@ -7177,7 +7267,7 @@ and power_of context frame base exponent =
     end
     else None
   in
-  (if not (L.mentions frame.bound base || L.mentions frame.bound exponent) then
+  (if not (Logic.mentions frame.bound base || Logic.mentions frame.bound exponent) then
      match add exponent with
      | Some (step, previous) ->
          fact context frame step;
@@ -7185,13 +7275,15 @@ and power_of context frame base exponent =
      | None -> ());
   (* Of two numbers, it is their power. *)
   (match (base, exponent) with
-  | L.Integer b, L.Integer e when Z.sign e >= 0 && Z.leq e (Z.of_int 256) ->
+  | Logic.Integer b, Logic.Integer e when Z.sign e >= 0 && Z.leq e (Z.of_int 256) ->
       fact context frame
-        (L.equal (L.Apply (S.Cost_power, [ base; exponent ])) (L.Integer (Z.pow b (Z.to_int e))))
+        (Logic.equal
+           (Logic.Apply (Symbol.Cost_power, [ base; exponent ]))
+           (Logic.Integer (Z.pow b (Z.to_int e))))
   | _ -> ());
-  L.Apply (S.Cost_power, [ base; exponent ])
+  Logic.Apply (Symbol.Cost_power, [ base; exponent ])
 
-(* [time(T.method)]: the longest any one call of a trait's method on a type
+(* [time(Types.method)]: the longest any one call of a trait's method on a type
    takes in this run, a constant of the run, at least one step. It is one
    symbol for each method and type, so a callee's bound and its caller's
    are about the same term. *)
@@ -7204,16 +7296,17 @@ and method_time context frame (callee : callee) =
   | _ -> raise (Foreign_unsupported "the time of what is not a trait's method")
 
 and trait_method_time context frame (method_ : Path.t) self_type =
-  let symbol = S.Method_time { method_; self_type = type_key self_type } in
-  declare context (L.Constant (symbol, L.Int));
-  fact context frame (L.Operation ("<=", [ L.int 1; L.Symbol symbol ]));
+  let symbol = Symbol.Method_time { method_; self_type = type_key self_type } in
+  declare context (Logic.Constant (symbol, Logic.Int));
+  fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
   (match method_time_bound context method_ self_type with
   | Some k ->
-      fact context frame (L.Operation ("<=", [ L.Symbol symbol; L.Integer (Z.max k Z.one) ]))
+      fact context frame
+        (Logic.Operation ("<=", [ Logic.Symbol symbol; Logic.Integer (Z.max k Z.one) ]))
   | None -> ());
-  L.Symbol symbol
+  Logic.Symbol symbol
 
-(* A bound on [time(T.method)] for a known type: a copy of a [Plain] value
+(* A bound on [time(Types.method)] for a known type: a copy of a [Plain] value
    that holds no potential takes one step, and the method of an [impl] whose
    time clause is a constant [O(k)] takes at most [k] counted as a call is,
    where it makes no potential, since nothing it changes or returns can
@@ -7229,16 +7322,16 @@ and method_time_bound context (method_ : Path.t) self_type =
         then Some Z.one
         else None
       else
-        let reference : T.trait_reference = { trait; trait_arguments = []; associated = [] } in
+        let reference : Types.trait_reference = { trait; trait_arguments = []; associated = [] } in
         match concrete_impl context reference self_type with
         | Some (impl, arguments) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
               match Interface.Impls.signature context.database path with
-              | Some (signature : T.signature) -> (
+              | Some (signature : Types.signature) -> (
                   List.for_all
-                    (fun (parameter : T.parameter_info) ->
-                      parameter.mode <> T.Mut || not (holds parameter.type_))
+                    (fun (parameter : Types.parameter_info) ->
+                      parameter.mode <> Types.Mut || not (holds parameter.type_))
                     signature.parameters
                   && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
                   && match signature.output with Returns ty -> not (holds ty) | _ -> false)
@@ -7271,7 +7364,7 @@ and method_time_bound context (method_ : Path.t) self_type =
 
 (* A built-in copy: of a [Plain] value that holds no potential, a copy of
    its bits; of any other, a call of [Copyable.copy], which takes
-   [time(T.copy)] and pays for the potential the copy holds, as a trait's
+   [time(Types.copy)] and pays for the potential the copy holds, as a trait's
    method that promises only that it ends does. *)
 and copied context frame ty term =
   if
@@ -7293,7 +7386,7 @@ and copied context frame ty term =
               try potential context frame ty term
               with Unsupported _ | Foreign_unsupported _ -> Costs.zero
             in
-            Costs.minus (Costs.plus time (L.int 1)) copy_potential
+            Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
         | _ -> unknown_amount context frame counter)
 
 (* Loops' costs. A loop with a [cost] clause about a counter is bounded by
@@ -7337,8 +7430,8 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
               | Units ->
                   let constants = Costs.constants (Loop_bound cost.origin) in
                   context.groups <- constants :: context.groups;
-                  declare context (L.Constant (constants.factor, L.Int));
-                  declare context (L.Constant (constants.addend, L.Int));
+                  declare context (Logic.Constant (constants.factor, Logic.Int));
+                  declare context (Logic.Constant (constants.addend, Logic.Int));
                   Some constants
               | At_most | Exactly -> None
             in
@@ -7346,9 +7439,9 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
         | None ->
             Per_iteration
               {
-                per = fresh context frame "per" L.Int;
+                per = fresh context frame "per" Logic.Int;
                 per_held =
-                  Option.map (fun held -> (fresh context frame "per" L.Int, held frame)) held;
+                  Option.map (fun held -> (fresh context frame "per" Logic.Int, held frame)) held;
               }
       in
       { counter; entry; rule; held })
@@ -7367,7 +7460,7 @@ and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Cor
   in
   match (counter.counting, constants) with
   | Units, Some constants -> Costs.at_most since (Costs.bound constants g)
-  | Exactly, _ -> L.equal since g
+  | Exactly, _ -> Logic.equal since g
   | _ -> Costs.at_most since g
 
 and spent_at (frame : frame) key =
@@ -7376,7 +7469,7 @@ and spent_at (frame : frame) key =
 (* What a counter is bounded by at the head and where the loop is left:
    its value, plus the potential the loop holds there, for [per_held]. *)
 and counted_with ~(counter : Costs.counter) ~at ~bound =
-  if counter.counting = Exactly then L.equal at bound else Costs.at_most at bound
+  if counter.counting = Exactly then Logic.equal at bound else Costs.at_most at bound
 
 (* The head of a loop: each counter takes a fresh value, within its
    clause, or within its iterations so far times its bounds on one. *)
@@ -7385,7 +7478,7 @@ and loop_head context head costs ~iterations =
   let head =
     {
       head with
-      spent = List.map (fun cost -> (cost.counter, fresh context head "spent" L.Int)) costs;
+      spent = List.map (fun cost -> (cost.counter, fresh context head "spent" Logic.Int)) costs;
     }
   in
   List.iter
@@ -7485,7 +7578,7 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
           in
           match List.find_map bounded (held_rule @ [ (per, plain) ]) with
           | Some (per, spent, bound) ->
-              fact context head (L.equal per bound);
+              fact context head (Logic.equal per bound);
               List.iter2
                 (fun (frame : frame) spent ->
                   oblige context frame Cost span
@@ -7499,7 +7592,7 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
                 "The prover cannot bound what one iteration of this loop spends by what the loop \
                  does not change, so it cannot count the loop's cost: give the loop a `cost` \
                  clause."
-                (L.Boolean false)))
+                (Logic.Boolean false)))
     costs
 
 (* Where the loop is left: a counter bounded by a clause counts as the
@@ -7532,7 +7625,7 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
                 List.iter
                   (fun most ->
                     fact context exit_
-                      L.(
+                      Logic.(
                         conjunction
                           [
                             Costs.at_most at (Costs.plus start (Costs.times iterations per));
@@ -7585,7 +7678,7 @@ and held_by context (frame : frame) (changed : changed) =
 (* Potentials. *)
 
 (* A type's own [cost potential], from its form. *)
-and potential_clause context (ty : T.ty) =
+and potential_clause context (ty : Types.ty) =
   match type_source context ty with
   | Some ({ core = { definition = Type { potential = Some value; _ }; _ }; _ } as source) ->
       Some (source, value)
@@ -7596,7 +7689,7 @@ and potential_clause context (ty : T.ty) =
    growable buffer, a storage or a type whose model is the sequence one
    holds, which saves potential for growing. A type parameter may stand for
    such a type. *)
-and has_potential context ?(seen = []) (ty : T.ty) =
+and has_potential context ?(seen = []) (ty : Types.ty) =
   if seen <> [] then holds_potential_type context ~seen ty
   else
     let key = type_key ty in
@@ -7607,8 +7700,8 @@ and has_potential context ?(seen = []) (ty : T.ty) =
         Hashtbl.replace context.holds_potential key holds;
         holds
 
-and holds_potential_type context ~seen (ty : T.ty) =
-  if List.exists (T.equal ty) seen then false
+and holds_potential_type context ~seen (ty : Types.ty) =
+  if List.exists (Types.equal ty) seen then false
   else
     match ty with
     | Parameter _ -> true
@@ -7621,7 +7714,9 @@ and holds_potential_type context ~seen (ty : T.ty) =
             let substitution =
               try
                 List.combine
-                  (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
+                  (List.map
+                     (fun (generic : Types.generic) -> generic.generic)
+                     interface.type_generics)
                   arguments
               with Invalid_argument _ -> []
             in
@@ -7630,21 +7725,21 @@ and holds_potential_type context ~seen (ty : T.ty) =
               | Record fields -> fields
               | Sum variants ->
                   List.concat_map
-                    (fun (variant : T.variant) -> Option.value variant.fields ~default:[])
+                    (fun (variant : Types.variant) -> Option.value variant.fields ~default:[])
                     variants
               | Todo_type | Builtin_type _ | Error_shape _ -> []
             in
             List.exists
-              (fun (field : T.field) ->
+              (fun (field : Types.field) ->
                 has_potential context ~seen:(ty :: seen)
-                  (T.substitute substitution field.field_type))
+                  (Types.substitute substitution field.field_type))
               fields
         | _ -> false)
     | Named { arguments; _ } ->
         if
           List.exists
             (function
-              | T.Type element -> has_potential context ~seen:(ty :: seen) element | _ -> false)
+              | Types.Type element -> has_potential context ~seen:(ty :: seen) element | _ -> false)
             arguments
         then raise (Foreign_unsupported "the potential of a collection's elements")
         else false
@@ -7654,14 +7749,14 @@ and holds_potential_type context ~seen (ty : T.ty) =
    zero for a valid value, as each type with a potential shows, and its
    type's own potential plus its parts', unfolded once for each value it is
    asked of. *)
-and potential context frame ?(seen = []) (ty : T.ty) term =
+and potential context frame ?(seen = []) (ty : Types.ty) term =
   if not (has_potential context ty) then Costs.zero
   else begin
     let held = held_symbol context ty term in
-    if (not (List.mem held context.potentials)) && not (L.mentions frame.bound term) then begin
+    if (not (List.mem held context.potentials)) && not (Logic.mentions frame.bound term) then begin
       context.potentials <- held :: context.potentials;
       fact context frame
-        L.(validity context frame ~assuming:true ty term ==> Operation ("<=", [ int 0; held ]));
+        Logic.(validity context frame ~assuming:true ty term ==> Operation ("<=", [ int 0; held ]));
       match (potential_clause context ty, constructors context ty) with
       (* A type whose fields are seen holds what they hold; one whose fields
          are not, as a [List] outside its package, is read as the buffer its
@@ -7678,32 +7773,35 @@ and potential context frame ?(seen = []) (ty : T.ty) term =
               let slack = buffer_slack context ty term in
               let length = sequence_length context element sequence in
               fact context frame
-                L.(
+                Logic.(
                   Operation ("<=", [ int 0; slack ])
                   &&& Operation ("<=", [ slack; Operation ("*", [ int 2; length ]) ]));
               (match ty with
               | Named { path; _ } when Intrinsic.builtin_of_path path = Some Storage ->
                   let saved =
-                    L.Operation
+                    Logic.Operation
                       ( "-",
                         [
-                          L.Operation ("*", [ L.int 2; length ]);
+                          Logic.Operation ("*", [ Logic.int 2; length ]);
                           buffer_capacity context element term;
                         ] )
                   in
                   fact context frame
-                    (L.equal slack (L.ite (L.Operation (">=", [ saved; L.int 0 ])) saved (L.int 0)))
+                    (Logic.equal slack
+                       (Logic.ite
+                          (Logic.Operation (">=", [ saved; Logic.int 0 ]))
+                          saved (Logic.int 0)))
               | Named { path; _ }
                 when Intrinsic.builtin_of_path path = Some View
                      || Intrinsic.builtin_of_path path = Some Array ->
-                  fact context frame (L.equal slack (L.int 0))
+                  fact context frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
                 if has_potential context element then
                   sequence_sum context element sequence (potential_measure context element)
                 else Costs.zero
               in
-              fact context frame (L.equal held (Costs.plus slack elements))
+              fact context frame (Logic.equal held (Costs.plus slack elements))
           | None -> ())
       | clause, Some shape -> (
           try
@@ -7723,11 +7821,13 @@ and potential context frame ?(seen = []) (ty : T.ty) term =
                   | last :: earlier ->
                       List.fold_left
                         (fun otherwise ((variant, _) as one) ->
-                          L.ite (L.Is (constructor_name ty variant, term)) (parts one) otherwise)
+                          Logic.ite
+                            (Logic.Is (constructor_name ty variant, term))
+                            (parts one) otherwise)
                         (parts last) earlier
                   | [] -> Costs.zero)
             in
-            fact context frame (L.equal held (Costs.plus own parts))
+            fact context frame (Logic.equal held (Costs.plus own parts))
           with Unsupported _ | Foreign_unsupported _ -> ())
       | _ -> ()
     end;
@@ -7749,7 +7849,8 @@ and parts_potential context frame ~seen ty term (variant, fields) =
       if has_potential context field_type then
         let part = selected context ty variant field term in
         Costs.plus total
-          (if List.exists (T.equal field_type) (ty :: seen) then held_symbol context field_type part
+          (if List.exists (Types.equal field_type) (ty :: seen) then
+             held_symbol context field_type part
            else potential context frame ~seen:(ty :: seen) field_type part)
       else total)
     Costs.zero fields
@@ -7757,7 +7858,7 @@ and parts_potential context frame ~seen ty term (variant, fields) =
 (* A growable buffer's elements and model: a storage, by its own model, or
    a type whose [Model] is the sequence of the storage it holds in its one
    field, as a [List] and a [String] are. *)
-and buffer_elements context (ty : T.ty) =
+and buffer_elements context (ty : Types.ty) =
   let key = type_key ty in
   match Hashtbl.find_opt context.buffers key with
   | Some elements -> elements
@@ -7766,18 +7867,18 @@ and buffer_elements context (ty : T.ty) =
       Hashtbl.replace context.buffers key elements;
       elements
 
-and find_buffer_elements context (ty : T.ty) =
+and find_buffer_elements context (ty : Types.ty) =
   match ty with
-  | Named { path; arguments = [ T.Type element; T.Value _ ] }
+  | Named { path; arguments = [ Types.Type element; Types.Value _ ] }
     when Intrinsic.builtin_of_path path = Some Array ->
       Option.map
         (fun model_of -> (element, model_of))
         (model_function context ty ~model:(sequence_type element))
-  | Named { path; arguments = [ T.Type element ] }
+  | Named { path; arguments = [ Types.Type element ] }
     when Intrinsic.builtin_of_path path = Some Storage ->
       Some (element, fun term -> buffer_model context Storage element term)
-  | Named { path; arguments = [ T.Type element ] } when Intrinsic.builtin_of_path path = Some View
-    ->
+  | Named { path; arguments = [ Types.Type element ] }
+    when Intrinsic.builtin_of_path path = Some View ->
       Some (element, fun term -> buffer_model context View element term)
   | Named { path; arguments } when builtin ty = None -> (
       match Query.demand context.database Interface.Environment.interface path with
@@ -7786,12 +7887,12 @@ and find_buffer_elements context (ty : T.ty) =
           let substitution =
             try
               List.combine
-                (List.map (fun (generic : T.generic) -> generic.generic) type_generics)
+                (List.map (fun (generic : Types.generic) -> generic.generic) type_generics)
                 arguments
             with Invalid_argument _ -> []
           in
-          match T.substitute substitution field.field_type with
-          | Named { path = field_path; arguments = [ T.Type element ] }
+          match Types.substitute substitution field.field_type with
+          | Named { path = field_path; arguments = [ Types.Type element ] }
             when Intrinsic.builtin_of_path field_path = Some Storage
                  || Intrinsic.builtin_of_path field_path = Some View ->
               Option.map
@@ -7802,35 +7903,35 @@ and find_buffer_elements context (ty : T.ty) =
   | _ -> None
 
 (* What a buffer has saved for growing, as a function of it. *)
-and buffer_slack context (ty : T.ty) term =
-  let symbol = S.Slack (type_key ty) in
-  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
-  L.Apply (symbol, [ term ])
+and buffer_slack context (ty : Types.ty) term =
+  let symbol = Symbol.Slack (type_key ty) in
+  declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
+  Logic.Apply (symbol, [ term ])
 
 (* A value's potential as a measure, for a sum over a collection of such
    values: applied, it is the potential. *)
 and potential_measure context element =
-  let symbol = S.Potential_measure (type_key element) in
+  let symbol = Symbol.Potential_measure (type_key element) in
   let measure = measure_type element in
-  declare context (L.Constant (symbol, sort_of context (T.Function measure)));
-  let term = L.Symbol symbol in
+  declare context (Logic.Constant (symbol, sort_of context (Types.Function measure)));
+  let term = Logic.Symbol symbol in
   if not (List.mem term context.potentials) then begin
     context.potentials <- term :: context.potentials;
-    let each = S.Variable { label = "potential.element"; numbers = [] } in
+    let each = Symbol.Variable { label = "potential.element"; numbers = [] } in
     context.facts <-
-      L.Forall
+      Logic.Forall
         ( [ (each, sort_of context element) ],
-          L.equal
-            (applied context measure term [ L.Symbol each ])
-            (held_symbol context element (L.Symbol each)) )
+          Logic.equal
+            (applied context measure term [ Logic.Symbol each ])
+            (held_symbol context element (Logic.Symbol each)) )
       :: context.facts
   end;
   term
 
 and held_symbol context ty term =
-  let symbol = S.Potential (type_key ty) in
-  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
-  L.Apply (symbol, [ term ])
+  let symbol = Symbol.Potential (type_key ty) in
+  declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
+  Logic.Apply (symbol, [ term ])
 
 (* The facts since a mark in the list, which is kept reversed. *)
 and facts_since context count =
@@ -7846,7 +7947,7 @@ and block_value context frame (body : block) =
     | [] -> (
         match body.value with
         | Some last -> expression context frame last
-        | None -> Some (frame, L.Boolean true))
+        | None -> Some (frame, Logic.Boolean true))
     | statement_ :: rest -> (
         match statement context frame statement_ with
         | Some frame -> value_after frame rest
@@ -7885,7 +7986,7 @@ and ghost context frame body =
       context.unfinished <- unfinished)
     (fun () ->
       ignore (block_value context { frame with loop = None } body);
-      L.disjunction context.unfinished)
+      Logic.disjunction context.unfinished)
 
 and statement_kind context frame (node : statement) : frame option =
   let span = span_of frame.source node.origin in
@@ -7903,12 +8004,12 @@ and statement_kind context frame (node : statement) : frame option =
       let ty = operand_type context frame initial in
       let frame, term = operand_value context frame initial in
       let matched, bound = pattern_match context frame pattern term ty in
-      match block_value context (restrict frame (L.not_ matched)) otherwise with
+      match block_value context (restrict frame (Logic.not_ matched)) otherwise with
       | Some (fallen, _) ->
           oblige context fallen Unreachable span
             "This `else` block may finish, but it must leave the path, since the pattern did not \
              match."
-            (L.Boolean false);
+            (Logic.Boolean false);
           Some (restrict bound matched)
       | None -> Some (restrict bound matched))
   | Assign { target; value = assigned } ->
@@ -7935,7 +8036,7 @@ and statement_kind context frame (node : statement) : frame option =
           (Printf.sprintf "`%s` may not hold." (quote frame.source asserted.origin))
           term;
       Some frame
-  | Proof block_ -> Some (restrict frame (L.not_ (ghost context frame block_)))
+  | Proof block_ -> Some (restrict frame (Logic.not_ (ghost context frame block_)))
   | Parallel branches ->
       (* Branches are disjoint, so they can run in order. *)
       List.fold_left
@@ -8018,7 +8119,7 @@ and concurrent context frame (node : statement) branches =
    the clauses about each part; a [mut] part comes back as the caller left
    it, which is any value of its type; and a yielding method may end here,
    if a loop stops it, so its other clauses and [self]'s invariant hold. *)
-and yield_part context frame (node : statement) (mode : T.mode) (part : operand) =
+and yield_part context frame (node : statement) (mode : Types.mode) (part : operand) =
   let span = span_of frame.source node.origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
   | Some (part_type, kind), Some (each, at_end), Some before ->
@@ -8040,7 +8141,7 @@ and yield_part context frame (node : statement) (mode : T.mode) (part : operand)
       (* What the caller leaves in a part lent [mut] is stored back in each
          place it lends. *)
       let frame, part_after =
-        if mode = T.Mut && Core_walk.lent_places part <> [] then (
+        if mode = Types.Mut && Core_walk.lent_places part <> [] then (
           let part_after = arrive context frame "lent" part_type in
           if kind = `Lends then
             context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
@@ -8050,7 +8151,7 @@ and yield_part context frame (node : statement) (mode : T.mode) (part : operand)
       let after = appended context frame part_type before part_after in
       let frame = { frame with yielded_so_far = Some after } in
       if kind = `Yields then begin
-        show at_end ~at:frame ~result:None ~yielded:after ~finished:(Some (L.Boolean false))
+        show at_end ~at:frame ~result:None ~yielded:after ~finished:(Some (Logic.Boolean false))
           ~when_:"at this `yield`, where a loop may stop the method";
         match (frame.self, frame.self_type) with
         | Some self, Some self_type ->
@@ -8081,22 +8182,22 @@ and written_back context frame (part : operand) ty after =
                     match variant with
                     | None -> selected
                     | Some _ ->
-                        L.ite
-                          (L.Is (constructor_name ty variant, after))
+                        Logic.ite
+                          (Logic.Is (constructor_name ty variant, after))
                           selected
                           (arrive context frame "lent" field_type)
                   in
                   written_back context frame field field_type value
               | _ -> frame)
             frame fields
-      | None -> raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (T.show ty))))
+      | None -> raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty))))
   | Value _ -> frame
 
 (* A storage whose element at [index] is [part], and which is otherwise the
    one it was. *)
 and storage_updated context frame element storage index part =
   let storage_type =
-    T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
+    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let updated = arrive context frame "changed" storage_type in
   replaced context frame element
@@ -8104,21 +8205,23 @@ and storage_updated context frame element storage index part =
     ~after:(buffer_model context Storage element updated)
     index part;
   assume context frame
-    (L.equal (buffer_capacity context element updated) (buffer_capacity context element storage));
+    (Logic.equal
+       (buffer_capacity context element updated)
+       (buffer_capacity context element storage));
   updated
 
 (* An array whose element at [index] is [part], and which is otherwise the
    one it was. *)
-and array_updated context frame (array_type : T.ty) array index part =
+and array_updated context frame (array_type : Types.ty) array index part =
   match array_type with
-  | Named { arguments = T.Type element :: _; _ } ->
+  | Named { arguments = Types.Type element :: _; _ } ->
       let updated = arrive context frame "changed" array_type in
       replaced context frame element
         ~before:(array_model context frame array_type array)
         ~after:(array_model context frame array_type updated)
         index part;
       updated
-  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show array_type)))
+  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show array_type)))
 
 (* The owner of a slice lent to change, after the change: as long as it
    was, and the same outside the slice's run. *)
@@ -8126,8 +8229,8 @@ and sliced_owner_changed context frame (base : place) ~start ~stop =
   let owner_type = place_type context frame base in
   let element =
     match owner_type with
-    | Named { arguments = T.Type element :: _; _ } -> element
-    | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type)))
+    | Named { arguments = Types.Type element :: _; _ } -> element
+    | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (Types.show owner_type)))
   in
   let frame, owner = place_value context frame base in
   let changed = arrive context frame "changed" owner_type in
@@ -8138,7 +8241,7 @@ and sliced_owner_changed context frame (base : place) ~start ~stop =
       run_replaced context frame element ~before ~after ~start ~stop ~run:None;
       assume_valid context frame owner_type changed;
       store context frame base changed
-  | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type)))
+  | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (Types.show owner_type)))
 
 (* That one sequence is another as long, the same outside the run from
    [start] to before [stop], and, where [run] is given, [run]'s elements in
@@ -8147,17 +8250,17 @@ and run_replaced context frame element ~before ~after ~start ~stop ~run =
   let length sequence = sequence_length context element sequence in
   let at = element_at context element in
   let k = fresh_name context "index" in
-  let index = L.Symbol k in
+  let index = Logic.Symbol k in
   let inside =
     match run with
-    | Some run -> L.equal (at after index) (at run (L.Operation ("-", [ index; start ])))
-    | None -> L.Boolean true
+    | Some run -> Logic.equal (at after index) (at run (Logic.Operation ("-", [ index; start ])))
+    | None -> Logic.Boolean true
   in
-  assume context frame (L.equal (length after) (length before));
+  assume context frame (Logic.equal (length after) (length before));
   assume context frame
-    (L.Forall
-       ( [ (k, L.Int) ],
-         L.(
+    (Logic.Forall
+       ( [ (k, Logic.Int) ],
+         Logic.(
            Operation ("<=", [ int 0; index ])
            &&& Operation ("<", [ index; length before ])
            ==> ite
@@ -8172,11 +8275,12 @@ and replaced context frame element ~before ~after index part =
   let at = element_at context element in
   let k = fresh_name context "index" in
   assume context frame
-    (L.conjunction [ L.equal (length after) (length before); L.equal (at after index) part ]);
+    (Logic.conjunction
+       [ Logic.equal (length after) (length before); Logic.equal (at after index) part ]);
   assume context frame
-    (L.Forall
-       ( [ (k, L.Int) ],
-         L.(
+    (Logic.Forall
+       ( [ (k, Logic.Int) ],
+         Logic.(
            Operation ("<=", [ int 0; Symbol k ])
            &&& Operation ("<", [ Symbol k; length before ])
            &&& not_ (equal (Symbol k) index)
@@ -8214,7 +8318,7 @@ and store context frame (place : place) new_value =
       | Some [ (None, fields) ] ->
           let frame, base_value = place_value context frame base in
           let rebuilt =
-            L.Apply
+            Logic.Apply
               ( constructor_name base_type None,
                 List.map
                   (fun (name_, _) ->
@@ -8225,15 +8329,15 @@ and store context frame (place : place) new_value =
           store context frame base rebuilt
       | _ ->
           raise
-            (Foreign_unsupported (Printf.sprintf "assigning to a field of `%s`" (T.show base_type)))
-      )
+            (Foreign_unsupported
+               (Printf.sprintf "assigning to a field of `%s`" (Types.show base_type))))
   | Lent
       {
         kind =
           Call
             {
               callee =
-                Intrinsic { operation = Storage_at_mut; type_arguments = T.Type element :: _ };
+                Intrinsic { operation = Storage_at_mut; type_arguments = Types.Type element :: _ };
               arguments = [ Passed { value = Place storage; _ }; Passed { value = index; _ } ];
               _;
             };
@@ -8263,7 +8367,8 @@ and store context frame (place : place) new_value =
         kind =
           Call
             {
-              callee = Intrinsic { operation = View_at_mut; type_arguments = T.Type element :: _ };
+              callee =
+                Intrinsic { operation = View_at_mut; type_arguments = Types.Type element :: _ };
               arguments = [ Passed { value = Place owner; _ }; Passed { value = index; _ } ];
               _;
             };
@@ -8278,7 +8383,7 @@ and store context frame (place : place) new_value =
         ~after:(buffer_model context View element updated)
         index new_value;
       store context frame owner updated
-  | Lent { kind = Call { lends = Some T.Mut; _ }; _ } ->
+  | Lent { kind = Call { lends = Some Types.Mut; _ }; _ } ->
       store_lent context frame place (fun _ -> new_value)
   | Lent _ | Temporary _ -> raise (Foreign_unsupported "assigning to this place")
 
@@ -8319,7 +8424,7 @@ and with_target_keys context frame target f =
    changed. *)
 and lent_root (place : place) =
   match place with
-  | Lent { kind = Call { lends = Some T.Mut; callee; _ }; _ } -> (
+  | Lent { kind = Call { lends = Some Types.Mut; callee; _ }; _ } -> (
       match callee with
       | Intrinsic { operation = Storage_at_mut | Array_at_mut | View_at_mut; _ } -> false
       | _ -> true)
@@ -8340,7 +8445,7 @@ and store_lent context frame (place : place) leave =
       match constructors context base_type with
       | Some [ (None, fields) ] ->
           store_lent context frame base (fun base_value ->
-              L.Apply
+              Logic.Apply
                 ( constructor_name base_type None,
                   List.map
                     (fun (name_, _) ->
@@ -8349,8 +8454,8 @@ and store_lent context frame (place : place) leave =
                     fields ))
       | _ ->
           raise
-            (Foreign_unsupported (Printf.sprintf "assigning to a field of `%s`" (T.show base_type)))
-      )
+            (Foreign_unsupported
+               (Printf.sprintf "assigning to a field of `%s`" (Types.show base_type))))
   | _ -> store context frame place (leave (snd (place_value context frame place)))
 
 (* What a loop's body may change, which is havocked at its head: the local
@@ -8373,8 +8478,8 @@ and changed_places ?(condition : expression option) frame (body : block) : chang
           | Call { arguments; _ } ->
               List.iter
                 (function
-                  | Passed { mode = T.Mut; value = Place place; _ } -> note place
-                  | Passed { mode = T.Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
+                  | Passed { mode = Types.Mut; value = Place place; _ } -> note place
+                  | Passed { mode = Types.Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
                       note base
                   | Passed _ | Default -> ())
                 arguments
@@ -8400,7 +8505,7 @@ and changed_places ?(condition : expression option) frame (body : block) : chang
           (match node.kind with
           | Assign { target; _ } | Compound_assign { target; _ } -> note target
           | For { iteration = Cursor { cursor = place; _ }; _ } -> note place
-          | Yield { mode = T.Mut; part } -> List.iter note (Core_walk.lent_places part)
+          | Yield { mode = Types.Mut; part } -> List.iter note (Core_walk.lent_places part)
           | _ -> ());
           Core_walk.statement_children visit node);
       pattern = (fun node -> Core_walk.pattern_children visit node);
@@ -8419,7 +8524,9 @@ and havoc context frame (changed : changed) =
   let frame =
     List.fold_left
       (fun frame local ->
-        let ty = match local_type context frame local with Some ty -> ty | None -> T.Integer in
+        let ty =
+          match local_type context frame local with Some ty -> ty | None -> Types.Integer
+        in
         { frame with locals = Locals.add local (arrive context frame "loop" ty) frame.locals })
       frame changed.changed_locals
   in
@@ -8435,7 +8542,7 @@ and havoc context frame (changed : changed) =
 and preserved_validity context (entry : frame) (changed : changed) =
   let obligation name ty before read =
     match validity context entry ~assuming:false ~deep:true ty before with
-    | L.Boolean true -> None
+    | Logic.Boolean true -> None
     | valid -> Some (name, ty, valid, read)
   in
   List.filter_map
@@ -8460,7 +8567,7 @@ and assume_preserved_validity context head preserved =
       match read head with
       | Some term ->
           assume context head
-            (L.( ==> ) valid_on_entry (validity context head ~assuming:true ~deep:true ty term))
+            (Logic.( ==> ) valid_on_entry (validity context head ~assuming:true ~deep:true ty term))
       | None -> ())
     preserved
 
@@ -8471,8 +8578,9 @@ and check_preserved_validity context end_ span preserved =
       | Some term ->
           oblige context end_ Invariant span
             (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
-               (T.show ty) name)
-            (L.( ==> ) valid_on_entry (validity context end_ ~assuming:false ~deep:true ty term))
+               (Types.show ty) name)
+            (Logic.( ==> ) valid_on_entry
+               (validity context end_ ~assuming:false ~deep:true ty term))
       | None -> ())
     preserved
 
@@ -8542,16 +8650,17 @@ and while_ context frame (node : statement) condition clauses body =
         let _, l = value context { at with checking = false } left in
         let _, r = value context { at with checking = false } right in
         match compared with
-        | Less -> Some [ L.Operation ("-", [ r; l ]) ]
-        | Less_equal -> Some [ L.Operation ("+", [ L.Operation ("-", [ r; l ]); L.int 1 ]) ]
-        | Greater -> Some [ L.Operation ("-", [ l; r ]) ]
-        | _ -> Some [ L.Operation ("+", [ L.Operation ("-", [ l; r ]); L.int 1 ]) ])
+        | Less -> Some [ Logic.Operation ("-", [ r; l ]) ]
+        | Less_equal ->
+            Some [ Logic.Operation ("+", [ Logic.Operation ("-", [ r; l ]); Logic.int 1 ]) ]
+        | Greater -> Some [ Logic.Operation ("-", [ l; r ]) ]
+        | _ -> Some [ Logic.Operation ("+", [ Logic.Operation ("-", [ l; r ]); Logic.int 1 ]) ])
     | `None -> None
   in
   let start_measures = if context.terminates then measure_terms inside else None in
   if context.terminates && start_measures = None then
     oblige context inside Termination span "This loop may not end: give it a `decreases` clause."
-      (L.Boolean false);
+      (Logic.Boolean false);
   (* With one measure, which every iteration shows to start at or above
      zero and to decrease, the loop runs at most one more time than the
      measure on entry. A ghost [last] is the measure at the start of the
@@ -8559,9 +8668,9 @@ and while_ context frame (node : statement) condition clauses body =
   let most =
     match (start_measures, measure_terms frame, iterations) with
     | Some [ at_head ], Some [ on_entry ], Some iterations ->
-        let last = fresh context head "last" L.Int in
+        let last = fresh context head "last" Logic.Int in
         assume context head
-          L.(
+          Logic.(
             equal iterations (int 0)
             ==> Operation ("<=", [ at_head; on_entry ])
             &&& (Operation (">=", [ iterations; int 1 ])
@@ -8573,7 +8682,7 @@ and while_ context frame (node : statement) condition clauses body =
                               on_entry;
                             ] )
                     &&& Operation ("<", [ at_head; last ]))));
-        [ Costs.at_least_zero (Costs.plus on_entry (L.int 1)) ]
+        [ Costs.at_least_zero (Costs.plus on_entry (Logic.int 1)) ]
     | _ -> []
   in
   let finished = block_value context inside body in
@@ -8594,14 +8703,14 @@ and while_ context frame (node : statement) condition clauses body =
     ends;
   let exit_ =
     loop_exit context
-      { (restrict head (L.not_ test)) with loop = frame.loop }
+      { (restrict head (Logic.not_ test)) with loop = frame.loop }
       costs ~iterations ~most
   in
   let left =
     List.map
       (fun (frame' : frame) ->
         loop_exit context { frame' with loop = frame.loop } costs
-          ~iterations:(Option.map (fun n -> Costs.plus n (L.int 1)) iterations)
+          ~iterations:(Option.map (fun n -> Costs.plus n (Logic.int 1)) iterations)
           ~most)
       exits.breaks
   in
@@ -8649,14 +8758,14 @@ and iterations_so_far context head costs =
         match cost.rule with Per_iteration _ -> true | Clause_bound _ -> false)
       costs
   then begin
-    let iterations = fresh context head "iterations" L.Int in
-    assume context head (L.Operation ("<=", [ L.int 0; iterations ]));
+    let iterations = fresh context head "iterations" Logic.Int in
+    assume context head (Logic.Operation ("<=", [ Logic.int 0; iterations ]));
     Some iterations
   end
   else None
 
 and one_step (counter : Costs.counter) =
-  match counter.resource with Time -> L.int 1 | _ -> Costs.zero
+  match counter.resource with Time -> Logic.int 1 | _ -> Costs.zero
 
 and for_ context frame (node : statement) (pattern : pattern) (iteration : iteration) clauses body =
   let outer = context.iteration_returns in
@@ -8670,10 +8779,10 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
   | Some ended, (_, ty) :: _ ->
       (* Where an iteration returned, the function returns once the loop has
          ended, on a path of its own. *)
-      let returned = fresh context ended "returned" L.Bool in
+      let returned = fresh context ended "returned" Logic.Bool in
       let value = Option.map (fun ty -> arrive context ended "result" ty) ty in
       context.returns <- (restrict ended returned, value) :: context.returns;
-      Some (restrict ended (L.not_ returned))
+      Some (restrict ended (Logic.not_ returned))
   | _ -> ended
 
 and loop_over context frame (node : statement) (pattern : pattern) (iteration : iteration) clauses
@@ -8697,23 +8806,24 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       (* The [n]th iteration, from 0, has the index [low + n]. *)
       let count =
         Costs.normalize
-          (if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low)
+          (if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1)
+           else Costs.minus high low)
       in
-      let iterations = fresh context head "iterations" L.Int in
+      let iterations = fresh context head "iterations" Logic.Int in
       assume context head
-        L.(
+        Logic.(
           Operation ("<=", [ int 0; iterations ])
           &&& Operation ("<=", [ iterations; Costs.at_least_zero count ]));
       (* [yielded] is the indexes so far, from [low] up. *)
       let before = some_parts context head element in
-      assume context head (L.equal (sequence_length context element before) iterations);
+      assume context head (Logic.equal (sequence_length context element before) iterations);
       (let position = fresh_name context "index" in
-       match sequence_at context element before (L.Symbol position) with
+       match sequence_at context element before (Logic.Symbol position) with
        | Some yielded_index ->
            assume context head
-             (L.Forall
-                ( [ (position, L.Int) ],
-                  L.(
+             (Logic.Forall
+                ( [ (position, Logic.Int) ],
+                  Logic.(
                     Operation ("<=", [ int 0; Symbol position ])
                     &&& Operation ("<", [ Symbol position; iterations ])
                     ==> equal yielded_index (Operation ("+", [ low; Symbol position ]))) ))
@@ -8727,7 +8837,7 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       assume_invariants context head clauses;
       let exits = { breaks = []; continues = [] } in
       let inside =
-        { (restrict head (L.Operation ("<", [ iterations; count ]))) with loop = Some exits }
+        { (restrict head (Logic.Operation ("<", [ iterations; count ]))) with loop = Some exits }
       in
       let through = appended context inside element before index in
       let inside = { inside with yielded = outer_yielded } in
@@ -8738,21 +8848,23 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
       let with_through (f : frame) =
-        at_index { f with loop = frame.loop; yielded = Some through } (Costs.plus index (L.int 1))
+        at_index
+          { f with loop = frame.loop; yielded = Some through }
+          (Costs.plus index (Logic.int 1))
       in
       end_iterations context frame node clauses start ~head ~inside ~ends ~breaks:exits.breaks
         ~with_through;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
         loop_exit context
-          { (restrict head (L.Operation (">=", [ iterations; count ]))) with loop = frame.loop }
+          { (restrict head (Logic.Operation (">=", [ iterations; count ]))) with loop = frame.loop }
           costs ~iterations:(Some iterations) ~most
       in
       let left =
         List.map
           (fun (f : frame) ->
             loop_exit context (with_through f) costs
-              ~iterations:(Some (Costs.plus iterations (L.int 1)))
+              ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
               ~most)
           exits.breaks
       in
@@ -8763,7 +8875,7 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
   | Yielding_call _ -> unsupported span "this `for` loop"
   | Cursor { cursor; next = None } -> (
       match place_type context frame cursor with
-      | T.Cursor { method_; _ } as cursor_type ->
+      | Types.Cursor { method_; _ } as cursor_type ->
           pulled_loop context frame node pattern cursor clauses body ~cursor_type ~method_
       | _ -> unsupported span "this `for` loop")
   | Cursor { cursor; next = Some next } ->
@@ -8783,7 +8895,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
     | Function { path; type_arguments } -> (
         let substitution =
           match Interface.Impls.signature context.database path with
-          | Some (signature : T.signature) -> callee_substitution frame signature type_arguments
+          | Some (signature : Types.signature) -> callee_substitution frame signature type_arguments
           | None -> []
         in
         match Interface.Impls.signature context.database path with
@@ -8802,7 +8914,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
           {
             trait with
             trait_arguments =
-              List.map (T.substitute_argument frame.substitution) trait.trait_arguments;
+              List.map (Types.substitute_argument frame.substitution) trait.trait_arguments;
           }
         in
         let evidence : evidence =
@@ -8822,12 +8934,12 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
           signature_terminates context path,
           method_contract ?reading_package:(reading_package context) context.database trait name
             receiver evidence,
-          [ ({ T.owner = trait.trait; name = "Self" }, T.Type self_type) ] )
+          [ ({ Types.owner = trait.trait; name = "Self" }, Types.Type self_type) ] )
     | _ -> (None, false, None, [])
   in
   if context.terminates && not terminates then
     oblige context frame Termination span
-      "This loop may not end: the method it loops over has no `time` clause." (L.Boolean false);
+      "This loop may not end: the method it loops over has no `time` clause." (Logic.Boolean false);
   let element_type = substituted context frame pattern.type_ in
   (* The method's frame, with the loop's arguments. *)
   let method_frame (at : frame) (own : part) = part_frame at own ~arguments ~substitution in
@@ -8860,7 +8972,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
     List.fold_left
       (fun (changed : changed) (passed : passed) ->
         match (passed.mode, passed.operand) with
-        | T.Mut, Some (Place place) -> (
+        | Types.Mut, Some (Place place) -> (
             match root_of place with
             | Some Self -> { changed with changes_self = frame.self <> None }
             | Some local ->
@@ -8876,17 +8988,17 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
     ~start:(fun head -> some_parts context head element_type)
     ~receive:(fun head before ->
       (* Each time round, the method either yields another part or ends. *)
-      let has_another = fresh context head "another" L.Bool in
+      let has_another = fresh context head "another" Logic.Bool in
       let element = arrive context head "element" element_type in
       let inside = restrict head has_another in
       assume_valid context inside element_type element;
       method_clauses inside ~each:true ~result:(Some element) ~yielded:before ~finished:None;
       let through = appended context inside element_type before element in
       method_clauses inside ~each:false ~result:None ~yielded:through
-        ~finished:(Some (L.Boolean false));
+        ~finished:(Some (Logic.Boolean false));
       method_clauses
-        (restrict head (L.not_ has_another))
-        ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
+        (restrict head (Logic.not_ has_another))
+        ~each:false ~result:None ~yielded:before ~finished:(Some (Logic.Boolean true));
       { has_another; element; through; advance = Fun.id })
 
 (* What a loop changes, with the local or [self] its cursor is in, which
@@ -8916,7 +9028,7 @@ and pulled_loop context frame (node : statement) pattern (cursor_place : place) 
   if context.terminates && not (signature_terminates context method_) then
     oblige context frame Termination span
       "This loop may not end: the method its cursor comes from has no `time` clause."
-      (L.Boolean false);
+      (Logic.Boolean false);
   let changed = with_cursor frame node (changed_places frame body) cursor_place in
   let at_head = ref cursor in
   receiving_loop context frame node pattern clauses body ~element_type:cursor_method.element
@@ -8929,11 +9041,11 @@ and pulled_loop context frame (node : statement) pattern (cursor_place : place) 
     ~receive:(fun head _ ->
       let pulled, later = pull context head cursor_method !at_head ~cursor_type in
       let option_type =
-        T.Named { path = option_path; arguments = [ T.Type cursor_method.element ] }
+        Types.Named { path = option_path; arguments = [ Types.Type cursor_method.element ] }
       in
       {
-        has_another = L.Is (constructor_name option_type (Some "Some"), pulled);
-        element = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]);
+        has_another = Logic.Is (constructor_name option_type (Some "Some"), pulled);
+        element = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]);
         through = cursor_yielded context cursor_type cursor_method.element later;
         advance = (fun (frame : frame) -> store context frame cursor_place later);
       })
@@ -8952,7 +9064,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
     | Trait_method { trait; evidence = Impl _ as evidence; _ } -> (trait, evidence)
     | _ ->
         unsupported span "a loop over `%s`, whose `Cursor` the prover cannot find"
-          (T.show cursor_type)
+          (Types.show cursor_type)
   in
   let impl =
     match evidence with Impl { impl; _ } -> impl | _ -> bug "a cursor's evidence is not an impl"
@@ -8965,14 +9077,14 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
     | Some contract -> contract
     | None ->
         unsupported span "a loop over `%s`, whose `next` the prover cannot read"
-          (T.show cursor_type)
+          (Types.show cursor_type)
   in
   let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
-  let option_type = T.Named { path = option_path; arguments = [ T.Type element_type ] } in
+  let option_type = Types.Named { path = option_path; arguments = [ Types.Type element_type ] } in
   let call_ : call =
     {
       callee = next;
-      arguments = [ Passed { mode = T.Mut; value = Place cursor_place; mark = None } ];
+      arguments = [ Passed { mode = Types.Mut; value = Place cursor_place; mark = None } ];
       lends = None;
       uses = [];
     }
@@ -8984,13 +9096,13 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
   if context.terminates && not (signature_terminates context path) then
     oblige context frame Termination span
       (Printf.sprintf "This loop may not end: `%s`'s `next` has no `time` clause."
-         (T.show cursor_type))
-      (L.Boolean false);
+         (Types.show cursor_type))
+      (Logic.Boolean false);
   if context.terminates && measures = None then
     oblige context frame Termination span
       "This loop may not end: a cursor of a type's own promises no end, so give the loop a \
        `decreases` clause."
-      (L.Boolean false);
+      (Logic.Boolean false);
   let measured (at : frame) =
     Option.map
       (List.map (fun measure -> snd (value context { at with checking = false } measure)))
@@ -9024,7 +9136,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
           [
             {
               position = 0;
-              mode = T.Mut;
+              mode = Types.Mut;
               operand = Some (Place cursor_place);
               type_ = cursor_type;
               term = cursor;
@@ -9033,11 +9145,11 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
           ]
           ~havoc_mut
           ~substitution_of:(fun _ ->
-            [ ({ T.owner = cursor_trait; name = "Self" }, T.Type cursor_type) ])
+            [ ({ Types.owner = cursor_trait; name = "Self" }, Types.Type cursor_type) ])
           ~instance:[ type_key cursor_type ]
       in
-      let has_another = L.Is (constructor_name option_type (Some "Some"), pulled) in
-      let element = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
+      let has_another = Logic.Is (constructor_name option_type (Some "Some"), pulled) in
+      let element = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
       let inside = restrict after has_another in
       assume_valid context inside element_type element;
       {
@@ -9083,7 +9195,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
   end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks:exits.breaks
     ~with_through;
-  let ended = received.advance (restrict head (L.not_ received.has_another)) in
+  let ended = received.advance (restrict head (Logic.not_ received.has_another)) in
   let varies = mentions_fresh_after context loop.fresh_mark in
   let ended_facts = facts_since context ended_mark @ facts_since context loop.facts_mark in
   let exit_ =
@@ -9096,7 +9208,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
     List.map
       (fun (f : frame) ->
         loop_exit context (with_through f) costs
-          ~iterations:(Some (Costs.plus iterations (L.int 1)))
+          ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
           ~most:
             (Costs.upper_bounds ~varies ~facts:ended_facts
                (sequence_length context element_type through)))
@@ -9198,7 +9310,7 @@ let empty_frame source =
     self = None;
     old_self = None;
     result = None;
-    condition = L.Boolean true;
+    condition = Logic.Boolean true;
     checking = true;
     bound = [];
     binders = [];
@@ -9253,8 +9365,8 @@ let promises context (source : source) locals (costs : Core.cost list) ~inherite
                         (Own_bound { counter = counter_number context counter; inherited })
                     in
                     context.groups <- constants :: context.groups;
-                    declare context (L.Constant (constants.factor, L.Int));
-                    declare context (L.Constant (constants.addend, L.Int));
+                    declare context (Logic.Constant (constants.factor, Logic.Int));
+                    declare context (Logic.Constant (constants.addend, Logic.Int));
                     if not (List.mem_assoc counter context.own_constants) then
                       context.own_constants <- (counter, constants) :: context.own_constants;
                     Some constants
@@ -9289,7 +9401,7 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
   let goal =
     match (promise.counter.counting, promise.constants) with
     | Units, Some constants -> Costs.at_most spent (Costs.bound constants g)
-    | Exactly, _ -> L.equal spent g
+    | Exactly, _ -> Logic.equal spent g
     | _ -> Costs.at_most spent g
   in
   oblige context frame Cost span
@@ -9317,7 +9429,10 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
   let signature = Interface.Impls.signature database path in
   let terminates =
     proof
-    || match signature with Some (signature : T.signature) -> signature.terminates | None -> false
+    ||
+    match signature with
+    | Some (signature : Types.signature) -> signature.terminates
+    | None -> false
   in
   let home = home source in
   let context =
@@ -9339,7 +9454,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             in
             let self = arrive context frame "self" self_type in
             (match self with
-            | L.Symbol symbol -> context.entry <- symbol :: context.entry
+            | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
             (* A step of an update may be given a value in the middle of
                one. *)
@@ -9349,7 +9464,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             let ty = parameter.type_ in
             let term = arrive context frame ("parameter." ^ parameter.name) ty in
             (match term with
-            | L.Symbol symbol ->
+            | Logic.Symbol symbol ->
                 context.values <- (symbol, parameter.name) :: context.values;
                 context.entry <- symbol :: context.entry
             | _ -> ());
@@ -9427,7 +9542,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
               old_locals;
               self = Option.map fst self;
               old_self = start.self;
-              self_type = Option.map (fun (_, ty) -> T.substitute substitution ty) self;
+              self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
               result;
               checking = false;
               loop = None;
@@ -9442,9 +9557,9 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
   let trait_requires =
     match trait_frame start ~result:None with
     | Some (part, inside) ->
-        L.conjunction
+        Logic.conjunction
           (List.map (fun clause -> snd (clause_value context inside clause)) part.requires)
-    | None -> L.Boolean true
+    | None -> Logic.Boolean true
   in
   (* Its cost clauses, and its trait's, each count from zero. *)
   let promised =
@@ -9520,12 +9635,12 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
   in
   let mut_parameters =
     List.filter
-      (fun (parameter : Core.parameter) -> parameter.mode = T.Mut && parameter.local <> Self)
+      (fun (parameter : Core.parameter) -> parameter.mode = Types.Mut && parameter.local <> Self)
       parameters
   in
   let mut_self =
     List.exists
-      (fun (parameter : Core.parameter) -> parameter.mode = T.Mut && parameter.local = Self)
+      (fun (parameter : Core.parameter) -> parameter.mode = Types.Mut && parameter.local = Self)
       parameters
   in
   List.iter
@@ -9561,7 +9676,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             (fun (ensured : expression) ->
               let _, term =
                 value context
-                  { frame with yielded = Some yielded_so_far; finished = Some (L.Boolean true) }
+                  { frame with yielded = Some yielded_so_far; finished = Some (Logic.Boolean true) }
                   ensured
               in
               oblige context frame Ensures (at frame ensured)
@@ -9593,10 +9708,10 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
                       local_type context frame local )
               in
               match (parameter.mode, entry, ty) with
-              | (T.Mut | T.Own), Some entry, Some ty ->
+              | (Types.Mut | Types.Own), Some entry, Some ty ->
                   let potential_after =
                     match (parameter.mode, later) with
-                    | T.Mut, Some later -> potential context frame ty later
+                    | Types.Mut, Some later -> potential context frame ty later
                     | _ -> Costs.zero
                   in
                   Costs.plus total (Costs.minus potential_after (potential context frame ty entry))
@@ -9655,14 +9770,14 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
                     oblige context frame Ensures returns_span
                       "This method replaces one its trait provides, so it must return what the \
                        provided body returns, and it may not."
-                      (L.equal returned defined)
+                      (Logic.equal returned defined)
                 | None -> ()
                 end
               else
                 oblige context frame Ensures returns_span
                   "This method replaces one its trait provides, whose body is not functional, so \
                    there is no definition to show this one agrees with."
-                  (L.Boolean false)
+                  (Logic.Boolean false)
           | _ -> ()
           end
       | _ -> ())
@@ -9680,7 +9795,7 @@ let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
   List.iter
     (fun (law_source, (law : law)) ->
       let types = law_parameter_types ~substitution law in
-      if not (List.exists (fun ty -> T.is_error ty) types) then begin
+      if not (List.exists (fun ty -> Types.is_error ty) types) then begin
         (* The other laws are facts here, and this one is not. *)
         context.laws_assumed <- laws_key trait for_type :: context.laws_assumed;
         let terms =
@@ -9711,12 +9826,13 @@ let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
                 List.fold_left2
                   (fun (locals, types) (parameter : Core.parameter) term ->
                     ( Locals.add parameter.local term locals,
-                      Locals.add parameter.local (T.substitute renaming parameter.type_) types ))
+                      Locals.add parameter.local (Types.substitute renaming parameter.type_) types
+                    ))
                   (start.locals, start.types) parameters
                   (List.filteri (fun index _ -> index < List.length parameters) terms)
               in
               restrict start
-                (L.not_
+                (Logic.not_
                    (ghost context
                       {
                         start with
@@ -9735,8 +9851,8 @@ let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
         match without_costs context (fun () -> block_value context inside law.body) with
         | Some (_, holds) ->
             oblige context start Law at
-              (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (T.show_trait trait) law.name
-                 (T.show for_type))
+              (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait)
+                 law.name (Types.show for_type))
               holds
         | None -> ()
       end)
@@ -9756,8 +9872,8 @@ let type_ ?reveal database (source : source) ~path =
       let ty =
         match Query.demand database Interface.Environment.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
-            T.Named { path; arguments = Types.generic_arguments interface.type_generics }
-        | _ -> T.Named { path; arguments = [] }
+            Types.Named { path; arguments = Types.generic_arguments interface.type_generics }
+        | _ -> Types.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in
       let value_ = arrive context start "value" ty in
@@ -9774,8 +9890,8 @@ let type_ ?reveal database (source : source) ~path =
           oblige context at_value Cost (at at_value written)
             (Printf.sprintf
                "The potential of `%s` may be below zero for a value that meets its invariants."
-               (T.show ty))
-            (L.Operation ("<=", [ L.int 0; own ])))
+               (Types.show ty))
+            (Logic.Operation ("<=", [ Logic.int 0; own ])))
         potential
   | _ -> ());
   outcome context

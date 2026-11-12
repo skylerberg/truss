@@ -1,4 +1,3 @@
-module T = Types
 module Impls = Interface.Impls
 module Environment = Interface.Environment
 

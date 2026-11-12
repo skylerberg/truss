@@ -22,25 +22,23 @@
    values to function types. *)
 
 open Syntax
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 open State
-open Instantiation
 
-let panic : T.capability = Capability (Well_known.path Panic)
+let panic : Types.capability = Capability (Well_known.path Panic)
 
 (* The capability that [concurrent] code uses, because its behavior can
    depend on task scheduling. *)
-let tasks : T.capability = Capability Core_walk.tasks_capability
+let tasks : Types.capability = Capability Core_walk.tasks_capability
 
 (* [spans] maps a syntax node id to its span. A core node is reported at the
    span of its origin. *)
 type checking = {
   state : state;
   spans : span array;
-  mutable provides : (T.capability list * Core.implementation list * Core.block) list;
+  mutable provides : (Types.capability list * Core.implementation list * Core.block) list;
       (** Every [provide] of the definition: the capabilities available at it, its implementations,
           and its body. *)
 }
@@ -64,9 +62,9 @@ type scope_kind =
           error messages. *)
 
 type scope = {
-  available : T.capability list;
+  available : Types.capability list;
   kind : scope_kind;
-  implemented_capability : T.capability option;
+  implemented_capability : Types.capability option;
       (** Set in a method of an [impl] of a capability, and not in a lambda, a [parallel] branch, or
           a specification inside it. An indirect call (a call through a function value) in such a
           method may use that capability, because the method can pass its own implementation on to
@@ -87,7 +85,7 @@ let no_capabilities description =
    grants it. [uses] are the capabilities that [what], a definition of
    [package], uses. Capability parameters are not checked: they are
    instantiated by the caller. *)
-let check_grant checking (origin : Core.origin) ~what package (uses : T.capability list) =
+let check_grant checking (origin : Core.origin) ~what package (uses : Types.capability list) =
   List.iter
     (fun capability ->
       report checking Not_granted origin (Interface.Grants.message ~what ~of_:package capability))
@@ -102,7 +100,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
   match callee with
   | Function { path; _ } ->
       Option.iter
-        (fun (signature : T.signature) ->
+        (fun (signature : Types.signature) ->
           check_grant checking origin
             ~what:(Printf.sprintf "`%s`" (Path.show path))
             (Path.package path) signature.uses)
@@ -119,13 +117,13 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
           match Interface.Impls.impl_interface state.database impl with
           | Some interface ->
               List.iter
-                (fun (method_name, method_receiver, (method_signature : T.signature)) ->
+                (fun (method_name, method_receiver, (method_signature : Types.signature)) ->
                   if method_name = name && method_receiver = receiver then
                     check_grant checking origin
                       ~what:
                         (Printf.sprintf "The `impl` of `%s` for `%s`"
-                           (T.show_trait interface.implements)
-                           (T.show interface.for_type))
+                           (Types.show_trait interface.implements)
+                           (Types.show interface.for_type))
                       (Path.package impl) method_signature.uses)
                 interface.impl_methods
           | None -> ())
@@ -135,7 +133,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
 (* Adds the constraint that [required] is a subset of the capabilities
    available in [scope]. [origin] is where a violation is reported. *)
 let require_available checking scope (origin : Core.origin) ?(for_implementation = false)
-    ?(indirect_call = false) (required : T.capability list) =
+    ?(indirect_call = false) (required : Types.capability list) =
   let state = checking.state in
   let superset =
     if indirect_call then union scope.available (Option.to_list scope.implemented_capability)
@@ -143,7 +141,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
   in
   let report_missing =
     List.iter (fun capability ->
-        let shown = T.show_capability capability in
+        let shown = Types.show_capability capability in
         match scope.kind with
         | Lambda_body lambda ->
             report checking Lambda_uses lambda
@@ -167,7 +165,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
               (Printf.sprintf "This implementation uses `%s`, which is not available here." shown)
         | Function_body -> (
             match capability with
-            | T.Capability _ ->
+            | Types.Capability _ ->
                 report checking Not_available origin
                   (Printf.sprintf
                      "This call uses `%s`, which is not available here. Declare it with `uses %s`, \
@@ -196,7 +194,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
 let require_intrinsic_uses checking scope (origin : Core.origin) operation =
   if Option.is_none scope.implemented_capability then
     require_available checking scope origin
-      (List.map (fun capability -> T.Capability capability) (Intrinsic.uses operation))
+      (List.map (fun capability -> Types.Capability capability) (Intrinsic.uses operation))
 
 (* Handles a callee that is stored in a node other than a [Call] (see
    [Core_walk.visit]). It requires the [uses] of the callee's signature. A
@@ -220,20 +218,21 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
         | Some method_, Some interface ->
             let signature = method_.method_signature in
             Impls.normalize_capabilities state.database ~bounds:(bounds state)
-              (T.substitute_capabilities
+              (Types.substitute_capabilities
                  (Interface.Properties.trait_substitution interface ~self:self_type trait
-                 @ Option.value ~default:[] (T.substitution_of signature.generics type_arguments))
+                 @ Option.value ~default:[]
+                     (Types.substitution_of signature.generics type_arguments))
                  signature.uses)
         | _ -> [])
   | Capability_method { capability; _ } ->
-      require_available checking scope origin [ T.Capability capability ]
+      require_available checking scope origin [ Types.Capability capability ]
   | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
   | Indirect _ -> ()
 
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
   | Lambda { body; _ } ->
-      let uses = match node.type_ with T.Function { uses; _ } -> uses | _ -> [] in
+      let uses = match node.type_ with Types.Function { uses; _ } -> uses | _ -> [] in
       check_block checking
         { available = uses; kind = Lambda_body node.origin; implemented_capability = None }
         body
@@ -355,10 +354,10 @@ and check_provide checking scope implementations body =
       if impls = [] then
         report checking Not_an_implementation implementation.origin
           (Printf.sprintf "`%s` implements no capability, so it provides nothing."
-             (T.show implementation.type_));
+             (Types.show implementation.type_));
       let mutates =
         List.exists
-          (fun (_, (interface : T.impl_interface)) ->
+          (fun (_, (interface : Types.impl_interface)) ->
             List.exists (fun (_, receiver, _) -> receiver = Path.Mut) interface.impl_methods)
           impls
       in
@@ -378,18 +377,20 @@ and check_provide checking scope implementations body =
             ]
           "This implementation never changes its own state, so the place is provided without `mut`.";
       List.iter
-        (fun ((provided : Core.provided), (interface : T.impl_interface)) ->
+        (fun ((provided : Core.provided), (interface : Types.impl_interface)) ->
           check_grant checking implementation.origin
             ~what:
               (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
-                 (T.show interface.for_type))
+                 (Types.show interface.for_type))
             (Path.package provided.impl) interface.impl_uses;
           require_available checking scope implementation.origin ~for_implementation:true
             interface.impl_uses)
         impls;
       provided :=
         union !provided
-          (List.map (fun ((provided : Core.provided), _) -> T.Capability provided.capability) impls))
+          (List.map
+             (fun ((provided : Core.provided), _) -> Types.Capability provided.capability)
+             impls))
     implementations;
   checking.provides <- (scope.available, implementations, body) :: checking.provides;
   check_block checking { scope with available = union scope.available !provided } body
@@ -418,7 +419,7 @@ let solve (state : state) =
   let substitute capabilities =
     List.concat_map
       (function
-        | T.Capability_variable variable -> value_of variable | capability -> [ capability ])
+        | Types.Capability_variable variable -> value_of variable | capability -> [ capability ])
       capabilities
   in
   let missing (constraint_ : subset_constraint) =
@@ -434,7 +435,7 @@ let solve (state : state) =
         (fun changed (constraint_ : subset_constraint) ->
           let variables =
             List.filter_map
-              (function T.Capability_variable variable -> Some variable | _ -> None)
+              (function Types.Capability_variable variable -> Some variable | _ -> None)
               constraint_.superset
           in
           match (variables, missing constraint_) with
@@ -461,19 +462,19 @@ let solve (state : state) =
    parameter whose trait has a method with one, or a type that contains one
    of these at any depth. An associated capability set is empty for an [any]
    type, and can hold any capability for a type parameter. *)
-let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T.ty) =
+let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : Types.ty) =
   let inside = can_call_capability_code state ~bounds ~seen in
-  let trait_uses (trait : T.trait_reference) =
-    let can_hold_a_capability : T.capability -> bool = function
-      | Capability_projection _ -> ( match type_ with T.Any _ -> false | _ -> true)
+  let trait_uses (trait : Types.trait_reference) =
+    let can_hold_a_capability : Types.capability -> bool = function
+      | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
       | Capability _ | Capability_parameter _ | Capability_variable _ -> true
     in
     List.exists
-      (fun (bound : T.trait_reference) ->
+      (fun (bound : Types.trait_reference) ->
         match Query.demand state.database Environment.trait_interface bound.trait with
         | Some interface ->
             List.exists
-              (fun (method_ : T.trait_method) ->
+              (fun (method_ : Types.trait_method) ->
                 List.exists can_hold_a_capability method_.method_signature.uses)
               interface.methods
         | None -> false)
@@ -481,23 +482,23 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
   in
   let arguments =
     List.exists (function
-      | T.Type argument -> inside argument
-      | T.Value _ | T.Capabilities _ -> false)
+      | Types.Type argument -> inside argument
+      | Types.Value _ | Types.Capabilities _ -> false)
   in
   match type_ with
-  | T.Function { uses; inputs; output; _ } ->
+  | Types.Function { uses; inputs; output; _ } ->
       uses <> []
       || List.exists (fun (_, input) -> inside input) inputs
-      || inside (T.result_type output)
-  | T.Any trait -> trait_uses trait
-  | T.Parameter parameter -> List.exists trait_uses (bounds parameter)
-  | T.Cursor { arguments = type_arguments; _ } -> arguments type_arguments
-  | T.Named { path; arguments = type_arguments } -> (
+      || inside (Types.result_type output)
+  | Types.Any trait -> trait_uses trait
+  | Types.Parameter parameter -> List.exists trait_uses (bounds parameter)
+  | Types.Cursor { arguments = type_arguments; _ } -> arguments type_arguments
+  | Types.Named { path; arguments = type_arguments } -> (
       arguments type_arguments
       || (not (List.exists (Path.equal path) seen))
          &&
          let inside = can_call_capability_code state ~bounds ~seen:(path :: seen) in
-         let fields = List.exists (fun (field : T.field) -> inside field.field_type) in
+         let fields = List.exists (fun (field : Types.field) -> inside field.field_type) in
          (match Members.fields state.database path type_arguments with
            | Some named_fields -> fields named_fields
            | None -> false)
@@ -505,10 +506,12 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
          match Members.variants state.database path type_arguments with
          | Some variants ->
              List.exists
-               (fun (variant : T.variant) -> fields (Option.value ~default:[] variant.fields))
+               (fun (variant : Types.variant) -> fields (Option.value ~default:[] variant.fields))
                variants
          | None -> false)
-  | T.Projection _ | T.Never | T.Integer | T.Literal _ | T.Variable _ | T.Hole | T.Error _ -> false
+  | Types.Projection _ | Types.Never | Types.Integer | Types.Literal _ | Types.Variable _
+  | Types.Hole | Types.Error _ ->
+      false
 
 (* Data race prevention. A monitor locks its methods through [Tasks]: code
    generation wraps each method with [Tasks.lock] and [Tasks.unlock], using
@@ -529,13 +532,14 @@ let check_monitor_lock checking ~solved available implementations =
   let state = checking.state in
   let provides_tasks (implementation : Core.implementation) =
     List.exists
-      (fun ((provided : Core.provided), (_ : T.impl_interface)) ->
+      (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
         Path.equal provided.capability Core_walk.tasks_capability)
       (Form.capability_impls state implementation.type_)
   in
   let available =
     List.concat_map
-      (function T.Capability_variable variable -> solved variable | capability -> [ capability ])
+      (function
+        | Types.Capability_variable variable -> solved variable | capability -> [ capability ])
       available
   in
   if not (List.mem tasks available || List.exists provides_tasks implementations) then
@@ -550,7 +554,7 @@ let check_monitor_lock checking ~solved available implementations =
                 `provide`, and no implementation in it provides `Tasks`. Without the lock, the two \
                 calls are a data race. Provide the implementation of `Tasks` in this `provide` or \
                 in an enclosing one."
-               (T.show implementation.type_)))
+               (Types.show implementation.type_)))
       implementations
 
 (* Deadlock prevention. Where the body of a [provide] can use [Tasks], an
@@ -570,16 +574,16 @@ let check_monitor_callbacks checking implementations =
     (fun (implementation : Core.implementation) ->
       if implementation.mode = Mut then
         List.iter
-          (fun ((provided : Core.provided), (_ : T.impl_interface)) ->
+          (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
             match Query.demand state.database Environment.trait_interface provided.capability with
             | Some capability ->
                 List.iter
-                  (fun (method_ : T.trait_method) ->
+                  (fun (method_ : Types.trait_method) ->
                     let signature = method_.method_signature in
-                    let bounds = T.bounds_of signature.generics in
+                    let bounds = Types.bounds_of signature.generics in
                     match
                       List.find_opt
-                        (fun (parameter : T.parameter_info) ->
+                        (fun (parameter : Types.parameter_info) ->
                           can_call_capability_code state ~bounds parameter.type_)
                         signature.parameters
                     with
@@ -593,7 +597,7 @@ let check_monitor_callbacks checking implementations =
                               enter the monitor of a nested `provide`, and two tasks could \
                               deadlock. Pass the method the values that it needs instead of a \
                               callback."
-                             (T.show_capability (T.Capability provided.capability))
+                             (Types.show_capability (Types.Capability provided.capability))
                              method_.method_name parameter.name)
                     | None -> ())
                   capability.methods
@@ -647,7 +651,7 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
             | Some { interface = Impl_interface impl; _ }
               when Interface.Summary.kind_of state.database impl.implements.trait = Some Capability
               ->
-                Some (T.Capability impl.implements.trait)
+                Some (Types.Capability impl.implements.trait)
             | _ -> None)
       in
       Option.iter

@@ -77,6 +77,17 @@ It does not mean everyday vocabulary.
    A word on this list is fine as part of a longer name that says what the
    value is, such as `found_type` against `expected_type`.
 
+   Do not name a value, a parameter, or a module alias with one letter:
+   write `builder`, not `b`; `index`, not `i`; `Types.ty`, not `T.ty`.
+   A letter says nothing about the value, and the next author copies it.
+   Three uses keep a letter:
+
+   | Use | Example |
+   |---|---|
+   | A module's main type, by the OCaml convention | `type t`, `Store.t` |
+   | A type variable | `'a`, `'value` |
+   | A name a published specification gives, so the code reads against it | SHA-2's `a` to `h` |
+
 8. **Do not copy the style of existing text.** Much of this repository
    describes around standard terms in everyday words. Fix that text; do not
    match it. When you edit a file, fix the vague names and roundabout

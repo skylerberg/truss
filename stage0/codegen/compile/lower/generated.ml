@@ -17,7 +17,7 @@ let generated_state context ~anchor ~substitution =
               path = anchor;
               ordinal = 0;
             }
-          ~anchor ~substitution ~result:(Returns T.unit)))
+          ~anchor ~substitution ~result:(Returns Types.unit)))
 
 (* Where a generated function's result goes when it is another function's,
    passed on as it came: the slot, or a local for a result of no size. *)
@@ -54,7 +54,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   result_slot st result;
   let parameter_places =
     List.map
-      (fun (info : T.parameter_info) ->
+      (fun (info : Types.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
         (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
       capability_signature.parameters
@@ -83,7 +83,9 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
              });
         (capability, Lir.Copy (at outer)))
       captured;
-  let self_mode : T.mode = match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read in
+  let self_mode : Types.mode =
+    match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
+  in
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
@@ -121,7 +123,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
   result_slot st result;
   let parameter_places =
     List.map
-      (fun (info : T.parameter_info) ->
+      (fun (info : Types.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic [] info.type_ in
         (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
       capability_signature.parameters
@@ -206,7 +208,7 @@ let locked_table context (key : Instance.key) ~capability : Lir.table =
     capability = Some capability;
     entries =
       List.map
-        (fun (m : T.trait_method) ->
+        (fun (m : Types.trait_method) ->
           ( Instance.Locked_entry { capability; name = m.method_name },
             fst (entry_signature context m.method_signature) ))
         interface.methods;
@@ -225,7 +227,7 @@ let table context (key : Instance.key) : Lir.table =
       in
       let entries =
         List.map
-          (fun (m : T.trait_method) ->
+          (fun (m : Types.trait_method) ->
             let receiver =
               match
                 List.find_opt (fun (name, _, _) -> name = m.method_name) interface.impl_methods
@@ -394,7 +396,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   let parameter_places =
     List.map
       (fun ((mode : Ground.mode), ty) ->
-        let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+        let types_mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
         (parameter st ~owned:(mode = Own) mode ty, types_mode, ty))
       ty.parameters
   in
@@ -430,7 +432,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let _, trait_signature = dynamic_slot context trait name in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
-  let any = T.substitute_trait substitution interface.implements in
+  let any = Types.substitute_trait substitution interface.implements in
   let _, result, capabilities = any_entry_signature context ~any ~trait trait_signature in
   let st = generated_state context ~anchor:impl ~substitution in
   let b = st.b in
@@ -438,7 +440,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   result_slot st result;
   let parameter_places =
     List.map
-      (fun (info : T.parameter_info) ->
+      (fun (info : Types.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
         (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
       method_signature.parameters
@@ -448,7 +450,9 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let typed = local b (Pointer { target = Value self_ty; writable = true }) in
   if not (is_zero_size st self_ty) then emit b (Assign (at typed, Use (Copy (at value))));
-  let self_mode : T.mode = match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read in
+  let self_mode : Types.mode =
+    match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
+  in
   let result_ty =
     match method_signature.output with
     | Returns t -> Monomorphic.ground context.monomorphic substitution t
@@ -479,13 +483,13 @@ let any_table context (key : Instance.key) : Lir.table =
       let trait = interface.implements.trait in
       let substitution = bind interface.impl_generics type_arguments in
       let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
-      let any = T.substitute_trait substitution interface.implements in
+      let any = Types.substitute_trait substitution interface.implements in
       let drop_signature : Lir.signature =
         { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true }
       in
       let entries =
         List.map
-          (fun (m : T.trait_method) ->
+          (fun (m : Types.trait_method) ->
             let receiver =
               match
                 List.find_opt (fun (name, _, _) -> name = m.method_name) interface.impl_methods

@@ -4,7 +4,7 @@ val bind_local : Lowering.state -> Core.local -> Lir.place -> unit
 type bound_name = {
   local : Core.local;
   name : string;
-  mode : Definitions.T.mode;
+  mode : Types.mode;
   ty : Ground.ty;
   part : Lir.place;
 }
