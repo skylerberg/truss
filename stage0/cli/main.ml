@@ -1,12 +1,11 @@
-(* The [truss] command line: its commands and arguments, and where each
-   command runs.
+(* The [truss] command line: its commands and arguments, and the process
+   that runs each command.
 
-   A command that reads code runs where its worktree's session is: in the
-   background process, which keeps sessions between commands and starts
-   when a command first needs it, or, with [--no-server] or
-   [TRUSS_NO_SERVER=1], in the command's own process. Either way the same
-   code below parses the arguments and runs the command, so the answer is
-   the same. *)
+   A command that reads code runs in the process that holds its worktree's
+   session: the background process, which keeps sessions between commands
+   and starts when a command first needs it, or with [--no-server] or
+   [TRUSS_NO_SERVER=1], the client's own process. Both run the same code to
+   parse the arguments and run the command, so the result is the same. *)
 
 open Cmdliner
 
@@ -14,37 +13,38 @@ let directory =
   Arg.(
     value & opt dir "."
     & info [ "C" ] ~docv:"DIRECTORY"
-        ~doc:"Run as if from $(docv): find the packages from there, and read paths from there.")
+        ~doc:"Run as if from $(docv): find the packages and resolve paths from there.")
 
 let json =
   Arg.(
     value & flag
     & info [ "json" ]
         ~doc:
-          "Write one JSON document to standard output in place of the report for people, with \
-           every diagnostic and the command's own fields.")
+          "Write one JSON document to standard output instead of the report for people, with every \
+           diagnostic and the command's own fields.")
 
-let paths targets =
+let paths items =
   Arg.(
     value & pos_all string []
     & info [] ~docv:"FILE_OR_DIRECTORY"
-        ~doc:("Look only at the " ^ targets ^ " in these files and directories."))
+        ~doc:("Select only the " ^ items ^ " in these files and directories."))
 
-(* Hidden from the commands' help: for testing the compiler. *)
+(* For testing the compiler, so it is hidden from the commands' help. *)
 let sanitize =
   Arg.(
     value & flag
     & info [ "sanitize" ] ~docs:Manpage.s_none
         ~doc:
-          "Build with AddressSanitizer and UndefinedBehaviorSanitizer, and keep no test results. A \
-           report from either is a bug in the compiler.")
+          "Build with AddressSanitizer and UndefinedBehaviorSanitizer, and cache no test results. \
+           Every report is a compiler bug.")
 
 let exits =
   [
-    Cmd.Exit.info 0 ~doc:"when the command succeeded and the code had no problem.";
+    Cmd.Exit.info 0 ~doc:"when the command succeeded and the code has no error.";
     Cmd.Exit.info 1
-      ~doc:"when the code has a problem: a diagnostic, a test that did not pass, a refused build.";
-    Cmd.Exit.info 2 ~doc:"when the command could not do its job.";
+      ~doc:
+        "when the code has an error: a diagnostic, a test that did not pass, or a rejected build.";
+    Cmd.Exit.info 2 ~doc:"when the command could not run.";
   ]
 
 let command name ~doc ?(man = []) term = Cmd.v (Cmd.info name ~doc ~man ~exits) term
@@ -55,19 +55,17 @@ let check =
       value & flag
       & info [ "fix" ]
           ~doc:
-            "Apply every fix that is the only fix its diagnostic offers, check again, and repeat \
-             until none is left, then report the remaining diagnostics.")
+            "Apply every fix that is its diagnostic's only fix, check again, and repeat until no \
+             such fix remains, then report the remaining diagnostics.")
   in
   let no_proofs =
     Arg.(
       value & flag
       & info [ "no-proofs" ]
-          ~doc:
-            "Report every diagnostic but the prover's, so the pinned solver is not needed. Only \
-             the packages' own files are checked: a dependency is checked only for the proofs that \
-             the program relies on.")
+          ~doc:"Skip the prover: report every other diagnostic, without the pinned solver.")
   in
-  command "check" ~doc:"Report every diagnostic in the packages."
+  command "check"
+    ~doc:"Report every diagnostic of the packages and of the project's packages they depend on."
     Term.(
       const (fun directory fix no_proofs json ->
           Outcome.Exit (Check_command.run ~directory ~fix ~proofs:(not no_proofs) ~json))
@@ -85,15 +83,16 @@ let test =
       value & flag
       & info [ "timings" ]
           ~doc:
-            "After the report, list every test with how long it took, slowest first. A cached test \
-             shows the time of the run that kept its result.")
+            "After the report, list every selected test with its duration, slowest first. A cached \
+             test shows the duration from the run that produced its result.")
   in
   let rerun =
     Arg.(
       value & flag
-      & info [ "rerun" ] ~doc:"Run every selected test, using no kept results, and keep new ones.")
+      & info [ "rerun" ]
+          ~doc:"Run every selected test without reading cached results, and cache the new ones.")
   in
-  command "test" ~doc:"Check the packages, then run the tests whose results are not kept."
+  command "test" ~doc:"Check the packages, then run the tests without a cached result."
     Term.(
       const (fun directory paths match_ timings rerun json sanitize ->
           Outcome.Exit (Test_command.run ~directory ~paths ~match_ ~timings ~rerun ~json ~sanitize))
@@ -118,7 +117,7 @@ let run =
       const (fun directory release sanitize arguments ->
           Program_command.run ~directory ~release ~sanitize ~arguments)
       $ directory
-      $ release_flag "Build as $(b,truss build) does, refusing an $(b,echo) as it does."
+      $ release_flag "Build as $(b,truss build) does, which also rejects an $(b,echo)."
       $ sanitize $ arguments)
 
 let build =
@@ -127,19 +126,23 @@ let build =
       value
       & opt (some string) None
       & info [ "o"; "output" ] ~docv:"PATH"
-          ~doc:"Write the program to $(docv), and not to a file named after the package here.")
+          ~doc:
+            "Write the program to $(docv) instead of a file named after the package in the current \
+             directory.")
   in
   command "build"
     ~doc:
-      "Check the package and build its program for release, refusing any $(b,todo) or $(b,echo) \
-       its $(b,main) can reach."
+      "Check the package and build its program for release, rejecting a program whose $(b,main) \
+       reaches a $(b,todo) or an $(b,echo)."
     Term.(
       const (fun directory output json -> Program_command.build ~directory ~output ~json)
       $ directory $ output $ json)
 
 let holes =
   command "holes"
-    ~doc:"List every $(b,todo), with its type, the names in scope, and the work it blocks."
+    ~doc:
+      "List every $(b,todo) with its expected type, the bindings in scope, and the tests and \
+       $(b,main) that reach it."
     Term.(
       const (fun directory paths json -> Outcome.Exit (Holes_command.run ~directory ~paths ~json))
       $ directory $ paths "holes" $ json)
@@ -167,13 +170,10 @@ let impact =
       value
       & opt (some string) None
       & info [ "base" ] ~docv:"REVISION"
-          ~doc:
-            "Compare with the commit $(docv) names, and not with where this branch left the \
-             default branch.")
+          ~doc:"Compare with the commit $(docv) instead of the merge base with the default branch.")
   in
   command "impact"
-    ~doc:
-      "List the definitions the worktree's changes from a base commit modify, and their dependents."
+    ~doc:"List the definitions that the worktree changes since a base commit, and their dependents."
     Term.(
       const (fun directory base json -> Outcome.Exit (Impact_command.run ~directory ~base ~json))
       $ directory $ base $ json)
@@ -184,18 +184,18 @@ let name_argument =
     & pos 0 (some string) None
     & info [] ~docv:"NAME"
         ~doc:
-          "A definition: its full path, or the end of one, such as $(b,parse) or \
+          "A definition: its full path, or a suffix of one, such as $(b,parse) or \
            $(b,Forecast.summary).")
 
 let references =
-  command "references" ~doc:"List a definition's readers, part by part."
+  command "references" ~doc:"List the dependents of a definition, by part."
     Term.(
       const (fun directory name json ->
           Outcome.Exit (Graph_command.run ~directory ~direction:References ~name ~json))
       $ directory $ name_argument $ json)
 
 let dependencies =
-  command "dependencies" ~doc:"List a definition's dependencies, part by part."
+  command "dependencies" ~doc:"List the dependencies of a definition, by part."
     Term.(
       const (fun directory name json ->
           Outcome.Exit (Graph_command.run ~directory ~direction:Dependencies ~name ~json))
@@ -206,12 +206,12 @@ let explain =
     Arg.(
       required
       & pos 0 (some string) None
-      & info [] ~docv:"FILE:LINE:COLUMN" ~doc:"A position, as diagnostics give them.")
+      & info [] ~docv:"FILE:LINE:COLUMN" ~doc:"A position, written as diagnostics write it.")
   in
   command "explain"
     ~doc:
-      "Describe the entity at a position: a name's meaning, its type, and the signature it refers \
-       to."
+      "Describe the name or expression at a position: its meaning, its type, and the signature of \
+       its definition."
     Term.(
       const (fun directory position json ->
           Outcome.Exit (Explain_command.run ~directory ~position ~json))
@@ -223,15 +223,15 @@ let overlap =
       value
       & opt (some string) None
       & info [ "with" ] ~docv:"BRANCH"
-          ~doc:"Compare with $(docv), and not with the other open worktrees.")
+          ~doc:"Compare with $(docv) instead of the other open worktrees.")
   in
   let merge =
     Arg.(
       value & flag
-      & info [ "merge" ] ~doc:"Also list the errors a merge of the two would have that neither has.")
+      & info [ "merge" ] ~doc:"Also check the merge result and list the diagnostics only it has.")
   in
   command "overlap"
-    ~doc:"List where this worktree's changes meet those of other worktrees, or of a branch."
+    ~doc:"List where this worktree's changes overlap those of other worktrees or of a branch."
     Term.(
       const (fun directory with_ merge json ->
           Outcome.Exit (Overlap_command.run ~directory ~with_ ~merge ~json))
@@ -253,8 +253,8 @@ let packages_argument ~doc = Arg.(value & pos_all string [] & info [] ~docv:"PAC
 let add =
   command "add"
     ~doc:
-      "Make registry packages dependencies of the package, each granted nothing, at the version \
-       written after $(b,@), or at its newest."
+      "Add registry packages as dependencies of the package, each granted nothing, at the version \
+       written after $(b,@) or the newest."
     Term.(
       const (fun directory names json -> Outcome.Exit (Add_command.run ~directory ~names ~json))
       $ directory
@@ -265,8 +265,8 @@ let add =
 let upgrade =
   command "upgrade"
     ~doc:
-      "Move the project's registry packages to their newest versions, or the packages named to \
-       theirs or to the version written after $(b,@), and report the effects."
+      "Change the project's registry packages, or only the named ones, to their newest versions or \
+       the version written after $(b,@), and report the effect."
     Term.(
       const (fun directory names json -> Outcome.Exit (Upgrade_command.run ~directory ~names ~json))
       $ directory
@@ -277,22 +277,21 @@ let upgrade =
 let publish =
   command "publish"
     ~doc:
-      "Add the package to the registry as its next version, once it is finished and breaks nothing \
-       its last version offers."
+      "Publish the package to the registry as its next version, if it is complete and compatible \
+       with its previous version."
     Term.(
       const (fun directory json -> Outcome.Exit (Publish_command.run ~directory ~json))
       $ directory $ json)
 
 let new_ =
   let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
-  command "new" ~doc:"Make a new package in a directory named $(i,NAME)."
+  command "new" ~doc:"Create a package in a directory named $(i,NAME)."
     Term.(
       const (fun directory name -> Outcome.Exit (New_command.run ~directory ~name))
       $ directory $ name)
 
 let sync =
-  command "sync"
-    ~doc:"Bring the project's session up to date with its files, and do nothing else."
+  command "sync" ~doc:"Update the project's session from its files, and do nothing else."
     Term.(
       const (fun directory ->
           ignore (Project.load directory);
@@ -321,13 +320,14 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
-(* The client runs the language server itself, since it reads standard
-   input for as long as the editor is open; this is its help. *)
+(* The help of [truss lsp]. The client runs the language server itself,
+   since the server reads standard input for as long as the editor is
+   open. *)
 let lsp =
   command "lsp"
     ~doc:
-      "Run the language server on standard input and output, for an editor: each open file's \
-       diagnostics, with its proofs', and the state of each of its obligations."
+      "Run the language server on standard input and output, for an editor. It reports each open \
+       file's diagnostics, the prover's included, and the state of each obligation."
     Term.(const (fun () -> Outcome.Exit 2) $ const ())
 
 let version =
@@ -369,9 +369,9 @@ let truss =
       lsp;
     ]
 
-(* Parses the arguments and runs the command, writing as [Output] says. A
-   reason the command cannot run, or a compiler bug with its context,
-   gives status 2. *)
+(* Parses the arguments and runs the command, writing to [Output]'s current
+   streams. A command that cannot run, or a compiler bug, exits with 2;
+   the bug's message names the compiler's step when it failed. *)
 let evaluate arguments =
   let buffer_out = Buffer.create 256 and buffer_err = Buffer.create 256 in
   let help = Format.formatter_of_buffer buffer_out
@@ -407,14 +407,15 @@ let evaluate arguments =
   Format.pp_print_flush err ();
   Output.print (Buffer.contents buffer_out);
   Output.eprint (Buffer.contents buffer_err);
-  (* The command's results are saved for other processes. *)
+  (* Saves the command's sessions, so another process can reuse their
+   results. *)
   List.iter Database.save_session !Project.opened;
   Project.opened := [];
   outcome
 
-(* Runs a command line, once more from the files if another process
-   collected a state it read. A failure of the machine, such as a file that
-   cannot be read, gives status 2. *)
+(* Runs a command line. If another process evicted an input of a session
+   that the command reads, the command runs again from the files. A system
+   failure, such as an unreadable file, exits with 2. *)
 let run_command_line arguments =
   match Database.recovering (fun () -> evaluate arguments) with
   | outcome -> outcome
@@ -425,16 +426,16 @@ let run_command_line arguments =
 type request = {
   arguments : string list;
   directory : string;  (** The client's current directory *)
-  registry : string option;  (** The registry the client's environment names *)
+  registry : string option;  (** The client's [TRUSS_REGISTRY] *)
   terminal : bool;
   columns : int option;
 }
 
 type response = { output : string; outcome : Outcome.t }
 
-(* The background process's answer to a request: the command run as the
-   client would have run it, from its directory, with its errors sent as
-   progress so they show while it works. *)
+(* The background process's response to a request: it runs the command
+   from the client's directory, as the client would, and sends standard
+   error as progress, so it appears while the command runs. *)
 let handle ~progress request =
   let buffer = Buffer.create 1024 in
   let previous = Sys.getcwd () in
@@ -457,8 +458,7 @@ let handle ~progress request =
 
 let serve key = Database.serve ~key ~handle
 
-(* The command's first word, and whether it is one that runs no code of a
-   worktree, which the client runs itself. *)
+(* The command name: the first argument that is not an option. *)
 let command_of arguments =
   List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
@@ -466,7 +466,8 @@ let finish (outcome : Outcome.t) =
   match outcome with
   | Exit status -> status
   | Run_program { program; arguments } ->
-      (* The program runs on this terminal, so it can prompt and read. *)
+      (* The program runs on the client's terminal, so it can prompt and read
+         input. *)
       Fun.protect
         ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
         (fun () -> Process.run_attached program arguments)
@@ -480,13 +481,13 @@ let request arguments =
     columns = Output.columns ();
   }
 
-(* Asks each running background process, without starting one. *)
+(* Asks each running background process, and starts none. *)
 let ask_running arguments : (response, string) result list =
   List.map
     (fun key -> Database.call ~start_server:false ~key ~progress:Output.eprint (request arguments))
     (Database.servers ())
 
-(* [truss clean]: stops every background process, each of which holds the
+(* [truss clean]: stops every background process, since each holds the
    store open, and deletes the store. *)
 let clean_store () =
   ignore (ask_running [ "stop" ]);
@@ -498,9 +499,9 @@ let clean_store () =
       Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
       2
 
-(* The directory a command line is about: the one [-C] names, from the current
-   directory, or the current directory. Its project's background process is
-   the one that answers. *)
+(* The command line's directory: the directory that [-C] names, relative to
+   the current directory, or else the current directory. Its project's
+   background process answers the command. *)
 let directory_of arguments =
   let rec named = function
     | "-C" :: directory :: _ -> Some directory
@@ -514,8 +515,8 @@ let directory_of arguments =
   | Some directory -> directory
   | None -> Sys.getcwd ()
 
-(* [truss lsp]: the language server, in the client's process, which checks
-   the open files where every other command runs. *)
+(* [truss lsp]: runs the language server in the client's process. It checks
+   the open files in the process where every other command runs. *)
 let language_server ~no_server =
   let check ~root encoding buffers =
     let request =

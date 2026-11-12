@@ -1,10 +1,10 @@
-(* [truss check]: every diagnostic in the package, and with [--fix], the
-   fixes that have no alternative applied. *)
+(* [truss check]: every diagnostic of the packages, and with [--fix], each
+   diagnostic's only fix applied. *)
 
-(* The fixes of one round in one file: each diagnostic's only fix, leaving
-   out any whose edits overlap an earlier one's, since applying both could
-   give a result neither intended. They are applied in the next round once the
-   file is checked again. *)
+(* The diagnostics to fix in one round in one file: each diagnostic with
+   exactly one fix, except a fix whose edits overlap an earlier fix's, since
+   applying both could produce neither intended result. A skipped fix is
+   reconsidered in the next round, after the file is checked again. *)
 let chosen (diagnostics : Diagnostic.t list) =
   let overlaps (left : Diagnostic.span Diagnostic.edit) (right : Diagnostic.span Diagnostic.edit) =
     (left.span.start < right.span.stop && right.span.start < left.span.stop)
@@ -27,8 +27,8 @@ let chosen (diagnostics : Diagnostic.t list) =
       | _ -> false)
     diagnostics
 
-(* Applies non-overlapping edits to a text, from the last to the first, so
-   each edit's offsets still hold when it is applied. *)
+(* Applies non-overlapping edits to a text from last to first, so each
+   edit's offsets stay valid. *)
 let apply text (edits : Diagnostic.span Diagnostic.edit list) =
   List.sort
     (fun (left : Diagnostic.span Diagnostic.edit) right -> compare right.span.start left.span.start)
@@ -39,12 +39,14 @@ let apply text (edits : Diagnostic.span Diagnostic.edit list) =
          ^ String.sub text edit.span.stop (String.length text - edit.span.stop))
        text
 
-(* Rounds are bounded, so fixes that undo each other cannot run forever. *)
+(* Bounds the rounds, so two fixes that undo each other cannot loop
+   forever. *)
 let rounds = 32
 
-(* Deletes each entry of a dependency that nothing in its package uses, which
-   is that problem's only fix, and returns each as JSON. A grant is never
-   added: that is a choice, which a reviewer is to see someone made. *)
+(* Deletes the manifest entry of each unused dependency, which is that
+   problem's only fix, and returns each deletion as JSON. A grant is never
+   added: granting a capability is a decision that a reviewer must see a
+   person make. *)
 let unused_dependencies (project : Project.t) =
   let root = Database.root project.session in
   List.filter_map
@@ -64,9 +66,9 @@ let unused_dependencies (project : Project.t) =
       | Not_a_capability _ -> None)
     (Project.manifest_problems project)
 
-(* Writes the lock file the manifests give, when the one written is another,
-   which is that problem's only fix. No version is chosen by it: a line the
-   manifests need and no lock file or record gives is `truss add`'s. *)
+(* Writes the canonical lock file when the lock file on disk differs, which
+   is that problem's only fix. It never chooses a version: a dependency
+   without a version in the lock file or any record needs `truss add`. *)
 let lock_file (project : Project.t) =
   match Database.lock_fix project.session with
   | None -> []
@@ -82,8 +84,8 @@ let lock_file (project : Project.t) =
              ]);
       ]
 
-(* Applies fixes until none is left to apply, and returns the diagnostics
-   they fixed, each as JSON in the file it was in when it was fixed. *)
+(* Applies fixes until none remains, and returns the fixed diagnostics as
+   JSON, each against the file text at the time of its fix. *)
 let fix (project : Project.t) =
   let rec round number fixed =
     let applied =
@@ -113,9 +115,10 @@ let fix (project : Project.t) =
   in
   round 1 []
 
-(* A check also lists where this worktree's changes meet those of other
-   open worktrees of the repository. Overlaps are not diagnostics: nothing is wrong with either worktree's
-   code, so they do not change the exit status. *)
+(* A check also lists the overlaps between this worktree's changes and those
+   of the repository's other open worktrees. An overlap is not a
+   diagnostic, since neither worktree's code has an error, so it does not
+   change the exit status. *)
 let run ~directory ~fix:fixing ~proofs ~json =
   let project = Project.load directory in
   let fixed = if fixing then fix project else [] in

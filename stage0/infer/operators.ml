@@ -225,7 +225,7 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
             };
         arguments = operands;
         omitted_defaults = [];
-        uses = [];
+        uses = Types.no_capabilities;
         callee_result = result;
       };
   defer state (fun () ->
@@ -264,7 +264,7 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
                       };
                   arguments = operands;
                   omitted_defaults = [];
-                  uses = [];
+                  uses = Types.no_capabilities;
                   callee_result = output;
                 }
         | None ->
@@ -305,7 +305,7 @@ and built_in_operator state (value : expression) (operands : expression list) re
               { Tables.expression = operand.id; parameter_index = index; mode = Read; mark = None })
             operands;
         omitted_defaults = [];
-        uses = [];
+        uses = Types.no_capabilities;
         callee_result = result;
       }
 
@@ -436,7 +436,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
                   { expression = right.id; parameter_index = 1; mode = Read; mark = None };
                 ];
               omitted_defaults = [];
-              uses = [];
+              uses = Types.no_capabilities;
               callee_result = result;
             };
         resolve_evidence state value left_type (trait_reference trait);
@@ -621,8 +621,9 @@ and any_ state env ?expected (value : expression) (inner : expression) =
                       List.iter
                         (fun name ->
                           match
-                            Impls.capability_set state.database ~bounds:(bounds state) inner_type
-                              { bound with associated = [] } name
+                            (Impls.capability_set state.database ~bounds:(bounds state) inner_type
+                               { bound with associated = [] } name
+                              :> Types.capability list)
                           with
                           | [] -> ()
                           | set ->

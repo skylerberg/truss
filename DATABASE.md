@@ -464,7 +464,7 @@ from one that is.
 
 A saved result is kept as a *fact*: its fingerprint, under a key made of
 
-- the compiler that computed it, named in stage0 by its identity, the BLAKE3
+- the computation's author, which in stage0 is the compiler's identity, the BLAKE3
   hash of its executable
 - the query's name and the result's key
 - each node the result read, in the order they were first read, with its
@@ -967,7 +967,9 @@ path and part, and files relative to the worktree's root, never nodes.
 | Question | Asked by | Answer |
 |---|---|---|
 | A session and its diagnostics | `truss check` and every command that reads code | The session for a directory's worktree, current with its files; the packages the directory is about; each file's diagnostics; and the manifests that could not be read |
-| Dependencies | `truss references`, `truss dependencies`, `truss holes`, `truss impact` | For every definition, the parts of other definitions each of its parts reads |
+| Dependencies | `truss dependencies` | For each part of the given definitions, the parts of other definitions it read |
+| Dependents | `truss references`, `truss impact`, `truss upgrade` | The parts of other definitions that read a part of the given definitions |
+| Reachable definitions | `truss holes`, `truss build`, `truss run` | For each root, every definition it reaches through dependencies |
 | Name meaning | `truss references`, `truss dependencies` | The definitions a name means: a full path, or the end of one |
 | Changes since a commit | `truss impact` | A session at a commit, and every part a change between two sessions can reach, with whether it changed |
 | Where two worktrees meet | `truss overlap`, `truss check` | Where two sessions' changes meet, and the diagnostics a merge of the two would have that neither has |
@@ -1191,10 +1193,10 @@ with the same inputs.
   added or removed and when any of those changes, and its cost follows the
   package. Splitting it into a result for each definition and one for each
   lookup would make it follow the change.
-- **Questions answered from an index.** A graph question walks the state to
-  find the dependency edges, which costs the state's size each time it is asked.
-  An index kept current like any result would answer in the size of the
-  answer.
+- **Questions answered from an index.** A question about dependents
+  computes every definition's dependencies, which costs the state's size
+  each time it is asked. An index kept current like any result would answer
+  in the size of the answer.
 - **Running affected tests unasked** is not decided. Test keys stay current
   once a test run has asked for them, so the background process could run
   the tests whose keys changed while the machine is idle, and have their

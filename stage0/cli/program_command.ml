@@ -1,8 +1,8 @@
-(* [truss run] and [truss build]: the package's program, built from its
+(* [truss run] and [truss build]: build the package's program from its
    [main]. *)
 
 exception Stop of int
-(** The command reported why it stopped, and exits with this status. *)
+(** The command has reported why it stopped, and exits with this status. *)
 
 (* A package's program starts at the [main] of its [main] module. *)
 let main_of (project : Project.t) (package : Project.package) =
@@ -19,8 +19,8 @@ let main_of (project : Project.t) (package : Project.package) =
 
 let mains (project : Project.t) = List.filter_map (main_of project) project.packages
 
-(* The package's [main]. A package with none is a library, which is not a
-   problem in its code, so the command stops with 2. *)
+(* The package's [main]. A package without one is a library, which is not
+   an error in its code, so the command exits with 2. *)
 let main (project : Project.t) =
   let package = Project.package project in
   match main_of project package with
@@ -36,7 +36,7 @@ let stop_at_diagnostics ?proofs ~json project =
     raise (Stop 1)
   end
 
-let construct_name = function `Todo -> "`todo`" | `Echo -> "`echo`"
+let keyword = function `Todo -> "`todo`" | `Echo -> "`echo`"
 
 let unshippable_json project (unshippable : Compile.unshippable) =
   Json.Object
@@ -48,8 +48,8 @@ let unshippable_json project (unshippable : Compile.unshippable) =
       ("way", Json.List (List.map (fun path -> Json.String (Path.show path)) unshippable.way));
     ]
 
-(* Refuses a program whose [main] can reach a [todo], or with [echo], an
-   [echo], listing each with the way from [main] to it. *)
+(* Rejects a program whose [main] reaches a [todo], or with [echo], an
+   [echo], and lists each with its call path from [main]. *)
 let refuse_unshippable ~json ~echo (project : Project.t) compile main =
   match Compile.unshippable compile ~main ~echo with
   | Error message -> Project.cannot_run "%s" message
@@ -65,14 +65,13 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
             Output.eprintf
               "%s:%d:%d: %s can be reached from `main`, so the program cannot be built.\n    %s\n"
               (Project.shown_workspace_path project unshippable.file)
-              unshippable.line unshippable.column
-              (construct_name unshippable.failure)
+              unshippable.line unshippable.column (keyword unshippable.failure)
               (String.concat " -> " (List.map Path.show unshippable.way)))
           unshippable;
       raise (Stop 1)
 
-(* Refuses a program whose [main] can reach a definition whose proofs have
-   a hole, naming each. *)
+(* Rejects a program whose [main] reaches a definition with a hole in its
+   proofs, and names each definition. *)
 let refuse_holes ~json (project : Project.t) main =
   match Proofs.holes_reached project main with
   | [] -> ()
@@ -104,12 +103,12 @@ let refuse_holes ~json (project : Project.t) main =
 
 let catching work = try work () with Stop status -> Outcome.Exit status
 
-(* [truss run]: a development build, unless [release], of the one package
-   the directory is about, which the client runs on its own terminal with
-   the arguments, so it can prompt and read. A [todo] is refused even here,
-   since reaching one would be a failure its signature does not show;
-   [echo] writes to standard error, except in a release build, which
-   refuses it as [truss build] does. *)
+(* [truss run]: builds the command's one package for development, or with
+   [release] for release, and returns the program for the client to run on
+   its terminal with the arguments, so it can prompt and read input. A
+   [todo] is rejected even here, since reaching one would be a failure that
+   the signature does not show. [echo] writes to standard error, except
+   that a release build rejects it as [truss build] does. *)
 let run ~directory ~release ~sanitize ~arguments =
   catching (fun () ->
       let project = Project.load directory in
@@ -127,18 +126,19 @@ let run ~directory ~release ~sanitize ~arguments =
       | Error message -> Project.cannot_run "%s" message
       | Ok () -> Outcome.Run_program { program; arguments })
 
-(* [truss build]: a release build at [output], or else at a file named after
-   the package in the current directory. *)
+(* [truss build]: builds for release to [output], or else to a file named
+   after the package in the current directory. *)
 let build ~directory ~output ~json =
   catching (fun () ->
       let project = Project.load directory in
       let package = Project.package project in
-      (* A program is built only once its proofs are done. *)
+      (* A program is built only once its obligations are proven. *)
       stop_at_diagnostics ~proofs:true ~json project;
       let main = main project in
       refuse_holes ~json project main;
-      (* Every proof the program reaches is done, the standard library's
-         included, so their obligations are not checked again at run time. *)
+      (* Every obligation the program reaches is proven, including the
+         standard library's, so the build omits the run-time checks they
+         replace. *)
       let compile = Compiler.create ~checks:false project Release in
       refuse_unshippable ~json ~echo:true project compile main;
       let output =

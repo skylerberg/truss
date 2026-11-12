@@ -1,5 +1,5 @@
-(* [truss holes]: every [todo], with the type it must have, the names in
-   scope there, and the work it blocks. *)
+(* [truss holes]: every [todo], with its expected type, the bindings in
+   scope, and the tests and [main] that reach it. *)
 
 module Names = Resolve.Names
 
@@ -9,7 +9,7 @@ type hole = {
   line : int;
   column : int;
   type_ : string option;  (** [None] for a type defined as [todo] *)
-  in_scope : (string * string) list;  (** Each name, with its type *)
+  in_scope : (string * string) list;  (** Each binding in scope, with its type *)
   mutable blocks : string list;
 }
 
@@ -48,25 +48,24 @@ let gather (project : Project.t) paths =
         (Query.demand project.context Names.declarations module_))
     (Project.selected project paths)
 
-(* The work each hole blocks: [main], if the program can reach it, and every
-   test that can, through the definitions' reads, directly or not. *)
+(* The blocked roots of each hole: [main] and every test that reaches the
+   hole's definition transitively. *)
 let fill_blocks (project : Project.t) holes =
   if holes <> [] then begin
-    let dependencies = Database.dependencies project.session in
     let roots =
       (match Program_command.mains project with [ main ] -> [ ("main", main) ] | _ -> [])
       @ List.map
           (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
           (Test_command.select project ~paths:[] ~match_:None)
     in
-    List.iter
-      (fun (label, root) ->
-        let seen = Project.reachable dependencies root in
+    List.iter2
+      (fun (label, _) reached ->
         List.iter
           (fun hole ->
-            if Hashtbl.mem seen hole.definition then hole.blocks <- hole.blocks @ [ label ])
+            if Path.Set.mem hole.definition reached then hole.blocks <- hole.blocks @ [ label ])
           holes)
       roots
+      (Database.reachable project.session (List.map snd roots))
   end
 
 let to_json hole =

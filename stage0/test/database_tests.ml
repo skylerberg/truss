@@ -414,21 +414,37 @@ let doubling : Path.t =
       name = "doubling";
     }
 
+let test_body_reads_signature : Database.edge =
+  {
+    dependent = doubling;
+    dependent_part = "body";
+    dependency = double;
+    dependency_part = "signature";
+  }
+
 let () =
-  test "a definition's readers are found part by part" (fun () ->
+  test "a definition's dependents are found part by part" (fun () ->
       fresh_store ();
       let session, _ = session (package ()) in
       ignore (errors (Database.root session));
-      let readers = Database.readers (Database.dependencies session) double in
-      if not (List.mem (doubling, "body", "signature") readers) then
+      if not (List.mem test_body_reads_signature (Database.dependents session [ double ])) then
         fail "the test's body does not read double's signature");
   test "a definition's dependencies are found part by part" (fun () ->
       fresh_store ();
       let session, _ = session (package ()) in
       ignore (errors (Database.root session));
-      let reads = Database.reads (Database.dependencies session) doubling in
-      if not (List.mem (double, "body", "signature") reads) then
+      if not (List.mem test_body_reads_signature (Database.dependencies session [ doubling ])) then
         fail "the test's body does not read double's signature");
+  test "a root reaches its dependencies and itself" (fun () ->
+      fresh_store ();
+      let session, _ = session (package ()) in
+      ignore (errors (Database.root session));
+      match Database.reachable session [ doubling; double ] with
+      | [ from_test; from_double ] ->
+          if not (Path.Set.mem double from_test && Path.Set.mem doubling from_test) then
+            fail "the test does not reach double and itself";
+          if Path.Set.mem doubling from_double then fail "double reaches the test that calls it"
+      | _ -> fail "not one set for each root");
   test "a name finds the definitions whose path ends with it" (fun () ->
       fresh_store ();
       let session, _ = session (package ()) in

@@ -1,6 +1,6 @@
-(* [truss overlap]: where this worktree's changes meet those of other open
-   worktrees of the repository, or of a branch, and with [--merge], the
-   errors a merge of the two would have that neither has. *)
+(* [truss overlap]: the overlaps between this worktree's changes and those
+   of the repository's other open worktrees, or of a branch, and with
+   [--merge], the diagnostics that only the merge result has. *)
 
 let describe (place : Database.place) =
   match place.path with
@@ -16,7 +16,7 @@ let sentence : Database.overlap -> string = function
         (describe change) (describe reads)
 
 type comparison = {
-  other : string;  (** The other worktree, as the current directory reaches it, or the branch *)
+  other : string;  (** The other worktree, relative to the current directory, or the branch *)
   overlaps : Database.overlap list;
   merged : (string * string * string) list;  (** A merge's new diagnostics: file, code, message *)
   error : string option;
@@ -92,8 +92,8 @@ let compare_with ~merge session (name, other) =
   in
   { other = name; overlaps; merged; error }
 
-(* The overlaps with every other open worktree, leaving out those with
-   none, for [truss check]. *)
+(* The overlaps with each other open worktree that has any, for [truss
+   check]. *)
 let with_other_worktrees session =
   List.filter_map
     (fun other ->

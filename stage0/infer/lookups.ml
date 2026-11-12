@@ -160,7 +160,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
             {
               inputs = [ (Types.Own, field.field_type) ];
               output = Returns type_;
-              uses = [];
+              uses = Types.no_capabilities;
               costs = [ { amortized = false; resource = Time; bound = Order_of } ];
             }
       | Some { fields = Some fields; _ } ->

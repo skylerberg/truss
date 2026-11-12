@@ -1,22 +1,23 @@
-(* The packages a command acts on, from the code database's session for the
-   project it is run in.
+(* The packages a command acts on, from the code database's session for
+   the command's project.
 
-   A command is about the packages at or under the directory it is run
-   from, or else the one that directory is in: a package's directory and
-   everything below it, apart from directories that hold their own
-   [truss.toml], which are other packages, and those whose names start with
-   [.]. The session reads the project's files and keeps the results computed
-   from them, so a command after a small edit does little work. *)
+   A command acts on the packages at or below its directory, or else on the
+   package that contains its directory. A package's files are those below
+   its directory, except in directories with their own [truss.toml], which
+   are other packages, and in directories whose names start with [.]. The
+   session caches results about the project's files, so a command after a
+   small edit does little work. *)
 
 exception Cannot_run of string
-(** The command cannot do its job: no manifest, a session another process holds, a file that cannot
-    be read. It exits with status 2. *)
+(** The command cannot run: no manifest, a session that another process holds, or an unreadable
+    file. It exits with status 2. *)
 
 let cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run message)) format
 let manifest_name = "truss.toml"
 let absolute path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
-(* A path with [.] and [..] parts resolved, and no trailing separator. *)
+(* The path with [.] and [..] segments resolved and no trailing
+   separator. *)
 let normalize path =
   let parts = String.split_on_char '/' (absolute path) in
   let segments =
@@ -30,7 +31,7 @@ let normalize path =
   in
   "/" ^ String.concat "/" (List.rev segments)
 
-(* [path] as written from [from], both normalized: [forecast.truss], or
+(* [path] relative to [from], both normalized, such as [forecast.truss] or
    [../weather/forecast.truss]. *)
 let relative ~from path =
   let split path = List.filter (( <> ) "") (String.split_on_char '/' path) in
@@ -50,13 +51,13 @@ type package = { name : Path.package; directory : string  (** Absolute *) }
 type t = {
   session : Database.session;
   context : Query.context;
-  packages : package list;  (** The packages the command is about *)
+  packages : package list;  (** The packages the command acts on *)
   mutable files : (Path.module_ * string) list;
-      (** Each of their modules, with its file, absolute, in order *)
+      (** Each of their modules with its absolute file path, in order *)
 }
 
-(* The sessions commands opened, which the command line saves once the
-   command is done. *)
+(* The sessions that commands opened, which the command line saves when
+   the command ends. *)
 let opened : Database.session list ref = ref []
 
 let module_files session packages =
@@ -90,41 +91,46 @@ let load directory =
         files = module_files session packages;
       }
 
-(* The one package a command that needs one is about. *)
+(* The package of a command that acts on exactly one. *)
 let package project =
   match project.packages with
   | [ package ] -> package
   | [] -> cannot_run "No package here."
   | several ->
-      cannot_run "This is about %d packages: %s. Run the command in one's directory."
+      cannot_run
+        "This directory contains %d packages: %s. Run the command in one package's directory."
         (List.length several)
         (String.concat ", " (List.map (fun part -> Path.show_package part.name) several))
 
 let is_own project (module_ : Path.module_) =
   List.exists (fun part -> part.name = module_.package) project.packages
 
-(* The errors in the command's packages' manifests that only their code
-   shows. *)
+(* The manifest problems that only the code of the command's packages
+   reveals. *)
 let manifest_problems project =
   Database.manifest_problems project.session
     (List.map (fun (package : package) -> package.name) project.packages)
 
-(* Reads the files again after a command changed some, so only the
-   changes are checked again. *)
+(* Rereads the files after a command edited some, so only the edited files
+   are checked again. *)
 let reload project =
   Database.refresh project.session;
   project.files <- module_files project.session project.packages
 
 let modules project = List.map fst project.files
 
-(* The packages the command's packages depend on, directly or not, but
-   the standard library, whose proofs are checked where it is released. *)
-let dependency_packages project =
+(* The project's packages that the command's packages depend on,
+   transitively, in the project's order. A registry package and the
+   standard library are checked and proven when they are published, so
+   they are not checked again; a registry package's tests can also use
+   dependencies that are not in this build. *)
+let project_dependencies project =
+  let project_packages = List.map snd (Database.packages project.session) in
   let seen = Hashtbl.create 8 in
   let rec visit name =
     List.iter
       (fun (dependency : Manifest.dependency) ->
-        if dependency.package <> Path.standard_package && not (Hashtbl.mem seen dependency.package)
+        if List.mem dependency.package project_packages && not (Hashtbl.mem seen dependency.package)
         then begin
           Hashtbl.replace seen dependency.package ();
           visit dependency.package
@@ -134,16 +140,18 @@ let dependency_packages project =
   List.iter (fun (package : package) -> visit package.name) project.packages;
   List.filter
     (fun name ->
-      not (List.exists (fun (package : package) -> package.name = name) project.packages))
-    (Hashtbl.fold (fun name () names -> name :: names) seen [])
+      Hashtbl.mem seen name
+      && not (List.exists (fun (package : package) -> package.name = name) project.packages))
+    project_packages
 
-(* The modules a program built from the command's packages is made of,
-   which its proofs are about: theirs, and their dependencies'. *)
+(* The modules that a command checks for a program built from its
+   packages: the packages' own, and those of the project's packages they
+   depend on. *)
 let program_modules project =
   modules project
   @ List.concat_map
       (fun name -> Database.package_modules project.session name)
-      (dependency_packages project)
+      (project_dependencies project)
 
 let file project module_ =
   match List.assoc_opt module_ project.files with
@@ -151,8 +159,8 @@ let file project module_ =
   | None ->
       Filename.concat (Database.root project.session) (Database.module_file project.session module_)
 
-(* The modules in each of [paths], files or directories, or every module
-   when there are none. *)
+(* The modules in [paths], each a file or a directory, or every module when
+   [paths] is empty. *)
 let selected project paths =
   match paths with
   | [] -> modules project
@@ -177,19 +185,20 @@ let selected project paths =
 
 let parsed project module_ = Query.demand project.context Workspace.file module_
 
-(* A module's text as a source named by its file as the current directory
-   reaches it, which is how every command shows positions. Offsets are the
-   same as in the database's own source. A module of another package, such
-   as the standard library's, keeps its own name. *)
+(* A module's text as a source named by its path relative to the current
+   directory, which every command uses for positions. Offsets match the
+   database's source. A module of a package outside the project, such as
+   the standard library, keeps its database name. *)
 let source project module_ =
   let text = Source.text (parsed project module_).source in
   if is_own project module_ || List.mem_assoc module_ project.files then
     Source.create ~path:(shown (file project module_)) text
   else (parsed project module_).source
 
-(* The file a position the compiled program reports names, such as
-   [weather/forecast.truss], as the current directory reaches it, if it is
-   one of these packages'. *)
+(* A file that the compiled program names in a position, such as
+   [weather/forecast.truss], as a path relative to the current directory
+   when the file belongs to one of the command's packages, and unchanged
+   otherwise. *)
 let shown_workspace_path project workspace_path =
   match
     List.find_opt (fun (module_, _) -> Workspace.file_path module_ = workspace_path) project.files
@@ -198,15 +207,3 @@ let shown_workspace_path project workspace_path =
   | None -> workspace_path
 
 let write_file = File_system.write_atomically ~durable:false
-
-(* Every definition [start] reads, directly or not. *)
-let reachable dependencies start =
-  let seen = Hashtbl.create 64 in
-  let rec walk path =
-    if not (Hashtbl.mem seen path) then begin
-      Hashtbl.replace seen path ();
-      List.iter (fun (read, _, _) -> walk read) (Database.reads dependencies path)
-    end
-  in
-  walk start;
-  seen

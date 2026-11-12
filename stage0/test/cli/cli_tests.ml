@@ -118,6 +118,23 @@ let () =
                file.module_.package = { Path.owner = None; name = "lib" })
              (Report.files report))
       then fail "the dependency's overflow is not reported");
+  test "a dependency's type error is reported without proofs" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
+            ("app/main.truss", Fixtures.dependencys_type_error_is_reported_without_proofs);
+            ("lib/truss.toml", manifest_of "lib");
+            ("lib/arith.truss", Fixtures.dependencys_type_error_is_reported_without_proofs_arith);
+          ]
+      in
+      let status, output =
+        captured (fun () ->
+            Program_command.run ~directory:(Filename.concat root "app") ~release:false
+              ~sanitize:false ~arguments:[])
+      in
+      if status <> Outcome.Exit 1 || not (contains output "lib/arith.truss") then fail "%s" output);
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
         directory
@@ -751,7 +768,7 @@ let () =
       let root = repository doubling in
       rewrite root "main.truss" (replace doubling "value * 2" "value + value");
       match impact root with
-      | [ { status = `Changed parts; read_by = []; _ } ] when not (List.mem "signature" parts) ->
+      | [ { status = `Changed parts; dependents = []; _ } ] when not (List.mem "signature" parts) ->
           if not (List.mem "body" parts) then fail "parts [%s]" (String.concat "; " parts)
       | changes ->
           fail "found [%s]"
@@ -774,10 +791,14 @@ let () =
           (fun (change : Impact_command.change) -> Path.show change.path = "demo::main::double")
           (impact root)
       with
-      | Some { before = Some before; after = Some after; read_by; _ } ->
+      | Some { before = Some before; after = Some after; dependents; _ } ->
           if not (contains before "(value: Int64)" && contains after "by: Int64 = 2") then
             fail "signatures %s, %s" before after;
-          if not (List.exists (fun (reader, _, _) -> Path.show reader = "demo::main::four") read_by)
+          if
+            not
+              (List.exists
+                 (fun (edge : Database.edge) -> Path.show edge.dependent = "demo::main::four")
+                 dependents)
           then fail "four does not read it"
       | _ -> fail "double did not change its signature");
   test "moving a definition within its file changes nothing" (fun () ->
@@ -1176,7 +1197,7 @@ let () =
       let root = angles turn in
       ignore (publish_from root);
       let status, output = publish_from root in
-      if status <> 0 || not (contains output "`acme::angles` 1.0.0 is these files already") then
+      if status <> 0 || not (contains output "`acme::angles` 1.0.0 already has these files") then
         fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that changes a public signature is refused, with the signature as it was and is"
@@ -1185,7 +1206,7 @@ let () =
       let root = angles turn in
       ignore (publish_from root);
       rewrite root "degrees.truss" Fixtures.release_that_changes_a_public_signature_is_refused;
-      expect_refused root "acme::angles::degrees::turn has other parameters or another result";
+      expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
       let _, output = publish_from root in
       List.iter
         (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
@@ -1200,7 +1221,7 @@ let () =
       let root = angles (turn ^ Fixtures.release_that_takes_a_public_definition_away_is) in
       ignore (publish_from root);
       rewrite root "degrees.truss" turn;
-      expect_refused root "acme::angles::degrees::half is gone, or is no longer public");
+      expect_refused root "acme::angles::degrees::half was removed or is no longer public");
   test "a private definition can change freely" (fun () ->
       let registry = registry () in
       let root = angles (turn ^ Fixtures.private_definition_can_change_freely) in
@@ -1289,7 +1310,8 @@ let () =
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
       if not (clean root) then fail "has diagnostics");
-  test "a dependency that only a package's tests use is not published with it" (fun () ->
+  test "a dependency that only a package's tests use is left out of its published lock file"
+    (fun () ->
       let registry = stocked () in
       let root =
         directory
@@ -1314,7 +1336,8 @@ let () =
       in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (clean user) then fail "has diagnostics");
+      if not (Report.clean (Report.gather ~proofs:true (Project.load user))) then
+        fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = registry () in
       let root =
@@ -1345,6 +1368,49 @@ let () =
   test "an unknown command is a bad argument" (fun () ->
       let outcome, _ = captured (fun () -> Main.evaluate [ "bogus" ]) in
       if outcome <> Outcome.Exit 2 then fail "did not exit with 2")
+
+(* Tagged templates *)
+
+let () =
+  test "check accepts an HTML template that interpolates into text and quoted attributes" (fun () ->
+      let root =
+        package
+          [
+            ( "main.truss",
+              "use standard::html\n\n\
+               fn page(name: String, link: String) -> html::Html {\n\
+              \  html::Html\"<p title='${name.copy()}'><a href=\\\"${own link}\\\">${own \
+               name}</a></p>\"\n\
+               }\n" );
+          ]
+      in
+      let outcome, output = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+      if outcome <> Outcome.Exit 0 then fail "did not succeed: %s" output);
+  test "check rejects an HTML template that interpolates into an event handler or a script"
+    (fun () ->
+      List.iter
+        (fun template ->
+          let root =
+            package
+              [
+                ( "main.truss",
+                  Printf.sprintf
+                    "use standard::html\n\n\
+                     fn page(code: String) -> html::Html {\n\
+                    \  html::Html\"%s\"\n\
+                     }\n"
+                    template );
+              ]
+          in
+          let outcome, output = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+          if outcome = Outcome.Exit 0 || not (contains output "is_valid_template") then
+            fail "accepted %s: %s" template output)
+        [
+          "<a onclick=\\\"${own code}\\\">x</a>";
+          "<${own code}>x</p>";
+          "<script>${own code}</script>";
+          "<a href=${own code}>x</a>";
+        ])
 
 (* Making a package *)
 

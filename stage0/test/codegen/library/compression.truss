@@ -1,0 +1,65 @@
+use standard::compression
+use standard::hex
+
+fn bytes_of(text: StringSlice) -> List[UInt8] {
+  match hex::decode(text) {
+    Ok(bytes) => own bytes
+    Err(_) => []
+  }
+}
+
+fn text_of(bytes: Slice[UInt8]) -> String {
+  String.from_utf8_lossy(bytes)
+}
+
+fn pattern(count: USize) -> List[UInt8] {
+  let letters = "abcdefg".bytes()
+  var bytes: List[UInt8] = []
+  var state: UInt32 = 1
+  for index in 0..count {
+    state = state.wrapping_multiply(1103515245).wrapping_add(12345)
+    mut bytes.push(if index % 50 < 30 { letters[USize.from(state >> 16) % 7] } else { 120 })
+  }
+  bytes
+}
+
+test "data that zlib and gzip compressed decompresses to their input" {
+  let fox = "hello hello hello hello, the quick brown fox jumps over the lazy dog"
+  let zlibbed = bytes_of("78dacb48cdc9c957c8402775144a3252150a4b3393b315928af2cbf314d2f22b14b24a730b8a15f2cb528bc0d2398955950a29f9e9005d8b18f6")
+  assert compression::decompress(zlibbed, format: compression::Format.Zlib) is Ok(plain) && text_of(plain) == fox
+  let raw = bytes_of("cb48cdc9c957c8402775144a3252150a4b3393b315928af2cbf314d2f22b14b24a730b8a15f2cb528bc0d2398955950a29f9e900")
+  assert compression::decompress(raw, format: compression::Format.Deflate) is Ok(inflated) && text_of(inflated) == fox
+  let zipped = bytes_of("1f8b08000000000000ff4b4c4a0600c241243503000000")
+  assert compression::decompress(zipped) is Ok(abc) && text_of(abc) == "abc"
+  let stored = bytes_of("010700f8ff73746f72656421")
+  assert compression::decompress(stored, format: compression::Format.Deflate) is Ok(kept) && text_of(kept) == "stored!"
+}
+
+test "compress's output decompresses to its input, in each format and at each level" {
+  let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), pattern(1000), pattern(70000)]
+  let formats: List[compression::Format] = [compression::Format.Deflate, compression::Format.Zlib, compression::Format.Gzip]
+  let levels: List[compression::Level] = [compression::Level.Fastest, compression::Level.Balanced, compression::Level.Smallest]
+  for input in inputs {
+    for format in formats {
+      for level in levels {
+        let packed = compression::compress(input, format: format, level: level)
+        assert compression::decompress(packed, format: format) == Ok(input.copy())
+      }
+    }
+  }
+  let repetitive = compression::compress(pattern(70000), level: compression::Level.Balanced)
+  assert repetitive.length() < 35000
+}
+
+test "decompress rejects damaged data, a wrong checksum, and output past its limit" {
+  let zipped = bytes_of("1f8b08000000000000ff4b4c4a0600c241243503000000")
+  var damaged = zipped.copy()
+  damaged[12] = damaged[12] ^ 255
+  assert compression::decompress(damaged) is Err(_)
+  var wrong = zipped.copy()
+  wrong[15] = wrong[15] ^ 1
+  assert compression::decompress(wrong) == Err(compression::Error.ChecksumMismatch)
+  let large = compression::compress(pattern(10000))
+  assert compression::decompress(large, limit: 100) == Err(compression::Error.TooLarge(limit: 100))
+  assert compression::decompress([1, 2, 3], format: compression::Format.Zlib) is Err(Malformed(_))
+}

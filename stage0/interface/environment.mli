@@ -10,7 +10,7 @@ type interface =
   | Trait_interface of Types.trait_interface
   | Impl_interface of Types.impl_interface
   | Constant_interface of Types.constant_interface
-  | Test_interface of Types.capability list
+  | Test_interface of Types.capability_set
   | Theorem_interface of Types.signature
   | Law_proof_interface of {
       generics : Types.generic list;

@@ -5,7 +5,7 @@ type change = {
   status : [ `Added | `Changed of string list | `Removed ];
   before : string option;
   after : string option;
-  read_by : (Path.t * string * string) list;
+  dependents : Database.edge list;
 }
 
 val changes : Project.t -> Database.session -> change list

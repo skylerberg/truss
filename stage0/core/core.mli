@@ -74,7 +74,7 @@ and call = {
   lends : Types.mode option;
       (** [Some mode] if the callee is a lending method ([lends] in its signature). The result of
           such a call is a place: see {!Lent}. *)
-  uses : Types.capability list;
+  uses : Types.capability_set;
       (** The capabilities this call requires: the callee's [uses] clause, with the callee's
           capability parameters substituted by this call's type arguments. *)
 }

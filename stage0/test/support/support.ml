@@ -90,17 +90,19 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
       wrong "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
         (Path.show mentioned.owner)
   in
-  let rec capabilities subject =
-    List.iter (function
-      | T.Capability _ -> ()
-      | T.Capability_parameter mentioned -> parameter subject mentioned
-      | T.Capability_projection { base; trait = reference; name } ->
-          (match base with
-          | Parameter _ | Projection _ -> ()
-          | _ -> wrong "%s contains `%s.%s`, which is not normalized" subject (T.show base) name);
-          type_ subject base;
-          trait subject reference
-      | T.Capability_variable _ -> wrong "%s contains a capability inference variable" subject)
+  let rec capabilities subject (set : T.capability_set) =
+    List.iter
+      (function
+        | T.Capability _ -> ()
+        | T.Capability_parameter mentioned -> parameter subject mentioned
+        | T.Capability_projection { base; trait = reference; name } ->
+            (match base with
+            | Parameter _ | Projection _ -> ()
+            | _ -> wrong "%s contains `%s.%s`, which is not normalized" subject (T.show base) name);
+            type_ subject base;
+            trait subject reference
+        | T.Capability_variable _ -> wrong "%s contains a capability inference variable" subject)
+      (set :> T.capability list)
   and type_ subject (ty : T.ty) =
     match ty with
     | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter (argument subject) arguments

@@ -54,7 +54,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
             })
           arguments;
       omitted_defaults = [];
-      uses = [];
+      uses = Types.no_capabilities;
       callee_result = result;
     }
   in

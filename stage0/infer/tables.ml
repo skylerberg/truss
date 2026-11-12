@@ -43,7 +43,7 @@ type call = {
   callee : callee;
   arguments : argument list;  (** In the order written. *)
   omitted_defaults : string list;  (** The parameters with defaults that were not passed. *)
-  uses : Types.capability list;  (** The callee's [uses], with capability parameters substituted. *)
+  uses : Types.capability_set;  (** The callee's [uses], with capability parameters substituted. *)
   callee_result : Types.ty;
       (** For an operator that tests the result of its call, as [<] tests the [Ordering] of
           [compare], this is not the operator's own type. *)

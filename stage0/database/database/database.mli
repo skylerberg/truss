@@ -130,18 +130,28 @@ val store_directory : unit -> string
 (** Where the store is: [$TRUSS_CACHE], or else [$XDG_CACHE_HOME/truss], or else [~/.cache/truss].
 *)
 
-(** {1 Dependencies} *)
+(** {1 Dependencies}
 
-type dependencies
+    An edge records that a part of one definition, such as its body, read a part of another, such as
+    its signature, when the session last computed it. The edges over-approximate: a read of a result
+    about a whole package, such as its impls, is an edge to every definition that result read. No
+    read is missing. *)
 
-val dependencies : session -> dependencies
-(** For every definition of the worktree, the parts of other definitions its parts read. *)
+type edge = {
+  dependent : Path.t;
+  dependent_part : string;
+  dependency : Path.t;
+  dependency_part : string;
+}
 
-val reads : dependencies -> Path.t -> (Path.t * string * string) list
-(** A definition's dependencies: each definition, the reader's part, and the part it reads. *)
+val dependencies : session -> Path.t list -> edge list
+(** The edges from the definitions' parts. *)
 
-val readers : dependencies -> Path.t -> (Path.t * string * string) list
-(** A definition's readers: each reader, its part, and the part of the definition it reads. *)
+val dependents : session -> Path.t list -> edge list
+(** The edges to the definitions' parts. *)
+
+val reachable : session -> Path.t list -> Path.Set.t list
+(** For each root, in order, the definitions it reaches through edges, the root included. *)
 
 val find_definitions : session -> string -> Path.t list
 (** The definitions a name means: a full path, or the end of one after [::] or [.]. *)
