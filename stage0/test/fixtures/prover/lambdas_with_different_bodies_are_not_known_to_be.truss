@@ -6,7 +6,7 @@ fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64
   total
 }
 
-fn f() -> Bool
+fn run_example() -> Bool
   ensures result
 {
   tally(fn(each) { each / 2 }) == tally(fn(other) { other / 3 })

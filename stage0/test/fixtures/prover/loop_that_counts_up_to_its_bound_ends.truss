@@ -1,8 +1,8 @@
-fn f(count: UInt32)
+fn run_example(count: UInt32)
   cost time finite
 {
-  var i: UInt32 = 0
-  while i < count {
-    i += 1
+  var step_index: UInt32 = 0
+  while step_index < count {
+    step_index += 1
   }
 }

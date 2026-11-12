@@ -11,7 +11,7 @@ let top_key module_name name : Resolve.Names.key =
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is checked once. *)
-let standard = lazy (Database.Testing.standard_base ())
+let standard = lazy (Database.For_testing.standard_base ())
 
 let setup files =
   let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in
@@ -135,11 +135,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   in
   let callee (callee : Core.callee) =
     match callee with
-    | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
+    | Function { type_arguments; _ } ->
+        List.iter (argument "first_value call's type argument") type_arguments
     | Trait_method { trait = reference; name; self_type; type_arguments; evidence; _ } -> (
-        trait "a call's trait" reference;
+        trait "first_value call's trait" reference;
         type_ "a call's `Self`" self_type;
-        List.iter (argument "a call's type argument") type_arguments;
+        List.iter (argument "first_value call's type argument") type_arguments;
         match evidence with
         | Impl { impl; arguments } ->
             (* The [next] of a yielding method's cursor is a [Cursor_next]. *)
@@ -182,8 +183,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
         type_ "a local" used;
         match Hashtbl.find_opt local_types local with
         | Some bound when not (T.equal bound used) ->
-            wrong "a local is used with the type `%s` and bound with the type `%s`" (T.show used)
-              (T.show bound)
+            wrong "first_value local is used with the type `%s` and bound with the type `%s`"
+              (T.show used) (T.show bound)
         | _ -> ())
     | Constant { type_ = constant; _ } -> type_ "a constant" constant
     | Lent { kind = Call { lends = Some _; _ }; _ } | Temporary _ -> ()
@@ -220,7 +221,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let rec yielded_operand ~lends (mode : T.mode) (part : Core.operand) =
     match part with
     | Place core_place ->
-        if mode = Mut then mutable_place "a `yield mut`" core_place else place core_place
+        if mode = Mut then mutable_place "first_value `yield mut`" core_place else place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
         List.iter (fun (_, field) -> Option.iter (yielded_operand ~lends mode) field) fields
@@ -290,7 +291,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 (fun (arm : Core.arm) ->
                   if List.length arm.patterns <> List.length scrutinees then
                     wrong "a `match` arm does not have one pattern per scrutinee";
-                  List.iter2 (binds_own "a `match`") scrutinees arm.patterns)
+                  List.iter2 (binds_own "first_value `match`") scrutinees arm.patterns)
                 arms
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
@@ -308,12 +309,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 (fun (implementation : Core.implementation) ->
                   type_ "an implementation" implementation.type_;
                   match (implementation.mode, implementation.value) with
-                  | Mut, Place core_place -> mutable_place "a `provide`" core_place
+                  | Mut, Place core_place -> mutable_place "first_value `provide`" core_place
                   | _, value -> operand value)
                 implementations
           | Call call ->
               callee call.callee;
-              capabilities "a call's `uses`" call.uses;
+              capabilities "first_value call's `uses`" call.uses;
               (match call.callee with Indirect function_value -> operand function_value | _ -> ());
               List.iter
                 (function
@@ -322,7 +323,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                   | Core.Passed { mode = Mut; value = Value _; _ } ->
                       wrong "a `mut` parameter receives a value that is not a slice"
                   | Passed { mode = Mut; value = Place core_place; _ } ->
-                      mutable_place "a `mut` argument" core_place
+                      mutable_place "first_value `mut` argument" core_place
                   | Passed { mode = Own; value = Place _; _ } ->
                       wrong "an `own` parameter receives a place"
                   | Passed { value; _ } -> operand value
@@ -336,12 +337,13 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Assign { target; _ } | Compound_assign { target; _ } ->
               mutable_place "an assignment" target
           | Let { pattern; value; _ } -> (
-              binds_own "a `let`" value pattern;
+              binds_own "first_value `let`" value pattern;
               match (pattern.kind, value) with
               | Bind { is_var = true; _ }, Place _ ->
                   wrong "a `let` that binds a mutable local receives a place"
               | _ -> ())
-          | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
+          | For { iteration = Cursor { cursor; _ }; _ } ->
+              mutable_place "first_value `for` loop" cursor
           | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
               let output =
                 match callee with

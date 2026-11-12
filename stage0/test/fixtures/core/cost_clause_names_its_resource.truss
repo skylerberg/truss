@@ -1,4 +1,4 @@
-fn g(items: List[Int64], visit: (fn(Int64) cost time finite))
+fn second_example(items: List[Int64], visit: (fn(Int64) cost time finite))
   uses Clock
   cost calls(visit) == items.length()
   cost calls(Clock.now) <= 1

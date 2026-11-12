@@ -1,4 +1,4 @@
-fn f(items: mut List[Int64]) {
+fn run_example(items: mut List[Int64]) {
   parallel for item in mut items {
     var doubled = item * 2
     doubled = doubled + 1

@@ -1,4 +1,4 @@
-trait T {
-  fn a(
-  fn b()
+trait Payload {
+  fn first_value(
+  fn second_value()
 }

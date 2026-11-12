@@ -6,7 +6,7 @@ module Lower = Compile.For_testing.Lower
 open Codegen_support
 
 let () =
-  passes "calls, operators, comparisons, a let, an if, and a return"
+  passes "calls, operators, comparisons, first_value let, an if, and first_value return"
     Fixtures.Core_form.calls_operators_comparisons_a_let_an_if_and_a;
   passes "`let x = own y` moves the value, and `let x = y` aliases the place"
     Fixtures.Core_form.let_x_own_y_moves_the_value_and_let_x_y_aliases;
@@ -26,11 +26,13 @@ let () =
     Fixtures.Core_form.for_loop_over_a_yielding_methods_call
 
 let () =
-  passes "a match on literals, a range, strings, and two values at once"
+  passes "first_value match on literals, first_value range, strings, and two values at once"
     Fixtures.Core_form.match_on_literals_a_range_strings_and_two_values;
   passes "alternatives that bind a name bind it from the alternative that matched"
     Fixtures.Core_form.alternatives_that_bind_a_name_bind_it_from_the;
-  passes "a let with an else, an is-test, a guard, and a pattern in a let and in a for loop"
+  passes
+    "first_value let with an else, an is-test, first_value guard, and a pattern in first_value let \
+     and in first_value for loop"
     Fixtures.Core_form.let_with_an_else_an_is_test_a_guard_and_a_pattern
 
 let () =
@@ -121,8 +123,8 @@ let () =
 
 let () =
   passes
-    "a lending method that yields on several paths: places, a value it makes, and one built around \
-     places"
+    "first_value lending method that yields on several paths: places, first_value value it makes, \
+     and one built around places"
     Fixtures.Core_form.lending_method_that_yields_on_several_paths_places
 
 let () =
@@ -171,7 +173,9 @@ let folds name ~folded ~run source =
   test name (fun () ->
       let database, _ = load source in
       let context =
-        Lower.context ~checks:true database target_64 ~constant:(fun context path ->
+        Lower.context ~checks:true database target_64
+          ~cursor_fields:(fun _ _ -> failwith "folding a constant lowers no pulled method")
+          ~constant:(fun context path ->
             match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
       in
       let value = Lower.constant_value context in

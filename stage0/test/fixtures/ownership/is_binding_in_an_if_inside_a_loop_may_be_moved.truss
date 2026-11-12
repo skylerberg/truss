@@ -1,4 +1,4 @@
-fn f(ready: Bool) {
+fn run_example(ready: Bool) {
   while ready {
     if make() is Some(text) {
       keep(own text)

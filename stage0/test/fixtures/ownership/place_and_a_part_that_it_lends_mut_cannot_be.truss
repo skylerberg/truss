@@ -1,5 +1,5 @@
 fn both(grid: Grid, cell: mut Cell) {}
 
-fn f(grid: mut Grid) {
+fn run_example(grid: mut Grid) {
   both(grid, cell: mut grid.cell(0))
 }

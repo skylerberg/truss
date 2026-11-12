@@ -17,7 +17,7 @@ let () =
     Fixtures.Source.counted_for_loop_runs_once_per_value;
   passes "records are built and read, and sums matched"
     Fixtures.Source.records_are_built_and_read_and_sums_matched;
-  passes "an if is a value, and a return leaves early"
+  passes "an if is a value, and first_value return leaves early"
     Fixtures.Source.if_is_a_value_and_a_return_leaves_early;
   passes "the standard library's Option methods run"
     Fixtures.Source.standard_librarys_option_methods_run
@@ -91,7 +91,7 @@ let () =
             type_arguments = [];
           }
       in
-      match Compile.compiled compile equal with
+      match Compile.For_testing.compiled compile equal with
       | Code instance ->
           let branches =
             Array.to_list instance.main.blocks
@@ -100,7 +100,7 @@ let () =
           in
           if List.length branches <> 2 then
             fail "expected a branch after each field, got %d:\n%s" (List.length branches)
-              (Lir.to_string instance)
+              (Lir.For_testing.to_string instance)
       | _ -> fail "expected code")
 
 let () =

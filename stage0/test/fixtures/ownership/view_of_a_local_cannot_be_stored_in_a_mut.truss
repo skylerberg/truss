@@ -1,4 +1,4 @@
-fn f(held: mut List[Slice[Int64]]) {
+fn run_example(held: mut List[Slice[Int64]]) {
   let local: List[Int64] = [1, 2, 3]
   mut held.push(local[0..2])
 }

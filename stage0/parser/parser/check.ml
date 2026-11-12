@@ -163,7 +163,8 @@ and statement cursor context (statement : statement) =
       Option.iter (types cursor context) annotation;
       expression cursor context value;
       Option.iter (block cursor context) else_
-  | For { mode; iterable; clauses; body; _ } ->
+  | For { mode; annotation; iterable; clauses; body; _ } ->
+      Option.iter (types cursor context) annotation;
       expression cursor context iterable;
       loop_clauses cursor context clauses;
       let body_context =

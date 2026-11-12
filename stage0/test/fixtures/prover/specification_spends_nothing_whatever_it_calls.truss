@@ -1,5 +1,5 @@
-fn f(items: List[Int64], keep: (fn(Int64) -> Bool cost time finite)) -> USize
-  requires forall i in 0..items.length() => keep(items.model()[i])
+fn run_example(items: List[Int64], keep: (fn(Int64) -> Bool cost time finite)) -> USize
+  requires forall step_index in 0..items.length() => keep(items.model()[step_index])
   cost time O(1)
 {
   items.length()

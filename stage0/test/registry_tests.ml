@@ -38,14 +38,22 @@ let () =
 
 let () =
   test "a package's hash does not depend on the order its files are given in" (fun () ->
-      let files = [ ("truss.toml", "a"); ("vector.truss", "b"); ("guide/start.md", "c") ] in
+      let files =
+        [
+          ("truss.toml", "first_value");
+          ("vector.truss", "second_value");
+          ("guide/start.md", "third_value");
+        ]
+      in
       if Content.hash files <> Content.hash (List.rev files) then fail "the hashes differ";
       if not (Content.is_hash (Content.hash files)) then fail "not 64 hexadecimal digits");
   test "a package's hash changes with a file's bytes, and with its path" (fun () ->
-      let hash = Content.hash [ ("a.truss", "one"); ("b.truss", "two") ] in
-      if hash = Content.hash [ ("a.truss", "one"); ("b.truss", "too") ] then fail "bytes";
-      if hash = Content.hash [ ("a.truss", "one"); ("c.truss", "two") ] then fail "path";
-      if hash = Content.hash [ ("a.truss", "onetwo") ] then fail "one file for two")
+      let hash = Content.hash [ ("first_value.truss", "one"); ("second_value.truss", "two") ] in
+      if hash = Content.hash [ ("first_value.truss", "one"); ("second_value.truss", "too") ] then
+        fail "bytes";
+      if hash = Content.hash [ ("first_value.truss", "one"); ("third_value.truss", "two") ] then
+        fail "path";
+      if hash = Content.hash [ ("first_value.truss", "onetwo") ] then fail "one file for two")
 
 (* The lock file *)
 
@@ -102,10 +110,19 @@ let () =
 
 let fresh = scratch
 
+(* The registry at a directory, as [TRUSS_REGISTRY] names one. *)
+let at root =
+  Index.configure (Some root);
+  Option.get (Index.current ())
+
+(* A version's files in a registry, at [owner/name/VERSION/]. *)
+let version_directory root (package : Path.package) version =
+  List.fold_left Filename.concat root (Path.package_parts package @ [ Version.show version ])
+
 let () =
   let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in
   test "a registry lists a package's versions in the order they were added" (fun () ->
-      let registry = Index.at (fresh "registry") in
+      let registry = at (fresh "registry") in
       Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       Index.add registry
         { Path.owner = Some "acme"; name = "geometry" }
@@ -121,7 +138,7 @@ let () =
       if Index.versions registry { Path.owner = Some "acme"; name = "nothing" } <> [] then
         fail "a package it does not hold");
   test "a version is fetched into a directory named by its hash, with every file" (fun () ->
-      let registry = Index.at (fresh "registry") and into = fresh "packages" in
+      let registry = at (fresh "registry") and into = fresh "packages" in
       Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       let hash = Content.hash files in
       match
@@ -132,14 +149,13 @@ let () =
           if Content.hash (Content.files ~all:true directory) <> hash then fail "other files"
       | Error reason -> fail "%s" reason);
   test "files that do not have the hash asked for are not kept" (fun () ->
-      let registry = Index.at (fresh "registry") and into = fresh "packages" in
+      let root = fresh "registry" and into = fresh "packages" in
+      let registry = at root in
       Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       let hash = Content.hash files in
       let changed =
         Filename.concat
-          (Index.version_directory registry
-             { Path.owner = Some "acme"; name = "geometry" }
-             (1, 0, 0))
+          (version_directory root { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0))
           "vector.truss"
       in
       Out_channel.with_open_bin changed (fun channel -> output_string channel "fn extra() {}\n");
@@ -150,7 +166,7 @@ let () =
       | Ok _ -> fail "kept");
       if Sys.readdir into <> [||] then fail "left files behind");
   test "a version the registry does not hold is not fetched" (fun () ->
-      let registry = Index.at (fresh "registry") and into = fresh "packages" in
+      let registry = at (fresh "registry") and into = fresh "packages" in
       match
         Index.fetch registry ~into
           { Path.owner = Some "acme"; name = "geometry" }
@@ -320,7 +336,7 @@ let () =
   let grant package capabilities = { Manifest.package; capabilities } in
   test "a package holds the capabilities the project grants it" (fun () ->
       let held =
-        Selection.holds
+        Selection.For_testing.holds
           ~project:
             [ grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient"; "Clock" ] ]
           [ package { Path.owner = Some "truss"; name = "http" } [] ]
@@ -329,7 +345,7 @@ let () =
       then fail "holds another");
   test "a package holds only the granted capabilities that its user holds itself" (fun () ->
       let held =
-        Selection.holds
+        Selection.For_testing.holds
           ~project:[ grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ] ]
           [
             package
@@ -343,7 +359,7 @@ let () =
           (String.concat "; " (List.assoc { Path.owner = Some "truss"; name = "tls" } held)));
   test "a package holds every capability any of its users grants it" (fun () ->
       let held =
-        Selection.holds
+        Selection.For_testing.holds
           ~project:
             [
               grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ];

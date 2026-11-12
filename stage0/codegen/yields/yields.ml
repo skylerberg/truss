@@ -405,3 +405,7 @@ let cursor_drop _env ~cursor ~owned ~evidence (function_ : Lir.function_) =
         ];
     environment = [];
   }
+
+module For_testing = struct
+  let loop_form = loop_form
+end

@@ -14,7 +14,7 @@ fn counted_up(count: USize) -> USize
 }
 
 theorem each_counted(items: List[USize])
-  requires forall i in 0..items.length() => items[i] < 1000
-  ensures forall i in 0..items.length() => counted_up(items[i]) == items[i]
+  requires forall step_index in 0..items.length() => items[step_index] < 1000
+  ensures forall step_index in 0..items.length() => counted_up(items[step_index]) == items[step_index]
 {
 }

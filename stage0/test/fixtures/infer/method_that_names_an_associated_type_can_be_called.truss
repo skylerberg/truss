@@ -1,4 +1,4 @@
-fn f(numbers: own Numbers) -> Int64 {
+fn run_example(numbers: own Numbers) -> Int64 {
   let source: any Source[Item = Int64] = any numbers
   source.first()
 }

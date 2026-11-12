@@ -17,8 +17,8 @@ proof Zero.is_zero for UInt8 {
   todo
 }
 
-fn f(x: UInt8) -> UInt8
+fn run_example(first_number: UInt8) -> UInt8
   ensures result == 0
 {
-  x.zero()
+  first_number.zero()
 }

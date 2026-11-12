@@ -1579,6 +1579,9 @@ and binding cursor ~is_var =
 
 and for_loop cursor ~mode =
   let pattern = Parse_pattern.pattern cursor in
+  let annotation =
+    if Cursor.accept_punctuation cursor Colon then Some (type_expression cursor) else None
+  in
   Cursor.expect_keyword cursor In;
   let iterable = expression cursor in
   (* In [for i in 0.. {}], the grammar reads the body as the end of the
@@ -1591,7 +1594,7 @@ and for_loop cursor ~mode =
       raise Cursor.Failed
   | _ -> ());
   let clauses = loop_clauses cursor in
-  For { mode; pattern; iterable; clauses; body = body cursor }
+  For { mode; pattern; annotation; iterable; clauses; body = body cursor }
 
 (* [invariant] and [cost] may repeat; [decreases] appears at most once. *)
 and loop_clauses cursor =

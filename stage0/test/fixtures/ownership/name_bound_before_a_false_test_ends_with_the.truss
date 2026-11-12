@@ -1,0 +1,9 @@
+fn show(text: String) {}
+
+fn f(names: Map[Int64, String], id: Int64) {
+  if names.get(id) is Some(name) && name.length() > 3 {
+    show(name)
+  } else {
+    show("short")
+  }
+}

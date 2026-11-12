@@ -26,10 +26,7 @@ let debug_form : Ground.ty -> Glue.debug_form = function
       | _ -> Structure)
   | _ -> Structure
 
-let context ?(checks = false)
-    ?(cursor_fields = fun _ _ -> bug "no driver gives cursors their fields")
-    ?(constant = fun _ path -> bug "no driver gives the value of %s" (Path.show path)) database
-    target =
+let context ?(checks = false) ~cursor_fields ~constant database target =
   let rec monomorphic : Monomorphic.context =
     {
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
@@ -101,7 +98,6 @@ let key_of context path =
   | None -> bug "no definition for %s" (Path.show path)
 
 let text_of context key = match demand context Names.text key with Some text -> text | None -> ""
-let back = Monomorphic.back
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =

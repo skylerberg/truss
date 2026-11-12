@@ -1,5 +1,5 @@
 use app::shapes
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   let = shapes::area()
 }

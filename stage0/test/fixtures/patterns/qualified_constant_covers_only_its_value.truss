@@ -2,8 +2,8 @@ type Code(number: Int64)
 
 public let Code.teapot: Int64 = 418
 
-fn f(n: Int64) -> Int64 {
-  match n {
+fn run_example(limit_count: Int64) -> Int64 {
+  match limit_count {
     Code.teapot => 1
     5 => 2
   }

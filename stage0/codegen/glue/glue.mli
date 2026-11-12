@@ -37,7 +37,6 @@ val drop : t -> Ground.ty -> Lir.t
 (* The copy function of a type: [Instance.Copy ty], taking the value as a
    read-only parameter and returning the copy. *)
 val copy : t -> Ground.ty -> Lir.t
-val copy_signature : t -> Ground.ty -> Lir.signature
 
 (* Slot 0 of an [any] table: [Instance.Any_drop ty], which takes the value's
    pointer untyped and drops the value. *)
@@ -69,3 +68,7 @@ val copy_into : t -> Lir_builder.t -> destination:Lir.place -> source:Lir.place 
    functions that write numbers and quoted text. *)
 val debug : t -> Ground.ty -> Lir.t
 val debug_signature : t -> Ground.ty -> Lir.signature
+
+module For_testing : sig
+  val copy_signature : t -> Ground.ty -> Lir.signature
+end

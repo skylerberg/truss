@@ -239,6 +239,7 @@ and statement_kind =
   | For of {
       mode : loop_mode;
       pattern : pattern;
+      annotation : type_expression option;  (** The element type, as in [for index: UInt8 in] *)
       iterable : expression;
       clauses : loop_clause list;
       body : block;

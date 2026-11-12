@@ -9,6 +9,6 @@ fn check(index: USize)
 {
 }
 
-fn f() {
+fn run_example() {
   apply(10, visit: check)
 }

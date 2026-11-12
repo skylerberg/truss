@@ -1,4 +1,4 @@
-fn f(count: UInt32) -> USize {
+fn run_example(count: UInt32) -> USize {
   var items: List[UInt32] = List.with_capacity(0)
   for index in 0..count {
     mut items.push(index)

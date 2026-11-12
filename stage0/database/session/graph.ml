@@ -1,20 +1,24 @@
 (* Graph questions about a state. Every answer names definitions and parts;
    the engine's nodes stay inside. *)
 
-type edge = {
-  dependent : Path.t;
-  dependent_part : string;
-  dependency : Path.t;
-  dependency_part : string;
-}
+open Graph_types
 
 let part_of (subject : Query.subject) = Option.value subject.part ~default:""
 
-(* The edges from a node about a definition: on each path of reads from the
-   node, the first node about another definition. A path passes through
-   nodes about no definition and nodes about the same definition, but not
-   through a fixed base's nodes, so that a definition does not depend on
-   everything the standard library's own queries read. *)
+(* An edge runs from a node about a definition, the dependent, along a path
+   of reads to the first node about another definition. The path continues
+   through a node about no definition or about the dependent, but not
+   through a fixed base's node, so that a definition does not depend on
+   everything the standard library's own queries read. Without
+   [dependent], a node about a definition does not continue the path. *)
+let passes_through ?dependent node =
+  (not (Engine.is_fixed node))
+  &&
+  match (Engine.subject node, dependent) with
+  | None, _ -> true
+  | Some subject, Some dependent -> Path.equal subject.path dependent
+  | Some _, None -> false
+
 let edges_of_node engine node (subject : Query.subject) =
   let dependencies = Hashtbl.create 8 in
   let visited = Hashtbl.create 16 in
@@ -27,7 +31,7 @@ let edges_of_node engine node (subject : Query.subject) =
           match Engine.subject read with
           | Some read_subject when not (Path.equal read_subject.path subject.path) ->
               Hashtbl.replace dependencies (read_subject.path, part_of read_subject) ()
-          | Some _ | None -> if not (Engine.is_fixed read) then traverse read
+          | Some _ | None -> if passes_through ~dependent:subject.path read then traverse read
         end)
       (Engine.reads engine node)
   in
@@ -38,29 +42,63 @@ let edges_of_node engine node (subject : Query.subject) =
       :: edges)
     dependencies []
 
-(* The edges from every node about a definition [is_dependent] accepts. *)
-let edges_from engine ~is_dependent =
+let dependencies engine paths =
+  let paths = Path.Set.of_list paths in
   List.concat_map
     (fun node ->
       match Engine.subject node with
-      | Some subject when is_dependent subject.path -> edges_of_node engine node subject
+      | Some subject when Path.Set.mem subject.path paths -> edges_of_node engine node subject
       | Some _ | None -> [])
     (Engine.nodes engine)
+  |> List.sort_uniq compare
 
-let dependencies engine paths =
+(* The edges to the definitions, found by walking each path of reads in
+   reverse, from a node about a definition through its readers. A path's
+   dependent is the first reader about a definition. *)
+let dependents engine paths =
   let paths = Path.Set.of_list paths in
-  List.sort_uniq compare (edges_from engine ~is_dependent:(fun path -> Path.Set.mem path paths))
-
-(* Edges are found from the dependent's nodes, so the dependents of a
-   definition take the edges of every definition. *)
-let dependents engine = function
-  | [] -> []
-  | paths ->
-      let paths = Path.Set.of_list paths in
-      List.filter
-        (fun edge -> Path.Set.mem edge.dependency paths)
-        (edges_from engine ~is_dependent:(fun _ -> true))
-      |> List.sort_uniq compare
+  let edges = Hashtbl.create 64 in
+  List.iter
+    (fun node ->
+      match Engine.subject node with
+      | Some (dependency : Query.subject) when Path.Set.mem dependency.path paths ->
+          let visited = Hashtbl.create 64 in
+          let rec ascend node dependent =
+            List.iter
+              (fun reader ->
+                let subject = Engine.subject reader in
+                let dependent =
+                  match (dependent, subject) with
+                  | Some _, _ -> dependent
+                  | None, Some (subject : Query.subject) -> Some subject.path
+                  | None, None -> None
+                in
+                let key = (Engine.identity reader, dependent) in
+                if
+                  (not (Hashtbl.mem visited key))
+                  && (not (Option.equal Path.equal dependent (Some dependency.path)))
+                  && passes_through ?dependent reader
+                then begin
+                  Hashtbl.replace visited key ();
+                  (match (subject, dependent) with
+                  | Some subject, Some dependent ->
+                      Hashtbl.replace edges
+                        {
+                          dependent;
+                          dependent_part = part_of subject;
+                          dependency = dependency.path;
+                          dependency_part = part_of dependency;
+                        }
+                        ()
+                  | _ -> ());
+                  ascend reader dependent
+                end)
+              (Engine.readers engine node)
+          in
+          ascend node None
+      | Some _ | None -> ())
+    (Engine.nodes_including_fixed engine);
+  List.sort_uniq compare (Hashtbl.fold (fun edge () edges -> edge :: edges) edges [])
 
 (* The definitions each root reaches through edges, the root included.
    A definition's dependencies do not depend on the root that reaches it,
@@ -93,8 +131,6 @@ let reachable engine roots =
     else List.fold_left reach (Path.Set.add path reached) (dependency_paths path)
   in
   List.map (reach Path.Set.empty) roots
-
-type difference = Changed | Added | Same
 
 (* Every node of [mine] that may differ from the same node in [theirs],
    with how it compares. A state holds only its differences from its bases, or
@@ -130,12 +166,6 @@ let changes mine theirs =
       | Some (subject : Query.subject) -> Some (subject.path, subject.part, difference)
       | None -> None)
     (compare_nodes mine theirs)
-
-type place = { path : Path.t option; part : string option; label : string }
-
-type overlap =
-  | Both_change of place
-  | Reads of { this_worktree : bool; change : place; reads : place }
 
 (* Where two states' changes from a common base meet: each node both
    changed, and each node one changed that depends on a node the other changed. *)

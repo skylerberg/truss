@@ -18,7 +18,7 @@ type artifact = {
   difference_count : int;
 }
 
-val write : ?full:bool -> Nodes.t -> string
+val write : ?full:bool -> ?stores_every_value:bool -> Nodes.t -> string
 
 type chain_size = { whole : int; differences : int; depth : int }
 

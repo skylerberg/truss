@@ -1,4 +1,4 @@
-fn f() -> USize {
+fn run_example() -> USize {
   var data: List[Int64] = [1, 2, 3]
   var other: List[Int64] = [7]
   var window = Window(other[0..1])

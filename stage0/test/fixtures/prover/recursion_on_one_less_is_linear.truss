@@ -1,6 +1,6 @@
-fn f(count: UInt32) -> UInt32
+fn run_example(count: UInt32) -> UInt32
   decreases count
   cost time O(count)
 {
-  if count == 0 { 0 } else { f(count - 1) }
+  if count == 0 { 0 } else { run_example(count - 1) }
 }

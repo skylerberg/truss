@@ -8,7 +8,7 @@ open Codegen_support
 (* [count_to(limit)] yields 1, 2, and so on up to [limit]. *)
 let count_to =
   function_ ~parameters:[ 0 ]
-    [ local ~name:"limit" (value int32); local ~name:"i" (value int32); local (Raw Bool) ]
+    [ local ~name:"limit" (value int32); local ~name:"step_index" (value int32); local (Raw Bool) ]
     [
       block [ Assign (at 1, Use (constant_int32 1)) ] (Goto 1);
       block
@@ -26,7 +26,7 @@ let body_type : Ground.function_type =
    to a total, and continues while [continues] says so. *)
 let loop_program continues =
   let env = shape_env () in
-  let method_ = instance "count_to" (Yields.loop_form env ~body:body_type count_to) in
+  let method_ = instance "count_to" (Yields.For_testing.loop_form env ~body:body_type count_to) in
   let total = Lir.Pointer { target = value int32; writable = true } in
   let body =
     function_ ~parameters:[ 0; 1 ] ~result:(value bool)
@@ -99,7 +99,8 @@ let () =
       let next =
         {
           (instance "next"
-             (Lir.canonical (Yields.cursor_next env ~cursor ~result ~evidence:[] count_to)))
+             (Lir.For_testing.canonical
+                (Yields.cursor_next env ~cursor ~result ~evidence:[] count_to)))
           with
           key = Cursor_next yielding;
         }
@@ -107,7 +108,9 @@ let () =
       let release : Lir.t =
         {
           key = Drop cursor;
-          main = Lir.canonical (Yields.cursor_drop env ~cursor ~owned:[] ~evidence:[] count_to);
+          main =
+            Lir.For_testing.canonical
+              (Yields.cursor_drop env ~cursor ~owned:[] ~evidence:[] count_to);
           nested = [||];
         }
       in

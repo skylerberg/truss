@@ -566,7 +566,10 @@ let () =
       expect_string ~expected:"150000\n5\n150000\n" output);
   test "the console a program is given is a value its start owns and drops" (fun () ->
       let _, compile = load Fixtures.Program.console_a_program_is_given_is_a_value_its_start in
-      match Compile.compiled compile (Program_main (Top { module_ = example; name = "main" })) with
+      match
+        Compile.For_testing.compiled compile
+          (Program_main (Top { module_ = example; name = "main" }))
+      with
       | Code instance ->
           let console local =
             match instance.main.locals.(local).ty with
@@ -583,7 +586,8 @@ let () =
                   block.statements)
               instance.main.blocks
           in
-          if not dropped then fail "no drop of the console:\n%s" (Lir.to_string instance)
+          if not dropped then
+            fail "no drop of the console:\n%s" (Lir.For_testing.to_string instance)
       | _ -> fail "expected code")
 
 let () =
@@ -623,7 +627,7 @@ let () =
                     with
                     | Top _, Some { generics = []; specification_only = false; _ } ->
                         ignore
-                          (Compile.compiled compile
+                          (Compile.For_testing.compiled compile
                              (Code { path = declaration.path; type_arguments = [] }))
                     | _ -> ())
                   (Query.demand database Resolve.Names.declarations example);
@@ -642,7 +646,9 @@ let () =
       (match run_main source with
       | 0, output, _ -> expect_string ~expected:"counted 1\ndone 3\n" output
       | status, _, errors -> fail "ended with status %d: %s" status errors);
-      match run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
+      match
+        run_main ~arguments:[ "first_value"; "second_value"; "third_value"; "fourth_value" ] source
+      with
       | 101, output, errors ->
           expect_string ~expected:"counted 5\n" output;
           if not (contains errors "many arguments") then fail "panicked with %S" errors

@@ -141,3 +141,7 @@ let run ~directory ~fix:fixing ~proofs ~json =
     end
   end;
   if Report.clean report then 0 else 1
+
+module For_testing = struct
+  let chosen = chosen
+end

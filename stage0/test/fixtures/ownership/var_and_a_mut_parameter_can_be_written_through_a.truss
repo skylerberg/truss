@@ -4,7 +4,7 @@ fn narrow(window: mut Window, count: USize) {
   window.rest = window.rest[..count]
 }
 
-fn f(supplied: mut List[Int64]) -> USize {
+fn run_example(supplied: mut List[Int64]) -> USize {
   var items: List[Int64] = [3, 1, 2]
   var part = items.slice()
   bump(mut part)

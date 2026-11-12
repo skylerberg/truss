@@ -1,5 +1,5 @@
 fn parse[Value](text: Int64) -> Option[Value] { todo }
 
-fn f() {
+fn run_example() {
   let _ = parse[Int64](1)
 }

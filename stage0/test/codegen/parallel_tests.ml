@@ -71,7 +71,7 @@ let () =
 (* Outlining *)
 
 let outlined (instance : Lir.t) =
-  Lir.to_string (Lir.canonical_instance (Outline.instance (shape_env ()) instance))
+  Lir.For_testing.to_string (Lir.canonical_instance (Outline.instance (shape_env ()) instance))
 
 let () =
   test "a region's own local goes with it, and a shared one is reached through the environment"

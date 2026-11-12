@@ -81,6 +81,7 @@ let unshared engine other =
 (* The state's nodes, apart from its fixed bases': the engine's own, and
    those of an earlier state it has not replaced. *)
 let nodes engine = own_and_inherited engine ~skip:(fun base -> base.fixed)
+let nodes_including_fixed engine = own_and_inherited engine ~skip:(fun _ -> false)
 let reads = current_reads
 
 (* A node's readers, without copying anything: a base's reader that the

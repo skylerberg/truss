@@ -1,4 +1,4 @@
-fn f() -> Option[Int64]
+fn run_example() -> Option[Int64]
   uses Meter
 {
   var counter = Counter(next: 0)

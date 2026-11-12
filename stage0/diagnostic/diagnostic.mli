@@ -344,8 +344,6 @@ module Collector : sig
   (** In order of position. *)
 end
 
-val limit : int
-
 val shown : t list -> t list
 (** The diagnostics to list: at most {!limit}, and then, if there were more, one with the code
     [Too_many_diagnostics] that counts the rest, so that a binary file opened by mistake gives a
@@ -372,3 +370,7 @@ val json_string : string -> string
 val quote : string -> string
 (** Text in double quotes, with quotes, backslashes, control characters, and bytes that are not
     valid UTF-8 escaped, so that text in any script stays readable and the result is valid UTF-8. *)
+
+module For_testing : sig
+  val limit : int
+end

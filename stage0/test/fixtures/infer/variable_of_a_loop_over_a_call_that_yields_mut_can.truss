@@ -12,7 +12,7 @@ impl Rows for Grid {
   }
 }
 
-fn f[Source: Rows](grid: mut Grid, source: mut Source) {
+fn run_example[Source: Rows](grid: mut Grid, source: mut Source) {
   for row in mut grid.rows() {
     mut row.push(1)
   }

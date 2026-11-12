@@ -67,12 +67,12 @@ let printed_body text name =
 
 let expect_definition name text expected =
   test name (fun () ->
-      let actual = printed_definition text "g" in
+      let actual = printed_definition text "second_example" in
       if actual <> expected then fail "found:\n%s" actual)
 
 let expect_body name text expected =
   test name (fun () ->
-      let actual = printed_body text "g" in
+      let actual = printed_body text "second_example" in
       if actual <> expected then fail "found:\n%s" actual)
 
 let meters = Fixtures.Core.meters
@@ -215,7 +215,7 @@ let () =
 (* Specifications *)
 
 let () =
-  expect_definition "a `requires` clause with a quantifier is not executable"
+  expect_definition "first_value `requires` clause with a quantifier is not executable"
     Fixtures.Core.requires_clause_with_a_quantifier_is_not
     "fn(items: List[Int64], limit: Int64)\n\
      requires (limit > 0)\n\
@@ -366,7 +366,7 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn g(items: List[Int64], config: Config) -> Int64 {\n\
+                 fn second_example(items: List[Int64], config: Config) -> Int64 {\n\
                 \  var hole = todo\n\
                 \  " ^ statement ^ "\n  config.port\n}\n" );
             ]))
@@ -417,7 +417,7 @@ let () =
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
-          if Path.show key.path = "app::main::g" then
+          if Path.show key.path = "app::main::second_example" then
             match Query.demand database Infer.core key with
             | Some form ->
                 Core_walk.definition
@@ -445,7 +445,7 @@ let () =
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
-          if Path.show key.path = "app::main::g" then
+          if Path.show key.path = "app::main::second_example" then
             match Query.demand database Infer.core key with
             | Some form ->
                 Core_walk.definition
@@ -579,7 +579,7 @@ let printed_derived text type_name trait name receiver =
                 List.find
                   (fun (path : Path.t) ->
                     match path with Top { name; _ } -> name = trait | _ -> false)
-                  (List.map Well_known.path Well_known.all);
+                  (List.map Well_known.path Well_known.For_testing.all);
             };
         name;
         receiver;
@@ -608,8 +608,8 @@ let () =
      place other.first) && Equal.equal for Second by a bound(place self.second, place \
      other.second)) }";
   expect_derived
-    "a sum type's derived equal compares the fields of matching variants, and is false for \
-     different variants"
+    "first_value sum type's derived equal compares the fields of matching variants, and is false \
+     for different variants"
     light "Light" "Equal" "equal" Read
     "fn(self: Light, other: Light)\n\
      { match place self { Off => { (place other is Off) } Dim(level: level) => { match place other \
@@ -823,7 +823,7 @@ let () =
       in
       if actual <> expected then fail "found:\n%s" actual)
 
-(* [Infer.specification] *)
+(* [Infer.For_testing.specification] *)
 
 let () =
   let specification text name =
@@ -835,7 +835,7 @@ let () =
           if Path.show key.path = "app::main::" ^ name then
             Option.map
               (fun form -> (database, key, form))
-              (Query.demand database Infer.specification key)
+              (Query.demand database Infer.For_testing.specification key)
           else None)
         (Query.demand database Resolve.Names.declarations (module_of "app::main"))
     in
@@ -892,7 +892,8 @@ let () =
         in
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            Query.demand database Infer.exported_specification (Resolve.Names.key_of declaration))
+            Query.demand database Infer.For_testing.exported_specification
+              (Resolve.Names.key_of declaration))
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
       in
       (match exported " transparent" with
@@ -915,7 +916,8 @@ let () =
           (fun (declaration : Resolve.Names.declaration) ->
             match declaration.path with
             | Method { name = "bump"; _ } ->
-                Query.demand database Infer.specification (Resolve.Names.key_of declaration)
+                Query.demand database Infer.For_testing.specification
+                  (Resolve.Names.key_of declaration)
             | _ -> None)
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
       in

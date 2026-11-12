@@ -1,4 +1,4 @@
-fn f(couple: Couple) -> Bool
+fn run_example(couple: Couple) -> Bool
   ensures result
 {
   var cursor = couple.each()

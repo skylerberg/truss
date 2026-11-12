@@ -338,28 +338,21 @@ let facts_from database ~facts_of (interface : Types.type_interface) =
                fields);
       }
 
-(* The types of a package, each with its group of mutually recursive types:
-   the types that name each other in their fields, including itself.
-   Packages cannot depend on each other in a cycle, so a group is within one
-   package. *)
-let groups =
-  Query.query ~name:"type_groups" ~phase:Phases.interfaces ~show:Path.show_package
-    (fun database package ->
-      let types =
-        List.filter_map
-          (fun (declaration : Resolve.Names.declaration) ->
-            if declaration.kind = Type && declaration.ordinal = 0 then Some declaration.path
-            else None)
-          (Query.demand database Resolve.Names.package_declarations package)
-      in
-      let known = Path.Set.of_list types in
+(* A type's group of mutually recursive types: the types that name each
+   other in their fields, including itself. Packages cannot depend on each
+   other in a cycle, so a group is within one package, and it is among the
+   types the type reaches through its fields. Each group is sorted, so every
+   member computes the same list. *)
+let group =
+  Query.query ~name:"type_group" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
+      let package = Path.package path in
       let named type_ =
         let named_types = ref [] in
         ignore
           (Types.map
              (function
-               | Types.Named { path; _ } when Path.Set.mem path known ->
-                   named_types := path :: !named_types;
+               | Types.Named { path = named; _ } when Path.package named = package ->
+                   named_types := named :: !named_types;
                    None
                | _ -> None)
              type_);
@@ -378,16 +371,10 @@ let groups =
               variants
         | _ -> []
       in
-      List.fold_left
-        (fun groups group ->
-          List.fold_left (fun groups member -> Path.Map.add member group groups) groups group)
-        Path.Map.empty
-        (Components.of_graph ~compare:Path.compare ~successors types))
-
-let group =
-  Query.query ~name:"type_group" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       Option.value ~default:[ path ]
-        (Path.Map.find_opt path (Query.demand database groups (Path.package path))))
+        (List.find_opt
+           (List.exists (Path.equal path))
+           (Components.of_graph ~compare:Path.compare ~successors [ path ])))
 
 (* The facts of a group of mutually recursive types, keyed by the group's
    first member. A recursive type is [Copyable] and [Plain] unless a part of

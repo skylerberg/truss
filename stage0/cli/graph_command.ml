@@ -20,7 +20,7 @@ let run ~directory ~direction ~name ~json =
                ( "reads",
                  Json.List
                    (List.map
-                      (fun (edge : Database.edge) ->
+                      (fun (edge : Graph_types.edge) ->
                         Json.Object
                           [
                             ("reader", Json.String (Path.show edge.dependent));
@@ -37,7 +37,7 @@ let run ~directory ~direction ~name ~json =
           | Dependencies -> "It reads nothing.")
       else
         List.iter
-          (fun (edge : Database.edge) ->
+          (fun (edge : Graph_types.edge) ->
             Output.printf "%s: its %s reads the %s of %s\n" (Path.show edge.dependent)
               edge.dependent_part edge.dependency_part (Path.show edge.dependency))
           edges;

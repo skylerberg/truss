@@ -1,4 +1,4 @@
-fn f(items: List[Int64]) -> USize {
+fn run_example(items: List[Int64]) -> USize {
   var labeled = Labeled(view: items[..], name: "a".copy())
   let name = labeled.name.slice()
   labeled = Labeled(view: items[..], name: "b".copy())

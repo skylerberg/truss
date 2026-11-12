@@ -1,6 +1,6 @@
 use store::ledger
 
-fn f()
+fn run_example()
   uses ledger::Ledger
 {
   ledger::pay(1)

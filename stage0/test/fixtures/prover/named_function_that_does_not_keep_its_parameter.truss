@@ -6,6 +6,6 @@ fn spin(value: UInt32) -> UInt32
   value
 }
 
-fn f() -> UInt32 {
+fn run_example() -> UInt32 {
   run(spin)
 }

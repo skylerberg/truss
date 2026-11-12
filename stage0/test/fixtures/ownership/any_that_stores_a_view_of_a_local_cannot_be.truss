@@ -1,4 +1,4 @@
-fn f() -> any Runner {
+fn run_example() -> any Runner {
   let items: List[Int64] = [1, 2, 3]
   any Window(view: items[..])
 }

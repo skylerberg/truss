@@ -5,7 +5,7 @@
 open Harness
 open Support
 
-let check = Type_checker.through Infer
+let check = Type_checker.For_testing.through Infer
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
@@ -182,6 +182,20 @@ let () =
     (fun () ->
       one_diagnostic Fixtures.Infer.local_whose_literal_does_not_fit_the_type_a
         "types.literal_out_of_range");
+  test "a loop's annotation decides the literals of its range" (fun () ->
+      let text = Fixtures.Infer.loop_annotation_decides_the_literals_of_its_range in
+      has_type text "10" "UInt8";
+      fine text);
+  test "a loop's annotation is the type of a destructured element" (fun () ->
+      fine Fixtures.Infer.loop_annotation_of_a_destructured_element);
+  test "a loop's annotation must be its element type" (fun () ->
+      one_diagnostic Fixtures.Infer.loop_annotation_must_be_the_element_type "types.mismatch"
+        ~says:"The elements of this loop are `UInt16`, not `UInt8`.");
+  test "a loop variable given its default type by a method call has a fix that annotates the loop"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.loop_variable_given_its_default_type_by_a_method
+        "types.mismatch"
+        ~fixed:Fixtures.Infer.loop_variable_given_its_default_type_by_a_method_fixed);
   test "a local used as two types is one error, at the second use" (fun () ->
       one_diagnostic Fixtures.Infer.local_used_as_two_types_is_one_error "types.mismatch"
         ~says:"An earlier statement decided that the type of `base` is `UInt8`.");
@@ -328,7 +342,7 @@ let () =
     [
       ("a read-only parameter", Fixtures.Infer.read_only_parameter);
       ("an `own` parameter", Fixtures.Infer.own_parameter);
-      ("a `let`", Fixtures.Infer.let_);
+      ("first_value `let`", Fixtures.Infer.let_);
       ("a field of a `let`", Fixtures.Infer.field_of_a_let);
       ("an element of a read-only parameter", Fixtures.Infer.element_of_a_read_only_parameter);
       ("a constant", Fixtures.Infer.constant);
@@ -458,10 +472,10 @@ let () =
          Fixtures.Infer.record_that_holds_a_slice_is_not_storable );
        ( "a generic type is not Storable where its argument is not",
          Fixtures.Infer.generic_type_is_not_storable_where_its_argument_is );
-       ("a function type is not Storable", Fixtures.Infer.function_type_is_not_storable);
+       ("first_value function type is not Storable", Fixtures.Infer.function_type_is_not_storable);
        ( "an any type is not Storable when its trait does not require it",
          Fixtures.Infer.any_type_is_not_storable_when_its_trait_does_not );
-       ( "a type parameter is Storable only when it is bounded",
+       ( "first_value type parameter is Storable only when it is bounded",
          Fixtures.Infer.type_parameter_is_storable_only_when_it_is_bounded );
      ];
    test "no impl of Storable can be written" (fun () ->
@@ -494,7 +508,8 @@ let () =
 
 let () =
   test "integer arithmetic in a specification is exact" (fun () ->
-      has_type Fixtures.Infer.integer_arithmetic_in_a_specification_is_exact "a + b" "Integer");
+      has_type Fixtures.Infer.integer_arithmetic_in_a_specification_is_exact
+        "first_value + second_value" "Integer");
   test "comparisons in a specification may mix integer types" (fun () ->
       fine Fixtures.Infer.comparisons_in_a_specification_may_mix_integer);
   test "a lambda in a specification may give a built-in integer for an Integer" (fun () ->
@@ -528,7 +543,7 @@ let () =
       expect_not_recomputed engine
         ~first:(fun () -> ignore (Infer.diagnostics database module_))
         ~again:(fun () ->
-          Database.Testing.set_text engine module_ (text "2");
+          Database.For_testing.set_text engine module_ (text "2");
           ignore (Infer.diagnostics database module_))
         Infer.type_check_result
         [ top_key "app::main" "caller" ]);
@@ -568,7 +583,7 @@ let () =
             (Query.demand database Resolve.Names.declarations module_))
         Standard_library.modules)
 
-let point = "type Point(x: Int64)\n\n"
+let point = "type Point(first_number: Int64)\n\n"
 
 let () =
   test "a call's type arguments must meet their bounds" (fun () ->
@@ -826,7 +841,7 @@ let () =
     (fun () ->
       let lists counted =
         "fn take(runs: List[(fn() uses Clock, Console cost calls(Console) <= 1)]) {}\n\n\
-         fn f(runs: List[(fn() uses Clock, Console cost calls(" ^ counted
+         fn run_example(runs: List[(fn() uses Clock, Console cost calls(" ^ counted
         ^ ") <= 1)]) {\n  take(runs)\n}\n"
       in
       fine (lists "Console");
@@ -835,16 +850,16 @@ let () =
   test "the target of `calls` in a function type is a capability or one of its methods" (fun () ->
       one_diagnostic Fixtures.Infer.target_of_calls_in_a_function_type_is_a_capability
         "types.not_a_capability";
-      one_diagnostic "fn f(run: (fn() uses Clock cost calls(Clock.later) <= 1)) {}\n"
+      one_diagnostic "fn run_example(run: (fn() uses Clock cost calls(Clock.later) <= 1)) {}\n"
         "types.unknown_member";
-      one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
+      one_diagnostic "fn run_example(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
         "types.not_a_capability");
   test
     "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
      method" (fun () ->
       let clause counted =
-        "type Point(x: Int64)\n\n\
-         fn f(count: Int64, visit: (fn() cost time finite))\n\
+        "type Point(first_number: Int64)\n\n\
+         fn run_example(count: Int64, visit: (fn() cost time finite))\n\
         \  uses Clock\n\
         \  cost calls(" ^ counted ^ ") <= 1\n{\n  todo\n}\n"
       in
@@ -888,7 +903,7 @@ let () =
 
 (* Constant expressions *)
 
-let point = "type Point(x: Int64, y: Int64)\n\n"
+let point = "type Point(first_number: Int64, second_number: Int64)\n\n"
 
 let () =
   test "a constant is built from literals, operators on numbers, and other constants" (fun () ->
@@ -922,7 +937,7 @@ let () =
       one_diagnostic Fixtures.Infer.default_must_be_a_constant_expression
         "types.default_not_constant");
   test "a default cannot name a parameter" (fun () ->
-      one_diagnostic "fn f(count: Int64, twice: Int64 = count * 2) {}\n"
+      one_diagnostic "fn run_example(count: Int64, twice: Int64 = count * 2) {}\n"
         "types.default_not_constant");
   test "a method's default must be a constant expression" (fun () ->
       one_diagnostic

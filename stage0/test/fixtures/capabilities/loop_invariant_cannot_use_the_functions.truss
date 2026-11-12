@@ -5,7 +5,7 @@ fn stamp() -> Bool
   todo
 }
 
-fn f()
+fn run_example()
   uses Clock
 {
   var count = 0

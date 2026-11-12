@@ -84,11 +84,11 @@ let () =
   test "values echo as Truss writes them" (fun () ->
       expect_output Fixtures.Feature.values_echo_as_truss_writes_them
         "test 0 passed\n\
-         echo 265\n\
+         echo 288\n\
          example/main.truss:4:11: Some(true)\n\
          example/main.truss:5:11: Some(1.5)\n\
          example/main.truss:6:11: [1, 2, 3]\n\
          example/main.truss:7:11: \"hi\\n \\${x} \\u{1}\"\n\
-         example/main.truss:8:11: Point(x: 0.1, y: 2.0)\n\
+         example/main.truss:8:11: Point(first_number: 0.1, second_number: 2.0)\n\
          example/main.truss:9:11: -7\n\
          example/main.truss:10:11: Character\"\195\169\"\n\n")

@@ -1,4 +1,4 @@
 test "a" {
-  let x: Int64 = 5
-  assert x == 6
+  let first_number: Int64 = 5
+  assert first_number == 6
 }

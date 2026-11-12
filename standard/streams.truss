@@ -308,6 +308,10 @@ public fn BufferedReader[Source: Reader].peek(mut self, count: USize) -> Result[
   Ok(self.pending.slice_range(self.start, stop: self.start + shown))
 }
 
+public fn BufferedReader[Source: Reader].buffered(self) -> USize {
+  self.pending.length() - self.start
+}
+
 public fn BufferedReader[Source: Reader].finish(own self) -> Source {
   self.source
 }

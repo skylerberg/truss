@@ -134,7 +134,7 @@ let () =
   test "a call is run again when the callee's body has changed" (fun () ->
       let source body =
         "fn same(value: UInt8) -> UInt8\n  cost time finite\n{\n  " ^ body
-        ^ "\n}\n\nfn f() -> UInt8\n  ensures result == 7\n{\n  same(7)\n}\n"
+        ^ "\n}\n\nfn run_example() -> UInt8\n  ensures result == 7\n{\n  same(7)\n}\n"
       in
       let database, compile = load (source "value") in
       let proven () =
@@ -148,7 +148,7 @@ let () =
           fail "%s"
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-      Database.Testing.set_text (Engine.of_context database) example (source "0");
+      Database.For_testing.set_text (Engine.of_context database) example (source "0");
       match proven () with
       | [ _ ] -> ()
       | actual ->

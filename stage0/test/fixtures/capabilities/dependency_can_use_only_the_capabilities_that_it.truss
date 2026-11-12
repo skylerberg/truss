@@ -1,6 +1,6 @@
 use clock_library::time
 
-fn f() -> Instant
+fn run_example() -> Instant
   uses Clock
 {
   time::stamp()

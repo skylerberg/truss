@@ -1,3 +1,3 @@
 test "a" {
-  run(fn(x) { assert x })
+  run(fn(first_number) { assert first_number })
 }

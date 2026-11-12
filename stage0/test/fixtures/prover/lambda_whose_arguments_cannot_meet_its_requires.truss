@@ -2,11 +2,11 @@ fn each_index(count: USize, visit: (fn(index: USize) -> USize requires index < c
   if count > 0 { visit(count - 1) } else { 0 }
 }
 
-fn f(x: Int64) -> Int64
+fn run_example(first_number: Int64) -> Int64
   ensures result <= 0
 {
-  if x > 0 {
-    let _ = each_index(0, visit: fn(i) { i })
+  if first_number > 0 {
+    let _ = each_index(0, visit: fn(step_index) { step_index })
   }
-  x
+  first_number
 }

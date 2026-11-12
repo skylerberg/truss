@@ -9,6 +9,7 @@
   source
   diagnostic
   database
+  graph_types
   build
   type_checker
   manifest

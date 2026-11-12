@@ -187,7 +187,7 @@ and statement state env (written : statement) ~last : unit =
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                              (Types.show resolved));
                       true)))
-  | For { mode = running; pattern = written_pattern; iterable; clauses; body } ->
+  | For { mode = running; pattern = written_pattern; annotation; iterable; clauses; body } ->
       let mode, inner =
         match iterable.kind with
         | Mode (Mut, inner) when Option.is_none (marked_call state inner) -> (Types.Mut, inner)
@@ -200,6 +200,22 @@ and statement state env (written : statement) ~last : unit =
       let loop_element = ref None in
       in_statement state env iterable.span (fun () ->
           let element, variable_mode = loop_iterable state env written ~mode inner in
+          (* The annotation is the element type. The header's statement is
+             not settled yet, so in [for index: UInt8 in 0..10] it decides
+             the literals of the range. *)
+          (match annotation with
+          | Some written_annotation ->
+              let annotated = Lower.type_ state.context written_annotation in
+              if not (unify state element annotated) then
+                ignore
+                  (reported_mismatch state Mismatch written_annotation.span
+                     ~sides:[ (element, annotated) ]
+                     (Printf.sprintf "The elements of this loop are `%s`, not `%s`."
+                        (show state element) (show state annotated)))
+          | None -> (
+              match written_pattern.kind with
+              | Binding_or_constant name -> Hashtbl.replace state.annotatable name.id ()
+              | _ -> ()));
           loop_element := Some element;
           (if inner != iterable then
              match state.tables.types.(inner.id) with

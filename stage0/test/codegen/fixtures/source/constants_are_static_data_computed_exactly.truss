@@ -1,14 +1,14 @@
-type Point(x: Int64, y: Int64)
+type Point(first_number: Int64, second_number: Int64)
   derives Equal
 
 let seconds_per_day: Int64 = 24 * 60 * 60
-let origin: Point = Point(x: -1, y: 2)
+let origin: Point = Point(first_number: -1, second_number: 2)
 let greeting: String = "hello"
 let primes: List[Int64] = [2, 3, 5, 7]
 
 test "constants" {
   assert seconds_per_day == 86400
-  assert origin == Point(x: -1, y: 2)
+  assert origin == Point(first_number: -1, second_number: 2)
   assert greeting == "hello"
   assert primes[3] == 7
   assert primes.length() == 4

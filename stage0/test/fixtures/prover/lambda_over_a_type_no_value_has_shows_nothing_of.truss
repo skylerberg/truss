@@ -6,11 +6,11 @@ fn ignore(visit: fn(Empty) -> Int64) -> Int64 {
   0
 }
 
-fn f(x: Int64) -> Int64
+fn run_example(first_number: Int64) -> Int64
   ensures result <= 0
 {
-  if x > 0 {
-    let _ = ignore(fn(e) { e.value })
+  if first_number > 0 {
+    let _ = ignore(fn(fifth_value) { fifth_value.value })
   }
-  x
+  first_number
 }

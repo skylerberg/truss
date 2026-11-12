@@ -6,6 +6,6 @@ trait Second {
   fn make() -> Self
 }
 
-fn f[Value: First + Second]() -> Value {
+fn run_example[Value: First + Second]() -> Value {
   Value.make()
 }

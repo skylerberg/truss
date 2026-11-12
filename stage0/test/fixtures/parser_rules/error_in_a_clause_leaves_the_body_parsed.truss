@@ -1,3 +1,3 @@
-fn f() requires + ensures true {
-  x
+fn run_example() requires + ensures true {
+  first_number
 }

@@ -1126,12 +1126,12 @@ block     = "{" lines(statement) "}" ;
 statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "var" pattern [ ":" type ] "=" expression [ "else" block ]
           | expression [ assignment_operator expression ]
-          | "for" pattern "in" expression { loop_clause } block
+          | "for" pattern [ ":" type ] "in" expression { loop_clause } block
           | "while" expression { loop_clause } block
           | "parallel" block
-          | "parallel" "for" pattern "in" expression { loop_clause } block
+          | "parallel" "for" pattern [ ":" type ] "in" expression { loop_clause } block
           | "concurrent" block
-          | "concurrent" "for" pattern "in" expression { loop_clause } block
+          | "concurrent" "for" pattern [ ":" type ] "in" expression { loop_clause } block
           | "proof" block
           | "assert" expression
           | "yield" expression ;
@@ -1336,6 +1336,11 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 | `while low < high { ... }` | Loop while a condition holds. |
 
 - A `mut` loop changes elements but does not add or remove them.
+- A `for` loop's type annotation is its element type, as a `let`'s is the
+  type of its value: `for index: UInt8 in 0..10` iterates over `UInt8`s, and
+  `for (index, element): Indexed[UInt8] in data.enumerate()` destructures
+  each `Indexed[UInt8]`. The annotation must be the element type: it never
+  converts the elements.
 - A `while` whose condition is the literal `true`, and that no `break`
   leaves, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.

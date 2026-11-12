@@ -1,4 +1,4 @@
-type Point(x: Int64)
+type Point(first_number: Int64)
 
 impl Ordered for Point {
   fn compare(self, other: Point) -> Ordering { todo }

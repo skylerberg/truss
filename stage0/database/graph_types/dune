@@ -1,0 +1,7 @@
+; The answers of the code database's graph questions, which the session layer
+; computes and the command line reads.
+
+(library
+ (name graph_types)
+ (modules_without_implementation graph_types)
+ (libraries path))
