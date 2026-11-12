@@ -1232,17 +1232,16 @@ generation read, including the patterns that `?` desugars to:
 
 `Ownership` enforces DESIGN.md's rules on modes, moves, and views within each
 function. It prevents use after move, dangling views, mutation of a borrowed
-place, and data races. It reads the definition's [core form](#the-core-form)
-and the interfaces of the definition's callees.
+place, and data races. It reads the definition's MIR, which
+[MIR.md](MIR.md) describes, and the interfaces of the definition's callees.
 
-The check builds a control-flow graph of the body. Each point of the graph
-performs one action on one place: a read, a move, a `mut` borrow, an
-assignment, or a binding of new locals. The edges follow evaluation order, and
-a loop has a back edge. The right operand of `&&` is reached only from where
-the left operand is true, and the right operand of `||` only from where it is
-false, so each operand has an edge to the operand after it and an edge to the
-code after the expression. A lambda's body is a separate entry point, because
-it runs when the lambda is called. Three dataflow analyses run on the graph:
+The check builds a graph of points from the MIR. Each point performs one
+action on one place: a read, a move, a `mut` borrow, an assignment, or a
+binding of new locals. The edges are the MIR's, so they follow its order of
+evaluation, and the MIR's loans, which it starts and ends where the
+language says a borrow lasts, are live at the points between. A lambda's body
+is a separate entry point, because it runs when the lambda is called. Three
+dataflow analyses run on the graph:
 
 - forward: the places that may have been moved before each point;
 - forward: the views that each holder may store at each point, where a holder

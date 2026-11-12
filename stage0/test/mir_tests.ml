@@ -16,7 +16,8 @@ let check_body what (body : Mir.body) =
     match place.root with Local found -> local found | Constant _ -> ()
   in
   let operand : Mir.operand -> unit = function
-    | Use { place = found; _ } | Borrow { place = found; _ } -> place found
+    | Use { place = found; _ } | Borrow { place = found; _ } | Take { place = found; _ } ->
+        place found
     | Constant _ -> ()
   in
   Array.iter
@@ -104,19 +105,40 @@ let () =
      first"
     Fixtures.Mir.assignment_evaluates_its_value_then_its_target_and
     "0:\n\
+    \  loan 0: read mut _1 for the operation\n\
+    \  end loans 0\n\
     \  _2 = app::main::step(mut _1, 2)\n\
+    \  loan 1: read _2 for the operation\n\
+    \  loan 2: read mut _0 for the operation\n\
+    \  loan 3: read mut _1 for the operation\n\
+    \  end loans 3\n\
     \  _3 = app::main::step(mut _1, 1)\n\
+    \  end loans 2\n\
     \  _4 = lend standard::core::Index.at(mut _0, _3)\n\
+    \  loan 4: mut mut _0 for the statement\n\
+    \  end loans 1\n\
     \  _4 = _2\n\
+    \  end loans 4\n\
     \  dead _2, _3, _4\n\
+    \  loan 5: read mut _1 for the operation\n\
+    \  end loans 5\n\
     \  _5 = app::main::step(mut _1, 4)\n\
     \  live _6\n\
     \  _6 = _5\n\
+    \  loan 6: read _6 for the operation\n\
+    \  loan 7: read mut _0 for the operation\n\
+    \  loan 8: read mut _1 for the operation\n\
+    \  end loans 8\n\
     \  _7 = app::main::step(mut _1, 3)\n\
+    \  end loans 7\n\
     \  _8 = lend standard::core::Index.at(mut _0, _7)\n\
-    \  _9 = add(_8, _6)\n\
-    \  _8 = _9\n\
-    \  dead _5, _6, _7, _8, _9\n\
+    \  loan 9: mut mut _0 for the statement\n\
+    \  end loans 6\n\
+    \  _9 = _6\n\
+    \  _10 = add(take _8, _9)\n\
+    \  _8 = _10\n\
+    \  end loans 9\n\
+    \  dead _5, _6, _7, _8, _9, _10\n\
     \  return ()";
   expect "a match tests its arms in order, and a guard that fails ends the arm's bindings"
     Fixtures.Mir.match_tests_its_arms_in_order_and_a_guard_that
@@ -128,20 +150,25 @@ let () =
     \  _3 = read _0.(Some).value\n\
     \  goto 2\n\
      2:\n\
-    \  _4 = _3 > 0\n\
-    \  branch _4 11 3\n\
+    \  loan 0: read read _0 for the operation\n\
+    \  _4 = _3\n\
+    \  loan 1: read _4 for the operation\n\
+    \  end loans 1\n\
+    \  _5 = _4 > 0\n\
+    \  branch _5 11 3\n\
      3:\n\
-    \  dead _4\n\
+    \  dead _4, _5\n\
     \  goto 4\n\
      4:\n\
+    \  end loans 0\n\
     \  dead _3\n\
     \  goto 5\n\
      5:\n\
-    \  _5 = _0 is Some\n\
-    \  branch _5 9 6\n\
+    \  _6 = _0 is Some\n\
+    \  branch _6 9 6\n\
      6:\n\
-    \  _6 = _0 is None\n\
-    \  branch _6 8 7\n\
+    \  _7 = _0 is None\n\
+    \  branch _7 8 7\n\
      7:\n\
     \  unreachable\n\
      8:\n\
@@ -152,9 +179,10 @@ let () =
     \  _1 = 0\n\
     \  goto 13\n\
      11:\n\
-    \  dead _4\n\
+    \  dead _4, _5\n\
     \  goto 12\n\
      12:\n\
+    \  end loans 0\n\
     \  _1 = _3\n\
     \  dead _3\n\
     \  goto 13\n\
@@ -206,35 +234,41 @@ let () =
      3:\n\
     \  live _6\n\
     \  _6 = _3\n\
-    \  _7 = _6 == 3\n\
-    \  branch _7 7 4\n\
+    \  _7 = _6\n\
+    \  loan 0: read _7 for the operation\n\
+    \  end loans 0\n\
+    \  _8 = _7 == 3\n\
+    \  branch _8 7 4\n\
      4:\n\
-    \  dead _7\n\
+    \  dead _7, _8\n\
     \  goto 5\n\
      5:\n\
     \  goto 6\n\
      6:\n\
-    \  live _8\n\
-    \  _8 = _6\n\
-    \  _9 = add(_2, _8)\n\
-    \  _2 = _9\n\
-    \  dead _8, _9\n\
+    \  live _9\n\
+    \  _9 = _6\n\
+    \  loan 1: read _9 for the operation\n\
+    \  end loans 1\n\
+    \  _10 = _9\n\
+    \  _11 = add(take _2, _10)\n\
+    \  _2 = _11\n\
+    \  dead _9, _10, _11\n\
     \  dead _6\n\
     \  goto 9\n\
      7:\n\
-    \  dead _7\n\
+    \  dead _7, _8\n\
     \  goto 8\n\
      8:\n\
     \  dead _6\n\
     \  goto 9\n\
      9:\n\
-    \  _10 = _3 == _4\n\
-    \  branch _10 11 10\n\
+    \  _12 = _3 == _4\n\
+    \  branch _12 11 10\n\
      10:\n\
     \  _3 = add(_3, 1)\n\
     \  goto 2\n\
      11:\n\
-    \  dead _3, _4, _5, _10\n\
+    \  dead _3, _4, _5, _12\n\
     \  return _2";
   expect "a loop over a yielding call runs its body for each part"
     Fixtures.Mir.loop_over_a_yielding_call_runs_its_body_for_each
@@ -247,27 +281,36 @@ let () =
     \  dead _1\n\
     \  each _3 in standard::list::impl Iterable for List[Element].each(read _0) 2 after 8\n\
      2:\n\
+    \  loan 0: read read _0 for the loop\n\
     \  live _4\n\
     \  _4 = read _3\n\
-    \  _5 = _4 < 0\n\
-    \  branch _5 6 3\n\
+    \  _5 = _4\n\
+    \  loan 1: read _5 for the operation\n\
+    \  end loans 1\n\
+    \  _6 = _5 < 0\n\
+    \  branch _6 6 3\n\
      3:\n\
-    \  dead _5\n\
+    \  dead _5, _6\n\
     \  goto 4\n\
      4:\n\
     \  goto 5\n\
      5:\n\
-    \  live _6\n\
-    \  _6 = _4\n\
-    \  _7 = add(_2, _6)\n\
-    \  _2 = _7\n\
-    \  dead _6, _7\n\
+    \  live _7\n\
+    \  _7 = _4\n\
+    \  loan 2: read _7 for the operation\n\
+    \  end loans 2\n\
+    \  _8 = _7\n\
+    \  _9 = add(take _2, _8)\n\
+    \  _2 = _9\n\
+    \  dead _7, _8, _9\n\
+    \  end loans 0\n\
     \  dead _4\n\
     \  next\n\
      6:\n\
-    \  dead _5\n\
+    \  dead _5, _6\n\
     \  goto 7\n\
      7:\n\
+    \  end loans 0\n\
     \  dead _4\n\
     \  goto 8\n\
      8:\n\
@@ -280,5 +323,9 @@ let () =
     \  return _2\n\n\
      lambda 0\n\
      0:\n\
-    \  _2 = add(_1, _0)\n\
-    \  return _2"
+    \  _2 = _1\n\
+    \  loan 0: read _2 for the operation\n\
+    \  _3 = _0\n\
+    \  end loans 0\n\
+    \  _4 = add(_2, _3)\n\
+    \  return _4"
