@@ -6,8 +6,7 @@
 
     - every call names its callee, and lists one argument per parameter, in parameter order;
     - every operator is either a built-in operation or a call of a trait method;
-    - syntactic sugar is desugared ([?], compound assignment, [for] over a collection, list
-      literals);
+    - syntactic sugar is desugared ([?], [for] over a collection, list literals);
     - every expression says whether it denotes a place or a value;
     - every type is fully inferred and normalized.
 
@@ -253,9 +252,9 @@ and kind =
   | Result  (** [result] in an [ensures] clause: the function's return value. *)
   | Old of expression  (** [old(e)]: the value of [e] when the function was called. *)
   | Current_target
-      (** The value of the target of the enclosing {!Compound_assign} before the assignment. It
-          appears exactly once, as a direct argument of the {!Call} or {!Operator} that computes the
-          new value. *)
+      (** The value of the target of the enclosing {!Compound_assign} before the assignment, which
+          the operator takes as owned. It appears exactly once, as the first argument of the {!Call}
+          or {!Operator} that computes the new value. *)
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
   | Yielded  (** [yielded]: the sequence of values a yielding method has yielded so far. *)
   | Finished  (** [finished]: whether a yielding method has returned. *)
@@ -333,10 +332,19 @@ and statement_kind =
           always diverges. *)
   | Evaluate of expression
   | Assign of { target : place; value : expression }
-  | Compound_assign of { target : place; value : expression }
-      (** A compound assignment such as [total += step]. [value] computes the new value; inside it,
-          {!Current_target} is the target's value before the assignment. The target place is
-          evaluated once. *)
+      (** [value] is evaluated first, then the index keys of [target], and then the new value
+          replaces the old one. *)
+  | Compound_assign of { target : place; operand : operand; bound : local; value : expression }
+      (** A compound assignment such as [total += step]. [operand] is the right operand. It is
+          evaluated first, and [bound] is bound to it: to its value, or to the place, which stays
+          borrowed until the assignment ends. Then the index keys of [target] are evaluated, once.
+          Then [value] computes the new value from {!Current_target} and [bound], and the new value
+          replaces the old one.
+
+          The operator takes the old value as owned, so the target holds no value while [value]
+          runs. Evaluating the operand first means that no code but the operator runs in that
+          window: an early exit in the operand, such as a [?], leaves the target initialized, and
+          the operand cannot read or mutate a target that was moved out. *)
   | For of {
       pattern : pattern;
       iteration : iteration;

@@ -149,6 +149,7 @@ type context = {
   mutable instantiating : Path.t list;
   disjoint : (int * int) list;
   mutable indexes : (int * (place_value * span)) list;
+  mutable evaluated_keys : (Core.id * L.term) list;
   mutable yielded_part : (T.ty * [ `Lends | `Yields ]) option;
   mutable yield_ensures : (Core.expression list * Core.expression list) option;
   home : Names.key;

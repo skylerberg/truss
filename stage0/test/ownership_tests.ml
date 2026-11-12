@@ -1142,7 +1142,41 @@ let () =
          \  var count = limit\n\
          \  count += 1\n\
          \  count\n\
-          }\n"))
+          }\n"));
+  let bag =
+    "type Bag(items: List[Int64])\n\n\
+     impl Add[Bag] for Bag {\n\
+    \  type Output = Bag\n\n\
+    \  fn add_is_defined(self, right: Bag) -> Bool {\n\
+    \    true\n\
+    \  }\n\n\
+    \  fn add(self, right: Bag) -> Bag {\n\
+    \    Bag(items: self.items.copy())\n\
+    \  }\n\
+     }\n\n"
+  in
+  test "a compound assignment's operand may change the target, because it runs first" (fun () ->
+      fine
+        (bag
+       ^ "fn grow(bag: mut Bag) -> Bag {\n\
+         \  mut bag.items.push(1)\n\
+         \  Bag(items: [])\n\
+          }\n\n\
+          fn f(bag: mut Bag) {\n\
+         \  bag += grow(mut bag)\n\
+          }\n"));
+  test "a compound assignment's borrowed operand cannot be changed by the target's index keys"
+    (fun () ->
+      one_diagnostic
+        (bag
+       ^ "fn spoil(others: mut List[Bag]) -> USize {\n\
+         \  mut others.push(Bag(items: []))\n\
+         \  0\n\
+          }\n\n\
+          fn f(bags: mut List[Bag], others: mut List[Bag]) {\n\
+         \  bags[spoil(mut others)] += others[0]\n\
+          }\n")
+        "ownership.changed_while_viewed")
 
 let () =
   test "the default of a parameter of a view type views a value that lasts for the call" (fun () ->

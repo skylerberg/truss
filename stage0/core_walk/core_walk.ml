@@ -148,7 +148,11 @@ let statement_children visit (node : statement) =
       visit.pattern pattern;
       Option.iter (block visit) else_
   | Evaluate value -> visit.expression value
-  | Assign { target; value } | Compound_assign { target; value } ->
+  | Assign { target; value } ->
+      place visit target;
+      visit.expression value
+  | Compound_assign { target; operand = right; value; _ } ->
+      operand visit right;
       place visit target;
       visit.expression value
   | For { pattern; iteration; clauses; body; _ } ->

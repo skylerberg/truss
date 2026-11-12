@@ -1157,6 +1157,14 @@ comparisons over `&&`. Every other combination needs parentheses.
   handed to the operator as owned, and an `own self` version of the
   operator's method can reuse its memory. `truss fmt` writes `x = x + y` as
   `x += y`, so code converges on one form.
+- **An assignment evaluates its right side before its target,** as Rust does
+  for `=` and for compound assignment of built-in types. The operator of a
+  compound assignment takes the target's old value as owned, so the target
+  holds no value until the result is stored. Evaluating the operand first
+  keeps every other piece of code out of that window: a `?` in the operand
+  cannot return with the target moved out, and the operand cannot read or
+  mutate a moved-out target. Java, C#, and Go evaluate the target first. For
+  `=` either order is sound, and Truss uses one rule for both forms.
 - **Integer division rounds toward zero, and `>>` on a signed integer copies
   the sign bit,** as in C, Rust, Go, and Swift and as the hardware does.
   Rounding down is available as a method, as Rust's `rem_euclid` is.
