@@ -1118,8 +1118,8 @@ fn evaluate(expression: Expression) -> Int64 {
   }
 }
 
-fn length_of(big: Option[Big]) -> USize {
-  match big {
+fn length_of(lookup: Option[Big]) -> USize {
+  match lookup {
     Some(big) => big.label.length()
     None => 0
   }
