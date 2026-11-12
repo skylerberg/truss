@@ -86,7 +86,7 @@ val trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
 val site : state -> Syntax.span -> Lir.site
 
-type unsupported = { what : string; at : Lir.site option }
+type unsupported = { construct : string; at : Lir.site option }
 
 exception Unsupported of unsupported
 

@@ -42,7 +42,7 @@ type t = {
   tables : (int, binding) Hashtbl.t;  (** Each input's and query's cells here, by its number *)
   own : (int, node) Hashtbl.t;
   foreign : (int, (int, node) Hashtbl.t) Hashtbl.t;
-      (** What here reads a base's node, by that node's id *)
+      (** This engine's readers of a base's node, by that node's id *)
   shadows : (int, node) Hashtbl.t;  (** The copy here of a base's node, by that node's id *)
   mutable clock : int;
   mutable frames : frame list;

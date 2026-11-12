@@ -31,11 +31,26 @@ type frame = {
   start : int;
   mutable nodes : int list;
   mutable bindings : int list;
-  mutable patterns : int list;
+  mutable declared : int list;
   mutable pending : (unit -> bool) list;
   mutable unmet : (Types.ty * Types.trait_reference) list;
   frame_specification : bool;
   span : Syntax.span;
+}
+
+type undecided_literal = {
+  index : int;
+  kind : Types.literal_kind;
+  local : Syntax.id;
+  owner : frame;
+}
+
+type literal_decision = {
+  decided_local : Syntax.id;
+  decided_type : Types.ty;
+  decided_at : Syntax.span;
+  is_default : bool;
+  mutable decision_report : Diagnostic.reported option;
 }
 
 type form = {
@@ -72,15 +87,10 @@ type state = {
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence : Path.package list;
+  mutable undecided : undecided_literal list;
+  decisions : (int, literal_decision) Hashtbl.t;
+  annotatable : (Syntax.id, unit) Hashtbl.t;
 }
-
-val reported :
-  state ->
-  ?fixes:Syntax.span Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Syntax.span ->
-  string ->
-  Diagnostic.reported
 
 val report :
   state ->
@@ -149,11 +159,24 @@ val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
 val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
 val target : state -> Syntax.name -> Resolve.target option
-val default_literal : state -> Types.ty -> Types.ty
+val default_literal : state -> at:Syntax.span -> Types.ty -> Types.ty
 val head : state -> Syntax.expression -> Resolve.head option
 val names_variant : Syntax.name -> bool
 val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Types.ty -> string
+
+val reported_mismatch :
+  state ->
+  ?fixes:Syntax.span Diagnostic.fix list ->
+  Diagnostic.Code.types ->
+  Syntax.span ->
+  sides:(Types.ty * Types.ty) list ->
+  string ->
+  Diagnostic.reported
+(** Reports a mismatch once per local whose literal type an earlier statement decided, with a note
+    at that statement. Each side is a type that may be such a local's, with the type the other side
+    needs. *)
+
 val mismatched : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
 val mismatch : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> unit
 val is_place : state -> Syntax.expression -> bool

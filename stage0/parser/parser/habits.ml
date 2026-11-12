@@ -3,7 +3,7 @@
 
    The parsing modules recognize each habit at the point where the ordinary
    grammar has already rejected a token, so a recognizer can never change
-   what valid code means, and call the function here that reports it. Each
+   the meaning of valid code, and call the function here that reports it. Each
    fix is exact: applying it leaves the code the author meant. *)
 
 open Syntax
@@ -175,7 +175,7 @@ let qualified_variant cursor ~qualifier_start ~(variant : Token.t) =
     "Remove the type"
     [ Diagnostic.delete (Source.span qualifier_start variant.span.start) ]
 
-(* What to write in place of a macro of another language, by its name. *)
+(* The replacement for a macro of another language, by its name. *)
 let macro_advice = function
   | "println" | "print" | "eprintln" | "eprint" ->
       " Print with `Console.print_line(text)`, and build the text with `${...}` in a string."

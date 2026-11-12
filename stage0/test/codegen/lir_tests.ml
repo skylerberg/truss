@@ -445,7 +445,7 @@ let () =
       let hash function_ = Lir.hash (instance "f" function_) in
       let left = numbered 0 1 and right = numbered 1 0 in
       if hash left <> hash right then fail "the hashes differ");
-  test "a change to what an instance does changes its hash" (fun () ->
+  test "a change to an instance's code changes its hash" (fun () ->
       let changed =
         function_ ~result:(value int32)
           [ local (value int32) ]

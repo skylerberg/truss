@@ -28,11 +28,11 @@ val put : t -> string -> string
     adds nothing. *)
 
 val get : t -> string -> string option
-(** The bytes with that name, or [None] if the store does not have them. A miss looks for what other
-    processes added since the store last looked, at most every twenty milliseconds. *)
+(** The bytes with that name, or [None] if the store does not have them. A miss looks for other
+    processes' additions since the store last looked, at most every twenty milliseconds. *)
 
 val refresh : t -> unit
-(** Looks now for what other processes added, before reading what one of them just wrote. *)
+(** Looks now for other processes' additions, before reading another process's latest write. *)
 
 val flush : t -> unit
 (** Makes every value and result added so far durable, before a pointer refers to them. *)
@@ -53,7 +53,7 @@ val files : t -> string -> string
 
 type pointer
 (** A named place that holds a few bytes and is replaced whole, such as the name of a worktree's
-    current state. Everything else in the store is named by what it holds and never changes. *)
+    current state. Everything else in the store is named by its content and never changes. *)
 
 val pointer : t -> string -> pointer
 

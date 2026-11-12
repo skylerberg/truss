@@ -1,5 +1,6 @@
-(** The reference parser: GRAMMAR.md's grammar, built by Menhir from grammar/truss.mly, which the
-    tests and the fuzzer check the hand-written parser against. It is built only for them. *)
+(** The reference parser: the grammar of SPECIFICATION.md, built by Menhir from grammar/truss.mly,
+    which the tests and the fuzzer check the hand-written parser against. It is built only for them.
+*)
 
 type entry
 (** An entry point of the reference grammar. *)

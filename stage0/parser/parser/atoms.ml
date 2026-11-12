@@ -37,15 +37,15 @@ let mode cursor =
 let name cursor (token : Token.t) text : Syntax.name =
   { text; span = Cursor.span cursor token.span; id = Cursor.fresh_id cursor }
 
-let lower cursor what =
+let lower cursor expected =
   match Cursor.peek_kind cursor with
   | Lower text -> name cursor (Cursor.next cursor) text
-  | _ -> Cursor.fail cursor what
+  | _ -> Cursor.fail cursor expected
 
-let upper cursor what =
+let upper cursor expected =
   match Cursor.peek_kind cursor with
   | Upper text -> name cursor (Cursor.next cursor) text
-  | _ -> Cursor.fail cursor what
+  | _ -> Cursor.fail cursor expected
 
 (* The modules of a path, [standard::json::] in [standard::json::parse]:
    each lowercase name followed by [::]. *)
@@ -61,9 +61,9 @@ let module_prefix cursor =
   loop []
 
 (* A path to an uppercase name, with optional modules: [geometry::Shape]. *)
-let upper_path cursor what : Syntax.path =
+let upper_path cursor expected : Syntax.path =
   let modules = module_prefix cursor in
-  { modules; last = upper cursor what }
+  { modules; last = upper cursor expected }
 
 let text cursor (text : Token.text) : Syntax.text =
   { value = text.value; span = Cursor.span cursor text.span }

@@ -4,7 +4,7 @@
    Lowering writes [drop(place)] wherever an owned local goes out of scope,
    on every path out of that scope, including [return] and [?]: it means
    "drop whatever this place still owns here". This pass computes, by a
-   dataflow analysis over the function's moves, what that is:
+   dataflow analysis over the function's moves, the owned value:
 
    - nothing, where the place was moved out on every path, and the drop is
      removed
@@ -19,7 +19,7 @@
    A write gives a place a value and drops nothing: whatever replaces a
    value drops it first, with a [drop] of its own, which is removed where
    the place holds nothing. So that this holds, and so that nothing is
-   leaked, the pass checks what it is given, and a failure is a compiler
+   leaked, the pass checks its input, and a failure is a compiler
    bug:
 
    - no write is to a place that may still own a value

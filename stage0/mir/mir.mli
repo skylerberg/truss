@@ -6,7 +6,7 @@
 type local = int
 type block = int
 
-(** What a local holds. *)
+(** Whether a local is a source binding or a temporary. *)
 type local_kind =
   | Source of { local : Core.local; mode : Types.mode }
       (** A parameter, [self], or a local that a pattern or a lambda binds. With [Read] or [Mut], it

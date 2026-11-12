@@ -1,10 +1,10 @@
-(* Cost bounds: what a counter counts, how, and the constants an [O(...)]
+(* Cost bounds: a counter's resource, its way of counting, and the constants an [O(...)]
    bound is proven with. *)
 module Symbol = Logic.Symbol
 
 let zero = Logic.Integer Z.zero
 
-(* What a [calls(...)] clause counts: calls through a function value,
+(* The target of a [calls(...)] clause: calls through a function value,
    which is its term in the definition proven, or calls of a capability's
    methods, or of one of them. *)
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
@@ -12,11 +12,11 @@ type resource = Time | Allocations | Allocated_bytes | Calls of target
 
 (* A counter counts in units, for an [O(...)] bound, or exactly, for a bound
    written with [<=] or [==]. In units, each callee's [O(g)] counts as
-   [g + 1] and each step as one, which is within a constant factor of what
-   is really spent; exactly, each callee counts what its exact bound says,
+   [g + 1] and each step as one, which is within a constant factor of the
+   real cost; exactly, each callee counts its exact bound,
    and one with only an [O(...)] bound is not known. A loop without a
    [cost] clause is counted as its iterations times a bound on each, which
-   for [==] must be what every iteration spends. *)
+   for [==] must be every iteration's exact cost. *)
 type counting = Units | At_most | Exactly
 
 (* An amortized bound has a counter of its own, so that a definition with a
@@ -113,7 +113,7 @@ let units amount = plus (at_least_zero amount) (Logic.int 1)
 (* [log] and [power]: [log(n)] rounds log2(n + 1) up, so [log(0)] is 0,
    and [power(b, e)] is [b] to the [e]. *)
 
-(* What is known of [log(n)]: it is 0 at and below 0, at least 0 and at
+(* The facts about [log(n)]: it is 0 at and below 0, at least 0 and at
    most [n], and one more than [log(n / 2)] from 1 up, which is exact since
    [log] rounds up. The halving is stated once, not again for [n / 2], so
    no fact makes the solver unfold [log] forever. *)
@@ -144,7 +144,7 @@ let log_order left right =
     ==> Operation ("<=", [ log left; log right ])
     &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ log right; log left ])))
 
-(* What is known of [power(b, e)]: 1 at 0, and at least 1, and above [e],
+(* The facts about [power(b, e)]: 1 at 0, and at least 1, and above [e],
    for a base of at least 1 or 2; and, as a step stated once, [b] times
    [power(b, e - 1)] from 1 up, with [e - 1]. *)
 let power_facts base exponent =
@@ -175,8 +175,8 @@ let power_order base left right =
 
 (* Arithmetic in a normal form: a sum of terms, each times an integer,
    plus an integer, with the terms in the order they first appear. So
-   [(k + a) - k] is [a], which is how what a loop spent in one iteration
-   is told from what it had spent before. *)
+   [(k + a) - k] is [a], which separates a loop's cost in one iteration
+   from its cost before. *)
 let rec normalize term =
   let rec linear coefficient term (sums, constant) =
     match term with
@@ -208,7 +208,7 @@ let rec normalize term =
     (add sums, constant)
   and inner = function
     | Logic.Apply (Symbol.Cost_most, [ left; right ]) -> (
-        (* What both choices add is outside the larger of them. *)
+        (* A term both choices add is moved outside the larger of them. *)
         let left = normalize left
         and right = normalize right in
         (* Each summand with its coefficient, so that a term both choices
@@ -265,7 +265,7 @@ let rec normalize term =
   in
   List.fold_left (fun total entry -> minus total (scaled entry)) total negative
 
-(* What was spent since [start], of a counter that is now [total]: a sum
+(* The cost since [start], of a counter that is now [total]: a sum
    that began at [start], or a choice between such sums where paths
    joined. *)
 let rec since ~start total =
@@ -276,7 +276,7 @@ let rec since ~start total =
 
 (* Finding a bound for one iteration of a loop, or one call of a lambda.
 
-   [cost] is what one iteration spent, a term over values the loop changes,
+   [cost] is one iteration's cost, a term over values the loop changes,
    which [varies] tells, and values it does not. The bound replaces each
    part of [cost] that varies with a bound on it from [facts]: an upper
    bound where [cost] grows with the part, and a lower bound where it

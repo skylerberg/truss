@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fails when a pull request takes out one of the last merges into main: it
-# changes every file that merge changed, and puts one of them back to what
-# it was before the merge. A commit made from an older tree on top of a
+# changes every file that merge changed, and puts one of them back to its state
+# before the merge. A commit made from an older tree on top of a
 # newer main does that to every merge the older tree lacks, with no
 # conflict. It reads the pull request's merge commit, which is the one
 # checked out unless another is named.
@@ -30,7 +30,7 @@ for merged in $(git rev-list --first-parent -n 30 "$base"); do
     now=$(git rev-parse -q --verify "$merge:$file" || echo none)
     was=$(git rev-parse -q --verify "$before:$file" || echo none)
     if [ "$now" = "$was" ]; then
-      echo "$(git log -1 --format='%h %s' "$merged") is taken out: $file is back to what it was before it."
+      echo "$(git log -1 --format='%h %s' "$merged") is taken out: $file is back to its state before it."
       found=1
       break
     fi

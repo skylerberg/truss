@@ -6,7 +6,7 @@ let resolve engine (node : node) =
   else match Hashtbl.find_opt engine.shadows node.id with Some own -> own | None -> node
 
 (* Collection. A node is necessary if it is a root or a necessary node reads
-   it; an unnecessary node is collected, with what only it read. That is done
+   it; an unnecessary node is collected, with the nodes only it read. That is done
    only once no query runs: a query that is still running has read nodes
    that do not yet count it as a reader. A copy of a base's node is never
    collected, since the base's readers may read it. *)
@@ -69,8 +69,8 @@ let rec sweep engine =
         List.iter (collect engine) candidates;
         sweep engine
 
-(* Replaces a node's reads, adding it to the readers of what it reads now
-   before taking it from the readers of what it no longer reads. *)
+(* Replaces a node's reads, adding it to the readers of its new dependencies
+   before taking it from the readers of its old ones. *)
 let commit_reads engine (node : node) (reads : node list) =
   List.iter (fun read -> add_reader engine read node) reads;
   let now = Hashtbl.create (List.length reads) in
@@ -125,8 +125,8 @@ let shadow engine (base : node) =
       | None -> ());
       own
 
-(* What reads one of an engine's own nodes: its own readers, and, when it
-   is a copy, what read the base's node in the bases, each copied into the
+(* The readers of one of an engine's own nodes: its own readers, and, when
+   it is a copy, the base node's readers in the bases, each copied into the
    engine unless it already was, since its copy is then among the own
    readers if it still reads this. [phase] narrows to one phase. *)
 let readers_here engine (node : node) ~phase =
@@ -155,8 +155,8 @@ let readers_here engine (node : node) ~phase =
           | None -> readers)
         (from base.readers own) engine.bases
 
-(* Marks a result, and what reads it within its phase, as possibly changed.
-   What reads it from a later phase is left alone until it is known to have
+(* Marks a result, and its readers within its phase, as possibly changed.
+   Its readers from a later phase are left alone until it is known to have
    changed. *)
 let mark ?(every_phase = false) engine (start : node) =
   let stack = Stack.create () in
@@ -174,8 +174,8 @@ let mark ?(every_phase = false) engine (start : node) =
     end
   done
 
-(* A node's result changed: what reads it is to be marked when its phase is
-   reached. *)
+(* A node's result changed: its readers are to be marked when their phase
+   is reached. *)
 let seed engine (node : node) =
   List.iter
     (fun (reader : node) ->

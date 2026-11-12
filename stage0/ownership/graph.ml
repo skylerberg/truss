@@ -72,7 +72,7 @@ type action =
       (** A [let] binds a part that a lending call lent. The loan ends with the statement. *)
   | Pass_owned_function of view list
       (** A function value that has these views is passed to an [own] parameter. The callee may
-          store the function, so the function could outlive what it captures. *)
+          store the function, so the function could outlive its captures. *)
   | Write_through of Place.t
       (** A mutation writes through the slice that is stored in this place, so it mutates every
           place that the slice views. *)

@@ -18,8 +18,8 @@ let () =
   close_in channel;
   if found <> [ "ELSE"; "LBRACE" ] then begin
     Printf.printf
-      "Menhir finds conflicts on [%s], but GRAMMAR.md documents conflicts only on [ELSE; LBRACE]. \
-       Resolve the new conflict, or explain it in GRAMMAR.md and here.\n"
+      "Menhir finds conflicts on [%s], but SPECIFICATION.md documents conflicts only on [ELSE; \
+       LBRACE]. Resolve the new conflict, or explain it in SPECIFICATION.md and here.\n"
       (String.concat "; " found);
     exit 1
   end

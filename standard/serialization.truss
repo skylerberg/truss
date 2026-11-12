@@ -650,16 +650,16 @@ fn name_top[Node: Tree](reader: mut TreeReader[Node], name: own String) {
   mut reader.path.push(own name)
 }
 
-fn expected_error[Node: Tree](reader: TreeReader[Node], what: StringSlice) -> Error {
+fn expected_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
   var message = "expected "
-  mut message.push(what)
+  mut message.push(expected)
   reader.error(message.slice())
 }
 
-fn mismatch_error[Node: Tree](reader: TreeReader[Node], what: StringSlice) -> Error {
+fn mismatch_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
   match reader.current {
     None => reader.error("is missing")
-    Some(_) => expected_error(reader, what: what)
+    Some(_) => expected_error(reader, expected: expected)
   }
 }
 
@@ -685,7 +685,7 @@ impl Deserializer for TreeReader[Node: Tree] {
         self.current = None
         Ok(flag)
       }
-      None => Err(mismatch_error(self, what: "true or false"))
+      None => Err(mismatch_error(self, expected: "true or false"))
     }
   }
 
@@ -699,7 +699,7 @@ impl Deserializer for TreeReader[Node: Tree] {
         self.current = None
         Ok(integer)
       }
-      None => Err(mismatch_error(self, what: "a whole number"))
+      None => Err(mismatch_error(self, expected: "a whole number"))
     }
   }
 
@@ -714,9 +714,9 @@ impl Deserializer for TreeReader[Node: Tree] {
           self.current = None
           Ok(unsigned)
         }
-        Err(_) => Err(expected_error(self, what: "a whole number that is not negative"))
+        Err(_) => Err(expected_error(self, expected: "a whole number that is not negative"))
       }
-      None => Err(mismatch_error(self, what: "a whole number that is not negative"))
+      None => Err(mismatch_error(self, expected: "a whole number that is not negative"))
     }
   }
 
@@ -730,18 +730,18 @@ impl Deserializer for TreeReader[Node: Tree] {
         self.current = None
         Ok(float)
       }
-      None => Err(mismatch_error(self, what: "a number"))
+      None => Err(mismatch_error(self, expected: "a number"))
     }
   }
 
   fn text(mut self) -> Result[String, Error] {
     if self.kind() != Kind.Text {
-      return Err(mismatch_error(self, what: "a string"))
+      return Err(mismatch_error(self, expected: "a string"))
     }
     match mut self.current.take() {
       Some(node) => match own node.into_text() {
         Some(text) => Ok(own text)
-        None => Err(expected_error(self, what: "a string"))
+        None => Err(expected_error(self, expected: "a string"))
       }
       None => Err(self.error("is missing"))
     }
@@ -749,7 +749,7 @@ impl Deserializer for TreeReader[Node: Tree] {
 
   fn begin_list(mut self) -> Result[Unit, Error] {
     if self.kind() != Kind.List {
-      return Err(mismatch_error(self, what: "a list"))
+      return Err(mismatch_error(self, expected: "a list"))
     }
     match mut self.current.take() {
       Some(node) => match own node.into_items() {
@@ -760,7 +760,7 @@ impl Deserializer for TreeReader[Node: Tree] {
           mut self.path.push("")
           Ok(Unit)
         }
-        None => Err(expected_error(self, what: "a list"))
+        None => Err(expected_error(self, expected: "a list"))
       }
       None => Err(self.error("is missing"))
     }
@@ -802,7 +802,7 @@ impl Deserializer for TreeReader[Node: Tree] {
 
   fn begin_record(mut self) -> Result[Unit, Error] {
     if self.kind() != Kind.Record {
-      return Err(mismatch_error(self, what: "a record"))
+      return Err(mismatch_error(self, expected: "a record"))
     }
     match mut self.current.take() {
       Some(node) => match own node.into_members() {
@@ -811,7 +811,7 @@ impl Deserializer for TreeReader[Node: Tree] {
           mut self.path.push("")
           Ok(Unit)
         }
-        None => Err(expected_error(self, what: "a record"))
+        None => Err(expected_error(self, expected: "a record"))
       }
       None => Err(self.error("is missing"))
     }
@@ -845,7 +845,7 @@ impl Deserializer for TreeReader[Node: Tree] {
 
   fn begin_map(mut self) -> Result[Unit, Error] {
     if self.kind() != Kind.Record {
-      return Err(mismatch_error(self, what: "a record"))
+      return Err(mismatch_error(self, expected: "a record"))
     }
     match mut self.current.take() {
       Some(node) => match own node.into_members() {
@@ -862,7 +862,7 @@ impl Deserializer for TreeReader[Node: Tree] {
           mut self.path.push("")
           Ok(Unit)
         }
-        None => Err(expected_error(self, what: "a record"))
+        None => Err(expected_error(self, expected: "a record"))
       }
       None => Err(self.error("is missing"))
     }
@@ -903,7 +903,7 @@ impl Deserializer for TreeReader[Node: Tree] {
   fn variant(mut self) -> Result[String, Error] {
     let kind = self.kind()
     if kind != Kind.Text && kind != Kind.Record {
-      return Err(mismatch_error(self, what: "a variant's name, or a record with one member"))
+      return Err(mismatch_error(self, expected: "a variant's name, or a record with one member"))
     }
     match mut self.current.take() {
       Some(node) => {
@@ -915,13 +915,13 @@ impl Deserializer for TreeReader[Node: Tree] {
               mut self.path.push("")
               Ok(own name)
             }
-            None => Err(expected_error(self, what: "a variant"))
+            None => Err(expected_error(self, expected: "a variant"))
           }
         }
         match own node.into_members() {
           Some(members) => {
             if members.length() != 1 {
-              return Err(expected_error(self, what: "a record with one member"))
+              return Err(expected_error(self, expected: "a record with one member"))
             }
             var found: Option[String] = None
             var inner: Option[Node] = None
@@ -939,15 +939,15 @@ impl Deserializer for TreeReader[Node: Tree] {
                       mut self.path.push("")
                       Ok(own name)
                     }
-                    None => Err(expected_error(self, what: "a record"))
+                    None => Err(expected_error(self, expected: "a record"))
                   }
-                  None => Err(expected_error(self, what: "a record"))
+                  None => Err(expected_error(self, expected: "a record"))
                 }
               }
-              None => Err(expected_error(self, what: "a record with one member"))
+              None => Err(expected_error(self, expected: "a record with one member"))
             }
           }
-          None => Err(expected_error(self, what: "a variant"))
+          None => Err(expected_error(self, expected: "a variant"))
         }
       }
       None => Err(self.error("is missing"))

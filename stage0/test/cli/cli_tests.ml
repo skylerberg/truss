@@ -1,5 +1,5 @@
 (* The command line's tests. Each gives a small package or input and states
-   one fact about what a command makes of it. *)
+   one fact about the command's result. *)
 
 open Cli
 
@@ -22,7 +22,7 @@ let manifest = ("truss.toml", manifest_of "demo")
 let package files = directory (manifest :: files)
 let read root path = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all
 
-(* Runs [f] as a command would, with what it writes kept, and returns its
+(* Runs [f] as a command would, with its output kept, and returns its
    result and its output, then saves the sessions it opened, as the command
    line does after each command. *)
 let captured work =
@@ -198,7 +198,7 @@ let () =
       expect_string ~expected:"../weather/forecast.truss"
         (Project.relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
-(* What is wrong between manifests *)
+(* Errors between manifests *)
 
 let problems files =
   let project = Project.load (directory files) in
@@ -315,7 +315,7 @@ let () =
           if not (contains shown.text "public fn double(value: Int64) -> Int64") then
             fail "showed %s" shown.text
       | shown -> fail "found %d" (List.length shown));
-  test "show lists what a package with an owner makes public" (fun () ->
+  test "show lists the public definitions of a package with an owner" (fun () ->
       let project = Project.load (directory owned) in
       if List.length (Show_command.find project ~body:false "acme::geometry") < 3 then
         fail "found too few")
@@ -387,9 +387,9 @@ let () =
         fail "wrote %s" (read root "main.truss"))
 
 let () =
-  test "check proves, and reports what it cannot prove" (fun () ->
+  test "check proves, and reports each unproven obligation" (fun () ->
       let root =
-        package [ ("main.truss", Fixtures.check_proves_and_reports_what_it_cannot_prove) ]
+        package [ ("main.truss", Fixtures.check_proves_and_reports_each_unproven_obligation) ]
       in
       let status, output =
         captured (fun () -> Check_command.run ~directory:root ~fix:false ~proofs:true ~json:false)
@@ -530,12 +530,7 @@ let () =
 
 (* Building *)
 
-(* Lowers code and compiles nothing, so it needs no C compiler. *)
-let lowering (project : Project.t) =
-  Compile.create project.context (Compiler.target ())
-    { compiler = "cc"; identity = "lowering only" }
-    (Build.cache (Database.objects_directory ()))
-    { build = Development; optimization = O1; extra = [] }
+let lowering (project : Project.t) = Compiler.lowering_only project.session project.context
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
@@ -781,7 +776,7 @@ let () =
                     | `Changed parts -> String.concat "," parts
                     | _ -> "?")
                   changes)));
-  test "a changed signature is shown before and after, with what reads it" (fun () ->
+  test "a changed signature is shown before and after, with its readers" (fun () ->
       let root = repository doubling in
       rewrite root "main.truss"
         (replace doubling "fn double(value: Int64) -> Int64"
@@ -801,16 +796,24 @@ let () =
                  dependents)
           then fail "four does not read it"
       | _ -> fail "double did not change its signature");
+  test "impact lists the tests a change reaches" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
+      let status, output =
+        captured (fun () -> Impact_command.run ~directory:root ~base:None ~json:false)
+      in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (contains output "Tests whose code changed: 1") then fail "wrote %s" output);
   test "moving a definition within its file changes nothing" (fun () ->
       let one = Fixtures.one and two = Fixtures.moving_a_definition_within_its_file_changes in
       let root = repository (one ^ "\n" ^ two) in
       rewrite root "main.truss" (two ^ "\n" ^ one);
       match impact root with [] -> () | changes -> fail "found %d changes" (List.length changes))
 
-(* What reads what, and positions *)
+(* Dependencies, and positions *)
 
 let () =
-  test "references list what reads a definition, part by part" (fun () ->
+  test "references list a definition's readers, part by part" (fun () ->
       let root = package [ ("main.truss", doubling) ] in
       let status, output =
         captured (fun () ->
@@ -873,7 +876,7 @@ let registry () =
   registry
 
 (* Adds a version of a package to a registry: its modules, the packages it
-   depends on, each with what it grants, and the versions it was published
+   depends on, each with its grants, and the versions it was published
    with, which the registry must hold already. *)
 let publish registry name version ?(dependencies = []) ?(record = []) modules =
   let manifest =
@@ -992,7 +995,7 @@ let () =
       let _ = stocked () in
       let root = package [ uses_geometry ] in
       ignore (add root [ "acme::geometry" ]);
-      (* Granting a package a capability changes what it holds. *)
+      (* Granting a package a capability changes its holdings. *)
       rewrite root "truss.toml"
         (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
       expect_problem_in root
@@ -1095,7 +1098,7 @@ let () =
       if status <> 0 || not (contains output "Every package is at the version asked for") then
         fail "status %d: %s" status output;
       expect_string ~expected:before (read root "truss.lock"));
-  test "an upgrade says which signatures the project reads change, and what breaks" (fun () ->
+  test "an upgrade says which signatures the project reads change, and which code breaks" (fun () ->
       let registry = stocked () in
       let root =
         package [ ("main.truss", Fixtures.upgrade_says_which_signatures_the_project_reads) ]
@@ -1182,7 +1185,7 @@ let () =
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
-  test "a release that adds a public definition gets the next minor number, and says what is new"
+  test "a release that adds a public definition gets the next minor number, and lists the additions"
     (fun () ->
       let registry = registry () in
       let root = angles turn in
@@ -1259,7 +1262,7 @@ let () =
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ])
 
-(* What a package is published with *)
+(* A package's dependencies at publication *)
 
 let () =
   test "a package is published with the versions of the packages its code uses" (fun () ->
@@ -1291,7 +1294,8 @@ let () =
       ] ->
           ()
       | _ -> fail "published with other versions");
-  test "a published package is used by another project, with what it was published with" (fun () ->
+  test "a published package is used by another project, with its dependencies at publication"
+    (fun () ->
       let _ = stocked () in
       let walls =
         directory

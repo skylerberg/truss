@@ -42,8 +42,8 @@ jobs:
           opam-sha256: ${{ env.OPAM_SHA256 }}
           ocaml-version: ${{ env.OCAML_VERSION }}
 
-      # Pull requests start from main's dune cache, so they build only what
-      # they changed.
+      # Pull requests start from main's dune cache, so they build only their
+      # changes.
       - uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/dune
@@ -122,8 +122,8 @@ jobs:
 
   # The standard library's proofs: the longest test, and the one that grows
   # with the library, so it runs beside the check, dealt out to several
-  # runners. Each proves its share of the modules. A new share is one more
-  # entry in the list.
+  # runners. Each proves its share of the modules, one process for each of
+  # its cores. A new runner is one more entry in the list.
   proofs:
     runs-on: ubuntu-latest
     strategy:
@@ -172,10 +172,13 @@ jobs:
           restore-keys: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-
 
       - name: Prove a share of the standard library
+        env:
+          TRUSS_SOLVER_CACHE: /home/runner/.cache/truss-solver
+          TRUSS_CACHE: /home/runner/.cache/truss-proofs
         run: |
           opam exec -- dune build ./stage0/test/standard_library_tests.exe
           cd _build/default/stage0/test
-          TRUSS_PROOF_SHARE="${{ matrix.share }}/${{ strategy.job-total }}" TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" TRUSS_CACHE="$HOME/.cache/truss-proofs" TRUSS_PROOF_STATE="share-${{ matrix.share }}" ./standard_library_tests.exe
+          "$GITHUB_WORKSPACE/.github/scripts/prove-share.sh" ${{ matrix.share }} ${{ strategy.job-total }}
 
       # An answer no run has asked for in two weeks is dropped, so the cache
       # holds the queries that are still asked and not every one that was. A

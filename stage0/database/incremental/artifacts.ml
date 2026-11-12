@@ -51,9 +51,8 @@ let record_facts engine =
         (fun node -> record_fact engine store node (lazy (current_reads engine node)))
         (unsaved_nodes engine)
 
-(* An artifact: a state, or what changed in one since an earlier artifact.
-   Each node is named by its input or query and its key, and what it read
-   by places in the artifact's table of such names. *)
+(* An artifact: a state, or its changes since an earlier artifact. Each
+   node is named by its input or query and its key, and its reads by places in the artifact's table of such names. *)
 type saved_node = {
   saved_name : string;
   saved_key : string;
@@ -113,7 +112,7 @@ let write ?(full = false) engine =
     end
     else unsaved_nodes engine
   in
-  (* A node that is written must find what it read when the state is
+  (* A node that is written must find its dependencies when the state is
      opened, so a node of the engine's own that the chain does not hold yet
      is written with the first node that read it. *)
   let scheduled = Hashtbl.create 256 in
@@ -219,7 +218,7 @@ let artifact (engine : t) = engine.chain
 let unwritten (engine : t) =
   engine.chain = None || Hashtbl.length engine.unsaved > 0 || engine.collected <> []
 
-(* An artifact's bytes start with what wrote it. They are marshaled, so
+(* An artifact's bytes start with the version that wrote it. They are marshaled, so
    they mean something only to the same version: read by another, as when
    a compiler collects a store that an earlier build of it wrote to, they
    would be taken for another type's. *)
@@ -335,7 +334,7 @@ let fill engine (artifacts : artifact list) =
         List.iter (fun read -> add_reader engine read node) reads
       end)
     restored;
-  (* What cannot be checked is left out, with what reads it. One that a base
+  (* A node that cannot be checked is left out, with its readers. One that a base
      also holds keeps its place, with nothing in it, so that the base's
      result, which is of an earlier state, is not read in its stead. *)
   let emptied = Hashtbl.create 8 in

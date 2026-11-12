@@ -1,5 +1,5 @@
-; A project's files as inputs, and what follows from them as queries: its
-; packages, their modules and text, what is wrong between its manifests,
+; A project's files as inputs, and queries derived from them: its
+; packages, their modules and text, the errors between its manifests,
 ; and the registry packages of its build. See DATABASE.md, "Inputs".
 
 (library

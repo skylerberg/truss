@@ -1,6 +1,5 @@
-(** What every definition is named by, across stages: its package, module, and name. Results name
-    other definitions by path, never by a hash. Code generation's instance keys use the same paths.
-*)
+(** A definition's name across stages: its package, module, and name. Results name other definitions
+    by path, never by a hash. Code generation's instance keys use the same paths. *)
 
 type package = { owner : string option; name : string }
 (** A package's name: [weather] has no owner, and [acme::geometry], a package from the registry, has

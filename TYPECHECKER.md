@@ -3,7 +3,7 @@
 This document describes name resolution and type checking in stage0, in
 [`stage0/`](stage0): every step between the parser's syntax trees and the core
 form that the prover and code generation read. It follows the decisions in
-[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md).
+[SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md).
 Its input is the trees described in [PARSER.md](PARSER.md). Its output is the
 core form that [CODEGEN.md](CODEGEN.md) and [PROVER.md](PROVER.md) consume. Its
 queries run on the code database, which [DATABASE.md](DATABASE.md) describes.
@@ -162,7 +162,7 @@ node ids, of the referent of every name. The tree itself is unchanged (see
 the file's `use` lines, and the names that other files and packages export,
 each through a query.
 
-### What a name can refer to
+### Namespaces
 
 Names are in separate namespaces, which the case rules distinguish:
 
@@ -385,12 +385,12 @@ the change invalidates nothing beyond the definition:
   with. The parameters and the contract are built before the body, so their
   nodes are numbered the same whatever the body is. Editing a body that the
   specification leaves out leaves the specification equal. A second result,
-  the exported specification, is what a proof in another package reads. It has
+  the exported specification, is the part a proof in another package reads. It has
   the body of a function only when the function is `public transparent`, so
   editing any other body re-proves nothing in a package that depends on this
   one. `transparent` is part of the signature, and it is an error on a function
   whose body cannot be a definition.
-- **What another package's proofs read names only what is public.** Those
+- **The specification another package's proofs read names only public definitions.** Those
   proofs read the `requires`, `ensures`, and `cost` of every definition that
   the package can call, and the body of a `transparent` function. A function
   or a constant that such a clause or body names must be public
@@ -518,7 +518,7 @@ value's core node in the conversion:
 | Conversion | Where |
 |---|---|
 | `Never` to any type | Wherever an expression of type `Never` meets an expected type, such as `None => return Err(error)` in a `match` whose value is an `Int64` |
-| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is DESIGN.md's only implicit conversion. |
+| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is SPECIFICATION.md's only implicit conversion. |
 | A function value to a function type with more `uses` or weaker costs | Where a value is passed, bound, returned, assigned, or stored, and where it is the tail expression of a branch of an `if` or a `match`. A pure function can be passed as `(fn(Item) uses Clock)`, and a `cost time O(1)` function as `cost time finite`. |
 | A built-in integer to `Integer`, and back | An argument or the key of an index, in specifications only (see [Specifications](#specifications)) |
 
@@ -530,8 +530,8 @@ different types, as in Rust.
   function that `uses Clock` is never a `fn()`, in an argument, a `let`, a
   `return`, a field, or an assignment. Where the expected type lists a
   capability parameter of the callee, the parameter is instantiated with the
-  capabilities that the function uses, as [What code may
-  call](#what-code-may-call) describes.
+  capabilities that the function uses, as [Capability
+  checking](#capability-checking) describes.
 - **The checker accepts weaker costs that the constants of the two types
   show:** an exact count is within any bound that it does not exceed, a count
   is `O(...)`, and every bound is `finite`. The type of a named function has
@@ -543,7 +543,7 @@ different types, as in Rust.
 
 ### Properties of types
 
-Five properties of a type decide what code can do with a value of it. Each is
+Five properties of a type decide the operations allowed on its values. Each is
 derived from the type's shape, as a condition on its type parameters:
 `Option[Value]` is `Plain` exactly when `Value` is.
 
@@ -664,7 +664,7 @@ from them.
   `internal` type in a visible field of a public type, as in Rust and Swift.
   Callers in other packages could not name the type.
 - **Clauses are checked in source order,** each with the earlier clauses in
-  scope, as SYNTAX.md describes. `requires`, `ensures`, and `decreases` are
+  scope, as SPECIFICATION.md describes. `requires`, `ensures`, and `decreases` are
   specifications (see [Specifications](#specifications)). `uses` names
   capabilities or capability parameters. The bound of each `cost` clause is an
   `Integer` expression. `calls(target)` names a parameter of a function type, a
@@ -752,7 +752,7 @@ written inside it, and neither check depends on the other:
   names must match because they are part of how a method is called, as Swift
   requires of protocol requirements. Defaults are written only in the trait. A
   method can add `ensures` and `cost` clauses, and can state a `requires`. The
-  prover shows that its clauses are no weaker than the trait's, as DESIGN.md
+  prover shows that its clauses are no weaker than the trait's, as SPECIFICATION.md
   describes. The `impl`'s clauses are part of its contract, on which a call
   that resolves to the `impl` depends.
 - **The traits that a trait requires** must be implemented for the same type,
@@ -839,7 +839,7 @@ an associated type's definition on the cycle names that constructor.
 
 A generic type that contains itself with different arguments, as in `type
 Nested[Element] = Leaf(value: Element) | indirect Node(inner:
-Nested[List[Element]])`, is `package.growing_type`, as DESIGN.md requires:
+Nested[List[Element]])`, is `package.growing_type`, as SPECIFICATION.md requires:
 the type has no fixed set of instances, and generic code is compiled once
 for each. A traversal of its own finds it, as in Go's check. Its graph has
 the parameters of generic types as nodes. An edge goes from a parameter to
@@ -860,20 +860,21 @@ statement are inference variables, solved by unification.
 inference variable in it must be solved. A literal whose type is still
 undetermined takes its default type, and any other unsolved variable is an
 error that asks for an annotation, with a fix that adds one to the `let`. The
-type of a local is then fixed for the rest of the body. This is local type
-inference, as in Swift, Kotlin, Scala, and C#, in contrast to inference across
-a whole body, as in Rust, OCaml, and Haskell:
+type of a local is then fixed for the rest of the body. The one exception is
+a literal type in the type of a local, described under Literals below. This
+is local type inference, as in Swift, Kotlin, Scala, and C#, in contrast to
+inference across a whole body, as in Rust, OCaml, and Haskell:
 
 - **The type of a variable is determined by its declaration,** which is the
   line that a reader, an LLM, and a hover in the language server see. An error
   is reported at the statement that caused it, never at a distant use that
   happened to fix the type of a variable.
-- **Checking is local and fast.** Unification never spans more than one
-  statement, so its cost follows the size of the statement.
+- **Checking is local and fast.** Unification spans more than one statement
+  only for the literal type of a local, so its cost follows the size of the
+  statement.
 - **The cost is a few annotations.** `var names = []` needs
   `var names: List[String] = []`, and `var best = None` needs a type, as in
-  Swift and Kotlin. SYNTAX.md already writes them this way, and
-  `var best = 0` is an `Int64`, as SYNTAX.md says.
+  Swift and Kotlin. SPECIFICATION.md already writes them this way.
 
 A statement here is the innermost statement. The statements inside a block that
 is part of a larger expression are inferred separately, and the block's tail
@@ -882,7 +883,9 @@ expression is checked against the block's expected type.
 The scrutinee of a `match` or an `is` is inferred before the patterns are
 checked, as if it were a statement of its own, because a pattern needs the type
 of its scrutinee. So in `second / 0 is None`, the `0` takes its default type
-and the operator's `impl` is selected before `None` is looked up.
+and the operator's `impl` is selected before `None` is looked up. A scrutinee
+that is a local of undecided literal type stays undecided, and an integer
+pattern is checked against it once a later statement decides it.
 
 ### Literals
 
@@ -901,8 +904,46 @@ decided in this order:
 3. **By the default,** `Int64` or `Float64`, at the end of the statement.
    A literal shift amount is a `USize`, as Go's is a `uint`.
 
+**A literal type in the type of a local outlives the local's declaration.**
+In `let limit = 10`, `var best = 0`, and `for index in 0..10`, nothing in
+the declaration decides the local's type. The first later statement that
+constrains it decides it, as Rust's `{integer}` does. Here `count < limit`
+decides that `limit` is a `UInt8`:
+
+```truss
+fn f(count: UInt8) -> Bool {
+  let limit = 10
+  count < limit
+}
+```
+
+- **The statement that encloses the declaration gives the default.** For a
+  local of a block, that is the statement that holds the block. For the
+  variable of a `for` loop, it is the loop. For a local of a body, it is the
+  end of the body. An undecided type cannot leak past the local's scope.
+- **A use that needs the type takes the default.** A method call on the
+  local takes the default type, as a method call on a literal does, because
+  method lookup needs the type of the receiver. An integer pattern does not
+  need the type: it is checked once the type is decided.
+- **A specification converts the local to `Integer`.** A local of code with
+  an undecided literal type converts to `Integer` in a specification, as a
+  built-in integer does, so a loop invariant such as `index + 1 <= 11` does
+  not decide that `index` is an `Integer`, a type that code cannot have.
+- **Only literal types outlive the statement.** A literal type can only
+  become a built-in number type, so the local's declaration still says that
+  it is a number. Unification for it spans statements, at the cost of one
+  variable per such local. Every other unsolved type still needs its
+  annotation at the declaration.
+- **A conflict is one error, with the deciding statement.** When a use
+  needs a type other than the one an earlier statement decided, the error
+  is at the use, with a note at the statement that decided it. Every later
+  mismatch of the same local reuses that report, so one decision is one
+  error, however many uses follow. When a method call gave the local its
+  default type, the error has a fix that writes the needed type on the
+  `let`, such as `let base: UInt8 = 1`.
+
 This never looks at which `impl`s exist, so adding an `impl` never changes
-what an existing call means, as DESIGN.md requires. Once a literal's type is
+an existing call's meaning, as SPECIFICATION.md requires. Once a literal's type is
 known:
 
 - **An integer literal must fit** its type, after negation: a `-` applied
@@ -911,7 +952,7 @@ known:
   type that an integer trait bounds is an integer type here, and a literal of
   it must fit every built-in type that implements the trait. A `USize` or `ISize` literal
   must fit in 32 bits unless the package's manifest says
-  `usize_bits = 64`, as DESIGN.md requires. The standard library, which
+  `usize_bits = 64`, as SPECIFICATION.md requires. The standard library, which
   holds the code for each platform, is checked with its target's width.
 - **A float literal is rounded once,** from its exact decimal value to its
   type, with ties to even. A literal that rounds to infinity is an error, as
@@ -979,7 +1020,7 @@ The arguments must then appear in parameter order; otherwise the call is an
 error with a fix that reorders them. An argument for a parameter with a default
 can be omitted, and the core form passes `Default` for each omitted parameter,
 for the default-presence mask that CODEGEN.md describes. Records and variants differ in
-two ways, as SYNTAX.md says: their arguments can come in any order, and only a
+two ways, as SPECIFICATION.md says: their arguments can come in any order, and only a
 record or a variant with exactly one field takes a bare value.
 
 **Lambda arguments are checked last.** The other arguments of a call are
@@ -1014,7 +1055,7 @@ statement has inferred the type that it constrains:
 
 **An `impl` is never chosen from the expected type.** A trait method's
 `impl` is chosen by `Self` and by the trait's type arguments, and those come
-from the receiver, a type name, or the arguments, as DESIGN.md requires.
+from the receiver, a type name, or the arguments, as SPECIFICATION.md requires.
 `Int64.from(count)` chooses `From[UInt32]` by the type of `count`. Type
 arguments written after the trait, as in `Add[Int64].add(left, right)`,
 are the ones the call uses.
@@ -1035,7 +1076,7 @@ The keyword at a call site must agree with the parameter:
   also chooses the method's version, as below, so it is never redundant
   there.
 - **A mark covers the longest place it can,** and the first method call
-  after it takes that place as its receiver, as SYNTAX.md describes.
+  after it takes that place as its receiver, as SPECIFICATION.md describes.
 - **A `mut` mark needs a mutable place.** The place in `mut place`, the
   receiver of a `mut self` method, and the collection of a `for` loop over
   `mut place` must be mutable, by the rule for the left side of an
@@ -1113,7 +1154,7 @@ type of a bound.
   first, so it never goes through `assign`.
 - **A block's value is its last expression.** Every other statement must
   have type `Unit` or `Never`; any other value is an error with a fix that
-  writes `let _ =`, as DESIGN.md requires. An `if` without an `else` has type
+  writes `let _ =`, as SPECIFICATION.md requires. An `if` without an `else` has type
   `Unit`. The arms of an `if` or `match` are unified, ignoring arms of type
   `Never`.
 - **Loop clauses** are specifications: an `invariant` is a `Bool`, and a
@@ -1121,7 +1162,7 @@ type of a bound.
 - **`while`** takes a `Bool`. A `while` whose condition is the literal
   `true`, and which no `break` leaves, has type `Never`, as Java and Kotlin
   treat it. Any other loop is a statement of type `Unit`.
-- **`for pattern in expression`** has three forms, as SYNTAX.md describes.
+- **`for pattern in expression`** has three forms, as SPECIFICATION.md describes.
   If the expression is a call of a `yields` method, the loop iterates over
   that call, and the loop variable has the mode that the method yields
   with. If it is a cursor, the loop advances the cursor until it is
@@ -1149,7 +1190,7 @@ when every branch has.
 ### `todo`, `echo`, and `unreachable`
 
 - **`todo` takes the expected type,** and the hole is reported with that type
-  and the names in scope, as SYNTAX.md describes. With no expected type, as in
+  and the names in scope, as SPECIFICATION.md describes. With no expected type, as in
   `let body = todo`, it has the `Hole` type. Every operation on a `Hole` is
   accepted, and its result is a `Hole`, so the rest of the body is still
   checked as far as possible. Its diagnostic states that the type is
@@ -1179,7 +1220,7 @@ when every branch has.
 
 A pattern is checked against the type of the value it matches:
 
-- **A variant** is looked up in the matched type, as SYNTAX.md describes,
+- **A variant** is looked up in the matched type, as SPECIFICATION.md describes,
   and a record pattern takes the matched type's only shape. The fields of an
   opaque type from another package cannot be matched.
 - **Fields** are matched by name: `field: pattern`, a bare name that is a
@@ -1230,7 +1271,7 @@ generation read, including the patterns that `?` desugars to:
 
 ## Ownership: moves, loans, and views
 
-`Ownership` enforces DESIGN.md's rules on modes, moves, and views within each
+`Ownership` enforces SPECIFICATION.md's rules on modes, moves, and views within each
 function. It prevents use after move, dangling views, mutation of a borrowed
 place, and data races. It reads the definition's MIR, which
 [MIR.md](MIR.md) describes, and the interfaces of the definition's callees.
@@ -1265,7 +1306,7 @@ Two places *overlap* when one is a prefix of the other. `config.servers` and
 `config.clients` are disjoint. `items[i]` and `items[j]` may overlap, and so
 may two slices of one collection. Where that matters, the checker reports no
 error. It emits a `Disjoint` obligation instead, which the prover discharges,
-as DESIGN.md requires for `sort(mut items[..middle])` next to `sort(mut
+as SPECIFICATION.md requires for `sort(mut items[..middle])` next to `sort(mut
 items[middle..])`.
 
 ### Moves
@@ -1279,7 +1320,7 @@ copied instead.
   move, and a fix that inserts `.copy()` at the move when the type is
   `Copyable`.
 - **A field can be moved out by itself.** The other fields stay usable, and the
-  whole record is usable again once the field is assigned, as DESIGN.md
+  whole record is usable again once the field is assigned, as SPECIFICATION.md
   describes. The checker tracks moved places by field path.
 - **Only an owned place can be moved.** Moving out of a read-only parameter, a
   view, a constant, or an element, as in `own items[i]`, is an error, as in
@@ -1333,11 +1374,11 @@ analysis computes, as in Rust's non-lexical lifetimes. While a shared loan of a
 place is live, no code can assign, move, or `mut`-borrow an overlapping place.
 While a `mut` loan is live, no other code can use an overlapping place at all.
 So `swap(mut first, second: mut first)` is an error, and `mut items.push(9)` is
-allowed once `middle` is dead, as in SYNTAX.md's example. A loan of a view is
+allowed once `middle` is dead, as in SPECIFICATION.md's example. A loan of a view is
 also a loan of the places that the view views.
 
 The operands of one operation are evaluated in the order written, and a later
-operand cannot mutate what an earlier operand evaluated to. The operands are
+operand cannot mutate an earlier operand's value. The operands are
 the arguments of a call, the fields of a constructor, the elements of a literal,
 the scrutinees of a `match`, the collection and then the keys of an index, and
 the value of an assignment and then the keys of its target.
@@ -1385,10 +1426,10 @@ uses one definition of the places that a value views, `Graph.views_of`.
   a function only if its elements do, so `mut items.sort_by(fn(first, second)
   { key(first) < key(second) })` is accepted where `items` is a `mut` slice
   parameter.
-- **The value of an `if`, a `match`, or a block views what any of its tail
-  expressions views.** After `let part = if first { items[..1] } else {
+- **The value of an `if`, a `match`, or a block views every place its tail
+  expressions view.** After `let part = if first { items[..1] } else {
   items[1..] }`, `part` views `items`. A copy of a view has the same views, and
-  a record built by `with` views what its base and its new fields view. The
+  a record built by `with` views every place its base and its new fields view. The
   checker decides this for every kind of expression, with no default case.
 - **A place that is assigned a view has the value's views.** After `holder.view
   = data[0..2]`, `holder` views `data`. A variable that is assigned again also
@@ -1477,7 +1518,7 @@ uses one definition of the places that a value views, `Graph.views_of`.
   produced the view. The error asks to bind the temporary to a name first, as
   Rust's E0716 does. The same holds for a view of a temporary that is assigned
   to a place, or that is passed to a call together with a `mut` argument that
-  can hold views. A cursor views what its call's read-only arguments view, as a
+  can hold views. A cursor views the places its call's read-only arguments view, as a
   view would. A string literal without interpolation has static storage, so a
   view of one is accepted.
 
@@ -1620,11 +1661,11 @@ fixes.
   `self[index]`, can create a cursor only where its element is `Plain`, which
   is copied implicitly in any case. Any named place counts: a field, an
   element, a parameter, or a local. An element of any other type would be
-  copied implicitly, which DESIGN.md rules out, so creating the cursor is an
+  copied implicitly, which SPECIFICATION.md rules out, so creating the cursor is an
   error that suggests a `for` loop or a method that yields owned values. A
   method that yields only temporaries, such as the results of calls, yields
   owned values, which a pull moves.
-- **Whether a method can be pulled is derived from its body,** as DESIGN.md
+- **Whether a method can be pulled is derived from its body,** as SPECIFICATION.md
   says. A `yields` method cannot be pulled if it yields recursively: through a
   `for` loop over a method in its own call cycle. Whether a method yields views
   of places is derived from the body too. Callers read two facts from a
@@ -1696,7 +1737,7 @@ follow the same data race rule as `parallel`. They differ in two ways: `?`,
 
 ## Capabilities
 
-### What code may call
+### Capability checking
 
 At each point of a body, a set of capabilities is *available*: the function's
 `uses`, its capability parameters, and the capabilities that each enclosing
@@ -1838,7 +1879,7 @@ runs to completion before the next call starts.
 
 ### Dependency grants
 
-DESIGN.md says that a dependency can use only the capabilities that its
+PACKAGES.md says that a dependency can use only the capabilities that its
 manifest entry grants, and that a grant is checked wherever the dependency's
 code is referenced. The type checker enforces this from the signatures of the
 dependency's code, never from its bodies. Every capability in those `uses`
@@ -1913,7 +1954,7 @@ type constructor overlap when their trait arguments unify, where each `impl`'s
 generic parameters are unification variables. So `impl Add[Element] for
 Vector[Element]` and `impl Add[Int64] for Vector[Element]` together are an
 error. A blanket `impl`, for a bare generic parameter, would cover every type
-that satisfies a bound, and is not allowed, as DESIGN.md says.
+that satisfies a bound, and is not allowed, as SPECIFICATION.md says.
 
 ### Finding an `impl`
 
@@ -1938,7 +1979,7 @@ method of a trait the type implements cannot be the same one. A trait's
 method may be another version of a type's own only when an `impl` in the
 type's package writes it: one left to the trait's provided body, or given
 by an `impl` in another package, cannot use a name the type's methods have
-at all, as DESIGN.md says. Neither can share a name with a constant of the
+at all, as SPECIFICATION.md says. Neither can share a name with a constant of the
 type. The error is reported at the `impl`, wherever it is.
 
 ### `any`
@@ -1963,7 +2004,7 @@ type. The error is reported at the `impl`, wherever it is.
 ### Instantiation cycles
 
 Generic code is compiled once for each set of type arguments, so generic
-code may not instantiate itself with growing arguments, as DESIGN.md says.
+code may not instantiate itself with growing arguments, as SPECIFICATION.md says.
 Each checked body records its *instantiation edges*: each generic definition
 it calls, with type arguments written in terms of its own type parameters.
 A package check builds the graph of these edges and reports a cycle in which
@@ -1995,7 +2036,7 @@ checks them like code, with these differences:
 - **Everything is pure.** No capability is available, not even `Panic`, and
   `echo` is not allowed.
 - **Every function called must be pure and have a `time` clause,** so that
-  it is known to terminate, as DESIGN.md requires. Both are facts of the
+  it is known to terminate, as SPECIFICATION.md requires. Both are facts of the
   callee's interface.
 - **`forall` and `exists`** bind a pattern over a range or a collection, or a
   name over a type. Their bodies, and `==>`, are `Bool`. A quantifier over a
@@ -2086,7 +2127,7 @@ trait method, the parameter and mode of each argument, the omitted defaults,
 and the capability set; the value of each literal; the variant or record of
 each pattern and the type of its scrutinee; the iteration of each `for` loop;
 the conversions of each template; and the mode of each lending call. The
-checker builds the core form from them. What a `provide` provides, and the
+checker builds the core form from them. A `provide`'s capabilities, and the
 obligations that the type checker creates, are in the core form only.
 
 The tables are canonical, so that two checks of the same definition give equal
@@ -2226,7 +2267,7 @@ the whole definition is checked. Only then is every type final, and some
 choices, such as the `impl` an operator resolves to, are made at the end of
 a statement.
 
-The check described in [What code may call](#what-code-may-call) runs on
+The check described in [Capability checking](#capability-checking) runs on
 the core form, and it solves the capability variables, because only the
 core form has every call. If the definition has capability variables, the
 core form is built again after they are solved, so that its types contain
@@ -2421,12 +2462,12 @@ whenever the intent is unambiguous:
   parser alone (see [Broken definitions](#broken-definitions)).
 - **The interpretation of `f[X]` is stated.** An error in `f[X]` states which
   interpretation applied, such as "`parse` is a generic function, and `[Int64]`
-  is its type argument", as DESIGN.md asks.
+  is its type argument", as SPECIFICATION.md asks.
 - **Habits from other languages** that need types are reported with fixes,
   such as `pair.0` and a tuple `(a, b)`, which say that Truss has no tuples
   and point to the record types in the standard library.
 - **Holes are not errors.** A `todo` is reported to the tools with its type
-  and the names in scope, as SYNTAX.md describes, and builds refuse programs
+  and the names in scope, as SPECIFICATION.md describes, and builds refuse programs
   that can reach one.
 
 ## Interfaces to other stages
@@ -2434,7 +2475,7 @@ whenever the intent is unambiguous:
 - **The parser** produces one syntax tree per definition, with positions
   relative to the definition and an id on every node. Later stages record their
   decisions in tables keyed by those ids, and never change the tree. For a
-  broken definition, the parser keeps what PARSER.md states, and the type
+  broken definition, the parser keeps the parts PARSER.md states, and the type
   checker relies on it as [Broken definitions](#broken-definitions) describes.
 - **The prover** reads core forms, the interfaces and contracts of their
   callees, the functional bodies that it uses as definitions, and the type

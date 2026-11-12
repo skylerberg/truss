@@ -28,7 +28,7 @@ let may_alias (first : Lir.place) (second : Lir.place) =
   in
   first.root = second.root && overlap first.projections second.projections
 
-(* How many arguments a call passes: what its target is given first, the
+(* How many arguments a call passes: its target's leading arguments, the
    pointer a large result is written through, and each argument that has a
    size. *)
 let passed env (instance : Lir.t) (function_ : Lir.function_) (target : Lir.target) arguments
@@ -59,9 +59,9 @@ let target_signature (instance : Lir.t) : Lir.target -> Lir.signature option = f
       Some signature
   | Intrinsic _ | Foreign _ -> None
 
-let function_ env (instance : Lir.t) what (function_ : Lir.function_) =
+let function_ env (instance : Lir.t) label (function_ : Lir.function_) =
   let blocks = Array.length function_.blocks and locals = Array.length function_.locals in
-  let bug format = Printf.ksprintf (fun message -> bug "%s: %s" what message) format in
+  let bug format = Printf.ksprintf (fun message -> bug "%s: %s" label message) format in
   let local local_number =
     if local_number < 0 || local_number >= locals then bug "local %d, of %d" local_number locals
   in
@@ -91,7 +91,7 @@ let function_ env (instance : Lir.t) what (function_ : Lir.function_) =
       bug "a fork of nested function %d" nested_index;
     let signature = Lir.signature instance.nested.(nested_index) in
     if signature.parameters <> parameters || signature.result <> None then
-      bug "a fork of nested function %d, which does not take what a fork gives" nested_index
+      bug "a fork of nested function %d, which does not take a fork's arguments" nested_index
   in
   let nested_value : Lir.statement -> unit = function
     | Assign (_, Function_value { code = Nested nested_index; _ }) ->
@@ -116,7 +116,7 @@ let function_ env (instance : Lir.t) what (function_ : Lir.function_) =
           | _ -> None
         in
         match has with
-        | None -> bug "a value of %s built as what it is not" (Ground.to_string ty)
+        | None -> bug "a value of %s built as another type" (Ground.to_string ty)
         | Some names ->
             List.iter
               (fun (name, _) ->
@@ -200,10 +200,10 @@ let links env ~find (compiled : Lir.compiled) =
     if not (Lir.equal_signature signature (Lir.signature (code key).main)) then
       bug "%s is named with a signature it does not have" (Instance.to_string key)
   in
-  let reaches key ~is what =
+  let reaches key ~is expected =
     match find key with
     | Some unit when is unit -> ()
-    | _ -> bug "the address of %s, which is not %s" (Instance.to_string key) what
+    | _ -> bug "the address of %s, which is not %s" (Instance.to_string key) expected
   in
   let is_table = function Lir.Table _ -> true | _ -> false
   and is_data = function Lir.Data _ -> true | _ -> false in

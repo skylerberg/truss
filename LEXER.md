@@ -1,8 +1,8 @@
 # Truss Lexer
 
 This document describes the stage0 lexer, in [`stage0/`](stage0). It
-implements the lexical grammar in [GRAMMAR.md](GRAMMAR.md), and the rules in
-[SYNTAX.md](SYNTAX.md) and [DESIGN.md](DESIGN.md) behind it.
+implements the lexical grammar and rules of
+[SPECIFICATION.md](SPECIFICATION.md).
 
 The lexer takes the bytes of one source file and returns an array of tokens and
 a list of diagnostics. It always returns tokens, even for a file with errors,
@@ -137,7 +137,7 @@ compiler that is easiest to test exhaustively.
 
 ### Forbidden characters
 
-The forbidden characters are those listed in GRAMMAR.md: the characters with
+The forbidden characters are those listed in SPECIFICATION.md: the characters with
 the `Bidi_Control` property, control characters other than tab, line feed, and
 a carriage return before a line feed, and every other
 `Default_Ignorable_Code_Point` except U+200C, U+200D, and the variation
@@ -231,7 +231,7 @@ and interpolation = { tokens : token array; span : span }
   values.
 - **An interpolation is a nested token array,** already laid out. The parser
   parses each one as an expression from its own array. This matches
-  GRAMMAR.md's single `STRING` token, keeps the outer token stream flat, and
+  SPECIFICATION.md's single `STRING` token, keeps the outer token stream flat, and
   confines an error inside an interpolation to that interpolation.
 - **A tag is only the name.** In `database::SqlQuery"..."`, `database` and
   `::` are ordinary tokens before the string, and the parser joins them.
@@ -240,7 +240,7 @@ and interpolation = { tokens : token array; span : span }
   one, as Go, Rust, and Gleam do.
 - **`keyword`, `reserved`, `punctuation`, and `foreign` have one constructor
   per item,** each built from a single list in `Token`. A test reads the
-  keyword and punctuation blocks in GRAMMAR.md and checks them against these
+  keyword and punctuation blocks in SPECIFICATION.md and checks them against these
   lists, so the documents and the code cannot diverge.
 
 ## Names and keywords
@@ -299,7 +299,7 @@ by a name:
    digit, read the fraction the same way.
 3. If the run so far ends in `e` and is followed by `+` or `-` and a digit,
    read the sign and the digits after it as the exponent.
-4. Check the whole text against GRAMMAR.md's rules for numbers, and compute
+4. Check the whole text against SPECIFICATION.md's rules for numbers, and compute
    the value from the digits with the `_`s removed.
 
 So `1..2` is `1`, `..`, `2`; `1.max(2)` is `1`, `.`, `max`, ...; and `1.0.max`
@@ -339,8 +339,8 @@ literal with many digits cannot make the lexer quadratic.
 - An `Upper` name followed directly by `"` or `$` is the tag of a tagged
   string. A keyword is never a tag: `return"x"` is `return` followed by a
   string.
-- `'a'` is a character literal from another language, and SYNTAX.md gives
-  its fix, `Character"a"`. The lexer emits the tagged string, so that the
+- `'a'` is a character literal from another language, and its fix is
+  `Character"a"`. The lexer emits the tagged string, so that the
   parser can continue.
 
 A string of another language is reported, and the token is the string that
@@ -415,7 +415,7 @@ For a raw string opened with *q* quotes and *n* dollar signs:
    is text.
 3. **A one-line string** must close on its line. A one-line string cannot
    start with `"`, because the opening run includes every quote, and it cannot
-   end with `"`, because the closing run would be too long. GRAMMAR.md states
+   end with `"`, because the closing run would be too long. SPECIFICATION.md states
    both rules, and they follow from the rule for runs.
 4. **A multi-line string** must close on a line that holds only whitespace
    before the closing delimiter. That whitespace is the indentation. A closing
@@ -468,7 +468,7 @@ lexer. The type checker checks that each holds exactly one character.
 
 ## Punctuation
 
-The scanner takes the longest match from GRAMMAR.md's list of punctuation, by
+The scanner takes the longest match from SPECIFICATION.md's list of punctuation, by
 a match on the first byte and then on the one or two bytes after it. It has
 no table-driven matcher.
 
@@ -530,7 +530,7 @@ tokens. Habits fall into two groups:
   error without a fix, and is skipped.
 - **`...` in documentation.** `...` lexes as `..` and `.`, which the parser
   rejects, so the examples in the documents write `todo` for omitted code,
-  as SYNTAX.md recommends for unwritten bodies.
+  as SPECIFICATION.md recommends for unwritten bodies.
 - **Parser-level habits.** Some foreign habits, such as `|x| x + 1`, `&x`,
   `x ? a : b`, `Shape::Circle`, and `a ?? b`, are made of valid tokens. The
   parser reports them, not the lexer.
@@ -539,7 +539,7 @@ tokens. Habits fall into two groups:
 
 ### NEWLINE tokens
 
-GRAMMAR.md's rule, which is Scala's: inside `(` or `[`, line breaks are
+SPECIFICATION.md's rule, which is Scala's: inside `(` or `[`, line breaks are
 ignored. Elsewhere, a line break becomes a `NEWLINE` when the token before it
 can end a statement and the token after it can begin one. Several line breaks
 give at most one `NEWLINE`.
@@ -560,13 +560,13 @@ at the end: if the last token can end a statement, emit NEWLINE; then END_OF_FIL
 - The `NEWLINE`'s span is the first line break after the token before it,
   which is where a fix such as "move `-` to the end of the line before" edits.
 - The two sets are functions over token kinds in `Layout`. A test checks them
-  against GRAMMAR.md.
+  against SPECIFICATION.md.
 - A closing `}` cannot begin a statement, so no `NEWLINE` comes before one.
   The parser still skips a `NEWLINE` before a `{` that must open a body.
 - Each interpolation's tokens are a separate array with their own stack. An
   unterminated interpolation, such as one that a line break ended, has its
   open brackets closed without another error.
-- GRAMMAR.md leaves out the foreign tokens `++` and `--`, which no rule
+- SPECIFICATION.md leaves out the foreign tokens `++` and `--`, which no rule
   accepts. Layout treats them as able both to end and to begin a statement,
   so that `i++` on a line of its own is a statement of its own, which the
   parser reports.
@@ -637,8 +637,8 @@ type t = {
 ```
 
 - Every diagnostic is an error. Truss has no warnings.
-- The habits SYNTAX.md lists get exact fixes, and any other invalid input a
-  plain error.
+- Common habits of other languages get exact fixes, and any other invalid
+  input a plain error.
 - Codes are stable, descriptive names, so tools and agents match on codes, not
   on message text.
 - A diagnostic may offer alternative fixes, as `0755` does.

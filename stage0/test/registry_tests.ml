@@ -52,12 +52,12 @@ let () =
 let lock_block () =
   String.concat "\n"
     (Documents.block_after
-       (Documents.read (Harness.workspace_path "SYNTAX.md"))
-       "### The lock file")
+       (Documents.read (Harness.workspace_path "PACKAGES.md"))
+       "## The lock file")
   ^ "\n"
 
 let () =
-  test "SYNTAX.md's lock file is read, and is written back as it is" (fun () ->
+  test "PACKAGES.md's lock file is read, and is written back as it is" (fun () ->
       let text = lock_block () in
       match Lock.parse text with
       | [
@@ -164,8 +164,8 @@ let () =
 let package text = Option.get (Path.parse_package text)
 let hash_of name (version : Version.t) = Content.hash [ (name, Version.show version) ]
 
-(* A registry in memory: each package and version, with what it depends on,
-   each with the capabilities it grants, and what it was published with. *)
+(* A registry in memory: each package and version, with its dependencies,
+   each with the capabilities it grants, and its dependencies at publication. *)
 let load published name version ~hash =
   let written = Path.show_package name in
   match List.assoc_opt (written, version) published with
@@ -296,7 +296,7 @@ let () =
       in
       if chosen packages <> [ ("acme::walls", (1, 0, 0)) ] then fail "chose another")
 
-(* What each package holds *)
+(* Package holdings *)
 
 let () =
   let package name dependencies : Selection.package =
@@ -341,7 +341,7 @@ let () =
       if List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient" ] then
         fail "holds [%s]"
           (String.concat "; " (List.assoc { Path.owner = Some "truss"; name = "tls" } held)));
-  test "a package holds what any of its users grants it" (fun () ->
+  test "a package holds every capability any of its users grants it" (fun () ->
       let held =
         Selection.holds
           ~project:

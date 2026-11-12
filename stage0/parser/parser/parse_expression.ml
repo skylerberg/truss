@@ -450,7 +450,7 @@ and cost cursor =
   end;
   let resource =
     match
-      Cost_word.expect cursor ~accepted:Cost_word.resources ~what:"a resource"
+      Cost_word.expect cursor ~accepted:Cost_word.resources ~category:"a resource"
         ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
     with
     | Time -> Time
@@ -472,7 +472,7 @@ and cost cursor =
            there. *)
         let suggested = if resource = Time then [ Cost_word.O; Finite ] else [ O ] in
         match
-          Cost_word.expect cursor ~accepted:[ O; Finite ] ~suggested ~what:"a bound"
+          Cost_word.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
             ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
         with
         | O -> Big_o (parenthesized_expression cursor)
@@ -1333,7 +1333,7 @@ and statement_line cursor ~previous : statement =
       let statement = statement cursor in
       end_of_statement cursor statement
 
-(* What may follow a statement on its line, where the grammar allows only a
+(* The tokens that may follow a statement on its line, where the grammar allows only a
    line break or [}]: habits are reported and parsing continues. *)
 and end_of_statement cursor (statement : statement) =
   match (Cursor.peek_kind cursor, statement.kind) with

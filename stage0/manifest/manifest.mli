@@ -11,7 +11,7 @@ type package = {
 }
 
 type t = {
-  package : package option;  (** What [[package]] and [[dependencies]] say, if there is one *)
+  package : package option;  (** The [[package]] and [[dependencies]] tables, if there is one *)
   project : bool;  (** Whether the manifest has a [[project]] table *)
   time_limit : int option;  (** [[test]]'s [time_limit], in seconds, if it is written *)
 }
@@ -20,11 +20,11 @@ type t = {
 val default_time_limit : int
 
 exception Malformed of int * string
-(** The line, counting from 1, and what is wrong there, as whole sentences. *)
+(** The line, counting from 1, and its error, as whole sentences. *)
 
 val parse : string -> t
 (** Raises {!Malformed}. A manifest is read strictly: a table or a key it does not have is
-    malformed, and so is what a manifest of another language would hold, such as a version. *)
+    malformed, and so is a key a manifest of another language would hold, such as a version. *)
 
 val has_project_table : string -> bool
 (** Whether a manifest's text has a [[project]] table, whatever else is in it. *)

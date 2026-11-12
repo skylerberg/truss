@@ -1,7 +1,7 @@
 type local = int
 type block = int
 
-(** What a local holds. *)
+(** Whether a local is a source binding or a temporary. *)
 type local_kind =
   | Source of { local : Core.local; mode : Types.mode }
       (** A parameter, [self], or a local that a pattern or a lambda binds. With [Read] or [Mut], it
@@ -1294,7 +1294,7 @@ and statement b (node : Core.statement) =
           | Yielding_call ({ kind = Call called; _ } as call) ->
               each_loop b ~origin ~pattern ~called ~node:call.id ~loop ~each:(fun bind_part ->
                   each ~bind_part)
-          | Yielding_call _ -> bug "a loop over what is not a call"
+          | Yielding_call _ -> bug "a loop over an expression that is not a call"
           | Cursor { cursor; next } ->
               cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each:(fun bind_part ->
                   each ~bind_part))
