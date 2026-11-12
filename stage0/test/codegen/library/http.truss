@@ -88,7 +88,7 @@ fn exchange(raw: StringSlice) -> String
 }
 
 fn client_and_server() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
 {
   var listener = NetworkServer.listen(loopback(8080)).expect("the port is free")
   var seen: List[String] = []

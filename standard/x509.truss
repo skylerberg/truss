@@ -49,6 +49,7 @@ public type SignatureAlgorithm =
   | RsaPkcs1(function: cryptography::HashFunction)
   | RsaPss(function: cryptography::HashFunction)
   | Ed25519Signature
+  | Unsupported
   derives Equal
 
 public opaque type Certificate(
@@ -403,10 +404,7 @@ public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
   if parts.length() != 3 {
     return Err(malformed("outer structure"))
   }
-  let algorithm = match algorithm_of(parts[1]) {
-    Some(algorithm) => algorithm
-    None => return Err(Error(message: "a certificate signed with an algorithm that is not supported"))
-  }
+  let algorithm = algorithm_of(parts[1]).unwrap_or(SignatureAlgorithm.Unsupported)
   let signature = match parts[2] {
     BitString(unused_bits, bytes) => if unused_bits == 0 { bytes.copy() } else { return Err(malformed("signature")) }
     _ => return Err(malformed("signature"))
