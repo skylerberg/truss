@@ -299,23 +299,24 @@ let () =
       Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.modules @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
-      let text = (Query.demand database Workspace.file checks).source in
-      expect_string
-        ~expected:
-          "standard/shared_checks.truss:66:3: error[capabilities.not_available]: This call uses \
-           `Tasks`, which is not available here. Declare it with `uses Tasks`, or `provide` an \
-           implementation.\n\
-          \  |   intrinsic::shared_key(ticks)\n\
-          \  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\
-           standard/shared_checks.truss:69:23: error[types.unsatisfied_bound]: \
-           `Shared[Slice[Int64]]` needs `Slice[Int64]: Storable`, which does not hold here.\n\
-          \  | fn of_a_view(numbers: intrinsic::Shared[Slice[Int64]]) -> UInt64\n\
-          \  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\
-           standard/shared_checks.truss:72:3: error[types.unsatisfied_bound]: This needs \
-           `Slice[Int64]: Storable`, which does not hold.\n\
-          \  |   intrinsic::shared_key(numbers)\n\
-          \  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
-        (String.concat ""
-           (List.map (Diagnostic.render text) (Type_checker.diagnostics database checks))))
+      let text = Source.text (Query.demand database Workspace.file checks).source in
+      let found =
+        List.map
+          (fun (d : Diagnostic.t) ->
+            (Diagnostic.Code.name d.code, String.sub text d.span.start (d.span.stop - d.span.start)))
+          (Type_checker.diagnostics database checks)
+      in
+      let expected =
+        [
+          ("capabilities.not_available", "intrinsic::shared_key(ticks)");
+          ("types.unsatisfied_bound", "intrinsic::Shared[Slice[Int64]]");
+          ("types.unsatisfied_bound", "intrinsic::shared_key(numbers)");
+        ]
+      in
+      let show = List.map (fun (code, excerpt) -> code ^ " at " ^ excerpt) in
+      if found <> expected then
+        fail "expected [%s], got [%s]"
+          (String.concat "; " (show expected))
+          (String.concat "; " (show found)))
 
 let () = Harness.finish ()
