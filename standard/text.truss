@@ -74,10 +74,10 @@ internal fn push_bytes(storage: mut intrinsic::Storage[UInt8], text: StringSlice
 {
   for index in 0..text.length()
     invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage)) + index
-    invariant forall i in 0..old(intrinsic::storage_length(storage)) =>
-      identical(intrinsic::storage_model(storage)[i], old(intrinsic::storage_model(storage))[i])
-    invariant forall i in 0..index =>
-      identical(intrinsic::storage_model(storage)[old(intrinsic::storage_length(storage)) + i], text.model()[i])
+    invariant forall position in 0..old(intrinsic::storage_length(storage)) =>
+      identical(intrinsic::storage_model(storage)[position], old(intrinsic::storage_model(storage))[position])
+    invariant forall position in 0..index =>
+      identical(intrinsic::storage_model(storage)[old(intrinsic::storage_length(storage)) + position], text.model()[position])
     invariant intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
     cost allocations == 0
   {
