@@ -25,9 +25,9 @@ let private_temporary_directory () =
   match Unix.lstat directory with
   | { st_kind = S_DIR; st_uid; st_perm; _ } when st_uid = Unix.getuid () && st_perm land 0o077 = 0
     ->
-      directory
+      Ok directory
   | _ | (exception Unix.Unix_error _) ->
-      failwith (directory ^ " is not a directory that only this user can use.")
+      Error (directory ^ " is not a directory that only this user can use; try --no-server.")
 
 (* A background process serves one key, which a client gives: a project's
    root. Its socket and its lock are named by the compiler's identity and a
@@ -41,10 +41,12 @@ let server_path identity key =
 
 let socket_path identity key =
   let path = server_path identity key ^ ".socket" in
-  if String.length path < 100 then path
+  if String.length path < 100 then Ok path
   else
-    Filename.concat (private_temporary_directory ())
-      (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16 ^ ".socket")
+    Result.map
+      (fun directory ->
+        Filename.concat directory (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16 ^ ".socket"))
+      (private_temporary_directory ())
 
 (* Whether a process holds a lock file's lock. *)
 let locked path =
@@ -94,10 +96,7 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve ~key ~alive ~idle ~keep ~handle =
-  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let identity = Core.identity () in
-  let path = socket_path identity key in
+let serve_at ~key ~alive ~idle ~keep ~handle identity path =
   let lock =
     Unix.openfile (server_path identity key ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
   in
@@ -142,7 +141,7 @@ let serve ~key ~alive ~idle ~keep ~handle =
                 (try
                    let request = Marshal.from_channel input in
                    let progress text = send output (Progress text) in
-                   send output (Final (Core.recovering (fun () -> handle ~progress request)))
+                   send output (Final (handle ~progress request))
                  with _ -> ());
                 try Unix.close client with Unix.Unix_error _ -> ()))
       done;
@@ -150,6 +149,13 @@ let serve ~key ~alive ~idle ~keep ~handle =
       (try Unix.unlink path with Unix.Unix_error _ -> ());
       (try Sys.remove (server_path identity key ^ ".key") with Sys_error _ -> ());
       Unix.close lock
+
+let serve ~key ~alive ~idle ~keep ~handle =
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  let identity = Core.identity () in
+  match socket_path identity key with
+  | Error message -> prerr_endline message
+  | Ok path -> serve_at ~key ~alive ~idle ~keep ~handle identity path
 
 (* Starts the background process, detached from the client's terminal. *)
 let start program key =
@@ -185,7 +191,8 @@ let call ?program ?(start_server = true) ~key ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = Identity.compute (Store.default_directory ()) in
   let program = Option.value program ~default:(Identity.executable ()) in
-  let path = socket_path identity key in
+  let ( let* ) = Result.bind in
+  let* path = socket_path identity key in
   let rec attempt tries =
     match connect path with
     | Some socket -> Some socket
