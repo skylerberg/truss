@@ -11,7 +11,7 @@ type context = {
   self_associated : (string * Types.ty) list;  (** In an [impl], its associated types. *)
   self_capabilities : (string * Types.capability list) list;
       (** In an [impl], each associated capability set that its trait declares. *)
-  diagnostics : Diagnostic.t list ref;  (** Shared by every copy of the context. *)
+  diagnostics : Syntax.diagnostic list ref;  (** Shared by every copy of the context. *)
   named : (Syntax.span * Types.ty) list ref;
       (** Each named type lowered, for checking its bounds. *)
 }

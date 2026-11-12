@@ -47,8 +47,7 @@ type checking = {
 let report checking ?(fixes = []) code (origin : Core.origin) message =
   let span = checking.spans.(origin) in
   checking.state.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Capabilities code) (Syntax.Span.to_source span) message
-    :: checking.state.diagnostics
+    Diagnostic.make ~fixes ~code:(Capabilities code) span message :: checking.state.diagnostics
 
 let union left right = List.sort_uniq compare (left @ right)
 
@@ -367,14 +366,16 @@ and check_provide checking scope implementations body =
       let start = checking.spans.(implementation.origin).start in
       if is_place && mutates && not marked_mut then
         report checking Provide_mark implementation.origin
-          ~fixes:[ Diagnostic.fix "Mark it `mut`." [ Diagnostic.insert start "mut " ] ]
+          ~fixes:
+            [
+              Diagnostic.fix "Mark it `mut`." [ Diagnostic.replace (Span.zero_width start) "mut " ];
+            ]
           "This implementation changes its own state, so the place is provided `mut`."
       else if marked_mut && not mutates then
         report checking Provide_mark implementation.origin
           ~fixes:
             [
-              Diagnostic.fix "Remove the mark."
-                [ Diagnostic.delete (Source.span start (start + 4)) ];
+              Diagnostic.fix "Remove the mark." [ Diagnostic.delete (Span.make start (start + 4)) ];
             ]
           "This implementation never changes its own state, so the place is provided without `mut`.";
       List.iter

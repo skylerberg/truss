@@ -21,8 +21,8 @@ let at database (key : Names.key) ?(fixes = []) code (span : span) message =
         {
           module_;
           diagnostic =
-            Diagnostic.move base
-              (Diagnostic.make ~fixes ~code:(Package code) (Syntax.Span.to_source span) message);
+            Diagnostic.map_spans (Span.to_source ~base)
+              (Diagnostic.make ~fixes ~code:(Package code) span message);
         }
   | None -> None
 
@@ -30,7 +30,7 @@ let declarations database package = Query.demand database Names.package_declarat
 
 let dependencies database package =
   List.map
-    (fun (dependency : Workspace.dependency) -> dependency.package)
+    (fun (dependency : Manifest.dependency) -> dependency.package)
     (Query.demand database Workspace.dependencies package)
 
 let header_span (definition : definition) =
@@ -347,7 +347,7 @@ let check_recursion database (declaration : Names.declaration) (definition : def
                   ~fixes:
                     [
                       Diagnostic.fix "Mark the variant `indirect`."
-                        [ Diagnostic.insert span.start "indirect " ];
+                        [ Diagnostic.replace (Span.zero_width span.start) "indirect " ];
                     ]
                   "This type contains itself in place, so it would be infinitely large. Mark the \
                    variant `indirect` to keep its fields on the heap."
@@ -717,7 +717,7 @@ let manifest_problems =
       let checks = List.for_all (Infer.is_clean database) keys in
       let used = List.concat_map (Query.demand database used_packages) keys in
       List.concat_map
-        (fun (dependency : Workspace.dependency) ->
+        (fun (dependency : Manifest.dependency) ->
           (match
              Query.demand database Interface.Grants.granted (package_name, dependency.package)
            with
@@ -735,4 +735,5 @@ let diagnostics database (module_ : Path.module_) =
   List.filter_map
     (fun placed -> if placed.module_ = module_ then Some placed.diagnostic else None)
     (Query.demand database check module_.package)
-  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
+  |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+      compare left.span right.span)

@@ -390,7 +390,10 @@ let check context (graph : Graph.t) : task_hazard option =
           report context Keeps_lent_part at
             ~fixes:
               (if copyable context type_ then
-                 [ Diagnostic.fix "Copy it." [ Diagnostic.insert at.stop ".copy()" ] ]
+                 [
+                   Diagnostic.fix "Copy it."
+                     [ Diagnostic.replace (Syntax.Span.zero_width at.stop) ".copy()" ];
+                 ]
                else [])
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
              it in this statement, or copy it."

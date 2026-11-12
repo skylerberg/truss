@@ -1,6 +1,7 @@
 (library
  (name interface)
  (libraries
+  manifest
   compiler_bug
   query
   phases

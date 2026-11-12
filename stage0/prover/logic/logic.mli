@@ -1,8 +1,8 @@
 (** The solver's logic: sorts, terms, and queries, and their canonical text in SMT-LIB.
 
-    Symbols here are the prover's own names: each is a {!Symbol.t}, which says what the symbol
-    stands for, so the prover tells one kind from another by its constructor. A query's canonical
-    text never contains them: {!text} numbers every declared symbol by its first appearance, so two
+    Symbols here are the prover's own names: each is a {!symbol}, which says what the symbol stands
+    for, so the prover tells one kind from another by its constructor. A query's canonical text
+    never contains them: {!text} numbers every declared symbol by its first appearance, so two
     queries that differ only in names have the same text, and so the same hash. *)
 
 type sort =
@@ -18,13 +18,14 @@ type sort =
 module Symbol : sig
   (** The [O(...)] bound that a pair of cost constants belongs to. *)
   type cost_group =
-    | Own_bound of { counter : string; inherited : bool }
-        (** The definition's own bound on a counter, by the counter's key, or the bound it inherits
-            from a trait's method. *)
-    | Lambda_bound of { lambda : int; counter : string }  (** A lambda's bound, by its node. *)
+    | Own_bound of { counter : int; inherited : bool }
+        (** The definition's own bound on a counter, by the counter's number in the definition, or
+            the bound it inherits from a trait's method. *)
+    | Lambda_bound of { lambda : int; counter : int }  (** A lambda's bound, by its node. *)
     | Loop_bound of int  (** A loop's [cost] clause, by its origin. *)
 
-  type t =
+  (** A symbol, over the terms it can hold. *)
+  type 'term t =
     | Variable of { label : string; numbers : int list }
         (** A value the prover makes, or a bound variable: [label] says what it is for, and
             [numbers] tell it from others with the same label. *)
@@ -35,9 +36,10 @@ module Symbol : sig
     | Constant of Path.t  (** A [const] definition's value. *)
     | Generic_value of { owner : Path.t; name : string }  (** A generic value parameter. *)
     | Literal of { type_key : string; text : string }  (** A text literal's value. *)
-    | Argument of string  (** A term that holds a pure call, by the hash of its text. *)
-    | Lambda of string  (** A functional lambda, by the hash of its definition. *)
-    | Over of t
+    | Argument of 'term  (** A term that holds a pure call, named by the term. *)
+    | Lambda of { sorts : sort list; definition : 'term }
+        (** A functional lambda, named by its parameters' sorts and its definition. *)
+    | Over of 'term t
         (** A symbol made inside a lambda's body, as a function of the lambda's arguments. *)
     | Constructor of { type_key : string; type_name : string; variant : string option }
         (** A datatype's constructor: a variant's, or with [None], a record's. [type_name] is the
@@ -79,28 +81,27 @@ module Symbol : sig
     | Cost_power  (** Exponentiation, for cost bounds. *)
     | Reached of int  (** Whether a counterexample reaches a decision, by its position. *)
     | Condition of int  (** Whether a decision's condition holds there. *)
-
-  val show : t -> string
-  (** The symbol as readable text, for tests, debugging, and hashes of terms. *)
 end
 
 type term =
-  | Symbol of Symbol.t  (** A declared constant, or a bound variable inside its quantifier. *)
+  | Symbol of symbol  (** A declared constant, or a bound variable inside its quantifier. *)
   | Integer of Z.t
   | Boolean of bool
   | Bits of int * Z.t  (** A bit-vector literal: its width, and its value, at or above zero. *)
-  | Apply of Symbol.t * term list
+  | Apply of symbol * term list
       (** A declared function, or a datatype's constructor or selector, applied. *)
-  | Is of Symbol.t * term  (** SMT-LIB's [(_ is C)]: whether constructor [C] built the value. *)
+  | Is of symbol * term  (** SMT-LIB's [(_ is C)]: whether constructor [C] built the value. *)
   | Operation of string * term list
       (** A built-in operation of SMT-LIB, such as ["+"] or ["ite"], by its SMT-LIB name. *)
-  | Forall of (Symbol.t * sort) list * term
-  | Exists of (Symbol.t * sort) list * term
+  | Forall of (symbol * sort) list * term
+  | Exists of (symbol * sort) list * term
+
+and symbol = term Symbol.t
 
 type declaration =
-  | Constant of Symbol.t * sort
-  | Function of Symbol.t * sort list * sort
-  | Datatype of string * (Symbol.t * (Symbol.t * sort) list) list
+  | Constant of symbol * sort
+  | Function of symbol * sort list * sort
+  | Datatype of string * (symbol * (symbol * sort) list) list
       (** An algebraic datatype, the sort [Uninterpreted name]: its constructors, each with its
           fields' selectors and sorts. A constructor and a selector are applied by name, and {!Is}
           tests which constructor built a value. Constructors and fields are numbered in the order
@@ -138,7 +139,7 @@ val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
 (** The remainder of {!truncated_divide}, with the sign of the left operand. *)
 
-val mentions : Symbol.t list -> term -> bool
+val mentions : symbol list -> term -> bool
 (** Whether a term mentions any of the symbols, free. *)
 
 val free_symbols : term -> Symbol.t list
@@ -174,11 +175,11 @@ val term_text : query -> term -> string option
 (** A term in the query's canonical names, for asking its value of a model, or [None] if it names a
     symbol the query's text does not. *)
 
-val symbols : query -> (Symbol.t * string) list
+val symbols : query -> (symbol * string) list
 (** Each declared symbol the canonical text mentions, with its canonical name, for reading a model
     back. *)
 
-val members : query -> (string * (Symbol.t * Symbol.t list)) list
+val members : query -> (string * (symbol * symbol list)) list
 (** Each datatype constructor the canonical text names, with the prover's name for it, for reading a
     model back. *)
 
@@ -188,3 +189,6 @@ val hash : string -> string
 
 val show_term : term -> string
 (** A term as SMT-LIB, with the prover's own names, for tests and debugging. *)
+
+val show_symbol : symbol -> string
+(** A symbol as readable text, for tests and debugging. *)

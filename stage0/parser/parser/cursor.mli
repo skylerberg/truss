@@ -42,7 +42,6 @@ val is_punctuation : t -> Token.punctuation -> bool
 val is_keyword : t -> Token.keyword -> bool
 val accept_punctuation : t -> Token.punctuation -> bool
 val accept_keyword : t -> Token.keyword -> bool
-val relative : t -> int -> int
 val span : t -> Source.span -> Syntax.Span.t
 val previous_stop : t -> int
 val span_from : t -> int -> Syntax.Span.t
@@ -52,7 +51,7 @@ val text : t -> Source.span -> string
 val report :
   t ->
   ?notes:(Diagnostic.span * string) list ->
-  ?fixes:Diagnostic.fix list ->
+  ?fixes:Diagnostic.span Diagnostic.fix list ->
   Diagnostic.Code.parser ->
   Diagnostic.span ->
   string ->

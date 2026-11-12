@@ -8,10 +8,9 @@ type resource = Time | Allocations | Allocated_bytes | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
 
-val key : counter -> string
 val covers : clause:target -> counter:target -> bool
 
-type constants = { factor : S.t; addend : S.t; mutable pairs : (Z.t * Z.t) list }
+type constants = { factor : L.symbol; addend : L.symbol; mutable pairs : (Z.t * Z.t) list }
 
 val pairs : (Z.t * Z.t) list
 val constants : S.cost_group -> constants

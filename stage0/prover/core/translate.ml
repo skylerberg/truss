@@ -62,14 +62,15 @@ type obligation = {
   cited : (Names.key * span) option;
       (** The clause it comes from, in the definition that states it, where that is not the one
           being proven: a callee's [requires]. *)
-  fixes : Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
+  fixes : span Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
   query : L.query;
   contracts_alone : L.query option;
       (** The query without what unfolding callees' definitions gave, where it has any: asked when
           the query runs out of steps, since a callee's contract can be enough where its definition
           is too much for the solver. *)
-  values : (S.t * string) list;  (** Each prover symbol a counterexample shows, with its name. *)
-  locals : (S.t * string) list;
+  values : (L.symbol * string) list;
+      (** Each prover symbol a counterexample shows, with its name. *)
+  locals : (L.symbol * string) list;
       (** The locals whose values are symbols where the obligation is made, with their names: asked
           for only once the query has a counterexample, so the query's key stays its own. *)
   constants : Costs.constants list;
@@ -148,8 +149,8 @@ and frame = {
   result : L.term option;
   condition : L.term;
   checking : bool;  (** Whether obligations are made here; not in a callee's clauses. *)
-  bound : S.t list;  (** Symbols bound by quantifiers around this point. *)
-  binders : (S.t * L.sort * L.term) list;
+  bound : L.symbol list;  (** Symbols bound by quantifiers around this point. *)
+  binders : (L.symbol * L.sort * L.term) list;
       (** The quantifiers around this point, innermost first: each bound symbol, its sort, and the
           premise it ranges over. *)
   loop : loop_exits option;
@@ -163,8 +164,8 @@ and frame = {
   handed_out : L.term option;
       (** In a lending or yielding method's own body, the parts it has handed out so far. *)
   updating : L.term option;  (** What the target of an update holds before it. *)
-  spent : (string * L.term) list;
-      (** Each counter's value here, by its key: what the code proven has spent since it began. *)
+  spent : (Costs.counter * L.term) list;
+      (** Each counter's value here: what the code proven has spent since it began. *)
 }
 
 (* What a loop's body may change. *)
@@ -179,7 +180,6 @@ type loop_rule =
 
 type loop_cost = {
   counter : Costs.counter;
-  key : string;
   entry : L.term;  (** The counter on entry to the loop. *)
   rule : loop_rule;
   held : (frame -> L.term) option;  (** The potential of what the loop changes. *)
@@ -225,13 +225,13 @@ type passed = {
 
 (* A fact stated once in a definition's proof, by what it is about. *)
 type stated =
-  | In_range of S.t  (** That a symbol's values are in its type's range. *)
-  | Value_of of S.t  (** What a constant's value is. *)
-  | Definition_of of S.t  (** A pure function's definition, for every argument. *)
-  | Contract_of of S.t  (** A pure function's [ensures], for every valid argument. *)
-  | Exclusive of S.t  (** That at most one of a symbol's kind holds. *)
-  | Array_length of S.t  (** The length of an array's model, by the model's function. *)
-  | Ranked_model of S.t  (** That a model is below its value, by the model's function. *)
+  | In_range of L.symbol  (** That a symbol's values are in its type's range. *)
+  | Value_of of L.symbol  (** What a constant's value is. *)
+  | Definition_of of L.symbol  (** A pure function's definition, for every argument. *)
+  | Contract_of of L.symbol  (** A pure function's [ensures], for every valid argument. *)
+  | Exclusive of L.symbol  (** That at most one of a symbol's kind holds. *)
+  | Array_length of L.symbol  (** The length of an array's model, by the model's function. *)
+  | Ranked_model of L.symbol  (** That a model is below its value, by the model's function. *)
   | Ranked_elements of string  (** That a sequence's elements are below it, by its type's key. *)
 
 type context = {
@@ -243,7 +243,7 @@ type context = {
   mutable parameters : Core.parameter list;  (** The definition's, for its callbacks' [requires]. *)
   measures : expression list;  (** Its [decreases], for its recursive calls. *)
   mutable declarations : L.declaration list;
-  declared : (S.t, unit) Hashtbl.t;
+  declared : (L.symbol, unit) Hashtbl.t;
   datatypes : (string, unit) Hashtbl.t;  (** The sorts declared as datatypes, by name. *)
   stated : (stated, unit) Hashtbl.t;
   mutable facts : L.term list;  (** Reversed. *)
@@ -252,7 +252,7 @@ type context = {
           steps is asked again without. *)
   mutable obligations : obligation list;  (** Reversed. *)
   mutable fresh : int;
-  mutable values : (S.t * string) list;  (** For counterexamples. *)
+  mutable values : (L.symbol * string) list;  (** For counterexamples. *)
   local_names : (Core.local, string) Hashtbl.t;  (** Each local's name, as its pattern binds it. *)
   mutable returns : (frame * L.term option) list;
   mutable leaving : leaving list;  (** The early exits of the [concurrent] code being read. *)
@@ -270,18 +270,21 @@ type context = {
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
-  mutable own_constants : (string * Costs.constants) list;
+  mutable own_constants : (Costs.counter * Costs.constants) list;
       (** By counter, the constants of the definition's own [O(...)] bounds, which a call back into
           it assumes. *)
   mutable groups : Costs.constants list;  (** Every bound's constants, made so far. *)
-  fresh_order : (S.t, int) Hashtbl.t;  (** Each fresh symbol's number, to tell what a loop made. *)
+  counter_numbers : (Costs.counter, int) Hashtbl.t;
+      (** Each counter's number, which names the constants of its bounds. *)
+  fresh_order : (L.symbol, int) Hashtbl.t;
+      (** Each fresh symbol's number, to tell what a loop made. *)
   mutable logs : (L.term * bool) list;  (** Each term [log] is applied to, and whether halved. *)
   mutable powers : (L.term * L.term) list;  (** Each base and exponent [power] is applied to. *)
   mutable lambda_times : (L.term * (L.term * obligation list)) list;
       (** A lambda's bound on the time of one call, and the obligations that show it, made only once
           the bound is used. *)
   mutable lambda_captures : (L.term * Core.local list) list;  (** What each lambda captures. *)
-  lambda_definitions : (S.t, L.term) Hashtbl.t;
+  lambda_definitions : (L.symbol, L.term) Hashtbl.t;
       (** Each functional lambda's definition, by its symbol, which names what it captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
   models : (string, (L.term -> L.term) option) Hashtbl.t;
@@ -300,9 +303,9 @@ type context = {
   reveal : bool;
       (** Whether callees in other packages are read as their own package reads them, bodies
           included, to tell whether seeing a hidden body would prove an obligation. *)
-  mutable entry : S.t list;
+  mutable entry : L.symbol list;
       (** The symbols of the definition's parameters and [self] as they arrive. *)
-  mutable hidden_bodies : (S.t * (string * bool)) list;
+  mutable hidden_bodies : (L.symbol * (string * bool)) list;
       (** Each callee in another package whose body would define it but is not [transparent]: its
           symbol, with its name and whether it can be marked so. *)
   mutable cursors : (L.term * cursor) list;  (** Where each cursor value came from. *)
@@ -322,12 +325,12 @@ type context = {
   ranking : bool;
       (** Whether the definition proven may show a recursive call ends by being on a part of its
           parameters, the one use of the order of parts, which is stated only then. *)
-  mutable scopes : (S.t * L.term list ref) list;
+  mutable scopes : (L.symbol * L.term list ref) list;
       (** Each quantifier whose body is being read, innermost first, by its bound symbol, with the
           facts made in its body that name it. *)
   quantifier_facts : (L.term, L.term list) Hashtbl.t;
       (** Each quantifier read, with the facts its body made that name its bound symbol. *)
-  mutable quantifier_symbols : S.t list;
+  mutable quantifier_symbols : L.symbol list;
       (** Every quantifier's bound symbol, which a fact stated outside its quantifier must not name.
       *)
   mutable validating : T.ty list;
@@ -501,9 +504,9 @@ let add_requires context frame required =
   let edit =
     match brace with
     | Some at when at > 0 && text.[at - 1] = '\n' ->
-        Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
+        Some (Diagnostic.replace (Syntax.Span.zero_width at) ("  requires " ^ required ^ "\n"))
     | Some at when at > 0 && text.[at - 1] = ' ' ->
-        Some (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
+        Some (Diagnostic.replace (Syntax.Span.make (at - 1) at) ("\n  requires " ^ required ^ "\n"))
     | _ -> None
   in
   match edit with
@@ -703,7 +706,7 @@ and occurs part term =
 (* Where a node came from in its form's text, by its origin. *)
 let span_of (source : source) origin =
   let spans = Lazy.force source.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin) else Span.make 0 0
+  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
 
 (* A node's source text, for messages. *)
 let quote source origin =
@@ -944,6 +947,14 @@ let in_range ty term =
       else within
   | None -> L.Boolean true
 
+let counter_number context counter =
+  match Hashtbl.find_opt context.counter_numbers counter with
+  | Some number -> number
+  | None ->
+      let number = Hashtbl.length context.counter_numbers in
+      Hashtbl.replace context.counter_numbers counter number;
+      number
+
 (* Runs [make] the first time a fact is met in a definition's proof, for a
    fact that is stated once. *)
 let once context stated make =
@@ -951,14 +962,6 @@ let once context stated make =
     Hashtbl.replace context.stated stated ();
     make ()
   end
-
-(* A sort's name, as part of a symbol's. *)
-let sort_label (sort : L.sort) =
-  match sort with
-  | Int -> "Int"
-  | Bool -> "Bool"
-  | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
-  | Uninterpreted name -> name
 
 (* A term with its quantifiers' bound names numbered in the order they
    appear, so two terms that differ only in those names are the same. *)
@@ -1492,9 +1495,7 @@ let method_contract ?reader database (trait : T.trait_reference) name receiver (
 
 let distinct_counters counters =
   List.fold_left
-    (fun found counter ->
-      if List.exists (fun other -> Costs.key other = Costs.key counter) found then found
-      else found @ [ counter ])
+    (fun found counter -> if List.mem counter found then found else found @ [ counter ])
     [] counters
 
 (* What a cost clause counts, with the locals it is read with, which give
@@ -2351,9 +2352,10 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
       match count with
       | Some count when frame.checking ->
           spend context frame (fun counter ->
-              let key = Costs.key counter in
               let spent =
-                match (List.assoc_opt key body_frame.spent, List.assoc_opt key after.spent) with
+                match
+                  (List.assoc_opt counter body_frame.spent, List.assoc_opt counter after.spent)
+                with
                 | Some start, Some total -> Costs.since ~start total
                 | _ -> Costs.zero
               in
@@ -2533,7 +2535,7 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
     List.fold_left
       (fun (frame, evaluated) (position, (argument : argument)) ->
         match argument with
-        | Passed { mode; value = operand } when not (is_lambda argument) ->
+        | Passed { mode; value = operand; _ } when not (is_lambda argument) ->
             let type_ = operand_type context frame operand in
             let frame, term, run =
               match operand with
@@ -2588,6 +2590,7 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
             {
               mode;
               value = Value ({ kind = Lambda { parameters; captures; body; _ }; _ } as lambda_node);
+              _;
             } ->
             let _, term =
               lambda context frame lambda_node parameters captures body
@@ -3509,7 +3512,8 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
             let constants =
               if counting = Units then begin
                 let constants =
-                  Costs.constants (Lambda_bound { lambda = node.id; counter = Costs.key counter })
+                  Costs.constants
+                    (Lambda_bound { lambda = node.id; counter = counter_number context counter })
                 in
                 context.groups <- constants :: context.groups;
                 declare context (L.Constant (constants.factor, L.Int));
@@ -3538,10 +3542,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
       @ List.map (fun (counter, _, _) -> counter) promised
       @ loop_counters inside.locals body);
   let inside =
-    {
-      inside with
-      spent = List.map (fun counter -> (Costs.key counter, Costs.zero)) context.counters;
-    }
+    { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
   let mark = context.fresh and facts_mark = List.length context.facts in
   let premises =
@@ -3591,9 +3592,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
               parameters function_type.inputs)
           !ended;
         let spent_of (exit_ : frame) counter =
-          match List.assoc_opt (Costs.key counter) exit_.spent with
-          | Some term -> term
-          | None -> Costs.zero
+          match List.assoc_opt counter exit_.spent with Some term -> term | None -> Costs.zero
         in
         List.iter
           (fun (exit_ : frame) ->
@@ -3807,12 +3806,7 @@ and lambda_definition context frame (function_type : T.function_type) parameters
             defined
             (List.mapi (fun index parameter -> (index, parameter)) bound)
         in
-        let symbol =
-          S.Lambda
-            (Logic.hash
-               (String.concat " " (List.map (fun (_, sort) -> sort_label sort) bound)
-               ^ " " ^ L.show_term named_by_position))
-        in
+        let symbol = S.Lambda { sorts = List.map snd bound; definition = named_by_position } in
         let sort = sort_of context (T.Function function_type) in
         (* A lambda that captures a quantifier's bound symbol is a function
            of it. *)
@@ -3888,7 +3882,7 @@ and named_term context ty term =
   in
   if not (holds_call term) then term
   else
-    let symbol = S.Argument (Logic.hash (L.show_term term)) in
+    let symbol = S.Argument term in
     let named = L.Symbol symbol in
     once context (Value_of symbol) (fun () ->
         declare context (L.Constant (symbol, sort_of context ty));
@@ -6413,10 +6407,9 @@ and spend context frame (amount : Costs.counter -> L.term) =
       frame with
       spent =
         List.map
-          (fun (key, term) ->
-            match List.find_opt (fun counter -> Costs.key counter = key) context.counters with
-            | Some counter -> (key, Costs.plus term (amount counter))
-            | None -> (key, term))
+          (fun (counter, term) ->
+            if List.mem counter context.counters then (counter, Costs.plus term (amount counter))
+            else (counter, term))
           frame.spent;
     }
 
@@ -6488,7 +6481,7 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
       && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
            ~target:context.current
     then
-      match List.assoc_opt (Costs.key counter) context.own_constants with
+      match List.assoc_opt counter context.own_constants with
       | Some constants ->
           if not (Path.equal path context.current) then constants.pairs <- [ List.hd Costs.pairs ];
           Some constants
@@ -7301,9 +7294,8 @@ and copied context frame ty term =
 and loop_costs context frame (clauses : loop_clause list) ~held =
   List.map
     (fun (counter : Costs.counter) ->
-      let key = Costs.key counter in
       let entry =
-        match List.assoc_opt key frame.spent with Some term -> term | None -> Costs.zero
+        match List.assoc_opt counter frame.spent with Some term -> term | None -> Costs.zero
       in
       let written =
         List.find_map
@@ -7338,7 +7330,7 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
                   Option.map (fun held -> (fresh context frame "per" L.Int, held frame)) held;
               }
       in
-      { counter; key; entry; rule; held })
+      { counter; entry; rule; held })
     context.counters
 
 and counting_of (cost : Core.cost) : Costs.counting =
@@ -7370,11 +7362,14 @@ and counted_with ~(counter : Costs.counter) ~at ~bound =
 and loop_head context head costs ~iterations =
   let iterations = Option.value iterations ~default:Costs.zero in
   let head =
-    { head with spent = List.map (fun cost -> (cost.key, fresh context head "spent" L.Int)) costs }
+    {
+      head with
+      spent = List.map (fun cost -> (cost.counter, fresh context head "spent" L.Int)) costs;
+    }
   in
   List.iter
     (fun cost ->
-      let at_head = spent_at head cost.key in
+      let at_head = spent_at head cost.counter in
       match cost.rule with
       | Clause_bound (written, constants) ->
           assume context head
@@ -7432,13 +7427,13 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
                    (quote frame.source written_cost.origin)
                    when_)
                 (loop_clause_holds context frame cost.counter written_cost constants
-                   ~since:(Costs.minus (spent_at frame cost.key) cost.entry)))
+                   ~since:(Costs.minus (spent_at frame cost.counter) cost.entry)))
             (List.map (fun f -> (f, "after an iteration")) ends
             @ List.map (fun f -> (f, "where the loop is left")) breaks)
       | Per_iteration { per; per_held } -> (
           let frames = ends @ breaks in
           let plain (frame : frame) =
-            Costs.since ~start:(spent_at head cost.key) (spent_at frame cost.key)
+            Costs.since ~start:(spent_at head cost.counter) (spent_at frame cost.counter)
           in
           (* Where an iteration spends or saves potential, what it spends is
              bounded with the potential the loop holds, which telescopes,
@@ -7494,7 +7489,7 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
   let spent =
     List.map
       (fun cost ->
-        let at = spent_at exit_ cost.key in
+        let at = spent_at exit_ cost.counter in
         match cost.rule with
         | Clause_bound (written, _) ->
             let g =
@@ -7509,7 +7504,7 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
               | At_most -> bounded_amount context exit_ g
               | Exactly -> g
             in
-            (cost.key, Costs.plus cost.entry counted)
+            (cost.counter, Costs.plus cost.entry counted)
         | Per_iteration { per; per_held } ->
             let bounded ~at ~start per =
               if cost.counter.counting <> Exactly then
@@ -7534,7 +7529,7 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
                   ~at:(Costs.plus at (held exit_))
                   ~start:(Costs.plus cost.entry on_entry) per_held
             | _ -> ());
-            (cost.key, at))
+            (cost.counter, at))
       costs
   in
   { exit_ with spent }
@@ -8321,8 +8316,8 @@ and changed_places ?(condition : expression option) frame (body : block) : chang
           | Call { arguments; _ } ->
               List.iter
                 (function
-                  | Passed { mode = T.Mut; value = Place place } -> note place
-                  | Passed { mode = T.Mut; value = Value { kind = Slice { base; _ }; _ } } ->
+                  | Passed { mode = T.Mut; value = Place place; _ } -> note place
+                  | Passed { mode = T.Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
                       note base
                   | Passed _ | Default -> ())
                 arguments
@@ -8913,7 +8908,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
   let call_ : call =
     {
       callee = next;
-      arguments = [ Passed { mode = T.Mut; value = Place cursor_place } ];
+      arguments = [ Passed { mode = T.Mut; value = Place cursor_place; mark = None } ];
       lends = None;
       uses = [];
     }
@@ -9072,6 +9067,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     declared = Hashtbl.create 64;
     datatypes = Hashtbl.create 16;
     stated = Hashtbl.create 64;
+    counter_numbers = Hashtbl.create 4;
     facts = [];
     scopes = [];
     quantifier_facts = Hashtbl.create 16;
@@ -9155,7 +9151,7 @@ let empty_frame source =
    returns. *)
 let definition_span (source : source) =
   let spans = Lazy.force source.spans in
-  match Array.length spans with 0 -> Span.make 0 0 | count -> spans.(count - 1)
+  match Array.length spans with 0 -> Syntax.Span.make 0 0 | count -> spans.(count - 1)
 
 (* A cost clause, as a promise about one counter, shown at each way its
    definition returns. A trait's clause, which an [impl]'s method keeps, is
@@ -9180,7 +9176,6 @@ let promises context (source : source) locals (costs : Core.cost list) ~inherite
               let counter =
                 { Costs.resource; counting = counting_of cost; amortized = cost.amortized }
               in
-              let key = Costs.key counter in
               (match (cost.resource, resource) with
               | Calls (Function_parameter local), Calls (Through term) ->
                   context.call_targets <- (term, local) :: context.call_targets
@@ -9188,12 +9183,15 @@ let promises context (source : source) locals (costs : Core.cost list) ~inherite
               let constants =
                 match counter.counting with
                 | Units ->
-                    let constants = Costs.constants (Own_bound { counter = key; inherited }) in
+                    let constants =
+                      Costs.constants
+                        (Own_bound { counter = counter_number context counter; inherited })
+                    in
                     context.groups <- constants :: context.groups;
                     declare context (L.Constant (constants.factor, L.Int));
                     declare context (L.Constant (constants.addend, L.Int));
-                    if not (List.mem_assoc key context.own_constants) then
-                      context.own_constants <- (key, constants) :: context.own_constants;
+                    if not (List.mem_assoc counter context.own_constants) then
+                      context.own_constants <- (counter, constants) :: context.own_constants;
                     Some constants
                 | At_most | Exactly -> None
               in
@@ -9213,9 +9211,7 @@ let promised_by database (source : source) =
    its bound, read with the parameters as they were on entry. *)
 let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span ~change =
   let spent =
-    match List.assoc_opt (Costs.key promise.counter) frame.spent with
-    | Some term -> term
-    | None -> Costs.zero
+    match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
   (* An amortized bound is on what is spent plus the growth of the
      potential of what the definition returns and changes. *)
@@ -9397,10 +9393,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
     distinct_counters
       (List.map (fun promise -> promise.counter) promised @ loop_counters start.locals body);
   let start =
-    {
-      start with
-      spent = List.map (fun counter -> (Costs.key counter, Costs.zero)) context.counters;
-    }
+    { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
   let start =
     match trait_frame start ~result:None with

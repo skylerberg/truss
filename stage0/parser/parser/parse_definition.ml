@@ -218,7 +218,7 @@ let body cursor =
           ~fixes:[ Diagnostic.fix "Add `{ todo }`" [ Diagnostic.insert stop " { todo }" ] ];
         (* The signature parsed, so the definition keeps it, with an error
            statement at the offset where the body belongs. *)
-        let at = Syntax.Span.make (Cursor.relative cursor stop) (Cursor.relative cursor stop) in
+        let at = Cursor.span cursor (Source.zero_width stop) in
         {
           statements =
             [

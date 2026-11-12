@@ -23,9 +23,7 @@ let remove_trivia cursor ~start ~stop ~line_break =
   | true, false -> Diagnostic.delete (span before after)
   | false, true -> Diagnostic.delete (span start after)
   | false, false ->
-      let line_start =
-        max (Source.line_start cursor.source start) (Source.byte_order_mark_length cursor.source)
-      in
+      let line_start = Source.line_start cursor.source start in
       let stop = if byte cursor after < 0 then after else after + line_break_length cursor after in
       Diagnostic.delete (span line_start stop)
 

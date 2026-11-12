@@ -164,12 +164,15 @@ let truss_value members text =
   in
   (* A constructor's name as Truss writes it: its variant, or for a record
      its type's own name. *)
-  let constructor : S.t -> string = function
+  let constructor : L.symbol -> string = function
     | Constructor { variant = Some variant; _ } -> variant
     | Constructor { type_name; variant = None; _ } -> type_name
-    | other -> S.show other
+    | other -> L.show_symbol other
   in
-  let field : S.t -> string = function Field { field; _ } -> field | other -> S.show other in
+  let field : L.symbol -> string = function
+    | Field { field; _ } -> field
+    | other -> L.show_symbol other
+  in
   let opaque atom =
     (* The solver's name for a value of a sort it knows nothing about. *)
     match String.index_opt atom '!' with
@@ -264,7 +267,6 @@ let counterexample members (obligation : Translate.obligation) answer_values =
   ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
-let source_span (span : span) : Diagnostic.span = Syntax.Span.to_source span
 
 (* A span inside its definition's text, which every span of the
    definition's own tree is; anything else would be a bug, and is shown at
@@ -324,7 +326,7 @@ let bitwise_operations =
     "swap_bytes";
   ]
 
-let bitwise_of : S.t -> _ = function
+let bitwise_of : L.symbol -> _ = function
   | Opaque_operation { operation; integer = Some (bits, signed); _ }
     when List.mem operation bitwise_operations ->
       Some (operation, bits, signed)
@@ -425,7 +427,7 @@ type variant = Made | Exact | Alone | Alone_exact | Revealed
 type oracles = {
   solve :
     index:int ->
-    choice:(S.t * (Z.t * Z.t)) list ->
+    choice:(L.symbol * (Z.t * Z.t)) list ->
     variant:variant ->
     with_locals:bool ->
     solver_response;
@@ -590,16 +592,16 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
 (* An obligation's state: where it is, what it asks, where it was not
    shown, the diagnostic that says why, and whether its proof trusts
    compiled code. *)
-type state = {
+type 'span state = {
   code : Diagnostic.Code.prover;
-  span : Diagnostic.span;
+  span : 'span;
   shows : string;
-  failure : Diagnostic.t option;
+  failure : 'span Diagnostic.diagnostic option;
   trusts_compiled_code : bool;
 }
 
 let definition_states oracles database (key : Names.key) =
-  let source_span span = source_span (within database key span) in
+  let within span = within database key span in
   match Query.demand database proof key with
   | Not_proven_here -> []
   | Unsupported (span, what) ->
@@ -610,9 +612,9 @@ let definition_states oracles database (key : Names.key) =
       [
         ( {
             code = Unsupported;
-            span = source_span span;
+            span = within span;
             shows = message;
-            failure = Some (diagnostic Unsupported (source_span span) message);
+            failure = Some (diagnostic Unsupported (within span) message);
             trusts_compiled_code = false;
           },
           None );
@@ -620,7 +622,7 @@ let definition_states oracles database (key : Names.key) =
   | Obligations outcome ->
       List.map
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
-          let span = source_span obligation.span in
+          let span = within obligation.span in
           (* These fixes change what the code means, so they are named, not
              applied. *)
           let others =
@@ -717,7 +719,7 @@ let oracle_response : (string, oracle_response) Query.input =
 (* A definition's outcome: its states, once every response they need is
    recorded, or the requests still pending. *)
 type outcome =
-  | Decided of (state * (Names.key * Syntax.span) option) list
+  | Decided of (span state * (Names.key * Syntax.span) option) list
   | Pending of oracle_request list
 
 let run_result database run =
@@ -747,7 +749,7 @@ let runs =
 type question = {
   definition : Names.key;
   index : int;
-  choice : (S.t * (Z.t * Z.t)) list;
+  choice : (L.symbol * (Z.t * Z.t)) list;
   variant : variant;
   with_locals : bool;
 }
@@ -923,9 +925,6 @@ let moved_states ?evaluator ~record database solver module_ =
       let base_of key = Option.map snd (Query.demand database Names.base key) in
       match base_of key with
       | Some base ->
-          let moved offset (span : Diagnostic.span) =
-            Source.span (span.start + offset) (span.stop + offset)
-          in
           Some
             (List.map
                (fun (state, cited) ->
@@ -934,7 +933,7 @@ let moved_states ?evaluator ~record database solver module_ =
                    | Some ((cited : Names.key), span) when cited.module_ = module_ ->
                        Option.map
                          (fun offset ->
-                           ( moved offset (source_span (within database cited span)),
+                           ( Span.to_source ~base:offset (within database cited span),
                              "This is the clause that must hold." ))
                          (base_of cited)
                    | _ -> None
@@ -951,7 +950,7 @@ let moved_states ?evaluator ~record database solver module_ =
                        with
                        | Some offset, Some file ->
                            let start =
-                             (moved offset (source_span (within database cited span))).start
+                             (Span.to_source ~base:offset (within database cited span)).start
                            in
                            let line, _ = Source.position file.source start in
                            Printf.sprintf " The clause that must hold is at `%s:%d`."
@@ -961,11 +960,11 @@ let moved_states ?evaluator ~record database solver module_ =
                  in
                  {
                    state with
-                   span = moved base state.span;
+                   span = Span.to_source ~base state.span;
                    failure =
                      Option.map
                        (fun failure ->
-                         let failure = Diagnostic.move base failure in
+                         let failure = Diagnostic.map_spans (Span.to_source ~base) failure in
                          let failure = { failure with message = failure.message ^ elsewhere } in
                          match note with
                          | Some note -> { failure with notes = failure.notes @ [ note ] }
@@ -978,7 +977,7 @@ let moved_states ?evaluator ~record database solver module_ =
 
 let in_order list =
   List.sort
-    (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
     list
 

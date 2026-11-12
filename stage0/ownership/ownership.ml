@@ -11,7 +11,7 @@ type pulling = Yield_rules.pulling = Pullable | Yields_mut | Recursive | Yields_
 let pullable = Yield_rules.pullable
 
 type result = {
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
   moves : Core.id list;
   disjoint : (Core.origin * Core.origin) list;
 }
@@ -24,17 +24,16 @@ let inputs database (key : Resolve.Names.key) =
   match
     ( Query.demand database Infer.core key,
       Query.demand database Resolve.Names.spans key,
-      Query.demand database Resolve.Names.marks key,
       Query.demand database Interface.Environment.lowered_interface key )
   with
-  | Some form, Some spans, Some marks, Some lowered ->
+  | Some form, Some spans, Some lowered ->
       let context : Context.context =
         {
           database;
           bounds =
             (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
           spans;
-          marks;
+          marks = Hashtbl.create 8;
           names = Hashtbl.create 32;
           kinds = Hashtbl.create 32;
           types = Hashtbl.create 32;
@@ -74,7 +73,7 @@ let inputs database (key : Resolve.Names.key) =
 
 (* The result of the dataflow analyses of one definition. *)
 type analysis = {
-  reported : Diagnostic.t list;
+  reported : Syntax.diagnostic list;
   moved : Core.id list;
   must_be_disjoint : (Core.origin * Core.origin) list;
   task_hazard : Views.task_hazard option;
@@ -143,7 +142,7 @@ let check database (key : Resolve.Names.key) : result option =
         {
           diagnostics =
             List.sort_uniq
-              (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+              (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
                 compare (left.span, left.message) (right.span, right.message))
               (analyzed.reported @ context.diagnostics);
           moves = List.sort_uniq compare analyzed.moved;

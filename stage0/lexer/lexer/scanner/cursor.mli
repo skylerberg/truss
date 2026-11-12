@@ -22,7 +22,7 @@ val byte : t -> int -> int
 val report :
   t ->
   ?notes:(Diagnostic.span * string) list ->
-  ?fixes:Diagnostic.fix list ->
+  ?fixes:Diagnostic.span Diagnostic.fix list ->
   code:Diagnostic.Code.lexer ->
   Diagnostic.span ->
   string ->

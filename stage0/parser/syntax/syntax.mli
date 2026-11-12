@@ -14,6 +14,9 @@ module Span = Span
 
 type span = Span.t
 
+type diagnostic = span Diagnostic.diagnostic
+(** A diagnostic in its definition's offsets. *)
+
 type id = int
 (** A node's id: a small integer, unique within its definition, assigned in the order the parser
     builds the definition's nodes. Later stages record their results for a node in tables keyed by

@@ -9,13 +9,12 @@ type context = {
   resolved : Resolve.resolved;
   tables : Infer.tables;
   text : string;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
 }
 
 let report context ?(fixes = []) code (span : span) message =
   context.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Usage code) (Syntax.Span.to_source span) message
-    :: context.diagnostics
+    Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
 (* Unused variables *)
 
@@ -111,7 +110,7 @@ let check_unused context (definition : definition) =
             [
               Diagnostic.fix
                 (Printf.sprintf "Write `%s`." replacement)
-                [ Diagnostic.replace (Syntax.Span.to_source name.span) replacement ];
+                [ Diagnostic.replace name.span replacement ];
             ]
           (Printf.sprintf "`%s` is never used. Bind it to `_` instead." name.text))
     (pattern_bindings definition)
@@ -161,7 +160,7 @@ let check_block context (written : block) =
             ~fixes:
               [
                 Diagnostic.fix "Delete the code that cannot run."
-                  [ Diagnostic.delete (Source.span start last.span.stop) ];
+                  [ Diagnostic.delete (Span.make start last.span.stop) ];
               ]
             "This code can never run: the statement before it never finishes."
         end
@@ -220,7 +219,8 @@ let definition_diagnostics =
           check_unused context definition;
           check_unreachable context definition;
           List.sort
-            (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
+            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+              compare left.span right.span)
             context.diagnostics
       | _ -> [])
 

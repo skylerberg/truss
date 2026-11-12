@@ -7,7 +7,7 @@
 let diagnostics database module_ =
   let file = Query.demand database Workspace.file module_ in
   List.sort_uniq
-    (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
     (file.diagnostics
     @ Resolve.diagnostics database module_

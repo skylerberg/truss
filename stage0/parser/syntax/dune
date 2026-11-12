@@ -1,4 +1,4 @@
 (library
  (name syntax)
  (modules_without_implementation syntax)
- (libraries source token zarith))
+ (libraries diagnostic source token zarith))

@@ -20,11 +20,11 @@ type obligation = {
   span : span;
   message : string;
   cited : (Names.key * span) option;
-  fixes : Diagnostic.fix list;
+  fixes : Syntax.span Diagnostic.fix list;
   query : L.query;
   contracts_alone : L.query option;
-  values : (S.t * string) list;
-  locals : (S.t * string) list;
+  values : (L.symbol * string) list;
+  locals : (L.symbol * string) list;
   constants : Costs.constants list;
   evaluation : evaluation option;
   known_calls : known_call list;
@@ -73,8 +73,8 @@ and frame = {
   result : L.term option;
   condition : L.term;
   checking : bool;
-  bound : S.t list;
-  binders : (S.t * L.sort * L.term) list;
+  bound : L.symbol list;
+  binders : (L.symbol * L.sort * L.term) list;
   loop : loop_exits option;
   substitution : T.substitution;
   self_type : T.ty option;
@@ -82,7 +82,7 @@ and frame = {
   finished : L.term option;
   handed_out : L.term option;
   updating : L.term option;
-  spent : (string * L.term) list;
+  spent : (Costs.counter * L.term) list;
 }
 
 type changed = { changed_locals : Core.local list; changes_self : bool }
@@ -93,7 +93,6 @@ type loop_rule =
 
 type loop_cost = {
   counter : Costs.counter;
-  key : string;
   entry : L.term;
   rule : loop_rule;
   held : (frame -> L.term) option;
@@ -113,13 +112,13 @@ type passed = {
 }
 
 type stated =
-  | In_range of S.t
-  | Value_of of S.t
-  | Definition_of of S.t
-  | Contract_of of S.t
-  | Exclusive of S.t
-  | Array_length of S.t
-  | Ranked_model of S.t
+  | In_range of L.symbol
+  | Value_of of L.symbol
+  | Definition_of of L.symbol
+  | Contract_of of L.symbol
+  | Exclusive of L.symbol
+  | Array_length of L.symbol
+  | Ranked_model of L.symbol
   | Ranked_elements of string
 
 type context = {
@@ -129,14 +128,14 @@ type context = {
   mutable parameters : Core.parameter list;
   measures : Core.expression list;
   mutable declarations : L.declaration list;
-  declared : (S.t, unit) Hashtbl.t;
+  declared : (L.symbol, unit) Hashtbl.t;
   datatypes : (string, unit) Hashtbl.t;
   stated : (stated, unit) Hashtbl.t;
   mutable facts : L.term list;
   unfolded : (L.term, unit) Hashtbl.t;
   mutable obligations : obligation list;
   mutable fresh : int;
-  mutable values : (S.t * string) list;
+  mutable values : (L.symbol * string) list;
   local_names : (Core.local, string) Hashtbl.t;
   mutable returns : (frame * L.term option) list;
   mutable leaving : leaving list;
@@ -149,14 +148,15 @@ type context = {
   home : Names.key;
   mutable laws_assumed : string list;
   mutable counters : Costs.counter list;
-  mutable own_constants : (string * Costs.constants) list;
+  mutable own_constants : (Costs.counter * Costs.constants) list;
   mutable groups : Costs.constants list;
-  fresh_order : (S.t, int) Hashtbl.t;
+  counter_numbers : (Costs.counter, int) Hashtbl.t;
+  fresh_order : (L.symbol, int) Hashtbl.t;
   mutable logs : (L.term * bool) list;
   mutable powers : (L.term * L.term) list;
   mutable lambda_times : (L.term * (L.term * obligation list)) list;
   mutable lambda_captures : (L.term * Core.local list) list;
-  lambda_definitions : (S.t, L.term) Hashtbl.t;
+  lambda_definitions : (L.symbol, L.term) Hashtbl.t;
   mutable potentials : L.term list;
   models : (string, (L.term -> L.term) option) Hashtbl.t;
   holds_potential : (string, bool) Hashtbl.t;
@@ -166,8 +166,8 @@ type context = {
   mutable decisions : (string * string option * L.term * L.term) list;
   mutable iteration_returns : (Core.origin * T.ty option) list;
   reveal : bool;
-  mutable entry : S.t list;
-  mutable hidden_bodies : (S.t * (string * bool)) list;
+  mutable entry : L.symbol list;
+  mutable hidden_bodies : (L.symbol * (string * bool)) list;
   mutable cursors : (L.term * cursor) list;
   mutable proving : bool;
   mutable holes : (Names.key * span) list;
@@ -176,9 +176,9 @@ type context = {
   mutable passed_values : int list;
   mutable reading_callback : bool;
   ranking : bool;
-  mutable scopes : (S.t * L.term list ref) list;
+  mutable scopes : (L.symbol * L.term list ref) list;
   quantifier_facts : (L.term, L.term list) Hashtbl.t;
-  mutable quantifier_symbols : S.t list;
+  mutable quantifier_symbols : L.symbol list;
   mutable validating : T.ty list;
 }
 

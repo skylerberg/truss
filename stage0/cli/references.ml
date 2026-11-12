@@ -59,7 +59,7 @@ let of_definition database (key : Names.key) =
   with
   | Some definition, Some resolved, Some (module_, base) ->
       let names = Syntax_walk.names definition in
-      let absolute (span : Syntax.span) = Source.span (base + span.start) (base + span.stop) in
+      let absolute = Syntax.Span.to_source ~base in
       let occurrence ?(declares = false) span target =
         { module_; span = absolute span; target; in_definition = key; declares }
       in

@@ -242,7 +242,7 @@ val load_package :
   ?usize_bits:int ->
   Engine.t ->
   name:Path.package ->
-  dependencies:Workspace.dependency list ->
+  dependencies:Manifest.dependency list ->
   (Path.module_ * string) list ->
   unit
 (** Gives an engine a package by itself, as a root of its own: a manifest that says the name, the
@@ -259,7 +259,7 @@ module Testing : sig
     ?usize_bits:int ->
     Engine.t ->
     name:Path.package ->
-    dependencies:Workspace.dependency list ->
+    dependencies:Manifest.dependency list ->
     unit
   (** Gives a package set with {!load_package} another manifest, and leaves its modules as they are.
   *)

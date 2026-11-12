@@ -4,20 +4,20 @@ type sort = Int | Bool | Float of int * int | Uninterpreted of string
 
 module Symbol = struct
   type cost_group =
-    | Own_bound of { counter : string; inherited : bool }
-    | Lambda_bound of { lambda : int; counter : string }
+    | Own_bound of { counter : int; inherited : bool }
+    | Lambda_bound of { lambda : int; counter : int }
     | Loop_bound of int
 
-  type t =
+  type 'term t =
     | Variable of { label : string; numbers : int list }
     | Function of { callee : Path.t; instance : string list }
     | Function_value of { callee : Path.t; instance : string list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Literal of { type_key : string; text : string }
-    | Argument of string
-    | Lambda of string
-    | Over of t
+    | Argument of 'term
+    | Lambda of { sorts : sort list; definition : 'term }
+    | Over of 'term t
     | Constructor of { type_key : string; type_name : string; variant : string option }
     | Field of { type_key : string; variant : string option; field : string }
     | Unit
@@ -48,83 +48,124 @@ module Symbol = struct
     | Cost_power
     | Reached of int
     | Condition of int
-
-  let sort_text = function
-    | Int -> "Int"
-    | Bool -> "Bool"
-    | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
-    | Uninterpreted name -> name
-
-  let instance_text = function [] -> "" | keys -> "[" ^ String.concat ", " keys ^ "]"
-  let variant_text = Option.value ~default:"record"
-
-  let group_text = function
-    | Own_bound { counter; inherited } -> counter ^ if inherited then ".trait" else ""
-    | Lambda_bound { lambda; counter } -> Printf.sprintf "lambda.%d.%s" lambda counter
-    | Loop_bound origin -> Printf.sprintf "loop.%d" origin
-
-  let rec show = function
-    | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
-    | Function { callee; instance } -> "function." ^ Path.show callee ^ instance_text instance
-    | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
-    | Constant path -> "constant." ^ Path.show path
-    | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
-    | Literal { type_key; text } -> Printf.sprintf "literal.%s.%S" type_key text
-    | Argument hash -> "argument." ^ hash
-    | Lambda hash -> "lambda." ^ hash
-    | Over symbol -> show symbol ^ ".over"
-    | Constructor { type_key; variant; _ } -> "constructor." ^ type_key ^ "." ^ variant_text variant
-    | Field { type_key; variant; field } ->
-        "field." ^ type_key ^ "." ^ variant_text variant ^ "." ^ field
-    | Unit -> "Unit.unit"
-    | Apply sorts -> String.concat "." ("apply" :: List.map sort_text sorts)
-    | Equal type_key -> "equal." ^ type_key
-    | Valid type_key -> "valid." ^ type_key
-    | Rank type_key -> "rank." ^ type_key
-    | Capacity type_key -> "capacity." ^ type_key
-    | Model type_key -> "model." ^ type_key
-    | Slack type_key -> "slack." ^ type_key
-    | Potential type_key -> "potential." ^ type_key
-    | Potential_measure type_key -> "potential.measure." ^ type_key
-    | Cursor_yielded type_key -> "cursor.yielded." ^ type_key
-    | Cursor_ended type_key -> "cursor.ended." ^ type_key
-    | Block_bytes { type_key; variant } -> "bytes." ^ type_key ^ "." ^ variant_text variant
-    | Time sort -> "time." ^ sort_text sort
-    | Method_time { method_; self_type } ->
-        Printf.sprintf "time.method.%s[%s]" (Path.show method_) self_type
-    | Opaque_operation { operation; type_key; _ } ->
-        Printf.sprintf "operation.%s.%s" operation type_key
-    | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" count width
-    | System operation -> "system." ^ operation
-    | Libc_number number -> "libc.number." ^ number
-    | Handle_descriptor -> "handle.descriptor"
-    | Compare_bytes_order -> "compare_bytes.order"
-    | Cost_factor group -> "cost.factor." ^ group_text group
-    | Cost_addend group -> "cost.addend." ^ group_text group
-    | Cost_most -> "cost.most"
-    | Cost_log -> "cost.log"
-    | Cost_power -> "cost.power"
-    | Reached index -> Printf.sprintf "reached.%d" index
-    | Condition index -> Printf.sprintf "condition.%d" index
 end
 
 type term =
-  | Symbol of Symbol.t
+  | Symbol of symbol
   | Integer of Z.t
   | Boolean of bool
   | Bits of int * Z.t
-  | Apply of Symbol.t * term list
-  | Is of Symbol.t * term
+  | Apply of symbol * term list
+  | Is of symbol * term
   | Operation of string * term list
-  | Forall of (Symbol.t * sort) list * term
-  | Exists of (Symbol.t * sort) list * term
+  | Forall of (symbol * sort) list * term
+  | Exists of (symbol * sort) list * term
+
+and symbol = term Symbol.t
 
 type declaration =
-  | Constant of Symbol.t * sort
-  | Function of Symbol.t * sort list * sort
-  | Datatype of string * (Symbol.t * (Symbol.t * sort) list) list
+  | Constant of symbol * sort
+  | Function of symbol * sort list * sort
+  | Datatype of string * (symbol * (symbol * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }
+
+(* A bit-vector literal, most significant bit first. *)
+let bits_text width value =
+  "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
+
+let integer_text value =
+  if Z.sign value < 0 then Printf.sprintf "(- %s)" (Z.to_string (Z.neg value))
+  else Z.to_string value
+
+let sort_text = function
+  | Int -> "Int"
+  | Bool -> "Bool"
+  | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
+  | Uninterpreted name -> name
+
+let instance_text = function [] -> "" | keys -> "[" ^ String.concat ", " keys ^ "]"
+let variant_text = Option.value ~default:"record"
+
+let group_text : Symbol.cost_group -> string = function
+  | Own_bound { counter; inherited } ->
+      Printf.sprintf "counter.%d" counter ^ if inherited then ".trait" else ""
+  | Lambda_bound { lambda; counter } -> Printf.sprintf "lambda.%d.counter.%d" lambda counter
+  | Loop_bound origin -> Printf.sprintf "loop.%d" origin
+
+let rec show_symbol : symbol -> string = function
+  | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
+  | Function { callee; instance } -> "function." ^ Path.show callee ^ instance_text instance
+  | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
+  | Constant path -> "constant." ^ Path.show path
+  | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
+  | Literal { type_key; text } -> Printf.sprintf "literal.%s.%S" type_key text
+  | Argument term -> "argument(" ^ show_term term ^ ")"
+  | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
+  | Over symbol -> show_symbol symbol ^ ".over"
+  | Constructor { type_key; variant; _ } -> "constructor." ^ type_key ^ "." ^ variant_text variant
+  | Field { type_key; variant; field } ->
+      "field." ^ type_key ^ "." ^ variant_text variant ^ "." ^ field
+  | Unit -> "Unit.unit"
+  | Apply sorts -> String.concat "." ("apply" :: List.map sort_text sorts)
+  | Equal type_key -> "equal." ^ type_key
+  | Valid type_key -> "valid." ^ type_key
+  | Rank type_key -> "rank." ^ type_key
+  | Capacity type_key -> "capacity." ^ type_key
+  | Model type_key -> "model." ^ type_key
+  | Slack type_key -> "slack." ^ type_key
+  | Potential type_key -> "potential." ^ type_key
+  | Potential_measure type_key -> "potential.measure." ^ type_key
+  | Cursor_yielded type_key -> "cursor.yielded." ^ type_key
+  | Cursor_ended type_key -> "cursor.ended." ^ type_key
+  | Block_bytes { type_key; variant } -> "bytes." ^ type_key ^ "." ^ variant_text variant
+  | Time sort -> "time." ^ sort_text sort
+  | Method_time { method_; self_type } ->
+      Printf.sprintf "time.method.%s[%s]" (Path.show method_) self_type
+  | Opaque_operation { operation; type_key; _ } ->
+      Printf.sprintf "operation.%s.%s" operation type_key
+  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" count width
+  | System operation -> "system." ^ operation
+  | Libc_number number -> "libc.number." ^ number
+  | Handle_descriptor -> "handle.descriptor"
+  | Compare_bytes_order -> "compare_bytes.order"
+  | Cost_factor group -> "cost.factor." ^ group_text group
+  | Cost_addend group -> "cost.addend." ^ group_text group
+  | Cost_most -> "cost.most"
+  | Cost_log -> "cost.log"
+  | Cost_power -> "cost.power"
+  | Reached index -> Printf.sprintf "reached.%d" index
+  | Condition index -> Printf.sprintf "condition.%d" index
+
+and show_term term =
+  let rec show = function
+    | Symbol name -> show_symbol name
+    | Integer value -> integer_text value
+    | Boolean value -> if value then "true" else "false"
+    | Bits (width, value) -> bits_text width value
+    | Apply (name, arguments) -> applied (show_symbol name) arguments
+    | Operation (name, arguments) -> applied name arguments
+    | Is (constructor, argument) ->
+        applied (Printf.sprintf "(_ is %s)" (show_symbol constructor)) [ argument ]
+    | Forall (bound, body) -> binder "forall" bound body
+    | Exists (bound, body) -> binder "exists" bound body
+  and applied head = function
+    | [] -> head
+    | arguments -> "(" ^ String.concat " " (head :: List.map show arguments) ^ ")"
+  and binder word bound body =
+    let sort = function
+      | Int -> "Int"
+      | Bool -> "Bool"
+      | Float (exponent, significand) ->
+          Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
+      | Uninterpreted name -> name
+    in
+    Printf.sprintf "(%s (%s) %s)" word
+      (String.concat " "
+         (List.map (fun (name, s) -> Printf.sprintf "(%s %s)" (show_symbol name) (sort s)) bound))
+      (show body)
+  in
+  show term
 
 let arguments = function
   | Apply (_, arguments) | Operation (_, arguments) -> arguments
@@ -449,13 +490,13 @@ let prune query =
    and position, so a quantifier's text does not depend on what its
    variables were called. *)
 type numbering = {
-  declared : (Symbol.t, declaration) Hashtbl.t;
-  datatypes : (string, (Symbol.t * (Symbol.t * sort) list) list) Hashtbl.t;
-  member_of : (Symbol.t, string * string) Hashtbl.t;
+  declared : (symbol, declaration) Hashtbl.t;
+  datatypes : (string, (symbol * (symbol * sort) list) list) Hashtbl.t;
+  member_of : (symbol, string * string) Hashtbl.t;
       (** Each constructor and selector: its datatype and its canonical suffix. *)
-  triggering : Symbol.t -> bool;
-  symbol_names : (Symbol.t, string) Hashtbl.t;
-  mutable symbol_order : Symbol.t list;  (** Reversed. *)
+  triggering : symbol -> bool;
+  symbol_names : (symbol, string) Hashtbl.t;
+  mutable symbol_order : symbol list;  (** Reversed. *)
   sort_names : (string, string) Hashtbl.t;
   mutable sort_order : string list;  (** Reversed. *)
 }
@@ -512,15 +553,7 @@ let function_name numbering name =
   | None -> (
       match symbol_name numbering name with
       | Some canonical -> canonical
-      | None -> invalid_arg ("Logic.text: undeclared symbol " ^ Symbol.show name))
-
-(* A bit-vector literal, most significant bit first. *)
-let bits_text width value =
-  "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
-
-let integer_text value =
-  if Z.sign value < 0 then Printf.sprintf "(- %s)" (Z.to_string (Z.neg value))
-  else Z.to_string value
+      | None -> invalid_arg ("Logic.text: undeclared symbol " ^ show_symbol name))
 
 let rec print numbering bound buffer term =
   let add = Buffer.add_string buffer in
@@ -736,33 +769,3 @@ let members query =
   |> List.sort compare
 
 let hash text = "smt1-blake3-" ^ Blake3.hex_digest text
-
-let show_term term =
-  let rec show = function
-    | Symbol name -> Symbol.show name
-    | Integer value -> integer_text value
-    | Boolean value -> if value then "true" else "false"
-    | Bits (width, value) -> bits_text width value
-    | Apply (name, arguments) -> applied (Symbol.show name) arguments
-    | Operation (name, arguments) -> applied name arguments
-    | Is (constructor, argument) ->
-        applied (Printf.sprintf "(_ is %s)" (Symbol.show constructor)) [ argument ]
-    | Forall (bound, body) -> binder "forall" bound body
-    | Exists (bound, body) -> binder "exists" bound body
-  and applied head = function
-    | [] -> head
-    | arguments -> "(" ^ String.concat " " (head :: List.map show arguments) ^ ")"
-  and binder word bound body =
-    let sort = function
-      | Int -> "Int"
-      | Bool -> "Bool"
-      | Float (exponent, significand) ->
-          Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
-      | Uninterpreted name -> name
-    in
-    Printf.sprintf "(%s (%s) %s)" word
-      (String.concat " "
-         (List.map (fun (name, s) -> Printf.sprintf "(%s %s)" (Symbol.show name) (sort s)) bound))
-      (show body)
-  in
-  show term

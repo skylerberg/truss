@@ -134,7 +134,7 @@ let receiver (parameters : parameter list) : Path.receiver =
 let packages database (module_ : Path.module_) =
   let dependencies =
     List.map
-      (fun (dependency : Workspace.dependency) -> dependency.package)
+      (fun (dependency : Manifest.dependency) -> dependency.package)
       (Query.demand database Workspace.dependencies module_.package)
   in
   List.sort_uniq compare (module_.package :: Path.standard_package :: dependencies)
@@ -652,10 +652,6 @@ let spans =
   Query.query ~name:"spans" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map Syntax_walk.spans (Query.demand database definition key))
 
-let marks =
-  Query.query ~name:"marks" ~phase:Phases.declarations ~show:show_key (fun database key ->
-      Option.map Syntax_walk.marks (Query.demand database definition key))
-
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =
   Query.query ~name:"base" ~phase:Phases.declarations ~show:show_key ~saved:true
@@ -673,10 +669,11 @@ let per_definition database module_ of_definition =
     (fun declaration ->
       let key = key_of declaration in
       match Query.demand database base key with
-      | Some (_, base) -> List.map (Diagnostic.move base) (of_definition key)
+      | Some (_, base) ->
+          List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base)) (of_definition key)
       | None -> [])
     (Query.demand database declarations module_)
-  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+  |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
 
 (* A definition's source text, which fixes quote, apart from the rest of

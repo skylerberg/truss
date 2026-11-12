@@ -40,14 +40,6 @@ val spans : Syntax.definition -> Syntax.span array
     loop clause of a definition, indexed by node id. The core form holds no spans, so a stage that
     reads it looks up a node's origin here to show its source text. *)
 
-type mark = { mode : Syntax.mode; mark : Syntax.span; marked : Syntax.span }
-(** A [mut] or [own] mark: [mark] is the word and the space after it, and [marked] the mark with the
-    expression it marks. *)
-
-val marks : Syntax.definition -> (Syntax.id * mark) list
-(** Each mark of a definition, by the id of the expression it marks: [own items] by the id of
-    [items], and [own (items)] too. *)
-
 val names : Syntax.definition -> Syntax.name list
 (** Every name in a definition, references and the names that bind, in source order. Tools use it to
     find the name at a position, and checks to find every binding. *)

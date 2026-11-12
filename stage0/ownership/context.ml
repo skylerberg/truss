@@ -11,7 +11,8 @@ type context = {
   database : Query.context;
   bounds : T.parameter -> T.trait_reference list;
   spans : Syntax.span array;
-  marks : (Core.origin * Syntax_walk.mark) list;  (** Each expression's [mut] or [own] mark. *)
+  marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
+      (** Each argument written with a [mut] or [own], by the origin of the value passed. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, T.ty) Hashtbl.t;
@@ -22,7 +23,7 @@ type context = {
       (** The definition is a method of an [impl] of a capability. Its callers cannot see the
           implementation, so no view may be stored in [self] or returned from it. *)
   mutable mutable_locals : Core.local list;  (** The locals declared with [var]. *)
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
       (** Pairs of index calls or slices of one collection, by origin, that must select disjoint
@@ -69,11 +70,7 @@ let span context (origin : Core.origin) : Syntax.span =
 
 let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
   context.diagnostics <-
-    Diagnostic.make ~fixes
-      ~notes:
-        (List.map (fun ((note : Syntax.span), text) -> (Syntax.Span.to_source note, text)) notes)
-      ~code:(Ownership code) (Syntax.Span.to_source at) message
-    :: context.diagnostics
+    Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
 let kind_of_mode : T.mode -> kind = function Own -> Owned | Read -> Borrowed | Mut -> Borrowed_mut
 
@@ -97,7 +94,7 @@ let show context (place : Place.t) =
       (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
 
 (* The names and kinds of the definition's locals, from its parameters and
-   its patterns. *)
+   its patterns, and the marks of its arguments. *)
 let collect context (definition : Core.definition) =
   (match definition with
   | Function { parameters; _ } ->
@@ -112,6 +109,22 @@ let collect context (definition : Core.definition) =
   Core_walk.definition
     {
       Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Call { arguments; _ } ->
+              List.iter
+                (function
+                  | Core.Passed { mode; value; mark = Some mark } ->
+                      let origin =
+                        match value with
+                        | Place found -> Core_walk.place_origin found
+                        | Value value -> value.origin
+                      in
+                      Hashtbl.replace context.marks origin (mode, mark)
+                  | Passed { mark = None; _ } | Default -> ())
+                arguments
+          | _ -> ());
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with
@@ -127,13 +140,17 @@ let collect context (definition : Core.definition) =
 (* The edits that replace a move by a copy: insert [.copy()] after the place
    and delete the [own] mark before it. *)
 let copy_at context (moved : Core.origin) =
-  (match List.assoc_opt moved context.marks with
-    | Some { mode = Own; mark; _ } -> [ Diagnostic.delete (Syntax.Span.to_source mark) ]
-    | Some { mode = Mut; _ } | None -> [])
-  @ [ Diagnostic.insert (span context moved).stop ".copy()" ]
+  (match Hashtbl.find_opt context.marks moved with
+    | Some (Own, { written; marked }) ->
+        [
+          Diagnostic.delete
+            (Syntax.Span.make (span context written).start (span context marked).start);
+        ]
+    | Some ((Read | Mut), _) | None -> [])
+  @ [ Diagnostic.replace (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
 
 (* The span of a place together with the [mut] or [own] mark before it. *)
 let with_mark context (place : Core.origin) : Syntax.span =
-  match List.assoc_opt place context.marks with
-  | Some { marked; _ } -> marked
+  match Hashtbl.find_opt context.marks place with
+  | Some (_, { written; _ }) -> span context written
   | None -> span context place
