@@ -24,3 +24,10 @@ val manifest_sentence : package:string -> manifest_problem -> string
 val code_packages : (string, string list) Query.query
 (** The packages a package's code uses, its tests apart, by the package's name. A dependency that is
     not among them is one only its tests use. *)
+
+(** The type checker's own stages, for their tests. *)
+module For_testing : sig
+  module Patterns = Patterns
+  module Usage = Usage
+  module Package_checks = Package_checks
+end

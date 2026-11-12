@@ -1,3 +1,5 @@
+module Layout = Lexer.For_testing.Layout
+
 (* The lexer's tests. Each test gives an input and states exactly what the
    lexer must do with it: the tokens, or the one diagnostic with its code,
    position, and fix.

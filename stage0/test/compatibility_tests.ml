@@ -1,3 +1,5 @@
+module Compatibility = Cli.Compatibility
+
 (* The tests of whether a release keeps what the one before it offered.
    Each gives a module as it was and as it is, and states what changed. *)
 

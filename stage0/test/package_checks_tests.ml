@@ -1,3 +1,5 @@
+module Package_checks = Type_checker.For_testing.Package_checks
+
 (* The tests of the checks across a package. *)
 
 open Harness

@@ -1,3 +1,5 @@
+module Package_checks = Type_checker.For_testing.Package_checks
+
 (* The tests of capabilities: what code may call, lambdas' uses,
    capability parameters, provide, and dependency grants. *)
 

@@ -1,3 +1,6 @@
+module Patterns = Type_checker.For_testing.Patterns
+module Usage = Type_checker.For_testing.Usage
+
 (* The tests of moves, loans, and views. *)
 
 open Harness

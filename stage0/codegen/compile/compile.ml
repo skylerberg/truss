@@ -1000,3 +1000,8 @@ let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
     checked = Hashtbl.create 8;
     called = Hashtbl.create 8;
   }
+
+module For_testing = struct
+  module Lower = Lower
+  module Intrinsics = Intrinsics
+end

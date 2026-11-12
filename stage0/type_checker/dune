@@ -6,10 +6,15 @@
   path
   workspace
   diagnostic
+  source
   resolve
+  syntax
+  syntax_walk
+  types
+  checked
+  core
+  core_walk
   interface
   infer
-  patterns
-  usage
   ownership
-  package_checks))
+  zarith))

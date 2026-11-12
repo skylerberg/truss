@@ -5,3 +5,8 @@
     grammar's line-break rule. The array ends with [End_of_file]. *)
 
 val lex : Source.t -> Token.t array * Diagnostic.t list
+
+(** The lexer's own modules, for its tests. *)
+module For_testing : sig
+  module Layout = Layout
+end

@@ -1,3 +1,5 @@
+module Lower = Compile.For_testing.Lower
+
 (* Lowering from the core form: a program for each kind of node, whose test
    passes when the code lowered from it runs correctly. *)
 

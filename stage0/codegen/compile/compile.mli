@@ -180,3 +180,9 @@ val evaluate_call :
   function_:Path.t ->
   arguments:Z.t list ->
   (evaluated_call, string) result
+
+(** Code generation's own passes, for their tests. *)
+module For_testing : sig
+  module Lower = Lower
+  module Intrinsics = Intrinsics
+end

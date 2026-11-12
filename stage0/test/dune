@@ -33,7 +33,6 @@
   source
   diagnostic
   token
-  layout
   lexer
   unicode
   zarith
@@ -69,15 +68,12 @@
   interface
   checked
   infer
-  patterns
-  usage
   ownership
-  package_checks
   syntax_walk
   type_checker
   manifest
   registry
-  compatibility)
+  cli)
  (deps
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/stage0/**dune)))

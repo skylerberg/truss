@@ -1,6 +1,7 @@
 (library
  (name resolve)
  (libraries
+  zarith
   query
   phases
   path

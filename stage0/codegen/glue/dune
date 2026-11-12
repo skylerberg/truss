@@ -1,6 +1,8 @@
 (library
  (name glue)
  (libraries
+  path
+  intrinsic
   storage
   compiler_bug
   lir_builder
