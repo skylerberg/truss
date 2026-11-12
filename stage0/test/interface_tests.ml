@@ -47,10 +47,7 @@ let () =
   test "a method's receiver has its type's generic parameters" (fun () ->
       let database =
         setup
-          [
-            ( "app::main",
-              "type Box[Value](value: Value)\n\nfn Box[Value].get(self) -> Value { todo }\n" );
-          ]
+          [ ("app::main", Fixtures.Interface.methods_receiver_has_its_types_generic_parameters) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
       match Query.demand database Interface.Environment.signature path with
@@ -62,36 +59,22 @@ let () =
   test "a trait in a type position is an error" (fun () ->
       one_diagnostic "fn f(value: Equal) {}\n" "types.not_a_type");
   test "a type argument must meet the type's bounds" (fun () ->
-      one_diagnostic
-        "type Sorted[Element: Ordered](items: List[Element])\n\n\
-         type Point(x: Int64)\n\n\
-         fn f(points: Sorted[Point]) {}\n"
+      one_diagnostic Fixtures.Interface.type_argument_must_meet_the_types_bounds
         "types.unsatisfied_bound");
   test "a generic parameter's bound meets a bound the type needs" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "type Sorted[Element: Ordered](items: List[Element])\n\n\
-             fn f[Item: Ordered](items: Sorted[Item]) {}\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.generic_parameters_bound_meets_a_bound_the_type) ]);
   test "a public signature cannot mention a private type" (fun () ->
-      one_diagnostic "type Secret(code: Int64)\n\npublic fn f(secret: Secret) {}\n"
+      one_diagnostic Fixtures.Interface.public_signature_cannot_mention_a_private_type
         "types.private_in_public");
   test "a method must be in its type's package" (fun () ->
       one_diagnostic "fn Int64.double(self) -> Int64 { todo }\n" "types.method_outside_package");
   test "main must have its fixed signature" (fun () ->
       one_diagnostic "fn main() -> ExitCode { todo }\n" "types.main_signature");
   test "main with its fixed signature is accepted" (fun () ->
-      no_diagnostics
-        [
-          ( "app::main",
-            "fn main(arguments: List[String]) -> ExitCode\n  uses Console\n{\n  todo\n}\n" );
-        ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.main_with_its_fixed_signature_is_accepted) ]);
   test "a default may build a record from constants" (fun () ->
-      no_diagnostics
-        [
-          ("app::main", "type Point(x: Int64, y: Int64)\n\nfn f(at: Point = Point(x: 0, y: 1)) {}\n");
-        ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.default_may_build_a_record_from_constants) ]);
   test "an associated type no bound declares is an error" (fun () ->
       one_diagnostic "fn f[Items: Iterable](items: Items) -> Items.Key { todo }\n"
         "types.unknown_associated_type");
@@ -114,25 +97,16 @@ let () =
   test "two fields with one name are an error" (fun () ->
       one_diagnostic "type Point(x: Int64, x: Int64)\n" "types.duplicate_field");
   test "deriving needs every field to implement the trait" (fun () ->
-      one_diagnostic "type Opaque(x: Int64)\n\ntype Point(inner: Opaque)\n  derives Equal\n"
+      one_diagnostic Fixtures.Interface.deriving_needs_every_field_to_implement_the_trait
         "types.cannot_derive");
   test "only a record derives Default" (fun () ->
-      one_diagnostic "type Light =\n  | Off\n  | On\n  derives Default\n" "types.cannot_derive";
+      one_diagnostic Fixtures.Interface.only_a_record_derives_default "types.cannot_derive";
       no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
   test "deriving Serialize needs every field to implement it" (fun () ->
-      one_diagnostic
-        "use standard::serialization\n\n\
-         type Opaque(x: Int64)\n\n\
-         type Point(inner: Opaque)\n\
-        \  derives serialization::Serialize\n"
+      one_diagnostic Fixtures.Interface.deriving_serialize_needs_every_field_to_implement
         "types.cannot_derive";
       no_diagnostics
-        [
-          ( "app::main",
-            "use standard::serialization\n\n\
-             type Point(x: Int64, tags: List[String] = [])\n\
-            \  derives serialization::Serialize, serialization::Deserialize\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.deriving_serialize_needs_every_field_to_implement_2) ]);
   test "deriving Ordered needs Equal derived too" (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
   test "a generic type derives under conditions on its parameters" (fun () ->
@@ -146,140 +120,50 @@ let () =
 
 let () =
   test "an impl must give every method without a body" (fun () ->
-      one_diagnostic "type Point(x: Int64)\n\nimpl Equal for Point {}\n" "types.missing_member");
+      one_diagnostic Fixtures.Interface.impl_must_give_every_method_without_a_body
+        "types.missing_member");
   test "an impl may leave out a method with a body" (fun () ->
-      no_diagnostics
-        [
-          ( "app::main",
-            "type Point(x: Int64)\n\n\
-             impl Equal for Point {\n\
-            \  fn equal(self, other: Point) -> Bool { todo }\n\
-             }\n" );
-        ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.impl_may_leave_out_a_method_with_a_body) ]);
   test "an impl's method must have the trait's signature" (fun () ->
-      one_diagnostic
-        "type Point(x: Int64)\n\n\
-         impl Equal for Point {\n\
-        \  fn equal(self, value: Point) -> Bool { todo }\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.impls_method_must_have_the_traits_signature
         "types.signature_mismatch");
   test "an impl cannot give a method its trait does not declare" (fun () ->
-      one_diagnostic
-        "type Point(x: Int64)\n\n\
-         impl Equal for Point {\n\
-        \  fn equal(self, other: Point) -> Bool { todo }\n\
-        \  fn extra(self) {}\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.impl_cannot_give_a_method_its_trait_does_not
         "types.extra_member");
   test "an impl must give every associated type" (fun () ->
-      one_diagnostic
-        "type Meters(value: Int64)\n\n\
-         impl Add[Meters] for Meters {\n\
-        \  fn add_is_defined(self, right: Meters) -> Bool { true }\n\
-        \  fn add(self, right: Meters) -> Self.Output { todo }\n\
-         }\n"
-        "types.missing_member");
+      one_diagnostic Fixtures.Interface.impl_must_give_every_associated_type "types.missing_member");
   test "the traits a trait requires must be implemented" (fun () ->
-      one_diagnostic
-        "type Point(x: Int64)\n\n\
-         impl Ordered for Point {\n\
-        \  fn compare(self, other: Point) -> Ordering { todo }\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.traits_a_trait_requires_must_be_implemented
         "types.missing_required_impl");
   test "nothing can implement Panic" (fun () ->
-      one_diagnostic
-        "type Quiet()\n\n\
-         impl Panic for Quiet {\n\
-        \  fn crash(self, message: StringSlice) -> Never { todo }\n\
-         }\n"
-        "types.implements_panic");
+      one_diagnostic Fixtures.Interface.nothing_can_implement_panic "types.implements_panic");
   test "a trait's impl cannot have uses" (fun () ->
-      one_diagnostic
-        "type Point(x: Int64)\n\n\
-         impl Equal for Point\n\
-        \  uses Clock\n\
-         {\n\
-        \  fn equal(self, other: Point) -> Bool { todo }\n\
-         }\n"
-        "types.impl_uses");
+      one_diagnostic Fixtures.Interface.traits_impl_cannot_have_uses "types.impl_uses");
   test "a capability's impl takes a receiver and may have uses" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "type FixedClock(time: Instant)\n\n\
-             impl Clock for FixedClock\n\
-            \  uses Random\n\
-             {\n\
-            \  fn now(self) -> Instant { todo }\n\
-            \  fn monotonic(self) -> Duration { todo }\n\
-            \  fn sleep(self, duration: Duration) {}\n\
-             }\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.capabilitys_impl_takes_a_receiver_and_may_have) ]);
   test "a capability's impl method may repeat its impl's uses" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "type FixedClock(time: Instant)\n\n\
-             impl Clock for FixedClock\n\
-            \  uses Random\n\
-             {\n\
-            \  fn now(self) -> Instant\n\
-            \    uses Random\n\
-            \  {\n\
-            \    todo\n\
-            \  }\n\
-            \  fn monotonic(self) -> Duration { todo }\n\
-            \  fn sleep(self, duration: Duration) {}\n\
-             }\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.capabilitys_impl_method_may_repeat_its_impls_uses) ]);
   test "a method of a capability's impl cannot declare `uses`" (fun () ->
-      one_diagnostic
-        "type FixedClock(time: Instant)\n\n\
-         impl Clock for FixedClock {\n\
-        \  fn now(self) -> Instant\n\
-        \    uses Random\n\
-        \  {\n\
-        \    todo\n\
-        \  }\n\
-        \  fn monotonic(self) -> Duration { todo }\n\
-        \  fn sleep(self, duration: Duration) {}\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.method_of_a_capabilitys_impl_cannot_declare_uses
         "types.impl_uses");
   test "an impl's method can rename its generic parameters" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "trait Filler {\n\
-            \  fn fill[count: USize](self) -> Array[Int64, count]\n\n\
-            \  fn run[capability Used](self, action: (fn() uses Used))\n\
-            \    uses Used\n\
-             }\n\n\
-             type Thing()\n\n\
-             impl Filler for Thing {\n\
-            \  fn fill[size: USize](self) -> Array[Int64, size] { todo }\n\n\
-            \  fn run[capability Given](self, action: (fn() uses Given))\n\
-            \    uses Given\n\
-            \  {\n\
-            \    todo\n\
-            \  }\n\
-             }\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.impls_method_can_rename_its_generic_parameters) ]);
   test "traits cannot require each other in a cycle" (fun () ->
       let database =
-        setup [ ("app::main", "trait First: Second {}\n\ntrait Second: First {}\n") ]
+        setup [ ("app::main", Fixtures.Interface.traits_cannot_require_each_other_in_a_cycle) ]
       in
       match codes (check database (module_of "app::main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
-      one_diagnostic "trait Sorted: Ordered {\n  fn compare(self, other: Self) -> Ordering\n}\n"
+      one_diagnostic Fixtures.Interface.trait_cannot_redeclare_a_method_of_a_trait_it
         "types.redeclared_method");
   test "a trait may add a version of a method of a trait it requires" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "trait Changeable: Iterable {\n  fn each(mut self) yields mut Self.Element\n}\n" );
-        ])
+        [ ("app::main", Fixtures.Interface.trait_may_add_a_version_of_a_method_of_a_trait_it) ])
 
 (* Properties *)
 
@@ -319,11 +203,11 @@ let () =
     (fun _ -> Types.named (app "Point") [])
     Interface.Impls.plain;
   property "a variant held indirectly is not Plain" false
-    "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, right: Tree)\n"
+    Fixtures.Interface.variant_held_indirectly_is_not_plain
     (fun _ -> Types.named (app "Tree") [])
     Interface.Impls.plain;
   property "a recursive type is still Copyable" true
-    "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, right: Tree)\n"
+    Fixtures.Interface.recursive_type_is_still_copyable
     (fun _ -> Types.named (app "Tree") [])
     Interface.Impls.copyable;
   property "an opaque type is not Copyable unless it says so" false
@@ -353,21 +237,8 @@ let () =
 
 let holder = "type Holder[Value](value: Value)\n"
 let held type_ = Types.named (app "Holder") [ type_ ]
-let chain = "type Chain[Value] =\n  | End\n  | indirect Link(value: Value, rest: Chain[Value])\n"
-
-let projection_holder =
-  "trait Shown {\n\
-  \  type Part\n\
-   }\n\n\
-   type Numbers(items: List[Int64])\n\n\
-   impl Shown for Numbers {\n\
-  \  type Part = Slice[Int64]\n\
-   }\n\n\
-   type Counted(count: Int64)\n\n\
-   impl Shown for Counted {\n\
-  \  type Part = Int64\n\
-   }\n\n\
-   type Kept[Source: Shown](part: Source.Part)\n"
+let chain = Fixtures.Interface.chain
+let projection_holder = Fixtures.Interface.projection_holder
 
 let () =
   property "an Option of an Option of a List is not Plain" false ""
@@ -392,19 +263,15 @@ let () =
     (fun _ -> Types.named (app "Chain") [ int64 ])
     Interface.Impls.is_view;
   property "a type that contains itself around a Slice is a view" true
-    "type Nest[Value] =\n  | Leaf(value: Value)\n  | indirect More(inner: Nest[Slice[Value]])\n"
+    Fixtures.Interface.type_that_contains_itself_around_a_slice_is_a_view
     (fun _ -> Types.named (app "Nest") [ int64 ])
     Interface.Impls.is_view;
   property "types that hold each other are Copyable when nothing in them says otherwise" true
-    "type Even =\n  | Zero\n  | indirect After(odd: Odd)\n\ntype Odd(even: Even, count: Int64)\n"
+    Fixtures.Interface.types_that_hold_each_other_are_copyable_when
     (fun _ -> Types.named (app "Even") [])
     Interface.Impls.copyable;
   property "types that hold each other are not Copyable when one holds what is not" false
-    "public opaque type Token(code: Int64)\n\n\
-     type Even =\n\
-    \  | Zero\n\
-    \  | indirect After(odd: Odd)\n\n\
-     type Odd(even: Even, token: Token)\n"
+    Fixtures.Interface.types_that_hold_each_other_are_not_copyable_when
     (fun _ -> Types.named (app "Even") [])
     Interface.Impls.copyable;
   property "a type that holds an associated type is a view when that type is one" true
@@ -423,17 +290,7 @@ let () =
     (projection_holder ^ "\ntype Outer(held: Kept[Numbers])\n")
     (fun _ -> Types.named (app "Outer") [])
     Interface.Impls.is_view;
-  let through_itself =
-    projection_holder
-    ^ "\n\
-       type Marker()\n\n\
-       impl Shown for Marker {\n\
-      \  type Part = Tree\n\
-       }\n\n\
-       type Tree =\n\
-      \  | Leaf\n\
-      \  | indirect Branch(held: Kept[Marker])\n"
-  in
+  let through_itself = projection_holder ^ Fixtures.Interface.through_itself in
   property "a type that contains itself through an associated type is Copyable" true through_itself
     (fun _ -> Types.named (app "Tree") [])
     Interface.Impls.copyable;
@@ -501,28 +358,7 @@ let () =
 (* Methods at an [impl] *)
 
 let () =
-  let text =
-    "trait Described {\n\
-    \  fn describe(self) -> Int64\n\n\
-    \  fn beside[Other](self, other: Other) -> Self { todo }\n\
-     }\n\n\
-     type One()\n\n\
-     impl Described for One {\n\
-    \  fn describe(self) -> Int64 { todo }\n\
-     }\n\n\
-     type Both[Value](first: Value, second: Value)\n\n\
-     impl Described for Both[Value: Described] {\n\
-    \  fn describe(self) -> Int64 { todo }\n\
-     }\n\n\
-     type FixedClock(time: Instant)\n\n\
-     impl Clock for FixedClock\n\
-    \  uses Random\n\
-     {\n\
-    \  fn now(self) -> Instant { todo }\n\
-    \  fn monotonic(self) -> Duration { todo }\n\
-    \  fn sleep(self, duration: Duration) {}\n\
-     }\n"
-  in
+  let text = Fixtures.Interface.described in
   let impl_of database type_ wanted : Path.t =
     match Interface.Impls.implements database ~bounds:(fun _ -> []) type_ wanted with
     | Some (From_impl { impl; _ }) -> impl
@@ -573,55 +409,23 @@ let () =
 let () =
   test "a transparent function is one whose body is its definition" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "public transparent fn double(value: Int64) -> Int64\n\
-            \  cost time O(1)\n\
-             {\n\
-            \  value + value\n\
-             }\n" );
-        ];
-      one_diagnostic "public transparent fn double(value: Int64) -> Int64 {\n  value + value\n}\n"
+        [ ("app::main", Fixtures.Interface.transparent_function_is_one_whose_body_is_its) ];
+      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_2
         "types.not_a_definition";
-      one_diagnostic
-        "public transparent fn bump(counter: mut Int64)\n  cost time O(1)\n{\n  counter += 1\n}\n"
+      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_3
         "types.not_a_definition";
-      one_diagnostic
-        "public transparent fn now() -> Instant\n\
-        \  uses Clock\n\
-        \  cost time O(1)\n\
-         {\n\
-        \  Clock.now()\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_4
         "types.not_a_definition")
 
 (* Law proofs *)
 
 let () =
-  let monoid =
-    "trait Joined {\n\
-    \  fn join(self, other: Self) -> Self\n\n\
-    \  law associative(first: Self, second: Self, third: Self) {\n\
-    \    true\n\
-    \  }\n\
-     }\n\n\
-     type Meters(value: Int64)\n\n\
-     type Feet(value: Int64)\n\n\
-     impl Joined for Meters {\n\
-    \  fn join(self, other: Meters) -> Meters { todo }\n\
-     }\n\n"
-  in
+  let monoid = Fixtures.Interface.monoid in
   test "a law's proof names a law of its trait and a type that implements the trait" (fun () ->
       no_diagnostics [ ("app::main", monoid ^ "proof Joined.associative for Meters {\n}\n") ];
       one_diagnostic (monoid ^ "proof Joined.commutative for Meters {\n}\n") "types.unknown_member";
       one_diagnostic (monoid ^ "proof Joined.associative for Feet {\n}\n") "types.no_impl");
-  let boxed =
-    monoid
-    ^ "type Box[Item](item: Item)\n\n\
-       impl Joined for Box[Item: Joined] {\n\
-      \  fn join(self, other: Box[Item]) -> Box[Item] { todo }\n\
-       }\n\n"
-  in
+  let boxed = monoid ^ Fixtures.Interface.boxed in
   test "a law's proof for a generic impl names the impl's type with its own generic parameters"
     (fun () ->
       no_diagnostics
@@ -653,12 +457,7 @@ let () =
 
 let () =
   test "adding an impl of one trait re-checks nothing that asked about another" (fun () ->
-      let base =
-        "type Point(x: Int64)\n\n\
-         impl Equal for Point {\n\
-        \  fn equal(self, other: Point) -> Bool { todo }\n\
-         }\n"
-      in
+      let base = Fixtures.Interface.base in
       let database = setup [ ("app::main", base) ] in
       let point = Types.named (app "Point") [] in
       let asker =
@@ -673,22 +472,14 @@ let () =
         ~first:(fun () -> if not (Query.demand database asker ()) then fail "no impl of Equal")
         ~again:(fun () ->
           Database.Testing.set_text engine (module_of "app::main")
-            (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
+            (base ^ Fixtures.Interface.adding_an_impl_of_one_trait_re_checks_nothing_that);
           ignore (Query.demand database asker ()))
         asker [ () ])
-
-(* What the review of interfaces found *)
 
 let () =
   test "a type that contains itself with growing arguments does not hang" (fun () ->
       let database =
-        setup
-          [
-            ( "app::main",
-              "type Nested[Element] =\n\
-              \  | Leaf(value: Element)\n\
-              \  | indirect Node(inner: Nested[List[Element]])\n" );
-          ]
+        setup [ ("app::main", Fixtures.Interface.type_that_contains_itself_with_growing_arguments) ]
       in
       ignore
         (Interface.Impls.copyable database
@@ -696,82 +487,25 @@ let () =
            (Types.named (app "Nested") [ int64 ])));
   test "an impl's method may have the trait method's own generic parameters" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "trait Mapper {\n\
-            \  fn apply[Output](self, value: Output) -> Output\n\
-             }\n\n\
-             type Point(x: Int64)\n\n\
-             impl Mapper for Point {\n\
-            \  fn apply[Output](self, value: Output) -> Output { todo }\n\
-             }\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.impls_method_may_have_the_trait_methods_own) ]);
   test "associated types inside function types are substituted in an impl" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "trait Visits {\n\
-            \  type Element\n\
-            \  fn visit(self, each: fn(Self.Element) -> Bool)\n\
-             }\n\n\
-             type Bag(count: Int64)\n\n\
-             impl Visits for Bag {\n\
-            \  type Element = Int64\n\
-            \  fn visit(self, each: fn(Int64) -> Bool) {}\n\
-             }\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.associated_types_inside_function_types_are) ]);
   test "an associated type of a required trait is checked in an impl" (fun () ->
-      one_diagnostic
-        "trait Base {\n\
-        \  type Key\n\
-         }\n\n\
-         trait Sub: Base {\n\
-        \  fn get(self) -> Self.Key\n\
-         }\n\n\
-         type P(x: Int64)\n\n\
-         impl Base for P {\n\
-        \  type Key = Int64\n\
-         }\n\n\
-         impl Sub for P {\n\
-        \  fn get(self) -> String { todo }\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.associated_type_of_a_required_trait_is_checked_in
         "types.signature_mismatch");
   test "an impl's associated type must meet the trait's bound on it" (fun () ->
-      one_diagnostic
-        "trait Keyed {\n\
-        \  type Key: Hash\n\
-         }\n\n\
-         type Opaque(x: Int64)\n\n\
-         type P(x: Int64)\n\n\
-         impl Keyed for P {\n\
-        \  type Key = Opaque\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.impls_associated_type_must_meet_the_traits_bound
         "types.unsatisfied_bound");
   test "an associated type's declared bound holds where it is used" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "trait Keyed {\n  type Key: Hash + Ordered\n  fn keys(self) -> Set[Self.Key]\n}\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.associated_types_declared_bound_holds_where_it_is) ]);
   test "Self in a required trait is substituted by the bounded type" (fun () ->
       no_diagnostics
-        [
-          ( "app::main",
-            "trait Summable: Add[Self] {}\n\n\
-             type Needs[Value: Add[Value]](value: Value)\n\n\
-             fn f[Item: Summable](items: Needs[Item]) {}\n" );
-        ]);
+        [ ("app::main", Fixtures.Interface.self_in_a_required_trait_is_substituted_by_the) ]);
   test "a trait whose header did not parse satisfies every bound that names it" (fun () ->
       let database =
-        setup
-          [
-            ( "app::main",
-              "trait Shape[ {\n\
-               }\n\n\
-               type Holder[Value: Shape](value: Value)\n\n\
-               type P(x: Int64)\n\n\
-               fn f(holder: Holder[P]) {}\n" );
-          ]
+        setup [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
       in
       match Interface.diagnostics database (module_of "app::main") with
       | [] -> ()
@@ -789,39 +523,19 @@ let () =
   test "only some traits can be derived" (fun () ->
       one_diagnostic "type P()\n  derives Iterable\n" "types.not_derivable");
   test "a capability's impl must give every method" (fun () ->
-      one_diagnostic
-        "capability Journal {\n\
-        \  fn write(text: StringSlice)\n\
-        \  fn flush()\n\
-         }\n\n\
-         type Silent()\n\n\
-         impl Journal for Silent {\n\
-        \  fn write(self, text: StringSlice) {}\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.capabilitys_impl_must_give_every_method
         "types.missing_member");
   test "a capability's impl takes self or mut self" (fun () ->
-      one_diagnostic
-        "type Fixed()\n\n\
-         impl Clock for Fixed {\n\
-        \  fn now(own self) -> Instant { todo }\n\
-        \  fn monotonic(self) -> Duration { todo }\n\
-        \  fn sleep(self, duration: Duration) {}\n\
-         }\n"
+      one_diagnostic Fixtures.Interface.capabilitys_impl_takes_self_or_mut_self
         "types.wrong_receiver");
   test "a method's head names every generic parameter of its type" (fun () ->
-      one_diagnostic "type Box[Value](value: Value)\n\nfn Box.get(self) -> Int64 { todo }\n"
+      one_diagnostic Fixtures.Interface.methods_head_names_every_generic_parameter_of_its
         "types.arity");
   test "a type argument must be of its parameter's kind" (fun () ->
       one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   test "a constant in a type argument must have a value" (fun () ->
       let database =
-        setup
-          [
-            ( "app::main",
-              "let first: USize = second\n\n\
-               let second: USize = first\n\n\
-               fn f(values: Array[Int64, first]) {}\n" );
-          ]
+        setup [ ("app::main", Fixtures.Interface.constant_in_a_type_argument_must_have_a_value) ]
       in
       if
         not
@@ -830,13 +544,13 @@ let () =
   test "any must fix every associated type" (fun () ->
       one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   test "nothing can implement Copyable" (fun () ->
-      one_diagnostic "type P(x: Int64)\n\nimpl Copyable for P {\n  fn copy(self) -> P { todo }\n}\n"
-        "types.implements_built_in");
+      one_diagnostic Fixtures.Interface.nothing_can_implement_copyable "types.implements_built_in");
   test "a public constant cannot have a private type" (fun () ->
-      one_diagnostic "type Secret(code: Int64)\n\npublic let secret: Secret = Secret(code: 1)\n"
+      one_diagnostic Fixtures.Interface.public_constant_cannot_have_a_private_type
         "types.private_in_public");
   test "uses names a capability parameter, not a type parameter" (fun () ->
-      one_diagnostic "fn f[Value](value: Value)\n  uses Value\n{\n}\n" "types.not_a_capability");
+      one_diagnostic Fixtures.Interface.uses_names_a_capability_parameter_not_a_type
+        "types.not_a_capability");
   test "Never implements no trait" (fun () ->
       let database = setup [] in
       if
@@ -859,21 +573,20 @@ let () =
 
 let () =
   test "`Self.Item` outside a trait and an impl of one is an error" (fun () ->
-      one_diagnostic "type Box(value: Int64)\n\nfn Box.get(self) -> Self.Item {\n  todo\n}\n"
+      one_diagnostic Fixtures.Interface.self_item_outside_a_trait_and_an_impl_of_one_is_an
         "types.unknown_associated_type");
   test "a generic parameter is not a bound" (fun () ->
-      one_diagnostic "fn f[First, Second: First](value: own Second) -> Second {\n  value\n}\n"
-        "types.not_a_trait");
+      one_diagnostic Fixtures.Interface.generic_parameter_is_not_a_bound "types.not_a_trait");
   test "`Self` in a capability is an error" (fun () ->
-      one_diagnostic "capability Logger {\n  fn log(message: Self)\n}\n" "types.misplaced_self_type");
+      one_diagnostic Fixtures.Interface.self_in_a_capability_is_an_error "types.misplaced_self_type");
   test "`Self` in a function that is not a method is an error" (fun () ->
       one_diagnostic "fn f(value: Self) {}\n" "types.misplaced_self_type");
   test "a trait is not the head of a method" (fun () ->
-      one_diagnostic "fn Ordered.twice(self) -> Bool {\n  true\n}\n" "types.not_a_type");
+      one_diagnostic Fixtures.Interface.trait_is_not_the_head_of_a_method "types.not_a_type");
   test "a capability parameter is not a type" (fun () ->
       one_diagnostic "fn f[capability Granted](value: Granted) {}\n" "types.not_a_type");
   test "a method of an unknown type keeps its head's generic parameters" (fun () ->
-      one_diagnostic "fn Missing[Element].first(self) -> Element {\n  todo\n}\n"
+      one_diagnostic Fixtures.Interface.method_of_an_unknown_type_keeps_its_heads_generic
         "resolve.unknown_name")
 
 (* Well-known definitions *)

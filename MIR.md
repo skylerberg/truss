@@ -9,7 +9,7 @@ definition's body, built from the core form that
 to read it in place of the core form. The MIR of a definition is a query
 of the code database, which [DATABASE.md](DATABASE.md) describes.
 
-## What the MIR is for
+## Motivation
 
 The core form is a tree that is still close to the source: it has
 compound assignment, five kinds of loop, lending calls as places, and
@@ -61,7 +61,7 @@ read only by the prover, would cost more than it gives. The MIR is a
 second representation, but all three consumers read it, and it is what
 makes them agree.
 
-## What the MIR keeps
+## Contents
 
 | The MIR has | Because |
 |---|---|

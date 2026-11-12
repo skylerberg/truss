@@ -1,0 +1,11 @@
+fn total(items: List[Int64]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum = sum + item
+  }
+  sum
+}
+
+test "sums" {
+  assert total([1, 2, 3]) == 6
+}

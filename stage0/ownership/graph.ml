@@ -32,8 +32,8 @@ type view = {
   place : Place.t;
   copied_out : bool;
       (** If false, the value borrows [place] itself, as a slice of a list borrows the list. If
-          true, the value is a copy of a view that is stored in [place], so it borrows what the
-          stored view borrows and not [place]. *)
+          true, the value is a copy of a view that is stored in [place], so it borrows the stored
+          view's loans and not [place]. *)
 }
 
 (* An argument that is a place: the place, the parameter's mode, the

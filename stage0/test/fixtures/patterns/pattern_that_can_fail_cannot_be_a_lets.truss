@@ -1,0 +1,4 @@
+fn f(present: Option[Int64]) -> Int64 {
+  let Some(value) = present
+  value
+}

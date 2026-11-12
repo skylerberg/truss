@@ -1,0 +1,3 @@
+type Pending[Element] = todo
+
+type Knot(runs: Pending[(fn(Knot) -> Bool cost time finite)])

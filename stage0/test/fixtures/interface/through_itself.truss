@@ -1,0 +1,10 @@
+
+type Marker()
+
+impl Shown for Marker {
+  type Part = Tree
+}
+
+type Tree =
+  | Leaf
+  | indirect Branch(held: Kept[Marker])

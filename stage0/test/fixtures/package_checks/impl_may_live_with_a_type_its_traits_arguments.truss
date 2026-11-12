@@ -1,0 +1,5 @@
+type UserId(number: Int64)
+
+impl From[UserId] for Int64 {
+  fn from(value: own UserId) -> Int64 { todo }
+}

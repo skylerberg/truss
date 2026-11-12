@@ -1,0 +1,9 @@
+fn bump(count: mut UInt8) -> Bool
+  requires count < 200
+  ensures count == old(count) + 1
+  ensures result
+{
+  count += 1
+  true
+}
+

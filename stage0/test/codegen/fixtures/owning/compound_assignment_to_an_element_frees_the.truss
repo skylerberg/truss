@@ -1,0 +1,26 @@
+type Bag(items: List[Int64])
+
+impl Add[Bag] for Bag {
+  type Output = Bag
+
+  fn add_is_defined(self, right: Bag) -> Bool {
+    true
+  }
+
+  fn add(self, right: Bag) -> Bag {
+    var items = self.items.copy()
+    for item in right.items {
+      mut items.push(item)
+    }
+    Bag(items: own items)
+  }
+}
+
+test "element" {
+  var bags: List[Bag] = [Bag(items: [1]), Bag(items: [2])]
+  let others: List[Bag] = [Bag(items: [3]), Bag(items: [4, 5])]
+  bags[0] += others[1]
+  bags[1] += Bag(items: [6])
+  assert bags[0].items.length() == 3
+  assert bags[1].items.length() == 2
+}

@@ -1,0 +1,21 @@
+trait Check {
+  fn check(self) -> Bool
+    cost time finite
+}
+
+type Loop()
+
+impl Check for Loop {
+  fn check(self) -> Bool
+    cost time finite
+  {
+    let other: any Check = any Loop()
+    !other.check()
+  }
+}
+
+fn f() -> Bool
+  cost time finite
+{
+  Loop().check()
+}

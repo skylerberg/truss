@@ -1,0 +1,16 @@
+theorem a_written_bit_keeps_the_unused_bits_clear(word: UInt64, used: USize, position: USize)
+  requires used < 64
+  requires position < used
+  requires (word >> used) == 0
+  ensures ((word ^ (1 << position)) >> used) == 0
+  ensures ((word | (1 << position)) >> used) == 0
+{
+}
+
+theorem a_union_keeps_the_unused_bits_clear(first: UInt64, second: UInt64, used: USize)
+  requires used < 64
+  requires (first >> used) == 0
+  requires (second >> used) == 0
+  ensures ((first | second) >> used) == 0
+{
+}

@@ -1,0 +1,5 @@
+fn f(value: Int64, floor: Int64) -> Int64
+  ensures result == (if value > floor { value } else { floor })
+{
+  apply(fn(each) { if each > floor { each } else { floor } }, value: value)
+}

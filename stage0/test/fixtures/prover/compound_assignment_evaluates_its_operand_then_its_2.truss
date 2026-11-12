@@ -1,0 +1,8 @@
+fn f() -> Int64
+  ensures result == 211
+{
+  var items: List[USize] = [10]
+  var order = 0
+  items[digit(mut order, next: 1)] += digit(mut order, next: 2)
+  order
+}

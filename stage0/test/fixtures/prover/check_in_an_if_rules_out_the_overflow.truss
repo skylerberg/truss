@@ -1,0 +1,3 @@
+fn f(count: UInt8) -> UInt8 {
+  if count < 255 { count + 1 } else { count }
+}

@@ -639,8 +639,8 @@ let encode glue ty =
   in
   (if parameter <> None then
      match glue.representation ty with
-     | Handle -> bug "a handle cannot be worked out while compiling"
-     | Shared _ -> bug "a shared value cannot be worked out while compiling"
+     | Handle -> bug "a handle cannot be computed while compiling"
+     | Shared _ -> bug "a shared value cannot be computed while compiling"
      | Storage element ->
          bytes (Storage.length value) (Memory_layout.of_type glue.env glue.usize).size;
          loop glue builder

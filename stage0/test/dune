@@ -26,7 +26,7 @@
   compatibility_tests
   library_use_tests
   scale_tests)
- (modules :standard \ database_tests prover_tests)
+ (modules :standard \ fixtures database_tests prover_tests)
  (libraries
   process
   harness
@@ -75,9 +75,25 @@
   type_checker
   manifest
   registry
-  cli)
+  cli
+  fixtures)
  (deps
   (glob_files %{workspace_root}/*.md)))
+
+; The fixtures, as a library, since both stanzas of tests use them.
+
+(library
+ (name fixtures)
+ (modules fixtures))
+
+(rule
+ (target fixtures.ml)
+ (deps
+  (glob_files_rec fixtures/**.truss))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_fixtures/embed_fixtures.exe} %{deps}))))
 
 ; The slowest suites run as several processes at once, each with a share of
 ; the suite's tests, since one process runs its tests on one core.
@@ -108,7 +124,8 @@
   prover
   interface
   infer
-  type_checker)
+  type_checker
+  fixtures)
  (deps
   (glob_files %{workspace_root}/*.md))
  (action

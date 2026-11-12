@@ -1,0 +1,13 @@
+type Side =
+  | Left(value: Int64)
+  | Right(value: Int64)
+  derives Equal
+
+fn f(side: Side) -> Int64
+  requires side == Side.Left(value: 3) || side == Side.Right(value: 3)
+  ensures result == 3
+{
+  match side {
+    Left(value) | Right(value) => value
+  }
+}

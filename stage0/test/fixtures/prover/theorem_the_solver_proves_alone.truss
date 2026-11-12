@@ -1,0 +1,6 @@
+theorem squares_grow(value: Int64)
+  requires value >= 0
+  requires value < 1000
+  ensures value * value >= value
+{
+}

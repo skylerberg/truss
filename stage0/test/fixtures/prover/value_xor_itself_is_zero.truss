@@ -1,0 +1,5 @@
+fn f(value: UInt64) -> UInt64
+  ensures result == 0
+{
+  value ^ value
+}

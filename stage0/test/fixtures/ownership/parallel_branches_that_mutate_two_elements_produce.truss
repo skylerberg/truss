@@ -1,0 +1,6 @@
+fn f(items: mut List[Int64], first: USize, second: USize) {
+  parallel {
+    items[first] = 1
+    items[second] = 2
+  }
+}

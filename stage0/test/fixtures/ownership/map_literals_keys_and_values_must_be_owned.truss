@@ -1,0 +1,3 @@
+fn f(name: own String) -> Map[String, Int64] {
+  [name: 1]
+}

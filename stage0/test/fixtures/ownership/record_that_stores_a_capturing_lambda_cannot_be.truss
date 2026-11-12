@@ -1,0 +1,3 @@
+fn build(amount: Int64) -> Handlers {
+  Handlers(first: fn(value) { value + amount })
+}

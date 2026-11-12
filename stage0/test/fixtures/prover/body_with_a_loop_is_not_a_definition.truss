@@ -1,0 +1,12 @@
+fn is_small(value: Int64) -> Bool
+  cost time finite
+{
+  var small = value < 10
+  small
+}
+
+fn f() -> Bool
+  ensures result
+{
+  is_small(3)
+}

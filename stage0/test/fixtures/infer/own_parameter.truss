@@ -1,0 +1,3 @@
+fn f(items: own List[Int64]) {
+  mut items.push(2)
+}

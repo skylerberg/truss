@@ -1,0 +1,38 @@
+type Held[View](view: View)
+
+type Window(view: Slice[Int64])
+
+type Holder(items: List[Int64], count: Int64)
+
+trait Sized {
+  fn size(self) -> USize
+}
+
+impl Sized for Window {
+  fn size(self) -> USize {
+    self.view.length()
+  }
+}
+
+fn Holder.reset(mut self) {
+  self.items = []
+}
+
+fn first_of(items: List[Int64]) -> Slice[Int64] {
+  items[0..1]
+}
+
+fn keep(items: own List[Int64]) {}
+
+fn change(items: mut List[Int64]) {}
+
+fn look[Value](value: Value) {}
+
+fn same[Value](value: own Value) -> Value {
+  value
+}
+
+fn put[Value](held: mut List[Value], value: own Value) {
+  mut held.push(own value)
+}
+

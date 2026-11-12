@@ -1,0 +1,6 @@
+fn f(range: mut Span)
+  requires range.high < 1000
+{
+  range.low = range.high + 1
+  range.low = range.high
+}

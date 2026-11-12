@@ -1,0 +1,18 @@
+trait Filler {
+  fn fill[count: USize](self) -> Array[Int64, count]
+
+  fn run[capability Used](self, action: (fn() uses Used))
+    uses Used
+}
+
+type Thing()
+
+impl Filler for Thing {
+  fn fill[size: USize](self) -> Array[Int64, size] { todo }
+
+  fn run[capability Given](self, action: (fn() uses Given))
+    uses Given
+  {
+    todo
+  }
+}

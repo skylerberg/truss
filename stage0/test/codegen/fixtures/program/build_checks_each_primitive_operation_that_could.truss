@@ -1,0 +1,45 @@
+fn pick(items: List[Int64], top: USize) -> USize
+  requires items[top] >= 0
+{
+  top
+}
+
+test "overflow" {
+  let big: Int64 = 9223372036854775807
+  let _ = big + 1
+}
+
+test "division" {
+  let zero: Int64 = 0
+  let _ = 5 / zero
+}
+
+test "index" {
+  let items: List[Int64] = [1, 2]
+  let _ = items[2]
+}
+
+test "shift" {
+  let one: UInt64 = 1
+  let amount: UInt64 = 70
+  let _ = one << amount
+}
+
+test "slice" {
+  let items: List[Int64] = [1, 2]
+  let _ = items[1..9]
+}
+
+test "swap" {
+  var items: List[Int64] = [1, 2]
+  mut items.swap(0, second: 7)
+}
+
+test "a clause that would fail if it ran" {
+  assert pick([1, 2], top: 9) == 9
+}
+
+test "fine" {
+  let items: List[Int64] = [1, 2]
+  assert items[1] + 1 == 3
+}

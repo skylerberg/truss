@@ -1,0 +1,11 @@
+fn spin(value: UInt32) -> UInt32
+  cost time O(value)
+{
+  for _ in 0..value {
+  }
+  value
+}
+
+fn f() -> UInt32 {
+  run(spin)
+}

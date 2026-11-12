@@ -1,0 +1,4 @@
+
+impl Hash for Point {
+  fn hash(self, hasher: mut Hasher) {}
+}

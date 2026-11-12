@@ -1,0 +1,7 @@
+type Grid(cells: List[Int64])
+
+fn Grid.cell(self, ready: Bool) lends Int64 {
+  if ready {
+    yield self.cells[0]
+  }
+}

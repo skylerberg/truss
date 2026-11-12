@@ -1,0 +1,3 @@
+fn f() {
+  let _ = Some(Holder(5))
+}

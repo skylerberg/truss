@@ -1,0 +1,14 @@
+fn join(names: own List[String]) -> String {
+  var text = ""
+  for name in own names {
+    text = "${text}${name}"
+  }
+  text
+}
+
+test "used up" {
+  assert join(["a${1}", "b${2}", "c${3}", "d${4}"]) == "a1b2c3d4"
+  assert join(["a${1}", "b${2}", "c${3}"]) == "a1b2c3"
+  assert join(["a${1}"]) == "a1"
+  assert join([]) == ""
+}

@@ -1,0 +1,4 @@
+test "a" {
+  let x: Int64 = 5
+  assert x == 6
+}

@@ -256,7 +256,7 @@ and loop_clause = loop_clause_kind node
 and loop_clause_kind =
   | Invariant of expression
   | Loop_decreases of expression list
-  | Loop_cost of cost  (** What the loop has spent since it started, at each iteration. *)
+  | Loop_cost of cost  (** The loop's cost so far, at each iteration. *)
 
 and arm = {
   patterns : pattern list;

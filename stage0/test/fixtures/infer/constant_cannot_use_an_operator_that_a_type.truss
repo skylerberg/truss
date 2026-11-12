@@ -1,0 +1,3 @@
+let greeting: String = "a"
+
+let same: Bool = greeting == greeting

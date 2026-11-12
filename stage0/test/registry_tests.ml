@@ -318,7 +318,7 @@ let () =
     }
   in
   let grant package capabilities = { Manifest.package; capabilities } in
-  test "a package holds what the project grants it" (fun () ->
+  test "a package holds the capabilities the project grants it" (fun () ->
       let held =
         Selection.holds
           ~project:
@@ -327,7 +327,7 @@ let () =
       in
       if held <> [ ({ Path.owner = Some "truss"; name = "http" }, [ "Clock"; "NetworkClient" ]) ]
       then fail "holds another");
-  test "a package holds of what a user grants it only what the user holds itself" (fun () ->
+  test "a package holds only the granted capabilities that its user holds itself" (fun () ->
       let held =
         Selection.holds
           ~project:[ grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ] ]

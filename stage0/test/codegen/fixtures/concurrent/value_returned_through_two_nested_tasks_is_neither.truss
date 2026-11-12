@@ -1,0 +1,30 @@
+fn nested(count: Int64, wanted: Int64) -> List[String]
+  uses Tasks
+{
+  concurrent for index in 0..count {
+    concurrent {
+      let beside = "beside ${index}"
+      if index == wanted {
+        return ["item ${index}", "found"]
+      }
+    }
+    if beside.length() == 0 {
+      return []
+    }
+  }
+  []
+}
+
+test "the list is the function's result" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let present = provide mut tasks {
+    nested(4, wanted: 2)
+  }
+  assert present.length() == 2
+  assert present[0] == "item 2"
+  var again = InOrder(opened: 0, cancelled: [])
+  let none = provide mut again {
+    nested(2, wanted: 7)
+  }
+  assert none.length() == 0
+}

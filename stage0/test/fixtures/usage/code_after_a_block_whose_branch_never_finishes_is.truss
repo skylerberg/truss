@@ -1,0 +1,9 @@
+fn f() -> Int64
+  uses Tasks
+{
+  concurrent {
+    return 1
+    return 2
+  }
+  3
+}

@@ -1,0 +1,9 @@
+test "left early" {
+  let names: Array[String, 3] = ["a${1}", "b${2}", "c${3}"]
+  var first = ""
+  for name in own names {
+    first = own name
+    break
+  }
+  assert first == "a1"
+}

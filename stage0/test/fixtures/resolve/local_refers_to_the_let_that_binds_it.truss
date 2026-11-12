@@ -1,0 +1,4 @@
+fn f() -> Int64 {
+  let count = 1
+  count
+}

@@ -1,0 +1,4 @@
+fn f(names: List[String]) -> Option[String] {
+  var each = names.each()
+  mut each.next()
+}

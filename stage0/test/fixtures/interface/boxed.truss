@@ -1,0 +1,6 @@
+type Box[Item](item: Item)
+
+impl Joined for Box[Item: Joined] {
+  fn join(self, other: Box[Item]) -> Box[Item] { todo }
+}
+

@@ -1,0 +1,3 @@
+fn apply_all(limit: USize, visit: (fn(index: USize) requires index + limit)) {
+  todo
+}

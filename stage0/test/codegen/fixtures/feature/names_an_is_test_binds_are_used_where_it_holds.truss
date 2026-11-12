@@ -1,0 +1,22 @@
+fn describe(present: Option[String], limit: USize) -> String {
+  if present is Some(text) && text.length() > limit {
+    text.copy()
+  } else if !(present is Some(_)) || limit == 0 {
+    "nothing"
+  } else {
+    "short"
+  }
+}
+
+fn longer(present: Option[String]) -> Bool {
+  present is Some(text) && text.length() > 3
+}
+
+test "is" {
+  assert describe(Some("long enough"), limit: 3) == "long enough"
+  assert describe(Some("ab"), limit: 3) == "short"
+  assert describe(None, limit: 3) == "nothing"
+  assert longer(Some("four"))
+  assert !longer(Some("abc"))
+  assert !longer(None)
+}

@@ -1,0 +1,5 @@
+use two::numbers
+
+fn four() -> Int64 {
+  numbers::two() * 2
+}

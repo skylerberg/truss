@@ -1,0 +1,7 @@
+fn main(arguments: List[String]) -> ExitCode {
+  helper()
+}
+
+fn helper() -> ExitCode {
+  todo
+}

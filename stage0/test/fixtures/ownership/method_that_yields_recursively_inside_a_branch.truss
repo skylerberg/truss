@@ -1,0 +1,17 @@
+fn Tree.odd(self) yields Int64 {
+  match self {
+    Leaf => {}
+    Node(left, ..) => {
+      for item in left.odd() {
+        if item > 0 {
+          yield item
+        }
+      }
+    }
+  }
+}
+
+fn f(tree: Tree) -> Option[Int64] {
+  var cursor = tree.odd()
+  mut cursor.next()
+}

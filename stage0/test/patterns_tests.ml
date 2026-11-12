@@ -8,7 +8,7 @@ open Support
 let check = Type_checker.through Patterns
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
-let priority = "type Priority =\n  | Low\n  | Normal\n  | Urgent(deadline: Instant)\n\n"
+let priority = Fixtures.Patterns.priority
 
 let message text =
   let database = setup [ ("app::main", text) ] in
@@ -18,123 +18,42 @@ let message text =
 
 let () =
   test "a missing case is named" (fun () ->
-      let text =
-        priority
-        ^ "fn f(present: Option[Priority]) -> Int64 {\n\
-          \  match present {\n\
-          \    Some(Low) => 1\n\
-          \    Some(Normal) => 2\n\
-          \    None => 3\n\
-          \  }\n\
-           }\n"
-      in
+      let text = priority ^ Fixtures.Patterns.missing_case_is_named in
       let actual = message text in
       let expected = "`Some(Urgent(_))` is not covered" in
       if not (Substring.contains actual expected) then fail "message %S" actual);
   test "a missing case's fix adds an arm with todo" (fun () ->
-      one_diagnostic "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true => 1\n  }\n}\n"
+      one_diagnostic Fixtures.Patterns.missing_cases_fix_adds_an_arm_with_todo
         "patterns.not_covered"
-        ~fixed:
-          "fn f(ready: Bool) -> Int64 {\n\
-          \  match ready {\n\
-          \    true => 1\n\
-          \    false => todo\n\
-          \  }\n\
-           }\n");
+        ~fixed:Fixtures.Patterns.missing_cases_fix_adds_an_arm_with_todo_fixed);
   test "an arm earlier arms cover is an error with a fix that deletes it" (fun () ->
-      one_diagnostic
-        "fn f(present: Option[Int64]) -> Int64 {\n\
-        \  match present {\n\
-        \    Some(value) => value\n\
-        \    None => 0\n\
-        \    _ => 1\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.arm_earlier_arms_cover_is_an_error_with_a_fix_that
         "patterns.unreachable_arm"
-        ~fixed:
-          "fn f(present: Option[Int64]) -> Int64 {\n\
-          \  match present {\n\
-          \    Some(value) => value\n\
-          \    None => 0\n\
-          \  }\n\
-           }\n");
+        ~fixed:Fixtures.Patterns.arm_earlier_arms_cover_is_an_error_with_a_fix_that_fixed);
   test "an alternative the alternatives before it cover is an error" (fun () ->
-      one_diagnostic
-        "fn f(present: Option[Int64]) -> Int64 {\n\
-        \  match present {\n\
-        \    None | None => 0\n\
-        \    Some(value) => value\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.alternative_the_alternatives_before_it_cover_is_an
         "patterns.unreachable_alternative");
   test "an arm with a guard does not cover its pattern" (fun () ->
-      one_diagnostic
-        "fn f(count: Int64) -> Int64 {\n  match count {\n    value if value > 0 => 1\n  }\n}\n"
+      one_diagnostic Fixtures.Patterns.arm_with_a_guard_does_not_cover_its_pattern
         "patterns.not_covered");
   test "integer ranges that cover the type are exhaustive" (fun () ->
-      fine
-        "fn f(byte: UInt8) -> Int64 {\n\
-        \  match byte {\n\
-        \    0..=127 => 1\n\
-        \    128..=255 => 2\n\
-        \  }\n\
-         }\n");
+      fine Fixtures.Patterns.integer_ranges_that_cover_the_type_are_exhaustive);
   test "integer ranges that leave a gap name it" (fun () ->
-      let actual =
-        message
-          "fn f(byte: UInt8) -> Int64 {\n\
-          \  match byte {\n\
-          \    0..=99 => 1\n\
-          \    101..=255 => 2\n\
-          \  }\n\
-           }\n"
-      in
+      let actual = message Fixtures.Patterns.integer_ranges_that_leave_a_gap_name_it in
       if not (Substring.contains actual "`100`") then fail "message %S" actual);
   test "a match on a string needs a pattern that matches everything" (fun () ->
-      one_diagnostic "fn f(text: String) -> Int64 {\n  match text {\n    \"a\" => 1\n  }\n}\n"
+      one_diagnostic Fixtures.Patterns.match_on_a_string_needs_a_pattern_that_matches
         "patterns.not_covered");
   test "a match over several values is checked as one" (fun () ->
-      fine
-        "type State = Idle | Running\n\n\
-         type Event = Start | Stop\n\n\
-         fn f(state: State, event: Event) -> Int64 {\n\
-        \  match state, event {\n\
-        \    Idle, Start => 1\n\
-        \    Running, Stop => 2\n\
-        \    _, _ => 3\n\
-        \  }\n\
-         }\n");
+      fine Fixtures.Patterns.match_over_several_values_is_checked_as_one);
   test "a match over several values misses a combination" (fun () ->
-      one_diagnostic
-        "type State = Idle | Running\n\n\
-         type Event = Start | Stop\n\n\
-         fn f(state: State, event: Event) -> Int64 {\n\
-        \  match state, event {\n\
-        \    Idle, Start => 1\n\
-        \    Running, _ => 2\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.match_over_several_values_misses_a_combination
         "patterns.not_covered");
   test "a pattern that can fail cannot be a let's" (fun () ->
-      one_diagnostic
-        "fn f(present: Option[Int64]) -> Int64 {\n  let Some(value) = present\n  value\n}\n"
-        "patterns.refutable");
-  test "a record pattern cannot fail" (fun () ->
-      fine
-        "type Pair2(first: Int64, second: Int64)\n\n\
-         fn f(pair: Pair2) -> Int64 {\n\
-        \  let (first, second) = pair\n\
-        \  first + second\n\
-         }\n");
+      one_diagnostic Fixtures.Patterns.pattern_that_can_fail_cannot_be_a_lets "patterns.refutable");
+  test "a record pattern cannot fail" (fun () -> fine Fixtures.Patterns.record_pattern_cannot_fail);
   test "a constant in a pattern is its value" (fun () ->
-      fine
-        "let limit: Int64 = 10\n\n\
-         fn f(count: Int64) -> Bool {\n\
-        \  match count {\n\
-        \    limit => true\n\
-        \    _ => false\n\
-        \  }\n\
-         }\n")
+      fine Fixtures.Patterns.constant_in_a_pattern_is_its_value)
 
 (* Constants in patterns *)
 
@@ -152,106 +71,32 @@ let () =
     | actual -> fail "found [%s]" (String.concat "; " actual)
   in
   test "a qualified constant covers only its value" (fun () ->
-      expect
-        "type Code(number: Int64)\n\n\
-         public let Code.teapot: Int64 = 418\n\n\
-         fn f(n: Int64) -> Int64 {\n\
-        \  match n {\n\
-        \    Code.teapot => 1\n\
-        \    5 => 2\n\
-        \  }\n\
-         }\n"
-        [ "patterns.not_covered" ]);
+      expect Fixtures.Patterns.qualified_constant_covers_only_its_value [ "patterns.not_covered" ]);
   test "a range with a constant end covers only up to it" (fun () ->
-      expect
-        "let limit: Int64 = 10\n\n\
-         fn f(n: Int64) -> Int64 {\n\
-        \  match n {\n\
-        \    limit..=20 => 1\n\
-        \    5 | 15 => 2\n\
-        \    _ => 3\n\
-        \  }\n\
-         }\n"
+      expect Fixtures.Patterns.range_with_a_constant_end_covers_only_up_to_it
         [ "patterns.unreachable_alternative" ]);
   test "a range with a constant end is not a wildcard" (fun () ->
-      expect
-        "let limit: Int64 = 10\n\n\
-         fn f(n: Int64) -> Int64 {\n\
-        \  match n {\n\
-        \    limit..=20 => 1\n\
-        \  }\n\
-         }\n"
+      expect Fixtures.Patterns.range_with_a_constant_end_is_not_a_wildcard
         [ "patterns.not_covered" ]);
   test "a Bool constant covers its value" (fun () ->
-      expect
-        "let on: Bool = true\n\n\
-         fn f(b: Bool) -> Int64 {\n\
-        \  match b {\n\
-        \    on => 1\n\
-        \    false => 2\n\
-        \  }\n\
-         }\n"
-        []);
+      expect Fixtures.Patterns.bool_constant_covers_its_value []);
   test "a variant constant covers its variant" (fun () ->
-      expect
-        "type Color =\n\
-        \  | Red\n\
-        \  | Green\n\
-        \  derives Equal\n\n\
-         let favorite: Color = Color.Red\n\n\
-         fn f(color: Color) -> Int64 {\n\
-        \  match color {\n\
-        \    favorite => 1\n\
-        \    Green => 2\n\
-        \  }\n\
-         }\n"
-        []);
+      expect Fixtures.Patterns.variant_constant_covers_its_variant []);
   test "a constant whose value is not evaluated at compile time covers only itself" (fun () ->
-      expect
-        "let built: Int64 = 3 << 0\n\n\
-         fn f(n: Int64) -> Int64 {\n\
-        \  match n {\n\
-        \    built => 1\n\
-        \    3 => 2\n\
-        \    _ => 3\n\
-        \  }\n\
-         }\n"
-        [])
+      expect Fixtures.Patterns.constant_whose_value_is_not_evaluated_at_compile [])
 
 (* Errors reported once *)
 
 let () =
   let codes_of text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
   test "a generic parameter that is a value covers nothing else" (fun () ->
-      one_diagnostic
-        "fn f[limit: USize](count: USize) -> Bool {\n  match count {\n    limit => true\n  }\n}\n"
+      one_diagnostic Fixtures.Patterns.generic_parameter_that_is_a_value_covers_nothing
         "patterns.not_covered");
   test "a record constant covers the record it is" (fun () ->
-      one_diagnostic
-        "type Point(x: Int64, y: Bool)\n\
-        \  derives Equal\n\n\
-         let origin: Point = Point(x: 0, y: false)\n\n\
-         fn f(point: Point) -> Bool {\n\
-        \  match point {\n\
-        \    origin => true\n\
-        \    (x: 0, y: false) => false\n\
-        \    _ => false\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.record_constant_covers_the_record_it_is
         "patterns.unreachable_arm");
   test "a match on a type that failed to parse reports nothing more" (fun () ->
-      match
-        codes_of
-          "type Broken =\n\
-          \  | A\n\
-          \  | B(x: )\n\n\
-           fn f(e: Broken) -> Int64 {\n\
-          \  match e {\n\
-          \    A => 1\n\
-          \    B(..) => 2\n\
-          \  }\n\
-           }\n"
-      with
+      match codes_of Fixtures.Patterns.match_on_a_type_that_failed_to_parse_reports with
       | actual when List.mem "patterns.not_covered" actual ->
           fail "found [%s]" (String.concat "; " actual)
       | _ -> ());
@@ -272,19 +117,7 @@ let () =
           | actual -> fail "found [%s]" (String.concat "; " actual))
         [ "own name"; "\"${name}\"" ]);
   test "a sub-pattern that failed to type makes no arm unreachable" (fun () ->
-      match
-        codes_of
-          "type Tree =\n\
-          \  | Leaf\n\
-          \  | indirect Node(left: Tree)\n\n\
-           fn f(tree: Tree) -> Int64 {\n\
-          \  match tree {\n\
-          \    Node(Lef) => 1\n\
-          \    Leaf => 2\n\
-          \    _ => 3\n\
-          \  }\n\
-           }\n"
-      with
+      match codes_of Fixtures.Patterns.sub_pattern_that_failed_to_type_makes_no_arm with
       | actual when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) actual ->
           fail "found [%s]" (String.concat "; " actual)
       | _ -> ())
@@ -293,52 +126,14 @@ let () =
 
 let () =
   test "an alternative that an earlier arm covers is unreachable, even the first" (fun () ->
-      one_diagnostic
-        "type Color =\n\
-        \  | Red\n\
-        \  | Green\n\
-        \  | Blue\n\n\
-         fn f(color: Color) -> Int64 {\n\
-        \  match color {\n\
-        \    Red => 1\n\
-        \    Red | Green => 2\n\
-        \    Blue => 3\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.alternative_that_an_earlier_arm_covers_is
         "patterns.unreachable_alternative"
-        ~fixed:
-          "type Color =\n\
-          \  | Red\n\
-          \  | Green\n\
-          \  | Blue\n\n\
-           fn f(color: Color) -> Int64 {\n\
-          \  match color {\n\
-          \    Red => 1\n\
-          \    Green => 2\n\
-          \    Blue => 3\n\
-          \  }\n\
-           }\n");
+        ~fixed:Fixtures.Patterns.alternative_that_an_earlier_arm_covers_is_fixed);
   test "a nested alternative that the one before covers is unreachable" (fun () ->
-      one_diagnostic
-        "type Color =\n\
-        \  | Red\n\
-        \  | Green\n\n\
-         fn f(color: Option[Color]) -> Int64 {\n\
-        \  match color {\n\
-        \    Some(Red | Red) => 1\n\
-        \    _ => 2\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.nested_alternative_that_the_one_before_covers_is
         "patterns.unreachable_alternative")
 
 let () =
   test "character literals and ranges cover their values" (fun () ->
-      one_diagnostic
-        "fn f(letter: Character) -> Int64 {\n\
-        \  match letter {\n\
-        \    Character\"a\"..=Character\"z\" => 1\n\
-        \    Character\"m\" => 2\n\
-        \    _ => 3\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Patterns.character_literals_and_ranges_cover_their_values
         "patterns.unreachable_arm")

@@ -1,0 +1,4 @@
+fn escape(amount: Int64) -> List[fn(Int64) -> Int64] {
+  let add: fn(Int64) -> Int64 = fn(value) { value + amount }
+  [add]
+}

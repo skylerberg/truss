@@ -1,0 +1,8 @@
+fn same[Value](value: own Value) -> Value {
+  value
+}
+
+fn escape(amount: Int64) -> fn(Int64) -> Int64 {
+  let add: fn(Int64) -> Int64 = fn(value) { value + amount }
+  same(add)
+}

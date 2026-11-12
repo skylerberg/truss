@@ -1,0 +1,3 @@
+fn give(amount: Int64) {
+  take(fn(value) { value + amount })
+}

@@ -1,0 +1,13 @@
+type Vector[Element](first: Element)
+
+impl Add[Element] for Vector[Element] {
+  type Output = Vector[Element]
+  fn add_is_defined(self, right: Element) -> Bool { true }
+  fn add(self, right: Element) -> Vector[Element] { todo }
+}
+
+impl Add[Int64] for Vector[Element] {
+  type Output = Vector[Element]
+  fn add_is_defined(self, right: Int64) -> Bool { true }
+  fn add(self, right: Int64) -> Vector[Element] { todo }
+}

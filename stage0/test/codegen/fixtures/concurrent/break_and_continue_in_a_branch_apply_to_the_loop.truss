@@ -1,0 +1,28 @@
+fn rounds(count: Int64) -> Int64
+  uses Tasks, Console
+{
+  var total: Int64 = 0
+  for round in 0..count {
+    concurrent {
+      {
+        if round == 1 {
+          continue
+        }
+        if round == 3 {
+          break
+        }
+        Console.print_line("round ${round}")
+      }
+      Console.print_line("beside round ${round}")
+    }
+    total += 1
+  }
+  total
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  Console.print_line("${rounds(6)}")
+  ExitCode.success
+}

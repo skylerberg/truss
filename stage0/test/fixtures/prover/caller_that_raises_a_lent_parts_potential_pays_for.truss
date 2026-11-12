@@ -1,0 +1,5 @@
+fn raise(bag: mut Bag[Meter], credit: UInt32)
+  cost amortized time O(1)
+{
+  mut bag.first().credit = credit
+}

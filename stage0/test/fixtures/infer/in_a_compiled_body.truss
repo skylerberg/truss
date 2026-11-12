@@ -1,0 +1,3 @@
+fn f(a: Bool, b: Bool) -> Bool {
+  a ==> b
+}

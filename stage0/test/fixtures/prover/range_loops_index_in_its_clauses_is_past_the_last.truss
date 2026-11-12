@@ -1,0 +1,8 @@
+fn f(count: UInt32)
+  requires count > 0
+{
+  for index in 0..count
+    invariant index < count
+  {
+  }
+}

@@ -1,0 +1,10 @@
+fn f() -> USize {
+  var slot: Option[String] = Some("a".copy())
+  match slot {
+    Some(inner) => {
+      slot = None
+      inner.length()
+    }
+    None => 0
+  }
+}

@@ -1,0 +1,3 @@
+fn f(present: Option[Int64]) -> Int64 {
+  if present is Some(value) { value } else { 0 }
+}

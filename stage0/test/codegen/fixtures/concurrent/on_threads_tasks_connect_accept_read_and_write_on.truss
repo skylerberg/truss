@@ -1,0 +1,41 @@
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, NetworkServer, NetworkClient, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  var counter = Counter(count: 0)
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    let at = listener.local_address()
+    provide mut counter {
+      concurrent {
+        {
+          for _ in 0..16 {
+            if mut listener.accept() is Ok(moved) {
+              var server = own moved
+              var heard: List[UInt8] = []
+              if mut server.read(mut heard, limit: 100) is Ok(_) {
+                let _ = mut server.write(heard.slice())
+              }
+            }
+          }
+        }
+        concurrent for _ in 0..16 {
+          if NetworkClient.connect(at, timeout: None) is Ok(built) {
+            var client = own built
+            let request: List[UInt8] = [7, 8, 9]
+            let _ = mut client.write(request.slice())
+            var answer: List[UInt8] = []
+            if mut client.read(mut answer, limit: 100) is Ok(count) {
+              if count == 3 && answer[2] == 9 {
+                Tally.add(1)
+              }
+            }
+          }
+        }
+      }
+      Console.print_line("echoed ${Tally.total()}")
+    }
+  }
+  ExitCode.success
+}

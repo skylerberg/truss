@@ -1,0 +1,3 @@
+fn f() {
+  let colors: Set[String] = ["red", "green"]
+}

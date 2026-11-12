@@ -1,0 +1,5 @@
+type Even =
+  | Zero
+  | indirect After(odd: Odd)
+
+type Odd(even: Even, count: Int64)

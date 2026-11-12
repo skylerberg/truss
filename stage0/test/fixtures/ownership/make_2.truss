@@ -1,0 +1,4 @@
+fn make() -> Option[String] { todo }
+
+fn keep(text: own String) {}
+

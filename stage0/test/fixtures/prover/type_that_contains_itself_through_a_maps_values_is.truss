@@ -1,0 +1,7 @@
+type Tree =
+  | Leaf
+  | Branch(children: Map[String, Tree])
+
+fn is_leaf(tree: Tree) -> Bool {
+  tree is Leaf
+}

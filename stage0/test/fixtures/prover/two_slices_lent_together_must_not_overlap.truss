@@ -1,0 +1,7 @@
+fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}
+
+fn f(items: mut List[Int64])
+  requires items.length() > 3
+{
+  both(mut items[0..2], second: mut items[1..3])
+}

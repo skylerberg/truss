@@ -1,0 +1,3 @@
+fn holds(limit: Integer) -> Bool {
+  forall value: Int64 => value > 0 ==> value + limit > limit
+}

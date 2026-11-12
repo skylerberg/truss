@@ -1,0 +1,11 @@
+fn square(value: Int64) -> Int64 {
+  value * value
+}
+
+test "squares" {
+  assert square(3) == 9
+}
+
+test "squares wrongly" {
+  assert square(3) == 10
+}

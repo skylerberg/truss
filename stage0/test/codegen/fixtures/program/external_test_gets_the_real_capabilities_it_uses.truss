@@ -1,0 +1,5 @@
+test "reads the clock"
+  uses Clock
+{
+  let _ = Clock.now()
+}

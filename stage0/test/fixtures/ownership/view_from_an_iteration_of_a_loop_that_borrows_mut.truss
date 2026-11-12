@@ -1,0 +1,8 @@
+fn f(reader: mut Reader) -> USize {
+  var total: USize = 0
+  for chunk in mut reader.chunks() {
+    let current = chunk
+    total = total + current.length()
+  }
+  total
+}

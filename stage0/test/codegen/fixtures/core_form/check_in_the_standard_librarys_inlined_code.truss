@@ -1,0 +1,10 @@
+type Grid(cells: List[Int64], width: USize)
+
+fn Grid.cell(self, row: USize, column: USize) lends Int64 {
+  yield self.cells[row * self.width + column]
+}
+
+test "an index formed in a lending method" {
+  let grid = Grid(cells: [1, 2, 3, 4], width: 2)
+  let _ = grid.cell(2, column: 1)
+}

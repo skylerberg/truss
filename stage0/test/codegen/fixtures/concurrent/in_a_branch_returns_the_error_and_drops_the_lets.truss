@@ -1,0 +1,37 @@
+type Failed(at: String)
+
+fn checked(text: own String, good: Bool) -> Result[String, Failed] {
+  if good {
+    Ok(own text)
+  } else {
+    Err(Failed(at: own text))
+  }
+}
+
+fn both(first: Bool, second: Bool) -> Result[USize, Failed]
+  uses Tasks
+{
+  concurrent {
+    let left = checked("first", good: first)?
+    let right = checked("second", good: second)?
+  }
+  Ok(left.length() + right.length() - 6)
+}
+
+fn report(first: Bool, second: Bool)
+  uses Tasks, Console
+{
+  match both(first, second: second) {
+    Ok(sum) => Console.print_line("sum ${sum}")
+    Err(failed) => Console.print_line("failed at ${failed.at}")
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  report(true, second: true)
+  report(true, second: false)
+  report(false, second: false)
+  ExitCode.success
+}

@@ -1,0 +1,6 @@
+fn f() -> Bool
+  ensures result
+{
+  let table: Map[Int64, Int64] = [1: 2, 3: 4]
+  table.contains(3)
+}

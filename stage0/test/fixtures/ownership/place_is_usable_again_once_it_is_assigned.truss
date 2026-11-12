@@ -1,0 +1,6 @@
+fn f(items: own List[Int64]) {
+  var current = own items
+  keep(own current)
+  current = []
+  look(current)
+}

@@ -1,0 +1,4 @@
+fn f(items: own List[Int64]) {
+  keep(items.copy())
+  look(items)
+}

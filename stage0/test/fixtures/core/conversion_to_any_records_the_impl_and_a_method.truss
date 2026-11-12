@@ -1,0 +1,19 @@
+trait Source {
+  type Item
+  fn first(self) -> Self.Item
+}
+
+type Numbers(items: List[Int64])
+
+impl Source for Numbers {
+  type Item = Int64
+
+  fn first(self) -> Int64 {
+    self.items[0]
+  }
+}
+
+fn g(numbers: own Numbers) -> Int64 {
+  let source: any Source[Item = Int64] = any numbers
+  source.first()
+}

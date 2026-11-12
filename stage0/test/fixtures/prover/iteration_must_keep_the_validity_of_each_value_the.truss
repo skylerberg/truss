@@ -1,0 +1,14 @@
+type Positive(n: Int64)
+  invariant n > 0
+
+fn take(item: Positive) -> Int64 {
+  item.n
+}
+
+fn f(count: USize) -> Int64 {
+  var item = Positive(n: 2)
+  for _ in 0..count {
+    item.n = 0
+  }
+  1
+}

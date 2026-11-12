@@ -317,7 +317,7 @@ static void t_thread_attributes(pthread_attr_t *attributes) {
 
 #endif
 
-/* What the sanitizers need to know about a switch to another stack. */
+/* Sanitizer hooks for switching stacks. */
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 #define T_ADDRESS_SANITIZER 1
@@ -387,8 +387,8 @@ static void *t_stack_acquire(void) {
 
 static void t_stack_release(void *low) {
 #ifdef T_ADDRESS_SANITIZER
-  /* What the frames of the last coroutine left poisoned must not be
-     reported against the next one. */
+  /* The last coroutine's poisoned frames must not be reported against
+     the next one. */
   __asan_unpoison_memory_region(low, t_stack_bytes);
 #endif
   pthread_mutex_lock(&t_stack_lock);
@@ -1149,8 +1149,8 @@ static void t_fork(struct t_worker *self, const struct t_branch *branches, size_
       job->run(job->environment);
       continue;
     }
-    /* What the branches before this one offered, they took back or waited
-       for, so the newest job on the queue is this one, unless a thief has
+    /* Each earlier branch's job was taken back or waited for, so the
+       newest job on the queue is this one, unless a thief has
        it, and then a thief has every job offered before it too. */
     struct t_job *back = t_take_back(self);
     if (back == job) job->run(job->environment);

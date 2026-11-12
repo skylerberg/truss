@@ -1,0 +1,5 @@
+type Counter(count: Int64)
+
+fn Counter.get(self) -> Int64 {
+  self.count
+}

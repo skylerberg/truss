@@ -1,0 +1,10 @@
+type Shelf(books: List[String])
+
+type First(title: String, rest: Slice[String])
+
+type Numbered(index: USize, title: String)
+
+type Tagged(tag: String, book: String)
+
+type Both(first: List[String], second: List[String])
+

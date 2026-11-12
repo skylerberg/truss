@@ -1,0 +1,5 @@
+type Outer[Element] =
+  | Empty
+  | indirect More(inner: Inner[List[Element]])
+
+type Inner[Element](outer: Outer[Element])

@@ -1,0 +1,5 @@
+fn zeros[count: USize]() -> Array[Int64, count] { todo }
+
+fn f() {
+  let _ = zeros()
+}

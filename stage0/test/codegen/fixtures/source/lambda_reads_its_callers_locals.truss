@@ -1,0 +1,8 @@
+fn apply(value: Int64, transform: fn(Int64) -> Int64) -> Int64 {
+  transform(value)
+}
+
+test "lambdas" {
+  let offset = 10
+  assert apply(5, transform: fn(value) { value + offset }) == 15
+}

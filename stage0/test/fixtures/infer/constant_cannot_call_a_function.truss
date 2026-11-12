@@ -1,0 +1,5 @@
+fn compute() -> Int64 {
+  1
+}
+
+let computed: Int64 = compute()

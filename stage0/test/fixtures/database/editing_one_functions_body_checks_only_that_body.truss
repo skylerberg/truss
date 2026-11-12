@@ -1,0 +1,3 @@
+fn triple(value: Int64) -> Int64 {
+  value * 3
+}

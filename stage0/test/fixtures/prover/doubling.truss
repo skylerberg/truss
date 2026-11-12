@@ -1,0 +1,13 @@
+trait Doubling {
+  fn value(self) -> Int64
+    cost time finite
+
+  fn doubled(self) -> Bool
+    cost time finite
+  {
+    self.value() > 0
+  }
+}
+
+type Amount(cents: Int64)
+

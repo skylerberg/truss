@@ -1,0 +1,3 @@
+fn f(items: List[Int64]) {
+  keep(Labeled(view: items[..], name: "a".copy()))
+}

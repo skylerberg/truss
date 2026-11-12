@@ -1,0 +1,4 @@
+fn same(prefix: String) yields String {
+  yield prefix.copy()
+}
+

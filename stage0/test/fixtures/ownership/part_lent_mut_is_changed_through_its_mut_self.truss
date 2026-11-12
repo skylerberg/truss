@@ -1,0 +1,3 @@
+fn f(grid: mut Grid) {
+  mut grid.cell(0).visit()
+}

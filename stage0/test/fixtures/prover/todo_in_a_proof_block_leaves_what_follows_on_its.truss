@@ -1,0 +1,6 @@
+fn f(items: List[Int64], index: USize) -> Int64 {
+  proof {
+    todo
+  }
+  items[index]
+}

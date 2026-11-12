@@ -1,0 +1,5 @@
+fn g(items: List[Int64]) -> USize
+  cost time O(items.length())
+{
+  items.length()
+}

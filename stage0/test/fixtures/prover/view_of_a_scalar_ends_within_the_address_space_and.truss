@@ -1,0 +1,10 @@
+use standard::intrinsic
+
+fn placed(starts: intrinsic::View[USize]) -> USize {
+  let first = intrinsic::view_address(starts)
+  proof {
+    assert intrinsic::view_length(starts) == 0 || first >= 1
+    assert first + 8 * intrinsic::view_length(starts) <= 18446744073709551616
+  }
+  first
+}

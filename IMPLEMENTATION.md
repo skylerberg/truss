@@ -154,7 +154,7 @@ it explains.
 
 ### Comments
 
-A comment says what the code cannot: a reason, an invariant, or a trap. One
+A comment holds information the code cannot express: a reason, an invariant, or a trap. One
 that restates the code, labels a section, or retells a document is left
 out. A comment never points at a document, a section of one, or another
 file, since such a pointer goes stale when what it names moves.
@@ -186,8 +186,8 @@ Every stage of stage0 is tested the same way:
   test must not load the library's sources into a new engine: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
-- **A test run reuses what the last one worked out.** Two results are
-  kept by what they were worked out from, so they can be kept between
+- **A test run reuses the previous run's results.** Two results are
+  keyed by their inputs, so they can be kept between
   runs: the solver's answer to a query, and the object compiled from a
   file of generated C. `TRUSS_SOLVER_CACHE` and `TRUSS_OBJECT_CACHE` name
   the directories. CI restores both from `main`'s last run, so a run
@@ -201,6 +201,15 @@ Every stage of stage0 is tested the same way:
   must panic with a message that contains the test's name. A test written
   in OCaml that compiles a program of its own is for the compiler: a
   diagnostic, generated code, or a whole program's output.
+- **A test's Truss source is a fixture file, not an OCaml string.** The
+  text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
+  suite, where it can be read, edited, and renamed as Truss.
+  `embed_fixtures` compiles each directory of fixtures into the module
+  `Fixtures`, so the test names one as `Fixtures.Prover.overflow`, and a
+  fixture that is missing fails to compile. A fixture is named after its
+  test. Text that is not a whole module stays in OCaml: a template with a
+  hole that the test fills, a line given to the lexer or the parser, and a
+  snippet of one or two lines.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not

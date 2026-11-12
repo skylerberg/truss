@@ -1,0 +1,5 @@
+theorem t(value: Int64)
+  ensures true
+{
+  assert value > 0
+}

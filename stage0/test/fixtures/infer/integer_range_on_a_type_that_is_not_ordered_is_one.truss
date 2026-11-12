@@ -1,0 +1,6 @@
+fn f(ready: Bool) -> Int64 {
+  match ready {
+    1..=2 => 1
+    _ => 2
+  }
+}

@@ -1,0 +1,15 @@
+fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool
+  ensures result == change(value)
+  cost time finite
+{
+  change(value)
+}
+
+theorem each_captured(items: List[Bool])
+  ensures forall i in 0..items.length() =>
+    apply(fn(_) {
+      var held = items[i]
+      held
+    }, value: false) == items[i]
+{
+}

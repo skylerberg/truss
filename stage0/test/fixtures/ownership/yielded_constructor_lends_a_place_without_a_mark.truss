@@ -1,0 +1,7 @@
+
+fn title_length(shelf: Shelf) -> USize {
+  match shelf.get(0) {
+    Some(title) => title.length()
+    None => 0
+  }
+}

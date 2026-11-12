@@ -1,0 +1,6 @@
+use demo::weather
+
+fn main(arguments: List[String]) -> ExitCode {
+  let _ = weather::total([1]) + demo::weather::total([2])
+  ExitCode.success
+}

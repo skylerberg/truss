@@ -74,9 +74,9 @@ let () =
   same_cost "reformatting the signature of a function every module calls costs the same"
     (core ~signature:"value:  Int64" "value");
   same_cost "adding a function beside one every module calls costs the same"
-    (core ~after:"\nfn unused() -> Int64 {\n  7\n}\n" "value");
+    (core ~after:Fixtures.Scale.adding_a_function_beside_one_every_module_calls "value");
   test "editing a body in one module costs the same in a larger package" (fun () ->
-      let text = module_text 0 ^ "\nfn another() -> Int64 {\n  1\n}\n" in
+      let text = module_text 0 ^ Fixtures.Scale.editing_a_body_in_one_module_costs_the_same_in_a in
       let few = edit (package 4) "app::part_0" text
       and many = edit (package 40) "app::part_0" text in
       if few <> many then fail "four modules: %s; forty: %s" (show few) (show many));

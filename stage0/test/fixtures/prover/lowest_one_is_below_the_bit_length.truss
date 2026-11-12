@@ -1,0 +1,7 @@
+theorem t(word: UInt64, bits: USize)
+  requires bits <= 64
+  requires word != 0
+  requires bits == 64 || word < power(2, bits)
+  ensures word.trailing_zeros() < bits
+{
+}

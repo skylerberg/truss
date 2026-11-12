@@ -1,0 +1,5 @@
+fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}
+
+fn f(items: mut List[Int64], middle: USize) {
+  both(mut items[..middle], second: mut items[middle..])
+}

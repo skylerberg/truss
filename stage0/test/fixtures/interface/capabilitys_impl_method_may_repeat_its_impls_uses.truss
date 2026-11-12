@@ -1,0 +1,13 @@
+type FixedClock(time: Instant)
+
+impl Clock for FixedClock
+  uses Random
+{
+  fn now(self) -> Instant
+    uses Random
+  {
+    todo
+  }
+  fn monotonic(self) -> Duration { todo }
+  fn sleep(self, duration: Duration) {}
+}

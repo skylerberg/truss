@@ -1,0 +1,5 @@
+fn g[Element: Equal](items: List[Element], item: Element) -> Bool
+  cost time O(items.length() * time(Element.equal))
+{
+  todo
+}

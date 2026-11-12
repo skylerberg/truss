@@ -1,0 +1,7 @@
+fn Holder.each_item(mut self) yields mut Int64 {
+  var items = own self.items
+  for item in mut items {
+    yield mut item
+  }
+  self.items = own items
+}

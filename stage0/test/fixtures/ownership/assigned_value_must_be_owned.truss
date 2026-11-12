@@ -1,0 +1,5 @@
+fn f(items: own List[Int64]) {
+  var held: List[Int64] = []
+  held = items
+  let _ = held
+}

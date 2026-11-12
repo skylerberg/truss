@@ -16,16 +16,7 @@ let write directory file text =
 
 let manifest name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
 let project = "[project]\n"
-
-let program =
-  {|internal fn double(value: Int64) -> Int64 {
-  value * 2
-}
-
-test "doubling" {
-  assert double(2) == 4
-}
-|}
+let program = Fixtures.Database.doubling
 
 (* A store that holds the standard library's checked state and nothing
    else, as any store does once Truss has run. Checking the standard
@@ -158,7 +149,8 @@ let () =
           in
           if call directory <> 0 then fail "found errors";
           if not !progressed then fail "sent no progress";
-          write directory "main.truss" "fn broken() -> Int64 {\n  true\n}\n";
+          write directory "main.truss"
+            Fixtures.Database.background_process_answers_requests_and_sees_every;
           if call directory <> 1 then fail "missed the error";
           (match Database.open_session directory with
           | Error _ -> ()
@@ -173,7 +165,8 @@ let () =
   test "a session finds an error, and none once it is fixed" (fun () ->
       fresh_store ();
       let directory = package () in
-      write directory "main.truss" "fn broken() -> Int64 {\n  true\n}\n";
+      write directory "main.truss"
+        Fixtures.Database.session_finds_an_error_and_none_once_it_is_fixed;
       expect_errors directory 1;
       write directory "main.truss" program;
       expect_errors directory 0);
@@ -190,17 +183,21 @@ let () =
       let directory = package () in
       expect_errors directory 0;
       Database.reset ();
-      write directory "main.truss" "fn broken() -> Int64 {\n  true\n}\n";
+      write directory "main.truss"
+        Fixtures.Database.change_made_while_no_process_ran_is_seen_after_a;
       expect_errors directory 1);
   test "editing one function's body checks only that body again" (fun () ->
       fresh_store ();
       let directory = package () in
-      write directory "other.truss" "fn triple(value: Int64) -> Int64 {\n  value * 3\n}\n";
+      write directory "other.truss"
+        Fixtures.Database.editing_one_functions_body_checks_only_that_body;
       expect_errors directory 0;
       clear directory;
-      write directory "main.truss" (program ^ "\nfn unused() -> Int64 {\n  1\n}\n");
+      write directory "main.truss"
+        (program ^ Fixtures.Database.editing_one_functions_body_checks_only_that_body_2);
       write directory "main.truss" program;
-      write directory "other.truss" "fn triple(value: Int64) -> Int64 {\n  value * 4\n}\n";
+      write directory "other.truss"
+        Fixtures.Database.editing_one_functions_body_checks_only_that_body_3;
       expect_errors directory 0;
       let again = checked directory in
       if List.mem (top "app::main" "double") again then fail "checked double again";
@@ -211,7 +208,7 @@ let () =
       let point fields = "internal type Point(" ^ fields ^ ")\n" in
       write directory "point.truss" (point "x: Int64, y: Int64");
       write directory "reader.truss"
-        "use app::point\n\nfn width(of: point::Point) -> Int64 {\n  of.x\n}\n";
+        Fixtures.Database.reordering_a_types_fields_checks_no_reader_of_the;
       expect_errors directory 0;
       let width = top "app::reader" "width" in
       let lowered directory = computed directory Interface.Environment.lowered_interface in
@@ -247,7 +244,7 @@ let () =
   test "a removed module is gone from the package" (fun () ->
       fresh_store ();
       let directory = package () in
-      write directory "broken.truss" "fn broken() -> Int64 {\n  true\n}\n";
+      write directory "broken.truss" Fixtures.Database.removed_module_is_gone_from_the_package;
       expect_errors directory 1;
       Sys.remove (Filename.concat directory "broken.truss");
       expect_errors directory 0);
@@ -262,9 +259,11 @@ let () =
   test "a file that cannot be read is not there, and a change beside it is still seen" (fun () ->
       fresh_store ();
       let directory = package () in
-      write directory "other.truss" "internal fn one() -> Int64 {\n  1\n}\n";
+      write directory "other.truss"
+        Fixtures.Database.file_that_cannot_be_read_is_not_there_and_a_change;
       expect_errors directory 0;
-      write directory "main.truss" "internal fn double(value: Int64) -> Missing {\n  value\n}\n";
+      write directory "main.truss"
+        Fixtures.Database.file_that_cannot_be_read_is_not_there_and_a_change_2;
       Unix.chmod (Filename.concat directory "other.truss") 0;
       let unreadable = errors directory in
       Unix.chmod (Filename.concat directory "other.truss") 0o644;
@@ -273,14 +272,17 @@ let () =
   test "a trial sees its changed, added, and removed files, and the session does not" (fun () ->
       fresh_store ();
       let directory = package () in
-      write directory "other.truss" "internal fn one() -> Int64 {\n  1\n}\n";
+      write directory "other.truss"
+        Fixtures.Database.trial_sees_its_changed_added_and_removed_files_and;
       expect_errors directory 0;
       let session, _ = session directory in
       let trial =
         Database.trial session
           [
-            ("main.truss", Some "internal fn double(value: Int64) -> Missing {\n  value\n}\n");
-            ("added.truss", Some "internal fn two() -> Int64 {\n  2\n}\n");
+            ( "main.truss",
+              Some Fixtures.Database.trial_sees_its_changed_added_and_removed_files_and_2 );
+            ( "added.truss",
+              Some Fixtures.Database.trial_sees_its_changed_added_and_removed_files_and_3 );
             ("other.truss", None);
           ]
       in
@@ -300,7 +302,8 @@ let () =
       let directory = fresh "project" in
       write directory "truss.toml" (project ^ manifest "app");
       write directory "main.truss" program;
-      write directory "tools/helper.truss" "internal fn one() -> Int64 {\n  1\n}\n";
+      write directory "tools/helper.truss"
+        Fixtures.Database.manifest_added_below_a_package_gives_the_files;
       expect_errors directory 0;
       let before, _ = session directory in
       if List.length (Database.package_modules before { owner = None; name = "app" }) <> 2 then
@@ -348,7 +351,7 @@ let () =
       write root "good/truss.toml" (manifest "good");
       write root "good/main.truss" program;
       write root "bad/truss.toml" (manifest "bad");
-      write root "bad/main.truss" "fn broken() -> Int64 {\n  true\n}\n";
+      write root "bad/main.truss" Fixtures.Database.session_opened_in_a_packages_directory_is_about;
       expect_errors (Filename.concat root "good") 0;
       expect_errors (Filename.concat root "bad") 1;
       expect_errors root 1);
@@ -357,7 +360,8 @@ let () =
       let first = package () in
       expect_errors first 0;
       let second = package () in
-      write second "main.truss" (program ^ "\nfn extra() -> Int64 {\n  1\n}\n");
+      write second "main.truss"
+        (program ^ Fixtures.Database.new_worktree_starts_from_the_nearest_saved_state);
       expect_errors second 0;
       let again = checked second in
       if List.mem (top "app::main" "double") again then fail "checked double again";
@@ -386,7 +390,8 @@ let () =
       let first = worktree () in
       expect_errors first 0;
       let second = worktree () in
-      write second "part_3.truss" (module_text 3 ^ "\nfn extra() -> Int64 {\n  1\n}\n");
+      write second "part_3.truss"
+        (module_text 3 ^ Fixtures.Database.new_worktrees_state_is_a_difference_over_the_state);
       expect_errors second 0;
       match (Database.Testing.session_engine first, Database.Testing.session_engine second) with
       | Some whole, Some difference ->
@@ -442,24 +447,8 @@ let repository () =
   git root [ "commit"; "-q"; "-m"; "base" ];
   root
 
-let change_interface root =
-  write root "main.truss"
-    {|internal fn double(value: Int64, times: Int64) -> Int64 {
-  value * times
-}
-
-test "doubling" {
-  assert double(2, times: 2) == 4
-}
-|}
-
-let add_caller root =
-  write root "main.truss"
-    (program ^ {|
-fn quadruple(value: Int64) -> Int64 {
-  double(double(value))
-}
-|})
+let change_interface root = write root "main.truss" Fixtures.Database.change_interface
+let add_caller root = write root "main.truss" (program ^ Fixtures.Database.add_caller)
 
 let base_of session =
   match Database.base_commit session None with
@@ -620,11 +609,7 @@ let () =
       let other = fresh "merge" in
       git root [ "worktree"; "add"; "-q"; other; "-b"; "merged" ];
       change_interface root;
-      write other "caller.truss"
-        "use app::main\n\n\
-         fn quadruple(value: Int64) -> Int64 {\n\
-        \  main::double(main::double(value))\n\
-         }\n";
+      write other "caller.truss" Fixtures.Database.merge_preview_finds_the_errors_the_merge_would;
       let mine, _ = session root in
       let theirs, _ = session other in
       match Database.merge_preview mine theirs with
@@ -657,7 +642,7 @@ let check_library library modules =
   Database.save_session library
 
 let () =
-  test "a library state opened again after an edit computes only what the edit reached" (fun () ->
+  test "a library state opened again after an edit recomputes only the edit's dependents" (fun () ->
       fresh_store ~empty:true ();
       let first = (library_module "first", library_function "first") in
       let second = (library_module "second", library_function "second") in

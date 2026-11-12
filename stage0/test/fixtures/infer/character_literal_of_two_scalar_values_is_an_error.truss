@@ -1,0 +1,3 @@
+fn f() -> Character {
+  Character"ab"
+}

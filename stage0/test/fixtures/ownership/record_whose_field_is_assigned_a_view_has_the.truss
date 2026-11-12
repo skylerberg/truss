@@ -1,0 +1,8 @@
+fn f() -> USize {
+  var data: List[Int64] = [1, 2, 3]
+  var other: List[Int64] = [7]
+  var window = Window(other[0..1])
+  window.view = data[0..2]
+  mut data.push(4)
+  window.view.length()
+}

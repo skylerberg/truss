@@ -1,0 +1,62 @@
+type Seen(outer: Bool, nested: Bool)
+
+capability Report {
+  fn outer(cancelled: Bool)
+  fn nested(cancelled: Bool)
+  fn text() -> String
+}
+
+impl Report for Seen {
+  fn outer(mut self, cancelled: Bool) {
+    self.outer = cancelled
+  }
+
+  fn nested(mut self, cancelled: Bool) {
+    self.nested = cancelled
+  }
+
+  fn text(self) -> String {
+    "cancelled ${self.outer} and nested ${self.nested}"
+  }
+}
+
+fn blocked()
+  uses Tasks, Report
+{
+  var waiting = true
+  while waiting {
+    let ticket = Tasks.watch(9)
+    if Tasks.cancelled() {
+      waiting = false
+    } else {
+      Tasks.wait(9, ticket: ticket, reason: "a key that is never woken")
+    }
+  }
+  Report.outer(Tasks.cancelled())
+  concurrent {
+    Report.nested(Tasks.cancelled())
+  }
+}
+
+fn race() -> Int64
+  uses Tasks, Report
+{
+  concurrent {
+    blocked()
+    {
+      Tasks.yield_now()
+      return 5
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var seen = Seen(outer: false, nested: false)
+  provide mut seen {
+    let winner = race()
+    Console.print_line("${winner} ${Report.text()}")
+  }
+  ExitCode.success
+}

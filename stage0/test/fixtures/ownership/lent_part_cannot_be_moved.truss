@@ -1,0 +1,5 @@
+fn take(cell: own Cell) {}
+
+fn f(grid: Grid) {
+  take(grid.cell(0))
+}

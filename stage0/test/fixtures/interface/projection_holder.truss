@@ -1,0 +1,17 @@
+trait Shown {
+  type Part
+}
+
+type Numbers(items: List[Int64])
+
+impl Shown for Numbers {
+  type Part = Slice[Int64]
+}
+
+type Counted(count: Int64)
+
+impl Shown for Counted {
+  type Part = Int64
+}
+
+type Kept[Source: Shown](part: Source.Part)

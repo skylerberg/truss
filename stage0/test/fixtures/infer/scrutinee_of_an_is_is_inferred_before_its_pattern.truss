@@ -1,0 +1,15 @@
+type Span(ticks: Int64)
+
+impl Divide[Int64] for Span {
+  type Output = Option[Span]
+
+  fn divide_is_defined(self, right: Int64) -> Bool { true }
+
+  fn divide(self, right: Int64) -> Option[Span] {
+    todo
+  }
+}
+
+fn f(span: Span) -> Bool {
+  span / 0 is None
+}

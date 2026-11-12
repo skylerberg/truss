@@ -1,0 +1,3 @@
+fn f() -> Int64 {
+  5.wrapping_add(3)
+}

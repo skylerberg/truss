@@ -1,0 +1,34 @@
+fn fail(message: StringSlice)
+  uses Panic
+{
+  Panic.crash(message)
+}
+
+fn report(count: USize) -> USize
+  uses Console, Panic
+{
+  if count > 5 {
+    Panic.crash("too many to report")
+  }
+  Console.print_line("counted ${count}")
+  count
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Panic
+{
+  let crash = fail
+  let counted = report
+  let checked: (fn(USize) -> USize uses Panic) = fn(count) {
+    if count > 9 {
+      Panic.crash("far too many")
+    }
+    count + 1
+  }
+  let total = counted(arguments.length()) + checked(arguments.length())
+  if arguments.length() > 3 {
+    crash("many arguments")
+  }
+  Console.print_line("done ${total}")
+  ExitCode.success
+}

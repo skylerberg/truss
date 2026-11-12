@@ -1,5 +1,5 @@
-(** What the parser's tests share: parsing a text, and asserting what it gives, a tree, statements,
-    or one diagnostic with its fixes. *)
+(** Helpers for the parser's tests: parsing a text, and asserting its result, a tree, statements, or
+    one diagnostic with its fixes. *)
 
 val document : string -> string
 (** The text of a document of the repository, by its name. *)

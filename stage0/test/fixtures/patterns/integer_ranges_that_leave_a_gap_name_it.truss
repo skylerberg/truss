@@ -1,0 +1,6 @@
+fn f(byte: UInt8) -> Int64 {
+  match byte {
+    0..=99 => 1
+    101..=255 => 2
+  }
+}

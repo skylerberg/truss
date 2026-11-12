@@ -1,0 +1,7 @@
+fn boxed() -> any Feed {
+  any Counter(next: 0)
+}
+
+fn through(feed: mut any Feed) -> Option[Int64] {
+  mut feed.pull()
+}

@@ -1,0 +1,3 @@
+fn g(total: UInt8) -> UInt8 {
+  total + 1
+}

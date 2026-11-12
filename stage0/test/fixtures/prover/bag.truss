@@ -1,0 +1,8 @@
+type Bag[Value](first: Value, second: Value)
+
+fn Bag[Value].first(mut self) lends mut Value
+  cost amortized time O(1)
+{
+  yield mut self.first
+}
+

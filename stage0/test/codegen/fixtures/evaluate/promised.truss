@@ -1,0 +1,14 @@
+fn count_to(limit: UInt8 = 3) -> UInt8
+  cost time finite
+{
+  var count: UInt8 = 0
+  for _ in 0..limit
+    invariant count == yielded.length()
+  {
+    count += 1
+  }
+  count
+}
+
+fn f() -> UInt8
+  ensures result == 

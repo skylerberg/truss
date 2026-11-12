@@ -1,0 +1,3 @@
+impl Feed for Zip[First: Feed, Second: Feed] {
+  capability Uses = First.Uses, Second.Uses, Clock
+}

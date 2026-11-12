@@ -1,0 +1,10 @@
+fn total() -> Int64 {
+  var cursor = provide Fixed(value: 7) {
+    readings(3)
+  }
+  var sum = 0
+  for reading in mut cursor {
+    sum += reading
+  }
+  sum
+}

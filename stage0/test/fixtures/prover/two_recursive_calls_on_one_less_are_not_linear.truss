@@ -1,0 +1,9 @@
+fn f(count: UInt32) -> UInt32
+  decreases count
+  cost time O(count)
+{
+  if count == 0 { 0 } else {
+    let _ = f(count - 1)
+    f(count - 1)
+  }
+}

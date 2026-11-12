@@ -1,0 +1,8 @@
+fn f(parts: List[Slice[Int64]])
+  uses Tasks
+{
+  var cursor = parts.each()
+  concurrent for part in cursor {
+    look(part)
+  }
+}

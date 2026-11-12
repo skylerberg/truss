@@ -1,0 +1,11 @@
+fn flip(value: Int8) -> Int8 {
+  -value
+}
+
+fn least() -> Int8 {
+  -128
+}
+
+test "negated" {
+  assert flip(least()) == 0
+}

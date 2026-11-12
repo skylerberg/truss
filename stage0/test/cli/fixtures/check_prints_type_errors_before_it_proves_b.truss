@@ -1,0 +1,3 @@
+fn wrong() -> Int64 {
+  true
+}

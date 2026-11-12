@@ -1,0 +1,7 @@
+fn f() -> Int64 {
+  concurrent {
+    let left = 1
+    let right = 2
+  }
+  left
+}

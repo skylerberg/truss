@@ -1,0 +1,6 @@
+fn f() -> USize {
+  var items: List[Int64] = [1, 2, 3, 4, 5]
+  let middle = items[1..4]
+  mut items.push(9)
+  middle.length()
+}

@@ -1,0 +1,11 @@
+trait Keyed {
+  type Key: Hash
+}
+
+type Opaque(x: Int64)
+
+type P(x: Int64)
+
+impl Keyed for P {
+  type Key = Opaque
+}

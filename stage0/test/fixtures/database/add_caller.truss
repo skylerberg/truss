@@ -1,0 +1,4 @@
+
+fn quadruple(value: Int64) -> Int64 {
+  double(double(value))
+}

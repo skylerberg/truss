@@ -1,0 +1,17 @@
+type Counter(count: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    let before = self.count
+    self.count = before + amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+}

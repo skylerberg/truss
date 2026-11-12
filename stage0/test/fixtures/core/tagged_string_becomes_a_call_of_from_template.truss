@@ -1,0 +1,11 @@
+type Shout(text: String)
+
+impl FromTemplate for Shout {
+  type Part = String
+
+  fn from_template(template: Template[String]) -> Shout { todo }
+}
+
+fn g(name: own String) -> Shout {
+  Shout"hey ${own name}!"
+}

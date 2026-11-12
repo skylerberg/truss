@@ -1,0 +1,3 @@
+fn gap(low: UInt8, high: UInt8) -> UInt8 {
+  high - low
+}

@@ -1,0 +1,5 @@
+fn sort_part(part: mut Slice[Int64]) {}
+
+fn g(items: mut List[Int64]) {
+  sort_part(mut items[..2])
+}

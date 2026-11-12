@@ -1,0 +1,12 @@
+fn Span.restore(mut self)
+  ensures self.low <= self.high
+{
+  self.low = self.high
+}
+
+public fn Span.shift(mut self)
+  requires self.high < 1000
+{
+  self.low = self.high + 1
+  mut self.restore()
+}

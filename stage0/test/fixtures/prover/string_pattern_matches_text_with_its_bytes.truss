@@ -1,0 +1,8 @@
+fn f(text: String) -> USize
+  ensures result <= 3
+{
+  match text {
+    "yes" => text.length()
+    _ => 0
+  }
+}

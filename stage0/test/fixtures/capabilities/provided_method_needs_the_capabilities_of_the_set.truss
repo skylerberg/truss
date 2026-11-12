@@ -1,0 +1,4 @@
+fn f() {
+  var gauge = Gauge(last: 0)
+  mut gauge.skip()
+}
