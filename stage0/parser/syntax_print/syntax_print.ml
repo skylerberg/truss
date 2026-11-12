@@ -488,3 +488,8 @@ let file (file : file) =
   String.concat "\n"
     (List.map (fun (item : path item) -> form "use" [ path item.value ]) file.uses
     @ definitions file.definitions)
+
+module For_testing = struct
+  let definition = definition
+  let definitions = definitions
+end

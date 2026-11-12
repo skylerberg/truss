@@ -126,4 +126,4 @@ let () =
         Instance.Code { path = Top { module_ = example; name = "Point" }; type_arguments = [] }
       in
       expect_bug ~saying:"while lowering example::main::Point" (fun () ->
-          ignore (Compile.compiled compile not_code)))
+          ignore (Compile.For_testing.compiled compile not_code)))

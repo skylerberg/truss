@@ -244,10 +244,6 @@ let ask solver request =
       | None -> ());
       answer
 
-let solve solver ?(values = []) query =
-  let request = request ~values query in
-  read request (ask solver request)
-
 let ask_all solver requests =
   let requests = Array.of_list requests in
   let answers = Array.make (Array.length requests) Out_of_steps_canonical in
@@ -266,3 +262,7 @@ let ask_all solver requests =
   Array.to_list answers
 
 let solved solver = locked (fun () -> solver.solved)
+
+module For_testing = struct
+  let key = key
+end

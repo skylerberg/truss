@@ -134,3 +134,7 @@ let run ~directory ~with_ ~merge ~json =
       (if merge then "No overlap, and merging gives no new error." else "No overlap.")
   else print comparisons;
   0
+
+module For_testing = struct
+  let sentence = sentence
+end

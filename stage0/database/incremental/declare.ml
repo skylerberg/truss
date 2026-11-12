@@ -233,22 +233,3 @@ let observed_node engine (query : ('key, 'value) query) (key : 'key) : node =
   defer_collection engine node;
   sweep engine;
   node
-
-(* The result a state holds for a query and key, if nothing that changed
-   could have reached it. The phases before the query's are brought up to
-   date, and what reads their changes within the query's phase is marked,
-   so a result that is not marked is current. Nothing of the query's phase
-   is computed, no read is recorded, and the result is not made a root. *)
-let known (context : context) (query : ('key, 'value) query) (key : 'key) : 'value option =
-  let engine = context.engine in
-  if context.frame <> None then invalid_arg "Incremental.known: called while a query runs";
-  if not engine.frozen then begin
-    settle ~through:(query.phase - 1) engine;
-    mark_seeds engine query.phase
-  end;
-  match find_result engine query key with
-  | Some cell when not (cell.node.marked || cell.node.busy) -> (
-      match load engine cell with
-      | Some (Value value) -> Some value
-      | Some (Raised _) | None -> None)
-  | Some _ | None -> None

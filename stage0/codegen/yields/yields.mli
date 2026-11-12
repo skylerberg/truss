@@ -12,7 +12,6 @@
 (* The loop form. [body] is the type of the caller's loop body, whose result
    is a [Bool]: true to continue. A lending method's [yield] has no [stop], so
    it calls the body and always continues. *)
-val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
 
 (* The fields of a cursor over the method: its state, a [UInt32], then each
    parameter that is not in [evidence], named as
@@ -50,3 +49,7 @@ val cursor_drop :
   evidence:Lir.local list ->
   Lir.function_ ->
   Lir.function_
+
+module For_testing : sig
+  val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
+end

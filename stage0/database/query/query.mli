@@ -61,23 +61,11 @@ val query :
     functions unless [equal] is given. Reading a query of a later phase raises [Invalid_argument].
 *)
 
-val get : context -> ('key, 'value) input -> 'key -> 'value
-(** An input's value. Raises [Not_found] if it is not set; either answer is read. *)
-
 val find : context -> ('key, 'value) input -> 'key -> 'value option
 (** An input's value, or [None] if it is not set. *)
 
 val demand : context -> ('key, 'value) query -> 'key -> 'value
 (** A query's result. Raises the exception the query raised, or {!Cycle}. *)
-
-val known : context -> ('key, 'value) query -> 'key -> 'value option
-(** For a driver, outside any query: the result the state already holds for a query and key, if no
-    change could have reached it. The phases before the query's are brought up to date, and nothing
-    of the query's own phase is computed, so a driver can tell which results are still to be
-    computed and prepare for them together, as the prover solves many definitions' queries at once.
-    [None] is also the answer for a result whose reads may have changed, even where checking them
-    would find it current, and for one that raised. The read is not recorded and the result is not
-    kept. Raises [Invalid_argument] inside a running query. *)
 
 exception Cycle of string list
 (** A query asked, directly or through others, for its own result. Every query on the cycle has this

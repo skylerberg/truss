@@ -313,3 +313,7 @@ let group_key ~link ~deep ~members start =
                ])
            walked);
     ]
+
+module For_testing = struct
+  let references = references
+end

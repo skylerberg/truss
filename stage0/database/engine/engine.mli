@@ -42,18 +42,6 @@ val stabilize : t -> change
 (** Brings every result the engine holds up to date, and returns what was computed since the last
     call, and what came out different. *)
 
-val executed : t -> string list
-(** The results computed since the log was last cleared, as ["name(key)"]: for a check that nothing
-    was computed, and for messages. A check of one result uses {!computed}. *)
-
-val computed : t -> ('key, 'value) Query.query -> 'key list
-(** The keys whose results of the query were computed since the log was last cleared, in order. *)
-
-val result_label : ('key, 'value) Query.query -> 'key -> string
-(** A result as {!executed} names it, for messages. *)
-
-val clear_log : t -> unit
-
 type counters = Incremental.counters = {
   marked : int;
   confirmed : int;
@@ -72,22 +60,16 @@ val counters : t -> counters
 val nodes : t -> node list
 (** Every input and result of the state, apart from its fixed bases'. *)
 
-val differing : t -> node list
-(** The nodes the engine itself holds: what differs from its bases, or may. *)
-
 val unshared : t -> t -> node list
 (** The nodes of an engine that may differ from another's. *)
 
 val identity : node -> string
 (** What names a node in every engine. *)
 
-val count : t -> int
 val label : node -> string
 val subject : node -> Query.subject option
-val is_input : node -> bool
 val is_fixed : node -> bool
 val reads : t -> node -> node list
-val readers : t -> node -> node list
 
 val current_in : node -> t -> node option
 (** The same query and key in another engine, computed there if it has none. The other engine only
@@ -155,11 +137,32 @@ val audit : ?include_bases:bool -> ?before:Query.phase -> t -> string list
     [before], only the results of the phases before that one are computed again, which leaves out
     what is costly to compute and audited elsewhere, such as proofs. *)
 
-val audit_all : unit -> string list
-(** Audits every engine made since {!auditing} was set that did work since its last audit. *)
-
-val auditing : bool ref
-
 val skip_audit : t -> unit
 (** Leaves an engine out of {!audit_all}, for a test whose queries are not pure functions of their
     reads. *)
+
+module For_testing : sig
+  val executed : t -> string list
+  (** The results computed since the log was last cleared, as ["name(key)"]: for a check that
+      nothing was computed, and for messages. A check of one result uses {!computed}. *)
+
+  val computed : t -> ('key, 'value) Query.query -> 'key list
+  (** The keys whose results of the query were computed since the log was last cleared, in order. *)
+
+  val result_label : ('key, 'value) Query.query -> 'key -> string
+  (** A result as {!executed} names it, for messages. *)
+
+  val clear_log : t -> unit
+
+  val differing : t -> node list
+  (** The nodes the engine itself holds: what differs from its bases, or may. *)
+
+  val count : t -> int
+  val is_input : node -> bool
+  val readers : t -> node -> node list
+
+  val audit_all : unit -> string list
+  (** Audits every engine made since {!auditing} was set that did work since its last audit. *)
+
+  val auditing : bool ref
+end

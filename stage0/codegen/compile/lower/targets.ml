@@ -740,32 +740,3 @@ let boxed_cursor st (yielding : Ground.yielding) : Lir.place =
        });
   free_in_scope st (at boxed);
   { root = Local boxed; projections = [ Deref ] }
-
-(* Calls a trait's method on a value of a ground type, through the [impl]
-   the type has, with arguments that are places. *)
-
-let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~destination =
-  match
-    Interface.Impls.implements st.context.database
-      ~bounds:(fun _ -> [])
-      (back self)
-      { trait; trait_arguments = []; associated = [] }
-  with
-  | Some (From_impl { impl; substitution }) ->
-      let interface = impl_interface st.context impl in
-      let type_arguments =
-        List.map
-          (fun (generic : Types.generic) ->
-            match List.assoc_opt generic.generic substitution with
-            | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
-            | None -> bug "an unbound parameter of %s" (Path.show impl))
-          interface.impl_generics
-      in
-      let path = Path.Method { owner = impl; name; receiver } in
-      let signature = signature_of st.context path in
-      call_instance st
-        (Code { path; type_arguments })
-        ~signature
-        ~substitution:(bind signature.generics type_arguments)
-        ~arguments ~destination ()
-  | _ -> bug "%s has no impl of %s" (Ground.to_string self) (Path.show trait)

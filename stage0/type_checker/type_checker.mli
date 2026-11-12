@@ -4,10 +4,6 @@
 (** The stages, in the order they run. *)
 type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
-val through : stage -> Query.context -> Path.module_ -> Diagnostic.t list
-(** The diagnostics of a file's definitions from the stages up to and including one, in the order
-    the stages run, for tests of a stage that leave the later ones out. *)
-
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** Every diagnostic of a file, from the lexer to the package checks, in its offsets and in order.
 *)
@@ -34,7 +30,7 @@ val code_packages : (Path.package, Path.package list) Query.query
 
 (** The type checker's own stages, for their tests. *)
 module For_testing : sig
-  module Patterns = Patterns
-  module Usage = Usage
-  module Package_checks = Package_checks
+  val through : stage -> Query.context -> Path.module_ -> Diagnostic.t list
+  (** The diagnostics of a file's definitions from the stages up to and including one, in the order
+      the stages run, for tests of a stage that leave the later ones out. *)
 end

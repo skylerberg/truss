@@ -13,7 +13,7 @@ let fail format =
    holds is computed again in a new engine with the same inputs, and must
    come out the same. So every test of every stage also tests that the
    code database kept each result current. *)
-let () = Engine.auditing := true
+let () = Engine.For_testing.auditing := true
 
 (* With [TRUSS_TEST] set, only the tests whose names contain it run, for
    working on one. *)
@@ -37,7 +37,7 @@ let always name body =
   | exception exception_ ->
       (* With OCAMLRUNPARAM=b, the backtrace says where. *)
       fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
-  match Engine.audit_all () with
+  match Engine.For_testing.audit_all () with
   | problems ->
       List.iter (fun problem -> fail "the code database kept a stale result: %s" problem) problems
   | exception exception_ -> fail "auditing raised %s" (Printexc.to_string exception_)
@@ -46,16 +46,18 @@ let test name body = if wanted name then always name body
 
 let expect_not_recomputed engine ~first ~again query keys =
   let computed step =
-    Engine.clear_log engine;
+    Engine.For_testing.clear_log engine;
     step ();
-    Engine.computed engine query
+    Engine.For_testing.computed engine query
   in
   let before = computed first in
   let after = computed again in
   List.iter
     (fun key ->
-      if not (List.mem key before) then fail "%s was never computed" (Engine.result_label query key)
-      else if List.mem key after then fail "%s was computed again" (Engine.result_label query key))
+      if not (List.mem key before) then
+        fail "%s was never computed" (Engine.For_testing.result_label query key)
+      else if List.mem key after then
+        fail "%s was computed again" (Engine.For_testing.result_label query key))
     keys
 
 (* The workspace root: the nearest directory above the executable that

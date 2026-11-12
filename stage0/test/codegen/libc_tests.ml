@@ -76,20 +76,20 @@ let linux : Libc.system = { os = Linux; architecture = X86_64 }
 let () =
   test "the C library's numbers, prototypes, and structures are what this system's headers give"
     (fun () ->
-      match compiles (Libc.check host) with
+      match compiles (Libc.For_testing.check host) with
       | Ok () -> ()
       | Error message -> fail "the table disagrees with the headers:\n%s" message);
   test "another system's numbers do not pass for this one's" (fun () ->
       let other : Libc.system =
         { host with os = (match host.os with Linux -> Macos | Macos -> Linux) }
       in
-      match compiles (Libc.check other) with
+      match compiles (Libc.For_testing.check other) with
       | Ok () ->
           fail "the check takes the table of %s on %s" (Libc.system_name other)
             (Libc.system_name host)
       | Error _ -> ());
   test "a function that only macOS has is held to its headers, and to no other system's" (fun () ->
-      let checked system = contains (Libc.check system) "proc_pidpath" in
+      let checked system = contains (Libc.For_testing.check system) "proc_pidpath" in
       if not (checked { os = Macos; architecture = Arm64 }) then
         fail "the check for macOS leaves out proc_pidpath";
       if checked linux then fail "the check for Linux looks for proc_pidpath");
@@ -108,7 +108,8 @@ let () =
            ~site:{ definition = definition "entry"; line = 0; column = 1 });
       finish builder (Return (Some (Copy (at length))));
       let lowered =
-        Lir.to_string (instance "entry" (build builder ~parameters:[] ~result:(Some (value int32))))
+        Lir.For_testing.to_string
+          (instance "entry" (build builder ~parameters:[] ~result:(Some (value int32))))
       in
       if not (contains lowered "this system's C library has no proc_pidpath") then
         fail "the call does not stop the program:\n%s" lowered;

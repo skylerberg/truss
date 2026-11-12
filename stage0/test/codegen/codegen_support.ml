@@ -54,7 +54,7 @@ let host =
   match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
 
 let target_64 = target_64 host
-let target_32 = target_32 host
+let target_32 = Memory_layout.For_testing.target_32 host
 let field name ty = (name, Typed ty)
 let variant ?(indirect = false) name fields : variant_shape = { name; indirect; fields }
 
@@ -99,7 +99,7 @@ let shapes extra (ty : Ground.ty) : shape =
 let layout ?(target = target_64) ?(extra = []) ty =
   of_type (create target ~shape_of:(shapes extra)) ty
 
-let describe ?target ?extra ty = to_string (layout ?target ?extra ty)
+let describe ?target ?extra ty = Memory_layout.For_testing.to_string (layout ?target ?extra ty)
 
 (* Building LIR by hand *)
 
@@ -215,7 +215,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t lis
   let env = match env with Some env -> env | None -> shape_env ~extra () in
   let sources =
     [
-      ("main", Startup.main_calling (Instance.symbol (key "entry")));
+      ("main", Startup.For_testing.main_calling (Instance.symbol (key "entry")));
       ("anchors", Positions.anchors_file target_64 anchors);
     ]
   in
@@ -237,7 +237,7 @@ let example : Path.module_ = { package = { owner = None; name = "example" }; mod
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is read and checked once and not for each test. *)
-let checked_standard = lazy (Database.Testing.standard_base ())
+let checked_standard = lazy (Database.For_testing.standard_base ())
 
 (* The modules of a package named [example], of Truss source, with the
    standard library, ready to compile. Each must check cleanly. *)
@@ -292,7 +292,7 @@ let passes name source = test name (fun () -> expect_output source "test 0 passe
 let run_main ?(arguments = []) ?input ?in_order text =
   let _, compile = load text in
   match
-    Compile.run_program ?input ?in_order compile
+    Compile.For_testing.run_program ?input ?in_order compile
       ~main:(Top { module_ = example; name = "main" })
       ~arguments
   with
@@ -335,5 +335,5 @@ let standard module_ name ?(arguments = []) () =
   Ground.Named { path = Path.standard [ module_ ] name; arguments }
 
 let standard_layout ty =
-  Memory_layout.to_string
+  Memory_layout.For_testing.to_string
     (Memory_layout.of_type (create target_64 ~shape_of:(Monomorphic.shape standard_context)) ty)

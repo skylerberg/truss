@@ -37,22 +37,6 @@ let index =
             | _ -> [])
         (Query.demand database Names.package_declarations package))
 
-let real_implementation database (capability : Path.t) : Path.t option =
-  match
-    List.filter_map
-      (fun ((trait, _), (impl : Path.t)) ->
-        match impl with
-        | Impl { module_; _ } when Well_known.in_system module_ && Path.equal trait capability ->
-            Some impl
-        | _ -> None)
-      (Query.demand database index Path.standard_package)
-  with
-  | [] -> None
-  | [ impl ] -> Some impl
-  | _ ->
-      Compiler_bug.bug ~stage:"Interface" "`%s` has more than one real implementation"
-        (Path.show capability)
-
 (* A package's impls by the type they are for: each with its trait. *)
 let by_type =
   Query.query ~name:"impls_by_type" ~phase:Phases.interfaces ~show:Path.show_package

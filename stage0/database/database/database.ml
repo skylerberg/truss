@@ -877,7 +877,10 @@ let servers = Session.Server.serving
 let stop = Session.Server.stop
 let store_directory = Session.Server.store_directory
 
-module Testing = struct
+module For_testing = struct
+  let prepare_store = prepare_store
+  let open_library = open_library
+
   (* Gives one module of a package given by itself another text. *)
   let set_text engine (module_ : Path.module_) text =
     let root = Project.package_root module_.package in

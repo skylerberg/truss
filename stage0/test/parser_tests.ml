@@ -1,5 +1,3 @@
-module Layout = Lexer.For_testing.Layout
-
 (* Each test gives an input and the parser's exact output: the tree,
    printed compactly, or the one diagnostic with its code, position, and
    fixes. *)
@@ -75,15 +73,17 @@ let () =
       | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
       let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
-      let printed = Syntax_print.definitions file.definitions in
+      let printed = Syntax_print.For_testing.definitions file.definitions in
       if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
       then fail "got [%s]" (String.concat "; " printed));
   test "a function without a body keeps its signature" (fun () ->
       let file, _ = parse "fn f(x: Int64) -> Int64\nfn g() {}" in
       match file.definitions with
       | first :: _ ->
-          if Syntax_print.definition first.value <> "(fn f ((x: Int64)) -> Int64 (block error))"
-          then fail "got %s" (Syntax_print.definition first.value)
+          if
+            Syntax_print.For_testing.definition first.value
+            <> "(fn f ((x: Int64)) -> Int64 (block error))"
+          then fail "got %s" (Syntax_print.For_testing.definition first.value)
       | [] -> fail "no definitions");
   test "the definition after a broken one parses" (fun () ->
       let file, diagnostics = parse "fn f() -> {\n}\nfn g() {}" in
@@ -245,7 +245,7 @@ let () =
   test "a definition's diagnostics are placed in the file by its base" (fun () ->
       match pieces "fn g() {}\nfn f() { x = }" with
       | source, tokens, [ _; second ] -> (
-          let parsed, _ = Parser.definition source tokens second in
+          let parsed, _ = Parser.For_testing.definition source tokens second in
           match Parser.diagnostics_in_file parsed with
           | [ diagnostic ] ->
               if diagnostic.span.start <> 23 then fail "start %d" diagnostic.span.start
@@ -256,7 +256,7 @@ let () =
       let parsed text =
         let source, tokens, pieces = pieces text in
         let last = List.nth pieces (List.length pieces - 1) in
-        let parsed, _ = Parser.definition source tokens last in
+        let parsed, _ = Parser.For_testing.definition source tokens last in
         (parsed.value.value, parsed.diagnostics)
       in
       if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ");
@@ -266,7 +266,7 @@ let () =
         let source, tokens, pieces =
           pieces ("impl Clock for Fixed {\n" ^ indentation ^ "fn now(self) -> Instant\n}")
         in
-        match Parser.definition source tokens (List.hd pieces) with
+        match Parser.For_testing.definition source tokens (List.hd pieces) with
         | _, [ method_ ] ->
             if Parser.diagnostics_in_file method_ = [] then fail "the method has no diagnostic";
             (method_.value.value, method_.value.text, method_.diagnostics)
@@ -309,8 +309,8 @@ let () =
       List.iter
         (fun kind ->
           if
-            Parser.begins_statement kind
-            && (not (Layout.can_begin kind))
+            Parser.For_testing.begins_statement kind
+            && (not (Lexer.For_testing.can_begin kind))
             && not (List.mem kind only_in_brackets)
           then
             fail "%s begins a statement, but a line break before it is not a NEWLINE"
@@ -507,8 +507,8 @@ let () =
       let file, _ = parse "type T(x: Int64, 1)" in
       (match file.definitions with
       | [ { value; _ } ] ->
-          if Syntax_print.definition value <> "(type T ((x: Int64) error))" then
-            fail "got %s" (Syntax_print.definition value)
+          if Syntax_print.For_testing.definition value <> "(type T ((x: Int64) error))" then
+            fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
       let statements, _ = body_of "let y = x with (1)" in
       if List.map Syntax_print.statement statements <> [ "(let y (with x error))" ] then

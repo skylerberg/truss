@@ -23,7 +23,7 @@ let no_diagnostics text diagnostics =
 let definitions text expected =
   let file, diagnostics = parse text in
   no_diagnostics text diagnostics;
-  let actual = Syntax_print.definitions file.definitions in
+  let actual = Syntax_print.For_testing.definitions file.definitions in
   expect_strings ~expected actual
 
 let definition text expected = definitions text [ expected ]

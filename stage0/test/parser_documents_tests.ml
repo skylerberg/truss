@@ -14,7 +14,9 @@ let () =
           (Documents.block_after (document "GRAMMAR.md")
              "name resolution gives the rest their meaning")
       in
-      let missing = List.filter (fun word -> not (List.mem word listed)) Parser.spelled_words in
+      let missing =
+        List.filter (fun word -> not (List.mem word listed)) Parser.For_testing.spelled_words
+      in
       if missing <> [] then fail "not listed: %s" (String.concat ", " missing))
 
 (* The documents *)

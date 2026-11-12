@@ -27,7 +27,7 @@ let record database responses =
   List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [ "main" ] }
-let standard = lazy (Database.Testing.standard_base ())
+let standard = lazy (Database.For_testing.standard_base ())
 
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)

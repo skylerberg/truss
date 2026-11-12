@@ -101,7 +101,6 @@ let key_of context path =
   | None -> bug "no definition for %s" (Path.show path)
 
 let text_of context key = match demand context Names.text key with Some text -> text | None -> ""
-let back = Monomorphic.back
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =

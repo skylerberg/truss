@@ -671,3 +671,7 @@ let encode glue ty =
          start builder after);
   finish builder (Return None);
   instance (Encode ty) (build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
+
+module For_testing = struct
+  let copy_signature = copy_signature
+end

@@ -117,8 +117,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **Every dependency is listed.** `dune-project` sets
   `(implicit_transitive_deps false)`, so a module names only the libraries
   its own `dune` file lists, and those lists are the whole graph.
-- **Tests reach a library's hidden modules through `For_testing`,** a
-  submodule of its interface that only tests read.
+- **Tests reach internal values through `For_testing`,** a submodule of an
+  interface that exports only the values tests and tools read. CI rejects a
+  use anywhere else.
 
 ### Documents
 

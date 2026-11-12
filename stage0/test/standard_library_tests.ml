@@ -148,7 +148,7 @@ let session =
   match Sys.getenv_opt "TRUSS_PROOF_STATE" with
   | None | Some "" -> None
   | Some name -> (
-      match Database.open_library name with
+      match Database.For_testing.open_library name with
       | Ok session -> Some session
       | Error message ->
           prerr_endline message;
@@ -157,7 +157,7 @@ let session =
 let () =
   let engine =
     match session with
-    | Some session -> Database.Testing.engine session
+    | Some session -> Database.For_testing.engine session
     | None ->
         let engine = Engine.create () in
         Database.load_standard engine;

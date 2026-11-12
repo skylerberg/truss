@@ -51,7 +51,7 @@ let show work =
 let edit database name text =
   let engine = Engine.of_context database in
   let before = Engine.counters engine in
-  Database.Testing.set_text engine (module_of name) text;
+  Database.For_testing.set_text engine (module_of name) text;
   ignore (Engine.stabilize engine);
   let after = Engine.counters engine in
   {
@@ -88,9 +88,9 @@ let () =
   test "a definition that only moved is not checked again" (fun () ->
       let database = package 4 in
       let engine = Engine.of_context database in
-      let checked () = Engine.computed engine Infer.type_check_result in
+      let checked () = Engine.For_testing.computed engine Infer.type_check_result in
       if checked () = [] then fail "checking the package checked no definition";
-      Engine.clear_log engine;
+      Engine.For_testing.clear_log engine;
       ignore (edit database "app::part_0" ("\n\n" ^ module_text 0));
       match checked () with
       | [] -> ()

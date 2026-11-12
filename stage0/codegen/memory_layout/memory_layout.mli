@@ -16,7 +16,6 @@
 type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
 
 val target_64 : Libc.system -> target
-val target_32 : Libc.system -> target
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 
@@ -126,6 +125,9 @@ type discriminant =
 val discriminant : t -> string -> discriminant
 
 (* A compact, one-line description, for tests. *)
-val integer_to_string : integer -> string
 val scalar_to_string : scalar -> string
-val to_string : t -> string
+
+module For_testing : sig
+  val target_32 : Libc.system -> target
+  val to_string : t -> string
+end

@@ -35,6 +35,9 @@ jobs:
         if: github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'Revert')
         run: .github/scripts/reverts.sh
 
+      - name: Check that only tests and tools use For_testing
+        run: .github/scripts/for_testing.sh
+
       - id: opam
         uses: ./.github/actions/opam
         with:

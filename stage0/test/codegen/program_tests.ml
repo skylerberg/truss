@@ -566,7 +566,10 @@ let () =
       expect_string ~expected:"150000\n5\n150000\n" output);
   test "the console a program is given is a value its start owns and drops" (fun () ->
       let _, compile = load Fixtures.Program.console_a_program_is_given_is_a_value_its_start in
-      match Compile.compiled compile (Program_main (Top { module_ = example; name = "main" })) with
+      match
+        Compile.For_testing.compiled compile
+          (Program_main (Top { module_ = example; name = "main" }))
+      with
       | Code instance ->
           let console local =
             match instance.main.locals.(local).ty with
@@ -583,7 +586,8 @@ let () =
                   block.statements)
               instance.main.blocks
           in
-          if not dropped then fail "no drop of the console:\n%s" (Lir.to_string instance)
+          if not dropped then
+            fail "no drop of the console:\n%s" (Lir.For_testing.to_string instance)
       | _ -> fail "expected code")
 
 let () =
@@ -623,7 +627,7 @@ let () =
                     with
                     | Top _, Some { generics = []; specification_only = false; _ } ->
                         ignore
-                          (Compile.compiled compile
+                          (Compile.For_testing.compiled compile
                              (Code { path = declaration.path; type_arguments = [] }))
                     | _ -> ())
                   (Query.demand database Resolve.Names.declarations example);

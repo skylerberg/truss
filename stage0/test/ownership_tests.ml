@@ -1,12 +1,9 @@
-module Patterns = Type_checker.For_testing.Patterns
-module Usage = Type_checker.For_testing.Usage
-
 (* The tests of moves, loans, and views. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Ownership
+let check = Type_checker.For_testing.through Ownership
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = Fixtures.Ownership.keep

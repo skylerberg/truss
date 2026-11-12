@@ -105,7 +105,10 @@ let changes (project : Project.t) base =
 let tests_changed (project : Project.t) base =
   let keys context session =
     let compile =
-      Compile.create context (Compiler.target ())
+      Compile.create
+        ~want:(fun lowering wanted ->
+          Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted))
+        context (Compiler.target ())
         { compiler = "cc"; identity = "lowering only" }
         (Build.cache (Database.objects_directory ()))
         { build = Development; optimization = O1; extra = [] }

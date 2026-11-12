@@ -187,8 +187,5 @@ val hash : string -> string
 (** The hash of a query's text, in hexadecimal, with a prefix naming the format and the algorithm.
 *)
 
-val show_term : term -> string
-(** A term as SMT-LIB, with the prover's own names, for tests and debugging. *)
-
 val show_symbol : symbol -> string
 (** A symbol as readable text, for tests and debugging. *)

@@ -161,3 +161,7 @@ let differences ~(written : Lock.t) ~(current : Lock.t) =
           Some (Printf.sprintf "Nothing in the build uses `%s`." (Path.show_package line.name))
         else None)
       written
+
+module For_testing = struct
+  let holds = holds
+end

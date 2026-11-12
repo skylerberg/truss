@@ -83,3 +83,16 @@ let audit ?include_bases ?before engine =
 let audit_all = Incremental.audit_all
 let auditing = Incremental.auditing
 let skip_audit = Incremental.skip_audit
+
+module For_testing = struct
+  let executed = executed
+  let computed = computed
+  let result_label = result_label
+  let clear_log = clear_log
+  let differing = differing
+  let count = count
+  let is_input = is_input
+  let readers = readers
+  let audit_all = audit_all
+  let auditing = auditing
+end

@@ -100,14 +100,6 @@ val published : Path.package -> Registry.Version.t -> (session, string) result
 (** A published package at a version, as a session of its own with the packages it was published
     with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
 
-val open_library : ?modules:(Path.module_ * string) list -> string -> (session, string) result
-(** The standard library as a state of its own, for working on the library: the [standard] package
-    is the session's own inputs, over no base, set from [modules], which are the sources built into
-    this compiler unless given. The state is opened from the pointer of that name, so each caller
-    that gives its own name keeps its own state, and is kept under {!Compiler_version.digest}, so it
-    is found again after an edit to the library, and by a test as by the command line. An error says
-    that another process has the state open. *)
-
 (** {1 The store} *)
 
 val objects_directory : unit -> string
@@ -122,10 +114,6 @@ val results : kind:string -> (string -> string option) * (string -> string -> un
 
 val flush_store : unit -> unit
 (** Writes the store's in-memory contents to disk. *)
-
-val prepare_store : unit -> unit
-(** Checks the standard library and keeps its state in the store, unless the store has it, as the
-    first session opened in a new store does. *)
 
 val store_directory : unit -> string
 (** Where the store is: [$TRUSS_CACHE], or else [$XDG_CACHE_HOME/truss], or else [~/.cache/truss].
@@ -261,7 +249,19 @@ val load_package :
 val load_standard : Engine.t -> unit
 (** Gives an engine the [standard] package, built into the compiler. *)
 
-module Testing : sig
+module For_testing : sig
+  val prepare_store : unit -> unit
+  (** Checks the standard library and keeps its state in the store, unless the store has it, as the
+      first session opened in a new store does. *)
+
+  val open_library : ?modules:(Path.module_ * string) list -> string -> (session, string) result
+  (** The standard library as a state of its own, for working on the library: the [standard] package
+      is the session's own inputs, over no base, set from [modules], which are the sources built
+      into this compiler unless given. The state is opened from the pointer of that name, so each
+      caller that gives its own name keeps its own state, and is kept under
+      {!Compiler_version.digest}, so it is found again after an edit to the library, and by a test
+      as by the command line. An error says that another process has the state open. *)
+
   val set_text : Engine.t -> Path.module_ -> string -> unit
   (** Gives one module of a package set with {!load_package} another text. *)
 

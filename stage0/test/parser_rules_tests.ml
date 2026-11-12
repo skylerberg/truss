@@ -325,8 +325,8 @@ let () =
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       match file.definitions with
       | [ { value; _ } ] ->
-          if Syntax_print.definition value <> "(fn f () error (ensures true) (block x))" then
-            fail "got %s" (Syntax_print.definition value)
+          if Syntax_print.For_testing.definition value <> "(fn f () error (ensures true) (block x))"
+          then fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
   test "an error in a member leaves the next member parsed" (fun () ->
       let file, diagnostics =

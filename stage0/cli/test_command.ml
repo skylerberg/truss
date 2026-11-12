@@ -278,3 +278,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
         else print_report tests records ~timings:show_timings timings;
         if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0
         else 1
+
+module For_testing = struct
+  let duration = duration
+end

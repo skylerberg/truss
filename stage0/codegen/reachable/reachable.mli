@@ -6,7 +6,6 @@
    in the LIR, so the result is the same on every run. *)
 
 (* The instances an instance refers to, in the order they first appear. *)
-val references : Memory_layout.env -> Lir.t -> Instance.key list
 
 (* Every instance reachable from the roots, roots first, each once, in the
    order it is first reached. [lookup] gives what an instance compiles to. *)
@@ -61,3 +60,7 @@ val group_key :
   members:Instance.key list ->
   Instance.key ->
   string
+
+module For_testing : sig
+  val references : Memory_layout.env -> Lir.t -> Instance.key list
+end

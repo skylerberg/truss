@@ -8,12 +8,13 @@ val expression : Syntax.expression -> string
 val clause : Syntax.clause -> string
 val law : Syntax.law -> string
 val statement : Syntax.statement -> string
-
-val definition : ?methods:string list -> Syntax.definition -> string
-(** A definition. [methods] are the methods written inside a trait, an [impl], or a capability,
-    already printed, which come after its own members. *)
-
-val definitions : Syntax.definition Syntax.item list -> string list
-(** A file's definitions, with each method inside the one it is written inside. *)
-
 val file : Syntax.file -> string
+
+module For_testing : sig
+  val definition : ?methods:string list -> Syntax.definition -> string
+  (** A definition. [methods] are the methods written inside a trait, an [impl], or a capability,
+      already printed, which come after its own members. *)
+
+  val definitions : Syntax.definition Syntax.item list -> string list
+  (** A file's definitions, with each method inside the one it is written inside. *)
+end

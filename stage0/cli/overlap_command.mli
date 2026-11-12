@@ -1,5 +1,3 @@
-val sentence : Database.overlap -> string
-
 type comparison = {
   other : string;
   overlaps : Database.overlap list;
@@ -11,3 +9,7 @@ val to_json : comparison list -> Json.t
 val print : comparison list -> unit
 val with_other_worktrees : Database.session -> comparison list
 val run : directory:string -> with_:string option -> merge:bool -> json:bool -> int
+
+module For_testing : sig
+  val sentence : Database.overlap -> string
+end

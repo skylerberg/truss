@@ -1019,6 +1019,19 @@ let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
   }
 
 module For_testing = struct
-  module Lower = Lower
+  module Lower = struct
+    type context = Lower.context
+    type constant = Lower.constant = Folded of Lir.data | Run of Ground.ty
+
+    let context ?checks ?constant database target = Lower.context ?checks ?constant database target
+    let constant = Lower.constant
+    let constant_value = Lower.For_testing.constant_value
+  end
+
   module Intrinsics = Intrinsics
+
+  let parse_report = parse_report
+  let build_supplied_tests = build_supplied_tests
+  let compiled = compiled
+  let run_program = run_program
 end

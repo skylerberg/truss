@@ -73,24 +73,6 @@ val core_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
       and the substitution that maps [Self] and the trait's generic parameters to the [impl]'s
       types. *)
 
-val specification : (Resolve.Names.key, Core.t option) Query.query
-(** What a caller's proof reads of a definition: its core form, without the body of a function whose
-    body no caller's proof reads. The parameters and the contract are built before the body, so
-    their nodes are numbered the same whatever the body is. Editing such a body leaves this result
-    equal, and no caller is proven again.
-
-    In the function's own package, a caller's proof reads the body of a function in the logic, which
-    the body defines. In another package, it reads that body only if the function is [transparent]:
-    a body that other packages' proofs read is part of the package's interface, and only a marked
-    one is. In every package, it reads the body that a trait provides for a method, which an [impl]
-    inherits or must agree with. It never reads the body of a theorem: a call of a theorem asserts
-    the [requires] and assumes the [ensures]. *)
-
-val exported_specification : (Resolve.Names.key, Core.t option) Query.query
-(** What a caller's proof in another package reads of a definition. Editing the body of a function
-    that is not [transparent] leaves this result equal, so no proof in a package that depends on
-    this one runs again. *)
-
 val specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
 (** As {!core_of_path}, for {!specification}. *)
 
@@ -106,3 +88,23 @@ val clean_tables : Query.context -> Resolve.Names.key -> tables option
     so that one mistake is not reported again by a later check. *)
 
 val is_clean : Query.context -> Resolve.Names.key -> bool
+
+module For_testing : sig
+  val specification : (Resolve.Names.key, Core.t option) Query.query
+  (** What a caller's proof reads of a definition: its core form, without the body of a function
+      whose body no caller's proof reads. The parameters and the contract are built before the body,
+      so their nodes are numbered the same whatever the body is. Editing such a body leaves this
+      result equal, and no caller is proven again.
+
+      In the function's own package, a caller's proof reads the body of a function in the logic,
+      which the body defines. In another package, it reads that body only if the function is
+      [transparent]: a body that other packages' proofs read is part of the package's interface, and
+      only a marked one is. In every package, it reads the body that a trait provides for a method,
+      which an [impl] inherits or must agree with. It never reads the body of a theorem: a call of a
+      theorem asserts the [requires] and assumes the [ensures]. *)
+
+  val exported_specification : (Resolve.Names.key, Core.t option) Query.query
+  (** What a caller's proof in another package reads of a definition. Editing the body of a function
+      that is not [transparent] leaves this result equal, so no proof in a package that depends on
+      this one runs again. *)
+end

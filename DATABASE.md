@@ -221,12 +221,6 @@ compare those counts for the same edit in a small package and a large one
   through the phase of what it reads,** so a driver never sees a result that
   a change has not reached yet. Later phases keep what is queued for them
   until something of theirs is read, or the state is written.
-- **A driver can ask which results are still to be computed.** `Query.known`
-  brings the phases before a query's up to date and gives the result the
-  state holds, if no change could have reached it, computing nothing of the
-  query's own phase. The prover asks this of each definition's verdict, and
-  solves the queries of the others together before it reads their verdicts.
-  Inside a running query it is an error, since the read is not recorded.
 - **A result whose query raised a fatal exception,** such as a stack
   overflow, stays queued, so it is computed again and never written as
   current.

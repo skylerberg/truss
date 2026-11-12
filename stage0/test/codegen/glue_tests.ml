@@ -50,7 +50,9 @@ let fill_storage ~target ~buffer values =
 let copy_call glue ty ~destination ~source =
   Lir.Call
     {
-      target = Direct { function_ = Instance (Copy ty); signature = Glue.copy_signature glue ty };
+      target =
+        Direct
+          { function_ = Instance (Copy ty); signature = Glue.For_testing.copy_signature glue ty };
       arguments =
         [
           Address { place = at destination; writable = true };
@@ -70,10 +72,11 @@ let () =
         Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~usize ()
       in
       expect_string ~expected:"fn(_0: *mut Holder)\nb0: drop *_0.items; return"
-        (Lir.function_to_string (Lir.canonical (Glue.drop glue (named "Holder")).main)));
+        (Lir.For_testing.function_to_string
+           (Lir.For_testing.canonical (Glue.drop glue (named "Holder")).main)));
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->
       let calls =
-        Array.to_list (Lir.canonical (Glue.copy glue (storage int32)).main).blocks
+        Array.to_list (Lir.For_testing.canonical (Glue.copy glue (storage int32)).main).blocks
         |> List.concat_map (fun (block : Lir.basic_block) -> block.statements)
         |> List.filter_map (function
           | Lir.Call { target = Intrinsic index; _ } -> Some index

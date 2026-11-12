@@ -1,0 +1,9 @@
+fn double(value: Int64) -> Int64
+  requires value < 1000 && value > -1000
+{
+  value * 2
+}
+
+test "doubles" {
+  assert double(2) == 4
+}

@@ -144,3 +144,7 @@ let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> [
   match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
   | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()
+
+module For_testing = struct
+  let objects = objects
+end
