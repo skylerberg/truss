@@ -109,11 +109,21 @@ val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability list -> capability list
 
+val result_type : result -> ty
+(** The type of what a function returns, yields, or lends. *)
+
+val show_mode : mode -> string
+(** How a mode is written before a type: [""], ["mut "], or ["own "]. *)
+
 val map : ?capabilities:(capability list -> capability list) -> (ty -> ty option) -> ty -> ty
 (** Rewrites a type from the outside in: where [f] gives a replacement, it is used as it is, and
     elsewhere the type's parts are rewritten. Every part is visited: arguments, function inputs and
     outputs, [any] and projection traits. [capabilities] rewrites each set of capabilities among
     those parts: the [uses] of a function type, and a capability argument. *)
+
+val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
+(** Whether [f] holds for a type or any of its parts, the parts {!map} visits. [resolve] is applied
+    to each type before it is tested and taken apart, for a type with variables bound elsewhere. *)
 
 val has_capability_variable : capability list -> bool
 
@@ -150,6 +160,10 @@ val show_capability : capability -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
 
+val show_output : result -> string
+(** A function's result as a signature writes it after the parameters: [" -> Int64"],
+    [" yields mut Element"], or nothing for unit. *)
+
 (** {1 Interfaces}
 
     What other definitions may depend on: the checked outward-facing part of each definition. *)
@@ -160,6 +174,12 @@ type generic_kind =
   | Capability_generic
 
 type generic = { generic : parameter; kind : generic_kind }
+
+val generic_arguments : generic list -> argument list
+(** The arguments that name each generic itself, as the definition's own body sees them. *)
+
+val bounds_of : generic list -> parameter -> trait_reference list
+(** The bounds a list of generics gives one type parameter. *)
 
 val substitution_of : generic list -> argument list -> substitution option
 (** What stands for each of a definition's generic parameters, given its arguments in order, or

@@ -40,15 +40,7 @@ let head_type context owner (head : type_head) =
                (if List.length expected = 1 then "parameter" else "parameters")
                (List.length generics))
       | _ -> ());
-      let arguments =
-        List.map
-          (fun (generic : T.generic) ->
-            match generic.kind with
-            | Value_generic -> T.Value (T.Value_parameter generic.generic)
-            | Type_generic _ -> T.Type (T.Parameter generic.generic)
-            | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
-          generics
-      in
+      let arguments = T.generic_arguments generics in
       let type_ =
         match Intrinsic.builtin_of_path type_path with
         | Some Never -> T.Never
@@ -66,15 +58,6 @@ let head_type context owner (head : type_head) =
   | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
 
 let trait_self_parameter trait : T.parameter = { owner = trait; name = "Self" }
-
-let generic_arguments generics =
-  List.map
-    (fun (generic : T.generic) ->
-      match generic.kind with
-      | Value_generic -> T.Value (T.Value_parameter generic.generic)
-      | Type_generic _ -> T.Type (T.Parameter generic.generic)
-      | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
-    generics
 
 (* The fields of a shape, in the order of their names. The order of
    declaration is not part of a shape, so reordering a type's fields changes
@@ -124,7 +107,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
       let trait_generics = Lower.generics context path generics in
       let self_parameter = trait_self_parameter path in
       let self_trait : T.trait_reference =
-        { trait = path; trait_arguments = generic_arguments trait_generics; associated = [] }
+        { trait = path; trait_arguments = T.generic_arguments trait_generics; associated = [] }
       in
       Hashtbl.replace context.bounds self_parameter [ self_trait ];
       let context =
@@ -415,7 +398,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
               context )
         | Type_definition { generics; body; clauses; _ } ->
             let type_generics = Lower.generics context path generics in
-            let self = T.Named { path; arguments = generic_arguments type_generics } in
+            let self = T.Named { path; arguments = T.generic_arguments type_generics } in
             let context = { context with self_type = Some self } in
             let shape =
               match body with

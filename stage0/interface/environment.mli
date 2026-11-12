@@ -29,8 +29,6 @@ type lowered_interface = {
       (** The generic parameters' bounds. *)
 }
 
-val generic_arguments : Types.generic list -> Types.argument list
-
 val lower :
   Query.context ->
   Resolve.Names.key ->

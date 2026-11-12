@@ -21,6 +21,7 @@ type checked = {
 
 let is_digit c = c >= '0' && c <= '9'
 let is_ascii_word c = is_digit c || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+let is_hexadecimal_digit c = is_digit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 
 let is_radix_prefix text start =
   start + 1 < String.length text
@@ -54,7 +55,6 @@ let scan_end text start =
   in
   let stop = if !only_digits then quoted_groups stop else stop in
   let hexadecimal = is_radix_prefix text start && Char.lowercase_ascii text.[start + 1] = 'x' in
-  let is_hexadecimal_digit c = is_digit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') in
   (* C's hexadecimal float, as in `0x1.8p3`, is one token too. Its exponent
      is required, which tells it from a method call on a hexadecimal
      literal, as in `0xFF.abs()`. *)
@@ -160,7 +160,7 @@ let base_name = function 16 -> "hexadecimal" | 2 -> "binary" | _ -> "octal"
 
 let is_digit_of_base base c =
   match base with
-  | 16 -> is_digit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+  | 16 -> is_hexadecimal_digit c
   | 2 -> c = '0' || c = '1'
   | _ -> c >= '0' && c <= '7'
 

@@ -950,17 +950,6 @@ let () =
 let () =
   test "no table of the standard library holds a type inference left unsolved" (fun () ->
       let database = setup [] in
-      let rec unsolved = function
-        | Types.Variable _ | Types.Literal _ -> true
-        | Types.Named { arguments; _ } | Types.Cursor { arguments; _ } ->
-            List.exists (function Types.Type type_ -> unsolved type_ | _ -> false) arguments
-        | Types.Function { inputs; output; _ } -> (
-            List.exists (fun (_, type_) -> unsolved type_) inputs
-            ||
-            match output with
-            | Returns type_ | Yields (_, type_) | Lends (_, type_) -> unsolved type_)
-        | _ -> false
-      in
       List.iter
         (fun ((module_ : Path.module_), _) ->
           List.iter
@@ -971,7 +960,10 @@ let () =
               | Some { tables; _ } ->
                   List.iter
                     (Array.iter (function
-                      | Some type_ when unsolved type_ ->
+                      | Some type_
+                        when Types.exists
+                               (function Variable _ | Literal _ -> true | _ -> false)
+                               type_ ->
                           fail "%s: an unsolved type" (Path.show declaration.path)
                       | _ -> ()))
                     [ tables.types; tables.local_types ]

@@ -113,9 +113,7 @@ let cursor_interface database ~method_ =
   with
   | Some ({ output = Yields (_, element); _ } as signature), Some trait_interface ->
       let impl_generics = signature.generics in
-      let for_type =
-        T.Cursor { method_; arguments = Environment.generic_arguments signature.generics }
-      in
+      let for_type = T.Cursor { method_; arguments = Types.generic_arguments signature.generics } in
       let self : T.substitution = [ ({ owner = cursor_trait; name = "Self" }, T.Type for_type) ] in
       let of_cursor (declared : T.signature) =
         let declared = T.substitute_signature self declared in
@@ -175,8 +173,7 @@ let derived_interface database ~type_ ~trait =
           type_interface.type_generics
       in
       let for_type =
-        T.Named
-          { path = type_; arguments = Environment.generic_arguments type_interface.type_generics }
+        T.Named { path = type_; arguments = Types.generic_arguments type_interface.type_generics }
       in
       let self : T.substitution = [ ({ owner = trait; name = "Self" }, T.Type for_type) ] in
       Some
@@ -291,9 +288,7 @@ let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
     !found
   in
   let signature = method_.method_signature in
-  let result =
-    match signature.output with T.Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
-  in
+  let result = T.result_type signature.output in
   if signature.generics <> [] then Has_generics
   else if
     List.exists (fun (info : T.parameter_info) -> names_self info.type_) signature.parameters
@@ -560,14 +555,7 @@ let signature database (path : Path.t) =
                 T.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
                   (T.substitute_signature substitution declared)
               in
-              let bounds parameter =
-                List.concat_map
-                  (fun (generic : T.generic) ->
-                    match generic.kind with
-                    | Type_generic bounds when generic.generic = parameter -> bounds
-                    | _ -> [])
-                  signature.generics
-              in
+              let bounds = T.bounds_of signature.generics in
               { signature with uses = normalize_capabilities database ~bounds signature.uses })
             (Query.demand database Environment.signature
                (Method { owner = impl.implements.trait; name; receiver }))

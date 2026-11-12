@@ -4073,13 +4073,7 @@ and current_bounds context : Interface.Impls.bounds =
         | Some signature -> signature.generics
         | None -> impl_generics current)
   in
-  fun parameter ->
-    List.concat_map
-      (fun (generic : T.generic) ->
-        match generic.kind with
-        | Type_generic bounds when generic.generic = parameter -> bounds
-        | _ -> [])
-      generics
+  fun parameter -> T.bounds_of generics parameter
 
 (* A trait's laws, and those of the traits it requires, as facts about a
    type, each quantified over its parameters. A law is shown for each
@@ -9808,8 +9802,7 @@ let type_ ?reveal database (source : source) ~path =
       let ty =
         match Query.demand database Interface.Environment.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
-            T.Named
-              { path; arguments = Interface.Environment.generic_arguments interface.type_generics }
+            T.Named { path; arguments = Types.generic_arguments interface.type_generics }
         | _ -> T.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in

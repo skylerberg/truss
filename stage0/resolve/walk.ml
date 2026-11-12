@@ -90,7 +90,7 @@ type state = {
 
 let reported state ?fixes code (span : span) message =
   let diagnostic =
-    Diagnostic.make ?fixes ~code:(Resolve code) (Source.span span.start span.stop) message
+    Diagnostic.make ?fixes ~code:(Resolve code) (Syntax.Span.to_source span) message
   in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
@@ -100,58 +100,14 @@ let set state (name : name) target = state.names.(name.id) <- Some target
 
 (* Closest names *)
 
-(* The optimal string alignment distance: insertions, deletions,
-   substitutions, and swaps of two neighboring letters, the usual typos,
-   each count one. *)
-let distance left right =
-  let rows = String.length left + 1 and columns = String.length right + 1 in
-  let table = Array.make_matrix rows columns 0 in
-  for i = 0 to rows - 1 do
-    table.(i).(0) <- i
-  done;
-  for j = 0 to columns - 1 do
-    table.(0).(j) <- j
-  done;
-  for i = 1 to rows - 1 do
-    for j = 1 to columns - 1 do
-      let cost = if left.[i - 1] = right.[j - 1] then 0 else 1 in
-      let best =
-        min (min (table.(i - 1).(j) + 1) (table.(i).(j - 1) + 1)) (table.(i - 1).(j - 1) + cost)
-      in
-      table.(i).(j) <-
-        (if i > 1 && j > 1 && left.[i - 1] = right.[j - 2] && left.[i - 2] = right.[j - 1] then
-           min best (table.(i - 2).(j - 2) + 1)
-         else best)
-    done
-  done;
-  table.(rows - 1).(columns - 1)
-
-(* The visible name closest to [text], if one is near enough to be a typo:
-   at most a third of the name's letters away, and at least one. *)
-let closest text candidates =
-  let limit = max 1 (String.length text / 3) in
-  let best =
-    List.fold_left
-      (fun best candidate ->
-        let distance = distance text candidate in
-        if candidate = text || distance > limit then best
-        else
-          match best with
-          | Some (_, best_distance) when best_distance <= distance -> best
-          | _ -> Some (candidate, distance))
-      None
-      (List.sort_uniq compare candidates)
-  in
-  Option.map fst best
-
 let unknown state (name : name) ~what candidates =
   let fixes =
-    match closest name.text candidates with
+    match Diagnostic.closest name.text candidates with
     | Some candidate ->
         [
           Diagnostic.fix
             (Printf.sprintf "Write `%s`." candidate)
-            [ Diagnostic.replace (Source.span name.span.start name.span.stop) candidate ];
+            [ Diagnostic.replace (Syntax.Span.to_source name.span) candidate ];
         ]
     | None -> []
   in
@@ -415,9 +371,7 @@ and local_value state scope (name : name) =
                       ~fixes:
                         [
                           Diagnostic.fix "Write `None`."
-                            [
-                              Diagnostic.replace (Source.span name.span.start name.span.stop) "None";
-                            ];
+                            [ Diagnostic.replace (Syntax.Span.to_source name.span) "None" ];
                         ]
                       (Printf.sprintf
                          "Truss has no `%s`. A value that may be missing is an `Option`, and \

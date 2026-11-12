@@ -160,6 +160,9 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
+let result_type = function Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
+let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
+
 let rec map ?(capabilities = Fun.id) f type_ =
   match f type_ with
   | Some replacement -> replacement
@@ -197,6 +200,24 @@ let rec map ?(capabilities = Fun.id) f type_ =
       | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
       | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
 
+let rec exists ?(resolve = Fun.id) f type_ =
+  let type_ = resolve type_ in
+  let exists = exists ~resolve f in
+  let argument = function Type type_ -> exists type_ | Value _ | Capabilities _ -> false in
+  let trait (reference : trait_reference) =
+    List.exists argument reference.trait_arguments
+    || List.exists (fun (_, type_) -> exists type_) reference.associated
+  in
+  f type_
+  ||
+  match type_ with
+  | Named { arguments; _ } | Cursor { arguments; _ } -> List.exists argument arguments
+  | Projection { base; trait = reference; _ } -> exists base || trait reference
+  | Function { inputs; output; _ } ->
+      List.exists (fun (_, type_) -> exists type_) inputs || exists (result_type output)
+  | Any reference -> trait reference
+  | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
@@ -207,11 +228,9 @@ let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
   | Named { arguments; _ } | Cursor { arguments; _ } -> List.exists argument_unsolved arguments
   | Projection { base; trait; _ } -> contains_unsolved base || trait_unsolved trait
-  | Function { inputs; output; _ } -> (
+  | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> contains_unsolved type_) inputs
-      ||
-      match output with
-      | Returns type_ | Yields (_, type_) | Lends (_, type_) -> contains_unsolved type_)
+      || contains_unsolved (result_type output)
   | Any trait -> trait_unsolved trait
   | Parameter _ | Never | Integer | Error _ -> false
 
@@ -310,20 +329,18 @@ and show_trait trait =
   | [] -> path_name trait.trait
   | all -> Printf.sprintf "%s[%s]" (path_name trait.trait) (String.concat ", " all)
 
+and show_output = function
+  | Returns type_ when type_ = unit -> ""
+  | Returns type_ -> " -> " ^ show type_
+  | Yields (written, type_) -> " yields " ^ show_mode written ^ show type_
+  | Lends (written, type_) -> " lends " ^ show_mode written ^ show type_
+
 and show_function (function_type : function_type) =
-  let mode = function Read -> "" | Mut -> "mut " | Own -> "own " in
   let inputs =
     String.concat ", "
-      (List.map (fun (written, type_) -> mode written ^ show type_) function_type.inputs)
+      (List.map (fun (written, type_) -> show_mode written ^ show type_) function_type.inputs)
   in
-  let output =
-    match function_type.output with
-    | Returns type_ when type_ = unit -> ""
-    | Returns type_ -> " -> " ^ show type_
-    | Yields (written, type_) -> " yields " ^ mode written ^ show type_
-    | Lends (written, type_) -> " lends " ^ mode written ^ show type_
-  in
-  let base = Printf.sprintf "fn(%s)%s" inputs output in
+  let base = Printf.sprintf "fn(%s)%s" inputs (show_output function_type.output) in
   let uses = List.map show_capability function_type.uses in
   let costs =
     List.map
@@ -351,6 +368,23 @@ and show_function (function_type : function_type) =
 
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }
+
+let generic_arguments generics =
+  List.map
+    (fun generic ->
+      match generic.kind with
+      | Value_generic -> Value (Value_parameter generic.generic)
+      | Type_generic _ -> Type (Parameter generic.generic)
+      | Capability_generic -> Capabilities [ Capability_parameter generic.generic ])
+    generics
+
+let bounds_of generics parameter =
+  List.concat_map
+    (fun generic ->
+      match generic.kind with
+      | Type_generic bounds when generic.generic = parameter -> bounds
+      | _ -> [])
+    generics
 
 let substitution_of (generics : generic list) arguments : substitution option =
   if List.length generics = List.length arguments then
