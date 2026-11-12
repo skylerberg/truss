@@ -677,8 +677,6 @@ let () =
           ignore (Query.demand database asker ()))
         asker [ () ])
 
-(* What the review of interfaces found *)
-
 let () =
   test "a type that contains itself with growing arguments does not hang" (fun () ->
       let database =

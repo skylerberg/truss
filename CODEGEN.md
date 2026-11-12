@@ -15,7 +15,7 @@ linker turns into a program. In the core form every call has a resolved
 callee and one argument per parameter, each argument is marked as a place
 or a value, every operator is resolved to an intrinsic operation or a call,
 and every type is fully inferred. A slice of a range, `items[1..3]`, is a
-call of the base type's `slice_range` with both bounds worked out, so
+call of the base type's `slice_range` with both bounds evaluated, so
 lowering it is lowering that call. Lowering from the core form needs no
 name resolution and no type inference. Every proof obligation has been
 discharged by then.
@@ -73,7 +73,7 @@ checked definitions
                             └──────────── LIR, cached per instance ────────┘
 ```
 
-Code generation reads what the type checker made of each definition, as
+Code generation reads each definition's core form, as
 queries of the code database. It does not depend on the prover, and the
 prover and the code database do not depend on it. Only a driver depends on
 code generation: the command line, a test, a tool, and `stage0/evaluator`,
@@ -185,7 +185,7 @@ since it does not wait for proofs:
 - A storage operation checks its own precondition. A push and an
   insertion need room, a pop needs an element, a new length is within the
   capacity, and a new capacity is at least the length.
-- A call of the C library checks what the table says of each argument: a
+- A call of the C library checks each argument against its row of the table: a
   view has the elements that the function reads, a storage has the room
   that the function writes into or the elements that it changes, and
   elements that the function reads up to a zero end with one.
@@ -228,7 +228,7 @@ nothing reads.
 
 ### Roots
 
-A build starts from roots and compiles only what they can reach:
+A build starts from roots and compiles only the instances they reach:
 
 - **A program:** its `main`.
 - **A test run:** each test that must run, that is, each test without a
@@ -401,7 +401,7 @@ no pointers, no `size_of`, and no foreign code.
   with spare values, the other variants use those values instead of a tag.
   Stage0 uses these spare values: non-null pointers, `Bool`, `Character`, and
   the unused values of another sum type's tag. So `Option[List[Int64]]`,
-  `Option[Bool]`, and `Option[Character]` are the size of what they hold.
+  `Option[Bool]`, and `Option[Character]` are the size of their payload.
   The field with the most spare values is used, the first in placement order
   on a tie, and the variants without fields take its first values, in
   declaration order. What is left is spare for the type around it, so
@@ -650,14 +650,14 @@ elements are never moved out, which is how a `Storage`'s drop drops each
 element.
 
 A function starts with every parameter it owns holding a value, except
-what the pointer for a large result points to: the LIR names that
+the slot a large result's pointer addresses: the LIR names that
 parameter, so the first write of the result drops nothing, whatever the
 caller's memory held before.
 
 **A write gives a place a value and drops nothing.** Whatever replaces a
-value drops it first, with a `drop` of its own. So an assignment works its
-new value out into a temporary, drops what the place still owns, and moves
-the temporary in: `items = rebuild(own items)` drops nothing, since the
+value drops it first, with a `drop` of its own. So an assignment evaluates its
+new value into a temporary, drops the place's old value if the place still
+owns it, and moves the temporary in: `items = rebuild(own items)` drops nothing, since the
 place was moved from, `name = other_name` drops the old `name`, and
 `names[0] = other_name` drops the old element. A compound assignment and a
 field written by `with` do the same, and each evaluates the place it
@@ -686,7 +686,7 @@ memory and handles.
 `Glue` generates these for each monomorphic type, each as its own instance,
 so they are compiled once and shared:
 
-- **Drop:** frees what the value owns, field by field. A type is *trivial*
+- **Drop:** frees the value's storage and handles, field by field. A type is *trivial*
   when it holds no `Storage`, no `indirect` variant, and no handle
   anywhere; its drop is empty and every drop of it is removed. A sum type's
   drop switches on its variant and drops that variant's fields. An
@@ -1060,7 +1060,7 @@ of `each` that a `for` loop makes, which the core form gives it. The
 answer starts as true for `forall` and false for `exists`, each value's
 body is evaluated, and the first one that decides the answer sets it and
 leaves the loop as `break` does, so an `each` that is inlined drops what
-it owns. It costs what the loop costs up to that value, and a quantifier
+it owns. It costs the same as the loop up to that value, and a quantifier
 inside a loop or another quantifier needs nothing more.
 
 A loop over a yielding method that is already inlined around it, as a
@@ -1075,8 +1075,8 @@ so it only drives `for` loops.
 ### Cursors
 
 When some code pulls a yielding method with `next()`, it is lowered a second
-time, for pulling. `next` gives its caller a value of its own: what the
-method makes is moved out, and a part of a place it yields a view of, such
+time, for pulling. `next` gives its caller an owned value: a value the
+method computes is moved out, and a view it yields of part of a place, such
 as a `List` element from `each`, is copied, so that the element stays
 where it is. `Yields` makes that version a state machine, as C# and Kotlin
 compile iterators:
@@ -1114,8 +1114,8 @@ with the type's own `next`: it is called until it gives `None`, and the
 loop owns each value it gives.
 
 A cursor's drop function runs the `stop` path of the `yield` it is stopped
-at, which drop elaboration has already filled with the drops of what the
-method owns there. That is what DESIGN.md means by a dropped cursor ending
+at, which drop elaboration has already filled with the drops of the
+method's owned values there. That is what DESIGN.md means by a dropped cursor ending
 the method at its last `yield`. Before the method starts, it drops the
 owned parameters, such as the receiver of an `own self` method, and after
 the end it drops nothing. A method whose yields go through a recursive call has
@@ -1288,7 +1288,7 @@ and the pool's threads run the tasks that are ready:
   with one core the pool has no thread but the first, so a spare thread
   runs the tasks while `main` waits for them.
 - **A task changes threads.** A task that parks resumes on whichever
-  thread takes it. What the runtime keeps for each thread follows the
+  thread takes it. The runtime's per-thread state follows the
   task: the coroutine that the task is in, and for the sanitizers the
   stack that it left. Generated code reads `errno` through the runtime's
   `t_runtime_errno`. glibc declares its own function for the address of
@@ -1419,10 +1419,8 @@ order, and marks where each part starts:
   method that is inlined, where a `yield` in a branch would run the
   caller's code.
 
-Run in place, the regions mean what the statement means. So drop
-elaboration reads them as ordinary code: which branch gives a `let` its
-value, which takes a value out of a place, and which drops what, is worked
-out as for any other code.
+Run in place, the regions have the statement's semantics, so drop
+elaboration analyzes them as ordinary code.
 
 ### Outlining
 
@@ -1519,7 +1517,7 @@ the nested function's parameter.
   | Yielded | The task |
   |---|---|
   | An `own` value, a value the method computed for the `yield`, or a value from a cursor | Owns the value and drops it |
-  | A read-only place, or a constructor of read-only places | Holds a bitwise copy that it never drops. The place still owns what the bytes point at |
+  | A read-only place, or a constructor of read-only places | Holds a bitwise copy that it never drops. The place still owns the memory the bytes point to |
 
   The task outlives the `yield`. The ownership check has verified that a
   borrowed place is inside a parameter the method takes read-only, or is
@@ -1699,8 +1697,8 @@ address: as many elements as a count that the call passes, a fixed number,
 a number of the system such as `PATH_MAX` or the size of a `struct stat`,
 or up to the first zero element, as C reads a path. And it says which
 count bounds the result, as `read` returns no more than the count it was
-given. Code generation does not use these. They are what the prover holds
-a call to: a view has the elements that are read, and storage has the room
+given. Code generation does not use these. They are the prover's preconditions
+for a call: a view has the elements that are read, and storage has the room
 that is filled. So the proof that a call stays inside the memory it is
 given is one rule over the table, and a new row needs no rule of its own.
 
@@ -1833,8 +1831,8 @@ and on Linux the `XDG` variables. The local time zone is `TZ`, or where
 each with its zero byte, refusing one that holds a zero byte, and does the
 same for the variables: those this process was started with, unless the
 command leaves them out, and then the command's own, a later one of a
-name replacing an earlier. What the program does to its first three
-descriptors before it runs is a `posix_spawn_file_actions_t`, which is
+name replacing an earlier. The setup of the program's first three
+descriptors is a `posix_spawn_file_actions_t`, which is
 storage of as many bytes as the structure takes: a stream that is
 discarded is opened on `/dev/null`, a stream that is piped or captured is
 one end of a `pipe` whose other end this process keeps, and the directory
@@ -1954,8 +1952,8 @@ value cannot be folded from its expression, and a tagged template's check.
 
 - **It is built for the host, with the target's `USize`.** `USize` is a
   `typedef` in the generated C, so code built to run while compiling for a
-  32-bit target uses 32 bits on a 64-bit host and computes what the target
-  would compute.
+  32-bit target uses 32 bits on a 64-bit host and computes the target's
+  results.
 - **Results are written out in a binary form,** and the compiler turns them
   into static data in C. Values are never shared, so every value is a tree,
   and writing it out is a simple walk.
@@ -1977,12 +1975,12 @@ the type's shape. The binary form is:
 - storage's length as a `USize`, then its elements
 - a value of zero size writes nothing
 
-The value is worked out once in a compiler's run, and its program's objects
+The value is computed once in a compiler's run, and its program's objects
 are cached as any others are.
 
 A tagged template's check has a `Template_check` instance, of the tag's
 `from_template` and the template's literal texts: it builds a template of
-those texts and no parts, works out each of `from_template`'s `requires`
+those texts and no parts, evaluates each of `from_template`'s `requires`
 clauses that can run, and writes each out as a `Bool`. A clause can run
 unless it uses the mathematical `Integer`, a quantifier, a conversion to
 or from one, or a comparison of integers of two types. In one that runs,
@@ -2061,8 +2059,8 @@ the tests that can reach the edited code, and costs what can reach it:
   refers to written as that instance's place in the list of what it refers
   to, and each path as a number given in the order paths are first met. It
   holds no name, so renaming or moving a definition changes no hash. A
-  constant worked out by running code refers to its evaluator, whose code is
-  what decides its value.
+  constant computed by running code refers to its evaluator, whose code
+  determines its value.
 - **The key of everything an instance can reach** is its own hash and the
   key of each instance it refers to, in order.
 - **Instances that reach each other are keyed as a group.** A key cannot be
@@ -2094,10 +2092,10 @@ the tests that can reach the edited code, and costs what can reach it:
   on its size.
 
 Two programs that differ only in names give the same key, and any change to
-what the test can run changes it. A layout change appears in the LIR of
+the code the test reaches changes it. A layout change appears in the LIR of
 every instance that uses the layout, so it changes the key too. A function
 that a thousand tests reach is hashed once, and an edit to it makes its own
-hash again, and the keys of what reaches it.
+hash again, and the keys of the instances that reach it.
 
 Finding the groups walks every instance the wanted tests reach, when what
 any of them refers to changes. That is the one step here whose cost follows
@@ -2122,9 +2120,9 @@ for someone else to act on:
 
 | Failure | What it is | How it is reported |
 |---|---|---|
-| A compiler bug | An invariant of code generation does not hold: a pass met LIR it cannot have been given, or the verifier refused what a pass made | An exception that carries the stage that found it, what it found, and what the compiler was doing, such as the instance being lowered. Nothing in code generation catches it: the command line reports it once and exits with status 2. |
-| A program stage0 cannot build yet | The program is valid, and lowering has no code for something in it, which [Not built](#not-built) lists | An exception that carries what it is and its position. The driver gives it as the build's error, with the file and line. |
-| A build that cannot be done | The C compiler or the linker refused, or a program run while compiling ended badly | The build's error, with what they wrote |
+| A compiler bug | An invariant of code generation does not hold: a pass met LIR it cannot have been given, or the verifier refused what a pass made | An exception that carries the stage that found it, what it found, and the compiler's context, such as the instance being lowered. Nothing in code generation catches it: the command line reports it once and exits with status 2. |
+| A program stage0 cannot build yet | The program is valid, and lowering has no code for something in it, which [Not built](#not-built) lists | An exception that carries the unsupported construct and its position. The driver gives it as the build's error, with the file and line. |
+| A build that cannot be done | The C compiler or the linker refused, or a program run while compiling ended badly | The build's error, with their output |
 
 The two exceptions are every stage's to use. A broken invariant that the
 OCaml standard library finds first, such as a missing list element, is
@@ -2171,14 +2169,14 @@ Code generation's lowering is a query, so a test run after an edit lowers
 only the instances the edit reached:
 
 - **An instance's LIR** is a query keyed by the instance and by how it is
-  lowered: the target's widths and its system, and whether the program
-  checks what the prover would prove. A pulled method's version, whose locals make its
+  lowered: the target's widths and its system, and whether the build has
+  run-time checks. A pulled method's version, whose locals make its
   cursor's fields, is a query of its own.
 - **Each computation lowers in a context of its own,** made from the
-  query's reads. A layout or a piece of generated code worked out on the way
+  query's reads. A layout or a piece of generated code computed on the way
   is read through that query, never cached where another query could use it
   without reading what it came from.
-- **A constant that is worked out by running code** is the one result a
+- **A constant that is computed by running code** is the one result a
   query cannot make, since running code is not a function of reads. Its
   query says so instead, and the build runs the constant's evaluator, whose
   code is lowered by the same query, and puts the value in the program. Only
@@ -2268,7 +2266,7 @@ a command line can hold.
   function that is called, not inlined, reports the function's own
   position. Rust's `#[track_caller]` reports the caller's by passing its
   location.
-- **A constant's value kept between runs.** It is worked out again in each
+- **A constant's value kept between runs.** It is computed again in each
   run of the compiler.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and

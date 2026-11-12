@@ -1,6 +1,6 @@
-(* What a build compiles, and what keys a test's result.
+(* The instances a build compiles, and the key of a test's result.
 
-   A build starts from roots and compiles only what they reach: each
+   A build starts from roots and compiles only the instances they reach: each
    instance that an instance calls, takes as a function value, reads as a
    constant, or drops. The walk takes references in the order they appear
    in the LIR, so the result is the same on every run. *)

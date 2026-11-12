@@ -117,7 +117,7 @@ let counting =
 |}
 
 let () =
-  test "a call whose arguments are known is worked out by running it" (fun () ->
+  test "a call whose arguments are known is evaluated by running it" (fun () ->
       match
         proven_with_running
           (counting ^ "\nfn f() -> UInt8\n  ensures result == 7\n{\n  count_up(7)\n}\n")

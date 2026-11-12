@@ -333,10 +333,10 @@ val blocks : function_ -> bool
     that a spare thread can run tasks in place of a thread whose call lasts, and so that the runtime
     can interrupt the call if its task is cancelled. Three kinds of function are not counted. A call
     on a socket does not block, because the standard library's sockets fail with [EAGAIN] where they
-    would. A function that reads or changes only what the system keeps about a file, such as [stat],
-    returns quickly on a local file system, and the standard library does not expect every such call
-    to be interrupted. The runtime's own functions that wait park the calling task, or count its
-    thread as blocked, themselves. *)
+    would. A function that reads or changes only a file's metadata, such as [stat], returns quickly
+    on a local file system, and the standard library does not expect every such call to be
+    interrupted. The runtime's own functions that wait park the calling task, or count its thread as
+    blocked, themselves. *)
 
 val available : system -> function_ -> bool
 (** Whether the system's C library has the function. A program built for a system never calls one

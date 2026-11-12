@@ -1,4 +1,4 @@
-(** What the database sees of the engine: setting inputs, keeping results current, walking the
+(** The engine's interface for the database: setting inputs, keeping results current, walking the
     graph, and keeping states and facts in the store. Only the database and tests use this; compiler
     stages see {!Query}. *)
 
@@ -23,7 +23,7 @@ val context : t -> Query.context
 val observer : t -> Query.context
 (** For a driver's reads that make no root: a result is computed if the state has none, and is
     collected again unless something else makes it necessary. A question about a state is asked
-    through this, so that asking does not change what the state maintains. *)
+    through this, so that asking does not change the results the state maintains. *)
 
 val of_context : Query.context -> t
 val set : t -> ('key, 'value) Query.input -> 'key -> 'value -> unit
@@ -161,5 +161,5 @@ val audit_all : unit -> string list
 val auditing : bool ref
 
 val skip_audit : t -> unit
-(** Leaves an engine out of {!audit_all}, for a test whose queries are not functions of what they
-    read. *)
+(** Leaves an engine out of {!audit_all}, for a test whose queries are not pure functions of their
+    reads. *)

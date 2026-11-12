@@ -1633,7 +1633,7 @@ test "a function with a default, used as a value, uses the argument it is called
 }
 |}
 
-(* Checks which of a module's constants fold and which are worked out by
+(* Checks which of a module's constants fold and which are computed by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
   test what (fun () ->

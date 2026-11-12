@@ -93,7 +93,7 @@ and node = {
 and written = Unwritten | In_whole | In_difference
 
 and fingerprint =
-  | Unknown  (** Not worked out yet, or forgotten since the outcome changed *)
+  | Unknown  (** Not computed yet, or forgotten since the outcome changed *)
   | Hashed of { hash : string; stored : bool }
       (** The hash of the outcome's bytes; [stored] when the store has them under it *)
   | Opaque of string

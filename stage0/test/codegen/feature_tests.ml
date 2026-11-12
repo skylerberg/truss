@@ -836,7 +836,7 @@ test "names" {
   }
 }
 |};
-  passes "a constant that needs its code run is worked out while compiling"
+  passes "a constant that needs its code run is evaluated while compiling"
     {|type Point(x: Int64, y: Int64)
 
 let side: Int64 = 7
