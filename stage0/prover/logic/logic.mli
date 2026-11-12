@@ -142,7 +142,7 @@ val truncated_remainder : term -> term -> term
 val mentions : symbol list -> term -> bool
 (** Whether a term mentions any of the symbols, free. *)
 
-val free_symbols : term -> Symbol.t list
+val free_symbols : term -> symbol list
 (** The symbols a term mentions free, as constants, not as applied functions. *)
 
 val quantified : term -> bool
