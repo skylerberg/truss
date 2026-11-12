@@ -1,12 +1,11 @@
 # Truss MIR
 
 This document describes the design of stage0's mid-level IR, the MIR, in
-`stage0/mir/`. Its builder is built, and no stage reads it yet:
-[Not built](#not-built) lists the order the rest is built in. The MIR is a control-flow graph of each
-definition's body, built from the core form that
-[TYPECHECKER.md](TYPECHECKER.md) describes. The ownership check, the prover
-([PROVER.md](PROVER.md)), and code generation ([CODEGEN.md](CODEGEN.md)) are
-to read it in place of the core form. The MIR of a definition is a query
+`stage0/mir/`. The MIR is a control-flow graph of each definition's body,
+built from the core form that [TYPECHECKER.md](TYPECHECKER.md) describes.
+The ownership check reads it, and the prover ([PROVER.md](PROVER.md)) and
+code generation ([CODEGEN.md](CODEGEN.md)) are to read it in place of the
+core form: [Not built](#not-built) lists the order. The MIR of a definition is a query
 of the code database, which [DATABASE.md](DATABASE.md) describes.
 
 ## Motivation
@@ -125,6 +124,8 @@ An operand is one of:
   that copies implicitly, and a move otherwise. It names the core node it
   reads for, by which the ownership check reports a move.
 - `borrow place`, read-only or `mut`, for a parameter that borrows
+- `take place`, the old value of a compound assignment's target, which the
+  operator takes as owned and the statement assigns again
 - a constant: unit, a literal of a built-in type, or a string literal
 
 The type decides between a copy and a move, so the builder needs no fact
@@ -141,6 +142,7 @@ about types, and the MIR is a function of the core form alone.
 | `place = template from_template(record)` | A tagged string, with its literal texts, on which the prover runs the tag's checks. |
 | `place = pull cursor` | The next value of the built-in cursor of a yielding method, an `Option`. A user type's `Cursor.next` is an ordinary call. |
 | `live locals`, `dead locals` | Where locals start to hold values, and where they stop: the end of a scope, of a statement, or of a loan. A jump out of scopes, such as a `break`, ends them first. |
+| `loan n: mode operand for duration`, `end loans` | Where what an operand borrows or views starts to be lent, and where it stops. The durations are the loop body, the `provide` body, the rest of a statement for a lending call's receiver, and the operation for an operand that later operands must not change. A jump out of a scope ends its loans. |
 | `assert operand` | An `assert` that can run: stop the program if the `Bool` is false. |
 | `echo operand` | Record a value's debug output. |
 | `provide implementations`, `provide end` | The start and the end of a `provide` block. |
@@ -188,8 +190,13 @@ reads the callee's contract for each part.
 
 ## Evaluation order
 
-The MIR builder is the one place that decides the order of evaluation.
-These are its rules:
+The MIR builder is the one place that decides the order of evaluation. In
+an operation with several operands, each operand but a constant or a `mut`
+borrow is held where it is evaluated: a value in a temporary, and a
+read-only borrow as a lent local. So a later operand cannot change what an
+earlier one read, and a value is moved where it is written. A `mut` borrow
+starts where the operation runs, so later operands can still read the
+place. These are its rules:
 
 1. **A call** evaluates an indirect callee, then its arguments in order.
    The `mut` borrows of its arguments start after the last argument is
@@ -303,11 +310,12 @@ writes it on the loop header, as an assumption that is ghost code.
 
 ### The ownership check
 
-The check's graph of points is the MIR. Its dataflow analyses of moves and
-views run on the MIR's statements, and its loans are borrow locals and the
-borrows of call arguments, which end where the MIR says. The rules for
-moves, views, and borrows do not change; the builder of the graph
-goes away.
+The check builds its graph of points from the MIR's statements, and its
+dataflow analyses of moves and views run on that graph. Its loans are the
+MIR's: each point has the loans that are live where it is. The views of a
+temporary are worked out where the MIR assigns it. An element of a `List`, a
+`Slice`, or an `Array` is a place of its own, so a lend of one lends no part
+of the collection for the statement.
 
 ### The prover
 
@@ -385,20 +393,18 @@ that reaches it as a bug in the compiler.
 
 ## Not built
 
-The builder is built. The rest is built in this order, and each step
-removes the code that it replaces:
+The builder is built, and the ownership check reads the MIR. The rest is
+built in this order, and each step removes the code that it replaces:
 
-1. **The ownership check** reads the MIR, and its own graph builder is
-   removed.
-2. **Code generation** lowers the MIR to the LIR, and its lowering of the
+1. **Code generation** lowers the MIR to the LIR, and its lowering of the
    core form is removed.
-3. **The prover** runs the MIR forward, and its walk of the core form is
+2. **The prover** runs the MIR forward, and its walk of the core form is
    removed.
-4. **The core form** loses the forms that only the builder then reads,
+3. **The core form** loses the forms that only the builder then reads,
    such as `Current_target`, and its consumers' cases for
    specification-only forms in executable code.
 
 The prover already reads `Operator` and a call of an intrinsic that is a
 primitive operation through one translation, since the core form names the
-operation in both. Pattern matching as a decision tree comes after step 2,
+operation in both. Pattern matching as a decision tree comes after step 1,
 as an improvement of the builder.
