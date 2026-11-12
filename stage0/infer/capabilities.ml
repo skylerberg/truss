@@ -274,6 +274,7 @@ and check_children checking scope node =
       statement = check_statement checking scope;
       pattern = (fun inner -> check_children checking scope (`Pattern inner));
       callee = require_callee_uses checking scope origin;
+      place = ignore;
     }
   in
   match node with

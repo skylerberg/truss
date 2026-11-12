@@ -163,11 +163,29 @@ type passes =
 
 type result = Returns of scalar | Points_at of scalar | Text | Never
 type signature = { parameters : (string * passes) list; result : result; at_most : string option }
+type c_type = Void | Named of string | Struct of string | Const of c_type | Pointer of c_type
+
+let rec show_c_type = function
+  | Void -> "void"
+  | Named name -> name
+  | Struct name -> "struct " ^ name
+  | Const (Pointer _ as pointer) -> show_c_type pointer ^ "const"
+  | Const c -> "const " ^ show_c_type c
+  | Pointer (Pointer _ as inner) -> show_c_type inner ^ "*"
+  | Pointer inner -> show_c_type inner ^ " *"
+
+(* The structures a C type names, which a file that includes no header
+   declares before it can mention them. *)
+let rec structures = function
+  | Struct name -> [ name ]
+  | Const c | Pointer c -> structures c
+  | Void | Named _ -> []
 
 type declaration = {
   symbol : string;
-  returns : string;
-  takes : string list;
+  returns : c_type;
+  never_returns : bool;
+  takes : c_type list;
   variadic_from : int option;
 }
 
@@ -436,20 +454,20 @@ let function_name = function
    headers have and the C that is emitted says [void]. *)
 type row = {
   symbol : system -> string;
-  returns : system -> string;
+  returns : system -> c_type;
   result : result;
   at_most : string option;
   on : os -> bool;
-  parameters : (string * passes * (system -> string)) list;
+  parameters : (string * passes * (system -> c_type)) list;
   variadic_from : int option;
   headers : string list;
   layout : string list;
-  named : (string * string) list;
+  named : (string * c_type) list;
 }
 
 let everywhere c (_ : system) = c
 let by_os choose (system : system) = choose system.os
-let size = everywhere "__SIZE_TYPE__"
+let size = everywhere (Named "__SIZE_TYPE__")
 
 (* The symbol of a function that fills a [struct stat]. On macOS for
    x86-64 the plain symbol is an old function that fills a smaller
@@ -458,10 +476,10 @@ let status_symbol name (system : system) =
   match system with { os = Macos; architecture = X86_64 } -> name ^ "$INODE64" | _ -> name
 
 (* [mode_t], a file's permission bits. *)
-let mode = by_os (function Linux -> "unsigned int" | Macos -> "unsigned short")
+let mode = by_os (function Linux -> Named "unsigned int" | Macos -> Named "unsigned short")
 
 (* [off_t], a position in a file. *)
-let offset = by_os (function Linux -> "long" | Macos -> "long long")
+let offset = by_os (function Linux -> Named "long" | Macos -> Named "long long")
 
 let describe function_ =
   let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
@@ -471,50 +489,55 @@ let describe function_ =
   let counted by = Counted { by; each = 1 } in
   match function_ with
   | Write ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("bytes", Elements (UInt8, counted "count"), everywhere (Pointer (Const Void)));
           ("count", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
   | Read ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
           ("count", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
   | Open ->
-      row (everywhere "int") (Returns Int32) ~variadic_from:2
+      row (everywhere (Named "int")) (Returns Int32) ~variadic_from:2
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("flags", Value Int32, everywhere "int");
-          ("mode", Value Int32, everywhere "int");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("flags", Value Int32, everywhere (Named "int"));
+          ("mode", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "fcntl.h" ]
   | Close ->
       (* The runtime's function, which calls the C library's. The runtime
          keeps which descriptors it has registered for waiting, and a closed
          descriptor's number is given to the next one that is opened. *)
-      row (everywhere "int32_t") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int32_t") ]
+      row (everywhere (Named "int32_t")) (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere (Named "int32_t")) ]
         ~symbol:(everywhere "t_runtime_close") ~headers:[]
   | Errno ->
       (* The runtime's function, and not the C library's own, which a
          compiler may assume returns the same address on every call. A task
          that has parked may resume on another thread, where the address
          differs. *)
-      row (everywhere "int *") (Points_at Int32) [] ~symbol:(everywhere "t_runtime_errno")
-        ~headers:[]
+      row
+        (everywhere (Pointer (Named "int")))
+        (Points_at Int32) [] ~symbol:(everywhere "t_runtime_errno") ~headers:[]
   | Clock_gettime ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
           (* macOS makes [clockid_t] an enumeration with no negative member,
              which C gives the representation of this type. *)
-          ("clock", Value Int32, by_os (function Linux -> "int" | Macos -> "unsigned int"));
-          ("time", Written (Int64, [ "seconds"; "nanoseconds" ]), everywhere "struct timespec *");
+          ( "clock",
+            Value Int32,
+            by_os (function Linux -> Named "int" | Macos -> Named "unsigned int") );
+          ( "time",
+            Written (Int64, [ "seconds"; "nanoseconds" ]),
+            everywhere (Pointer (Struct "timespec")) );
         ]
         ~headers:[ "time.h" ]
         ~layout:
@@ -528,86 +551,95 @@ let describe function_ =
   | Getentropy ->
       (* Eight random bytes are a random [UInt64], whatever order the system
          keeps a number's bytes in. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("buffer", Written (UInt64, [ "value" ]), everywhere "void *"); ("count", Always 8, size);
+          ("buffer", Written (UInt64, [ "value" ]), everywhere (Pointer Void));
+          ("count", Always 8, size);
         ]
         ~headers:[ "sys/types.h"; "sys/random.h" ]
   | Getenv ->
-      row (everywhere "char *") Text
-        [ ("name", Elements (UInt8, Through_zero), everywhere "const char *") ]
+      row
+        (everywhere (Pointer (Named "char")))
+        Text
+        [ ("name", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char")))) ]
         ~headers:[ "stdlib.h" ]
   | Posix_spawnp ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("process", Written (Int32, [ "process" ]), everywhere "int *");
-          ("program", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("process", Written (Int32, [ "process" ]), everywhere (Pointer (Named "int")));
+          ("program", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
           ( "file_actions",
             Elements (UInt8, Number Spawn_file_actions_size),
-            everywhere "const void *" );
-          ("attributes", Always 0, everywhere "const void *");
-          ("arguments", Elements (USize, Through_zero), everywhere "char *const *");
-          ("environment", Elements (USize, Through_zero), everywhere "char *const *");
+            everywhere (Pointer (Const Void)) );
+          ("attributes", Always 0, everywhere (Pointer (Const Void)));
+          ( "arguments",
+            Elements (USize, Through_zero),
+            everywhere (Pointer (Const (Pointer (Named "char")))) );
+          ( "environment",
+            Elements (USize, Through_zero),
+            everywhere (Pointer (Const (Pointer (Named "char")))) );
         ]
         ~named:
           [
-            ("file_actions", "const posix_spawn_file_actions_t *");
-            ("attributes", "const posix_spawnattr_t *");
+            ("file_actions", Pointer (Const (Named "posix_spawn_file_actions_t")));
+            ("attributes", Pointer (Const (Named "posix_spawnattr_t")));
           ]
         ~headers:[ "spawn.h" ]
         ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
   | Waitpid ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("process", Value Int32, everywhere "int");
-          ("status", Written (Int32, [ "status" ]), everywhere "int *");
-          ("options", Value Int32, everywhere "int");
+          ("process", Value Int32, everywhere (Named "int"));
+          ("status", Written (Int32, [ "status" ]), everywhere (Pointer (Named "int")));
+          ("options", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "sys/wait.h" ]
   | Snprintf ->
       (* The one use: a float written with a number of digits, by a format
          that takes the two. *)
-      row (everywhere "int") (Returns Int32) ~variadic_from:3
+      row (everywhere (Named "int")) (Returns Int32) ~variadic_from:3
         [
-          ("buffer", Room (UInt8, counted "size"), everywhere "char *");
+          ("buffer", Room (UInt8, counted "size"), everywhere (Pointer (Named "char")));
           ("size", Value USize, size);
-          ("format", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("precision", Value Int32, everywhere "int");
-          ("value", Value Float64, everywhere "double");
+          ("format", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("precision", Value Int32, everywhere (Named "int"));
+          ("value", Value Float64, everywhere (Named "double"));
         ]
         ~headers:[ "stdio.h" ]
   | Strtod ->
-      row (everywhere "double") (Returns Float64)
+      row (everywhere (Named "double")) (Returns Float64)
         [
-          ("text", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("end", Always 0, everywhere "char **");
+          ("text", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("end", Always 0, everywhere (Pointer (Pointer (Named "char"))));
         ]
         ~headers:[ "stdlib.h" ]
   | Strtof ->
-      row (everywhere "float") (Returns Float32)
+      row (everywhere (Named "float")) (Returns Float32)
         [
-          ("text", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("end", Always 0, everywhere "char **");
+          ("text", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("end", Always 0, everywhere (Pointer (Pointer (Named "char"))));
         ]
         ~headers:[ "stdlib.h" ]
-  | Fork -> row (everywhere "int") (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Fork -> row (everywhere (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
   | Pipe ->
-      row (everywhere "int") (Returns Int32)
-        [ ("ends", Written (Int32, [ "read_end"; "write_end" ]), everywhere "int *") ]
+      row (everywhere (Named "int")) (Returns Int32)
+        [
+          ("ends", Written (Int32, [ "read_end"; "write_end" ]), everywhere (Pointer (Named "int")));
+        ]
         ~headers:[ "unistd.h" ]
   | Poll ->
       (* A [pollfd] is its descriptor and then two numbers of half the
          size, what to wait for and what was found, which are the low and
          the high half of one [Int32] where the low byte comes first. *)
-      row ~at_most:"count" (everywhere "int") (Returns Int32)
+      row ~at_most:"count" (everywhere (Named "int")) (Returns Int32)
         [
           ( "waited_for",
             Elements_to_change (Int32, Counted { by = "count"; each = 2 }),
-            everywhere "struct pollfd *" );
+            everywhere (Pointer (Struct "pollfd")) );
           ( "count",
             Value USize,
-            by_os (function Linux -> "unsigned long" | Macos -> "unsigned int") );
-          ("timeout", Value Int32, everywhere "int");
+            by_os (function Linux -> Named "unsigned long" | Macos -> Named "unsigned int") );
+          ("timeout", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "poll.h" ]
         ~layout:
@@ -622,31 +654,34 @@ let describe function_ =
             "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
           ]
   | Kill ->
-      row (everywhere "int") (Returns Int32)
-        [ ("process", Value Int32, everywhere "int"); ("signal", Value Int32, everywhere "int") ]
+      row (everywhere (Named "int")) (Returns Int32)
+        [
+          ("process", Value Int32, everywhere (Named "int"));
+          ("signal", Value Int32, everywhere (Named "int"));
+        ]
         ~headers:[ "signal.h" ]
   | Sysconf ->
-      row (everywhere "long") (Returns ISize)
-        [ ("name", Value Int32, everywhere "int") ]
+      row (everywhere (Named "long")) (Returns ISize)
+        [ ("name", Value Int32, everywhere (Named "int")) ]
         ~headers:[ "unistd.h" ]
   | Exit ->
-      row (everywhere "_Noreturn void") Never
-        [ ("status", Value Int32, everywhere "int") ]
+      row (everywhere Void) Never
+        [ ("status", Value Int32, everywhere (Named "int")) ]
         ~symbol:(everywhere "_exit") ~headers:[ "unistd.h" ]
   | Pread ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
           ("count", Value USize, size);
           ("offset", Value Int64, offset);
         ]
         ~headers:[ "unistd.h" ]
   | Pwrite ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("bytes", Elements (UInt8, counted "count"), everywhere (Pointer (Const Void)));
           ("count", Value USize, size);
           ("offset", Value Int64, offset);
         ]
@@ -654,29 +689,29 @@ let describe function_ =
   | Lseek ->
       row offset (Returns Int64)
         [
-          ("descriptor", Value Int32, everywhere "int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
           ("offset", Value Int64, offset);
-          ("whence", Value Int32, everywhere "int");
+          ("whence", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "unistd.h" ]
   | Ftruncate ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int"); ("length", Value Int64, offset) ]
+      row (everywhere (Named "int")) (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere (Named "int")); ("length", Value Int64, offset) ]
         ~headers:[ "unistd.h" ]
   | Fsync ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int") ]
+      row (everywhere (Named "int")) (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere (Named "int")) ]
         ~headers:[ "unistd.h" ]
   | Fstat ->
       (* The structure is filled as bytes, which the standard library reads
          at the offsets the table's numbers give. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("status", Room (UInt8, Number Stat_size), everywhere (Pointer Void));
         ]
         ~symbol:(status_symbol "fstat")
-        ~named:[ ("status", "struct stat *") ]
+        ~named:[ ("status", Pointer (Struct "stat")) ]
         ~headers:[ "sys/stat.h" ]
         ~layout:
           [
@@ -687,117 +722,122 @@ let describe function_ =
             "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
           ]
   | Stat ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("status", Room (UInt8, Number Stat_size), everywhere (Pointer Void));
         ]
         ~symbol:(status_symbol "stat")
-        ~named:[ ("status", "struct stat *") ]
+        ~named:[ ("status", Pointer (Struct "stat")) ]
         ~headers:[ "sys/stat.h" ]
   | Lstat ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("status", Room (UInt8, Number Stat_size), everywhere (Pointer Void));
         ]
         ~symbol:(status_symbol "lstat")
-        ~named:[ ("status", "struct stat *") ]
+        ~named:[ ("status", Pointer (Struct "stat")) ]
         ~headers:[ "sys/stat.h" ]
   | Mkdir ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
           ("mode", Value Int32, mode);
         ]
         ~headers:[ "sys/stat.h" ]
   | Remove ->
-      row (everywhere "int") (Returns Int32)
-        [ ("path", Elements (UInt8, Through_zero), everywhere "const char *") ]
+      row (everywhere (Named "int")) (Returns Int32)
+        [ ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char")))) ]
         ~headers:[ "stdio.h" ]
   | Rename ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("from", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("to", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("from", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("to", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
         ]
         ~headers:[ "stdio.h" ]
   | Symlink ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("target", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("link", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("target", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("link", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
         ]
         ~headers:[ "unistd.h" ]
   | Link ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("target", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("link", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("target", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("link", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
         ]
         ~headers:[ "unistd.h" ]
   | Chmod ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
           ("mode", Value Int32, mode);
         ]
         ~headers:[ "sys/stat.h" ]
   | Utimensat ->
       (* The times are two [timespec]s, the time of access and then the time
          of modification, as four numbers. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("directory", Value Int32, everywhere "int");
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("times", Elements (Int64, Exactly 4), everywhere "const struct timespec *");
-          ("flags", Value Int32, everywhere "int");
+          ("directory", Value Int32, everywhere (Named "int"));
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("times", Elements (Int64, Exactly 4), everywhere (Pointer (Const (Struct "timespec"))));
+          ("flags", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "fcntl.h"; "sys/stat.h" ]
   | Readlink ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("buffer", Room (UInt8, counted "count"), everywhere "char *");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("buffer", Room (UInt8, counted "count"), everywhere (Pointer (Named "char")));
           ("count", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
   | Realpath ->
       (* The resolved path is written into the room given, which is to hold
          [PATH_MAX] bytes, and the address returned is that room's. *)
-      row (everywhere "char *") Text
+      row
+        (everywhere (Pointer (Named "char")))
+        Text
         [
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("resolved", Room (UInt8, Number Path_max), everywhere "char *");
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("resolved", Room (UInt8, Number Path_max), everywhere (Pointer (Named "char")));
         ]
         ~headers:[ "stdlib.h"; "limits.h" ]
   | Getcwd ->
       (* The path is written into the room given, and the address returned
          is that room's. *)
-      row (everywhere "char *") Text
+      row
+        (everywhere (Pointer (Named "char")))
+        Text
         [
-          ("buffer", Room (UInt8, counted "size"), everywhere "char *"); ("size", Value USize, size);
+          ("buffer", Room (UInt8, counted "size"), everywhere (Pointer (Named "char")));
+          ("size", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
   | Gethostname ->
       (* The name ends with a zero byte unless it fills the bytes given. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("name", Elements_to_change (UInt8, counted "size"), everywhere "char *");
+          ("name", Elements_to_change (UInt8, counted "size"), everywhere (Pointer (Named "char")));
           ("size", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
-  | Getpid -> row (everywhere "int") (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Getpid -> row (everywhere (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
   | Proc_pidpath ->
       (* The path of a process's executable, which Linux gives as a link
          in its [/proc]. *)
       row ~at_most:"size"
         ~on:(fun os -> os = Macos)
-        (everywhere "int") (Returns Int32)
+        (everywhere (Named "int")) (Returns Int32)
         [
-          ("process", Value Int32, everywhere "int");
-          ("buffer", Room (UInt8, counted "size"), everywhere "void *");
-          ("size", Value USize, everywhere "unsigned int");
+          ("process", Value Int32, everywhere (Named "int"));
+          ("buffer", Room (UInt8, counted "size"), everywhere (Pointer Void));
+          ("size", Value USize, everywhere (Named "unsigned int"));
         ]
         ~headers:[ "libproc.h" ]
   | Fcntl_dupfd_cloexec ->
@@ -805,88 +845,88 @@ let describe function_ =
          is not less than [least], closed in programs the process runs.
          The request is the row's, since another request reads its third
          argument as an address. *)
-      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+      row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("request", Fixed F_dupfd_cloexec, everywhere "int");
-          ("least", Value Int32, everywhere "int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("request", Fixed F_dupfd_cloexec, everywhere (Named "int"));
+          ("least", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "fcntl.h" ]
   | Fcntl_setfd_cloexec ->
       (* Has the descriptor closed in programs the process runs. *)
-      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+      row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("request", Fixed F_setfd, everywhere "int");
-          ("flags", Fixed Fd_cloexec, everywhere "int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("request", Fixed F_setfd, everywhere (Named "int"));
+          ("flags", Fixed Fd_cloexec, everywhere (Named "int"));
         ]
         ~headers:[ "fcntl.h" ]
   | Posix_spawn_file_actions_init ->
       (* What a program that is started does to its descriptors before it
          runs. The structure is storage of as many bytes as it takes, which
          only these functions read. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
           ( "actions",
             Elements_to_change (UInt8, Number Spawn_file_actions_size),
-            everywhere "void *" );
+            everywhere (Pointer Void) );
         ]
-        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_destroy ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
           ( "actions",
             Elements_to_change (UInt8, Number Spawn_file_actions_size),
-            everywhere "void *" );
+            everywhere (Pointer Void) );
         ]
-        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_adddup2 ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
           ( "actions",
             Elements_to_change (UInt8, Number Spawn_file_actions_size),
-            everywhere "void *" );
-          ("descriptor", Value Int32, everywhere "int");
-          ("onto", Value Int32, everywhere "int");
+            everywhere (Pointer Void) );
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("onto", Value Int32, everywhere (Named "int"));
         ]
-        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_addopen ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
           ( "actions",
             Elements_to_change (UInt8, Number Spawn_file_actions_size),
-            everywhere "void *" );
-          ("descriptor", Value Int32, everywhere "int");
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("flags", Value Int32, everywhere "int");
+            everywhere (Pointer Void) );
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("flags", Value Int32, everywhere (Named "int"));
           ("mode", Value Int32, mode);
         ]
-        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_addchdir ->
       (* The directory the program starts in. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         ~symbol:(everywhere "posix_spawn_file_actions_addchdir_np")
         [
           ( "actions",
             Elements_to_change (UInt8, Number Spawn_file_actions_size),
-            everywhere "void *" );
-          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+            everywhere (Pointer Void) );
+          ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
         ]
-        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Getdents64 ->
       (* The next entries of a directory that is open, as many as fit: each
          is a [struct dirent64], as long as it says it is. *)
       row ~at_most:"count"
         ~on:(fun os -> os = Linux)
-        (everywhere "long") (Returns ISize)
+        (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
           ("count", Value USize, size);
         ]
         ~headers:[ "dirent.h" ]
@@ -896,24 +936,24 @@ let describe function_ =
          [struct attrlist], asks for, in the order of their numbers. *)
       row
         ~on:(fun os -> os = Macos)
-        (everywhere "int") (Returns Int32)
+        (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("wanted", Elements (UInt8, Exactly 24), everywhere "void *");
-          ("buffer", Elements_to_change (UInt8, counted "size"), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("wanted", Elements (UInt8, Exactly 24), everywhere (Pointer Void));
+          ("buffer", Elements_to_change (UInt8, counted "size"), everywhere (Pointer Void));
           ("size", Value USize, size);
-          ("options", Value UInt64, everywhere "unsigned long long");
+          ("options", Value UInt64, everywhere (Named "unsigned long long"));
         ]
         ~headers:[ "sys/attr.h"; "unistd.h" ]
         ~layout:[ "sizeof(struct attrlist) == 24" ]
   | Ioctl_tiocgwinsz ->
       (* A terminal's size: its rows, its columns, and its width and height
          in pixels, each two bytes. *)
-      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "ioctl") ~variadic_from:2
+      row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "ioctl") ~variadic_from:2
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("request", Fixed Tiocgwinsz, everywhere "unsigned long");
-          ("size", Elements_to_change (UInt8, Exactly 8), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("request", Fixed Tiocgwinsz, everywhere (Named "unsigned long"));
+          ("size", Elements_to_change (UInt8, Exactly 8), everywhere (Pointer Void));
         ]
         ~headers:[ "sys/ioctl.h" ]
         ~layout:
@@ -926,41 +966,41 @@ let describe function_ =
       (* A terminal's settings, a [struct termios] as bytes, which the
          standard library reads and changes at the offsets the table's
          numbers give. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("settings", Elements_to_change (UInt8, Number Termios_size), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("settings", Elements_to_change (UInt8, Number Termios_size), everywhere (Pointer Void));
         ]
-        ~named:[ ("settings", "struct termios *") ]
+        ~named:[ ("settings", Pointer (Struct "termios")) ]
         ~headers:[ "termios.h" ]
   | Tcsetattr ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("when", Fixed Tcsaflush, everywhere "int");
-          ("settings", Elements (UInt8, Number Termios_size), everywhere "const void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("when", Fixed Tcsaflush, everywhere (Named "int"));
+          ("settings", Elements (UInt8, Number Termios_size), everywhere (Pointer (Const Void)));
         ]
-        ~named:[ ("settings", "const struct termios *") ]
+        ~named:[ ("settings", Pointer (Const (Struct "termios"))) ]
         ~headers:[ "termios.h" ]
   | Socket ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("domain", Value Int32, everywhere "int");
-          ("kind", Value Int32, everywhere "int");
-          ("protocol", Value Int32, everywhere "int");
+          ("domain", Value Int32, everywhere (Named "int"));
+          ("kind", Value Int32, everywhere (Named "int"));
+          ("protocol", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "sys/socket.h" ]
   | Bind ->
       (* An address is a [struct sockaddr_in] or [sockaddr_in6] as bytes:
          where its family is differs between systems, and the rest is laid
          out as the check holds it to. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("address", Elements (UInt8, counted "length"), everywhere "const void *");
-          ("length", Value USize, everywhere "unsigned int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("address", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
+          ("length", Value USize, everywhere (Named "unsigned int"));
         ]
-        ~named:[ ("address", "const struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h"; "netinet/in.h" ]
         ~layout:
           [
@@ -972,113 +1012,117 @@ let describe function_ =
             "__builtin_offsetof(struct sockaddr_in6, sin6_addr) == 8";
           ]
   | Connect ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("address", Elements (UInt8, counted "length"), everywhere "const void *");
-          ("length", Value USize, everywhere "unsigned int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("address", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
+          ("length", Value USize, everywhere (Named "unsigned int"));
         ]
-        ~named:[ ("address", "const struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h" ]
   | Listen ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int"); ("waiting", Value Int32, everywhere "int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("waiting", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "sys/socket.h" ]
   | Accept ->
       (* The length is how much room the address has, and then how long
          the address is. *)
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
-          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere (Pointer Void));
+          ("length", Written (UInt32, [ "length" ]), everywhere (Pointer (Named "unsigned int")));
         ]
-        ~named:[ ("address", "struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Getsockname ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
-          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere (Pointer Void));
+          ("length", Written (UInt32, [ "length" ]), everywhere (Pointer (Named "unsigned int")));
         ]
-        ~named:[ ("address", "struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Getpeername ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
-          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere (Pointer Void));
+          ("length", Written (UInt32, [ "length" ]), everywhere (Pointer (Named "unsigned int")));
         ]
-        ~named:[ ("address", "struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Shutdown ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int"); ("how", Value Int32, everywhere "int") ]
+      row (everywhere (Named "int")) (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("how", Value Int32, everywhere (Named "int"));
+        ]
         ~headers:[ "sys/socket.h" ]
   | Setsockopt ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("level", Value Int32, everywhere "int");
-          ("option", Value Int32, everywhere "int");
-          ("value", Elements (UInt8, counted "length"), everywhere "const void *");
-          ("length", Value USize, everywhere "unsigned int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("level", Value Int32, everywhere (Named "int"));
+          ("option", Value Int32, everywhere (Named "int"));
+          ("value", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
+          ("length", Value USize, everywhere (Named "unsigned int"));
         ]
         ~headers:[ "sys/socket.h"; "sys/time.h" ]
         ~layout:
           [ "sizeof(struct timeval) == 16"; "__builtin_offsetof(struct timeval, tv_usec) == 8" ]
   | Getsockopt ->
-      row (everywhere "int") (Returns Int32)
+      row (everywhere (Named "int")) (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("level", Value Int32, everywhere "int");
-          ("option", Value Int32, everywhere "int");
-          ("value", Elements_to_change (UInt8, counted "length"), everywhere "void *");
-          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("level", Value Int32, everywhere (Named "int"));
+          ("option", Value Int32, everywhere (Named "int"));
+          ("value", Elements_to_change (UInt8, counted "length"), everywhere (Pointer Void));
+          ("length", Written (UInt32, [ "length" ]), everywhere (Pointer (Named "unsigned int")));
         ]
         ~headers:[ "sys/socket.h" ]
   | Sendto ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("bytes", Elements (UInt8, counted "count"), everywhere (Pointer (Const Void)));
           ("count", Value USize, size);
-          ("flags", Value Int32, everywhere "int");
-          ("address", Elements (UInt8, counted "length"), everywhere "const void *");
-          ("length", Value USize, everywhere "unsigned int");
+          ("flags", Value Int32, everywhere (Named "int"));
+          ("address", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
+          ("length", Value USize, everywhere (Named "unsigned int"));
         ]
-        ~named:[ ("address", "const struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h" ]
   | Recvfrom ->
-      row ~at_most:"count" (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
           ("count", Value USize, size);
-          ("flags", Value Int32, everywhere "int");
-          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
-          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+          ("flags", Value Int32, everywhere (Named "int"));
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere (Pointer Void));
+          ("length", Written (UInt32, [ "length" ]), everywhere (Pointer (Named "unsigned int")));
         ]
-        ~named:[ ("address", "struct sockaddr *") ]
+        ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Fcntl_getfl ->
-      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+      row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("request", Fixed F_getfl, everywhere "int");
-          ("unused", Always 0, everywhere "int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("request", Fixed F_getfl, everywhere (Named "int"));
+          ("unused", Always 0, everywhere (Named "int"));
         ]
         ~headers:[ "fcntl.h" ]
   | Fcntl_setfl ->
-      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+      row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
         [
-          ("descriptor", Value Int32, everywhere "int");
-          ("request", Fixed F_setfl, everywhere "int");
-          ("flags", Value Int32, everywhere "int");
+          ("descriptor", Value Int32, everywhere (Named "int"));
+          ("request", Fixed F_setfl, everywhere (Named "int"));
+          ("flags", Value Int32, everywhere (Named "int"));
         ]
         ~headers:[ "fcntl.h" ]
   | Addresses_of_host ->
@@ -1091,10 +1135,10 @@ let describe function_ =
          knows no such host, and -2 where it could not find out. *)
       row ~at_most:"room"
         ~symbol:(everywhere "t_runtime_addresses_of_host")
-        (everywhere "long") (Returns ISize)
+        (everywhere (Named "long")) (Returns ISize)
         [
-          ("host", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("addresses", Room (UInt8, counted "room"), everywhere "void *");
+          ("host", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
+          ("addresses", Room (UInt8, counted "room"), everywhere (Pointer Void));
           ("room", Value USize, size);
         ]
         ~headers:[]
@@ -1105,9 +1149,11 @@ let describe function_ =
          any thread can wait for them. *)
       row
         ~symbol:(everywhere "t_runtime_signals_wait")
-        (everywhere "int32_t") (Returns Int32)
+        (everywhere (Named "int32_t")) (Returns Int32)
         [
-          ("signals", Elements (Int32, counted "count"), everywhere "const int32_t *");
+          ( "signals",
+            Elements (Int32, counted "count"),
+            everywhere (Pointer (Const (Named "int32_t"))) );
           ("count", Value USize, size);
         ]
         ~headers:[]
@@ -1121,17 +1167,17 @@ let describe function_ =
          is not, and sets [errno]: to [EINTR] if the calling task is
          cancelled, and to [EAGAIN] if the time limit that the program set
          on the socket passed. *)
-      let descriptor = ("descriptor", Value Int32, everywhere "int32_t") in
-      let writing = ("writing", Value Int32, everywhere "int32_t") in
+      let descriptor = ("descriptor", Value Int32, everywhere (Named "int32_t")) in
+      let writing = ("writing", Value Int32, everywhere (Named "int32_t")) in
       if waiting = Descriptor_watch then
         row
           ~symbol:(everywhere "t_runtime_descriptor_watch")
-          (everywhere "uint64_t") (Returns UInt64) [ descriptor; writing ] ~headers:[]
+          (everywhere (Named "uint64_t")) (Returns UInt64) [ descriptor; writing ] ~headers:[]
       else
         row
           ~symbol:(everywhere "t_runtime_descriptor_wait")
-          (everywhere "int32_t") (Returns Int32)
-          [ descriptor; writing; ("ticket", Value UInt64, everywhere "uint64_t") ]
+          (everywhere (Named "int32_t")) (Returns Int32)
+          [ descriptor; writing; ("ticket", Value UInt64, everywhere (Named "uint64_t")) ]
           ~headers:[]
   | Descriptors_watch ->
       (* The runtime's. A caller that reads several descriptors, none of
@@ -1142,24 +1188,26 @@ let describe function_ =
          task is cancelled. *)
       row
         ~symbol:(everywhere "t_runtime_descriptors_watch")
-        (everywhere "uint64_t") (Returns UInt64) [] ~headers:[]
+        (everywhere (Named "uint64_t")) (Returns UInt64) [] ~headers:[]
   | Descriptors_wait ->
       row
         ~symbol:(everywhere "t_runtime_descriptors_wait")
-        (everywhere "int32_t") (Returns Int32)
+        (everywhere (Named "int32_t")) (Returns Int32)
         [
-          ("descriptors", Elements (Int32, counted "count"), everywhere "const int32_t *");
+          ( "descriptors",
+            Elements (Int32, counted "count"),
+            everywhere (Pointer (Const (Named "int32_t"))) );
           ("count", Value USize, size);
-          ("ticket", Value UInt64, everywhere "uint64_t");
+          ("ticket", Value UInt64, everywhere (Named "uint64_t"));
         ]
         ~headers:[]
   | Sleep ->
       (* The runtime's. It waits for the time and returns 0, or returns 1 as
          soon as the calling task is cancelled. *)
-      row ~symbol:(everywhere "t_runtime_sleep") (everywhere "int32_t") (Returns Int32)
+      row ~symbol:(everywhere "t_runtime_sleep") (everywhere (Named "int32_t")) (Returns Int32)
         [
-          ("seconds", Value Int64, everywhere "int64_t");
-          ("nanoseconds", Value Int64, everywhere "int64_t");
+          ("seconds", Value Int64, everywhere (Named "int64_t"));
+          ("nanoseconds", Value Int64, everywhere (Named "int64_t"));
         ]
         ~headers:[]
   | ( Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
@@ -1167,10 +1215,12 @@ let describe function_ =
       (* The runtime's task functions. A group, a key, a ticket, and a
          mutex are each a [UInt64]. A function with no result to return
          returns 0. *)
-      let handle name = (name, Value UInt64, everywhere "uint64_t") in
+      let handle name = (name, Value UInt64, everywhere (Named "uint64_t")) in
       let symbol = everywhere ("t_runtime_" ^ function_name task) in
-      let returns_handle = row ~symbol (everywhere "uint64_t") (Returns UInt64) ~headers:[] in
-      let returns_flag = row ~symbol (everywhere "int32_t") (Returns Int32) ~headers:[] in
+      let returns_handle =
+        row ~symbol (everywhere (Named "uint64_t")) (Returns UInt64) ~headers:[]
+      in
+      let returns_flag = row ~symbol (everywhere (Named "int32_t")) (Returns Int32) ~headers:[] in
       match task with
       | Tasks_open -> returns_handle []
       | Tasks_watch -> returns_handle [ handle "key" ]
@@ -1225,30 +1275,10 @@ let declaration system function_ : declaration =
   {
     symbol = row.symbol system;
     returns = row.returns system;
+    never_returns = row.result = Never;
     takes = List.map (fun (_, _, c) -> c system) row.parameters;
     variadic_from = row.variadic_from;
   }
-
-(* The structures a C type names, which a file that includes no header
-   declares before it can mention them. *)
-let structures c =
-  let word = "struct " in
-  let length = String.length c and skip = String.length word in
-  let rec from start found =
-    if start + skip > length then List.rev found
-    else if String.sub c start skip = word then begin
-      let stop = ref (start + skip) in
-      while
-        !stop < length
-        && match c.[!stop] with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false
-      do
-        incr stop
-      done;
-      from !stop (String.sub c start (!stop - start) :: found)
-    end
-    else from (start + 1) found
-  in
-  from 0 []
 
 let prototype (declaration : declaration) =
   let named =
@@ -1260,14 +1290,17 @@ let prototype (declaration : declaration) =
   let declared =
     List.sort_uniq String.compare (List.concat_map structures (declaration.returns :: named))
   in
+  let named = List.map show_c_type named in
   let parameters =
     match (named, declaration.variadic_from) with
     | [], None -> "void"
     | named, None -> String.concat ", " named
     | named, Some _ -> String.concat ", " (named @ [ "..." ])
   in
-  String.concat "" (List.map (fun structure -> structure ^ ";\n") declared)
-  ^ Printf.sprintf "%s %s(%s);\n" declaration.returns declaration.symbol parameters
+  String.concat "" (List.map (fun structure -> "struct " ^ structure ^ ";\n") declared)
+  ^ Printf.sprintf "%s%s %s(%s);\n"
+      (if declaration.never_returns then "_Noreturn " else "")
+      (show_c_type declaration.returns) declaration.symbol parameters
 
 let numbers =
   [
@@ -1832,14 +1865,13 @@ let check system =
   (* The address is of one of the numbers, where C takes the first of
      several, or of a structure that is all of them. *)
   let reached symbol c count scalar =
+    let c = show_c_type c in
     holds
       (symbol ^ " reaches numbers of another size")
       (Printf.sprintf "sizeof(*(%s)0) == %d || sizeof(*(%s)0) == %d" c (bytes scalar) c
          (count * bytes scalar))
   in
-  let is_void c =
-    String.starts_with ~prefix:"void" c || String.starts_with ~prefix:"const void" c
-  in
+  let is_void = function Pointer (Void | Const Void) -> true | _ -> false in
   String.concat ""
     ([
        (* The headers are to declare each function plainly, not as a macro

@@ -198,10 +198,23 @@ type signature = {
 }
 (** A function as Truss calls it: how each parameter of the C function is given. *)
 
+(** A C type as a declaration writes it: [char *const *] is
+    [Pointer (Const (Pointer (Named "char")))]. *)
+type c_type =
+  | Void
+  | Named of string  (** A type C or a header names with words: [int], [unsigned long], [mode_t] *)
+  | Struct of string  (** [struct timespec] *)
+  | Const of c_type
+  | Pointer of c_type
+
+val show_c_type : c_type -> string
+(** As C writes it: [const char *]. *)
+
 type declaration = {
   symbol : string;
-  returns : string;  (** The C type it returns *)
-  takes : string list;  (** The C type of each parameter *)
+  returns : c_type;
+  never_returns : bool;  (** Declared [_Noreturn], as [_exit] is *)
+  takes : c_type list;  (** The C type of each parameter *)
   variadic_from : int option;
       (** The first parameter that C passes through [...], which some systems pass differently from
           a named parameter *)

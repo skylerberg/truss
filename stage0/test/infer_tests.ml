@@ -19,7 +19,7 @@ let fine text = no_diagnostics [ ("app::main", text) ]
 let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let module_ = module_of "app::main" in
-  let offset = Documents.find text written ~occurrence in
+  let offset = Option.get (Substring.find ~occurrence text written) in
   let found =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
@@ -142,7 +142,8 @@ let () =
       one_diagnostic "fn f() {\n  let size: USize = 5_000_000_000\n}\n" "types.literal_out_of_range");
   test "a package that runs only on 64-bit targets may use 64-bit USize literals" (fun () ->
       let engine = Engine.create ~bases:[ Lazy.force Support.standard ] () in
-      Database.load_package ~usize_bits:64 engine ~name:"app" ~dependencies:[]
+      Database.load_package ~usize_bits:64 engine ~name:{ owner = None; name = "app" }
+        ~dependencies:[]
         [ (module_of "app::main", "fn f() {\n  let size: USize = 5_000_000_000\n}\n") ];
       match check (Engine.context engine) (module_of "app::main") with
       | [] -> ()
@@ -185,8 +186,7 @@ let () =
       match core_call_at text "length + extra" 1 with
       | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ ->
           let shown = Path.show impl in
-          if Documents.find shown "Add[Int64]" ~occurrence:1 < 0 then
-            fail "the impl chosen is %s" shown
+          if not (Substring.contains shown "Add[Int64]") then fail "the impl chosen is %s" shown
       | _ -> fail "no impl recorded");
   test "an ordering on Self in a trait's law is its compare" (fun () ->
       let text =

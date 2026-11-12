@@ -8,19 +8,21 @@ module Version = Registry.Version
 (* A package written as [acme::geometry], or with a version, as
    [acme::geometry@1.4.2]. *)
 let wanted text =
-  let name, version =
+  let written, version =
     match String.index_opt text '@' with
     | Some at ->
         (String.sub text 0 at, Some (String.sub text (at + 1) (String.length text - at - 1)))
     | None -> (text, None)
   in
-  (match Manifest.name_parts name with
-  | Some [ _; _ ] -> ()
-  | _ ->
-      Project.cannot_run
-        "`%s` is not a registry package's name, which is an owner and a name, such as \
-         `acme::geometry`."
-        name);
+  let name =
+    match Manifest.parse_name written with
+    | Some ({ owner = Some _; _ } as name) -> name
+    | _ ->
+        Project.cannot_run
+          "`%s` is not a registry package's name, which is an owner and a name, such as \
+           `acme::geometry`."
+          written
+  in
   ( name,
     Option.map
       (fun version ->
@@ -35,8 +37,8 @@ let wanted text =
 type change =
   | Entered of Lock.entry
   | Left of Lock.entry
-  | Moved of { name : string; from : Version.t; to_ : Version.t }
-  | Holds of { name : string; gained : string list }
+  | Moved of { name : Path.package; from : Version.t; to_ : Version.t }
+  | Holds of { name : Path.package; gained : string list }
       (** A package that would hold capabilities it did not *)
 
 let lock_changes ~(before : Lock.t) ~(after : Lock.t) =
@@ -61,20 +63,24 @@ let holds = function [] -> "" | held -> ", which holds " ^ String.concat ", " he
 
 let change_sentence = function
   | Entered entry ->
-      Printf.sprintf "`%s` %s enters the build%s." entry.name (Version.show entry.version)
-        (holds entry.holds)
-  | Left entry -> Printf.sprintf "`%s` %s leaves the build." entry.name (Version.show entry.version)
+      Printf.sprintf "`%s` %s enters the build%s." (Path.show_package entry.name)
+        (Version.show entry.version) (holds entry.holds)
+  | Left entry ->
+      Printf.sprintf "`%s` %s leaves the build." (Path.show_package entry.name)
+        (Version.show entry.version)
   | Moved { name; from; to_ } ->
-      Printf.sprintf "`%s` goes from %s to %s." name (Version.show from) (Version.show to_)
+      Printf.sprintf "`%s` goes from %s to %s." (Path.show_package name) (Version.show from)
+        (Version.show to_)
   | Holds { name; gained } ->
-      Printf.sprintf "`%s` would hold %s, which it did not." name (String.concat ", " gained)
+      Printf.sprintf "`%s` would hold %s, which it did not." (Path.show_package name)
+        (String.concat ", " gained)
 
 let change_json = function
   | Entered entry ->
       Json.Object
         [
           ("kind", Json.String "entered");
-          ("package", Json.String entry.name);
+          ("package", Json.String (Path.show_package entry.name));
           ("version", Json.String (Version.show entry.version));
           ("holds", Json.List (List.map (fun held -> Json.String held) entry.holds));
         ]
@@ -82,14 +88,14 @@ let change_json = function
       Json.Object
         [
           ("kind", Json.String "left");
-          ("package", Json.String entry.name);
+          ("package", Json.String (Path.show_package entry.name));
           ("version", Json.String (Version.show entry.version));
         ]
   | Moved { name; from; to_ } ->
       Json.Object
         [
           ("kind", Json.String "moved");
-          ("package", Json.String name);
+          ("package", Json.String (Path.show_package name));
           ("from", Json.String (Version.show from));
           ("to", Json.String (Version.show to_));
         ]
@@ -97,7 +103,7 @@ let change_json = function
       Json.Object
         [
           ("kind", Json.String "holds");
-          ("package", Json.String name);
+          ("package", Json.String (Path.show_package name));
           ("gained", Json.List (List.map (fun held -> Json.String held) gained));
         ]
 

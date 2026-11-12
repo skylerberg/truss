@@ -125,7 +125,8 @@ let check_method_location state (head : type_head) =
               (Printf.sprintf
                  "`%s` is defined in the package `%s`, so its methods and constants must be too. A \
                   function of this package can take it as a parameter instead."
-                 (Path.show owner) owner_module.package)
+                 (Path.show owner)
+                 (Path.show_package owner_module.package))
           else if visibility = Private && owner_module <> state.key.module_ then
             report state Method_outside_package head.span
               (Printf.sprintf

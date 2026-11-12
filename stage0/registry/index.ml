@@ -83,13 +83,13 @@ let fetch registry ~into name version ~hash =
     let files = Content.files ~all:true (version_directory registry name version) in
     if files = [] then
       Error
-        (Printf.sprintf "the registry at %s has no `%s` %s" registry.root name
+        (Printf.sprintf "the registry at %s has no `%s` %s" registry.root (Path.show_package name)
            (Version.show version))
     else if Content.hash files <> hash then
       Error
         (Printf.sprintf
            "the files the registry at %s holds as `%s` %s do not have the hash the lock file names"
-           registry.root name (Version.show version))
+           registry.root (Path.show_package name) (Version.show version))
     else begin
       (* Written beside itself and renamed, so that a package in the store
          is always whole. *)

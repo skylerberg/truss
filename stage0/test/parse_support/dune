@@ -8,4 +8,5 @@
   parser
   syntax
   syntax_print
-  documents))
+  documents
+  substring))

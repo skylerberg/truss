@@ -6,7 +6,7 @@ open Harness
 
 let module_of text : Path.module_ =
   match String.split_on_char ':' text |> List.filter (( <> ) "") with
-  | package :: modules -> { package; modules }
+  | name :: modules -> { package = { owner = None; name }; modules }
   | [] -> invalid_arg text
 
 (* A small standard library, enough for the prelude names these tests use. *)
@@ -95,7 +95,7 @@ let one_diagnostic ?(others = []) ?fixed text code =
 let name_at database file text occurrence =
   let module_ = module_of file in
   let source = Workspace.(Source.text (Query.demand database file module_).source) in
-  let offset = Documents.find source text ~occurrence in
+  let offset = Option.get (Substring.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let found =
     List.find_map
@@ -152,7 +152,7 @@ let refers ?(others = []) text ~name:(written, occurrence) expected =
 let refers_to_binding text ~use ~binding =
   let database = setup [ ("app::main", text) ] in
   let source = text in
-  let binding_offset = Documents.find source (fst binding) ~occurrence:(snd binding) in
+  let binding_offset = Option.get (Substring.find ~occurrence:(snd binding) source (fst binding)) in
   let name, names, base, resolved = name_at database "app::main" (fst use) (snd use) in
   let actual = describe names base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
@@ -318,7 +318,7 @@ let () =
 let bracket_of text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let module_ = module_of "app::main" in
-  let offset = Documents.find text written ~occurrence in
+  let offset = Option.get (Substring.find ~occurrence text written) in
   let declarations = Query.demand database Resolve.Names.declarations module_ in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
@@ -594,13 +594,18 @@ let () =
 (* A package with an owner in its name *)
 
 let () =
-  let geometry : Path.module_ = { package = "acme::geometry"; modules = [ "vector" ] } in
+  let geometry : Path.module_ =
+    { package = { Path.owner = Some "acme"; name = "geometry" }; modules = [ "vector" ] }
+  in
   let with_geometry ~dependencies text =
     let database = setup [ ("app::main", text) ] in
     let engine = Engine.of_context database in
-    Database.load_package engine ~name:"acme::geometry" ~dependencies:[]
+    Database.load_package engine
+      ~name:{ Path.owner = Some "acme"; name = "geometry" }
+      ~dependencies:[]
       [ (geometry, "public fn length(value: Int64) -> Int64 {\n  value\n}\n") ];
-    Database.Testing.set_manifest engine ~name:"app"
+    Database.Testing.set_manifest engine
+      ~name:{ Path.owner = None; name = "app" }
       ~dependencies:
         (List.map (fun package -> { Workspace.package; capabilities = [] }) dependencies);
     database
@@ -612,7 +617,9 @@ let () =
      }\n"
   in
   test "a path into a package with an owner starts with the owner and the name" (fun () ->
-      let database = with_geometry ~dependencies:[ "acme::geometry" ] uses_both in
+      let database =
+        with_geometry ~dependencies:[ { Path.owner = Some "acme"; name = "geometry" } ] uses_both
+      in
       (match diagnostics database "app::main" with
       | [] -> ()
       | found -> fail "found [%s]" (String.concat "; " (codes found)));
@@ -626,7 +633,8 @@ let () =
       | found -> fail "found [%s]" (String.concat "; " found));
   test "an owner alone names no package" (fun () ->
       let database =
-        with_geometry ~dependencies:[ "acme::geometry" ]
+        with_geometry
+          ~dependencies:[ { Path.owner = Some "acme"; name = "geometry" } ]
           "use acme::vector\n\nfn f() -> Int64 {\n  vector::length(1)\n}\n"
       in
       match codes (diagnostics database "app::main") with

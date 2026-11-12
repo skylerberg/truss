@@ -13,10 +13,7 @@ let expect_strings ~expected actual =
   if expected <> actual then
     fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
 
-let contains text part =
-  let n = String.length part in
-  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
-  at 0
+let contains = Substring.contains
 
 (* Packages on disk *)
 
@@ -90,7 +87,8 @@ let () =
 (* Finding the package *)
 
 let names (project : Project.t) =
-  List.sort compare (List.map (fun (p : Project.package) -> p.name) project.packages)
+  List.sort compare
+    (List.map (fun (p : Project.package) -> Path.show_package p.name) project.packages)
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
@@ -141,7 +139,12 @@ let () =
       in
       let project = Project.load (Filename.concat root "app") in
       let report = Report.gather ~proofs:true project in
-      if not (List.exists (fun (file : Report.file) -> file.module_.package = "lib") report.files)
+      if
+        not
+          (List.exists
+             (fun (file : Report.file) ->
+               file.module_.package = { Path.owner = None; name = "lib" })
+             report.files)
       then fail "the dependency's overflow is not reported");
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
@@ -944,7 +947,13 @@ let () =
       let place path part : Database.place =
         {
           path =
-            Some (Path.Top { module_ = { package = "demo"; modules = [ "main" ] }; name = path });
+            Some
+              (Path.Top
+                 {
+                   module_ =
+                     { package = { Path.owner = None; name = "demo" }; modules = [ "main" ] };
+                   name = path;
+                 });
           part = Some part;
           label = "";
         }
@@ -992,10 +1001,12 @@ let publish registry name version ?(dependencies = []) ?(record = []) modules =
          (fun (dependency, version) ->
            match Registry.Index.hash_of registry dependency version with
            | Some hash -> { Registry.Lock.name = dependency; version; hash; holds = [] }
-           | None -> failwith (dependency ^ " is not in the registry"))
+           | None -> failwith (Path.show_package dependency ^ " is not in the registry"))
          record)
   in
-  Registry.Index.add registry name version
+  Registry.Index.add registry
+    (Option.get (Path.parse_package name))
+    version
     ((("truss.toml", manifest) :: (if record = [] then [] else [ ("truss.lock", lock) ])) @ modules)
 
 let units text =
@@ -1015,7 +1026,7 @@ let stocked () =
   publish registry "acme::units" (1, 1, 0) (units "100");
   publish registry "acme::geometry" (1, 0, 0)
     ~dependencies:[ ("acme::units", []) ]
-    ~record:[ ("acme::units", (1, 0, 0)) ]
+    ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 0, 0)) ]
     geometry;
   registry
 
@@ -1027,7 +1038,8 @@ let lock_lines root = String.split_on_char '\n' (String.trim (read root "truss.l
 
 let versions root =
   List.map
-    (fun (entry : Registry.Lock.entry) -> (entry.name, Registry.Version.show entry.version))
+    (fun (entry : Registry.Lock.entry) ->
+      (Path.show_package entry.name, Registry.Version.show entry.version))
     (Registry.Lock.parse (read root "truss.lock"))
 
 let expect_versions root expected =
@@ -1056,7 +1068,7 @@ let () =
          brings that version with it. *)
       publish registry "acme::shapes" (1, 0, 0)
         ~dependencies:[ ("acme::units", []) ]
-        ~record:[ ("acme::units", (1, 1, 0)) ]
+        ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 1, 0)) ]
         [ ("square.truss", "public fn sides() -> Int64 {\n  4\n}\n") ];
       rewrite root "main.truss"
         (snd uses_geometry ^ "\nfn sides() -> Int64 {\n  acme::shapes::square::sides()\n}\n");
@@ -1119,12 +1131,17 @@ let () =
       let registry = stocked () in
       publish registry "acme::angles" (1, 0, 0) [ ("degrees.truss", "") ];
       let root = package [ ("main.truss", "") ] in
-      let hash = Option.get (Registry.Index.hash_of registry "acme::angles" (1, 0, 0)) in
+      let hash =
+        Option.get
+          (Registry.Index.hash_of registry { Path.owner = Some "acme"; name = "angles" } (1, 0, 0))
+      in
       rewrite root "truss.toml" (manifest_of "demo" ^ "[dependencies]\n\"acme::angles\" = []\n");
       rewrite root "truss.lock" (Printf.sprintf "format 1\nacme::angles 1.0.0 %s\n" hash);
       Out_channel.with_open_bin
         (Filename.concat
-           (Registry.Index.version_directory registry "acme::angles" (1, 0, 0))
+           (Registry.Index.version_directory registry
+              { Path.owner = Some "acme"; name = "angles" }
+              (1, 0, 0))
            "degrees.truss")
         (fun channel -> output_string channel "fn stolen() {}\n");
       expect_problem_in root "do not have the hash the lock file names");
@@ -1132,7 +1149,10 @@ let () =
       let registry = stocked () in
       publish registry "acme::tides" (1, 0, 0) [ ("moon.truss", "") ];
       let root = package [ ("main.truss", "") ] in
-      let hash = Option.get (Registry.Index.hash_of registry "acme::tides" (1, 0, 0)) in
+      let hash =
+        Option.get
+          (Registry.Index.hash_of registry { Path.owner = Some "acme"; name = "tides" } (1, 0, 0))
+      in
       rewrite root "truss.toml" (manifest_of "demo" ^ "[dependencies]\n\"acme::tides\" = []\n");
       rewrite root "truss.lock" (Printf.sprintf "format 1\nacme::tides 1.0.0 %s\n" hash);
       Registry.Index.configure (Some "");
@@ -1211,7 +1231,7 @@ let () =
       ignore (quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false));
       publish registry "acme::geometry" (1, 1, 0)
         ~dependencies:[ ("acme::units", [ "Clock" ]) ]
-        ~record:[ ("acme::units", (1, 0, 0)) ]
+        ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 0, 0)) ]
         geometry;
       let _, output = upgrade root [ "acme::geometry" ] in
       if not (contains output "`acme::units` would hold Clock, which it did not") then
@@ -1245,10 +1265,12 @@ let () =
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       if not (contains output "Published `acme::angles` 1.0.0") then fail "said %s" output;
-      expect_published registry "acme::angles" [ "1.0.0" ];
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ];
       let files =
         Registry.Content.files ~all:true
-          (Registry.Index.version_directory registry "acme::angles" (1, 0, 0))
+          (Registry.Index.version_directory registry
+             { Path.owner = Some "acme"; name = "angles" }
+             (1, 0, 0))
       in
       expect_strings ~expected:[ "degrees.truss"; "truss.toml" ] (List.map fst files));
   test "a package whose name ends in _v2 starts at 2.0.0" (fun () ->
@@ -1257,7 +1279,7 @@ let () =
         directory [ ("truss.toml", manifest_of "acme::angles_v2"); ("degrees.truss", turn) ]
       in
       ignore (publish_from root);
-      expect_published registry "acme::angles_v2" [ "2.0.0" ]);
+      expect_published registry { Path.owner = Some "acme"; name = "angles_v2" } [ "2.0.0" ]);
   test "a release that changes only a body gets the next patch number" (fun () ->
       let registry = registry () in
       let root = angles turn in
@@ -1265,7 +1287,7 @@ let () =
       rewrite root "degrees.truss" "public fn turn() -> Int64 {\n  180 + 180\n}\n";
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
-      expect_published registry "acme::angles" [ "1.0.0"; "1.0.1" ]);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
   test "a release that adds a public definition gets the next minor number, and says what is new"
     (fun () ->
       let registry = registry () in
@@ -1275,7 +1297,7 @@ let () =
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       if not (contains output "acme::angles::degrees::half is new") then fail "said %s" output;
-      expect_published registry "acme::angles" [ "1.0.0"; "1.1.0" ]);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.1.0" ]);
   test "files that are a version already are not published again" (fun () ->
       let registry = registry () in
       let root = angles turn in
@@ -1283,7 +1305,7 @@ let () =
       let status, output = publish_from root in
       if status <> 0 || not (contains output "`acme::angles` 1.0.0 is these files already") then
         fail "status %d: %s" status output;
-      expect_published registry "acme::angles" [ "1.0.0" ]);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that changes a public signature is refused, with the signature as it was and is"
     (fun () ->
       let registry = registry () in
@@ -1299,7 +1321,7 @@ let () =
           "now: public fn turn(times: Int64) -> Int64";
           "Publish it under a new name, such as `acme::angles_v2`";
         ];
-      expect_published registry "acme::angles" [ "1.0.0" ]);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that takes a public definition away is refused" (fun () ->
       let _ = registry () in
       let root = angles (turn ^ "\npublic fn half() -> Int64 {\n  180\n}\n") in
@@ -1313,7 +1335,7 @@ let () =
       rewrite root "degrees.truss" (turn ^ "\nfn third(of: Int64) -> Int64 {\n  of\n}\n");
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
-      expect_published registry "acme::angles" [ "1.0.0"; "1.0.1" ]);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
   test "a package with no owner in its name is not published" (fun () ->
       let _ = registry () in
       match publish_from (package [ ("degrees.truss", turn) ]) with
@@ -1333,20 +1355,20 @@ let () =
       in
       expect_refused root "degrees.truss:2:3: `todo` is not finished code";
       expect_refused root "degrees.truss:6:3: `echo` is not finished code";
-      expect_published registry "acme::angles" []);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose test fails is not published" (fun () ->
       let registry = registry () in
       let root =
         angles (turn ^ "\ntest \"a turn is a right angle\" {\n  assert turn() == 90\n}\n")
       in
       expect_refused root "A package is published only when its tests pass";
-      expect_published registry "acme::angles" []);
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose tests pass is published" (fun () ->
       let registry = registry () in
       let root = angles (turn ^ "\ntest \"a turn is whole\" {\n  assert turn() == 360\n}\n") in
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
-      expect_published registry "acme::angles" [ "1.0.0" ])
+      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ])
 
 (* What a package is published with *)
 
@@ -1369,14 +1391,16 @@ let () =
         Registry.Lock.parse
           (In_channel.with_open_bin
              (Filename.concat
-                (Registry.Index.version_directory registry "acme::walls" (1, 0, 0))
+                (Registry.Index.version_directory registry
+                   { Path.owner = Some "acme"; name = "walls" }
+                   (1, 0, 0))
                 "truss.lock")
              In_channel.input_all)
       in
       match record with
       | [
-       { name = "acme::geometry"; version = 1, 0, 0; holds = []; _ };
-       { name = "acme::units"; version = 1, 0, 0; holds = []; _ };
+       { name = { Path.owner = Some "acme"; name = "geometry" }; version = 1, 0, 0; holds = []; _ };
+       { name = { Path.owner = Some "acme"; name = "units" }; version = 1, 0, 0; holds = []; _ };
       ] ->
           ()
       | _ -> fail "published with other versions");
@@ -1422,7 +1446,9 @@ let () =
       if
         Sys.file_exists
           (Filename.concat
-             (Registry.Index.version_directory registry "acme::walls" (1, 0, 0))
+             (Registry.Index.version_directory registry
+                { Path.owner = Some "acme"; name = "walls" }
+                (1, 0, 0))
              "truss.lock")
       then fail "published with a package only its test uses";
       let user =

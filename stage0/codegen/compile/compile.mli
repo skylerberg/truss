@@ -39,7 +39,7 @@ val create :
   ?checks:bool ->
   ?file_name:(Path.module_ -> string) ->
   ?want:(lowering -> Instance.key list -> unit) ->
-  ?worked_on:(string -> bool) ->
+  ?worked_on:(Path.package -> bool) ->
   Query.context ->
   Memory_layout.target ->
   Toolchain.t ->

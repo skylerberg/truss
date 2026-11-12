@@ -13,10 +13,10 @@
      [test]
      time_limit = 10 *)
 
-type dependency = { package : string; capabilities : string list }
+type dependency = { package : Path.package; capabilities : string list }
 
 type package = {
-  name : string;
+  name : Path.package;
   truss : string option;
   dependencies : dependency list;
   usize_bits : int;
@@ -37,15 +37,12 @@ let is_lower_snake_case name =
   && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name
   && List.for_all (( <> ) "") (String.split_on_char '_' name)
 
-(* [acme::geometry] is [Some ["acme"; "geometry"]]. *)
-let name_parts name =
-  match String.split_on_char ':' name with
-  | [ one ] when is_lower_snake_case one -> Some [ one ]
-  | [ owner; ""; one ] when is_lower_snake_case owner && is_lower_snake_case one ->
-      Some [ owner; one ]
+let parse_name text =
+  match Path.parse_package text with
+  | Some package when List.for_all is_lower_snake_case (Path.package_parts package) -> Some package
   | _ -> None
 
-let valid_name name = name_parts name <> None
+let valid_name text = parse_name text <> None
 
 type token =
   | Open
@@ -217,12 +214,16 @@ let toolchain_builds version =
   | _ -> false
 
 let dependency (entry : entry) : dependency =
-  if not (valid_name entry.key) then
-    malformed entry.line "`%s` is not a package's name, which is %s." entry.key name_expected;
-  if (not entry.quoted) && String.contains entry.key ':' then
+  let package =
+    match parse_name entry.key with
+    | Some package -> package
+    | None ->
+        malformed entry.line "`%s` is not a package's name, which is %s." entry.key name_expected
+  in
+  if (not entry.quoted) && package.owner <> None then
     malformed entry.line "A name with `::` is written in quotes: `\"%s\" = []`." entry.key;
   match entry.value with
-  | List capabilities -> { package = entry.key; capabilities }
+  | List capabilities -> { package; capabilities }
   | Inline_table ->
       malformed entry.line
         "A dependency's entry is the list of capabilities it is granted, as in `%s = []`. A \
@@ -268,8 +269,11 @@ let parse text =
       match entry.key with
       | "name" ->
           let text = text_of entry in
-          if not (valid_name text) then malformed entry.line "A package's name is %s." name_expected;
-          name := Some text
+          name :=
+            Some
+              (match parse_name text with
+              | Some package -> package
+              | None -> malformed entry.line "A package's name is %s." name_expected)
       | "truss" ->
           let text = text_of entry in
           if version_of text = None then
@@ -340,11 +344,12 @@ let has_project_table text =
       String.trim line = "[project]")
     (String.split_on_char '\n' text)
 
-let without_dependency text name =
+let without_dependency text package =
   let entry =
     Option.bind
       (List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text))
-      (fun table -> List.find_opt (fun (entry : entry) -> entry.key = name) table.entries)
+      (fun table ->
+        List.find_opt (fun (entry : entry) -> parse_name entry.key = Some package) table.entries)
   in
   match entry with
   | None -> text
@@ -353,12 +358,15 @@ let without_dependency text name =
       |> List.filteri (fun index _ -> index + 1 < entry.line || index + 1 > entry.last_line)
       |> String.concat "\n"
 
-let with_dependency text name =
+let with_dependency text (package : Path.package) =
+  let name = Path.show_package package in
   let entry =
-    Printf.sprintf "%s = []" (if String.contains name ':' then Printf.sprintf "%S" name else name)
+    Printf.sprintf "%s = []" (if package.owner <> None then Printf.sprintf "%S" name else name)
   in
   match List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text) with
-  | Some table when List.exists (fun (entry : entry) -> entry.key = name) table.entries -> text
+  | Some table
+    when List.exists (fun (entry : entry) -> parse_name entry.key = Some package) table.entries ->
+      text
   | Some table ->
       let lines = String.split_on_char '\n' text in
       let after =

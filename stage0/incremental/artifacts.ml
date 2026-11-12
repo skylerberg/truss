@@ -370,15 +370,11 @@ let fill engine (artifacts : artifact list) =
 (* Frozen bases, shared by every engine opened from the same whole state
    over the same bases, and held weakly, so that one no engine uses is
    freed. *)
-let shared_bases : (string, t Weak.t) Hashtbl.t = Hashtbl.create 8
+let shared_bases : (string * string * bool * int list, t Weak.t) Hashtbl.t = Hashtbl.create 8
 let forget_bases () = Hashtbl.reset shared_bases
 
 let frozen_from (store : store) ~bases ~fixed ~name (artifacts : artifact list) =
-  let key =
-    String.concat ":"
-      (store.id :: name :: string_of_bool fixed
-      :: List.map (fun (base : t) -> string_of_int base.id) bases)
-  in
+  let key = (store.id, name, fixed, List.map (fun (base : t) -> base.id) bases) in
   let cached =
     match Hashtbl.find_opt shared_bases key with Some weak -> Weak.get weak 0 | None -> None
   in

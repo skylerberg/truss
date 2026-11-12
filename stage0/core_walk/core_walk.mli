@@ -12,6 +12,7 @@ type visit = {
       (** Called for every callee stored in a node other than a [Call]: an interpolated piece's
           [display], a cursor's [next], and a pattern's [equal]. The callee of a [Call] is not
           reported here, because the visitor sees the [Call] node itself. *)
+  place : Core.place -> unit;  (** Called for every place, and for each place a [Field] is of. *)
 }
 
 val ignore_all : visit

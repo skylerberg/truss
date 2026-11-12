@@ -12,7 +12,11 @@ let generated_state context ~anchor ~substitution =
     (frame_of ~inlined:[]
        (unwritten
           ~definition_key:
-            { Names.module_ = { package = ""; modules = [] }; path = anchor; ordinal = 0 }
+            {
+              Names.module_ = { package = { owner = None; name = "" }; modules = [] };
+              path = anchor;
+              ordinal = 0;
+            }
           ~anchor ~substitution ~result:(Returns T.unit)))
 
 (* Where a generated function's result goes when it is another function's,
@@ -255,7 +259,8 @@ let real_implementation (capability : Path.t) : Path.t =
   Impl
     {
       module_ = Well_known.system_module module_name;
-      name = Printf.sprintf "%s for System%s" name name;
+      trait = name;
+      for_type = { type_name = "System" ^ name; generics = [] };
     }
 
 (* The real implementation of each capability, for code the runtime runs

@@ -135,7 +135,11 @@ let check context (graph : Graph.t) =
         report context Use_after_move
           (span context points.(index).origin)
           ~notes:[ (moved_span, Printf.sprintf "`%s` is moved here." shown) ]
-          ~fixes:[ Diagnostic.fix "Pass a copy at the move instead." (copy_at context moved_span) ]
+          ~fixes:
+            [
+              Diagnostic.fix "Pass a copy at the move instead."
+                (copy_at context points.(moved_at).origin);
+            ]
           (Printf.sprintf "`%s` is used after it was moved." shown)
     | _ -> ()
   in

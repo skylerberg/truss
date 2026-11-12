@@ -27,7 +27,7 @@ let main (project : Project.t) =
   | Some main -> main
   | None ->
       Project.cannot_run "The package %s has no `main` in a `main` module, so it has no program."
-        package.name
+        (Path.show_package package.name)
 
 let stop_at_diagnostics ?proofs ~json project =
   let report = Report.gather ?proofs project in
@@ -140,7 +140,9 @@ let build ~directory ~output ~json =
          included, so what they show is not checked again at run time. *)
       let compile = Compiler.create ~checks:false project Release in
       refuse_unshippable ~json ~echo:true project compile main;
-      let output = Project.normalize (Option.value output ~default:package.name) in
+      let output =
+        Project.normalize (Option.value output ~default:(Path.show_package package.name))
+      in
       match Compile.build_program compile ~main ~output with
       | Error message -> Project.cannot_run "%s" message
       | Ok () ->

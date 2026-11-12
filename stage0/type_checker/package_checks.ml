@@ -483,7 +483,7 @@ let instantiation_edges database (key : Names.key) =
         form.definition;
       List.rev !edges
 
-let check_instantiation database (package : string) =
+let check_instantiation database (package : Path.package) =
   let generic =
     List.filter
       (fun (declaration : Names.declaration) ->
@@ -528,7 +528,7 @@ let check_instantiation database (package : string) =
 
 (* Two tests with one name in one file are already a duplicate definition;
    this is for two in different files of the package. *)
-let check_tests database (package : string) =
+let check_tests database (package : Path.package) =
   let tests =
     List.filter
       (fun (declaration : Names.declaration) -> declaration.kind = Test && declaration.ordinal = 0)
@@ -553,7 +553,7 @@ let check_tests database (package : string) =
 (* The package *)
 
 let check =
-  Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Fun.id ~saved:true
+  Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Path.show_package ~saved:true
     (fun database package_name ->
       let package = package_name in
       let declarations = declarations database package in
@@ -704,7 +704,7 @@ let used_packages =
    not among them is one only its tests use, which a project that uses the
    package once it is published does not take on. *)
 let code_packages =
-  Query.query ~name:"code_packages" ~phase:Phases.checks ~saved:true ~show:Fun.id
+  Query.query ~name:"code_packages" ~phase:Phases.checks ~saved:true ~show:Path.show_package
     (fun database package_name ->
       let package = package_name in
       List.sort_uniq compare
@@ -717,25 +717,26 @@ let code_packages =
 
 (* What only a package's code shows to be wrong with its manifest. *)
 type manifest_problem =
-  | Not_a_capability of { dependency : string; name : string }
+  | Not_a_capability of { dependency : Path.package; name : string }
       (** A grant's entry that names no capability *)
-  | Unused of string  (** A dependency that nothing in the package uses *)
+  | Unused of Path.package  (** A dependency that nothing in the package uses *)
 
 let manifest_sentence ~package = function
   | Not_a_capability { dependency; name } ->
       Printf.sprintf
         "`%s`, in the entry for `%s`, names no capability. A grant names a capability of the \
          prelude by its name, such as `Clock`, and any other by its full path."
-        name dependency
+        name (Path.show_package dependency)
   | Unused dependency ->
-      Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." package dependency
+      Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
+        (Path.show_package dependency)
 
 (* Which dependencies a package uses is known only once all of its code
    checks: a call in a body with an error may not have been worked out. So a
    package with an error elsewhere is not told that a dependency is unused,
    which a fix would then delete. *)
 let manifest_problems =
-  Query.query ~name:"manifest_problems" ~phase:Phases.checks ~saved:true ~show:Fun.id
+  Query.query ~name:"manifest_problems" ~phase:Phases.checks ~saved:true ~show:Path.show_package
     (fun database package_name ->
       let package = package_name in
       let keys = List.map Names.key_of (declarations database package) in

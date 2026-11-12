@@ -467,7 +467,11 @@ let () =
                 path =
                   Top
                     {
-                      module_ = { package = "acme::geometry"; modules = [ "vector" ] };
+                      module_ =
+                        {
+                          package = { owner = Some "acme"; name = "geometry" };
+                          modules = [ "vector" ];
+                        };
                       name = "length";
                     };
                 type_arguments = [];

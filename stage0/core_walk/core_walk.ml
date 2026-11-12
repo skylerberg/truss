@@ -5,9 +5,11 @@ type visit = {
   statement : statement -> unit;
   pattern : pattern -> unit;
   callee : callee -> unit;
+  place : place -> unit;
 }
 
-let ignore_all = { expression = ignore; statement = ignore; pattern = ignore; callee = ignore }
+let ignore_all =
+  { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
 let callees found =
   {
@@ -30,7 +32,9 @@ let rec lent_places : operand -> place list = function
       List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:lent_places field) fields
   | Value _ -> []
 
-let rec place visit = function
+let rec place visit found =
+  visit.place found;
+  match found with
   | Local _ | Constant _ -> ()
   | Field { base; _ } -> place visit base
   | Lent call -> visit.expression call
@@ -196,6 +200,7 @@ let rec deep visit =
         visit.pattern node;
         pattern_children (deep visit) node);
     callee = visit.callee;
+    place = visit.place;
   }
 
 let expression visit node = (deep visit).expression node

@@ -7,7 +7,8 @@ let derivable (trait : Path.t) =
   match Well_known.of_path trait with Some (Equal | Hash | Ordered | Default) -> true | _ -> false
 
 let index =
-  Query.query ~name:"impl_index" ~phase:Phases.interfaces ~show:Fun.id (fun database package ->
+  Query.query ~name:"impl_index" ~phase:Phases.interfaces ~show:Path.show_package
+    (fun database package ->
       List.concat_map
         (fun (declaration : Names.declaration) ->
           if declaration.ordinal <> 0 then []
@@ -53,7 +54,8 @@ let real_implementation database (capability : Path.t) : Path.t option =
 
 (* A package's impls by the type they are for: each with its trait. *)
 let by_type =
-  Query.query ~name:"impls_by_type" ~phase:Phases.interfaces ~show:Fun.id (fun database package ->
+  Query.query ~name:"impls_by_type" ~phase:Phases.interfaces ~show:Path.show_package
+    (fun database package ->
       List.fold_left
         (fun table ((trait, type_), impl) ->
           Path.Map.update type_
@@ -69,7 +71,8 @@ let impls_for database (type_ : Path.t) package =
 let impls_in =
   Query.query ~name:"impls" ~phase:Phases.interfaces ~saved:true
     ~show:(fun (trait, type_, package) ->
-      Printf.sprintf "%s for %s in %s" (Path.show trait) (Path.show type_) package)
+      Printf.sprintf "%s for %s in %s" (Path.show trait) (Path.show type_)
+        (Path.show_package package))
     (fun database ((trait : Path.t), (type_ : Path.t), package) ->
       List.filter_map
         (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)

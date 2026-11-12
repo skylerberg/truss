@@ -2,7 +2,7 @@ open Harness
 
 let module_of text : Path.module_ =
   match String.split_on_char ':' text |> List.filter (( <> ) "") with
-  | package :: modules -> { package; modules }
+  | name :: modules -> { package = { owner = None; name }; modules }
   | [] -> invalid_arg text
 
 (* The standard library as a fixed base, shared by every test in a run, so
@@ -364,6 +364,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 wrong "the alternatives of a pattern do not bind the same locals"
           | _ -> ());
       callee;
+      place = ignore;
     }
     form.definition
 
@@ -437,7 +438,7 @@ let one_diagnostic ~check ?(others = []) ?fixed ?says text code =
       if actual <> code then fail "expected %s, got %s: %s" code actual diagnostic.message;
       Option.iter
         (fun says ->
-          if Documents.find diagnostic.message says ~occurrence:1 < 0 then
+          if not (Substring.contains diagnostic.message says) then
             fail "expected a message that says %S, got: %s" says diagnostic.message)
         says;
       match (fixed, diagnostic.fixes) with

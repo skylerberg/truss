@@ -49,7 +49,7 @@ type type_check_result = Body.type_check_result = {
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Diagnostic.t list;
-  evidence : string list;  (** The packages whose [impl]s met a bound in the definition *)
+  evidence : Path.package list;  (** The packages whose [impl]s met a bound in the definition *)
 }
 
 val type_check_result : (Resolve.Names.key, type_check_result option) Query.query
@@ -97,7 +97,7 @@ val specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query
 val exported_specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
 (** As {!core_of_path}, for {!exported_specification}. *)
 
-val evidence : (Resolve.Names.key, string list) Query.query
+val evidence : (Resolve.Names.key, Path.package list) Query.query
 (** The packages whose [impl]s met a bound in a definition. *)
 
 val clean : Query.context -> Resolve.Names.key -> tables option

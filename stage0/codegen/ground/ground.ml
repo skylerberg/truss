@@ -66,7 +66,10 @@ and compare_yielding a b =
 let equal a b = compare a b = 0
 
 let rec path_name : Path.t -> string = function
-  | Top { name; _ } | Impl { name; _ } | Test { name; _ } | Law_proof { name; _ } -> name
+  | Top { name; _ } | Test { name; _ } -> name
+  | Impl { trait; for_type; _ } -> trait ^ " for " ^ Path.show_type_head for_type
+  | Law_proof { trait; law; for_type; _ } ->
+      trait ^ "." ^ law ^ " for " ^ Path.show_type_head for_type
   | Method { name; _ } | Member_constant { name; _ } -> name
   | Derived { trait; _ } -> path_name trait
 
@@ -107,9 +110,14 @@ and arguments_to_string arguments =
 (* Encoding: each constructor is an array whose first item numbers it. *)
 
 let tagged n items = Cbor.Array (Cbor.int n :: items)
+let texts names = Cbor.Array (List.map (fun name -> Cbor.Text name) names)
 
 let encode_module (m : Path.module_) =
-  Cbor.Array (List.map (fun s -> Cbor.Text s) (m.package :: m.modules))
+  Cbor.Array
+    (texts (Path.package_parts m.package) :: List.map (fun name -> Cbor.Text name) m.modules)
+
+let encode_type_head (head : Path.type_head) =
+  Cbor.Array [ Text head.type_name; texts head.generics ]
 
 let encode_receiver : Path.receiver -> Cbor.t = function
   | Static -> Cbor.int 0
@@ -122,10 +130,12 @@ let rec encode_path : Path.t -> Cbor.t = function
   | Method { owner; name; receiver } ->
       tagged 1 [ encode_path owner; Text name; encode_receiver receiver ]
   | Member_constant { owner; name } -> tagged 2 [ encode_path owner; Text name ]
-  | Impl { module_; name } -> tagged 3 [ encode_module module_; Text name ]
+  | Impl { module_; trait; for_type } ->
+      tagged 3 [ encode_module module_; Text trait; encode_type_head for_type ]
   | Derived { type_; trait } -> tagged 4 [ encode_path type_; encode_path trait ]
   | Test { module_; name } -> tagged 5 [ encode_module module_; Text name ]
-  | Law_proof { module_; name } -> tagged 6 [ encode_module module_; Text name ]
+  | Law_proof { module_; trait; law; for_type } ->
+      tagged 6 [ encode_module module_; Text trait; Text law; encode_type_head for_type ]
 
 let encode_mode = function Read -> Cbor.int 0 | Mut -> Cbor.int 1 | Own -> Cbor.int 2
 

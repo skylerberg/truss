@@ -8,7 +8,7 @@ module Lock = Registry.Lock
 module Index = Registry.Index
 module Selection = Registry.Selection
 
-let contains text part = Documents.find text part ~occurrence:1 >= 0
+let contains text part = Substring.contains text part
 
 (* Versions *)
 
@@ -24,14 +24,14 @@ let () =
       List.iter
         (fun (name, major) ->
           let found = Version.major_of_name name in
-          if found <> major then fail "%s gives %d" name found)
+          if found <> major then fail "%s gives %d" (Path.show_package name) found)
         [
-          ("acme::geometry", 1);
-          ("acme::geometry_v2", 2);
-          ("acme::geometry_v17", 17);
-          ("acme::v2", 1);
-          ("acme::move", 1);
-          ("acme::geometry_v", 1);
+          ({ owner = Some "acme"; name = "geometry" }, 1);
+          ({ owner = Some "acme"; name = "geometry_v2" }, 2);
+          ({ owner = Some "acme"; name = "geometry_v17" }, 17);
+          ({ owner = Some "acme"; name = "v2" }, 1);
+          ({ owner = Some "acme"; name = "move" }, 1);
+          ({ owner = Some "acme"; name = "geometry_v" }, 1);
         ])
 
 (* A package's hash *)
@@ -58,14 +58,19 @@ let () =
       let text = lock_block () in
       match Lock.parse text with
       | [
-          { name = "acme::geometry_v2"; version = 2, 1, 3; holds = []; _ };
           {
-            name = "truss::http";
+            name = { Path.owner = Some "acme"; name = "geometry_v2" };
+            version = 2, 1, 3;
+            holds = [];
+            _;
+          };
+          {
+            name = { Path.owner = Some "truss"; name = "http" };
             version = 1, 12, 0;
             holds = [ "Clock"; "Handles"; "NetworkClient" ];
             _;
           };
-          { name = "truss::toml"; version = 1, 9, 4; holds = []; _ };
+          { name = { Path.owner = Some "truss"; name = "toml" }; version = 1, 9, 4; holds = []; _ };
         ] as entries ->
           if Lock.print entries <> text then fail "written as %S" (Lock.print entries)
       | _ -> fail "read differently");
@@ -108,73 +113,96 @@ let () =
   let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in
   test "a registry lists a package's versions in the order they were added" (fun () ->
       let registry = Index.at (fresh "registry") in
-      Index.add registry "acme::geometry" (1, 0, 0) files;
-      Index.add registry "acme::geometry" (1, 1, 0) (("angle.truss", "") :: files);
-      (match Index.versions registry "acme::geometry" with
+      Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
+      Index.add registry
+        { Path.owner = Some "acme"; name = "geometry" }
+        (1, 1, 0) (("angle.truss", "") :: files);
+      (match Index.versions registry { Path.owner = Some "acme"; name = "geometry" } with
       | [ ((1, 0, 0), first); ((1, 1, 0), second) ] ->
           if first <> Content.hash files || first = second then fail "the hashes are wrong"
       | _ -> fail "listed differently");
-      if Option.map fst (Index.newest registry "acme::geometry") <> Some (1, 1, 0) then
-        fail "the newest is not 1.1.0";
-      if Index.versions registry "acme::nothing" <> [] then fail "a package it does not hold");
+      if
+        Option.map fst (Index.newest registry { Path.owner = Some "acme"; name = "geometry" })
+        <> Some (1, 1, 0)
+      then fail "the newest is not 1.1.0";
+      if Index.versions registry { Path.owner = Some "acme"; name = "nothing" } <> [] then
+        fail "a package it does not hold");
   test "a version is fetched into a directory named by its hash, with every file" (fun () ->
       let registry = Index.at (fresh "registry") and into = fresh "packages" in
-      Index.add registry "acme::geometry" (1, 0, 0) files;
+      Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       let hash = Content.hash files in
-      match Index.fetch registry ~into "acme::geometry" (1, 0, 0) ~hash with
+      match
+        Index.fetch registry ~into { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) ~hash
+      with
       | Ok directory ->
           if Filename.basename directory <> hash then fail "in %s" directory;
           if Content.hash (Content.files ~all:true directory) <> hash then fail "other files"
       | Error reason -> fail "%s" reason);
   test "files that do not have the hash asked for are not kept" (fun () ->
       let registry = Index.at (fresh "registry") and into = fresh "packages" in
-      Index.add registry "acme::geometry" (1, 0, 0) files;
+      Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       let hash = Content.hash files in
       let changed =
-        Filename.concat (Index.version_directory registry "acme::geometry" (1, 0, 0)) "vector.truss"
+        Filename.concat
+          (Index.version_directory registry
+             { Path.owner = Some "acme"; name = "geometry" }
+             (1, 0, 0))
+          "vector.truss"
       in
       Out_channel.with_open_bin changed (fun channel -> output_string channel "fn extra() {}\n");
-      (match Index.fetch registry ~into "acme::geometry" (1, 0, 0) ~hash with
+      (match
+         Index.fetch registry ~into { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) ~hash
+       with
       | Error reason -> if not (contains reason "do not have the hash") then fail "said %s" reason
       | Ok _ -> fail "kept");
       if Sys.readdir into <> [||] then fail "left files behind");
   test "a version the registry does not hold is not fetched" (fun () ->
       let registry = Index.at (fresh "registry") and into = fresh "packages" in
-      match Index.fetch registry ~into "acme::geometry" (1, 0, 0) ~hash:(String.make 64 'b') with
+      match
+        Index.fetch registry ~into
+          { Path.owner = Some "acme"; name = "geometry" }
+          (1, 0, 0) ~hash:(String.make 64 'b')
+      with
       | Error _ -> ()
       | Ok _ -> fail "fetched")
 
 (* Choosing versions *)
 
+let package text = Option.get (Path.parse_package text)
 let hash_of name (version : Version.t) = Content.hash [ (name, Version.show version) ]
 
 (* A registry in memory: each package and version, with what it depends on,
    each with the capabilities it grants, and what it was published with. *)
 let load published name version ~hash =
-  match List.assoc_opt (name, version) published with
-  | Some (dependencies, record) when hash = hash_of name version ->
+  let written = Path.show_package name in
+  match List.assoc_opt (written, version) published with
+  | Some (dependencies, record) when hash = hash_of written version ->
       Ok
         ( ({
              name;
              truss = Some "0.1";
              dependencies =
                List.map
-                 (fun (package, capabilities) -> { Workspace.package; capabilities })
+                 (fun (name, capabilities) -> { Workspace.package = package name; capabilities })
                  dependencies;
              usize_bits = 32;
            }
             : Manifest.package),
           List.map
-            (fun (name, version) -> { Lock.name; version; hash = hash_of name version; holds = [] })
+            (fun (name, version) ->
+              { Lock.name = package name; version; hash = hash_of name version; holds = [] })
             record )
   | _ -> Error "it is not there"
 
-let entry name version = { Lock.name; version; hash = hash_of name version; holds = [] }
+let entry name version =
+  { Lock.name = package name; version; hash = hash_of name version; holds = [] }
 
 let chosen (packages, problems) =
   if problems <> [] then
     fail "problems: %s" (String.concat " " (List.map Selection.sentence problems));
-  List.map (fun (package : Selection.package) -> (package.name, package.version)) packages
+  List.map
+    (fun (found : Selection.package) -> (Path.show_package found.name, found.version))
+    packages
 
 let () =
   let published =
@@ -190,8 +218,8 @@ let () =
   in
   let choose lock roots =
     Selection.choose ~lock
-      ~roots:(List.map (fun name -> ("app", name)) roots)
-      ~local:(fun name -> name = "app" || name = "acme::local")
+      ~roots:(List.map (fun name -> (package "app", package name)) roots)
+      ~local:(fun name -> name = package "app" || name = package "acme::local")
       ~load:(load published)
   in
   test "a build uses the version its lock file names, and nothing newer" (fun () ->
@@ -220,11 +248,24 @@ let () =
         fail "chose another");
   test "a dependency that nothing gives a version is a problem that names who wants it" (fun () ->
       match choose [] [ "acme::units" ] with
-      | _, [ No_version { name = "acme::units"; wanted_by = "app" } ] -> ()
+      | ( _,
+          [
+            No_version
+              {
+                name = { Path.owner = Some "acme"; name = "units" };
+                wanted_by = { Path.owner = None; name = "app" };
+              };
+          ] ) ->
+          ()
       | _ -> fail "not reported");
   test "a version whose files cannot be had is a problem" (fun () ->
       match choose [ entry "acme::units" (1, 9, 0) ] [ "acme::units" ] with
-      | _, [ Cannot_load { name = "acme::units"; version = 1, 9, 0; _ } ] -> ()
+      | ( _,
+          [
+            Cannot_load
+              { name = { Path.owner = Some "acme"; name = "units" }; version = 1, 9, 0; _ };
+          ] ) ->
+          ()
       | _ -> fail "not reported");
   test "a record that names a version under another hash than the build's is a problem" (fun () ->
       let lock =
@@ -238,7 +279,10 @@ let () =
             not
               (List.exists
                  (function
-                   | Selection.Two_contents { name = "acme::units"; _ } -> true | _ -> false)
+                   | Selection.Two_contents
+                       { name = { Path.owner = Some "acme"; name = "units" }; _ } ->
+                       true
+                   | _ -> false)
                  problems)
           then fail "not reported");
   test "a project's package is used whatever the registry has by its name" (fun () ->
@@ -249,8 +293,12 @@ let () =
       let packages =
         Selection.choose
           ~lock:[ entry "acme::walls" (1, 0, 0) ]
-          ~roots:[ ("app", "acme::walls"); ("app", "acme::local") ]
-          ~local:(fun name -> name = "acme::local")
+          ~roots:
+            [
+              ({ Path.owner = None; name = "app" }, { Path.owner = Some "acme"; name = "walls" });
+              ({ Path.owner = None; name = "app" }, { Path.owner = Some "acme"; name = "local" });
+            ]
+          ~local:(fun name -> name = { Path.owner = Some "acme"; name = "local" })
           ~load:(load published)
       in
       if chosen packages <> [ ("acme::walls", (1, 0, 0)) ] then fail "chose another")
@@ -262,7 +310,7 @@ let () =
     {
       name;
       version = (1, 0, 0);
-      hash = hash_of name (1, 0, 0);
+      hash = hash_of (Path.show_package name) (1, 0, 0);
       manifest =
         {
           name;
@@ -280,28 +328,44 @@ let () =
   test "a package holds what the project grants it" (fun () ->
       let held =
         Selection.holds
-          ~project:[ grant "truss::http" [ "NetworkClient"; "Clock" ] ]
-          [ package "truss::http" [] ]
+          ~project:
+            [ grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient"; "Clock" ] ]
+          [ package { Path.owner = Some "truss"; name = "http" } [] ]
       in
-      if held <> [ ("truss::http", [ "Clock"; "NetworkClient" ]) ] then fail "holds another");
+      if held <> [ ({ Path.owner = Some "truss"; name = "http" }, [ "Clock"; "NetworkClient" ]) ]
+      then fail "holds another");
   test "a package holds of what a user grants it only what the user holds itself" (fun () ->
       let held =
         Selection.holds
-          ~project:[ grant "truss::http" [ "NetworkClient" ] ]
+          ~project:[ grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ] ]
           [
-            package "truss::http" [ ("truss::tls", [ "NetworkClient"; "Clock" ]) ];
-            package "truss::tls" [];
+            package
+              { Path.owner = Some "truss"; name = "http" }
+              [ ({ Path.owner = Some "truss"; name = "tls" }, [ "NetworkClient"; "Clock" ]) ];
+            package { Path.owner = Some "truss"; name = "tls" } [];
           ]
       in
-      if List.assoc "truss::tls" held <> [ "NetworkClient" ] then
-        fail "holds [%s]" (String.concat "; " (List.assoc "truss::tls" held)));
+      if List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient" ] then
+        fail "holds [%s]"
+          (String.concat "; " (List.assoc { Path.owner = Some "truss"; name = "tls" } held)));
   test "a package holds what any of its users grants it" (fun () ->
       let held =
         Selection.holds
-          ~project:[ grant "truss::http" [ "NetworkClient" ]; grant "truss::tls" [ "Random" ] ]
-          [ package "truss::http" [ ("truss::tls", [ "NetworkClient" ]) ]; package "truss::tls" [] ]
+          ~project:
+            [
+              grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ];
+              grant { Path.owner = Some "truss"; name = "tls" } [ "Random" ];
+            ]
+          [
+            package
+              { Path.owner = Some "truss"; name = "http" }
+              [ ({ Path.owner = Some "truss"; name = "tls" }, [ "NetworkClient" ]) ];
+            package { Path.owner = Some "truss"; name = "tls" } [];
+          ]
       in
-      if List.assoc "truss::tls" held <> [ "NetworkClient"; "Random" ] then fail "holds another");
+      if
+        List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient"; "Random" ]
+      then fail "holds another");
   test "where a lock file differs from the one a build gives is told for each package" (fun () ->
       let written =
         [

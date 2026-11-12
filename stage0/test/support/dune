@@ -2,6 +2,7 @@
  (name support)
  (libraries
   harness
+  substring
   query
   engine
   database

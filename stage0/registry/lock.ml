@@ -1,4 +1,4 @@
-type entry = { name : string; version : Version.t; hash : string; holds : string list }
+type entry = { name : Path.package; version : Version.t; hash : string; holds : string list }
 type t = entry list
 
 exception Malformed of int * string
@@ -7,19 +7,21 @@ let malformed line format =
   Printf.ksprintf (fun message -> raise (Malformed (line, message))) format
 
 let header = "format 1"
-let sorted entries = List.sort (fun left right -> String.compare left.name right.name) entries
+let sorted entries = List.sort (fun left right -> Path.compare_package left.name right.name) entries
 let find entries name = List.find_opt (fun entry -> entry.name = name) entries
 
 let entry_of_line line text =
   let words = List.filter (( <> ) "") (String.split_on_char ' ' text) in
   match words with
-  | name :: version :: hash :: rest ->
-      (match Manifest.name_parts name with
-      | Some [ _; _ ] -> ()
-      | _ ->
-          malformed line
-            "`%s` is not a registry package's name, which is an owner and a name joined by `::`."
-            name);
+  | written :: version :: hash :: rest ->
+      let name =
+        match Manifest.parse_name written with
+        | Some ({ owner = Some _; _ } as name) -> name
+        | _ ->
+            malformed line
+              "`%s` is not a registry package's name, which is an owner and a name joined by `::`."
+              written
+      in
       let version =
         match Version.parse version with
         | Some ((major, _, _) as version) when major = Version.major_of_name name -> version
@@ -27,7 +29,7 @@ let entry_of_line line text =
             malformed line
               "A version of `%s` starts with %d, the number at the end of its name, or 1 for a \
                name without one."
-              name (Version.major_of_name name)
+              written (Version.major_of_name name)
         | None ->
             malformed line "`%s` is not a version, which is three numbers, such as 1.4.2." version
       in
@@ -67,7 +69,7 @@ let parse text =
         (List.fold_left
            (fun seen (line, entry) ->
              if List.mem entry.name seen then
-               malformed line "`%s` already has a line above." entry.name;
+               malformed line "`%s` already has a line above." (Path.show_package entry.name);
              entry.name :: seen)
            [] entries);
       sorted (List.map snd entries)
@@ -78,7 +80,8 @@ let print entries =
     ((header ^ "\n")
     :: List.map
          (fun entry ->
-           Printf.sprintf "%s %s %s%s\n" entry.name (Version.show entry.version) entry.hash
+           Printf.sprintf "%s %s %s%s\n" (Path.show_package entry.name) (Version.show entry.version)
+             entry.hash
              (match entry.holds with
              | [] -> ""
              | holds -> " holds " ^ String.concat ", " (List.sort String.compare holds)))

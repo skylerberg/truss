@@ -103,19 +103,18 @@ and spell_argument = function
   | Count_name name -> name.text
   | Constraint (name, type_) -> name.text ^ " = " ^ spell_type type_
 
-let spell_head (head : type_head) =
-  let generics =
-    List.filter_map
-      (fun (generic : generic_parameter) ->
-        match generic.kind with
-        | Type_parameter (name, _) | Value_parameter (name, _) | Capability_parameter name ->
-            Some name.text
-        | Generic_error -> None)
-      head.generics
-  in
-  match generics with
-  | [] -> spell_path head.path
-  | _ -> Printf.sprintf "%s[%s]" (spell_path head.path) (String.concat ", " generics)
+let spell_head (head : type_head) : Path.type_head =
+  {
+    type_name = spell_path head.path;
+    generics =
+      List.filter_map
+        (fun (generic : generic_parameter) ->
+          match generic.kind with
+          | Type_parameter (name, _) | Value_parameter (name, _) | Capability_parameter name ->
+              Some name.text
+          | Generic_error -> None)
+        head.generics;
+  }
 
 (* A function's own name, which comes after the type head when it is
    written on a type. *)
@@ -148,11 +147,11 @@ let packages database (module_ : Path.module_) =
    [file_system], and [acme::geometry::vector] is the package
    [acme::geometry] and the module [vector]. *)
 let full_module database ~(from : Path.module_) (names : string list) : Path.module_ =
-  match names with
-  | owner :: name :: rest when List.mem (owner ^ "::" ^ name) (packages database from) ->
-      { package = owner ^ "::" ^ name; modules = rest }
-  | package :: rest -> { package; modules = rest }
-  | [] -> { package = ""; modules = [] }
+  let known = packages database from in
+  let is_package (package : Path.package) = package.owner = None || List.mem package known in
+  match Path.split_module ~is_package names with
+  | Some module_ -> module_
+  | None -> { package = { owner = None; name = "" }; modules = [] }
 
 (* The module a [use] line names. *)
 let used_module database ~from (path : path) =
@@ -426,7 +425,8 @@ let declarations =
                      declare (top module_ name.text) Theorem (generics <> [])
                  | Impl { trait_; type_; _ } ->
                      declare
-                       (Impl { module_; name = spell_path_type trait_ ^ " for " ^ spell_head type_ })
+                       (Impl
+                          { module_; trait = spell_path_type trait_; for_type = spell_head type_ })
                        Impl (type_.generics <> [])
                  | Test { name; _ } ->
                      let text =
@@ -440,9 +440,9 @@ let declarations =
                        (Law_proof
                           {
                             module_;
-                            name =
-                              Printf.sprintf "%s.%s for %s" (spell_path_type trait_) law.text
-                                (spell_head type_);
+                            trait = spell_path_type trait_;
+                            law = law.text;
+                            for_type = spell_head type_;
                           })
                        Law_proof false
                  | Definition_error { name = Some (Plain_name name); keyword } -> (
@@ -472,7 +472,7 @@ end)
 (* All declarations of a package, module by module. Each index of the
    package is built from this list in one pass. *)
 let package_declarations =
-  Query.query ~name:"package_declarations" ~phase:Phases.declarations ~show:Fun.id
+  Query.query ~name:"package_declarations" ~phase:Phases.declarations ~show:Path.show_package
     (fun database package ->
       List.concat_map
         (fun module_ -> Query.demand database declarations module_)
@@ -480,7 +480,8 @@ let package_declarations =
 
 (* A package's methods and member constants by owner and name. *)
 let member_index =
-  Query.query ~name:"member_index" ~phase:Phases.declarations ~show:Fun.id (fun database package ->
+  Query.query ~name:"member_index" ~phase:Phases.declarations ~show:Path.show_package
+    (fun database package ->
       List.fold_left
         (fun index (declaration : declaration) ->
           match declaration.path with
@@ -498,7 +499,8 @@ let member_index =
    the order they are declared. A method written inside a trait is declared
    as that trait's, so this reads no trait's interface. *)
 let trait_index =
-  Query.query ~name:"trait_index" ~phase:Phases.declarations ~show:Fun.id (fun database package ->
+  Query.query ~name:"trait_index" ~phase:Phases.declarations ~show:Path.show_package
+    (fun database package ->
       let declared = Query.demand database package_declarations package in
       let traits =
         List.filter_map
@@ -527,7 +529,7 @@ let trait_index =
 (* The traits of a package that declare a method with a name. *)
 let traits_declaring =
   Query.query ~name:"traits_declaring" ~phase:Phases.declarations ~saved:true
-    ~show:(fun (package, name) -> package ^ " " ^ name)
+    ~show:(fun (package, name) -> Path.show_package package ^ " " ^ name)
     (fun database (package, name) ->
       Option.value ~default:[]
         (String_map.find_opt name (Query.demand database trait_index package)))
@@ -650,6 +652,10 @@ let law_parameters =
 let spans =
   Query.query ~name:"spans" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map Syntax_walk.spans (Query.demand database definition key))
+
+let marks =
+  Query.query ~name:"marks" ~phase:Phases.declarations ~show:show_key (fun database key ->
+      Option.map Syntax_walk.marks (Query.demand database definition key))
 
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =

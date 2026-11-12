@@ -18,10 +18,11 @@ let run ~directory ~names ~json =
       match version with
       | None ->
           if Registry.Index.newest registry name = None then
-            Project.cannot_run "The registry has no package `%s`." name
+            Project.cannot_run "The registry has no package `%s`." (Path.show_package name)
       | Some version ->
           if Registry.Index.hash_of registry name version = None then
-            Project.cannot_run "The registry has no `%s` %s." name (Registry.Version.show version))
+            Project.cannot_run "The registry has no `%s` %s." (Path.show_package name)
+              (Registry.Version.show version))
     wanted;
   let manifest = Filename.concat package.directory Project.manifest_name in
   let written = In_channel.with_open_bin manifest In_channel.input_all in

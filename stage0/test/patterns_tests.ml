@@ -35,7 +35,7 @@ let () =
       in
       let found = message text in
       let expected = "`Some(Urgent(_))` is not covered" in
-      if not (Documents.find found expected ~occurrence:1 >= 0) then fail "message %S" found);
+      if not (Substring.contains found expected) then fail "message %S" found);
   test "a missing case's fix adds an arm with todo" (fun () ->
       one_diagnostic "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true => 1\n  }\n}\n"
         "patterns.not_covered"
@@ -94,7 +94,7 @@ let () =
           \  }\n\
            }\n"
       in
-      if Documents.find found "`100`" ~occurrence:1 < 0 then fail "message %S" found);
+      if not (Substring.contains found "`100`") then fail "message %S" found);
   test "a match on a string needs a pattern that matches everything" (fun () ->
       one_diagnostic "fn f(text: String) -> Int64 {\n  match text {\n    \"a\" => 1\n  }\n}\n"
         "patterns.not_covered");

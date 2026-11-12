@@ -4,6 +4,7 @@ open Syntax
 module Translate = Translate
 module Names = Resolve.Names
 module L = Logic
+module S = Logic.Symbol
 
 type proof = Obligations of Translate.outcome | Unsupported of span * string | Not_proven_here
 
@@ -161,20 +162,14 @@ let truss_value members text =
     flush ();
     List.rev !found
   in
-  (* The last part of a prover name: a variant's name, or a field's. *)
-  let last internal =
-    match List.rev (String.split_on_char '.' internal) with last :: _ -> last | [] -> internal
-  in
   (* A constructor's name as Truss writes it: its variant, or for a record
-     its type's own name, after its module and before its arguments. *)
-  let constructor internal =
-    if last internal = "record" then
-      let type_ = String.sub internal 12 (String.length internal - 12 - 7) in
-      match List.rev (String.split_on_char ':' (List.hd (String.split_on_char '[' type_))) with
-      | last :: _ -> last
-      | [] -> type_
-    else last internal
+     its type's own name. *)
+  let constructor : S.t -> string = function
+    | Constructor { variant = Some variant; _ } -> variant
+    | Constructor { type_name; variant = None; _ } -> type_name
+    | other -> S.show other
   in
+  let field : S.t -> string = function Field { field; _ } -> field | other -> S.show other in
   let opaque atom =
     (* The solver's name for a value of a sort it knows nothing about. *)
     match String.index_opt atom '!' with
@@ -228,7 +223,7 @@ let truss_value members text =
           | Some (internal, fields) when List.length fields = List.length items ->
               constructor internal ^ "("
               ^ String.concat ", "
-                  (List.map2 (fun field item -> last field ^ ": " ^ item) fields items)
+                  (List.map2 (fun selector item -> field selector ^ ": " ^ item) fields items)
               ^ ")"
           | Some (internal, _) -> constructor internal ^ "(" ^ String.concat ", " items ^ ")"
           | None -> head ^ "(" ^ String.concat ", " items ^ ")"
@@ -257,8 +252,8 @@ let counterexample members (obligation : Translate.obligation) answer_values =
       (List.mapi
          (fun index (holding, failing, _, _) ->
            match
-             ( List.assoc_opt (Printf.sprintf "reached.%d" index) answer_values,
-               List.assoc_opt (Printf.sprintf "condition.%d" index) answer_values )
+             ( List.assoc_opt (S.Reached index) answer_values,
+               List.assoc_opt (S.Condition index) answer_values )
            with
            | Some "true", Some "true" -> Some holding
            | Some "true", Some "false" -> failing
@@ -329,21 +324,10 @@ let bitwise_operations =
     "swap_bytes";
   ]
 
-let integer_width = function
-  | "Int8" -> Some (8, true)
-  | "Int16" -> Some (16, true)
-  | "Int32" -> Some (32, true)
-  | "Int64" | "ISize" -> Some (64, true)
-  | "UInt8" -> Some (8, false)
-  | "UInt16" -> Some (16, false)
-  | "UInt32" -> Some (32, false)
-  | "UInt64" | "USize" -> Some (64, false)
-  | _ -> None
-
-let bitwise_of name =
-  match String.split_on_char '.' name with
-  | [ "operation"; operation; type_ ] when List.mem operation bitwise_operations ->
-      Option.map (fun (bits, signed) -> (operation, bits, signed)) (integer_width type_)
+let bitwise_of : S.t -> _ = function
+  | Opaque_operation { operation; integer = Some (bits, signed); _ }
+    when List.mem operation bitwise_operations ->
+      Some (operation, bits, signed)
   | _ -> None
 
 let exactly (query : L.query) =
@@ -355,7 +339,7 @@ let exactly (query : L.query) =
            found := (term, named) :: !found);
         List.iter (walk bound) arguments
     | L.Forall (symbols, body) | L.Exists (symbols, body) -> walk (symbols @ bound) body
-    | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> ()
+    | term -> List.iter (walk bound) (L.arguments term)
   in
   List.iter (walk []) (query.goal :: query.facts);
   let definition term =
@@ -363,47 +347,50 @@ let exactly (query : L.query) =
     | L.Apply (name, arguments) -> (
         match (bitwise_of name, arguments) with
         | Some (operation, bits, signed), first :: rest ->
-            let bits_of value = L.Apply (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
+            let bits_of value = L.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
             let a = bits_of first in
             let result =
               match (operation, rest) with
-              | "complement", _ -> Some (L.Apply ("bvnot", [ a ]))
-              | "and", [ b ] -> Some (L.Apply ("bvand", [ a; bits_of b ]))
-              | "or", [ b ] -> Some (L.Apply ("bvor", [ a; bits_of b ]))
-              | "xor", [ b ] -> Some (L.Apply ("bvxor", [ a; bits_of b ]))
-              | "shift_left", [ b ] -> Some (L.Apply ("bvshl", [ a; bits_of b ]))
+              | "complement", _ -> Some (L.Operation ("bvnot", [ a ]))
+              | "and", [ b ] -> Some (L.Operation ("bvand", [ a; bits_of b ]))
+              | "or", [ b ] -> Some (L.Operation ("bvor", [ a; bits_of b ]))
+              | "xor", [ b ] -> Some (L.Operation ("bvxor", [ a; bits_of b ]))
+              | "shift_left", [ b ] -> Some (L.Operation ("bvshl", [ a; bits_of b ]))
               | "shift_right", [ b ] ->
-                  Some (L.Apply ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
+                  Some (L.Operation ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
               | ("rotate_left" | "rotate_right"), [ b ] ->
                   (* By the amount modulo the width, with what leaves one end
                      coming in at the other. *)
-                  let by = bits_of (L.Apply ("mod", [ b; L.int bits ])) in
-                  let rest = L.Apply ("bvsub", [ bits_of (L.int bits); by ]) in
+                  let by = bits_of (L.Operation ("mod", [ b; L.int bits ])) in
+                  let rest = L.Operation ("bvsub", [ bits_of (L.int bits); by ]) in
                   let towards, back =
                     if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
                   in
                   Some
-                    (L.Apply ("bvor", [ L.Apply (towards, [ a; by ]); L.Apply (back, [ a; rest ]) ]))
+                    (L.Operation
+                       ( "bvor",
+                         [ L.Operation (towards, [ a; by ]); L.Operation (back, [ a; rest ]) ] ))
               | "swap_bytes", _ ->
                   let byte index =
-                    L.Apply (Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index), [ a ])
+                    L.Operation
+                      (Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index), [ a ])
                   in
                   let bytes = List.init (bits / 8) byte in
                   Some
                     (List.fold_left
-                       (fun swapped next -> L.Apply ("concat", [ swapped; next ]))
+                       (fun swapped next -> L.Operation ("concat", [ swapped; next ]))
                        (List.hd bytes) (List.tl bytes))
               | _ -> None
             in
             Option.map
               (fun result ->
-                let unsigned = L.Apply ("bv2nat", [ result ]) in
+                let unsigned = L.Operation ("bv2nat", [ result ]) in
                 let value =
                   if signed then
                     let half = L.Integer (Z.shift_left Z.one (bits - 1)) in
                     L.ite
-                      (L.Apply (">=", [ unsigned; half ]))
-                      (L.Apply ("-", [ unsigned; L.Integer (Z.shift_left Z.one bits) ]))
+                      (L.Operation (">=", [ unsigned; half ]))
+                      (L.Operation ("-", [ unsigned; L.Integer (Z.shift_left Z.one bits) ]))
                       unsigned
                   else unsigned
                 in
@@ -438,7 +425,7 @@ type variant = Made | Exact | Alone | Alone_exact | Revealed
 type oracles = {
   solve :
     index:int ->
-    choice:(string * (Z.t * Z.t)) list ->
+    choice:(S.t * (Z.t * Z.t)) list ->
     variant:variant ->
     with_locals:bool ->
     solver_response;
@@ -760,7 +747,7 @@ let runs =
 type question = {
   definition : Names.key;
   index : int;
-  choice : (string * (Z.t * Z.t)) list;
+  choice : (S.t * (Z.t * Z.t)) list;
   variant : variant;
   with_locals : bool;
 }
@@ -799,10 +786,7 @@ let question_request =
                   List.concat
                     (List.mapi
                        (fun index (_, _, reached, condition) ->
-                         [
-                           (Printf.sprintf "reached.%d" index, reached);
-                           (Printf.sprintf "condition.%d" index, condition);
-                         ])
+                         [ (S.Reached index, reached); (S.Condition index, condition) ])
                        obligation.decisions)
                 else []
               in

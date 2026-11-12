@@ -294,7 +294,9 @@ test "nested" {
 |};
   test "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
       let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
-      Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
+      Database.load_package (Engine.of_context database)
+        ~name:{ owner = None; name = "example" }
+        ~dependencies:[]
         [ (example, "let big: Int8 = 100\nlet bigger: Int8 = big + big\n") ];
       match
         List.map

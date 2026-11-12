@@ -290,6 +290,24 @@ let spans (definition_ : definition) : span array =
   definition ~statement expression definition_;
   spans
 
+type mark = { mode : mode; mark : span; marked : span }
+
+let marks (definition_ : definition) =
+  let found = ref [] in
+  let rec unparenthesized (value : expression) =
+    match value.kind with Parenthesized inner -> unparenthesized inner | _ -> value
+  in
+  let rec expression (value : expression) =
+    (match value.kind with
+    | Mode (mode, inner) ->
+        let mark = Span.make value.span.start inner.span.start in
+        found := ((unparenthesized inner).id, { mode; mark; marked = value.span }) :: !found
+    | _ -> ());
+    children expression value
+  in
+  definition expression definition_;
+  List.sort compare !found
+
 (* Visits names in expressions, patterns, types, clauses, and heads. *)
 let walk_names ~on_name:add (definition_ : definition) =
   let path (written : path) =

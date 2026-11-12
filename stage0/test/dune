@@ -29,6 +29,7 @@
   scale_tests)
  (libraries
   harness
+  substring
   compiler_bug
   source
   diagnostic

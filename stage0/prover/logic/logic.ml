@@ -2,23 +2,140 @@
 
 type sort = Int | Bool | Float of int * int | Uninterpreted of string
 
+module Symbol = struct
+  type cost_group =
+    | Own_bound of { counter : string; inherited : bool }
+    | Lambda_bound of { lambda : int; counter : string }
+    | Loop_bound of int
+
+  type t =
+    | Variable of { label : string; numbers : int list }
+    | Function of { callee : Path.t; instance : string list }
+    | Function_value of { callee : Path.t; instance : string list }
+    | Constant of Path.t
+    | Generic_value of { owner : Path.t; name : string }
+    | Literal of { type_key : string; text : string }
+    | Argument of string
+    | Lambda of string
+    | Over of t
+    | Constructor of { type_key : string; type_name : string; variant : string option }
+    | Field of { type_key : string; variant : string option; field : string }
+    | Unit
+    | Apply of sort list
+    | Equal of string
+    | Valid of string
+    | Rank of string
+    | Capacity of string
+    | Model of string
+    | Slack of string
+    | Potential of string
+    | Potential_measure of string
+    | Cursor_yielded of string
+    | Cursor_ended of string
+    | Block_bytes of { type_key : string; variant : string option }
+    | Time of sort
+    | Method_time of { method_ : Path.t; self_type : string }
+    | Opaque_operation of { operation : string; type_key : string; integer : (int * bool) option }
+    | Bit_count of { count : string; width : int }
+    | System of string
+    | Libc_number of string
+    | Handle_descriptor
+    | Compare_bytes_order
+    | Cost_factor of cost_group
+    | Cost_addend of cost_group
+    | Cost_most
+    | Cost_log
+    | Cost_power
+    | Reached of int
+    | Condition of int
+
+  let sort_text = function
+    | Int -> "Int"
+    | Bool -> "Bool"
+    | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
+    | Uninterpreted name -> name
+
+  let instance_text = function [] -> "" | keys -> "[" ^ String.concat ", " keys ^ "]"
+  let variant_text = Option.value ~default:"record"
+
+  let group_text = function
+    | Own_bound { counter; inherited } -> counter ^ if inherited then ".trait" else ""
+    | Lambda_bound { lambda; counter } -> Printf.sprintf "lambda.%d.%s" lambda counter
+    | Loop_bound origin -> Printf.sprintf "loop.%d" origin
+
+  let rec show = function
+    | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
+    | Function { callee; instance } -> "function." ^ Path.show callee ^ instance_text instance
+    | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
+    | Constant path -> "constant." ^ Path.show path
+    | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
+    | Literal { type_key; text } -> Printf.sprintf "literal.%s.%S" type_key text
+    | Argument hash -> "argument." ^ hash
+    | Lambda hash -> "lambda." ^ hash
+    | Over symbol -> show symbol ^ ".over"
+    | Constructor { type_key; variant; _ } -> "constructor." ^ type_key ^ "." ^ variant_text variant
+    | Field { type_key; variant; field } ->
+        "field." ^ type_key ^ "." ^ variant_text variant ^ "." ^ field
+    | Unit -> "Unit.unit"
+    | Apply sorts -> String.concat "." ("apply" :: List.map sort_text sorts)
+    | Equal type_key -> "equal." ^ type_key
+    | Valid type_key -> "valid." ^ type_key
+    | Rank type_key -> "rank." ^ type_key
+    | Capacity type_key -> "capacity." ^ type_key
+    | Model type_key -> "model." ^ type_key
+    | Slack type_key -> "slack." ^ type_key
+    | Potential type_key -> "potential." ^ type_key
+    | Potential_measure type_key -> "potential.measure." ^ type_key
+    | Cursor_yielded type_key -> "cursor.yielded." ^ type_key
+    | Cursor_ended type_key -> "cursor.ended." ^ type_key
+    | Block_bytes { type_key; variant } -> "bytes." ^ type_key ^ "." ^ variant_text variant
+    | Time sort -> "time." ^ sort_text sort
+    | Method_time { method_; self_type } ->
+        Printf.sprintf "time.method.%s[%s]" (Path.show method_) self_type
+    | Opaque_operation { operation; type_key; _ } ->
+        Printf.sprintf "operation.%s.%s" operation type_key
+    | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" count width
+    | System operation -> "system." ^ operation
+    | Libc_number number -> "libc.number." ^ number
+    | Handle_descriptor -> "handle.descriptor"
+    | Compare_bytes_order -> "compare_bytes.order"
+    | Cost_factor group -> "cost.factor." ^ group_text group
+    | Cost_addend group -> "cost.addend." ^ group_text group
+    | Cost_most -> "cost.most"
+    | Cost_log -> "cost.log"
+    | Cost_power -> "cost.power"
+    | Reached index -> Printf.sprintf "reached.%d" index
+    | Condition index -> Printf.sprintf "condition.%d" index
+end
+
 type term =
-  | Symbol of string
+  | Symbol of Symbol.t
   | Integer of Z.t
   | Boolean of bool
   | Bits of int * Z.t
-  | Apply of string * term list
-  | Forall of (string * sort) list * term
-  | Exists of (string * sort) list * term
+  | Apply of Symbol.t * term list
+  | Is of Symbol.t * term
+  | Operation of string * term list
+  | Forall of (Symbol.t * sort) list * term
+  | Exists of (Symbol.t * sort) list * term
 
 type declaration =
-  | Constant of string * sort
-  | Function of string * sort list * sort
-  | Datatype of string * (string * (string * sort) list) list
-
-let tester constructor = "is?" ^ constructor
+  | Constant of Symbol.t * sort
+  | Function of Symbol.t * sort list * sort
+  | Datatype of string * (Symbol.t * (Symbol.t * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }
+
+let arguments = function
+  | Apply (_, arguments) | Operation (_, arguments) -> arguments
+  | Is (_, argument) -> [ argument ]
+  | Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _ -> []
+
+let map_arguments f = function
+  | Apply (name, arguments) -> Apply (name, List.map f arguments)
+  | Operation (name, arguments) -> Operation (name, List.map f arguments)
+  | Is (constructor, argument) -> Is (constructor, f argument)
+  | (Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _) as term -> term
 
 (* Building terms *)
 
@@ -28,55 +145,57 @@ let ( &&& ) left right =
   match (left, right) with
   | Boolean true, other | other, Boolean true -> other
   | Boolean false, _ | _, Boolean false -> Boolean false
-  | _ -> Apply ("and", [ left; right ])
+  | _ -> Operation ("and", [ left; right ])
 
 let ( ||| ) left right =
   match (left, right) with
   | Boolean false, other | other, Boolean false -> other
   | Boolean true, _ | _, Boolean true -> Boolean true
-  | _ -> Apply ("or", [ left; right ])
+  | _ -> Operation ("or", [ left; right ])
 
 let ( ==> ) premise conclusion =
   match (premise, conclusion) with
   | Boolean true, other -> other
   | Boolean false, _ | _, Boolean true -> Boolean true
-  | _ -> Apply ("=>", [ premise; conclusion ])
+  | _ -> Operation ("=>", [ premise; conclusion ])
 
 let not_ = function
   | Boolean value -> Boolean (not value)
-  | Apply ("not", [ inner ]) -> inner
-  | other -> Apply ("not", [ other ])
+  | Operation ("not", [ inner ]) -> inner
+  | other -> Operation ("not", [ other ])
 
-let equal left right = if left = right then Boolean true else Apply ("=", [ left; right ])
+let equal left right = if left = right then Boolean true else Operation ("=", [ left; right ])
 
 let ite condition then_ else_ =
   match condition with
   | Boolean true -> then_
   | Boolean false -> else_
-  | _ -> if then_ = else_ then then_ else Apply ("ite", [ condition; then_; else_ ])
+  | _ -> if then_ = else_ then then_ else Operation ("ite", [ condition; then_; else_ ])
 
 let conjunction terms = List.fold_left ( &&& ) (Boolean true) terms
 let disjunction terms = List.fold_left ( ||| ) (Boolean false) terms
 let zero = Integer Z.zero
-let negate value = Apply ("-", [ value ])
+let negate value = Operation ("-", [ value ])
 
 (* SMT-LIB's [div] and [mod] round so that the remainder is never
    negative. Truss rounds toward zero, which agrees with them when both
    operands are at or above zero, so each sign is handled by negating. *)
 let truncated_divide left right =
-  let ge0 value = Apply (">=", [ value; zero ]) in
-  let div a b = Apply ("div", [ a; b ]) in
+  let ge0 value = Operation (">=", [ value; zero ]) in
+  let div a b = Operation ("div", [ a; b ]) in
   ite (ge0 left)
     (ite (ge0 right) (div left right) (negate (div left (negate right))))
     (ite (ge0 right) (negate (div (negate left) right)) (div (negate left) (negate right)))
 
 let truncated_remainder left right =
-  Apply ("-", [ left; Apply ("*", [ right; truncated_divide left right ]) ])
+  Operation ("-", [ left; Operation ("*", [ right; truncated_divide left right ]) ])
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols
   | Integer _ | Boolean _ | Bits _ -> false
   | Apply (name, arguments) -> List.mem name symbols || List.exists (mentions symbols) arguments
+  | Operation (_, arguments) -> List.exists (mentions symbols) arguments
+  | Is (_, argument) -> mentions symbols argument
   | Forall (bound, body) | Exists (bound, body) ->
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
@@ -89,6 +208,8 @@ let rec replace ~from ~into term =
     match term with
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> term
     | Apply (name, arguments) -> Apply (name, List.map (replace ~from ~into) arguments)
+    | Operation (name, arguments) -> Operation (name, List.map (replace ~from ~into) arguments)
+    | Is (constructor, argument) -> Is (constructor, replace ~from ~into argument)
     | Forall (bound, body) ->
         if mentions (List.map fst bound) from then term else Forall (bound, replace ~from ~into body)
     | Exists (bound, body) ->
@@ -110,10 +231,8 @@ let triggers ~triggering variables body =
   let names = List.map fst variables in
   let rec usable = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
-    | Apply (name, arguments) ->
-        if triggering name then List.for_all usable arguments
-        else not (mentions names (Apply (name, arguments)))
-    | (Forall _ | Exists _) as term -> not (mentions names term)
+    | Apply (name, arguments) when triggering name -> List.for_all usable arguments
+    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term -> not (mentions names term)
   in
   let candidate = function
     | Apply (name, _ :: _) as term -> triggering name && mentions names term && usable term
@@ -125,6 +244,8 @@ let triggers ~triggering variables body =
     | Apply (_, arguments) ->
         if not (List.mem term !applications) then applications := term :: !applications;
         List.iter walk arguments
+    | Operation (_, arguments) -> List.iter walk arguments
+    | Is (_, argument) -> walk argument
     | Forall _ | Exists _ | Symbol _ | Integer _ | Boolean _ | Bits _ -> ()
   in
   walk body;
@@ -134,8 +255,9 @@ let triggers ~triggering variables body =
     inner <> term
     &&
     match term with
-    | Apply (_, arguments) ->
+    | Apply (_, arguments) | Operation (_, arguments) ->
         List.exists (fun argument -> argument = inner || within inner argument) arguments
+    | Is (_, argument) -> argument = inner || within inner argument
     | _ -> false
   in
   (* Whether [pattern] matches [term], binding its bound variables. *)
@@ -164,9 +286,12 @@ let triggers ~triggering variables body =
         | None -> false)
       applications
   in
-  let rec conclusion = function Apply ("=>", [ _; inner ]) -> conclusion inner | term -> term in
+  let rec conclusion = function
+    | Operation ("=>", [ _; inner ]) -> conclusion inner
+    | term -> term
+  in
   match conclusion body with
-  | Apply ("=", [ (Apply _ as defined); _ ]) when candidate defined && covers defined = names ->
+  | Operation ("=", [ (Apply _ as defined); _ ]) when candidate defined && covers defined = names ->
       [ [ defined ] ]
   | _ -> (
       let candidates = List.filter candidate applications in
@@ -224,7 +349,7 @@ let triggering_in declarations =
 let untriggered query =
   let triggering = triggering_in query.declarations in
   let rec without = function
-    | Apply ("=>", [ _; inner ]) -> without inner
+    | Operation ("=>", [ _; inner ]) -> without inner
     | Forall (variables, body) -> triggers ~triggering variables body = []
     | _ -> false
   in
@@ -244,6 +369,8 @@ let declared_symbols declared term =
     | Apply (name, arguments) ->
         if Hashtbl.mem declared name then found := name :: !found;
         List.iter (walk bound) arguments
+    | Operation (_, arguments) -> List.iter (walk bound) arguments
+    | Is (_, argument) -> walk bound argument
     | Forall (variables, body) | Exists (variables, body) ->
         walk (List.map fst variables @ bound) body
   in
@@ -266,7 +393,7 @@ let prune query =
      kept. A fact under a path's condition is read through it. *)
   let rec needs fact symbols =
     match fact with
-    | Apply ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
+    | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
     | Forall (variables, body) -> (
         match triggers ~triggering variables body with
         | [] -> fun () -> List.exists (Hashtbl.mem reached) symbols
@@ -303,18 +430,18 @@ let prune query =
 
 (* Numbering: every declared symbol and every sort is named by the order
    of its first appearance in a walk of the facts, in order, and then the
-   goal. A datatype's constructors, selectors, and testers are named after
+   goal. A datatype's constructors and selectors are named after
    its sort and their positions. Bound variables are named by their depth
    and position, so a quantifier's text does not depend on what its
    variables were called. *)
 type numbering = {
-  declared : (string, declaration) Hashtbl.t;
-  datatypes : (string, (string * (string * sort) list) list) Hashtbl.t;
-  member_of : (string, string * string) Hashtbl.t;
-      (** Each constructor, selector, and tester: its datatype and its canonical suffix. *)
-  triggering : string -> bool;
-  symbol_names : (string, string) Hashtbl.t;
-  mutable symbol_order : string list;  (** Reversed. *)
+  declared : (Symbol.t, declaration) Hashtbl.t;
+  datatypes : (string, (Symbol.t * (Symbol.t * sort) list) list) Hashtbl.t;
+  member_of : (Symbol.t, string * string) Hashtbl.t;
+      (** Each constructor and selector: its datatype and its canonical suffix. *)
+  triggering : Symbol.t -> bool;
+  symbol_names : (Symbol.t, string) Hashtbl.t;
+  mutable symbol_order : Symbol.t list;  (** Reversed. *)
   sort_names : (string, string) Hashtbl.t;
   mutable sort_order : string list;  (** Reversed. *)
 }
@@ -359,16 +486,19 @@ let symbol_name numbering name =
           | Datatype _ -> ());
           Some canonical)
 
-(* A function's name in the text: a datatype's member, a declared symbol,
-   or one of SMT-LIB's own. *)
+let member_name numbering name =
+  Option.map
+    (fun (datatype, suffix) -> sort_name numbering (Uninterpreted datatype) ^ suffix)
+    (Hashtbl.find_opt numbering.member_of name)
+
+(* A function's name in the text: a datatype's member or a declared symbol. *)
 let function_name numbering name =
-  match Hashtbl.find_opt numbering.member_of name with
-  | Some (datatype, suffix) ->
-      let canonical = sort_name numbering (Uninterpreted datatype) ^ suffix in
-      if String.length name > 3 && String.sub name 0 3 = "is?" then
-        Printf.sprintf "(_ is %s)" canonical
-      else canonical
-  | None -> ( match symbol_name numbering name with Some canonical -> canonical | None -> name)
+  match member_name numbering name with
+  | Some canonical -> canonical
+  | None -> (
+      match symbol_name numbering name with
+      | Some canonical -> canonical
+      | None -> invalid_arg ("Logic.text: undeclared symbol " ^ Symbol.show name))
 
 (* A bit-vector literal, most significant bit first. *)
 let bits_text width value =
@@ -384,28 +514,31 @@ let rec print numbering bound buffer term =
   | Symbol name -> (
       match List.assoc_opt name bound with
       | Some canonical -> add canonical
-      | None -> (
-          match Hashtbl.find_opt numbering.member_of name with
-          | Some _ -> add (function_name numbering name)
-          | None -> (
-              match symbol_name numbering name with
-              | Some canonical -> add canonical
-              | None -> invalid_arg ("Logic.text: undeclared symbol " ^ name))))
+      | None -> add (function_name numbering name))
   | Integer value -> add (integer_text value)
   | Boolean value -> add (if value then "true" else "false")
   | Bits (width, value) -> add (bits_text width value)
-  | Apply (name, []) -> add (function_name numbering name)
   | Apply (name, arguments) ->
-      add "(";
-      add (function_name numbering name);
-      List.iter
-        (fun argument ->
-          add " ";
-          print numbering bound buffer argument)
-        arguments;
-      add ")"
+      application numbering bound buffer (function_name numbering name) arguments
+  | Operation (name, arguments) -> application numbering bound buffer name arguments
+  | Is (constructor, argument) ->
+      application numbering bound buffer
+        (Printf.sprintf "(_ is %s)" (function_name numbering constructor))
+        [ argument ]
   | Forall (variables, body) -> quantifier numbering bound buffer "forall" variables body
   | Exists (variables, body) -> quantifier numbering bound buffer "exists" variables body
+
+and application numbering bound buffer head = function
+  | [] -> Buffer.add_string buffer head
+  | arguments ->
+      Buffer.add_string buffer "(";
+      Buffer.add_string buffer head;
+      List.iter
+        (fun argument ->
+          Buffer.add_string buffer " ";
+          print numbering bound buffer argument)
+        arguments;
+      Buffer.add_string buffer ")"
 
 and quantifier numbering bound buffer word variables body =
   let add = Buffer.add_string buffer in
@@ -458,7 +591,6 @@ let numbering query =
             (fun index (constructor, fields) ->
               let suffix = Printf.sprintf "_c%d" index in
               Hashtbl.replace member_of constructor (name, suffix);
-              Hashtbl.replace member_of (tester constructor) (name, suffix);
               List.iteri
                 (fun field (selector, _) ->
                   Hashtbl.replace member_of selector (name, Printf.sprintf "%s_f%d" suffix field))
@@ -557,10 +689,10 @@ let term_text query term =
     | Symbol name -> Hashtbl.mem numbering.symbol_names name
     | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) ->
-        (Hashtbl.mem numbering.member_of name
-        || Hashtbl.mem numbering.symbol_names name
-        || not (Hashtbl.mem numbering.declared name))
+        (Hashtbl.mem numbering.member_of name || Hashtbl.mem numbering.symbol_names name)
         && List.for_all named arguments
+    | Operation (_, arguments) -> List.for_all named arguments
+    | Is (constructor, argument) -> Hashtbl.mem numbering.member_of constructor && named argument
     | Forall _ | Exists _ -> false
   in
   if named term then begin
@@ -593,14 +725,19 @@ let hash text = "smt1-blake3-" ^ Blake3.to_hex (Blake3.hash text)
 
 let show_term term =
   let rec show = function
-    | Symbol name -> name
+    | Symbol name -> Symbol.show name
     | Integer value -> integer_text value
     | Boolean value -> if value then "true" else "false"
     | Bits (width, value) -> bits_text width value
-    | Apply (name, []) -> name
-    | Apply (name, arguments) -> "(" ^ String.concat " " (name :: List.map show arguments) ^ ")"
+    | Apply (name, arguments) -> applied (Symbol.show name) arguments
+    | Operation (name, arguments) -> applied name arguments
+    | Is (constructor, argument) ->
+        applied (Printf.sprintf "(_ is %s)" (Symbol.show constructor)) [ argument ]
     | Forall (bound, body) -> binder "forall" bound body
     | Exists (bound, body) -> binder "exists" bound body
+  and applied head = function
+    | [] -> head
+    | arguments -> "(" ^ String.concat " " (head :: List.map show arguments) ^ ")"
   and binder word bound body =
     let sort = function
       | Int -> "Int"
@@ -610,7 +747,8 @@ let show_term term =
       | Uninterpreted name -> name
     in
     Printf.sprintf "(%s (%s) %s)" word
-      (String.concat " " (List.map (fun (name, s) -> Printf.sprintf "(%s %s)" name (sort s)) bound))
+      (String.concat " "
+         (List.map (fun (name, s) -> Printf.sprintf "(%s %s)" (Symbol.show name) (sort s)) bound))
       (show body)
   in
   show term

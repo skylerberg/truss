@@ -442,15 +442,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
            ordinary one, so then there is no fix. *)
         let piece (side : expression) =
           match side.kind with
-          | String { tag = None; rest = []; _ } ->
-              let written = source state side.span in
-              let length = String.length written in
-              if
-                length >= 2
-                && written.[0] = '"'
-                && not (length >= 3 && String.sub written 0 3 = "\"\"\"")
-              then Some (String.sub written 1 (length - 2))
-              else None
+          | String { tag = None; form = Ordinary; first; rest = []; _ } ->
+              Some (source state first.span)
           | String _ -> None
           | _ -> Some ("${" ^ source state side.span ^ "}")
         in

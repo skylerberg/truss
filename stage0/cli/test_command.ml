@@ -6,11 +6,6 @@ type test = { path : Path.t; module_ : Path.module_; name : string; file : strin
 (* The tests defined in the selected modules, in the package's order, whose
    names contain [match_]. *)
 let select (project : Project.t) ~paths ~match_ =
-  let contains text part =
-    let n = String.length part in
-    let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
-    at 0
-  in
   List.concat_map
     (fun module_ ->
       let source = Project.source project module_ in
@@ -19,7 +14,7 @@ let select (project : Project.t) ~paths ~match_ =
           match declaration.path with
           | Test { name; _ }
             when declaration.ordinal = 0
-                 && match match_ with Some text -> contains name text | None -> true ->
+                 && match match_ with Some text -> Substring.contains name text | None -> true ->
               let line =
                 match
                   Query.demand project.context Resolve.Names.base (Resolve.Names.key_of declaration)

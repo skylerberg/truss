@@ -1,3 +1,3 @@
 (library
  (name toolchain)
- (libraries process unix))
+ (libraries process substring unix))

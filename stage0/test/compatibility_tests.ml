@@ -9,14 +9,15 @@ open Support
 let changes ?(usize_bits = (32, 32)) before after =
   let state text bits =
     let database = setup [] in
-    Database.load_package ~usize_bits:bits (Engine.of_context database) ~name:"lib" ~dependencies:[]
+    Database.load_package ~usize_bits:bits (Engine.of_context database)
+      ~name:{ owner = None; name = "lib" } ~dependencies:[]
       [ (module_of "lib::shapes", text) ];
     database
   in
   Compatibility.compare
     ~before:(state before (fst usize_bits))
     ~after:(state after (snd usize_bits))
-    "lib"
+    { owner = None; name = "lib" }
 
 let show (found, _) =
   List.map
@@ -184,10 +185,10 @@ let () =
         square ^ "\nimpl Default for Square {\n  fn default() -> Square {\n    Square(1)\n  }\n}\n"
       in
       (match show (changes with_impl square) with
-      | [ found ] when Documents.find found "is gone: the `impl` of" ~occurrence:1 >= 0 -> ()
+      | [ found ] when Substring.contains found "is gone: the `impl` of" -> ()
       | found -> fail "found [%s]" (String.concat "; " found));
       match show (changes square with_impl) with
-      | [ found ] when Documents.find found "is new: the `impl` of" ~occurrence:1 >= 0 -> ()
+      | [ found ] when Substring.contains found "is new: the `impl` of" -> ()
       | found -> fail "found [%s]" (String.concat "; " found));
   test "an impl whose associated capability set gains a capability breaks" (fun () ->
       let feed uses =
@@ -208,15 +209,14 @@ let () =
       let gains = show (changes (feed "") (feed "  capability Uses = Clock\n")) in
       (match gains with
       | [ found ]
-        when Documents.find found "breaks:" ~occurrence:1 = 0
-             && Documents.find found "has `Clock` in its `Uses`, which it did not" ~occurrence:1
-                >= 0 ->
+        when Substring.find found "breaks:" = Some 0
+             && Substring.contains found "has `Clock` in its `Uses`, which it did not" ->
           ()
       | found -> fail "found [%s]" (String.concat "; " found));
       (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
       | [ found ]
-        when Documents.find found "grows:" ~occurrence:1 = 0
-             && Documents.find found "has fewer capabilities in its `Uses`" ~occurrence:1 >= 0 ->
+        when Substring.find found "grows:" = Some 0
+             && Substring.contains found "has fewer capabilities in its `Uses`" ->
           ()
       | found -> fail "found [%s]" (String.concat "; " found));
       expect (feed "  capability Uses = Clock\n") (feed "  capability Uses = Clock\n") []);

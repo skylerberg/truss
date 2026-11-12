@@ -112,11 +112,7 @@ let computed directory =
   | None -> []
 
 let clear directory = Option.iter Engine.clear_log (Database.Testing.session_engine directory)
-
-let contains text part =
-  let n = String.length part and l = String.length text in
-  let rec at i = i + n <= l && (String.sub text i n = part || at (i + 1)) in
-  at 0
+let contains = Substring.contains
 
 let expect_errors directory count =
   let found = errors directory in
@@ -283,8 +279,12 @@ let () =
             ("other.truss", None);
           ]
       in
-      let modules session = List.sort compare (Database.package_modules session "app") in
-      let named name : Path.module_ = { package = "app"; modules = [ name ] } in
+      let modules session =
+        List.sort compare (Database.package_modules session { owner = None; name = "app" })
+      in
+      let named name : Path.module_ =
+        { package = { owner = None; name = "app" }; modules = [ name ] }
+      in
       if modules trial <> [ named "added"; named "main" ] then fail "the trial's modules";
       if Database.diagnostics trial (named "main") = [] then fail "the trial did not see the change";
       if modules session <> [ named "main"; named "other" ] then
@@ -298,14 +298,18 @@ let () =
       write directory "tools/helper.truss" "internal fn one() -> Int64 {\n  1\n}\n";
       expect_errors directory 0;
       let before, _ = session directory in
-      if List.length (Database.package_modules before "app") <> 2 then
+      if List.length (Database.package_modules before { owner = None; name = "app" }) <> 2 then
         fail "the package does not have both modules";
       write directory "tools/truss.toml" (manifest "tools");
       expect_errors directory 0;
       let after, _ = session directory in
-      if Database.package_modules after "app" <> [ { package = "app"; modules = [ "main" ] } ] then
-        fail "the first package still has the file";
-      if Database.package_modules after "tools" <> [ { package = "tools"; modules = [ "helper" ] } ]
+      if
+        Database.package_modules after { owner = None; name = "app" }
+        <> [ { package = { owner = None; name = "app" }; modules = [ "main" ] } ]
+      then fail "the first package still has the file";
+      if
+        Database.package_modules after { owner = None; name = "tools" }
+        <> [ { package = { owner = None; name = "tools" }; modules = [ "helper" ] } ]
       then fail "the new package does not have the file");
   test "a malformed manifest is a problem, at its line" (fun () ->
       fresh_store ();
@@ -384,10 +388,19 @@ let () =
             fail "the second holds %d nodes of its own, and the first state has %d" own all
       | _ -> fail "no sessions")
 
-let double : Path.t = Top { module_ = { package = "app"; modules = [ "main" ] }; name = "double" }
+let double : Path.t =
+  Top
+    {
+      module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
+      name = "double";
+    }
 
 let doubling : Path.t =
-  Test { module_ = { package = "app"; modules = [ "main" ] }; name = "doubling" }
+  Test
+    {
+      module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
+      name = "doubling";
+    }
 
 let () =
   test "what reads a definition is found part by part" (fun () ->
@@ -540,7 +553,11 @@ let () =
       | Error message -> fail "%s" message
       | Ok overlaps ->
           let quadruple : Path.t =
-            Top { module_ = { package = "app"; modules = [ "main" ] }; name = "quadruple" }
+            Top
+              {
+                module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
+                name = "quadruple";
+              }
           in
           if
             not

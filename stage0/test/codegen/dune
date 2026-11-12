@@ -40,6 +40,7 @@
   library_tests)
  (libraries
   harness
+  substring
   compiler_bug
   verify
   zarith

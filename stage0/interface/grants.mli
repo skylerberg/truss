@@ -8,16 +8,17 @@ type grant = {
   unknown : string list;  (** The entries that name no capability *)
 }
 
-val granted : (string * string, grant option) Query.query
+val granted : (Path.package * Path.package, grant option) Query.query
 (** The capabilities that a package's manifest grants to a dependency, or [None] for a package that
     the manifest does not list. *)
 
-val missing : Query.context -> package:string -> of_:string -> Types.capability list -> Path.t list
+val missing :
+  Query.context -> package:Path.package -> of_:Path.package -> Types.capability list -> Path.t list
 (** The capabilities that some code of the package [of_] uses and that [package]'s manifest does not
     grant to it. A package's own code and the standard library need no grant. A capability parameter
     is instantiated by the caller with the caller's own capabilities, so it needs none either. *)
 
-val message : what:string -> of_:string -> Path.t -> string
+val message : what:string -> of_:Path.package -> Path.t -> string
 (** The sentence for a capability that is not granted. *)
 
 val evidence_uses :
@@ -32,11 +33,11 @@ val evidence_uses :
 
 val messages :
   Query.context ->
-  package:string ->
+  package:Path.package ->
   (Path.t * Types.impl_interface * Types.capability list) list ->
   string list
 (** The diagnostic messages for the capabilities that such [impl]s use without a grant, in code of
     [package]. *)
 
 val evidence_messages :
-  Query.context -> package:string -> bounds:Impls.bounds -> Impls.evidence -> string list
+  Query.context -> package:Path.package -> bounds:Impls.bounds -> Impls.evidence -> string list

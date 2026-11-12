@@ -11,10 +11,7 @@ let fail = Harness.fail
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual
 
-let contains text part =
-  let n = String.length part in
-  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
-  at 0
+let contains = Substring.contains
 
 let expect_int ~expected actual =
   if expected <> actual then fail "expected %d, got %d" expected actual
@@ -37,7 +34,9 @@ let render_records records =
 (* Types for the tests: a few prelude types and types defined by each test,
    with their shapes. *)
 
-let definition name : Path.t = Top { module_ = { package = "test"; modules = [] }; name }
+let definition name : Path.t =
+  Top { module_ = { package = { owner = None; name = "test" }; modules = [] }; name }
+
 let named ?(arguments = []) name = Ground.Named { path = definition name; arguments }
 let int64 = named "Int64"
 let bool = named "Bool"
@@ -237,7 +236,7 @@ let expect_status ?extra ?anchors expected instances =
 
 (* Programs from source *)
 
-let example : Path.module_ = { package = "example"; modules = [ "main" ] }
+let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [ "main" ] }
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is read and checked once and not for each test. *)
@@ -247,7 +246,9 @@ let checked_standard = lazy (Database.Testing.standard_base ())
    standard library, ready to compile. Each must check cleanly. *)
 let load_modules modules =
   let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
-  Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[] modules;
+  Database.load_package (Engine.of_context database)
+    ~name:{ owner = None; name = "example" }
+    ~dependencies:[] modules;
   List.iter
     (fun (module_, _) ->
       let source = (Query.demand database Workspace.file module_).source in

@@ -17,7 +17,10 @@ let modules =
   |> List.sort compare
   |> List.map (fun file ->
       let module_ : Path.module_ =
-        { package = "example"; modules = [ Filename.chop_suffix file ".truss" ] }
+        {
+          package = { owner = None; name = "example" };
+          modules = [ Filename.chop_suffix file ".truss" ];
+        }
       in
       (module_, In_channel.with_open_bin (Filename.concat directory file) In_channel.input_all))
 

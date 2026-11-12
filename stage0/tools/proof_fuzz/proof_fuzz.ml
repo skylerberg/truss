@@ -26,7 +26,7 @@ let record database responses =
   let engine = Engine.of_context database in
   List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
 
-let example : Path.module_ = { package = "example"; modules = [ "main" ] }
+let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [ "main" ] }
 let standard = lazy (Database.Testing.standard_base ())
 
 let solver =
@@ -46,7 +46,10 @@ let target =
 
 let load text =
   let engine = Engine.create ~bases:[ Lazy.force standard ] () in
-  Database.load_package engine ~name:"example" ~dependencies:[] [ (example, text) ];
+  Database.load_package engine
+    ~name:{ owner = None; name = "example" }
+    ~dependencies:[]
+    [ (example, text) ];
   let database = Engine.context engine in
   if Type_checker.diagnostics database example <> [] then None
   else
@@ -95,11 +98,6 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
-let contains text part =
-  let n = String.length part in
-  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
-  at 0
-
 (* The functions the fuzzer can run. *)
 let runnable database =
   List.filter_map
@@ -131,7 +129,7 @@ let runnable database =
           match List.filter_map Fun.id ranges with
           | found
             when List.length found = List.length ranges
-                 && not (List.exists (fun admit -> contains admit "==>") admits) ->
+                 && not (List.exists (fun admit -> Substring.contains admit "==>") admits) ->
               Some { path = declaration.path; key; signature; admits; ranges = found }
           | _ -> None)
       | _ -> None)
@@ -209,7 +207,7 @@ let run_mutant ~samples text =
                     Hashtbl.replace tried arguments ();
                     incr runs;
                     match call candidate.path arguments with
-                    | Error message when contains message "ended with status" ->
+                    | Error message when Substring.contains message "ended with status" ->
                         incr failures;
                         Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
                           (Path.show candidate.path)
@@ -288,7 +286,10 @@ let () =
                 unproven = []
             | None ->
                 let engine = Engine.create ~bases:[ Lazy.force standard ] () in
-                Database.load_package engine ~name:"example" ~dependencies:[] [ (example, text) ];
+                Database.load_package engine
+                  ~name:{ owner = None; name = "example" }
+                  ~dependencies:[]
+                  [ (example, text) ];
                 shown (Type_checker.diagnostics (Engine.context engine) example);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (Documents.read file)

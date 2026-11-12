@@ -4,17 +4,6 @@ let read path =
   close_in channel;
   text
 
-let find text part ~occurrence =
-  let rec search index seen =
-    if index + String.length part > String.length text then -1
-    else if String.sub text index (String.length part) = part then
-      if seen + 1 = occurrence then index else search (index + 1) (seen + 1)
-    else search (index + 1) seen
-  in
-  search 0 0
-
-let contains text part = find text part ~occurrence:1 >= 0
-
 let truss_blocks text =
   let rec loop inside current blocks = function
     | [] -> List.rev blocks
@@ -51,7 +40,7 @@ let truss_blocks text =
 let block_after document marker =
   let rec after_marker = function
     | [] -> []
-    | line :: rest -> if contains line marker then rest else after_marker rest
+    | line :: rest -> if Substring.contains line marker then rest else after_marker rest
   in
   let rec after_fence = function
     | [] -> []
@@ -70,9 +59,9 @@ let words lines =
     (List.filter (( <> ) "") (List.concat_map (String.split_on_char ' ') lines))
 
 let between document first second =
-  let start = find document first ~occurrence:1 + String.length first in
+  let start = Option.get (Substring.find document first) + String.length first in
   let rest = String.sub document start (String.length document - start) in
-  String.sub rest 0 (find rest second ~occurrence:1)
+  String.sub rest 0 (Option.get (Substring.find rest second))
   |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
 
 let backticked text =

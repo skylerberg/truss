@@ -318,8 +318,7 @@ let check context (graph : Graph.t) : task_hazard option =
                     in
                     match Place.overlap first.place second.place with
                     | Overlapping ->
-                        report context Conflicting_loan
-                          (with_mark context (span context second.at))
+                        report context Conflicting_loan (with_mark context second.at)
                           (Printf.sprintf
                              (if yielded then
                                 format_of_string
@@ -352,8 +351,7 @@ let check context (graph : Graph.t) : task_hazard option =
                         viewed
                     in
                     if List.mem Place.Overlapping overlaps then
-                      report context Conflicting_loan
-                        (with_mark context (span context view_at))
+                      report context Conflicting_loan (with_mark context view_at)
                         (Printf.sprintf
                            "`%s` is borrowed `mut` by this call, so the call cannot also take a \
                             view of it."

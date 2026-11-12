@@ -274,7 +274,7 @@ type t = {
   cache : Build.cache;
   settings : Build.settings;
   file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
-  worked_on : string -> bool;
+  worked_on : Path.package -> bool;
       (** Whether a package is one of the project's own, whose code a development build never copies
           into another's file *)
   mutable evaluated : (Path.t * Lir.static_value) list;
@@ -684,19 +684,16 @@ let keep record = record.outcome = Passed && record.message = None && record.ech
    The database keeps them in its store. *)
 type results = { find : string -> string option; add : string -> string -> unit }
 
-(* A kept result is [passed] and the microseconds of the run that kept it.
-   A result in any other form, such as one an earlier version wrote, counts
-   as none, so its test runs again and replaces it. *)
+(* A kept result is a pass, so it is only the microseconds of the run that
+   kept it. A result in any other form, such as one an earlier version wrote,
+   counts as none, so its test runs again and replaces it. *)
 let stored results key =
-  match Option.map (String.split_on_char ' ') (results.find key) with
-  | Some [ "passed"; microseconds ] ->
-      Option.map
-        (fun microseconds ->
-          { outcome = Passed; message = None; echo = None; microseconds; cached = true })
-        (int_of_string_opt microseconds)
-  | _ -> None
+  Option.map
+    (fun microseconds ->
+      { outcome = Passed; message = None; echo = None; microseconds; cached = true })
+    (Option.bind (results.find key) int_of_string_opt)
 
-let store results key record = results.add key (Printf.sprintf "passed %d" record.microseconds)
+let store results key record = results.add key (string_of_int record.microseconds)
 
 type progress =
   | Lowering

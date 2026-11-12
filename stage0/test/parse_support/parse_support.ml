@@ -55,7 +55,7 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
         fail "expected %s, got %s"
           (Diagnostic.Code.name (Parser code))
           (Diagnostic.Code.name diagnostic.code);
-      let expected = Documents.find text at ~occurrence in
+      let expected = Option.get (Substring.find ~occurrence text at) in
       if diagnostic.span.start <> expected then
         fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
       let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in

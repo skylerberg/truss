@@ -183,12 +183,20 @@ let encode_rvalue instance rvalue =
   | Function_value { code; environment } ->
       tagged 6 [ encode_function_ref instance code; option operand environment ]
 
+let rec encode_c_type : Libc.c_type -> Cbor.t = function
+  | Void -> tagged 0 []
+  | Named name -> tagged 1 [ Text name ]
+  | Struct name -> tagged 2 [ Text name ]
+  | Const c -> tagged 3 [ encode_c_type c ]
+  | Pointer c -> tagged 4 [ encode_c_type c ]
+
 let encode_foreign (declaration : Libc.declaration) =
   Cbor.Array
     [
       Text declaration.symbol;
-      Text declaration.returns;
-      list (fun c -> Cbor.Text c) declaration.takes;
+      encode_c_type declaration.returns;
+      Bool declaration.never_returns;
+      list encode_c_type declaration.takes;
       option Cbor.int declaration.variadic_from;
     ]
 

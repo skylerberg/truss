@@ -1,7 +1,7 @@
-type dependency = Manifest.dependency = { package : string; capabilities : string list }
+type dependency = Manifest.dependency = { package : Path.package; capabilities : string list }
 
 type package = Project.package = {
-  name : string;
+  name : Path.package;
   dependencies : dependency list;
   modules : Path.module_ list;
   usize_bits : int;
@@ -45,27 +45,25 @@ let package database name = Query.demand database Project.package name
    only a package's modules is not worked out again when its dependencies
    change, and the other way round. *)
 let modules =
-  Query.query ~name:"package_modules" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_modules" ~phase:Phases.syntax ~show:Path.show_package
+    (fun database name ->
       match package database name with Some package -> package.modules | None -> [])
 
 let dependencies =
-  Query.query ~name:"package_dependencies" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_dependencies" ~phase:Phases.syntax ~show:Path.show_package
+    (fun database name ->
       match package database name with Some package -> package.dependencies | None -> [])
 
 let usize_bits =
-  Query.query ~name:"package_usize_bits" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_usize_bits" ~phase:Phases.syntax ~show:Path.show_package
+    (fun database name ->
       match package database name with Some package -> package.usize_bits | None -> 32)
 
 let exists =
-  Query.query ~name:"package_exists" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
-      Option.is_some (package database name))
+  Query.query ~name:"package_exists" ~phase:Phases.syntax ~show:Path.show_package
+    (fun database name -> Option.is_some (package database name))
 
-let split_path database (names : string list) =
-  match names with
-  | owner :: name :: rest when Query.demand database exists (owner ^ "::" ^ name) ->
-      Some (owner ^ "::" ^ name, rest)
-  | name :: rest when Query.demand database exists name -> Some (name, rest)
-  | _ -> None
+let split_module database names = Path.split_module ~is_package:(Query.demand database exists) names
 
 let module_exists =
   Query.query ~name:"module_exists" ~phase:Phases.syntax ~saved:true ~show:Path.show_module

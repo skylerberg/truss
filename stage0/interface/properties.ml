@@ -354,7 +354,8 @@ let facts_from database ~facts_of (interface : T.type_interface) =
    Packages cannot depend on each other in a cycle, so a group is within one
    package. *)
 let groups =
-  Query.query ~name:"type_groups" ~phase:Phases.interfaces ~show:Fun.id (fun database package ->
+  Query.query ~name:"type_groups" ~phase:Phases.interfaces ~show:Path.show_package
+    (fun database package ->
       let types =
         List.filter_map
           (fun (declaration : Resolve.Names.declaration) ->

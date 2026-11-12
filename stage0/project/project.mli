@@ -21,7 +21,7 @@ val unavailable : (string, string) Query.input
 val project_root : string
 val standard_root : string
 val registry_root : string -> string
-val package_root : string -> string
+val package_root : Path.package -> string
 val lock_file : string
 val manifest_file : string -> string
 val module_path : directory:string -> Path.module_ -> string
@@ -48,7 +48,7 @@ val layout : (string, layout) Query.query
 
 type selection = {
   selected : Registry.Selection.package list;
-  missing : (string * Registry.Version.t * string) list;
+  missing : (Path.package * Registry.Version.t * string) list;
       (** Packages whose files are not inputs yet: each one's name, version, and hash *)
   failed : string list;  (** The hashes of packages whose files could not be had *)
   lock_problems : string list;
@@ -62,19 +62,19 @@ val selection : (unit, selection) Query.query
 
 type place = { root : string; directory : string; manifest : Manifest.package }
 
-val place : (string, place option) Query.query
+val place : (Path.package, place option) Query.query
 (** Where a package of the build is, by its name. A project's package takes the place of any other
     of its name, and a root given by itself, such as the standard library's, that of a registry
     package. *)
 
 type package = {
-  name : string;
+  name : Path.package;
   dependencies : Manifest.dependency list;
   modules : Path.module_ list;
   usize_bits : int;
 }
 
-val package : (string, package option) Query.query
+val package : (Path.package, package option) Query.query
 (** A package: what its manifest says, and its modules. *)
 
 val module_text : (Path.module_, string option) Query.query
@@ -84,6 +84,6 @@ val problems : (unit, string list) Query.query
 (** What reading the project's manifests and lock file shows to be wrong, each as its file and
     sentences. *)
 
-val registry : (unit, (string * Registry.Version.t * string) list) Query.query
+val registry : (unit, (Path.package * Registry.Version.t * string) list) Query.query
 (** The registry packages of the build, in order of name: each one's name, its version, and the hash
     of its files. *)
