@@ -1,0 +1,17 @@
+(library
+ (name mir)
+ (libraries
+  compiler_bug
+  path
+  types
+  core
+  core_walk
+  intrinsic
+  syntax
+  well_known
+  query
+  phases
+  resolve
+  infer
+  interface
+  zarith))
