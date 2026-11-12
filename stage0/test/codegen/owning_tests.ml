@@ -259,5 +259,3 @@ test "swapped" {
   assert q.b == 1
 }
 |}
-
-let () = Harness.finish ()

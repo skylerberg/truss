@@ -16,7 +16,8 @@ let solver =
       exit 1
 
 let markdown_files =
-  Sys.readdir "../.." |> Array.to_list
+  Sys.readdir (Harness.workspace_path ".")
+  |> Array.to_list
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
 
@@ -62,7 +63,5 @@ let () =
                   | diagnostics ->
                       fail "%s"
                         (String.concat "" (List.map (Diagnostic.render file.source) diagnostics))))
-        (Documents.truss_blocks (Documents.read (Filename.concat "../.." name))))
+        (Documents.truss_blocks (Documents.read (Harness.workspace_path name))))
     markdown_files
-
-let () = finish ()

@@ -1184,5 +1184,3 @@ let () =
       match found with
       | Some { definition = Function { body = Some _; _ }; _ } -> ()
       | _ -> fail "the provided body is not in the specification")
-
-let () = finish ()

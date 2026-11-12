@@ -4733,5 +4733,3 @@ let () =
         \  }\n\
         \  first\n\
          }\n")
-
-let () = finish ()

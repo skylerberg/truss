@@ -279,7 +279,7 @@ let check_function state ~broken_body (written : signature) (body_block : block 
         Function { parameters; contract; body = Option.map (build_block state) body_block });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
-let check_definition state (lowered : Environment.lowered) =
+let check_definition state (lowered : Environment.lowered_interface) =
   let definition = state.definition in
   let broken part = Resolve.Parts.broken definition part in
   if not (broken Header) then

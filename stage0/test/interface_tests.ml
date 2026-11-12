@@ -884,5 +884,3 @@ let () =
           if Well_known.of_path (Well_known.path known) <> Some known then
             fail "`%s` is not found by its path" (Path.show (Well_known.path known)))
         Well_known.all)
-
-let () = finish ()

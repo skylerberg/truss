@@ -43,5 +43,3 @@ let () =
           { stage = "Lower"; message = "no impl"; doing = [ "lowering f"; "lowering g" ] }
       in
       if text <> "Lower: no impl\n  while lowering f\n  while lowering g" then fail "got %S" text)
-
-let () = finish ()

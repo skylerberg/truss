@@ -355,5 +355,3 @@ test "negated" {
 }
 |}
         "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")
-
-let () = Harness.finish ()

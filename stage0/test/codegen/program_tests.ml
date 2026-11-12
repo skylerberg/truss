@@ -1394,10 +1394,11 @@ fn main(arguments: List[String]) -> ExitCode
       expect_string ~expected:"inside\nnamed\nkept\n" output)
 
 (* The documents' examples: in every block that checks cleanly, each
-   function that is not generic, and not only for specifications, lowers, and each test passes or reaches a
-   [todo]. Most blocks are excerpts, which do not check alone. *)
+   function that is not generic, and not only for specifications, lowers,
+   and each test passes or reaches a [todo]. Most blocks are excerpts,
+   which do not check alone. *)
 let () =
-  let root = "../../.." in
+  let root = Harness.workspace_path "." in
   Sys.readdir root |> Array.to_list
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
@@ -1480,5 +1481,3 @@ fn main(arguments: List[String]) -> ExitCode
           expect_string ~expected:"counted 5\n" output;
           if not (contains errors "many arguments") then fail "panicked with %S" errors
       | status, _, errors -> fail "ended with status %d: %s" status errors)
-
-let () = Harness.finish ()

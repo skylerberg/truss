@@ -685,5 +685,3 @@ let () =
       if Engine.audit ~before:Phases.proofs engine <> [] then
         fail "the audit computed a result of a later phase";
       if Engine.audit engine = [] then fail "the whole audit found nothing")
-
-let () = finish ()

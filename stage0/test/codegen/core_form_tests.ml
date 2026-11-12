@@ -1591,5 +1591,3 @@ test "constants" {
   assert colors.length() == 2
 }
 |}
-
-let () = Harness.finish ()
