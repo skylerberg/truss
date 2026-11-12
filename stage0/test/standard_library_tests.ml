@@ -10,17 +10,18 @@ let () =
     exit 0
   end
 
-(* CI proves the library on several runners at once. [TRUSS_PROOF_SHARE]
-   names this run's share as [index/count], and the run checks and proves
-   only its own modules, and computes the parts of other modules they use on
-   demand. The modules are dealt out by weight, heaviest first, each to the
-   share with the least so far, so that the shares take about as long as
-   each other. A module's weight is its measured proof cost,
-   which [Proof_weights] lists. The letters of a module's source do not
-   tell: a module of loops with invariants costs several times as
-   much as straight-line code of the same length. A module that was not
-   measured weighs by its letters, which leaves out tables of numbers:
-   they are large and have nothing to prove. *)
+(* CI proves the library in several processes at once, one for each core
+   of several runners. [TRUSS_PROOF_SHARE] names this process's share as
+   [index/count], and the process checks and proves only its own modules,
+   and computes the parts of other modules they use on demand. The modules
+   are dealt out by weight, heaviest first, each to the share with the
+   least so far, so that the shares take about as long as each other. A
+   module's weight is its measured proof cost, which [Proof_weights]
+   lists. The letters of a module's source do not tell: a module of loops
+   with invariants costs several times as much as straight-line code of
+   the same length. A module that was not measured weighs by its letters,
+   which leaves out tables of numbers: they are large and have nothing to
+   prove. *)
 let share =
   match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
   | None | Some "" -> None
@@ -81,8 +82,9 @@ let solver =
    proven by itself, and the run prints [Proof_weights] again, with the
    processor time of each measured module, the solver's included, in
    hundredths of a second, and the recorded weight of every other module.
-   With no directory of solver answers, that is a module's cost to a run
-   that starts from nothing. *)
+   Measure with a directory that holds every query's answer, as CI's runs
+   start with: there a module's cost is translating it, which the solver's
+   cost from nothing would hide. *)
 let measured_modules =
   match Sys.getenv_opt "TRUSS_PROOF_WEIGHTS" with
   | None | Some "" -> None
