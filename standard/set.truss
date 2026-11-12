@@ -206,7 +206,7 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bo
   var kept_count: USize = 0
   for index in 0..count
     invariant self.elements.length() == count
-    invariant kept_count <= yielded.length()
+    invariant kept_count <= index
     invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
       i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
   {
@@ -238,7 +238,7 @@ public fn Set[Element: Hash + Ordered].remove_all(mut self, other: Set[Element])
   var kept_count: USize = 0
   for index in 0..count
     invariant self.elements.length() == count
-    invariant kept_count <= yielded.length()
+    invariant kept_count <= index
     invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
       i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
   {
@@ -309,7 +309,7 @@ public fn Set[Element: Hash + Ordered + Copyable].union(self, other: Set[Element
 {
   var union = self.copy()
   for index in 0..other.elements.length()
-    invariant union.elements.length() <= self.elements.length() + yielded.length()
+    invariant union.elements.length() <= self.elements.length() + index
     invariant forall i in 0..union.elements.length() => forall j in 0..union.elements.length() =>
       i < j ==> !(union.elements.model()[i] == union.elements.model()[j])
   {
@@ -323,7 +323,7 @@ public fn Set[Element: Hash + Ordered + Copyable].intersection(self, other: Set[
 {
   var intersection: Set[Element] = []
   for index in 0..self.elements.length()
-    invariant intersection.elements.length() <= yielded.length()
+    invariant intersection.elements.length() <= index
     invariant forall i in 0..intersection.elements.length() => forall j in 0..intersection.elements.length() =>
       i < j ==> !(intersection.elements.model()[i] == intersection.elements.model()[j])
   {
@@ -339,7 +339,7 @@ public fn Set[Element: Hash + Ordered + Copyable].difference(self, other: Set[El
 {
   var difference: Set[Element] = []
   for index in 0..self.elements.length()
-    invariant difference.elements.length() <= yielded.length()
+    invariant difference.elements.length() <= index
     invariant forall i in 0..difference.elements.length() => forall j in 0..difference.elements.length() =>
       i < j ==> !(difference.elements.model()[i] == difference.elements.model()[j])
   {
@@ -355,7 +355,7 @@ public fn Set[Element: Hash + Ordered + Copyable].symmetric_difference(self, oth
 {
   var symmetric_difference = self.difference(other)
   for index in 0..other.elements.length()
-    invariant symmetric_difference.elements.length() <= self.elements.length() + yielded.length()
+    invariant symmetric_difference.elements.length() <= self.elements.length() + index
     invariant forall i in 0..symmetric_difference.elements.length() => forall j in 0..symmetric_difference.elements.length() =>
       i < j ==> !(symmetric_difference.elements.model()[i] == symmetric_difference.elements.model()[j])
   {

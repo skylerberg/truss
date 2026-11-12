@@ -29,7 +29,7 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(2 * bytes.length())
   for index in 0..bytes.length()
-    invariant intrinsic::storage_length(output) == 2 * yielded.length()
+    invariant intrinsic::storage_length(output) == 2 * index
     invariant intrinsic::storage_capacity(output) == 2 * bytes.length()
   {
     let byte = bytes[index]

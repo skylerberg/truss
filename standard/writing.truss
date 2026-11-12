@@ -17,7 +17,7 @@ internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View
   let start = intrinsic::storage_length(output)
   growth::reserve(mut output, additional: count)
   for index in 0..count
-    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) >= start + count
   {
     intrinsic::storage_push(mut output, value: intrinsic::view_at(bytes, index: index))

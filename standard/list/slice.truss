@@ -566,9 +566,9 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
 {
   var copy: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(copy) == yielded.length()
+    invariant intrinsic::storage_length(copy) == index
     invariant intrinsic::storage_capacity(copy) == self.length()
-    invariant forall i in 0..yielded.length() =>
+    invariant forall i in 0..index =>
       identical(intrinsic::storage_model(copy)[i], self.model()[i])
   {
     intrinsic::storage_push(mut copy, value: self[index].copy())
@@ -583,7 +583,7 @@ public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost 
 {
   var kept: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(kept) <= yielded.length()
+    invariant intrinsic::storage_length(kept) <= index
     invariant intrinsic::storage_capacity(kept) == self.length()
     invariant forall i in 0..intrinsic::storage_length(kept) => keep(intrinsic::storage_model(kept)[i])
   {
@@ -615,7 +615,7 @@ public fn Slice[Element: Copyable].repeated(self, times: USize) -> List[Element]
     Some(total) => {
       var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(total)
       for position in 0..total
-        invariant intrinsic::storage_length(elements) == yielded.length()
+        invariant intrinsic::storage_length(elements) == position
         invariant intrinsic::storage_capacity(elements) == total
       {
         intrinsic::storage_push(mut elements, value: self[position % self.length()].copy())
@@ -884,7 +884,7 @@ public fn Slice[Element: Copyable].fill(mut self, value: Element)
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
-    invariant forall i in 0..yielded.length() => identical(self.model()[i], value)
+    invariant forall i in 0..index => identical(self.model()[i], value)
   {
     self[index] = value.copy()
   }
@@ -898,7 +898,7 @@ public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
-    invariant forall i in 0..yielded.length() => identical(self.model()[i], source.model()[i])
+    invariant forall i in 0..index => identical(self.model()[i], source.model()[i])
   {
     self[index] = source[index].copy()
   }

@@ -400,7 +400,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   let form = how == EscapeSet.AsForm
   var extra: USize = 0
   for index in 0..text.length()
-    invariant extra <= 2 * yielded.length()
+    invariant extra <= 2 * index
   {
     let byte = text.byte(index)
     if !how.allows(byte) && !(form && byte == 32) {
@@ -411,7 +411,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
   var budget = extra
   for index in 0..text.length()
-    invariant intrinsic::storage_length(output) + (text.length() - yielded.length()) + budget <= capacity
+    invariant intrinsic::storage_length(output) + (text.length() - index) + budget <= capacity
     invariant intrinsic::storage_capacity(output) == capacity
   {
     let byte = text.byte(index)
@@ -495,7 +495,7 @@ internal fn count_byte(text: StringSlice, byte: UInt8) -> USize
 {
   var count: USize = 0
   for index in 0..text.length()
-    invariant count <= yielded.length()
+    invariant count <= index
     cost allocations == 0
   {
     if text.byte(index) == byte {

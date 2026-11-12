@@ -35,6 +35,7 @@ type specification = {
   cost_bound : bool;
   yielded : bool;
   finished : bool;
+  elements : string list;
 }
 
 type scope = {

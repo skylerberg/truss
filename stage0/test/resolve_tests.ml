@@ -227,6 +227,14 @@ let () =
   test "a lambda's parameter is in scope in its body" (fun () ->
       refers_to_binding "fn f() -> fn(Int64) -> Int64 {\n  fn(item) { item }\n}\n" ~use:("item", 2)
         ~binding:("item", 1));
+  test "a range loop's index is in scope in its clauses" (fun () ->
+      refers_to_binding
+        "fn f(count: USize) {\n  for index in 0..count\n    invariant index <= count\n  {\n  }\n}\n"
+        ~use:("index", 2) ~binding:("index", 1));
+  test "a loop's element is not in scope in its clauses" (fun () ->
+      one_diagnostic
+        "fn f(items: List[Int64]) {\n  for item in items\n    invariant item > 0\n  {\n  }\n}\n"
+        "resolve.unknown_name");
   test "a local is not in scope after its block" (fun () ->
       one_diagnostic "fn f() -> Int64 {\n  {\n    let inner = 1\n  }\n  inner\n}\n"
         "resolve.unknown_name")
