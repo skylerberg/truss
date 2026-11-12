@@ -1,12 +1,3 @@
-(* The LIR as C. The library's modules, each building on the ones before it:
-
-   - [C_runtime]: the runtime's declarations, and the helpers a file uses
-   - [C_types]: a file's context, and the C types of what it names
-   - [C_values]: places, operands, constants, operators, and built values
-   - [C_code]: intrinsics, calls, statements, terminators, and functions
-   - [C_data]: static data and tables
-   - this module: a whole file *)
-
 open C_runtime
 open C_types
 open C_values

@@ -1,19 +1,4 @@
-(* Lowering: the core form of one instance to its LIR. The library's
-   modules, in the order each builds on the ones before it:
-
-   - [Definitions]: lowering's context, and finding an instance's code and
-     signature
-   - [Lowering]: the state of lowering one function, its scopes, locals,
-     and positions
-   - [Targets]: what a call reaches, how arguments are passed, evidence,
-     literals, cursors, and nested functions
-   - [Method_yields]: where a lending or yielding method's [yield]s are
-   - [Core_form]: expressions, statements, patterns, calls, inlining, and
-     defaults
-   - [Constants], [Derived], [Generated]: constants and their evaluators,
-     derived implementations, and the instances lowering makes, such as
-     capability tables and the program's [main]
-   - this module: pulled methods, each instance, and the interface *)
+(* Lowering: the core form of one instance to its LIR. *)
 
 open Lir_builder
 open Definitions

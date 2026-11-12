@@ -1,6 +1,5 @@
 (* The control-flow graph of a definition's body, built from its core form.
    Each point performs one action, and the edges follow evaluation order.
-   [Moves] and [Views] run dataflow analyses on this graph.
 
    Evaluation order:
    - A call evaluates an indirect callee, then its arguments in order. The
@@ -196,8 +195,8 @@ let tail_values (value : Core.expression) : Core.expression list =
   | Block body | Provide { body; _ } -> of_block body
   | _ -> []
 
-(* The views of a value, derived from its expression alone. [Views.resolve]
-   later adds the views that the roots of these places hold.
+(* The views of a value, derived from its expression alone, without the
+   views that the roots of these places hold.
 
    - A value that is copied or moved out of a place is a copy of a view
      stored there.

@@ -1,6 +1,5 @@
 (* Cost bounds: what a counter counts, how, and the constants an [O(...)]
-   bound is proven with. The proof program that increases the counters is
-   [Translate]'s. *)
+   bound is proven with. *)
 module Symbol = Logic.Symbol
 
 let zero = Logic.Integer Z.zero

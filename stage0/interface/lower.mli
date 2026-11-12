@@ -1,6 +1,6 @@
 (** Lowering written types to [Types.ty], from a definition's resolved form. Lowering reports the
     errors that a type position alone determines: a name that is not a type, a wrong number of
-    arguments, an associated type that no bound declares. [Check] checks bounds separately. *)
+    arguments, an associated type that no bound declares. It does not check bounds. *)
 
 type context = {
   database : Query.context;

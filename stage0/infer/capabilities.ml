@@ -196,8 +196,7 @@ let require_intrinsic_uses checking scope (origin : Core.origin) operation =
     require_available checking scope origin
       (List.map (fun capability -> Types.Capability capability) (Intrinsic.uses operation))
 
-(* Handles a callee that is stored in a node other than a [Call] (see
-   [Core_walk.visit]). It requires the [uses] of the callee's signature. A
+(* Handles a callee that is stored in a node other than a [Call]. It requires the [uses] of the callee's signature. A
    trait's method requires the [uses] that the trait declares, for the type
    that the method is called on: [next] declares [Self.Uses]. *)
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
