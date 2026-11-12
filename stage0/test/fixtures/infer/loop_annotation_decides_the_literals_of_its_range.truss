@@ -1,0 +1,5 @@
+fn f() {
+  for index: UInt8 in 0..10 {
+    let next = index.wrapping_add(1)
+  }
+}

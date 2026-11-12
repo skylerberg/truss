@@ -360,12 +360,12 @@ statement:
   | VAR pattern annotation_opt EQ expression else_opt { () }
   | expression { () }
   | expression assignment_operator expression { () }
-  | FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | WHILE expression list(loop_clause) newline_opt block { () }
   | PARALLEL block { () }
-  | PARALLEL FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | PARALLEL FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | CONCURRENT block { () }
-  | CONCURRENT FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | CONCURRENT FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
   | YIELD expression { () }

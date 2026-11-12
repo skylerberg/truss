@@ -172,8 +172,8 @@ type state = {
   decisions : (int, literal_decision) Hashtbl.t;
       (** Keyed by the [index] of the [undecided_literal]. *)
   annotatable : (id, unit) Hashtbl.t;
-      (** The locals that an unannotated [let] declares by a plain name, where a fix can add a type
-          after the name. *)
+      (** The locals that an unannotated [let] or [for] declares by a plain name, where a fix can
+          add a type after the name. *)
 }
 
 let reported state ?notes ?(fixes = []) code (span : span) message =
