@@ -86,3 +86,48 @@ let () =
         exit 1
       end
       else Printf.printf "%d tests pass\n" !count)
+
+let scratch_root =
+  lazy
+    (let root = Filename.temp_dir "truss-tests" "" in
+     at_exit (fun () -> try File_system.remove root with Sys_error _ | Unix.Unix_error _ -> ());
+     root)
+
+let scratch_count = ref 0
+
+let scratch name =
+  incr scratch_count;
+  let directory =
+    Filename.concat (Lazy.force scratch_root) (Printf.sprintf "%s-%d" name !scratch_count)
+  in
+  File_system.make_directory directory;
+  directory
+
+let write_files root files =
+  List.iter
+    (fun (path, text) ->
+      let path = Filename.concat root path in
+      File_system.make_directory (Filename.dirname path);
+      File_system.write path text)
+    files
+
+let git directory arguments =
+  match
+    Process.output "git"
+      ([ "-C"; directory; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ] @ arguments)
+  with
+  | 0, _ -> ()
+  | _ -> fail "git %s failed" (String.concat " " arguments)
+
+let markdown_documents () =
+  Sys.readdir (workspace_path ".")
+  |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".md")
+  |> List.sort compare
+
+let expect_string ~expected actual =
+  if not (String.equal expected actual) then fail "expected %S, got %S" expected actual
+
+let expect_strings ~expected actual =
+  if expected <> actual then
+    fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)

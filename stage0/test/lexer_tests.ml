@@ -625,7 +625,7 @@ let () =
 
 (* The documents *)
 
-let document name = Documents.read (Harness.workspace_path name)
+let document = Parse_support.document
 let truss_blocks name = Documents.truss_blocks (document name)
 let block_after = Documents.block_after
 let words = Documents.words
@@ -680,7 +680,4 @@ let () =
         (truss_blocks name))
     (* Every document at the root of the repository, so a new one is
        covered without being listed here. *)
-    (Sys.readdir (Harness.workspace_path ".")
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".md")
-    |> List.sort compare)
+    (Harness.markdown_documents ())

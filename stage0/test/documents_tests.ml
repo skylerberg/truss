@@ -8,18 +8,8 @@
 
 open Harness
 
-let solver =
-  match Solver.find () with
-  | Ok solver -> solver
-  | Error message ->
-      prerr_endline message;
-      exit 1
-
-let markdown_files =
-  Sys.readdir (Harness.workspace_path ".")
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
-  |> List.sort compare
+let solver = Lazy.force Support.solver
+let markdown_files = Harness.markdown_documents ()
 
 (* The codes that mean the block needs context it does not have. *)
 let excerpt_codes =

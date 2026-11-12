@@ -5,41 +5,16 @@ open Cli
 
 let test = Harness.test
 let fail = Harness.fail
-
-let expect_string ~expected actual =
-  if not (String.equal expected actual) then fail "expected %S, got %S" expected actual
-
-let expect_strings ~expected actual =
-  if expected <> actual then
-    fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
-
+let expect_string = Harness.expect_string
+let expect_strings = Harness.expect_strings
 let contains = Substring.contains
 
 (* Packages on disk *)
 
-let counter = ref 0
-
-(* A new directory holding the files, each a path under it and its text,
-   with directories made as needed. *)
+(* A new directory holding the files, each a path under it and its text. *)
 let directory files =
-  incr counter;
-  let root =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "truss-cli-tests-%d-%d" (Unix.getpid ()) !counter)
-  in
-  let rec make path =
-    if not (Sys.file_exists path) then begin
-      make (Filename.dirname path);
-      Sys.mkdir path 0o755
-    end
-  in
-  make root;
-  List.iter
-    (fun (path, text) ->
-      let path = Filename.concat root path in
-      make (Filename.dirname path);
-      Out_channel.with_open_bin path (fun channel -> output_string channel text))
-    files;
+  let root = Harness.scratch "package" in
+  Harness.write_files root files;
   Project.normalize root
 
 let manifest_of name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
@@ -64,10 +39,7 @@ let captured f =
 let quietly f = fst (captured f)
 
 (* The tests' sessions are in a store of their own, apart from the user's. *)
-let () =
-  Unix.putenv "TRUSS_CACHE"
-    (Filename.concat (Filename.get_temp_dir_name ())
-       (Printf.sprintf "truss-cli-tests-store-%d" (Unix.getpid ())))
+let () = Unix.putenv "TRUSS_CACHE" (Harness.scratch "store")
 
 (* Arguments *)
 
@@ -790,15 +762,7 @@ let () =
 
 (* Comparing with a commit, and other worktrees *)
 
-let git root arguments =
-  let command =
-    String.concat " "
-      (List.map Filename.quote
-         ([ "git"; "-C"; root; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ]
-         @ arguments))
-  in
-  if Sys.command (command ^ " >/dev/null 2>&1") <> 0 then
-    fail "git %s failed" (String.concat " " arguments)
+let git = Harness.git
 
 let doubling =
   {|internal fn double(value: Int64) -> Int64

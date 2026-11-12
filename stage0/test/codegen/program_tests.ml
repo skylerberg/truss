@@ -1397,10 +1397,7 @@ fn main(arguments: List[String]) -> ExitCode
    and each test passes or reaches a [todo]. Most blocks are excerpts,
    which do not check alone. *)
 let () =
-  let root = Harness.workspace_path "." in
-  Sys.readdir root |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
-  |> List.sort compare
+  Harness.markdown_documents ()
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
@@ -1431,7 +1428,7 @@ let () =
                       | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
                       | [ "test"; _; outcome ] -> fail "a test %s" outcome
                       | _ -> ())))
-        (Documents.truss_blocks (Documents.read (Filename.concat root name))))
+        (Documents.truss_blocks (Documents.read (Harness.workspace_path name))))
 
 let () =
   test "a function value whose type uses Panic is called without evidence for Panic" (fun () ->

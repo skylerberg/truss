@@ -101,16 +101,7 @@ let () =
 
 (* A registry's files *)
 
-let counter = ref 0
-
-let fresh name =
-  incr counter;
-  let path =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "truss-registry-tests-%d-%s-%d" (Unix.getpid ()) name !counter)
-  in
-  Unix.mkdir path 0o755;
-  path
+let fresh = scratch
 
 let () =
   let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in

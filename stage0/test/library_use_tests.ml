@@ -5,12 +5,7 @@
 
 open Harness
 
-let solver =
-  match Solver.find () with
-  | Ok solver -> solver
-  | Error message ->
-      prerr_endline message;
-      exit 1
+let solver = Lazy.force Support.solver
 
 let check database module_ =
   match Type_checker.diagnostics database module_ with

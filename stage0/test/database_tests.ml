@@ -4,38 +4,15 @@
 
 open Harness
 
-let scratch =
-  lazy
-    (let directory =
-       Filename.concat (Filename.get_temp_dir_name ())
-         (Printf.sprintf "truss-database-tests-%d" (Unix.getpid ()))
-     in
-     ignore (Sys.command ("rm -rf " ^ Filename.quote directory));
-     Unix.mkdir directory 0o755;
-     at_exit (fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote directory)));
-     directory)
-
+let fresh = scratch
 let counter = ref 0
 
-let fresh name =
-  incr counter;
-  let path = Filename.concat (Lazy.force scratch) (Printf.sprintf "%s-%d" name !counter) in
-  Unix.mkdir path 0o755;
-  path
-
 let write directory file text =
-  let path = Filename.concat directory file in
-  let rec make dir =
-    if not (Sys.file_exists dir) then begin
-      make (Filename.dirname dir);
-      Unix.mkdir dir 0o755
-    end
-  in
-  make (Filename.dirname path);
-  Out_channel.with_open_bin path (fun out -> output_string out text);
+  write_files directory [ (file, text) ];
   (* A rewrite within one second must still look changed. *)
+  incr counter;
   let now = Unix.gettimeofday () in
-  Unix.utimes path now (now +. float_of_int !counter)
+  Unix.utimes (Filename.concat directory file) now (now +. float_of_int !counter)
 
 let manifest name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
 let project = "[project]\n"
@@ -452,15 +429,7 @@ let () =
 
 (* With git *)
 
-let git directory arguments =
-  let command =
-    String.concat " "
-      (List.map Filename.quote
-         ([ "git"; "-C"; directory; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ]
-         @ arguments))
-  in
-  if Sys.command (command ^ " >/dev/null 2>&1") <> 0 then
-    fail "git %s failed" (String.concat " " arguments)
+let git = Harness.git
 
 let repository () =
   let root = fresh "repository" in
@@ -507,7 +476,7 @@ let () =
     (fun () ->
       fresh_store ();
       let root = repository () in
-      let other = Filename.concat (Lazy.force scratch) (Printf.sprintf "served-%d" !counter) in
+      let other = fresh "served" in
       git root [ "worktree"; "add"; "-q"; other; "-b"; "served" ];
       add_caller other;
       let key = Database.server_key other in
@@ -571,7 +540,7 @@ let () =
   test "overlap finds a new call to a function another worktree changes" (fun () ->
       fresh_store ();
       let root = repository () in
-      let other = Filename.concat (Lazy.force scratch) (Printf.sprintf "other-%d" !counter) in
+      let other = fresh "other" in
       git root [ "worktree"; "add"; "-q"; other; "-b"; "other" ];
       change_interface root;
       add_caller other;
@@ -616,7 +585,7 @@ let () =
       write top "tools/main.truss" program;
       git top [ "add"; "-A" ];
       git top [ "commit"; "-q"; "-m"; "base" ];
-      let other_top = Filename.concat (Lazy.force scratch) (Printf.sprintf "nested-%d" !counter) in
+      let other_top = fresh "nested" in
       git top [ "worktree"; "add"; "-q"; other_top; "-b"; "other" ];
       let other = Filename.concat other_top "services/app" in
       change_interface root;
@@ -646,7 +615,7 @@ let () =
   test "a merge preview finds the errors the merge would have" (fun () ->
       fresh_store ();
       let root = repository () in
-      let other = Filename.concat (Lazy.force scratch) (Printf.sprintf "merge-%d" !counter) in
+      let other = fresh "merge" in
       git root [ "worktree"; "add"; "-q"; other; "-b"; "merged" ];
       change_interface root;
       write other "caller.truss"
