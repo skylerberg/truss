@@ -1017,7 +1017,61 @@ let () =
         \  ensures items[0] == old(items[0]) + 1\n\
          {\n\
         \  items[0] += 1\n\
-         }\n")
+         }\n");
+  let digit =
+    "fn digit(order: mut Int64, next: Int64) -> USize\n\
+    \  requires order >= 0 && order < 1000 && next >= 0 && next < 10\n\
+    \  ensures order == old(order) * 10 + next\n\
+    \  ensures result == 0\n\
+     {\n\
+    \  order = order * 10 + next\n\
+    \  0\n\
+     }\n\n"
+  in
+  test "an assignment evaluates its value, then its target's index keys" (fun () ->
+      proven
+        (digit
+       ^ "fn f() -> Int64\n\
+         \  ensures result == 21\n\
+          {\n\
+         \  var items: List[USize] = [10]\n\
+         \  var order = 0\n\
+         \  items[digit(mut order, next: 1)] = digit(mut order, next: 2)\n\
+         \  order\n\
+          }\n");
+      not_proven
+        (digit
+       ^ "fn f() -> Int64\n\
+         \  ensures result == 12\n\
+          {\n\
+         \  var items: List[USize] = [10]\n\
+         \  var order = 0\n\
+         \  items[digit(mut order, next: 1)] = digit(mut order, next: 2)\n\
+         \  order\n\
+          }\n")
+        "prover.ensures");
+  test "a compound assignment evaluates its operand, then its target's index keys, once" (fun () ->
+      proven
+        (digit
+       ^ "fn f() -> Int64\n\
+         \  ensures result == 21\n\
+          {\n\
+         \  var items: List[USize] = [10]\n\
+         \  var order = 0\n\
+         \  items[digit(mut order, next: 1)] += digit(mut order, next: 2)\n\
+         \  order\n\
+          }\n");
+      not_proven
+        (digit
+       ^ "fn f() -> Int64\n\
+         \  ensures result == 211\n\
+          {\n\
+         \  var items: List[USize] = [10]\n\
+         \  var order = 0\n\
+         \  items[digit(mut order, next: 1)] += digit(mut order, next: 2)\n\
+         \  order\n\
+          }\n")
+        "prover.ensures")
 
 (* Laws *)
 

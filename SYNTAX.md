@@ -2016,6 +2016,16 @@ flags |= Permission.write
   update in place.
 - `truss fmt` writes `x = x + y` as `x += y`.
 
+#### Evaluation order of assignments
+
+- `target = value` evaluates `value` first, then the index keys of `target`,
+  and then stores. In `items[next()] = compute()`, `compute()` runs before
+  `next()`.
+- `target += operand` evaluates `operand` first, then the index keys of
+  `target`, once. Then the operator takes the old value of `target`, and the
+  result is stored. In `totals[region()] += parse(text)?`, a failed `parse`
+  returns before `region()` runs, and `totals` is left as it was.
+
 #### Integer division and shifts
 
 - `/` on integers rounds toward zero, and `%` gives a result with the sign of

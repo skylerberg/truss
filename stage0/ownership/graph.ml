@@ -910,14 +910,23 @@ and statement_actions builder frontier (node : Core.statement) =
               ~temporaries:(viewed_temporaries builder value)
           else frontier
       | None -> frontier)
-  | Compound_assign { target; value } -> (
-      let frontier = expression builder frontier value in
+  | Compound_assign { target; operand = right; bound; value } -> (
+      let frontier = evaluate_operand builder frontier Read right in
+      let frontier = bind_pattern builder frontier [ bound ] [ right ] node.origin in
+      let added = add_operand_loans builder (operand_borrows builder right) in
       let frontier = place_subexpressions builder frontier target in
+      remove_loans builder added;
       let frontier = writes_through builder frontier target ~whole:false in
-      match Place.of_core target with
-      | Some place ->
-          let origin = Core_walk.place_origin target in
-          emit builder (emit builder frontier (Read place) origin) (Assign place) origin
+      let origin = Core_walk.place_origin target in
+      let place = Place.of_core target in
+      let frontier =
+        match place with
+        | Some place -> emit builder frontier (Read place) origin
+        | None -> frontier
+      in
+      let frontier = expression builder frontier value in
+      match place with
+      | Some place -> emit builder frontier (Assign place) origin
       | None -> frontier)
   | For { pattern; iteration; body; _ } ->
       let frontier, loan =

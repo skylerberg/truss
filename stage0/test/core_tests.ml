@@ -100,10 +100,11 @@ let () =
     "{ (!(Ordered.compare for Meters by app::main::impl Ordered for Meters(place first, place \
      second) is Greater) || !Equal.equal for Meters by app::main::impl Equal for Meters(place \
      first, place second)) }";
-  expect_body "a compound assignment evaluates its target once"
+  expect_body "a compound assignment binds its operand, and evaluates its target once"
     "fn g(items: mut List[Int64]) {\n  items[0] += 2\n}\n"
     "{ compound_assign lent Index.at for List[Int64] by standard::list::impl Index for \
-     List[Element](mut place items, 0) lends mut = add(current_target, 2) }";
+     List[Element](mut place items, 0) lends mut = add(current_target, synthetic#0) with \
+     synthetic#0 = 2 }";
   expect_definition "arithmetic in a specification converts its operands to Integer"
     "fn g(count: Int64) -> Int64\n  ensures result + 1 > count\n{\n  count\n}\n"
     "fn(count: Int64)\n\
@@ -251,9 +252,10 @@ let () =
     \  total\n\
      }\n"
     "{ let var own total = 0; for item in yielding_call standard::list::impl Iterable for \
-     List[Element].each[Int64](place items) { compound_assign total = add(current_target, item) }; \
-     for step in integer_range 0..=total {  }; while (total < 3) { compound_assign total = \
-     add(current_target, 1) }; total }"
+     List[Element].each[Int64](place items) { compound_assign total = add(current_target, \
+     synthetic#0) with synthetic#0 = item }; for step in integer_range 0..=total {  }; while \
+     (total < 3) { compound_assign total = add(current_target, synthetic#1) with synthetic#1 = 1 \
+     }; total }"
 
 let () =
   expect_body "a `for` loop over the result of a call calls `each` on the result"

@@ -263,6 +263,9 @@ type context = {
       (** The ownership check's pairs of indexes, by the origin of each, that must differ. *)
   mutable indexes : (int * (place_value * span)) list;
       (** The value of each such index or range, once read. *)
+  mutable evaluated_keys : (Core.id * L.term) list;
+      (** The terms of the index keys of the target of the assignment being translated, by node.
+          Reading and storing the target look them up, so that no key is evaluated twice. *)
   mutable hands_out : (T.ty * [ `Lends | `Yields ]) option;
       (** In a lending or yielding method's body, the type of the parts it hands out. *)
   mutable handing : (expression list * expression list) option;
@@ -1562,8 +1565,11 @@ let comparison (comparison : comparison) =
 
 let rec expression context frame (node : expression) : (frame * L.term) option =
   if frame.source.key = Some context.home then
-    try expression_kind context frame node
-    with Foreign_unsupported message -> raise (Unsupported (at frame node, message))
+    match List.assoc_opt node.id context.evaluated_keys with
+    | Some term -> Some (frame, term)
+    | None -> (
+        try expression_kind context frame node
+        with Foreign_unsupported message -> raise (Unsupported (at frame node, message)))
   else
     try expression_kind context frame node
     with Unsupported (_, message) ->
@@ -7890,13 +7896,15 @@ and statement_kind context frame (node : statement) : frame option =
       | None -> Some (restrict bound matched))
   | Assign { target; value = assigned } ->
       let frame, new_value = value context frame assigned in
-      Some (store context frame target new_value)
-  | Compound_assign { target; value = updated } ->
-      (* The target is worked out once: what it holds is what [updating]
-         names in the value it takes. *)
-      let frame, current = place_value context frame target in
-      let after, new_value = value context { frame with updating = Some current } updated in
-      Some (store context { after with updating = frame.updating } target new_value)
+      with_target_keys context frame target (fun frame ->
+          Some (store context frame target new_value))
+  | Compound_assign { target; operand; bound; value = updated } ->
+      let frame, right = operand_value context frame operand in
+      let frame = { frame with locals = Locals.add bound right frame.locals } in
+      with_target_keys context frame target (fun frame ->
+          let frame, current = place_value context frame target in
+          let after, new_value = value context { frame with updating = Some current } updated in
+          Some (store context { after with updating = frame.updating } target new_value))
   | While { condition; clauses; body } -> while_ context frame node condition clauses body
   | For { pattern; iteration; clauses; body; _ } ->
       (* A loop's iterations change disjoint places, so however they run, as
@@ -8257,6 +8265,39 @@ and store context frame (place : place) new_value =
   | Lent { kind = Call { lends = Some T.Mut; _ }; _ } ->
       store_lent context frame place (fun _ -> new_value)
   | Lent _ | Temporary _ -> raise (Foreign_unsupported "assigning to this place")
+
+(* Evaluates the index keys of an assignment's target, in order, and runs
+   [f] with each key's term recorded, so that reading or storing the target
+   in [f] evaluates no key again. A key evaluated twice would run its
+   effects twice. *)
+and with_target_keys context frame target f =
+  let rec keys frame (place : place) =
+    match place with
+    | Local _ | Constant _ | Temporary _ -> (frame, [])
+    | Field { base; _ } -> keys frame base
+    | Lent { kind = Call { arguments = receiver :: indexes; _ }; _ } ->
+        let frame, outer =
+          match receiver with
+          | Passed { value = Place base; _ } -> keys frame base
+          | _ -> (frame, [])
+        in
+        List.fold_left
+          (fun (frame, evaluated) (index : argument) ->
+            match index with
+            | Passed { value = Value key; _ } ->
+                let frame, term = value context frame key in
+                (frame, (key.id, term) :: evaluated)
+            | Passed { value = Place key; _ } ->
+                let frame, inner = keys frame key in
+                (frame, inner @ evaluated)
+            | Default -> (frame, evaluated))
+          (frame, outer) indexes
+    | Lent _ -> (frame, [])
+  in
+  let frame, evaluated = keys frame target in
+  let outer = context.evaluated_keys in
+  context.evaluated_keys <- evaluated @ outer;
+  Fun.protect ~finally:(fun () -> context.evaluated_keys <- outer) (fun () -> f frame)
 
 (* Whether a place is a part, through fields, of what a call lends to be
    changed. *)
@@ -9119,6 +9160,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
       | Some ownership -> ownership.disjoint
       | None -> []);
     indexes = [];
+    evaluated_keys = [];
   }
 
 let outcome context = { obligations = List.rev context.obligations; holes = List.rev context.holes }

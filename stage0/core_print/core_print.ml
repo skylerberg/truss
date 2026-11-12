@@ -198,8 +198,9 @@ and statement names (node : statement) =
   | Evaluate value -> expression names value
   | Assign { target; value } ->
       Printf.sprintf "%s = %s" (place names target) (expression names value)
-  | Compound_assign { target; value } ->
-      Printf.sprintf "compound_assign %s = %s" (place names target) (expression names value)
+  | Compound_assign { target; operand = right; bound; value } ->
+      Printf.sprintf "compound_assign %s = %s with %s = %s" (place names target)
+        (expression names value) (local names bound) (operand names right)
   | For { pattern = bound; iteration; clauses; body; mode } ->
       Printf.sprintf "%sfor %s in %s%s %s"
         (match mode with

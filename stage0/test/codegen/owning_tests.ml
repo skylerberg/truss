@@ -245,6 +245,90 @@ test "once" {
   assert items[0] == 15
 }
 |};
+  passes "an assignment evaluates its value, then its target's index keys"
+    {|fn digit(order: mut Int64, next: Int64) -> USize {
+  order = order * 10 + next
+  0
+}
+
+test "ordered" {
+  var items: List[USize] = [10]
+  var order = 0
+  items[digit(mut order, next: 1)] = digit(mut order, next: 2)
+  assert order == 21
+  items[digit(mut order, next: 3)] += digit(mut order, next: 4)
+  assert order == 2143
+}
+|};
+  passes "a compound assignment to an element frees the replaced value once"
+    {|type Bag(items: List[Int64])
+
+impl Add[Bag] for Bag {
+  type Output = Bag
+
+  fn add_is_defined(self, right: Bag) -> Bool {
+    true
+  }
+
+  fn add(self, right: Bag) -> Bag {
+    var items = self.items.copy()
+    for item in right.items {
+      mut items.push(item)
+    }
+    Bag(items: own items)
+  }
+}
+
+test "element" {
+  var bags: List[Bag] = [Bag(items: [1]), Bag(items: [2])]
+  let others: List[Bag] = [Bag(items: [3]), Bag(items: [4, 5])]
+  bags[0] += others[1]
+  bags[1] += Bag(items: [6])
+  assert bags[0].items.length() == 3
+  assert bags[1].items.length() == 2
+}
+|};
+  passes "a compound assignment's operand runs before the operator takes the target"
+    {|type Bag(items: List[Int64])
+
+impl Add[Int64] for Bag {
+  type Output = Bag
+
+  fn add_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn add(self, right: Int64) -> Bag {
+    var items = self.items.copy()
+    mut items.push(right)
+    Bag(items: own items)
+  }
+}
+
+fn parse(text: String) -> Result[Int64, String] {
+  if text == "bad" { Err("bad") } else { Ok(1) }
+}
+
+fn bump(bag: mut Bag, text: String) -> Result[Int64, String] {
+  bag += parse(text)?
+  Ok(0)
+}
+
+fn grow(bag: mut Bag) -> Int64 {
+  mut bag.items.push(7)
+  mut bag.items.push(8)
+  1
+}
+
+test "operand first" {
+  var bag = Bag(items: [5])
+  let _ = bump(mut bag, text: "bad")
+  let _ = bump(mut bag, text: "good")
+  assert bag.items.length() == 2
+  bag += grow(mut bag)
+  assert bag.items.length() == 5
+}
+|};
   passes "a result assigned over its own argument reads the argument as it was"
     {|type Quad(a: Int64, b: Int64, c: Int64, d: Int64)
 

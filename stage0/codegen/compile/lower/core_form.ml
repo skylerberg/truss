@@ -1547,12 +1547,13 @@ and statement st (node : Core.statement) =
             else_;
           match_patterns st [ (pattern, scrutinee) ] ~failed
       | Assign { target; value } ->
-          (* The new value is evaluated into a temporary before it replaces
-             the old one, because evaluating it can read the target. *)
+          (* The new value is evaluated first, into a temporary, because
+             evaluating it can read the target. Then the target's index keys
+             are evaluated. *)
           let ty = ground st value.type_ in
-          let target = place st target in
           let new_value = temporary st ty in
           into st value new_value;
+          let target = place st target in
           replace st target ty ~by:new_value
       | Assert { value; _ } ->
           let condition = operand st value in
@@ -1569,9 +1570,19 @@ and statement st (node : Core.statement) =
                  site = site_of st node.origin;
                });
           start st.b after
-      | Compound_assign { target; value } ->
-          (* The target place is evaluated once. The operator reads its
-             current value, and the result replaces it. *)
+      | Compound_assign { target; operand; bound; value } ->
+          (* The operand is evaluated first, so that no code but the
+             operator runs while the target is moved out. Then the target
+             place is evaluated once, and the operator takes its current
+             value. The target then holds nothing, so the result is moved in
+             without a drop: dropping it would free the taken value a second
+             time. *)
+          let right =
+            match operand with
+            | Place source -> snapshot st (place st source)
+            | Value right -> value_place st right
+          in
+          bind_local st bound right;
           let ty = ground st value.type_ in
           let target = place st target in
           let result = temporary st ty in
@@ -1579,7 +1590,7 @@ and statement st (node : Core.statement) =
           st.compound_target <- Some target;
           into st value result;
           st.compound_target <- enclosing;
-          replace st target ty ~by:result
+          emit st.b (Assign (target, Use (owned st result ty)))
       | While { condition; body; _ } ->
           (* The condition's temporaries are dropped before the body and
              before the exit. The names it binds live until the body ends. *)

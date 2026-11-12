@@ -822,21 +822,29 @@ let is_executable state (condition : Core.expression) =
     condition;
   !executable
 
-(* A compound assignment. Its [value] computes the new value from
-   [Current_target] (the target's value before the assignment) and the
-   right-hand side. If the operator is a trait method, the checker recorded
-   the call under the statement's id. *)
+(* A compound assignment. The right operand is bound to a synthetic local,
+   and [value] computes the new value from [Current_target] (the target's
+   value before the assignment) and that local. If the operator is a trait
+   method, the checker recorded the call under the statement's id. *)
 let compound_assign state (written : statement) (target : expression) (value : expression) operator
     : Core.statement_kind =
   let place = place_of (build_expression state target) in
   let target_type = type_of state target in
   let current = synthetic_expression state ~origin:written.id target_type Core.Current_target in
   let right = build_expression state value in
-  let kind : Core.kind =
+  let bound = fresh_synthetic_local state in
+  let bound_value =
+    synthetic_expression state ~origin:value.id right.type_
+      (Use (Local { local = bound; type_ = right.type_; origin = value.id }))
+  in
+  let built_in operation : Core.kind * Core.operand =
+    (Operator { operation; arguments = [ current; bound_value ] }, Value right)
+  in
+  let kind, right_operand =
     match state.tables.calls.(written.id) with
     | Some ({ callee = Trait_method { trait; name; self_type; _ }; _ } as recorded) -> (
         match built_in_operation trait name self_type with
-        | Some operation -> Operator { operation; arguments = [ current; right ] }
+        | Some operation -> built_in operation
         | None ->
             let mode index =
               match
@@ -847,22 +855,28 @@ let compound_assign state (written : statement) (target : expression) (value : e
               | Some argument -> argument.mode
               | None -> T.Read
             in
-            Call
-              {
-                callee = callee recorded.callee;
-                arguments =
-                  [
-                    Passed { mode = mode 0; value = Value current; mark = None };
-                    Passed { mode = mode 1; value = operand (mode 1) right; mark = None };
-                  ];
-                lends = None;
-                uses = recorded.uses;
-              })
+            ( Call
+                {
+                  callee = callee recorded.callee;
+                  arguments =
+                    [
+                      Passed { mode = mode 0; value = Value current; mark = None };
+                      Passed { mode = mode 1; value = operand (mode 1) bound_value; mark = None };
+                    ];
+                  lends = None;
+                  uses = recorded.uses;
+                },
+              operand (mode 1) right ))
     | Some _ -> bug "a compound assignment's call is not a trait method call"
-    | None -> Operator { operation = operation_of operator; arguments = [ current; right ] }
+    | None -> built_in (operation_of operator)
   in
   Compound_assign
-    { target = place; value = synthetic_expression state ~origin:written.id target_type kind }
+    {
+      target = place;
+      operand = right_operand;
+      bound;
+      value = synthetic_expression state ~origin:written.id target_type kind;
+    }
 
 (* The cursor type that a call of a yielding method returns. *)
 let cursor_type (call : C.call) : T.ty =

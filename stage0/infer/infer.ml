@@ -77,18 +77,22 @@ let without_body (form : Core.t) : Core.t =
       let definition : Core.definition = Function { parameters; contract; body = None } in
       let nodes = ref 0 and synthetic_locals = ref 0 in
       let node id = nodes := max !nodes (id + 1) in
+      let synthetic : Core.local -> unit = function
+        | Synthetic number -> synthetic_locals := max !synthetic_locals (number + 1)
+        | Named _ | Self -> ()
+      in
       Core_walk.definition
         {
           Core_walk.ignore_all with
           expression = (fun node_ -> node node_.id);
-          statement = (fun node_ -> node node_.id);
+          statement =
+            (fun node_ ->
+              node node_.id;
+              match node_.kind with Compound_assign { bound; _ } -> synthetic bound | _ -> ());
           pattern =
             (fun node_ ->
               node node_.id;
-              match node_.kind with
-              | Bind { local = Synthetic number; _ } ->
-                  synthetic_locals := max !synthetic_locals (number + 1)
-              | _ -> ());
+              match node_.kind with Bind { local; _ } -> synthetic local | _ -> ());
         }
         definition;
       { definition; node_count = !nodes; synthetic_local_count = !synthetic_locals }
