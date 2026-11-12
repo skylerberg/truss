@@ -3,7 +3,7 @@ let bug format = Compiler_bug.bug ~stage:"Monomorphic" format
 type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
-  normalize_capabilities : Types.capability list -> Types.capability list;
+  normalize_capabilities : Types.capability_set -> Types.capability_set;
   cursor_fields : Ground.yielding -> (string * Memory_layout.member) list;
 }
 
@@ -12,7 +12,7 @@ let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; argu
 let panic_capability = Well_known.path Panic
 
 (* The capabilities of a set in an instance, in path order. *)
-let capabilities context substitution (set : Types.capability list) : Path.t list =
+let capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare
     (List.map
        (function
@@ -23,7 +23,8 @@ let capabilities context substitution (set : Types.capability list) : Path.t lis
          | Capability_projection { name; _ } ->
              bug "the associated capability set %s is not normalized" name
          | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
-       (context.normalize_capabilities (Types.substitute_capabilities substitution set)))
+       (context.normalize_capabilities (Types.substitute_capabilities substitution set)
+         :> Types.capability list))
 
 let evidence_for context substitution uses =
   List.filter
@@ -98,7 +99,8 @@ let rec back : Ground.ty -> Types.ty = function
             | Returns ty -> Returns (back ty)
             | Yields (yield_mode, ty) -> Yields (types_mode yield_mode, back ty)
             | Lends (yield_mode, ty) -> Lends (types_mode yield_mode, back ty));
-          uses = List.map (fun path -> Types.Capability path) function_type.uses;
+          uses =
+            Types.capability_set (List.map (fun path -> Types.Capability path) function_type.uses);
           costs = [];
         }
   | Any { trait; arguments; associated } ->
@@ -115,7 +117,8 @@ let rec back : Ground.ty -> Types.ty = function
 and back_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (back ty)
   | Value value -> Value (Known value)
-  | Capabilities set -> Capabilities (List.map (fun path -> Types.Capability path) set)
+  | Capabilities set ->
+      Capabilities (Types.capability_set (List.map (fun path -> Types.Capability path) set))
 
 (* The substitution of generic parameters by their arguments, which are
    ground. *)

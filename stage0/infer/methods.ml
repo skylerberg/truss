@@ -456,7 +456,7 @@ and capability_call state env (value : expression) capability (member : name) ar
             callee = Capability_method { capability; name = member.text };
             arguments = checked;
             omitted_defaults = left_out;
-            uses = [ Types.Capability capability ];
+            uses = Types.capability_set [ Types.Capability capability ];
             callee_result = result;
           };
       Form.register_call state value;

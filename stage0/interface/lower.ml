@@ -7,7 +7,7 @@ type context = {
   self_type : Types.ty option;  (** What [Self] means here. *)
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
-  self_capabilities : (string * Types.capability list) list;
+  self_capabilities : (string * Types.capability_set) list;
   diagnostics : Syntax.diagnostic list ref;
   named : (span * Types.ty) list ref;
 }
@@ -320,7 +320,7 @@ and capability context (written : capability_reference) : Types.capability list 
   | Capability_path path -> capability_path context path
   | Self_capabilities key -> (
       match List.assoc_opt key.text context.self_capabilities with
-      | Some set -> set
+      | Some set -> (set :> Types.capability list)
       | None -> (
           match (self context written.span, context.self_trait) with
           | Error _, _ -> []
@@ -353,7 +353,7 @@ and capability context (written : capability_reference) : Types.capability list 
               []))
 
 and capabilities context written =
-  List.sort_uniq compare (List.concat_map (capability context) written)
+  Types.capability_set (List.concat_map (capability context) written)
 
 and mode = function None -> Types.Read | Some Mut -> Types.Mut | Some Own -> Types.Own
 

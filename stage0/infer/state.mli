@@ -22,9 +22,9 @@ type env = {
 val runs : env -> bool
 
 type subset_constraint = {
-  subset : Types.capability list;
-  superset : Types.capability list;
-  report_missing : Types.capability list -> unit;
+  subset : Types.capability_set;
+  superset : Types.capability_set;
+  report_missing : Types.capability_set -> unit;
 }
 
 type frame = {
@@ -70,7 +70,7 @@ type state = {
   mutable lambdas : Syntax.span list;
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
-  mutable capability_solution : (int, Types.capability list) Hashtbl.t option;
+  mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence : Path.package list;
 }
 
@@ -133,7 +133,7 @@ val signed_type : state -> Types.ty -> bool
 val bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val final_type : state -> Types.ty -> Types.ty
-val final_capabilities : state -> Types.capability list -> Types.capability list
+val final_capabilities : state -> Types.capability_set -> Types.capability_set
 val final_argument : state -> Types.argument -> Types.argument
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit

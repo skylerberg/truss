@@ -12,7 +12,7 @@ type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
       (** Replaces each projection whose base is known by the associated type its [impl] chooses *)
-  normalize_capabilities : Types.capability list -> Types.capability list;
+  normalize_capabilities : Types.capability_set -> Types.capability_set;
       (** Replaces each associated capability set whose base is known by the capabilities that its
           [impl] defines *)
   cursor_fields : Ground.yielding -> (string * Memory_layout.member) list;
@@ -29,7 +29,7 @@ val mode : Types.mode -> Ground.mode
    that the [impl] defines for the type that the instance substitutes for
    its base, so a function that uses [Source.Uses] takes the evidence that
    its instance's [Source] needs. *)
-val evidence_for : context -> Types.substitution -> Types.capability list -> Path.t list
+val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 
 (* A ground type, written back as the checker's, so that the checker's own
    substitution and its lookups apply to it, and the substitution of

@@ -94,8 +94,8 @@ let cursor_uses database (type_ : Types.ty) =
           match Types.substitution_of signature.generics arguments with
           | Some substitution -> (Types.substitute_signature substitution signature).uses
           | None -> signature.uses)
-      | None -> [])
-  | _ -> []
+      | None -> Types.no_capabilities)
+  | _ -> Types.no_capabilities
 
 let cursor_of_impl : Path.t -> Path.t option = function
   | Derived { type_ = method_; trait } when Path.equal trait cursor_trait -> Some method_
@@ -125,14 +125,13 @@ let cursor_interface database ~method_ =
         {
           declared with
           uses =
-            List.sort_uniq compare
-              (List.concat_map
-                 (function
-                   | Types.Capability_projection { base; trait; _ }
-                     when Types.equal base for_type && Path.equal trait.trait cursor_trait ->
-                       signature.uses
-                   | capability -> [ capability ])
-                 declared.uses);
+            Types.flat_map_capabilities
+              (function
+                | Types.Capability_projection { base; trait; _ }
+                  when Types.equal base for_type && Path.equal trait.trait cursor_trait ->
+                    (signature.uses :> Types.capability list)
+                | capability -> [ capability ])
+              declared.uses;
         }
       in
       Some
@@ -141,7 +140,7 @@ let cursor_interface database ~method_ =
           implements =
             { trait = cursor_trait; trait_arguments = []; associated = [ ("Element", element) ] };
           for_type;
-          impl_uses = [];
+          impl_uses = Types.no_capabilities;
           capability_sets =
             List.map (fun name -> (name, signature.uses)) trait_interface.associated_capabilities;
           impl_methods =
@@ -149,7 +148,7 @@ let cursor_interface database ~method_ =
               (fun (method_ : Types.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  Types.method_in_impl ~impl_generics ~impl_uses:[]
+                  Types.method_in_impl ~impl_generics ~impl_uses:Types.no_capabilities
                     (of_cursor method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;
@@ -189,14 +188,14 @@ let derived_interface database ~type_ ~trait =
           Types.impl_generics;
           implements = trait_reference;
           for_type;
-          impl_uses = [];
+          impl_uses = Types.no_capabilities;
           capability_sets = [];
           impl_methods =
             List.map
               (fun (method_ : Types.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  Types.method_in_impl ~impl_generics ~impl_uses:[]
+                  Types.method_in_impl ~impl_generics ~impl_uses:Types.no_capabilities
                     (Types.substitute_signature self method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;
@@ -487,7 +486,9 @@ and associated_type database ~bounds ?defining type_ (trait : Types.trait_refere
       | None -> None)
 
 and capability_set database ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
-  let projection = [ Types.Capability_projection { base = type_; trait; name } ] in
+  let projection =
+    Types.capability_set [ Types.Capability_projection { base = type_; trait; name } ]
+  in
   if depth > 32 then projection
   else
     match implements database ~bounds ~conditions:false type_ trait with
@@ -496,23 +497,24 @@ and capability_set database ~bounds ?(depth = 0) type_ (trait : Types.trait_refe
         | Some interface ->
             normalize_capabilities database ~bounds ~depth:(depth + 1)
               (Types.substitute_capabilities substitution
-                 (Option.value ~default:[] (List.assoc_opt name interface.capability_sets)))
-        | None -> [])
+                 (Option.value ~default:Types.no_capabilities
+                    (List.assoc_opt name interface.capability_sets)))
+        | None -> Types.no_capabilities)
     | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
-    | Some (From_any | Built_in | Accepted _) -> []
+    | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
 
-and normalize_capabilities database ~bounds ?depth (capabilities : Types.capability list) =
-  if not (List.exists (function Types.Capability_projection _ -> true | _ -> false) capabilities)
-  then capabilities
+and normalize_capabilities database ~bounds ?depth (capabilities : Types.capability_set) =
+  let projection = function Types.Capability_projection _ -> true | _ -> false in
+  if not (List.exists projection (capabilities :> Types.capability list)) then capabilities
   else
-    List.sort_uniq compare
-      (List.concat_map
-         (function
-           | Types.Capability_projection { base; trait; name } ->
-               capability_set database ~bounds ?depth (normalize database ~bounds base)
-                 { trait with associated = [] } name
-           | capability -> [ capability ])
-         capabilities)
+    Types.flat_map_capabilities
+      (function
+        | Types.Capability_projection { base; trait; name } ->
+            (capability_set database ~bounds ?depth (normalize database ~bounds base)
+               { trait with associated = [] } name
+              :> Types.capability list)
+        | capability -> [ capability ])
+      capabilities
 
 and normalize database ~bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize database ~bounds ?defining in

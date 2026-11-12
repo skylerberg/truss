@@ -566,7 +566,9 @@ let () =
         { trait = standard [ "capabilities" ] "Clock"; trait_arguments = []; associated = [] }
       in
       let signature = at database (Types.named (app "FixedClock") []) clock "now" in
-      match signature.uses with [ Capability _ ] -> () | uses -> fail "%d uses" (List.length uses))
+      match (signature.uses :> Types.capability list) with
+      | [ Capability _ ] -> ()
+      | uses -> fail "%d uses" (List.length uses))
 
 (* Transparent functions *)
 

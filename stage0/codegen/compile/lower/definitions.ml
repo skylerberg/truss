@@ -70,7 +70,7 @@ type code = {
   text : string;  (** The definition's source text, for positions and messages *)
   result : Types.result;
   substitution : Types.substitution;
-  uses : Types.capability list;
+  uses : Types.capability_set;
   real : Path.t list;
       (** The capabilities the code gets the real implementations of, as [main]'s do: an external
           test's [uses] *)
@@ -90,7 +90,7 @@ let unwritten ~definition_key ~anchor ~substitution ~result =
     text = "";
     result;
     substitution;
-    uses = [];
+    uses = Types.no_capabilities;
     real = [];
     has_defaults = false;
   }
@@ -159,7 +159,9 @@ let code_of context (path : Path.t) type_arguments : code =
             real =
               (match demand context Environment.interface path with
               | Some (Test_interface uses) ->
-                  List.filter_map (function Types.Capability path -> Some path | _ -> None) uses
+                  List.filter_map
+                    (function Types.Capability path -> Some path | _ -> None)
+                    (uses :> Types.capability list)
               | _ -> []);
           }
       | _ -> bug "%s is not a test" (Path.show path))
@@ -227,7 +229,7 @@ let result_of context substitution (result : Types.result) =
    mask of defaults passed when there are defaults, and then the evidence
    for each capability it uses. *)
 let lir_signature context substitution ~(parameters : (Types.mode * Types.ty) list) ~has_defaults
-    ?(uses = []) (result : Types.result) : Lir.signature * Convention.result =
+    ?(uses = Types.no_capabilities) (result : Types.result) : Lir.signature * Convention.result =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
   let result_ty, returns = result_of context substitution result in
   let written =

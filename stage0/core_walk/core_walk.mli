@@ -73,11 +73,11 @@ type tasks_use =
       (** A call in it uses a capability parameter, which may be instantiated with [Tasks]. *)
   | No_tasks
 
-val tasks_use : ?solved:(int -> Types.capability list) -> Core.block -> tasks_use
+val tasks_use : ?solved:(int -> Types.capability_set) -> Core.block -> tasks_use
 (** How code can use [Tasks]. [solved] gives the solution of a capability variable, for a core form
     whose capability variables are not solved yet. *)
 
-val can_use_tasks : ?solved:(int -> Types.capability list) -> Core.block -> bool
+val can_use_tasks : ?solved:(int -> Types.capability_set) -> Core.block -> bool
 (** Whether code can use [Tasks]. An implementation that is provided [mut] around such code is a
     monitor. *)
 

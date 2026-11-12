@@ -66,9 +66,9 @@ let runs (env : env) = not (env.specification || env.compile_time)
    solving (because its [superset] has no variable to grow), the solver
    calls [report_missing] with the capabilities that [superset] lacks. *)
 type subset_constraint = {
-  subset : Types.capability list;
-  superset : Types.capability list;
-  report_missing : Types.capability list -> unit;
+  subset : Types.capability_set;
+  superset : Types.capability_set;
+  report_missing : Types.capability_set -> unit;
 }
 
 (* The state of the check of one statement. Types are inferred one
@@ -137,7 +137,7 @@ type state = {
   mutable unsolved : Diagnostic.reported option;
       (** The report of the first statement whose types could not be inferred. *)
   mutable capability_constraints : subset_constraint list;
-  mutable capability_solution : (int, Types.capability list) Hashtbl.t option;
+  mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
       (** The set each capability variable was solved to. [None] until the constraints are solved. A
           variable with no entry is the empty set. *)
   mutable evidence : Path.package list;  (** The packages whose [impl]s met a bound here. *)
@@ -402,16 +402,16 @@ let unsolved state =
 
 (* Replaces each capability variable in a set by its solution. Returns
    the set unchanged if the variables are not solved yet. *)
-let resolve_capabilities state (capabilities : Types.capability list) =
+let resolve_capabilities state (capabilities : Types.capability_set) =
   match state.capability_solution with
   | Some solution when Types.has_capability_variable capabilities ->
-      List.sort_uniq compare
-        (List.concat_map
-           (function
-             | Types.Capability_variable variable ->
-                 Option.value ~default:[] (Hashtbl.find_opt solution variable)
-             | capability -> [ capability ])
-           capabilities)
+      Types.flat_map_capabilities
+        (function
+          | Types.Capability_variable variable ->
+              (Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
+                :> Types.capability list)
+          | capability -> [ capability ])
+        capabilities
   | _ -> capabilities
 
 (* The final form of a type: inference variables replaced by their
@@ -432,11 +432,11 @@ let rec final_type state type_ =
 and final_capabilities state capabilities =
   resolve_capabilities state
     (Impls.normalize_capabilities state.database ~bounds:(bounds state)
-       (List.map
+       (Types.flat_map_capabilities
           (function
             | Types.Capability_projection { base; trait; name } ->
-                Types.Capability_projection { base = final_type state base; trait; name }
-            | capability -> capability)
+                [ Types.Capability_projection { base = final_type state base; trait; name } ]
+            | capability -> [ capability ])
           capabilities))
 
 let final_argument state = function
@@ -882,7 +882,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
                                    };
                                ];
                              lends = None;
-                             uses = [];
+                             uses = Types.no_capabilities;
                            })
                   | other -> bug "`%s` is viewed and has no view" (Types.show other)))
             before
@@ -915,11 +915,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
   | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _
     when not (Types.same_clauses actual_function wanted_function) ->
-      let unlisted =
-        List.filter
-          (fun capability -> not (List.mem capability wanted_function.uses))
-          actual_function.uses
-      in
+      let unlisted = Types.capability_difference actual_function.uses wanted_function.uses in
       (* If either set is not known yet, the check waits until the
          definition is checked: a subset constraint requires the value's
          [uses] to be within the expected type's. *)
@@ -934,10 +930,10 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
         Unify.unify state.unifier wanted
           (Types.Function
              { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
-        && (unlisted = [] || unknown)
+        && (unlisted = Types.no_capabilities || unknown)
         && (proven || argument || Option.is_some expression)
       then begin
-        if unlisted <> [] then
+        if unlisted <> Types.no_capabilities then
           state.capability_constraints <-
             {
               subset = actual_function.uses;

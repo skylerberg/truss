@@ -13,7 +13,7 @@ val granted : (Path.package * Path.package, grant option) Query.query
     the manifest does not list. *)
 
 val missing :
-  Query.context -> package:Path.package -> of_:Path.package -> Types.capability list -> Path.t list
+  Query.context -> package:Path.package -> of_:Path.package -> Types.capability_set -> Path.t list
 (** The capabilities that some code of the package [of_] uses and that [package]'s manifest does not
     grant to it. A package's own code and the standard library need no grant. A capability parameter
     is instantiated by the caller with the caller's own capabilities, so it needs none either. *)
@@ -26,7 +26,7 @@ val evidence_uses :
   bounds:Impls.bounds ->
   ?depth:int ->
   Impls.evidence ->
-  (Path.t * Types.impl_interface * Types.capability list) list
+  (Path.t * Types.impl_interface * Types.capability_set) list
 (** The capabilities that the [impl]s satisfying a bound can use: the resolved [impl] and,
     recursively, the [impl]s that satisfy its own bounds, each with the capabilities of its methods.
 *)
@@ -34,7 +34,7 @@ val evidence_uses :
 val messages :
   Query.context ->
   package:Path.package ->
-  (Path.t * Types.impl_interface * Types.capability list) list ->
+  (Path.t * Types.impl_interface * Types.capability_set) list ->
   string list
 (** The diagnostic messages for the capabilities that such [impl]s use without a grant, in code of
     [package]. *)

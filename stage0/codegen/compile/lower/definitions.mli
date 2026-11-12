@@ -34,7 +34,7 @@ type code = {
   text : string;
   result : Types.result;
   substitution : Types.substitution;
-  uses : Types.capability list;
+  uses : Types.capability_set;
   real : Path.t list;
   has_defaults : bool;
 }
@@ -57,7 +57,7 @@ val signature_of : context -> Path.t -> Types.signature
 val written : context -> Path.t -> (Resolve.Names.key * Syntax.signature * Syntax.block) option
 val code_of : context -> Path.t -> Ground.argument list -> code
 val panic_path : Path.t
-val evidence_for : context -> Types.substitution -> Types.capability list -> Path.t list
+val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 val result_of : context -> Types.substitution -> Types.result -> Convention.result * bool
 
 val lir_signature :
@@ -65,7 +65,7 @@ val lir_signature :
   Types.substitution ->
   parameters:(Types.mode * Types.ty) list ->
   has_defaults:bool ->
-  ?uses:Types.capability list ->
+  ?uses:Types.capability_set ->
   Types.result ->
   Lir.signature * Convention.result
 

@@ -16,7 +16,7 @@ type ty =
   | Hole
   | Error of Diagnostic.reported
 
-and argument = Type of ty | Value of value | Capabilities of capability list
+and argument = Type of ty | Value of value | Capabilities of capability_set
 and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
 
 and trait_reference = {
@@ -28,7 +28,7 @@ and trait_reference = {
 and function_type = {
   inputs : (mode * ty) list;
   output : result;
-  uses : capability list;
+  uses : capability_set;
   costs : cost list;
 }
 
@@ -40,6 +40,7 @@ and capability =
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
 
+and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 
 and resource =
@@ -52,6 +53,17 @@ and resource =
    constants: the number, when it is written as one. *)
 and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
+let capability_set capabilities : capability_set = List.sort_uniq compare capabilities
+let no_capabilities : capability_set = []
+let capability_union (left : capability_set) (right : capability_set) = capability_set (left @ right)
+
+let capability_subset (smaller : capability_set) (larger : capability_set) =
+  List.for_all (fun capability -> List.mem capability larger) smaller
+
+let capability_difference (left : capability_set) (right : capability_set) =
+  List.filter (fun capability -> not (List.mem capability right)) left
+
+let flat_map_capabilities f (set : capability_set) = capability_set (List.concat_map f set)
 let builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let unit = builtin Unit
 let bool = builtin Bool
@@ -137,24 +149,23 @@ and substitute_argument substitution = function
 
 (* A capability parameter stands for the set it is bound to. *)
 and substitute_capabilities substitution capabilities =
-  List.sort_uniq compare
-    (List.concat_map
-       (function
-         | Capability_parameter parameter as capability -> (
-             match List.assoc_opt parameter substitution with
-             | Some (Capabilities replacement) -> replacement
-             | _ -> [ capability ])
-         | Capability_projection { base; trait; name } ->
-             [
-               Capability_projection
-                 {
-                   base = substitute substitution base;
-                   trait = substitute_trait substitution trait;
-                   name;
-                 };
-             ]
-         | (Capability _ | Capability_variable _) as capability -> [ capability ])
-       capabilities)
+  flat_map_capabilities
+    (function
+      | Capability_parameter parameter as capability -> (
+          match List.assoc_opt parameter substitution with
+          | Some (Capabilities replacement) -> (replacement :> capability list)
+          | _ -> [ capability ])
+      | Capability_projection { base; trait; name } ->
+          [
+            Capability_projection
+              {
+                base = substitute substitution base;
+                trait = substitute_trait substitution trait;
+                name;
+              };
+          ]
+      | (Capability _ | Capability_variable _) as capability -> [ capability ])
+    capabilities
 
 and substitute_trait substitution (trait : trait_reference) =
   {
@@ -273,8 +284,7 @@ let terminates (function_type : function_type) =
   List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs
 
 let same_clauses (left : function_type) (right : function_type) =
-  List.sort_uniq compare left.uses = List.sort_uniq compare right.uses
-  && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
+  left.uses = right.uses && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
 
 let bound_implies (provided : cost_bound) (required : cost_bound) =
   match (provided, required) with
@@ -412,7 +422,7 @@ type signature = {
   receiver : (Path.receiver * ty) option;
   parameters : parameter_info list;
   output : result;
-  uses : capability list;
+  uses : capability_set;
   terminates : bool;
   specification_only : bool;
   stores_functions : string list;
@@ -459,9 +469,7 @@ let method_in_impl ~impl_generics ~impl_uses (signature : signature) =
   {
     signature with
     generics = impl_generics @ signature.generics;
-    uses =
-      signature.uses
-      @ List.filter (fun capability -> not (List.mem capability signature.uses)) impl_uses;
+    uses = capability_union signature.uses impl_uses;
   }
 
 let function_type_of (signature : signature) =
@@ -523,8 +531,8 @@ type impl_interface = {
   impl_generics : generic list;
   implements : trait_reference;
   for_type : ty;
-  impl_uses : capability list;
-  capability_sets : (string * capability list) list;
+  impl_uses : capability_set;
+  capability_sets : (string * capability_set) list;
   impl_methods : (string * Path.receiver * signature) list;
   impl_broken : bool;
 }
