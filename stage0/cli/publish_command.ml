@@ -242,11 +242,15 @@ let run ~directory ~json =
           Registry.Index.variable
   in
   let report = Report.gather ~proofs:true project in
-  let refuse reasons =
-    Report.refuse ~json report reasons;
+  let refuse sentences =
+    if json then
+      Json.print
+        (Report.document report
+           [ ("refused", Json.List (List.map (fun sentence -> Json.String sentence) sentences)) ])
+    else List.iter Output.eprint_line sentences;
     1
   in
-  if Report.refused ~json ~reasons:[ "Cannot publish a package with errors." ] report then 1
+  if Report.stop_on_errors ~json report then 1
   else
     match unfinished project with
     | _ :: _ as unfinished_code ->

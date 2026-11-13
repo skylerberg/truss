@@ -222,7 +222,7 @@ let run ~directory ~from_ ~to_ ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
   let report = Report.gather project in
-  if Report.refused ~json ~reasons:[ "Cannot rename in code with errors." ] report then 1
+  if Report.stop_on_errors ~json report then 1
   else
     let plan =
       match target_of project from_ with
@@ -247,10 +247,12 @@ let run ~directory ~from_ ~to_ ~json =
     in
     match caused with
     | _ :: _ ->
-        Report.refuse ~json (Report.of_files caused)
-          [
-            Printf.sprintf "Renaming %s to %s would cause these, so nothing was changed." from_ to_;
-          ];
+        let caused = Report.of_files caused in
+        if json then Json.print (Report.document caused [])
+        else begin
+          Report.print caused;
+          Output.eprintf "Renaming %s to %s would cause these, so nothing was changed.\n" from_ to_
+        end;
         1
     | [] ->
         let edits = edits_json project plan in

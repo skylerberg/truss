@@ -82,26 +82,9 @@ let print report =
   | 0 -> ()
   | error_count -> Output.eprintf "%s\n" (plural error_count "error" "errors")
 
-(* Reports why a command does nothing: the report, then each reason, on
-   standard error, or as JSON with [fields] and the reasons as [refused]. *)
-let refuse ~json ?(fields = []) report reasons =
-  if json then
-    Json.print
-      (document report
-         (if reasons = [] then fields
-          else
-            fields
-            @ [ ("refused", Json.List (List.map (fun reason -> Json.String reason) reasons)) ]))
-  else begin
-    print report;
-    List.iter Output.eprint_line reasons
-  end
-
-(* Whether the code has an error, so a command that needs code without one
-   stops; it refuses with the reasons first. *)
-let refused ~json ?fields ?(reasons = []) report =
-  if clean report then false
-  else begin
-    refuse ~json ?fields report reasons;
-    true
-  end
+(* Writes the report, as [print] does or as JSON with [fields], when the
+   code has errors, and returns whether it has, so the command stops. *)
+let stop_on_errors ~json ?(fields = []) report =
+  let has_errors = not (clean report) in
+  if has_errors then if json then Json.print (document report fields) else print report;
+  has_errors

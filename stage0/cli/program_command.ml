@@ -102,7 +102,7 @@ let refuse_unshippable ~json project compile main =
    error. *)
 let build_program ~json (project : Project.t) (build : Compiler.build) ~output =
   let is_release = build = Release in
-  if Report.refused ~json (Report.gather ~proofs:is_release project) then raise (Stop 1);
+  if Report.stop_on_errors ~json (Report.gather ~proofs:is_release project) then raise (Stop 1);
   let main = main project in
   let compile = Compiler.create ~checks:(not is_release) project build in
   if is_release then refuse_unshippable ~json project compile main;

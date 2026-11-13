@@ -232,7 +232,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
       project.packages
   in
   if
-    Report.refused ~json
+    Report.stop_on_errors ~json
       ~fields:[ ("tests", Json.List (List.map (fun test -> test_json test None) tests)) ]
       report
   then 1

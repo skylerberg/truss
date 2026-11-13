@@ -1297,9 +1297,7 @@ let () =
       | _ -> fail "published");
   test "a package with an error is not published" (fun () ->
       let _ = registry () in
-      expect_refused
-        (angles Fixtures.package_with_an_error_is_not_published)
-        "Cannot publish a package with errors");
+      expect_refused (angles Fixtures.package_with_an_error_is_not_published) "1 error");
   test "a package with a todo or an echo is not published, and each is listed" (fun () ->
       let registry = registry () in
       let root = angles Fixtures.package_with_a_todo_or_an_echo_is_not_published in
