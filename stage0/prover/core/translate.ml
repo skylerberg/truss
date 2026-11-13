@@ -9670,18 +9670,19 @@ let mir_passed_place context run place =
 (* What an argument is: a named function, perhaps widened, or a local
    passed on. *)
 let mir_shape run (value : Mir.operand) : Invocation.shape =
-  let rec named (operand : Mir.operand) =
+  let rec named visited (operand : Mir.operand) =
     match operand with
     | Use { place = { root = Local local; projections = [] }; _ }
-    | Borrow { place = { root = Local local; projections = [] }; _ } -> (
+    | Borrow { place = { root = Local local; projections = [] }; _ }
+      when not (List.mem local visited) -> (
         match Hashtbl.find_opt run.definitions local with
         | Some (Function_value { path; _ }, Some id, origin) ->
             Some (Invocation.Named_function { id; origin; path })
-        | Some (Convert { conversion = Widen; value }, _, _) -> named value
+        | Some (Convert { conversion = Widen; value }, _, _) -> named (local :: visited) value
         | _ -> None)
     | _ -> None
   in
-  match (named value, value) with
+  match (named [] value, value) with
   | Some shape, _ -> shape
   | ( None,
       ( Use { place = { root = Local local; projections = [] }; _ }
@@ -9696,26 +9697,27 @@ let mir_shape run (value : Mir.operand) : Invocation.shape =
    collection's new run. *)
 let mir_argument_place context run (mode : Types.mode) (value : Mir.operand) =
   (* The slice a local holds, as made or as copied from the local that made it. *)
-  let rec slice_in local =
+  let rec slice_in visited local =
     match Hashtbl.find_opt run.slices local with
     | Some slice -> Some slice
     | None -> (
-        match Hashtbl.find_opt run.definitions local with
-        | Some
-            ( Operand
-                ( Use { place = { root = Local copied; projections = [] }; _ }
-                | Borrow { place = { root = Local copied; projections = [] }; _ } ),
-              _,
-              _ )
-          when copied <> local ->
-            slice_in copied
+        match (run.body.locals.(local).kind, Hashtbl.find_opt run.definitions local) with
+        | ( Temporary,
+            Some
+              ( Operand
+                  ( Use { place = { root = Local copied; projections = [] }; _ }
+                  | Borrow { place = { root = Local copied; projections = [] }; _ } ),
+                _,
+                _ ) )
+          when not (List.mem copied visited) ->
+            slice_in (local :: visited) copied
         | _ -> None)
   in
   let slice =
     match value with
     | Borrow { place = { root = Local local; projections = [] }; _ }
     | Use { place = { root = Local local; projections = [] }; _ } ->
-        slice_in local
+        slice_in [] local
     | _ -> None
   in
   match (mode, slice) with
@@ -9918,16 +9920,19 @@ let mir_lend context frame run part (call : Mir.call) =
 
 (* The place a place stands for: through each binding of a part to change,
    and each temporary that holds a borrow of a place. *)
-let rec borrowed run (place : Mir.place) =
-  let place = expanded run place in
-  match place.root with
-  | Local local -> (
-      match Hashtbl.find_opt run.definitions local with
-      | Some (Operand (Borrow { place = held; _ }), _, _) ->
-          let held = borrowed run held in
-          { held with Mir.projections = held.Mir.projections @ place.Mir.projections }
-      | _ -> place)
-  | Constant _ -> place
+let borrowed run (place : Mir.place) =
+  let rec through visited (place : Mir.place) =
+    let place = expanded run place in
+    match place.root with
+    | Local local when not (List.mem local visited) -> (
+        match (run.body.locals.(local).kind, Hashtbl.find_opt run.definitions local) with
+        | Temporary, Some (Operand (Borrow { place = held; _ }), _, _) ->
+            let held = through (local :: visited) held in
+            { held with Mir.projections = held.Mir.projections @ place.Mir.projections }
+        | _ -> place)
+    | Local _ | Constant _ -> place
+  in
+  through [] place
 
 (* The type of a place a value is written to, as the MIR declares it. *)
 let mir_target_type context frame run (target : Mir.place) =
