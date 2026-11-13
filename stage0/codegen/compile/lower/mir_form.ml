@@ -62,7 +62,7 @@ let conditionally_lent (body : Mir.body) =
     ||
     match block.terminator with
     | Exit_tasks { tasks; _ } ->
-        List.exists (fun (_, ends) -> List.exists (ends_of part) ends) tasks
+        List.exists (fun (left : Mir.left_task) -> List.exists (ends_of part) left.ends) tasks
     | _ -> false
   in
   let lends = ref [] in
@@ -2098,7 +2098,9 @@ and terminator st region (ending : Mir.terminator) ~origin =
       | _ -> ());
       return_from_frame st
   | Iteration_end -> continue_loop st
-  | Exit_tasks { tasks; exit; task_end } ->
+  | Exit_tasks { tasks = left; exit } ->
+      let tasks = List.map (fun (left : Mir.left_task) -> (left.task, left.ends)) left in
+      let task_end = match left with innermost :: _ -> innermost.task_end | [] -> None in
       (* The block where the task ends is lowered, so that the branch that
          follows the task is found from it. *)
       Option.iter

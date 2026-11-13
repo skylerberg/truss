@@ -186,6 +186,7 @@ type context = {
   quantifier_facts : (Logic.term, Logic.term list) Hashtbl.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
+  mutable lambda_bodies : (Core.id * (frame -> Logic.term list -> unit)) list;
 }
 
 val quote : source -> int -> string
