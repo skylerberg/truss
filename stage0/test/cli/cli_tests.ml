@@ -38,6 +38,10 @@ let captured work =
 
 let quietly work = fst (captured work)
 
+(* Runs a command as the command line does, with a stop as its exit status. *)
+let status work = try work () with Outcome.Stop status -> status
+let outcome work = try work () with Outcome.Stop status -> Outcome.Exit status
+
 (* The JSON document a command writes with [--json]. *)
 let document run = Json.parse (snd (captured run))
 
@@ -165,7 +169,9 @@ let () =
       in
       let status, output =
         captured (fun () ->
-            Program_command.run ~directory:(Filename.concat root "app") ~release:false ~arguments:[])
+            outcome (fun () ->
+                Program_command.run ~directory:(Filename.concat root "app") ~release:false
+                  ~arguments:[]))
       in
       if status <> Outcome.Exit 1 || not (contains output "lib/arith/arith.truss") then
         fail "%s" output);
@@ -460,7 +466,8 @@ let () =
         package [ ("main.truss", Fixtures.build_refuses_a_program_that_can_reach_a_hole_in_a) ]
       in
       let outcome, output =
-        captured (fun () -> Program_command.build ~directory:root ~output:None ~json:false)
+        captured (fun () ->
+            outcome (fun () -> Program_command.build ~directory:root ~output:None ~json:false))
       in
       if outcome <> Outcome.Exit 1 then fail "did not refuse";
       if not (contains output "main.truss:3:5: `todo` in a proof can be reached") then
@@ -659,7 +666,7 @@ let two_files =
   [ ("weather/weather.truss", Fixtures.two_files_weather); ("main.truss", Fixtures.two_files) ]
 
 let rename root from_ to_ =
-  quietly (fun () -> Rename_command.run ~directory:root ~from_ ~to_ ~json:false)
+  quietly (fun () -> status (fun () -> Rename_command.run ~directory:root ~from_ ~to_ ~json:false))
 
 let () =
   test "renaming a function rewrites every reference in the package" (fun () ->
@@ -1190,7 +1197,8 @@ let () =
 
 (* Publishing *)
 
-let publish_from root = captured (fun () -> Publish_command.run ~directory:root ~json:false)
+let publish_from root =
+  captured (fun () -> status (fun () -> Publish_command.run ~directory:root ~json:false))
 
 (* A package of its own project, named [acme::angles], with one module. *)
 let angles text =

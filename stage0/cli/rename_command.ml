@@ -222,67 +222,66 @@ let run ~directory ~from_ ~to_ ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
   let report = Report.gather project in
-  if Report.stop_on_errors ~json report then 1
-  else
-    let plan =
-      match target_of project from_ with
-      | Definition path -> plan_definition project path (new_name ~from_ to_)
-      | Module module_ -> plan_module project module_ to_
-    in
-    let after = applied project plan in
-    let checked = Database.context (trial project after) in
-    let caused =
-      List.filter_map
-        (fun (_, file, text) ->
-          match Diagnostic.shown (Checks.diagnostics checked file) with
-          | [] -> None
-          | diagnostics ->
-              Some
-                {
-                  Report.file;
-                  source = Source.create ~path:(Project.shown (path_of project file)) text;
-                  diagnostics;
-                })
-        after
-    in
-    match caused with
-    | _ :: _ ->
-        let caused = Report.of_files caused in
-        if json then Json.print (Report.document caused [])
-        else begin
-          Report.print caused;
-          Output.eprintf "Renaming %s to %s would cause these, so nothing was changed.\n" from_ to_
-        end;
-        1
-    | [] ->
-        let edits = edits_json project plan in
-        List.iter
-          (fun (old_file, file, text) ->
-            if List.mem_assoc old_file plan.edits || old_file <> file then begin
-              let path = path_of project file in
-              File_system.make_directory (Filename.dirname path);
-              Project.write_file path text;
-              if old_file <> file then Sys.remove (Project.path project old_file)
-            end)
-          after;
-        Project.reload project;
-        let count = List.length edits in
-        if json then
-          Json.print
-            (Json.document ~diagnostics:[]
-               [
-                 ("edits", Json.List edits);
-                 ( "moved",
-                   match plan.moved with
-                   | Some (old_m, new_m) ->
-                       let directory module_ =
-                         Json.String (Project.shown (directory_of project module_))
-                       in
-                       Json.Object [ ("from", directory old_m); ("to", directory new_m) ]
-                   | None -> Json.Null );
-               ])
-        else
-          Output.printf "Renamed %s to %s: %s in %s.\n" from_ to_
-            (Report.plural count "edit" "edits")
-            (Report.plural (List.length plan.edits) "file" "files");
-        0
+  Report.stop_on_errors ~json report;
+  let plan =
+    match target_of project from_ with
+    | Definition path -> plan_definition project path (new_name ~from_ to_)
+    | Module module_ -> plan_module project module_ to_
+  in
+  let after = applied project plan in
+  let checked = Database.context (trial project after) in
+  let caused =
+    List.filter_map
+      (fun (_, file, text) ->
+        match Diagnostic.shown (Checks.diagnostics checked file) with
+        | [] -> None
+        | diagnostics ->
+            Some
+              {
+                Report.file;
+                source = Source.create ~path:(Project.shown (path_of project file)) text;
+                diagnostics;
+              })
+      after
+  in
+  match caused with
+  | _ :: _ ->
+      let caused = Report.of_files caused in
+      if json then Json.print (Report.document caused [])
+      else begin
+        Report.print caused;
+        Output.eprintf "Renaming %s to %s would cause these, so nothing was changed.\n" from_ to_
+      end;
+      1
+  | [] ->
+      let edits = edits_json project plan in
+      List.iter
+        (fun (old_file, file, text) ->
+          if List.mem_assoc old_file plan.edits || old_file <> file then begin
+            let path = path_of project file in
+            File_system.make_directory (Filename.dirname path);
+            Project.write_file path text;
+            if old_file <> file then Sys.remove (Project.path project old_file)
+          end)
+        after;
+      Project.reload project;
+      let count = List.length edits in
+      if json then
+        Json.print
+          (Json.document ~diagnostics:[]
+             [
+               ("edits", Json.List edits);
+               ( "moved",
+                 match plan.moved with
+                 | Some (old_m, new_m) ->
+                     let directory module_ =
+                       Json.String (Project.shown (directory_of project module_))
+                     in
+                     Json.Object [ ("from", directory old_m); ("to", directory new_m) ]
+                 | None -> Json.Null );
+             ])
+      else
+        Output.printf "Renamed %s to %s: %s in %s.\n" from_ to_
+          (Report.plural count "edit" "edits")
+          (Report.plural (List.length plan.edits) "file" "files");
+      0

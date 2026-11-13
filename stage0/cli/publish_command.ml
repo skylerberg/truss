@@ -248,59 +248,55 @@ let run ~directory ~json =
         (Report.document report
            [ ("refused", Json.List (List.map (fun sentence -> Json.String sentence) sentences)) ])
     else List.iter Output.eprint_line sentences;
-    1
+    raise (Outcome.Stop 1)
   in
-  if Report.stop_on_errors ~json report then 1
-  else
-    match unfinished project with
-    | _ :: _ as unfinished_code ->
-        refuse
-          (List.map
-             (fun (keyword, file, line, column) ->
-               Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
-             unfinished_code
-          @ [ "Cannot publish a package with a `todo` or an `echo`." ])
-    | [] -> (
-        match failed_tests project package with
-        | _ :: _ as failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ])
-        | [] -> (
-            match decide project registry package with
-            | Refused sentences -> refuse sentences
-            | Unchanged version ->
-                if json then
-                  Json.print
-                    (Report.document report [ ("version", Json.String (Version.show version)) ])
-                else
-                  Output.printf "`%s` %s already has these files.\n" (Path.show_package name)
-                    (Version.show version);
-                0
-            | Published { version; files; grows } ->
-                Registry.Index.add registry name version files;
-                let hash = Registry.Content.hash files in
-                if json then
-                  Json.print
-                    (Report.document report
-                       [
-                         ("package", Json.String (Path.show_package name));
-                         ("version", Json.String (Version.show version));
-                         ("hash", Json.String hash);
-                         ( "grows",
-                           Json.List
-                             (List.map
-                                (fun (path, description) ->
-                                  Json.Object
-                                    [
-                                      ("path", Json.String (Path.show path));
-                                      ("addition", Json.String description);
-                                    ])
-                                grows) );
-                       ])
-                else begin
-                  Output.printf "Published `%s` %s.\n" (Path.show_package name)
-                    (Version.show version);
-                  List.iter
-                    (fun (path, description) ->
-                      Output.printf "  %s %s.\n" (Path.show path) description)
-                    grows
-                end;
-                0))
+  Report.stop_on_errors ~json report;
+  (match unfinished project with
+  | [] -> ()
+  | unfinished_code ->
+      refuse
+        (List.map
+           (fun (keyword, file, line, column) ->
+             Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
+           unfinished_code
+        @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
+  (match failed_tests project package with
+  | [] -> ()
+  | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
+  match decide project registry package with
+  | Refused sentences -> refuse sentences
+  | Unchanged version ->
+      if json then
+        Json.print (Report.document report [ ("version", Json.String (Version.show version)) ])
+      else
+        Output.printf "`%s` %s already has these files.\n" (Path.show_package name)
+          (Version.show version);
+      0
+  | Published { version; files; grows } ->
+      Registry.Index.add registry name version files;
+      let hash = Registry.Content.hash files in
+      if json then
+        Json.print
+          (Report.document report
+             [
+               ("package", Json.String (Path.show_package name));
+               ("version", Json.String (Version.show version));
+               ("hash", Json.String hash);
+               ( "grows",
+                 Json.List
+                   (List.map
+                      (fun (path, description) ->
+                        Json.Object
+                          [
+                            ("path", Json.String (Path.show path));
+                            ("addition", Json.String description);
+                          ])
+                      grows) );
+             ])
+      else begin
+        Output.printf "Published `%s` %s.\n" (Path.show_package name) (Version.show version);
+        List.iter
+          (fun (path, description) -> Output.printf "  %s %s.\n" (Path.show path) description)
+          grows
+      end;
+      0

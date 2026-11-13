@@ -7,4 +7,4 @@ val clean : t -> bool
 val document : t -> (string * Json.t) list -> Json.t
 val plural : int -> string -> string -> string
 val print : t -> unit
-val stop_on_errors : json:bool -> ?fields:(string * Json.t) list -> t -> bool
+val stop_on_errors : json:bool -> ?fields:(string * Json.t) list -> t -> unit

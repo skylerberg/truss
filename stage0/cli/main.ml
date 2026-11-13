@@ -384,6 +384,7 @@ let evaluate arguments =
         run
     with
     | outcome -> outcome
+    | exception Outcome.Stop status -> Outcome.Exit status
     | exception Project.Cannot_run message ->
         Output.eprint_line message;
         Outcome.Exit 2
