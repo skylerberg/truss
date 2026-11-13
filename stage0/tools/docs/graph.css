@@ -228,7 +228,14 @@ main {
   display: flex;
   align-items: center;
   gap: 7px;
+  margin: 0 -6px;
+  padding: 1px 6px;
+  border-radius: 4px;
   font-family: var(--mono);
+}
+
+.areas div:hover {
+  background: color-mix(in srgb, var(--area-0) 14%, var(--surface));
 }
 
 .areas .count {
@@ -277,12 +284,15 @@ main {
 
 #canvas svg.focused .focus,
 #canvas svg.focused .dependency,
-#canvas svg.focused .dependent {
+#canvas svg.focused .dependent,
+#canvas svg.focused .member {
   opacity: 1;
 }
 
 #canvas .node.focus path,
-#canvas .node.focus polygon {
+#canvas .node.focus polygon,
+#canvas .node.member path,
+#canvas .node.member polygon {
   fill: color-mix(in srgb, var(--area) 35%, var(--surface));
   stroke-width: 2.6;
 }

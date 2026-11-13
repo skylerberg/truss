@@ -80,12 +80,13 @@
       <p>Hover over a library to highlight its
       <b class="dependency-key">dependencies</b> and its
       <b class="dependent-key">dependents</b> and list them here. Click a
-      library to open its documentation. Drag to pan and scroll to zoom.</p>
+      library to open its documentation. Hover over a directory to highlight
+      its libraries. Drag to pan and scroll to zoom.</p>
       <h3>Directories</h3>
       <div class="areas">${areas
         .map(
           (area) =>
-            `<div><span class="dot" style="--area: ${areaColor(area)}"></span>` +
+            `<div data-area="${escape(area)}"><span class="dot" style="--area: ${areaColor(area)}"></span>` +
             `${escape(areaLabel(area))}<span class="count">${counts.get(area)}</span></div>`,
         )
         .join("")}</div>`;
@@ -111,16 +112,39 @@
 
   let shown = null;
 
+  const clearHighlight = () => {
+    for (const element of svg.querySelectorAll(".focus, .dependency, .dependent, .member")) {
+      element.classList.remove("focus", "dependency", "dependent", "member");
+    }
+    svg.classList.remove("focused");
+  };
+
+  // Highlights the libraries of one directory of the overview, and the edges
+  // between two of them.
+  const highlightArea = (area) => {
+    clearHighlight();
+    svg.classList.add("focused");
+    const areaOf = (name) => libraries.get(name)?.area ?? "";
+    for (const [name, node] of nodes) {
+      if (areaOf(name) === area) node.classList.add("member");
+    }
+    for (const { edge, source, target } of edges) {
+      if (areaOf(source) === area && areaOf(target) === area) edge.classList.add("member");
+    }
+  };
+
   const show = (name) => {
     shown = name;
-    for (const element of svg.querySelectorAll(".focus, .dependency, .dependent")) {
-      element.classList.remove("focus", "dependency", "dependent");
-    }
-    svg.classList.toggle("focused", name !== null);
+    clearHighlight();
     if (name === null) {
       panel.innerHTML = overview();
+      for (const row of panel.querySelectorAll("[data-area]")) {
+        row.addEventListener("mouseenter", () => highlightArea(row.dataset.area));
+        row.addEventListener("mouseleave", clearHighlight);
+      }
       return;
     }
+    svg.classList.add("focused");
     const allDependencies = reachable(name, dependencies);
     const allDependents = reachable(name, dependents);
     nodes.get(name)?.classList.add("focus");
