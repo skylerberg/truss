@@ -2335,7 +2335,8 @@ and primitive_operation context frame ~node (operation : Intrinsic.operation) ty
           let scale = power_of context frame (Logic.int 2) right in
           assume context frame
             Logic.(
-              Operation ("<=", [ int 0; right ]) &&& Operation ("<", [ right; int bits ])
+              Operation ("<=", [ int 0; right ])
+              &&& Operation ("<", [ right; int bits ])
               ==> (Operation ("<=", [ int 1; scale ])
                   &&& Operation ("<=", [ scale; Integer (Z.shift_left Z.one (bits - 1)) ])));
           assume context frame
