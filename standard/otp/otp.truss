@@ -1,0 +1,144 @@
+use standard::base32
+use standard::cryptography
+use standard::intrinsic
+use standard::random
+use standard::url
+
+public type Algorithm = Sha1 | Sha256 | Sha512
+  derives Equal
+
+public fn Algorithm.name(self) -> String {
+  match self {
+    Sha1 => "SHA1"
+    Sha256 => "SHA256"
+    Sha512 => "SHA512"
+  }
+}
+
+public type Totp(secret: List[UInt8], digits: UInt32 = 6, period_seconds: Int64 = 30, algorithm: Algorithm = Algorithm.Sha1)
+
+fn mac(algorithm: Algorithm, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+  match algorithm {
+    Sha1 => cryptography::hmac_sha1(key, message: message)[..].to_list()
+    Sha256 => cryptography::hmac_sha256(key, message: message)[..].to_list()
+    Sha512 => cryptography::hmac_sha512(key, message: message)[..].to_list()
+  }
+}
+
+fn truncated(code: Slice[UInt8]) -> UInt32 {
+  if code.length() < 20 {
+    intrinsic::crash("an HMAC is at least 20 bytes".slice())
+  }
+  let offset: USize = intrinsic::convert(code[code.length() - 1] % 16)
+  let high: UInt32 = intrinsic::convert(code[offset] % 128)
+  let second: UInt32 = intrinsic::convert(code[offset + 1])
+  let third: UInt32 = intrinsic::convert(code[offset + 2])
+  let low: UInt32 = intrinsic::convert(code[offset + 3])
+  high * 16777216 + second * 65536 + third * 256 + low
+}
+
+let powers_of_ten: Array[UInt32, 10] = [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000]
+
+public fn hotp(secret: Slice[UInt8], counter: UInt64, digits: UInt32 = 6, algorithm: Algorithm = Algorithm.Sha1) -> String
+  requires digits >= 6 && digits <= 9
+{
+  var message: List[UInt8] = []
+  let width: UInt64 = 8
+  for index in 0..width {
+    mut message.push(intrinsic::convert((counter >> (8 * (7 - index))) & 255))
+  }
+  let value = truncated(mac(algorithm, key: secret, message: message.slice()).slice())
+  let length: USize = intrinsic::convert(digits)
+  let number = "${value % powers_of_ten[length]}"
+  var text = TextBuilder.new()
+  for _ in number.length()..length {
+    mut text.write("0")
+  }
+  mut text.write(number.slice())
+  own text.finish()
+}
+
+public fn Totp.generate(digits: UInt32 = 6, period_seconds: Int64 = 30, algorithm: Algorithm = Algorithm.Sha1) -> Totp
+  uses Random
+{
+  let length: USize = match algorithm {
+    Sha1 => 20
+    Sha256 => 32
+    Sha512 => 64
+  }
+  Totp(secret: random::bytes(length), digits: digits, period_seconds: period_seconds, algorithm: algorithm)
+}
+
+public fn Totp.is_valid(self) -> Bool {
+  self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1 && self.secret.length() >= 10
+}
+
+public fn Totp.step_at(self, unix_seconds: Int64) -> Int64
+  requires self.period_seconds >= 1
+  ensures result >= 0
+{
+  if unix_seconds < 0 { 0 } else { unix_seconds / self.period_seconds }
+}
+
+public fn Totp.code_at(self, unix_seconds: Int64) -> String
+  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
+{
+  self.code_for_step(self.step_at(unix_seconds))
+}
+
+fn Totp.code_for_step(self, step: Int64) -> String
+  requires self.digits >= 6 && self.digits <= 9
+  requires step >= 0
+{
+  hotp(self.secret.slice(), counter: intrinsic::convert(step), digits: self.digits, algorithm: self.algorithm)
+}
+
+public fn Totp.code(self) -> String
+  uses Clock
+  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
+{
+  self.code_at(Clock.now().unix_seconds())
+}
+
+public fn Totp.verify_at(self, code: StringSlice, unix_seconds: Int64, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
+  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
+  requires window >= 0 && window <= 10
+{
+  let current = self.step_at(unix_seconds)
+  let earliest = if current > window { current - window } else { 0 }
+  let latest = if current < Int64.maximum - window { current + window } else { current }
+  var matched: Option[Int64] = None
+  var step = earliest
+  while step <= latest
+    invariant step >= 0
+    decreases latest - step + 1
+  {
+    let is_new = match last_step {
+      Some(last) => step > last
+      None => true
+    }
+    let expected = self.code_for_step(step)
+    if cryptography::constant_time_equal(expected.slice().bytes(), second: code.bytes()) && is_new && matched == None {
+      matched = Some(step)
+    }
+    if step == Int64.maximum {
+      return matched
+    }
+    step += 1
+  }
+  matched
+}
+
+public fn Totp.verify(self, code: StringSlice, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
+  uses Clock
+  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
+  requires window >= 0 && window <= 10
+{
+  self.verify_at(code, unix_seconds: Clock.now().unix_seconds(), last_step: last_step, window: window)
+}
+
+public fn Totp.uri(self, issuer: StringSlice, account: StringSlice) -> String {
+  let label = "${url::encode_component(issuer)}:${url::encode_component(account)}"
+  let secret = base32::encode(self.secret.slice(), padding: false)
+  "otpauth://totp/${label}?secret=${secret}&issuer=${url::encode_component(issuer)}&algorithm=${self.algorithm.name()}&digits=${self.digits}&period=${self.period_seconds}"
+}

@@ -485,6 +485,48 @@ public fn sha1(bytes: Slice[UInt8]) -> Array[UInt8, 20]
   own hasher.finish()
 }
 
+public fn hmac_sha1(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 20]
+  cost time O(key.length() + message.length())
+  cost allocations == 0
+{
+  var padded: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  if key.length() > 64 {
+    let digest = sha1(key)
+    let count: USize = 20
+    for index in 0..count
+      cost allocations == 0
+    {
+      padded[index] = digest[index]
+    }
+  } else {
+    for index in 0..key.length()
+      cost allocations == 0
+    {
+      padded[index] = key[index]
+    }
+  }
+  var mixed: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let width: USize = 64
+  for index in 0..width
+    cost allocations == 0
+  {
+    mixed[index] = padded[index] ^ 0x36
+  }
+  var inner = Sha1.new()
+  mut inner.update(mixed.slice())
+  mut inner.update(message)
+  let digest = inner.finish()
+  for index in 0..width
+    cost allocations == 0
+  {
+    mixed[index] = padded[index] ^ 0x5c
+  }
+  var outer = Sha1.new()
+  mut outer.update(mixed.slice())
+  mut outer.update(digest.slice())
+  outer.finish()
+}
+
 public fn blake3(bytes: Slice[UInt8]) -> Array[UInt8, 32]
   cost time O(bytes.length())
   cost allocations == 0
@@ -2020,6 +2062,32 @@ public fn hash_password(
   requires password_cost.memory_kibibytes >= 8 * password_cost.parallelism
   cost time finite
 {
+  let tag = argon2id(password, salt: salt, password_cost: password_cost, length: 32)
+  var hash: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    if index < tag.length() {
+      hash[index] = tag[index]
+    }
+  }
+  hash
+}
+
+internal fn argon2id(
+  password: Slice[UInt8],
+  salt: Slice[UInt8],
+  password_cost: PasswordCost,
+  length: USize,
+) -> List[UInt8]
+  requires salt.length() >= 8
+  requires password_cost.parallelism >= 1 && password_cost.parallelism <= 16777215
+  requires password_cost.iterations >= 1
+  requires password_cost.memory_kibibytes >= 8 * password_cost.parallelism
+  requires length >= 4 && length <= 1024
+  cost time finite
+{
   let lanes: USize = intrinsic::convert(password_cost.parallelism)
   let requested: USize = intrinsic::convert(password_cost.memory_kibibytes)
   let segment_length = requested / (4 * lanes)
@@ -2032,7 +2100,7 @@ public fn hash_password(
   let block_count = lanes * shape.lane_length
   var parameters: List[UInt8] = []
   push_little_endian_32(mut parameters, value: password_cost.parallelism)
-  push_little_endian_32(mut parameters, value: 32)
+  push_length_32(mut parameters, length: length)
   push_little_endian_32(mut parameters, value: password_cost.memory_kibibytes)
   push_little_endian_32(mut parameters, value: password_cost.iterations)
   push_little_endian_32(mut parameters, value: 19)
@@ -2081,17 +2149,7 @@ public fn hash_password(
   for lane in 0..lanes {
     last = argon2_xor(last, second: memory[shape.block_index(block_count, lane: lane, column: shape.lane_length - 1)])
   }
-  let tag = argon2_long_hash(argon2_block_to_bytes(last).slice(), length: 32)
-  var hash: Array[UInt8, 32] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  ]
-  let count: USize = 32
-  for index in 0..count {
-    if index < tag.length() {
-      hash[index] = tag[index]
-    }
-  }
-  hash
+  argon2_long_hash(argon2_block_to_bytes(last).slice(), length: length)
 }
 
 public fn constant_time_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool

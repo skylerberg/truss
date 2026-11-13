@@ -1,0 +1,175 @@
+use standard::intrinsic
+
+public type DecodeError =
+  | InvalidCharacter(offset: USize)
+  | InvalidLength
+  | InvalidPadding
+  derives Equal
+
+impl Display for DecodeError {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      InvalidCharacter(offset) => {
+        mut output.write("the byte at offset ")
+        offset.display(mut output)
+        mut output.write(" is not in the alphabet")
+      }
+      InvalidLength => mut output.write("the text has a number of symbols that no count of bytes encodes to")
+      InvalidPadding => mut output.write("the padding is wrong, or the last symbol has bits that no byte uses")
+    }
+  }
+}
+
+fn symbol(value: UInt8) -> UInt8
+  requires value < 32
+  cost time O(1)
+  cost allocations == 0
+{
+  if value < 26 { value + 65 } else { value + 24 }
+}
+
+fn symbol_value(byte: UInt8) -> UInt8
+  ensures result <= 32
+  cost time O(1)
+  cost allocations == 0
+{
+  if byte >= 65 && byte <= 90 {
+    byte - 65
+  } else if byte >= 97 && byte <= 122 {
+    byte - 97
+  } else if byte >= 50 && byte <= 55 {
+    byte - 24
+  } else {
+    32
+  }
+}
+
+fn byte_at(bytes: Slice[UInt8], index: USize) -> UInt8
+  cost time O(1)
+  cost allocations == 0
+{
+  if index < bytes.length() { bytes[index] } else { 0 }
+}
+
+fn symbol_at(bytes: Slice[UInt8], start: USize, position: USize) -> UInt8
+  requires start <= bytes.length()
+  requires position < 8
+  ensures result < 32
+  cost time O(1)
+  cost allocations == 0
+{
+  if position == 0 {
+    byte_at(bytes, index: start) / 8
+  } else if position == 1 {
+    byte_at(bytes, index: start) % 8 * 4 + byte_at(bytes, index: start + 1) / 64
+  } else if position == 2 {
+    byte_at(bytes, index: start + 1) / 2 % 32
+  } else if position == 3 {
+    byte_at(bytes, index: start + 1) % 2 * 16 + byte_at(bytes, index: start + 2) / 16
+  } else if position == 4 {
+    byte_at(bytes, index: start + 2) % 16 * 2 + byte_at(bytes, index: start + 3) / 128
+  } else if position == 5 {
+    byte_at(bytes, index: start + 3) / 4 % 32
+  } else if position == 6 {
+    byte_at(bytes, index: start + 3) % 4 * 8 + byte_at(bytes, index: start + 4) / 32
+  } else {
+    byte_at(bytes, index: start + 4) % 32
+  }
+}
+
+public fn encode(bytes: Slice[UInt8], padding: Bool = true) -> String
+  cost time O(bytes.length())
+  cost allocations <= 1
+{
+  let count = bytes.length()
+  if count > USize.maximum / 16 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  let groups = (count + 4) / 5
+  let symbol_count = (8 * count + 4) / 5
+  let length = if padding { 8 * groups } else { symbol_count }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(8 * groups)
+  for position in 0..length
+    invariant intrinsic::storage_length(output) == position
+    invariant intrinsic::storage_capacity(output) == 8 * groups
+    cost allocations == 0
+  {
+    if position < symbol_count {
+      intrinsic::storage_push(mut output, value: symbol(symbol_at(bytes, start: position / 8 * 5, position: position % 8)))
+    } else {
+      intrinsic::storage_push(mut output, value: 61)
+    }
+  }
+  String(storage: own output)
+}
+
+fn value_at(text: Slice[UInt8], symbol_count: USize, index: USize) -> UInt8
+  requires symbol_count <= text.length()
+  ensures result <= 32
+{
+  if index < symbol_count { symbol_value(text[index]) } else { 0 }
+}
+
+fn byte_of(text: Slice[UInt8], symbol_count: USize, index: USize) -> UInt8
+  requires symbol_count <= text.length()
+  requires index <= USize.maximum / 4
+{
+  let start = index / 5 * 8
+  let position = index % 5
+  let first = value_at(text, symbol_count: symbol_count, index: start + position * 8 / 5) % 32
+  let second = value_at(text, symbol_count: symbol_count, index: start + position * 8 / 5 + 1) % 32
+  let third = value_at(text, symbol_count: symbol_count, index: start + position * 8 / 5 + 2) % 32
+  if position == 0 {
+    first * 8 + second / 4
+  } else if position == 1 {
+    first % 4 * 64 + second * 2 + third / 16
+  } else if position == 2 {
+    first % 16 * 16 + second / 2
+  } else if position == 3 {
+    first % 2 * 128 + second * 4 + third / 8
+  } else {
+    first % 8 * 32 + second
+  }
+}
+
+public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError] {
+  let symbols = text.bytes()
+  if symbols.length() > USize.maximum / 4 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var symbol_count = symbols.length()
+  while symbol_count > 0 && symbols[symbol_count - 1] == 61
+    invariant symbol_count <= symbols.length()
+    decreases symbol_count
+  {
+    symbol_count -= 1
+  }
+  let padded = symbols.length() - symbol_count
+  let tail = symbol_count % 8
+  if tail == 1 || tail == 3 || tail == 6 {
+    return Err(DecodeError.InvalidLength)
+  }
+  if padded > 0 && (tail == 0 || tail + padded != 8) {
+    return Err(DecodeError.InvalidPadding)
+  }
+  for index in 0..symbol_count {
+    if symbol_value(symbols[index]) == 32 {
+      return Err(DecodeError.InvalidCharacter(offset: index))
+    }
+  }
+  if tail > 0 {
+    let last = symbol_value(symbols[symbol_count - 1])
+    let unused = if tail == 2 { last % 4 } else if tail == 4 { last % 16 } else if tail == 5 { last % 2 } else { last % 8 }
+    if unused != 0 {
+      return Err(DecodeError.InvalidPadding)
+    }
+  }
+  let length = symbol_count / 8 * 5 + (symbol_count % 8) * 5 / 8
+  var bytes: List[UInt8] = []
+  mut bytes.reserve(length)
+  for index in 0..length {
+    mut bytes.push(byte_of(symbols, symbol_count: symbol_count, index: index))
+  }
+  Ok(own bytes)
+}
