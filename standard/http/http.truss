@@ -235,6 +235,7 @@ public type Request(
   target: String,
   headers: Headers = Headers(entries: []),
   body: Body = Body(source: Source.Memory(bytes: [], position: 0), pending: [], limit: 0, received: 0),
+  peer: Option[network::SocketAddress] = None,
 )
 
 public fn Request.path(self) -> StringSlice {
@@ -1299,6 +1300,7 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
+  peer: Option[network::SocketAddress],
 )
   uses Tasks, Handles, Clock, Granted
 {
@@ -1352,6 +1354,7 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
           target: own head.target,
           headers: own head.headers,
           body: channel_body(chunks, credit: None, limit: body_limit),
+          peer: peer,
         )
         var responder = new_responder(outbound, stream: 0, is_head: is_head)
         handler(own request, mut responder)
@@ -1459,6 +1462,7 @@ fn answer_arrival[capability Granted](
   arrival: own two::Arrival,
   handler: (fn(own Request, mut Responder) uses Granted),
   limits: Limits,
+  peer: Option[network::SocketAddress],
 )
   uses Tasks, Granted
 {
@@ -1474,6 +1478,7 @@ fn answer_arrival[capability Granted](
         target: own arrived.target,
         headers: own arrived.headers,
         body: channel_body(arrival.chunks.copy(), credit: own credit, limit: limits.body_bytes),
+        peer: peer,
       )
       handler(own request, mut responder)
       let _ = mut responder.finish()
@@ -1495,6 +1500,7 @@ fn serve_connection[capability Granted](
 {
   var opened = own connection
   prepare(mut opened, options: options)
+  let peer = Some(opened.peer_address())
   var inbox = two::Inbox(bytes: [])
   while inbox.bytes.length() < 3 {
     match fill(opened, inbox: mut inbox) {
@@ -1505,10 +1511,10 @@ fn serve_connection[capability Granted](
   }
   if inbox.bytes[0..3] == "PRI".bytes() {
     two::serve(opened, inbox: own inbox, header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
-      answer_arrival(own arrival, handler: handler, limits: options.limits)
+      answer_arrival(own arrival, handler: handler, limits: options.limits, peer: peer)
     })
   } else {
-    serve_one(opened, inbox: own inbox, handler: handler, options: options, stopping: stopping)
+    serve_one(opened, inbox: own inbox, handler: handler, options: options, stopping: stopping, peer: peer)
   }
   let _ = opened.close_sending()
 }
@@ -1524,16 +1530,17 @@ fn serve_secured[capability Granted](
 {
   var opened = own connection
   prepare(mut opened, options: options)
+  let peer = Some(opened.peer_address())
   let secured = match tls::accept(own opened, config: config) {
     Ok(secured) => own secured
     Err(_) => return
   }
   if secured.protocol() == Some("h2".slice()) {
     two::serve(secured, inbox: two::Inbox(bytes: []), header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
-      answer_arrival(own arrival, handler: handler, limits: options.limits)
+      answer_arrival(own arrival, handler: handler, limits: options.limits, peer: peer)
     })
   } else {
-    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options, stopping: stopping)
+    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options, stopping: stopping, peer: peer)
   }
   let _ = secured.close_sending()
 }
