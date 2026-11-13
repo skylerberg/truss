@@ -27,87 +27,37 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `brew install z3` on macOS, or from the release's archive, and put it on
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
-- **The Unicode tables are generated.** The compiler's tables are in
-  `stage0/unicode/unicode_tables.ml`. The standard library's are in
-  `standard/text/unicode_data.truss`, which holds the tables of character
-  properties, case mappings, normalization, and grapheme cluster boundaries,
-  and nothing else. Both are
-  generated from the same version of the Unicode character database, whose
-  files `stage0/tools/unicode/sources.txt` lists with their hashes. To move
-  to a new version of Unicode, change that list and run
-  `stage0/tools/unicode/regenerate.sh`. The functions that search the
-  library's tables are written by hand, in
-  `standard/text/unicode_tables.truss`.
-- **`dune build`** builds everything, **`dune test`** runs the tests, and
-  **`dune fmt`** formats the code with the ocamlformat version that
-  `.ocamlformat` pins.
+- **The Unicode tables are generated** from the Unicode character database
+  files that `stage0/tools/unicode/sources.txt` lists with their hashes:
+  the compiler's into `stage0/unicode/unicode_tables.ml`, and the standard
+  library's into `standard/text/unicode_data.truss`. To move to a new
+  version of Unicode, change that list and run
+  `stage0/tools/unicode/regenerate.sh`. Each function of
+  `standard/text/unicode_tables.truss` that names a table assigns its
+  result to a `var`, so that callers know it by its contract: with a
+  functional body the prover would copy the table into every caller's
+  queries.
+- **`dune build`** builds everything, and **`dune fmt`** formats the code
+  with the ocamlformat version that `.ocamlformat` pins.
 - **`stage0/tools/docs/build.sh`** builds the odoc documentation of every
-  library into `_build/docs` and prints the index's path. The index links to
-  a page of the library dependency graph, colored by directory under
-  `stage0`, where each library links to its documentation. It needs odoc and
-  dune-deps from opam and Graphviz from Homebrew, which `dune-project` does
-  not list because CI never builds the documentation.
+  library and a page of the library dependency graph into `_build/docs`. It
+  needs odoc and dune-deps from opam and Graphviz from Homebrew, which
+  `dune-project` does not list because CI never builds the documentation.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
-  `truss.opam` matches `dune-project`, and runs the tests, on every pull
-  request and every push to `main`. It must stay fast, so:
-  - **Nothing is installed in an ordinary run.** OCaml and every dependency
-    come from a cache of the whole opam root, keyed by the opam and OCaml
-    versions, the runner's image, and `truss.opam`
-    (`.github/actions/opam`). A change to `truss.opam` starts from the newest
-    cache with the same opam, OCaml, and image, and installs only the changed
-    packages. Only a new opam, OCaml, or image builds the switch from nothing,
-    with the opam binary downloaded from its release and checked against a
-    pinned hash. Nothing comes from apt, so a slow package mirror cannot slow
-    a run.
-  - **Dune's cache carries over from `main`,** so a pull request builds only
-    its changes. Only pushes to `main` save it, trimmed so that it stays
-    quick to restore.
-  - **The build, formatting, the opam file, and the compiler's tests are one
-    dune run,** so they overlap. Five things run beside it, each on a
-    runner of its own: the codegen tests, the codegen tests again under
-    AddressSanitizer and UndefinedBehaviorSanitizer, the programs that use
-    several threads under ThreadSanitizer, the prover's and the code
-    database's tests, and the standard library's proofs. ThreadSanitizer
-    cannot run beside the other sanitizers, and its tests take as long as
-    theirs, so it has a job of its own.
-  - **The longest suites have their own jobs.** The standard library's
-    proofs grow with the library, and `prover_tests` and `database_tests`
-    take twice as long as any other suite of the compiler's, so none of
-    them share the check's cores, which the other suites keep busy. The
-    dune run sets `TRUSS_SKIP_SUITES` to the three executables' names,
-    which makes each say it is skipped and stop.
-  - **A suite on a runner of its own runs as several processes.** One
-    process runs its tests one after another on one core, so the job
-    starts each suite twice, with `TRUSS_TEST_SHARE` set to `0/2` and
-    `1/2`: each process runs every other test
-    (`.github/scripts/test-shares.sh`). Each repeats the suite's setup, so
-    a suite runs this way only on cores that would otherwise be idle.
-  - **The proofs are dealt out to several runners, and to each of a
-    runner's cores.** `TRUSS_PROOF_SHARE` names a process's share as
-    `index/count`, and `standard_library_tests` then checks and proves only
-    that share's modules. The prover translates on one core, so each runner
-    starts one process for each of its cores, each with a share and a
-    state of its own (`.github/scripts/prove-share.sh`). The modules are
-    dealt out by their measured weights, so the shares take about as long
-    as each other. When the proofs' jobs become the longest again, add a
-    runner: one more entry in the workflow's list.
-  - **Solver answers are cached between runs.** The cache key of an answer
-    is the query text, the solver version, and the step limit. A run
-    restores the cache from `main` and solves only the queries whose text
-    changed. Only pushes to `main` save the cache. Each runner of the proofs
-    keeps its own. With the answers cached, most of a run is translating
-    the library's definitions into queries.
-  - **A new push to a pull request cancels the run it replaces.**
-- **A pull request that takes out a recent merge fails,** before anything is
+  `truss.opam` matches `dune-project`, runs every test suite, and proves the
+  standard library, on every pull request and every push to `main`. It must
+  stay fast: it installs nothing in an ordinary run, restores dune's cache,
+  the solver's answers, and compiled objects from `main`, and gives the
+  longest suites runners of their own. The workflow's comments say why each
+  job is laid out as it is; when the proofs' jobs become the longest again,
+  add a runner to their list.
+- **A pull request that takes out a recent merge fails** before anything is
   built (`.github/scripts/reverts.sh`). Several sessions fetch into one
-  repository, so `origin/main` can move between a branch's merge of it and
-  a squash onto it, and the squashed commit then carries the branch's older
-  tree onto the newer `main`: every merge the tree lacks is undone, with no
-  conflict. The check fails a pull request that changes every file one of
-  the last merges changed and puts one of them back to its state before
-  that merge. A pull request that means to do so has a title that starts
-  with "Revert". To squash safely, read `origin/main` once into a variable,
-  merge that commit, and squash onto that commit.
+  repository, so `origin/main` can move between a branch's merge of it and a
+  squash onto it, and the squashed commit then undoes every merge its older
+  tree lacks, with no conflict. To squash safely, read `origin/main` once
+  into a variable, merge that commit, and squash onto that commit. A pull
+  request that means to revert has a title that starts with "Revert".
 
 ### Libraries
 
@@ -150,6 +100,11 @@ Each document has one job, and a fact is stated in one of them:
 
 A document does not restate the code: a module's contents, a signature, or a
 test's coverage is read from the code, where it cannot go stale.
+A stage's document gives its structure, the decisions that need a reason,
+and its interfaces to other stages. A mechanism, a data format, a JSON
+field, or a diagnostic's code is read from the code. A reason belongs in
+one document: a stage's document does not argue again what DESIGN.md
+argues, and CLI.md does not restate PACKAGES.md's rules.
 
 A design document describes the design as it is. How it got there belongs in
 version control, in commit messages and pull request descriptions. A
