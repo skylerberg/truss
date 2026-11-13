@@ -1,0 +1,196 @@
+use standard::intrinsic
+use standard::log
+
+public type CorsPolicy(
+  origins: List[String] = ["*"],
+  methods: List[Method] = [Method.Get, Method.Head, Method.Post, Method.Put, Method.Patch, Method.Delete],
+  headers: List[String] = ["content-type", "authorization"],
+  exposed: List[String] = [],
+  allow_credentials: Bool = false,
+  max_age_seconds: Int64 = 600,
+)
+  derives Equal
+
+fn allowed_origin(policy: CorsPolicy, origin: StringSlice) -> Option[String] {
+  for allowed in policy.origins {
+    if allowed == "*" {
+      return Some(if policy.allow_credentials { origin.to_string() } else { "*" })
+    }
+    if allowed.slice() == origin {
+      return Some(origin.to_string())
+    }
+  }
+  None
+}
+
+fn joined(parts: Slice[String]) -> String {
+  var text = ""
+  for part in parts {
+    if !text.is_empty() {
+      mut text.push(", ")
+    }
+    mut text.push(part.slice())
+  }
+  text
+}
+
+public fn cors[capability Granted](
+  request: own Request,
+  responder: mut Responder,
+  policy: CorsPolicy,
+  next: (fn(own Request, mut Responder) uses Granted),
+)
+  uses Tasks, Granted
+{
+  let origin = match request.header("Origin") {
+    Some(origin) => origin.to_string()
+    None => {
+      next(own request, mut responder)
+      return
+    }
+  }
+  mut responder.add_header("Vary", value: "Origin")
+  let allowed = allowed_origin(policy, origin: origin.slice())
+  let is_preflight = request.method == Method.Options && request.header("Access-Control-Request-Method") is Some(_)
+  match allowed {
+    Some(value) => {
+      mut responder.set_header("Access-Control-Allow-Origin", value: value.slice())
+      if policy.allow_credentials {
+        mut responder.set_header("Access-Control-Allow-Credentials", value: "true")
+      }
+      if is_preflight {
+        var methods: List[String] = []
+        for method in policy.methods {
+          mut methods.push("${method}")
+        }
+        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods.slice()).slice())
+        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers.slice()).slice())
+        mut responder.set_header("Access-Control-Max-Age", value: "${policy.max_age_seconds}".slice())
+        let _ = mut responder.send(Response.new(status: Status.no_content))
+        return
+      }
+      if !policy.exposed.is_empty() {
+        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed.slice()).slice())
+      }
+    }
+    None => {
+      if is_preflight {
+        let _ = mut responder.send(Response.new(status: Status.no_content))
+        return
+      }
+    }
+  }
+  next(own request, mut responder)
+}
+
+public type SecurityPolicy(
+  content_security_policy: Option[String] = Some("default-src 'self'"),
+  frame_options: Option[String] = Some("DENY"),
+  referrer_policy: Option[String] = Some("strict-origin-when-cross-origin"),
+  transport_security_seconds: Option[Int64] = Some(31536000),
+  opener_policy: Option[String] = Some("same-origin"),
+)
+  derives Equal
+
+public fn secure_headers[capability Granted](
+  request: own Request,
+  responder: mut Responder,
+  next: (fn(own Request, mut Responder) uses Granted),
+  policy: SecurityPolicy = SecurityPolicy(),
+)
+  uses Granted
+{
+  mut responder.set_header("X-Content-Type-Options", value: "nosniff")
+  match policy.content_security_policy {
+    Some(value) => mut responder.set_header("Content-Security-Policy", value: value.slice())
+    None => {}
+  }
+  match policy.frame_options {
+    Some(value) => mut responder.set_header("X-Frame-Options", value: value.slice())
+    None => {}
+  }
+  match policy.referrer_policy {
+    Some(value) => mut responder.set_header("Referrer-Policy", value: value.slice())
+    None => {}
+  }
+  match policy.transport_security_seconds {
+    Some(seconds) => mut responder.set_header("Strict-Transport-Security", value: "max-age=${seconds}; includeSubDomains".slice())
+    None => {}
+  }
+  match policy.opener_policy {
+    Some(value) => mut responder.set_header("Cross-Origin-Opener-Policy", value: value.slice())
+    None => {}
+  }
+  next(own request, mut responder)
+}
+
+fn is_request_id(text: StringSlice) -> Bool {
+  if text.is_empty() || text.length() > 128 {
+    return false
+  }
+  for byte in text.bytes() {
+    let is_allowed = (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 45 || byte == 95 || byte == 46
+    if !is_allowed {
+      return false
+    }
+  }
+  true
+}
+
+public fn request_id[capability Granted](
+  request: own Request,
+  responder: mut Responder,
+  next: (fn(own Request, mut Responder) uses Granted),
+)
+  uses Random, Granted
+{
+  var incoming = own request
+  let id = match incoming.header("X-Request-ID") {
+    Some(given) => if is_request_id(given) { given.to_string() } else { Random.next().format(radix: 16, minimum_digits: 16) }
+    None => Random.next().format(radix: 16, minimum_digits: 16)
+  }
+  mut incoming.headers.set("X-Request-ID", value: id.slice())
+  mut responder.set_header("X-Request-ID", value: id.slice())
+  next(own incoming, mut responder)
+}
+
+public fn log_requests[capability Granted](
+  request: own Request,
+  responder: mut Responder,
+  next: (fn(own Request, mut Responder) uses Granted),
+)
+  uses Clock, Log, Granted
+{
+  let started = Clock.monotonic()
+  let method = "${request.method}"
+  let path = request.path().to_string()
+  let id = match request.header("X-Request-ID") {
+    Some(given) => given.to_string()
+    None => ""
+  }
+  next(own request, mut responder)
+  let elapsed = Clock.monotonic() - started
+  let code: Int64 = match responder.status() {
+    Some(status) => intrinsic::convert(status.code)
+    None => 200
+  }
+  var fields: List[log::Field] = [
+    log::Field.string("method", value: method.slice()),
+    log::Field.string("path", value: path.slice()),
+    log::Field.integer("status", value: code),
+    log::Field.integer("bytes", value: intrinsic::convert(responder.bytes_sent() & 9223372036854775807)),
+    log::Field.duration("duration", value: elapsed),
+  ]
+  if !id.is_empty() {
+    mut fields.push(log::Field.string("request_id", value: id.slice()))
+  }
+  log::information("request", fields: own fields)
+}
+
+public fn Request.with_body_limit(own self, bytes: USize) -> Request {
+  var limited = own self
+  if bytes < limited.body.limit {
+    limited.body.limit = bytes
+  }
+  limited
+}

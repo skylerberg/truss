@@ -463,10 +463,28 @@ public fn Body.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Resul
 type Phase = Waiting | Streaming | Done
   derives Equal
 
-public opaque type Responder(outbound: tasks::Channel[flow::Outbound], stream: UInt32, is_head: Bool, phase: Phase, ack: tasks::Channel[Bool])
+public opaque type Responder(
+  outbound: tasks::Channel[flow::Outbound],
+  stream: UInt32,
+  is_head: Bool,
+  phase: Phase,
+  ack: tasks::Channel[Bool],
+  preset: Headers,
+  status: Option[Status],
+  bytes_sent: UInt64,
+)
 
 fn new_responder(outbound: tasks::Channel[flow::Outbound], stream: UInt32, is_head: Bool) -> Responder {
-  Responder(outbound: outbound.copy(), stream: stream, is_head: is_head, phase: Phase.Waiting, ack: tasks::Channel.new(capacity: 1))
+  Responder(
+    outbound: outbound.copy(),
+    stream: stream,
+    is_head: is_head,
+    phase: Phase.Waiting,
+    ack: tasks::Channel.new(capacity: 1),
+    preset: Headers.new(),
+    status: None,
+    bytes_sent: 0,
+  )
 }
 
 fn fields_of(headers: Headers, has_length: Bool) -> List[hpack::Field] {
@@ -477,6 +495,32 @@ fn fields_of(headers: Headers, has_length: Bool) -> List[hpack::Field] {
     }
   }
   fields
+}
+
+fn merged_fields(preset: Headers, headers: Headers, has_length: Bool) -> List[hpack::Field] {
+  var fields = fields_of(headers, has_length: has_length)
+  for entry in preset.entries() {
+    if !headers.contains(entry.name.slice()) && !is_connection_specific(entry.name.slice()) {
+      mut fields.push(hpack::Field(name: entry.name.copy(), value: entry.value.copy()))
+    }
+  }
+  fields
+}
+
+public fn Responder.set_header(mut self, name: StringSlice, value: StringSlice) {
+  mut self.preset.set(name, value: value)
+}
+
+public fn Responder.add_header(mut self, name: StringSlice, value: StringSlice) {
+  mut self.preset.add(name, value: value)
+}
+
+public fn Responder.status(self) -> Option[Status] {
+  self.status
+}
+
+public fn Responder.bytes_sent(self) -> UInt64 {
+  self.bytes_sent
 }
 
 fn deliver(responder: Responder, message: own flow::Outbound) -> Result[Unit, Error]
@@ -503,10 +547,11 @@ public fn Responder.start(mut self, status: Status, headers: Headers = Headers(e
   }
   let is_end = self.is_head || !has_body(status)
   self.phase = if is_end { Phase.Done } else { Phase.Streaming }
+  self.status = Some(status)
   deliver(self, message: flow::Outbound.Head(
     stream: self.stream,
     status: status.code,
-    fields: fields_of(headers, has_length: false),
+    fields: merged_fields(self.preset, headers: headers, has_length: false),
     is_end: is_end,
     ack: self.ack.copy(),
   ))
@@ -519,6 +564,7 @@ fn Responder.switch_protocols(mut self, fields: own List[hpack::Field]) -> Resul
     return Err(Error.Unsupported(message: "a response that has already started"))
   }
   self.phase = Phase.Done
+  self.status = Some(Status(code: 101))
   deliver(self, message: flow::Outbound.Head(stream: self.stream, status: 101, fields: own fields, is_end: false, ack: self.ack.copy()))
 }
 
@@ -534,6 +580,7 @@ public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
   if bytes.is_empty() {
     return Ok(Unit)
   }
+  self.bytes_sent = self.bytes_sent.saturating_add(intrinsic::convert(bytes.length()))
   deliver(self, message: flow::Outbound.Data(stream: self.stream, bytes: bytes.to_list(), is_end: false, ack: self.ack.copy()))
 }
 
@@ -557,8 +604,9 @@ public fn Responder.send(mut self, response: own Response) -> Result[Unit, Error
     return Err(Error.Unsupported(message: "a response that has already started"))
   }
   self.phase = Phase.Done
+  self.status = Some(response.status)
   let has_payload = has_body(response.status)
-  var fields = fields_of(response.headers, has_length: has_payload)
+  var fields = merged_fields(self.preset, headers: response.headers, has_length: has_payload)
   if has_payload {
     mut fields.push(hpack::Field(name: "Content-Length", value: "${response.body.length()}"))
   }
@@ -567,6 +615,7 @@ public fn Responder.send(mut self, response: own Response) -> Result[Unit, Error
   if is_end {
     return Ok(Unit)
   }
+  self.bytes_sent = self.bytes_sent.saturating_add(intrinsic::convert(response.body.length()))
   deliver(self, message: flow::Outbound.Data(stream: self.stream, bytes: own response.body, is_end: true, ack: self.ack.copy()))
 }
 
