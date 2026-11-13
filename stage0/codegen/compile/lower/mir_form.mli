@@ -17,9 +17,9 @@ val fill_defaults :
     gives each parameter's place: a parameter with a default that the function owns has a place of
     its own. *)
 
-val lend_part_type : Definitions.context -> Ground.yielding -> Lir.ty
-(** The type of the part that a lending method's [Lend_begin] gives: its address, or the lent value
-    its [yield]s build. *)
+val address_part_type : Definitions.context -> Ground.yielding -> Lir.ty
+(** The type of the part that a method pulled by address gives: its address, or the lent value its
+    [yield]s build. *)
 
 val loop_body_type : Definitions.context -> Ground.yielding -> Ground.function_type
 (** The type of the loop body that a yielding method in loop form takes: a function of the part it

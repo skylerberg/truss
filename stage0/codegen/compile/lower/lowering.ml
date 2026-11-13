@@ -123,11 +123,15 @@ type schedule = Sequential | Chunked | Spawned of spawn_loop
    local it returns, or nowhere. *)
 type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 
-(* How a yielding method's [yield]s are lowered: in its pulled version,
-   where each stays as a state of its cursor, or in its loop form, where
+(* How a yielding or lending method's [yield]s are lowered: in its pulled
+   version, where each stays as a state of its cursor, and gives a value of
+   its own or, [by_address], the part's address; or in its loop form, where
    each calls the caller's loop body, of type [body], and stops where the
    body says to. Any other code has no [yield]. *)
-type form = Ordinary | Pulled | Looped of { body : Ground.function_type; chunked : bool }
+type form =
+  | Ordinary
+  | Pulled of { by_address : bool }
+  | Looped of { body : Ground.function_type; chunked : bool }
 
 type state = {
   context : context;
@@ -176,7 +180,7 @@ let enter context ?(form = Ordinary) ?(nested = ref []) frame =
     caller_site = None;
   }
 
-let is_pulled st = st.form = Pulled
+let is_pulled st = match st.form with Pulled _ -> true | Ordinary | Looped _ -> false
 
 (* Whether a lending or yielding method reports its checks at its caller's
    position: the standard library's do, as their code was once inlined into

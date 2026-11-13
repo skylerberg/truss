@@ -5,6 +5,7 @@ type ty =
   | Function of function_type
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Cursor of yielding
+  | Address_cursor of yielding
   | Lent of lent
   | Never
 
@@ -31,7 +32,8 @@ let rec compare left right =
         (fun (left_name, left_type) (right_name, right_type) ->
           String.compare left_name right_name >>= fun () -> compare left_type right_type)
         left.associated right.associated
-  | Cursor left, Cursor right -> compare_yielding left right
+  | Cursor left, Cursor right | Address_cursor left, Address_cursor right ->
+      compare_yielding left right
   | Lent left, Lent right -> compare_lent left right
   | Never, Never -> 0
   | _ -> Int.compare (rank left) (rank right)
@@ -43,6 +45,7 @@ and rank = function
   | Cursor _ -> 3
   | Lent _ -> 4
   | Never -> 5
+  | Address_cursor _ -> 6
 
 and compare_lent left right =
   compare left.base right.base >>= fun () ->
@@ -128,6 +131,7 @@ let rec to_string = function
       in
       "any " ^ path_name trait ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Cursor yielding -> "cursor of " ^ path_name yielding.method_
+  | Address_cursor yielding -> "address cursor of " ^ path_name yielding.method_
   | Lent lent -> lent_to_string lent
   | Never -> "Never"
 
@@ -198,6 +202,7 @@ let rec encode ?(path = encode_path) ty =
           Cbor.Array (List.map (fun (name, ty) -> Cbor.Array [ Text name; encode ty ]) associated);
         ]
   | Cursor yielding -> tagged 3 [ encode_yielding ~path yielding ]
+  | Address_cursor yielding -> tagged 6 [ encode_yielding ~path yielding ]
   | Never -> tagged 4 []
   | Lent lent -> tagged 5 [ encode_lent ~path lent ]
 

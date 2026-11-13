@@ -329,7 +329,7 @@ let standard_context : Monomorphic.context =
         Query.demand (Lazy.force standard_database) Interface.Environment.type_interface path);
     normalize = Fun.id;
     normalize_capabilities = Fun.id;
-    cursor_fields = (fun _ -> []);
+    cursor_fields = (fun ~by_address:_ _ -> []);
   }
 
 let standard module_ name ?(arguments = []) () =

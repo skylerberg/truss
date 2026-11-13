@@ -64,7 +64,11 @@ type spawn_loop = {
 
 type schedule = Sequential | Chunked | Spawned of spawn_loop
 type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
-type form = Ordinary | Pulled | Looped of { body : Ground.function_type; chunked : bool }
+
+type form =
+  | Ordinary
+  | Pulled of { by_address : bool }
+  | Looped of { body : Ground.function_type; chunked : bool }
 
 type state = {
   context : Definitions.context;

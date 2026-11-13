@@ -1044,24 +1044,21 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
       emit st.builder (Assign (built, Build { ty = Lent lent; variant; fields })));
   built
 
-(* Whether the code being lowered is a lending method's. *)
-let lends_part st =
-  match st.frame.code.result with Lends _ -> true | Returns _ | Yields _ -> false
-
-(* The type of the part that a lending method's [Lend_begin] gives: the
-   lent value its [yield]s build, where one of them is a constructor built
-   from places, or else the part's address. *)
-let lend_part_type context (lending : Ground.yielding) : Lir.ty =
-  let code = code_of context lending.method_ lending.type_arguments in
+(* The type of the part that a method pulled by address gives, a lending
+   method's [Lend_begin] or a yielding one's [Cursor_next_address]: the lent
+   value its [yield]s build, where one of them is a constructor built from
+   places, or else the part's address. *)
+let address_part_type context (yielding : Ground.yielding) : Lir.ty =
+  let code = code_of context yielding.method_ yielding.type_arguments in
   let st = enter context (frame_of code) in
-  let method_mir = mir_of context lending.method_ in
+  let method_mir = mir_of context yielding.method_ in
   st.frame <-
     { st.frame with mir = Some (frame_of_body ~lambdas:method_mir.lambdas method_mir.body) };
   match (lent_type st, code.result) with
   | Some lent, _ -> Value (Lent lent)
-  | None, Lends (mode, _) ->
+  | None, (Lends (mode, _) | Yields (mode, _)) ->
       Pointer { target = Value (yielded_type_of_frame st); writable = mode = Types.Mut }
-  | None, (Returns _ | Yields _) -> bug "%s does not lend" (Path.show lending.method_)
+  | None, Returns _ -> bug "%s neither lends nor yields" (Path.show yielding.method_)
 
 (* The type of the loop body that a yielding method in loop form takes: a
    function of its part that returns whether to go on. The part is what the
@@ -1815,19 +1812,19 @@ and lend_from_method st (lending : Ground.yielding) (arguments : Mir.argument li
   let signature = signature_of st.context lending.method_ in
   let substitution = bind signature.generics lending.type_arguments in
   let arguments, mask = evaluate_arguments st signature substitution arguments in
-  let state = at (local st.builder ~borrowed:true (Value (Cursor lending))) in
+  let state = at (local st.builder ~borrowed:true (Value (Address_cursor lending))) in
   (* A standard library method holds the position its checks report. *)
   let site =
     if reports_at_caller lending.method_ then Some (caller_site_operand st call_site) else None
   in
-  cursor_into ?site st ~path:lending.method_ ~type_arguments:lending.type_arguments ~signature
-    ~arguments ~mask state;
-  let part_type = lend_part_type st.context lending in
+  cursor_into ?site ~by_address:true st ~path:lending.method_ ~type_arguments:lending.type_arguments
+    ~signature ~arguments ~mask state;
+  let part_type = address_part_type st.context lending in
   let part = local st.builder ~borrowed:true part_type in
   let evidence = List.map (evidence_of st) (cursor_evidence st.context lending) in
   let state_pointer : Lir.operand = Address { place = state; writable = true } in
   let parameters =
-    Lir.Pointer { target = Value (Cursor lending); writable = true }
+    Lir.Pointer { target = Value (Address_cursor lending); writable = true }
     :: List.map (fun _ -> Convention.evidence) evidence
   in
   emit st.builder
@@ -1994,11 +1991,11 @@ and terminator st region (ending : Mir.terminator) ~origin =
 
 and yield st region ~mode ~part ~resume ~origin =
   match st.form with
-  | Pulled when lends_part st ->
+  | Pulled { by_address = true } ->
       (* A lending method's [yield] stays in the code, and its [Lend_begin]
          gives the part where it is: the address of the place, which may be
-         in the method's state, or the lent value the [yield] builds. The
-         method always goes on from its [yield]. *)
+         in the method's state, or the lent value the [yield] builds. *)
+      let writable = mode = Types.Mut in
       let value : Lir.operand =
         (* Where any of the method's [yield]s builds a lent value, every one
            gives one, as its [Lend_begin]'s type says. *)
@@ -2009,12 +2006,24 @@ and yield st region ~mode ~part ~resume ~origin =
             Copy slot
         | None, Built _ -> bug "a lent constructor with no lent value"
         | None, Part (Borrow { place = written; _ }) ->
-            Address { place = whole st (place st written); writable = mode = Types.Mut }
-        | None, Part part -> Address { place = whole st (operand_place st part); writable = false }
+            Address { place = whole st (place st written); writable }
+        | None, Part part -> Address { place = whole st (operand_place st part); writable }
       in
-      finish st.builder (Yield { value; resume = jump st region resume; stop = None });
+      let resume = jump st region resume in
+      (match st.frame.code.result with
+      | Lends _ ->
+          (* A lending method always goes on from its [yield]. *)
+          finish st.builder (Yield { value; resume; stop = None })
+      | Yields _ | Returns _ ->
+          (* A yielding method that another yields through stops where the
+             other leaves its loop, dropping its owned values. *)
+          let stop = block st.builder in
+          finish st.builder (Yield { value; resume; stop = Some stop });
+          start st.builder stop;
+          leave_to st 0;
+          leave_function st (Return None));
       start st.builder (block st.builder)
-  | Pulled ->
+  | Pulled { by_address = false } ->
       (* In the pulled version of a method a [yield] stays in the code, and
          yield lowering makes it a state of the cursor. [next] gives its
          caller a value of its own: a value the method made, or a copy of a
@@ -2187,15 +2196,38 @@ and for_each ?looped st ~origin ~(schedule : schedule) ~(iteration : Mir.iterati
   | Yielding call -> (
       match (resolve_callee st call.callee, looped) with
       | None, _ -> bug "a loop over a call that resolves to no method"
-      | Some (method_, type_arguments), None ->
+      | Some (method_, type_arguments), None -> (
           (* A body that yields where a [yield] cannot call a body: the loop
-             pulls a cursor over the call. *)
+             pulls a cursor over the call, which the cursor's state holds. A
+             method that yields places is pulled by address, so that the body
+             is given each place itself, as the method yields it. *)
           let yielding : Ground.yielding = { method_; type_arguments } in
-          in_scope st (fun () ->
-              let cursor = boxed_cursor st yielding in
-              call_into st call cursor ~origin;
-              own_in_scope st cursor;
-              pull_cursor st yielding cursor ~each:owned_each)
+          match (signature_of st.context method_).output with
+          | Yields (Own, _) ->
+              in_scope st (fun () ->
+                  let cursor = boxed_cursor st yielding in
+                  call_into st call cursor ~origin;
+                  own_in_scope st cursor;
+                  pull_cursor st yielding cursor ~each:owned_each)
+          | _ ->
+              in_scope st (fun () ->
+                  let signature = signature_of st.context method_ in
+                  let substitution = bind signature.generics type_arguments in
+                  let arguments, mask =
+                    evaluate_arguments st signature substitution call.arguments
+                  in
+                  let cursor = boxed_cursor ~by_address:true st yielding in
+                  let site =
+                    if reports_at_caller method_ then
+                      Some (caller_site_operand st (site_of st origin))
+                    else None
+                  in
+                  cursor_into ?site ~by_address:true st ~path:method_ ~type_arguments ~signature
+                    ~arguments ~mask cursor;
+                  own_in_scope st cursor;
+                  address_pull_loop st yielding cursor
+                    ~part:(address_part_type st.context yielding)
+                    ~body:each))
       | Some (method_, type_arguments), Some loop ->
           let yielding : Ground.yielding = { method_; type_arguments } in
           let mode =

@@ -1,0 +1,26 @@
+type Grid(cells: List[Int64], spare: Int64)
+
+fn Grid.positive(mut self) yields mut Int64 {
+  for index in 0..self.cells.length() {
+    if self.cells[index] > 0 {
+      yield mut self.cells[index]
+    }
+  }
+}
+
+fn Grid.first_positive(mut self) lends mut Int64 {
+  for cell in mut self.positive() {
+    yield mut cell
+    return
+  }
+  yield mut self.spare
+}
+
+test "the part it finds is the element, which a change through it changes" {
+  var grid = Grid(cells: [0, 2, 3], spare: 0)
+  mut grid.first_positive() += 10
+  assert grid.cells == [0, 12, 3]
+  var empty = Grid(cells: [0, -1], spare: 5)
+  mut empty.first_positive() += 1
+  assert empty.spare == 6
+}

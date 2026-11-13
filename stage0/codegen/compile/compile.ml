@@ -55,8 +55,10 @@ let elaborate_code ?(yields_lowered = Fun.id) (context : Lower.context) (instanc
    so that each is made once and its readers are known. *)
 let rec fresh_context lowering database =
   Lower.context ~checks:lowering.checks
-    ~cursor_fields:(fun context yielding ->
-      let function_, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
+    ~cursor_fields:(fun context ~by_address yielding ->
+      let function_, _ =
+        Query.demand database (Lazy.force pulled) (lowering, yielding, by_address)
+      in
       Yields.cursor_fields (Lower.env context)
         ~evidence:(Lower.pulled_evidence context yielding function_)
         function_)
@@ -67,18 +69,21 @@ let rec fresh_context lowering database =
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
     database lowering.target
 
-(* A pulled method's version, with its drops elaborated. *)
+(* A pulled method's version, with its drops elaborated: by value, as a
+   cursor gives its parts, or by address, as a lending method and a method
+   that another pulled one yields through give theirs. *)
 and pulled =
   lazy
     (Query.query ~name:"pulled" ~phase:Phases.lowering ~saved:true ~portable:true
-       ~show:(fun (lowering, yielding) ->
-         show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
-       (fun database (lowering, yielding) ->
+       ~show:(fun (lowering, yielding, by_address) ->
+         show_lowering lowering ^ " "
+         ^ Ground.to_string (if by_address then Address_cursor yielding else Cursor yielding))
+       (fun database (lowering, yielding, by_address) ->
          Compiler_bug.while_doing ~stage:"Compile"
            ("lowering the pulled form of " ^ Ground.to_string (Cursor yielding))
            (fun () ->
              let context = fresh_context lowering database in
-             let function_, owned = Lower.pulled context yielding in
+             let function_, owned = Lower.pulled context yielding ~by_address in
              ( Drops.elaborate (Lower.env context)
                  ~needs_drop:(fun ty -> not (Glue.trivial (Lower.glue context) ty))
                  ~environment:(fun _ -> [])
@@ -87,7 +92,9 @@ and pulled =
 
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
-  let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
+  let pulled ?(by_address = false) yielding =
+    Query.demand database (Lazy.force pulled) (lowering, yielding, by_address)
+  in
   let code instance = Compiled (elaborate_code context instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
@@ -115,8 +122,8 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
                        function_;
                    nested = [||];
                  })))
-  | Lend_begin lending ->
-      let function_, _ = pulled lending in
+  | Cursor_next_address yielding ->
+      let function_, _ = pulled ~by_address:true yielding in
       Compiled
         (Code
            (Lir.canonical_instance
@@ -124,14 +131,44 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
                  {
                    key;
                    main =
-                     Yields.lend_begin (Lower.env context) ~cursor:(Cursor lending)
-                       ~part:(Lower.lend_part_type context lending)
+                     Yields.cursor_next_address (Lower.env context)
+                       ~cursor:(Address_cursor yielding)
+                       ~part:(Lower.address_part_type context yielding)
+                       ~evidence:(Lower.pulled_evidence context yielding function_)
+                       function_;
+                   nested = [||];
+                 })))
+  | Drop (Address_cursor yielding as cursor) ->
+      let function_, owned = pulled ~by_address:true yielding in
+      Compiled
+        (Code
+           (Lir.canonical_instance
+              (Outline.instance (Lower.env context)
+                 {
+                   key;
+                   main =
+                     Yields.cursor_drop (Lower.env context) ~cursor ~owned
+                       ~evidence:(Lower.pulled_evidence context yielding function_)
+                       function_;
+                   nested = [||];
+                 })))
+  | Lend_begin lending ->
+      let function_, _ = pulled ~by_address:true lending in
+      Compiled
+        (Code
+           (Lir.canonical_instance
+              (Outline.instance (Lower.env context)
+                 {
+                   key;
+                   main =
+                     Yields.lend_begin (Lower.env context) ~cursor:(Address_cursor lending)
+                       ~part:(Lower.address_part_type context lending)
                        ~evidence:(Lower.pulled_evidence context lending function_)
                        function_;
                    nested = [||];
                  })))
   | Lend_finish lending ->
-      let function_, _ = pulled lending in
+      let function_, _ = pulled ~by_address:true lending in
       Compiled
         (Code
            (Lir.canonical_instance
@@ -139,7 +176,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
                  {
                    key;
                    main =
-                     Yields.lend_finish (Lower.env context) ~cursor:(Cursor lending)
+                     Yields.lend_finish (Lower.env context) ~cursor:(Address_cursor lending)
                        ~evidence:(Lower.pulled_evidence context lending function_)
                        function_;
                    nested = [||];

@@ -30,7 +30,7 @@ let rec trivial glue ty =
       (* An [any] value and a cursor always have a drop function, which a
          cursor's shape, made from its method's body, need not be looked at
          to know. *)
-      let any = match ty with Ground.Any _ | Cursor _ -> true | _ -> false in
+      let any = match ty with Ground.Any _ | Cursor _ | Address_cursor _ -> true | _ -> false in
       let member : Memory_layout.member -> bool = function
         | Typed ty -> trivial glue ty
         | Raw _ -> true
@@ -553,7 +553,7 @@ let debug glue ty =
       | Never, _ -> ()
       | Function _, _ -> text "fn"
       | Any _, _ -> text "any"
-      | Cursor _, _ -> text "cursor"
+      | (Cursor _ | Address_cursor _), _ -> text "cursor"
       | Lent _, _ ->
           bug "debug glue for %s, which a lent value is copied into first" (Ground.to_string ty)
       | _, Scalar scalar -> scalar_debug glue builder ~output scalar value

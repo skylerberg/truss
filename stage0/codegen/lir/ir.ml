@@ -17,7 +17,7 @@ let bug format = Compiler_bug.bug ~stage:"Lir" format
 (* A cursor always holds its state, which lets code over a cursor that holds
    another be lowered before the cursor's fields are known. *)
 let erased env = function
-  | Value (Cursor _) -> false
+  | Value (Cursor _ | Address_cursor _) -> false
   | Value ty -> Memory_layout.has_zero_size env ty
   | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 

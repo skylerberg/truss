@@ -172,7 +172,8 @@ let folds name ~folded ~run source =
       let database, _ = load source in
       let context =
         Lower.context ~checks:true database target_64
-          ~cursor_fields:(fun _ _ -> failwith "folding a constant lowers no pulled method")
+          ~cursor_fields:(fun _ ~by_address:_ _ ->
+            failwith "folding a constant lowers no pulled method")
           ~constant:(fun context path ->
             match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
       in

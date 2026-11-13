@@ -4,7 +4,7 @@ type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
   normalize_capabilities : Types.capability_set -> Types.capability_set;
-  cursor_fields : Ground.yielding -> (string * Memory_layout.member) list;
+  cursor_fields : by_address:bool -> Ground.yielding -> (string * Memory_layout.member) list;
 }
 
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
@@ -112,7 +112,7 @@ let rec back : Ground.ty -> Types.ty = function
         }
   | Cursor { method_; type_arguments } ->
       Cursor { method_; arguments = List.map back_argument type_arguments }
-  | Lent lent -> bug "%s has no type in the checker" (Ground.to_string (Lent lent))
+  | (Lent _ | Address_cursor _) as ty -> bug "%s has no type in the checker" (Ground.to_string ty)
 
 and back_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (back ty)
@@ -140,7 +140,8 @@ let rec shape context (ty : Ground.ty) : Memory_layout.shape =
   | Never -> Sum []
   | Function function_type -> Convention.function_value_shape function_type
   | Any _ -> Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ]
-  | Cursor yielding -> Record (context.cursor_fields yielding)
+  | Cursor yielding -> Record (context.cursor_fields ~by_address:false yielding)
+  | Address_cursor yielding -> Record (context.cursor_fields ~by_address:true yielding)
   | Lent lent -> lent_shape context lent
   | Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, arguments) with

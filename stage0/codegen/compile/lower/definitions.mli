@@ -19,7 +19,8 @@ type context = {
 
 val context :
   ?checks:bool ->
-  cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+  cursor_fields:
+    (context -> by_address:bool -> Ground.yielding -> (string * Memory_layout.member) list) ->
   constant:(context -> Path.t -> Lir.static_value option) ->
   Query.context ->
   Memory_layout.target ->

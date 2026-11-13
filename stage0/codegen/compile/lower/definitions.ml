@@ -32,7 +32,8 @@ let context ?(checks = false) ~cursor_fields ~constant database target =
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
       normalize = Interface.Impls.normalize database ~bounds:(fun _ -> []);
       normalize_capabilities = Interface.Impls.normalize_capabilities database ~bounds:(fun _ -> []);
-      cursor_fields = (fun yielding -> cursor_fields (Lazy.force context) yielding);
+      cursor_fields =
+        (fun ~by_address yielding -> cursor_fields (Lazy.force context) ~by_address yielding);
     }
   and context =
     lazy

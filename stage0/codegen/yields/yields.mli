@@ -67,3 +67,17 @@ val lend_begin :
    the same pointer and evidence, and returns nothing. *)
 val lend_finish :
   Memory_layout.env -> cursor:Ground.ty -> evidence:Lir.local list -> Lir.function_ -> Lir.function_
+
+(* A yielding method pulled by address, for a method that yields through
+   it: takes a writable pointer to its state, of type [cursor], then the
+   method's evidence. Where [part] is a pointer it returns the part's
+   address, or a null pointer once the method has ended; otherwise it takes
+   a writable pointer to where its part goes after the state, and returns a
+   [Bool]: whether it gave a part. *)
+val cursor_next_address :
+  Memory_layout.env ->
+  cursor:Ground.ty ->
+  part:Lir.ty ->
+  evidence:Lir.local list ->
+  Lir.function_ ->
+  Lir.function_

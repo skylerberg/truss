@@ -29,6 +29,8 @@ let () =
     Fixtures.Feature.lending_method_owns_a_value_at_one_of_its_yields;
   passes "a lending method yields inside a loop over a yielding method that owns a value"
     Fixtures.Feature.lending_method_yields_inside_a_loop_over_a;
+  passes "a `lends mut` method lends the part it finds in a loop over a `yields mut` method"
+    Fixtures.Feature.lends_mut_part_that_it_finds_in_a_loop_over_a;
   passes "a `lends mut` method yields on two paths, and owns a local at one of them"
     Fixtures.Feature.lends_mut_method_yields_on_two_paths_and_owns_a;
   passes "a lending method resumes when its caller's statement exits early"

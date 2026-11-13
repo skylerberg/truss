@@ -40,6 +40,7 @@ val cursor_evidence : Definitions.context -> Ground.yielding -> Path.t list
 
 val cursor_into :
   ?site:Lir.operand ->
+  ?by_address:bool ->
   Lowering.state ->
   path:Path.t ->
   type_arguments:Ground.argument list ->
@@ -149,4 +150,8 @@ val pull_loop :
   body:(Lir.place -> unit) ->
   unit
 
-val boxed_cursor : Lowering.state -> Ground.yielding -> Lir.place
+val boxed_cursor : ?by_address:bool -> Lowering.state -> Ground.yielding -> Lir.place
+
+val address_pull_loop :
+  Lowering.state -> Ground.yielding -> Lir.place -> part:Lir.ty -> body:(Lir.place -> unit) -> unit
+(** Pulls a cursor by address until it ends, running the body with the place of each part. *)

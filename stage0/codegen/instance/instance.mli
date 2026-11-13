@@ -35,6 +35,9 @@ type key =
   | Lend_begin of Ground.yielding
       (** A lending method run up to its [yield], over its state, a value of its [Cursor] type that
           the caller holds: it gives the part, its address, or the lent value its [yield] builds *)
+  | Cursor_next_address of Ground.yielding
+      (** The [next] of a yielding method pulled by address, over its [Address_cursor] state: it
+          gives each part's address, for a pulled or lending method that yields through it *)
   | Lend_finish of Ground.yielding
       (** The rest of a lending method, from the [yield] its [Lend_begin] reached, over the same
           state *)

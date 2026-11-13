@@ -24,7 +24,8 @@ val monomorphic : context -> Monomorphic.context
 
 val context :
   ?checks:bool ->
-  cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+  cursor_fields:
+    (context -> by_address:bool -> Ground.yielding -> (string * Memory_layout.member) list) ->
   constant:(context -> Path.t -> Lir.static_value option) ->
   Query.context ->
   Memory_layout.target ->
@@ -40,8 +41,8 @@ val instance : context -> Instance.key -> Lir.t
 val loop_body_type : context -> Ground.yielding -> Ground.function_type
 (** The type of the loop body that a yielding method in loop form takes. *)
 
-val lend_part_type : context -> Ground.yielding -> Lir.ty
-(** The type of the part that a lending method's [Lend_begin] gives. *)
+val address_part_type : context -> Ground.yielding -> Lir.ty
+(** The type of the part that a method pulled by address gives. *)
 
 (* A constant's static data, where its value folds: literals, operators on
    numbers and on [Bool], other constants that fold, and records, variants,
@@ -60,7 +61,10 @@ val evaluator : context -> Path.t -> Lir.t
    body with each [yield] left in place for yield lowering, and the values a
    cursor that has not started owns, as [Yields.cursor_drop] takes it. *)
 val pulled :
-  context -> Ground.yielding -> Lir.function_ * (Lir.local * (Lir.local * int) option) list
+  context ->
+  Ground.yielding ->
+  by_address:bool ->
+  Lir.function_ * (Lir.local * (Lir.local * int) option) list
 
 (* A cursor's [next] result type: an [Option] of the method's yield type. *)
 val cursor_result : context -> Ground.yielding -> Ground.ty

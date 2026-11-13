@@ -246,8 +246,9 @@ let cursor_evidence context (yielding : Ground.yielding) =
 (* Writes a cursor over a yielding method to [destination]. The cursor holds
    the call's arguments, in the order of the pulled method's parameters:
    its own, then the mask of defaults passed. *)
-let cursor_into ?site st ~path ~type_arguments ~(signature : Types.signature)
+let cursor_into ?site ?(by_address = false) st ~path ~type_arguments ~(signature : Types.signature)
     ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ~mask destination =
+  let yielding : Ground.yielding = { method_ = path; type_arguments } in
   let held = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
   let mask = if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [] in
   let fields =
@@ -260,18 +261,18 @@ let cursor_into ?site st ~path ~type_arguments ~(signature : Types.signature)
        ( destination,
          Build
            {
-             ty = Cursor { method_ = path; type_arguments };
+             ty = (if by_address then Address_cursor yielding else Cursor yielding);
              variant = None;
              fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
            } ))
 
 (* Writes a lambda's function value to [destination], and lowers the lambda
    as a nested function of the instance. The enclosing function fills an
-   environment with a pointer to each captured variable, given as its key,
-   its place, and its type. In the lambda's own state, [bind_capture] binds
-   each captured variable to the place the environment gives it, and [body]
-   lowers the body, given the place, the mode, and the type of each
-   parameter. The lambda is given its environment, then its type's
+   environment with a pointer to each captured variable, given as its place
+   and its type. In the lambda's own state, [body] lowers the body, given
+   the place the environment gives each captured variable, and the place,
+   the mode, and the type of each parameter. The lambda is given its
+   environment, then its type's
    parameters, then the evidence for its type's capabilities, which its
    caller passes: that is the only evidence its code can reach. [output] is
    the lambda's result, which a [?] in it returns early. *)
@@ -729,11 +730,71 @@ let pull_loop st ~(option : Ground.ty) ~(call_next : Lir.place -> unit) ~(body :
       finish st.builder (Goto test);
       start st.builder after)
 
+(* Pulls a cursor by address until it ends, running [body] with the place
+   of each part: the cursor's [next] writes the part's address, or the lent
+   value of type [part] that it builds, to a local, and says whether it
+   gave one. The part is the method's, not the loop's, so the loop drops
+   none of it. *)
+let address_pull_loop st (yielding : Ground.yielding) cursor ~(part : Lir.ty)
+    ~(body : Lir.place -> unit) =
+  in_scope st (fun () ->
+      let received = local st.builder ~borrowed:true part in
+      let evidence = List.map (evidence_of st) (cursor_evidence st.context yielding) in
+      let depth = List.length st.scopes in
+      let test = block st.builder and inside = block st.builder and after = block st.builder in
+      finish st.builder (Goto test);
+      start st.builder test;
+      let more = local st.builder (Raw Bool) in
+      let state = Lir.Pointer { target = Value (Address_cursor yielding); writable = true } in
+      let evidence_types = List.map (fun _ -> Convention.evidence) evidence in
+      let target parameters result =
+        Lir.Direct
+          {
+            function_ = Instance (Cursor_next_address yielding);
+            signature = { parameters; result = Some result; returns = true };
+          }
+      in
+      (match part with
+      | Pointer _ ->
+          (* The part's address, which is null once the method has ended. *)
+          emit st.builder
+            (Call
+               {
+                 target = target (state :: evidence_types) part;
+                 arguments = Address { place = cursor; writable = true } :: evidence;
+                 result = Returned (at received);
+               });
+          let address = local st.builder (Raw (Integer UInt64)) in
+          emit st.builder (Assign (at address, Convert (Copy (at received), Integer UInt64)));
+          emit st.builder
+            (Assign (at more, Binary (Not_equal, Copy (at address), constant_int UInt64 Z.zero)))
+      | _ ->
+          emit st.builder
+            (Call
+               {
+                 target =
+                   target
+                     (state :: Pointer { target = part; writable = true } :: evidence_types)
+                     (Raw Bool);
+                 arguments =
+                   Address { place = cursor; writable = true }
+                   :: Address { place = at received; writable = true }
+                   :: evidence;
+                 result = Returned (at more);
+               }));
+      branch st.builder (Copy (at more)) ~yes:inside ~no:after;
+      start st.builder inside;
+      in_scope st (fun () ->
+          looping st ~continue_:test ~break_:after ~depth (fun () ->
+              body (match part with Pointer _ -> at received / Deref | _ -> at received)));
+      finish st.builder (Goto test);
+      start st.builder after)
+
 (* A heap block for a cursor, which the current scope frees. A loop over a
    recursive yielding method keeps its cursor there, so that a cursor over
    the method can hold another. *)
-let boxed_cursor st (yielding : Ground.yielding) : Lir.place =
-  let cursor_ty = Ground.Cursor yielding in
+let boxed_cursor ?(by_address = false) st (yielding : Ground.yielding) : Lir.place =
+  let cursor_ty = if by_address then Ground.Address_cursor yielding else Cursor yielding in
   let boxed =
     local st.builder ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true })
   in

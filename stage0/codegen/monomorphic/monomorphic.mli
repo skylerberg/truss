@@ -15,7 +15,7 @@ type context = {
   normalize_capabilities : Types.capability_set -> Types.capability_set;
       (** Replaces each associated capability set whose base is known by the capabilities that its
           [impl] defines *)
-  cursor_fields : Ground.yielding -> (string * Memory_layout.member) list;
+  cursor_fields : by_address:bool -> Ground.yielding -> (string * Memory_layout.member) list;
       (** The fields of a pulled method's cursor, from its lowered body *)
 }
 

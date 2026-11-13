@@ -16,6 +16,9 @@ type ty =
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
       (** [any Cursor[Element = Int64]], with every associated type fixed, sorted by name *)
   | Cursor of yielding  (** The nameless type of a pulled yielding method *)
+  | Address_cursor of yielding
+      (** The state of a lending method, or of a yielding method that a pulled or lending method
+          yields through: a pull gives the part's address, which holds until the next pull *)
   | Lent of lent
       (** The value of a constructor of lent places that a lending or yielding method yields. It
           owns nothing. *)

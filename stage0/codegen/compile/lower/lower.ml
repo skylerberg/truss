@@ -90,11 +90,11 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
    each [own] argument's local, and for a parameter with a default, the
    mask's local and the parameter's bit in it, since the argument is there
    only when the bit is set. *)
-let pulled context (yielding : Ground.yielding) :
+let pulled context (yielding : Ground.yielding) ~by_address :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let parameters, _ = Mir_form.core_of context yielding.method_ in
-  let st = enter context ~form:Pulled (frame_of code) in
+  let st = enter context ~form:(Pulled { by_address }) (frame_of code) in
   let bound, mask, parameter_locals, places =
     begin_body st ~how:(Convention.held context.env) ~parameters
   in
@@ -115,15 +115,11 @@ let pulled context (yielding : Ground.yielding) :
         else None)
       bound
   in
-  (* A lending method of the standard library holds the position its caller
-     gave it, before its evidence, as one of its state's fields. *)
+  (* A method of the standard library pulled by address, a lending one or
+     one that another yields through, holds the position its caller gave it,
+     before its evidence, as one of its state's fields. *)
   let parameter_locals =
-    let lends =
-      match (signature_of context yielding.method_).output with
-      | Lends _ -> true
-      | Returns _ | Yields _ -> false
-    in
-    if reports_at_caller yielding.method_ && lends then begin
+    if reports_at_caller yielding.method_ && by_address then begin
       let site = local st.builder ~name:"caller_site" (Raw (Nullable_pointer Opaque)) in
       st.caller_site <- Some site;
       let evidence = List.length (Targets.cursor_evidence context yielding) in
@@ -275,7 +271,7 @@ let instance context (key : Instance.key) : Lir.t =
   | _ -> bug "%s is not code from source" (Instance.to_string key)
 
 let loop_body_type = Mir_form.loop_body_type
-let lend_part_type = Mir_form.lend_part_type
+let address_part_type = Mir_form.address_part_type
 
 module For_testing = struct
   let constant_value = constant_value

@@ -128,10 +128,9 @@ nothing to drop.
 
 - **Every value has an owner from its first moment.** A local of the MIR
   that owns its value is dropped where the MIR marks it dead. A scope owns
-  the values that lowering itself makes, and the scope around an inlined or
-  pulled method owns all of the method's locals, so a `break` at a `yield`
-  and a `yield`'s stop drop them. Scopes are one stack, and a jump out of a
-  loop's body leaves exactly the scopes it leaves.
+  the values that lowering itself makes, and the function's own scope owns
+  all of its locals, so a `yield`'s stop drops them. Scopes are one stack,
+  and a jump out of a loop's body leaves exactly the scopes it leaves.
 - **Drop elaboration** works as Rust's does: lowering writes a drop wherever
   a scope ends, and a dataflow analysis finds which places and fields may
   still own a value there, with a flag where only some paths do.
@@ -145,18 +144,39 @@ shared.
 
 ## Lending and yielding methods
 
-**Stage0 inlines a lending or yielding method into its caller.** Each
-`yield` hands its place to the caller's statement or runs the loop body
-there: `continue` goes on after the `yield`, and `break` takes its stop path,
-so the method's locals are dropped as the loop leaves them. That is a plain
-loop, with no coroutine at run time. A lend with nothing left to do, as for
-an index into a `List`, costs nothing. The design that replaces inlining is
-to pass the caller's code to the method as a function, which inlining in the
-C compiler makes as cheap.
+**Each lending or yielding method compiles once for each way it is used,**
+never into its caller:
 
-**The rest of a lending method runs at its part's end,** which the MIR
-marks. Where some path reaches that end without the call, a flag, one for
-each region that tasks may run at once, says whether the call ran.
+| Use | Form | Calling it |
+|---|---|---|
+| A `for` loop over a yielding method | The loop form: the method takes the caller's loop body last, as a function, and calls it at each `yield` | The body is a region of the caller, outlined after drop elaboration, which returns whether to go on |
+| A `parallel for` over a method that yields by position | The chunked loop form: the method's range loop runs in parts at once | As the loop form |
+| A lending call | A yield-once state machine over a state the caller holds: `Lend_begin` runs the method to its `yield` and gives the part's address, and `Lend_finish` runs the rest where the part ends | Where some path reaches the part's end without the call, a flag says whether it ran |
+| A cursor | A state machine whose `next` gives each part by value | |
+
+**A loop body leaves only by its exits.** A `continue` returns true, and a
+`break`, a `return`, or an early exit from a task records which exit it
+took, returns false, and the caller goes on there once the method has
+stopped. The method's stop path drops its own locals, so neither side
+reaches into the other's scopes. A task spawned in a body outlives the
+body's call, so outlining makes a fork of tasks before the loop around it,
+and its environment is the caller's.
+
+**A pulled or lending method that yields through another** pulls the other
+as a cursor, since its own `yield` is a state that no function can hold. A
+method that yields places is pulled by address, as a lending method is, so
+the part is the place itself, not a copy: a change through it reaches the
+collection, and nothing is allocated.
+
+**A lend with nothing left to do costs nothing.** Its state holds only its
+arguments and its `Lend_finish` is empty, and a development build inlines
+both from the standard library, as release builds do with ThinLTO.
+
+**A check in the standard library reports its caller's position.** A
+lending or yielding method of the standard library takes the position of
+its call, which an index out of bounds then names, as Rust's
+`#[track_caller]` does, and passes it on to the methods it calls the same
+way.
 
 **A pulled yielding method is a state machine,** as C# and Kotlin compile
 iterators. Each `yield` is a state, and the locals live across a `yield`
@@ -215,7 +235,10 @@ Chase and Lev's work-stealing deque. A branch's record lives in the fork's
 frame, which does not return until every branch is done, so nothing is
 allocated. A range is split into parts whose size depends only on the range,
 never on the number of threads, so the result does not depend on the
-machine. A test program runs a fork's branches in order.
+machine. A test program runs a fork's branches in order. A `parallel for`
+over a method that yields by position calls the method's chunked loop form,
+whose range loop is split this way, with the loop's body as a function each
+part calls.
 
 ## Concurrency
 

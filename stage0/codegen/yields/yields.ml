@@ -493,3 +493,64 @@ let lend_finish _env ~cursor ~evidence (function_ : Lir.function_) =
     blocks = Array.append [| entry_switch 0 resumes ~default:None |] blocks;
     environment = [];
   }
+
+(* A yielding method pulled by address. Where the part is an address, its
+   [next] returns it, or a null pointer once the method has ended; where it
+   is the lent value a [yield] builds, [next] writes it through its second
+   parameter and returns whether it gave one. *)
+let cursor_next_address _env ~cursor ~part ~evidence (function_ : Lir.function_) =
+  let by_pointer = match part with Lir.Pointer _ -> true | _ -> false in
+  let base = if by_pointer then 1 else 2 in
+  let result_slot = { Lir.root = Local 1; projections = [ Deref ] } in
+  let gave value : Lir.statement list * Lir.terminator =
+    if by_pointer then ([], Return (Some value))
+    else ([ Assign (result_slot, Use value) ], Return (Some (Constant (Bool true))))
+  in
+  let none : Lir.terminator = Return (Some (Constant (if by_pointer then Null else Bool false))) in
+  let finished = List.length (yields function_) + 1 in
+  let blocks, _ =
+    state_machine function_ ~evidence ~cursor:0 ~base
+      ~yield_:(fun ~state ~value ~resume:_ ~stop:_ ->
+        let statements, terminator = gave value in
+        (set_state 0 state :: statements, terminator))
+      ~return_:(fun () -> ([ set_state 0 finished ], none))
+  in
+  let done_block = Array.length blocks + 1 in
+  let resumes =
+    List.mapi (fun local (_, resume, _) -> (local + 1, resume + 1)) (yields function_)
+  in
+  let state_local : Lir.local_info =
+    {
+      ty = Pointer { target = Value cursor; writable = true };
+      name = Some "state";
+      borrowed = false;
+    }
+  in
+  {
+    Lir.parameters =
+      (if by_pointer then [ 0 ] else [ 0; 1 ]) @ List.map (fun local -> local + base) evidence;
+    written_result = None;
+    result = Some (if by_pointer then part else Raw Bool);
+    returns = true;
+    locals =
+      Array.append
+        (if by_pointer then [| state_local |]
+         else
+           [|
+             state_local;
+             {
+               ty = Pointer { target = part; writable = true };
+               name = Some "part";
+               borrowed = false;
+             };
+           |])
+        function_.locals;
+    blocks =
+      Array.concat
+        [
+          [| entry_switch 0 (((0, 1) :: resumes) @ [ (finished, done_block) ]) ~default:None |];
+          blocks;
+          [| { statements = []; terminator = none } |];
+        ];
+    environment = [];
+  }
