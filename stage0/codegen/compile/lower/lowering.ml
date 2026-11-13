@@ -66,6 +66,10 @@ and mir_frame = {
   mutable taken : Mir.place list;
       (** The targets of compound assignments whose old value an operator has taken, which hold
           nothing until they are assigned again *)
+  moves : Moves.t;  (** Which places may hold a value at each point *)
+  flags : (Moves.path * Lir.local) list;
+      (** The [Bool] local that says whether each flagged path holds a value *)
+  mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
 }
 
 (* The early exits of the tasks of one [concurrent] block or loop. An
@@ -91,6 +95,7 @@ and early_exit = {
   remaining : (Core.task * Mir.statement list) list;
       (** The enclosing tasks that the exit has yet to end, innermost first *)
   exit : Mir.task_exit;
+  state : Moves.state;  (** What may hold a value where the exit was taken *)
 }
 
 (* A task whose body is being lowered. *)
@@ -131,6 +136,9 @@ type state = {
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
   mutable forks : int;  (** How many [parallel] statements the function has marked *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
+  mutable moved : Lir.place list;
+      (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
+          of, so that the scope that owns one drops it only if it holds a value *)
 }
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
@@ -152,6 +160,7 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     pulling;
     forks = 0;
     tasks = [];
+    moved = [];
   }
 
 (* Whether a [parallel] statement's parts are marked here, to become
@@ -211,6 +220,12 @@ let rec binding_scope = function
 
 let innermost_scope st = match st.scopes with scope :: _ -> scope | [] -> bug "no scope"
 
+(* A move out of a place, which the scope that owns the place, if lowering
+   owns it, then does not drop. *)
+let moved st place =
+  if not (List.mem place st.moved) then st.moved <- place :: st.moved;
+  Lir.Move place
+
 (* Has the scope of the names around own the value at a place. *)
 let own_in_scope st place =
   let scope = binding_scope st.scopes in
@@ -234,11 +249,11 @@ let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 (* A parameter of the function being written, as the calling convention
    passes it, or as [how] does: the local it arrives in, unless it has no
    size, and the place its value is read at. The function owns it when
-   [owned]; otherwise it is the caller's, and one passed by value is
-   borrowed. *)
-let parameter st ?how ~owned (mode : Ground.mode) ty =
+   [owned], and the scope around drops it unless [in_scope] is false;
+   otherwise it is the caller's. *)
+let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let how = Option.value how ~default:(Convention.parameter st.context.env) in
-  let own place = if owned && not (trivial st ty) then own_in_scope st place in
+  let own place = if in_scope && owned && not (trivial st ty) then own_in_scope st place in
   match how mode ty with
   | None -> (None, temporary st ty)
   | Some (Lir.Pointer _ as pointer) ->
@@ -247,7 +262,7 @@ let parameter st ?how ~owned (mode : Ground.mode) ty =
       own place;
       (Some arrives, place)
   | Some passed ->
-      let arrives = local st.builder ~borrowed:(not owned) passed in
+      let arrives = local st.builder passed in
       own (at arrives);
       (Some arrives, at arrives)
 
@@ -290,20 +305,13 @@ let returned_type st =
       | _ -> None)
   | No_result -> None
 
-(* Drops the result slot's value before it is written again: an early
-   [return] can come after part of the result was written. *)
-let clear_result st =
-  match (returned_type st, result_place st) with
-  | Some ty, Some place -> if not (trivial st ty) then emit st.builder (Drop place)
-  | _ -> ()
-
 let return_result st : Lir.terminator =
   Return (match st.result with Returned_in local -> Some (Move (at local)) | _ -> None)
 
 let drop_scope st (scope : scope) =
   List.iter
     (function
-      | Drop_value place -> emit st.builder (Drop place)
+      | Drop_value place -> if not (List.mem place st.moved) then emit st.builder (Drop place)
       | Free_pointed pointer ->
           emit st.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
@@ -323,7 +331,7 @@ let drop_scope st (scope : scope) =
           start st.builder after
       | Write_back { destination; source; ty } ->
           emit st.builder
-            (Assign (destination, Use (if trivial st ty then Copy source else Move source)))
+            (Assign (destination, Use (if trivial st ty then Copy source else moved st source)))
       | Join_group join -> emit st.builder join)
     scope.owned
 
@@ -390,7 +398,7 @@ let unreachable_block st =
 (* An operand for an owned position: a [var], an [own] argument, a field, a
    returned value. The type checker has made sure a place there is a
    temporary or was marked [own], or copies implicitly. *)
-let owned st place ty = if trivial st ty then Lir.Copy place else Lir.Move place
+let owned st place ty = if trivial st ty then Lir.Copy place else moved st place
 
 (* Gives [destination], which holds nothing, the value at a place as its
    own: moved out of the place, or for a constant's static data, which
@@ -423,12 +431,6 @@ let looping st ~continue_ ~break_ ~depth body =
   st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
   body ();
   st.loops <- List.tl st.loops
-
-(* Replaces the value at a place with one computed beforehand: the old
-   value is dropped, and the new value moved in. *)
-let replace st place ty ~by =
-  if not (trivial st ty) then emit st.builder (Drop place);
-  emit st.builder (Assign (place, Use (owned st by ty)))
 
 (* The type of a place in the function being written, or [None] where it has
    zero size or is reached through a lambda's environment. *)

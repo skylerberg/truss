@@ -250,7 +250,6 @@ type basic_block = { statements : statement list; terminator : terminator }
 type local_info = {
   ty : ty;
   name : string option;
-  borrowed : bool;
       (** Holds the bits of a value that something else owns, as a read-only parameter passed by
           value does: nothing here drops it *)
 }

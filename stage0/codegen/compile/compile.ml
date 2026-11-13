@@ -37,21 +37,9 @@ type lowered_outcome =
   | Folded of Lir.data
   | Evaluate of Path.t * Ground.ty
 
-let environment (instance : Lir.t) nested_index = instance.nested.(nested_index).environment
-
-let elaborate_code (context : Lower.context) (instance : Lir.t) =
-  let needs_drop ty = not (Glue.trivial (Lower.glue context) ty) in
-  let elaborate function_ =
-    Drops.elaborate (Lower.env context) ~needs_drop ~environment:(environment instance) function_
-  in
-  Lir.Code
-    (Lir.canonical_instance
-       (Outline.instance (Lower.env context)
-          {
-            instance with
-            main = elaborate instance.main;
-            nested = Array.map elaborate instance.nested;
-          }))
+(* An instance with its regions outlined, in canonical form. *)
+let outlined (context : Lower.context) (instance : Lir.t) =
+  Lir.Code (Lir.canonical_instance (Outline.instance (Lower.env context) instance))
 
 (* A lowering context of its own for one computation, which reads a pulled
    method's cursor and another constant's value through the queries below,
@@ -70,7 +58,7 @@ let rec fresh_context lowering database =
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
     database lowering.target
 
-(* A pulled method's version, with its drops elaborated. *)
+(* A pulled method's version. *)
 and pulled =
   lazy
     (Query.query ~name:"pulled" ~phase:Phases.lowering ~saved:true ~portable:true
@@ -79,14 +67,7 @@ and pulled =
        (fun database (lowering, yielding) ->
          Compiler_bug.while_doing ~stage:"Compile"
            ("lowering the pulled form of " ^ Ground.to_string (Cursor yielding))
-           (fun () ->
-             let context = fresh_context lowering database in
-             let function_, owned = Lower.pulled context yielding in
-             ( Drops.elaborate (Lower.env context)
-                 ~needs_drop:(fun ty -> not (Glue.trivial (Lower.glue context) ty))
-                 ~environment:(fun _ -> [])
-                 function_,
-               owned ))))
+           (fun () -> Lower.pulled (fresh_context lowering database) yielding)))
 
 (* An instance's C, once its LIR is checked. *)
 and emitted (context : Lower.context) (compiled : Lir.compiled) =
@@ -98,7 +79,7 @@ and emitted (context : Lower.context) (compiled : Lir.compiled) =
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-  let code instance = emitted context (elaborate_code context instance) in
+  let code instance = emitted context (outlined context instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)

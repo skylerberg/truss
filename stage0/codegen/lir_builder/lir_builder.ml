@@ -19,8 +19,8 @@ let create () =
     statements = [];
   }
 
-let local builder ?name ?(borrowed = false) ty =
-  builder.locals <- { Lir.ty; name; borrowed } :: builder.locals;
+let local builder ?name ty =
+  builder.locals <- { Lir.ty; name } :: builder.locals;
   builder.local_count <- builder.local_count + 1;
   builder.local_count - 1
 

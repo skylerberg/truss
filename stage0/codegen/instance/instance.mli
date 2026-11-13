@@ -52,10 +52,6 @@ type key =
 val compare : key -> key -> int
 val equal : key -> key -> bool
 
-(* The canonical encoding, in deterministic CBOR, with each path written by
-   [path], as in [Ground.encode]. *)
-val encode : ?path:(Path.t -> Cbor.t) -> key -> Cbor.t
-
 (* The C symbol of an instance: [t_], then its path and type arguments, with
    markers between them that no Truss name can contain. A long name keeps a
    prefix and adds a hash of the whole name.

@@ -44,8 +44,7 @@ let loop_form env ~(body : Ground.function_type) (function_ : Lir.function_) =
     locals =
       Array.append function_.locals
         [|
-          { ty = Value (Function body); name = Some "body"; borrowed = true };
-          { ty = go_on_ty; name = Some "go_on"; borrowed = false };
+          { ty = Value (Function body); name = Some "body" }; { ty = go_on_ty; name = Some "go_on" };
         |];
     blocks;
   }
@@ -286,12 +285,10 @@ let cursor_next env ~cursor ~result ~evidence (function_ : Lir.function_) =
     locals =
       Array.concat
         [
-          Array.of_list
-            (List.map (fun ty -> { Lir.ty; name = Some "result"; borrowed = false }) result_pointer);
-          [| { ty = cursor_ty; name = Some "cursor"; borrowed = false } |];
+          Array.of_list (List.map (fun ty -> { Lir.ty; name = Some "result" }) result_pointer);
+          [| { ty = cursor_ty; name = Some "cursor" } |];
           function_.locals;
-          (if through_pointer then [||]
-           else [| { Lir.ty = Value result; name = Some "result"; borrowed = false } |]);
+          (if through_pointer then [||] else [| { Lir.ty = Value result; name = Some "result" } |]);
         ];
     blocks =
       Array.concat
@@ -339,7 +336,7 @@ let cursor_drop _env ~cursor ~owned ~evidence (function_ : Lir.function_) =
   in
   let added = ref [] in
   let new_local ty =
-    added := { Lir.ty; name = None; borrowed = false } :: !added;
+    added := { Lir.ty; name = None } :: !added;
     Array.length function_.locals + List.length !added
   in
   let started = ref [] and statements = ref [] in
@@ -386,11 +383,7 @@ let cursor_drop _env ~cursor ~owned ~evidence (function_ : Lir.function_) =
       Array.concat
         [
           [|
-            {
-              Lir.ty = Pointer { target = Value cursor; writable = true };
-              name = Some "cursor";
-              borrowed = false;
-            };
+            { Lir.ty = Pointer { target = Value cursor; writable = true }; name = Some "cursor" };
           |];
           function_.locals;
           Array.of_list (List.rev !added);

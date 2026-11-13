@@ -39,8 +39,8 @@ already needs the platform's C toolchain.
 ### Why one IR before C
 
 A small IR, the LIR, between the MIR and C text gives one place for
-every transformation, since drop elaboration, the cursor state machine, and
-outlining `parallel` branches are passes over a control-flow graph. The LIR
+every transformation, since the cursor state machine and outlining
+`parallel` branches are passes over a control-flow graph. The LIR
 is not SSA: locals are mutable slots, since the C compiler builds SSA
 itself, and slots make drops and state machines simpler.
 
@@ -133,16 +133,17 @@ A move is a copy of the value's bytes, after which the source place holds
 nothing to drop.
 
 - **Every value has an owner from its first moment.** A local of the MIR
-  that owns its value is dropped where the MIR marks it dead. A scope owns
-  the values that lowering itself makes, and the scope around an inlined or
-  pulled method owns all of the method's locals, so a `break` at a `yield`
-  and a `yield`'s stop drop them. Scopes are one stack, and a jump out of a
-  loop's body leaves exactly the scopes it leaves.
-- **Drop elaboration** works as Rust's does: lowering writes a drop wherever
-  a scope ends, and a dataflow analysis finds which places and fields may
-  still own a value there, with a flag where only some paths do.
-- **`Drops` checks its input,** so a mistake in lowering is a compiler bug
-  where it is made, not a leak in the runs that reach it.
+  that owns its value is dropped where the MIR ends it, and the MIR ends
+  every local on every way out but the parameters, which the function drops
+  where it returns. A scope owns the values that lowering itself makes, and
+  drops each one that lowering did not move.
+- **One move analysis decides each drop.** `Moves`, a forward analysis of
+  the MIR, says which places and fields may hold a value at each point.
+  Where a local ends, lowering drops all of it, the parts that were not
+  moved out, or, where only some paths give it a value, what a flag says.
+  The ownership check's rule of what moves is the same: a call moves each
+  argument passed to an `own` parameter, and an assignment moves what it
+  reads by value.
 - **Drop order is unobservable,** since dropping runs no Truss code.
 - **A panic drops nothing;** the operating system reclaims everything.
 
@@ -210,11 +211,10 @@ on a stack of its own, on a pool of threads:
 ## Parallelism
 
 A `parallel` branch, and a `parallel for` body, becomes a function of its
-own, in two steps with drop elaboration between them. Lowering first writes
-the branches in place, in order, as regions, so drop elaboration analyzes
-them as ordinary code. `Outline` then makes each region a nested function.
-It stops at a drop flag shared between regions, which would let one branch
-drop a value another had moved, a double free.
+own, in two steps. Lowering first writes the branches in place, in order,
+as regions, with their drops decided. `Outline` then makes each region a
+nested function. It stops at a drop flag shared between regions, which
+would let one branch drop a value another had moved, a double free.
 
 A fork runs its first branch and offers the rest to other threads through
 Chase and Lev's work-stealing deque. A branch's record lives in the fork's

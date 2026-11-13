@@ -363,7 +363,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
         ~arguments:[ (Read, view_ty, view) ]
         ~destination:text ();
       lower Storage_push [ string_ty ]
-        [ Place (list / Field storage_field); Value (Move text) ]
+        [ Place (list / Field storage_field); Value (moved st text) ]
         None);
   st.evidence <- real_implementations st ~user:"main" (evidence_for st.context [] signature.uses);
   let exit_ty =

@@ -46,6 +46,7 @@
   core_print
   core_walk
   mir
+  moves
   parser
   reference
   cbor

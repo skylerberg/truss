@@ -38,7 +38,7 @@ val describe :
 
 val int32 : Ground.ty
 val usize : Ground.ty
-val local : ?name:string -> ?borrowed:bool -> Lir.ty -> Lir.local_info
+val local : ?name:string -> Lir.ty -> Lir.local_info
 val value : Ground.ty -> Lir.ty
 val at : ?projections:Lir.projection list -> Lir.local -> Lir.place
 val copy : ?projections:Lir.projection list -> Lir.local -> Lir.operand

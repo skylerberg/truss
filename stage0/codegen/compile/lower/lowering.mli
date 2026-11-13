@@ -32,6 +32,10 @@ and mir_frame = {
   mutable provides : (Path.t * Lir.operand) list list;
   returned : Mir.local list;
   mutable taken : Mir.place list;
+  moves : Moves.t;  (** Which places may hold a value at each point *)
+  flags : (Moves.path * Lir.local) list;
+      (** The [Bool] local that says whether each flagged path holds a value *)
+  mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
 }
 
 type early_exits = {
@@ -45,6 +49,7 @@ and early_exit = {
   ends : Mir.statement list;
   remaining : (Core.task * Mir.statement list) list;
   exit : Mir.task_exit;
+  state : Moves.state;
 }
 
 type task = {
@@ -78,6 +83,9 @@ type state = {
   pulling : bool;
   mutable forks : int;
   mutable tasks : task list;
+  mutable moved : Lir.place list;
+      (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
+          of, so that the scope that owns one drops it only if it holds a value *)
 }
 
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
@@ -107,6 +115,7 @@ val binding : state -> ?name:string -> Ground.ty -> Lir.place
 val parameter :
   state ->
   ?how:(Ground.mode -> Ground.ty -> Lir.ty option) ->
+  ?in_scope:bool ->
   owned:bool ->
   Ground.mode ->
   Ground.ty ->
@@ -116,7 +125,6 @@ val evidence_parameters : state -> Path.t list -> Lir.local list
 val result_slot : state -> Convention.result -> unit
 val result_place : state -> Lir.place option
 val returned_type : state -> Ground.ty option
-val clear_result : state -> unit
 val return_result : state -> Lir.terminator
 val leave_to : state -> int -> unit
 val open_scope : state -> scope_kind -> scope
@@ -129,6 +137,7 @@ val finish_function :
 
 val nested_functions : state -> Lir.function_ array
 val unreachable_block : state -> unit
+val moved : state -> Lir.place -> Lir.operand
 val owned : state -> Lir.place -> Ground.ty -> Lir.operand
 val take : state -> Lir.place -> Ground.ty -> destination:Lir.place -> unit
 val snapshot : state -> Lir.place -> Lir.place
@@ -136,7 +145,6 @@ val snapshot : state -> Lir.place -> Lir.place
 val looping :
   state -> continue_:Lir.block -> break_:Lir.block -> depth:int -> (unit -> unit) -> unit
 
-val replace : state -> Lir.place -> Ground.ty -> by:Lir.place -> unit
 val place_type : state -> Lir.place -> Lir.ty option
 val lent_at : state -> Lir.place -> Ground.lent option
 val project : state -> Lir.place -> Lir.projection -> Lir.place

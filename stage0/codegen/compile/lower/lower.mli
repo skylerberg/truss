@@ -3,9 +3,9 @@
    Lowering reads a definition's core form, which gives every node's
    meaning, and writes LIR with every choice made:
    which instance each call reaches, how each argument is passed, which
-   values move and which are copied, and where each owned local goes out of
-   scope, on every path. It writes a [drop] wherever an owned value leaves
-   its scope; drop elaboration then decides each one's remaining ownership. *)
+   values move and which are copied, and what each owned local holds where
+   it goes out of scope, on every path, which the move analysis of the
+   instance's MIR says, and drops exactly that. *)
 
 (* A valid program stage0 cannot lower yet: the construct, and its position
    if one is known. It is not a compiler bug: the driver reports it as a
@@ -34,7 +34,7 @@ val context :
     readers are known. *)
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
-   test, before drop elaboration. *)
+   test. *)
 val instance : context -> Instance.key -> Lir.t
 
 (* A constant's static data, where its value folds: literals, operators on
@@ -50,8 +50,8 @@ val constant : context -> Path.t -> constant
    its binary form. *)
 val evaluator : context -> Path.t -> Lir.t
 
-(* The pulled version of a yielding method, before drop elaboration: its
-   body with each [yield] left in place for yield lowering, and the values a
+(* The pulled version of a yielding method: its body with each [yield]
+   left in place for yield lowering, and the values a
    cursor that has not started owns, as [Yields.cursor_drop] takes it. *)
 val pulled :
   context -> Ground.yielding -> Lir.function_ * (Lir.local * (Lir.local * int) option) list

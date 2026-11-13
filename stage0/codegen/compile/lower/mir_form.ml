@@ -54,59 +54,6 @@ let site_of st (origin : Core.origin) =
 let failure_site st (origin : Core.origin) =
   match st.frame.reported with Some site -> site | None -> site_of st origin
 
-(* The MIR of one body, ready to lower: how many times each local that
-   names a place is bound to one, which is more than once where several
-   patterns bind it. *)
-let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
-  let aliases = Hashtbl.create 8 and lent_values = Hashtbl.create 1 in
-  Array.iter
-    (fun (block : Mir.basic_block) ->
-      List.iter
-        (fun (statement : Mir.statement) ->
-          match statement.kind with
-          | Assign { target = { root = Local local; projections = [] }; value; _ } -> (
-              (match (body.locals.(local).kind, value) with
-              | ( (Lent (Read | Mut) | Source { mode = Read | Mut; _ }),
-                  (Construct _ | Operand (Borrow _)) ) ->
-                  Hashtbl.add lent_values local value
-              | _ -> ());
-              match value with
-              | Operand (Borrow _) ->
-                  Hashtbl.replace aliases local
-                    (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
-              | _ -> ())
-          | _ -> ())
-        block.statements)
-    body.blocks;
-  let built = Hashtbl.create 1 in
-  Hashtbl.iter
-    (fun local _ ->
-      let values = Hashtbl.find_all lent_values local in
-      if List.exists (function Mir.Construct _ -> true | _ -> false) values then
-        Hashtbl.replace built local values)
-    lent_values;
-  {
-    body;
-    lambdas;
-    places = Hashtbl.create 32;
-    aliases;
-    built;
-    owner;
-    returns_into;
-    forks = Hashtbl.create 1;
-    provides = [];
-    returned =
-      Array.fold_left
-        (fun returned (block : Mir.basic_block) ->
-          match block.terminator with
-          | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
-            when body.locals.(local).kind = Temporary ->
-              local :: returned
-          | _ -> returned)
-        [] body.blocks;
-    taken = [];
-  }
-
 let info st local = (mir st).body.locals.(local)
 
 (* The core local a parameter or a binding of the MIR is, if it is one. *)
@@ -135,9 +82,8 @@ let bind_local st local place =
 let result_slot st =
   match (mir st).returns_into with Some destination -> Some destination | None -> result_place st
 
-(* A new LIR local for a local of the MIR, which the scope that owns the
-   body's locals owns. A temporary that a [return] returns is the result's
-   slot. *)
+(* A new LIR local for a local of the MIR. A temporary that a [return]
+   returns is the result's slot. *)
 let rec fresh_place st local : Lir.place =
   match result_slot st with
   | Some slot when List.mem local (mir st).returned ->
@@ -161,10 +107,6 @@ and new_place st local : Lir.place =
         boxed / Deref
     | _ -> at (Lir_builder.local st.builder ?name (Value ty))
   in
-  (match frame.owner with
-  | Some scope when owns st local && not (trivial st ty) ->
-      scope.owned <- Drop_value place :: scope.owned
-  | _ -> ());
   bind_local st local place;
   place
 
@@ -227,6 +169,127 @@ let variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list
         variants
   | Scalar _ | Array _ -> bug "the fields of %s, which has none" (Ground.to_string ty)
 
+(* The MIR of one body, ready to lower: how many times each local that
+   names a place is bound to one, which is more than once where several
+   patterns bind it; which places may hold a value at each point; and the
+   flag of each place that is dropped where it may hold nothing. *)
+let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~lambdas
+    (body : Mir.body) : mir_frame =
+  let aliases = Hashtbl.create 8 and lent_values = Hashtbl.create 1 in
+  Array.iter
+    (fun (block : Mir.basic_block) ->
+      List.iter
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Assign { target = { root = Local local; projections = [] }; value; _ } -> (
+              (match (body.locals.(local).kind, value) with
+              | ( (Lent (Read | Mut) | Source { mode = Read | Mut; _ }),
+                  (Construct _ | Operand (Borrow _)) ) ->
+                  Hashtbl.add lent_values local value
+              | _ -> ());
+              match value with
+              | Operand (Borrow _) ->
+                  Hashtbl.replace aliases local
+                    (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
+              | _ -> ())
+          | _ -> ())
+        block.statements)
+    body.blocks;
+  let built = Hashtbl.create 1 in
+  Hashtbl.iter
+    (fun local _ ->
+      let values = Hashtbl.find_all lent_values local in
+      if List.exists (function Mir.Construct _ -> true | _ -> false) values then
+        Hashtbl.replace built local values)
+    lent_values;
+  let parts =
+    Array.fold_left
+      (fun parts (block : Mir.basic_block) ->
+        match block.terminator with For { part; _ } -> part :: parts | _ -> parts)
+      [] body.blocks
+  in
+  (* How each parameter is passed, where it is not as its binding says: a
+     lambda's parameters are patterns, and its function type says how each
+     is passed. *)
+  let passed_as local : Ground.mode option =
+    match passed with
+    | None -> None
+    | Some modes -> Option.map (List.nth modes) (List.find_index (Int.equal local) body.parameters)
+  in
+  (* The locals whose places hold values of their own, which their ends
+     drop. A capture is a place lowering gives it. *)
+  let owns local =
+    (not (Hashtbl.mem aliases local))
+    && (not (List.mem local body.captures))
+    &&
+    match (passed_as local, body.locals.(local).kind) with
+    | Some mode, _ -> mode = Own
+    | None, (Temporary | Source { mode = Own; _ }) -> true
+    | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
+  in
+  let needs_drop (path : Moves.path) =
+    let rec path_type ty = function
+      | [] -> Some ty
+      | step :: rest -> (
+          let member =
+            match (Memory_layout.shape st.context.env ty, (step : Moves.step)) with
+            | Record fields, Field name -> List.assoc_opt name fields
+            | Sum variants, Variant { variant; field } ->
+                Option.bind
+                  (List.find_opt
+                     (fun (shape : Memory_layout.variant_shape) -> shape.name = variant)
+                     variants)
+                  (fun (shape : Memory_layout.variant_shape) -> List.assoc_opt field shape.fields)
+            | _ -> None
+          in
+          match member with Some (Typed field_ty) -> path_type field_ty rest | _ -> None)
+    in
+    match path_type (ground st body.locals.(path.local).type_) path.steps with
+    | Some ty -> not (trivial st ty)
+    | None -> false
+  in
+  (* The locals whose places are another owner's, lent to be changed, which a
+     value may be moved out of and given back to. *)
+  let lent_mut local =
+    (not (owns local))
+    && (not (Hashtbl.mem built local))
+    && (not (List.mem local parts))
+    && (not (List.mem local body.captures))
+    &&
+    match (passed_as local, body.locals.(local).kind) with
+    | Some mode, _ -> mode = Mut
+    | None, (Source { mode = Mut; _ } | Lent Mut) -> true
+    | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
+  in
+  let moves = Moves.analyse ~owns ~lent_mut ~needs_drop body in
+  {
+    body;
+    lambdas;
+    places = Hashtbl.create 32;
+    aliases;
+    built;
+    owner;
+    returns_into;
+    forks = Hashtbl.create 1;
+    provides = [];
+    returned =
+      Array.fold_left
+        (fun returned (block : Mir.basic_block) ->
+          match block.terminator with
+          | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
+            when body.locals.(local).kind = Temporary ->
+              local :: returned
+          | _ -> returned)
+        [] body.blocks;
+    taken = [];
+    moves;
+    flags =
+      List.map
+        (fun path -> (path, Lir_builder.local st.builder ~name:"owned" (Raw Bool)))
+        (Moves.flagged moves);
+    state = Moves.entry moves 0;
+  }
+
 (* Writes [build] for each variant that the value at [source], of type
    [ty], may have, with the variant's fields: once for a record, and for a
    sum type in a case of a switch on the variant. *)
@@ -264,14 +327,15 @@ let rec whole st (source : Lir.place) : Lir.place =
    for a record, so the variant cannot change. *)
 and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
   let ty = lent.base in
-  let copy = at (local st.builder ~borrowed:(not lent.writable) (Value ty)) in
+  let copy = at (local st.builder (Value ty)) in
   let scope = innermost_scope st in
-  if lent.writable then begin
-    (match variants_of st ty with
+  (* Lent to be changed, each field written back moves out of the copy, which
+     then holds nothing. *)
+  if lent.writable then
+    begin match variants_of st ty with
     | [ (None, _) ] -> ()
-    | _ -> bug "%s is lent to be changed" (Ground.to_string (Lent lent)));
-    scope.owned <- Drop_value copy :: scope.owned
-  end;
+    | _ -> bug "%s is lent to be changed" (Ground.to_string (Lent lent))
+    end;
   each_variant st ty source (fun variant fields ->
       let fields =
         List.map
@@ -306,8 +370,8 @@ and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
 
 (* The place of a compound assignment's target, whose old value an operator
    takes. The target holds nothing until the statement assigns it again, so
-   that assignment drops nothing: an element's old value cannot be tracked
-   by drop elaboration, and a drop would free it a second time. *)
+   that assignment drops nothing: an element is not a place the move
+   analysis tracks, and a drop would free its old value a second time. *)
 let taken st (written : Mir.place) =
   let frame = mir st in
   frame.taken <- written :: frame.taken;
@@ -481,6 +545,165 @@ let break_loop st =
       start st.builder (block st.builder)
   | [] -> bug "a break outside a loop"
 
+(* Drops *)
+
+(* The place of a path of the MIR. *)
+let path_place st (path : Moves.path) =
+  place st
+    {
+      root = Local path.local;
+      projections =
+        List.map
+          (function
+            | Moves.Field field -> Mir.Field field
+            | Variant { variant; field } -> Mir.Variant_field { variant; field })
+          path.steps;
+    }
+
+(* Drops what [path] holds where the code being lowered is: all of it; the
+   parts not moved out of it, where some were; or, where it may hold
+   nothing, what its flag says. A path that is not tracked holds a value
+   whenever its local does. *)
+let rec drop_path st (path : Moves.path) =
+  let frame = mir st in
+  match Moves.status frame.moves frame.state path with
+  | None -> (
+      let place = path_place st path in
+      match place_type st place with
+      | Some (Value ty) when not (trivial st ty) -> emit st.builder (Drop place)
+      | _ -> ())
+  | Some Empty -> ()
+  | Some Holds -> drop_held st path
+  | Some Maybe ->
+      let flag =
+        match List.assoc_opt path frame.flags with
+        | Some flag -> flag
+        | None ->
+            bug "local %d%s, which may hold nothing, has no flag" path.local
+              (String.concat ""
+                 (List.map
+                    (function
+                      | Moves.Field field -> "." ^ field
+                      | Variant { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
+                    path.steps))
+      in
+      when_ st.builder (Copy (at flag)) (fun () -> drop_held st path)
+
+(* Drops a path that holds a value. *)
+and drop_held st (path : Moves.path) =
+  let frame = mir st in
+  if
+    List.for_all
+      (fun inner -> Moves.status frame.moves frame.state inner = Some Holds)
+      (Moves.inside frame.moves path)
+  then emit st.builder (Drop (path_place st path))
+  else drop_parts st path
+
+(* Drops the parts of a path that holds a value, some part of which was moved
+   out. *)
+and drop_parts st (path : Moves.path) =
+  let frame = mir st in
+  let place = path_place st path in
+  let ty =
+    match place_type st place with
+    | Some (Value ty) -> ty
+    | _ -> bug "a path to drop that holds no value"
+  in
+  let child step =
+    let inner = { path with steps = path.steps @ [ step ] } in
+    match place_type st (path_place st inner) with
+    | Some (Value inner_ty) when not (trivial st inner_ty) -> drop_path st inner
+    | _ -> ()
+  in
+  match (Memory_layout.of_type st.context.env ty).form with
+  | Struct fields ->
+      List.iter (fun (field : Memory_layout.field) -> child (Field field.name)) fields
+  | Tagged _ | Niche_encoded _ -> (
+      let depth = List.length path.steps in
+      let inside = Moves.inside frame.moves path in
+      let variants =
+        List.sort_uniq compare
+          (List.filter_map
+             (fun (inner : Moves.path) ->
+               match List.nth_opt inner.steps depth with
+               | Some (Variant { variant; _ }) -> Some variant
+               | _ -> None)
+             inside)
+      in
+      let open_variant variant =
+        List.iter
+          (fun (name, _) -> child (Variant { variant; field = name }))
+          (List.assoc (Some variant) (variants_of st ty));
+        if
+          List.exists
+            (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
+            (match Memory_layout.shape st.context.env ty with Sum shapes -> shapes | _ -> [])
+        then emit st.builder (Free_block { place; variant })
+      in
+      (* A part of a variant is moved out only of a value that holds the
+         variant. So where a part of it holds nothing on every way here, the
+         value is that variant. Where a part may still hold its value, the
+         value may hold another variant, and it is asked which it holds. *)
+      let certain variant =
+        List.exists
+          (fun (inner : Moves.path) ->
+            match List.nth_opt inner.steps depth with
+            | Some (Variant { variant = inner_variant; _ }) ->
+                inner_variant = variant && Moves.status frame.moves frame.state inner = Some Empty
+            | _ -> false)
+          inside
+      in
+      match variants with
+      | [] -> emit st.builder (Drop place)
+      | [ only ] when certain only -> open_variant only
+      | variants ->
+          let after = block st.builder in
+          let cases =
+            List.map
+              (fun variant ->
+                let case = block st.builder in
+                in_block st.builder case (fun () ->
+                    open_variant variant;
+                    finish st.builder (Goto after));
+                (variant, case))
+              variants
+          in
+          let other = block st.builder in
+          in_block st.builder other (fun () ->
+              emit st.builder (Drop place);
+              finish st.builder (Goto after));
+          finish st.builder (Switch_variant { place; cases; default = Some other });
+          start st.builder after)
+  | _ -> emit st.builder (Drop place)
+
+(* Drops a local of the MIR where it ends, by what it holds: nothing, for a
+   local that owns no value with something to drop. *)
+let drop_local st local =
+  let path : Moves.path = { local; steps = [] } in
+  if Moves.owns (mir st).moves local && Moves.status (mir st).moves (mir st).state path <> None then
+    drop_path st path
+
+(* Gives each flag the value a step of the analysis gave its path. *)
+let update_flags st ~before =
+  let frame = mir st in
+  List.iter
+    (fun ((path : Moves.path), holds) ->
+      emit st.builder (Assign (at (List.assoc path frame.flags), Use (Constant (Bool holds)))))
+    (Moves.changed frame.moves ~before ~after:frame.state)
+
+(* Drops the values the function's own parameters still hold, where it
+   returns. *)
+let drop_parameters st = List.iter (drop_local st) (mir st).body.parameters
+
+(* Drops what a place holds before it is given a value: by what a path of
+   an owning local holds, and otherwise, for a place another owner's value
+   is in, all of it. *)
+let overwritten st (target : Mir.place) (destination : Lir.place) ty =
+  match Moves.path_of_place target with
+  | Some path when Moves.status (mir st).moves (mir st).state { path with steps = [] } <> None ->
+      drop_path st path
+  | _ -> if not (trivial st ty) then emit st.builder (Drop destination)
+
 (* Returns from the function, whose result is already written. In an
    expression lowered on its own, jumps to its end instead. *)
 let return_from_frame st =
@@ -489,6 +712,7 @@ let return_from_frame st =
       leave_to st depth;
       finish st.builder (Goto exit)
   | None ->
+      drop_parameters st;
       leave_to st 0;
       finish st.builder (return_result st));
   start st.builder (block st.builder)
@@ -575,8 +799,8 @@ let call_with_places st (callee : Mir.callee) (places : Lir.place list) ~destina
     ~signature ~substitution ~arguments ~destination ()
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
-   order. An omitted argument gets an uninitialized temporary, which the
-   callee fills with the default. The returned mask has one bit for each
+   order. An omitted argument gets a local that holds nothing, and which
+   nothing drops: the callee makes the default its own. The returned mask has one bit for each
    parameter with a default, set where the call passes an argument. *)
 let evaluate_arguments st (signature : Types.signature) substitution (arguments : Mir.argument list)
     =
@@ -599,7 +823,7 @@ let evaluate_arguments st (signature : Types.signature) substitution (arguments 
           else None
         in
         match argument with
-        | Default -> (mode, ty, temporary st ty)
+        | Default -> (mode, ty, at (local st.builder (Value ty)))
         | Passed { value; _ } ->
             Option.iter (fun bit -> mask := !mask lor (1 lsl bit)) bit;
             (mode, ty, operand_place st value))
@@ -632,11 +856,7 @@ let shared_update st ~shared ~input ~change ~destination =
   let pointer = Lir.Copy (shared / Field "value") in
   emit st.builder
     (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
-  (* The pointer is [borrowed] so that drop elaboration does not track the
-     value, which the [Shared] owns. *)
-  let typed =
-    local st.builder ~borrowed:true (Pointer { target = Value value_ty; writable = true })
-  in
+  let typed = local st.builder (Pointer { target = Value value_ty; writable = true }) in
   emit st.builder (Assign (at typed, Use pointer));
   let result =
     match destination with Some destination -> destination | None -> temporary st result_ty
@@ -671,6 +891,12 @@ let intrinsic st (operation : Intrinsic.operation) ~type_arguments (arguments : 
             | Default -> bug "an intrinsic called with an omitted argument")
           arguments
       in
+      List.iter
+        (fun position ->
+          match List.nth arguments position with
+          | Intrinsics.Place place -> ignore (moved st place)
+          | Value _ -> ())
+        (Intrinsics.consumed_places operation);
       Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.builder
         st.context.types operation ~type_arguments arguments ~destination ~site
 
@@ -793,8 +1019,9 @@ let locked_evidence st ~(tasks : Lir.operand) (evidence : (Path.t * Lir.operand)
 
    With no task left, this is the plain exit. Otherwise the innermost task
    cancels its group. If it is the first to cancel, it records the exit's
-   number and the return value for the code that joins the group. The task
-   then ends, whether or not it was first. *)
+   number and the return value for the code that joins the group;
+   otherwise it drops the return value. The task then ends, whether or not
+   it was first. *)
 let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit : Mir.task_exit)
     ~(value : Lir.place option) =
   match (tasks, st.tasks) with
@@ -803,7 +1030,6 @@ let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit
       | Exit_return _ ->
           (match (value, result_place st, returned_type st) with
           | Some value, Some result, Some ty ->
-              clear_result st;
               emit st.builder (Assign (result, Use (owned st value ty)))
           | _ -> ());
           return_from_frame st
@@ -811,25 +1037,33 @@ let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit
       | Exit_iteration -> continue_loop st)
   | (id, ends) :: remaining, task :: _ when id = task.id ->
       let exits = task.early_exits in
-      exits.exits <- { ends; remaining; exit } :: exits.exits;
+      exits.exits <- { ends; remaining; exit; state = Moves.copy (mir st).state } :: exits.exits;
       let number = List.length exits.exits in
-      when_ st.builder (tasks_bool st "cancel" [ task.group ]) (fun () ->
-          emit st.builder (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
-          match (value, returned_type st) with
-          | Some value, Some ty ->
-              let return_value =
-                match exits.return_value with
-                | Some return_value -> return_value
-                | None ->
-                    let return_value = owned_local st ~name:"return_value" exits.scope ty in
-                    exits.return_value <- Some return_value;
-                    return_value
-              in
-              (* Only one exit wins, so [return_value] is empty here. Drop
-                 elaboration cannot prove that when a loop repeats this
-                 code, so the assignment is lowered as a replacement. *)
-              replace st return_value ty ~by:value
-          | _ -> ());
+      let won = block st.builder and lost = block st.builder and after = block st.builder in
+      Lir_builder.branch st.builder (tasks_bool st "cancel" [ task.group ]) ~yes:won ~no:lost;
+      start st.builder won;
+      emit st.builder (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
+      (match (value, returned_type st) with
+      | Some value, Some ty ->
+          let return_value =
+            match exits.return_value with
+            | Some return_value -> return_value
+            | None ->
+                let return_value = owned_local st ~name:"return_value" exits.scope ty in
+                exits.return_value <- Some return_value;
+                return_value
+          in
+          (* Only one exit wins, so [return_value] is empty here. *)
+          emit st.builder (Assign (return_value, Use (owned st value ty)))
+      | _ -> ());
+      finish st.builder (Goto after);
+      (* A task that does not win drops the value it would have returned. *)
+      start st.builder lost;
+      (match (value, returned_type st) with
+      | Some value, Some ty when not (trivial st ty) -> emit st.builder (Drop value)
+      | _ -> ());
+      finish st.builder (Goto after);
+      start st.builder after;
       leave_to st task.scope_depth;
       finish st.builder (Goto task.end_block);
       start st.builder (block st.builder)
@@ -859,6 +1093,7 @@ let resume_early_exit st region ~lower_ends (exits : early_exits) =
           st.evidence <- evidence;
           (mir st).provides <- provides;
           start st.builder target;
+          (mir st).state <- Moves.copy recorded.state;
           lower_ends recorded.ends;
           let value = match recorded.exit with Exit_return _ -> exits.return_value | _ -> None in
           early_exit st region ~tasks:recorded.remaining ~exit:recorded.exit ~value;
@@ -909,21 +1144,21 @@ let spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
   let boxed = not (is_zero_size st ty) in
   let move_or_copy place : Lir.operand = if is_owned then owned st place ty else Copy place in
   (* The block's address, read back from the item, and the value's place
-     in the block. The pointer is [borrowed] so that drop elaboration does
-     not track the block's contents. *)
+     in the block. *)
   let block_of () : Lir.local * Lir.place =
     let pointer = local st.builder (Raw (Pointer Opaque)) in
     emit st.builder (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
-    let typed = local st.builder ~borrowed:true (Pointer { target = Value ty; writable = true }) in
+    let typed = local st.builder (Pointer { target = Value ty; writable = true }) in
     emit st.builder (Assign (at typed, Use (Copy (at pointer))));
     (pointer, { root = Local typed; projections = [ Deref ] })
   in
   (* Takes the value out of the block into a local and frees the block.
-     The enclosing scope drops the local only if the value is owned. *)
-  let unbox () : Lir.place =
+     Where [dropped_here], the enclosing scope drops an owned value; a task
+     binds the loop's part to it, which the MIR ends. *)
+  let unbox ~dropped_here : Lir.place =
     if boxed then begin
       let unboxed =
-        if is_owned then binding st ty else at (local st.builder ~borrowed:true (Value ty))
+        if is_owned && dropped_here then binding st ty else at (local st.builder (Value ty))
       in
       let pointer, inside = block_of () in
       emit st.builder (Assign (unboxed, Use (move_or_copy inside)));
@@ -947,8 +1182,8 @@ let spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
   end
   else emit st.builder (Assign (item, Use (constant_int UInt64 Z.zero)));
   spawn_iteration st loop
-    ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ())))
-    (fun () -> in_scope st (fun () -> each (unbox ())))
+    ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ~dropped_here:true)))
+    (fun () -> in_scope st (fun () -> each (unbox ~dropped_here:false)))
 
 (* Lent values *)
 
@@ -1018,7 +1253,7 @@ let rec lent_from st (lent : Ground.lent) (source : Lir.place) : Lir.place =
   | None -> lend_fields st lent source
 
 and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
-  let built = at (local st.builder ~borrowed:true (Value (Lent lent))) in
+  let built = at (local st.builder (Value (Lent lent))) in
   each_variant st lent.base source (fun variant fields ->
       let fields =
         List.map
@@ -1035,13 +1270,8 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
 
 (* Lowering *)
 
-(* Makes the locals that the current frame's code owns, so that the scope
-   that owns them drops them on every way out: at a [return], and at the
-   [stop] of a [yield] of a pulled method. A local the MIR has ended holds
-   nothing there,
-   and drop elaboration removes its drop. Where paths join, as they do where
-   the rest of a lending method runs, a local may hold a value on only some
-   of them, and the drop then takes a flag. *)
+(* Makes the place of each local the current frame's code owns, before the
+   code runs, so that a cursor that is boxed is allocated once. *)
 let make_owned_locals st =
   let frame = mir st in
   let parts =
@@ -1060,6 +1290,10 @@ let make_owned_locals st =
    into the current block. Leaves a block that nothing reaches. *)
 let rec lower_body ?enclosing st (frame : mir_frame) =
   st.frame <- { st.frame with mir = Some frame };
+  List.iter
+    (fun path ->
+      emit st.builder (Assign (at (List.assoc path frame.flags), Use (Constant (Bool true)))))
+    (Moves.held_at_entry frame.moves);
   run_region st (new_region ?enclosing st) ~entry:(0, 0)
 
 (* Lowers a region from the statement [index] of a block into the current
@@ -1091,10 +1325,29 @@ and run_region st region ~entry:(block, index) =
 and lower_from st region block index =
   let basic = (mir st).body.blocks.(block) in
   st.frame <- block_frame st region.region_frame basic.inlined;
+  let frame = mir st in
+  frame.state <- Moves.entry frame.moves block;
+  if index = 0 then
+    List.iter
+      (fun path ->
+        emit st.builder (Assign (at (List.assoc path frame.flags), Use (Constant (Bool true)))))
+      (Moves.given_on_entry frame.moves block);
   List.iteri
     (fun position (statement : Mir.statement) ->
-      if position >= index then in_statement st (fun () -> lower_statement st statement))
+      if position >= index then begin
+        let before = Moves.copy frame.state in
+        (* A statement's moves happen before it gives its destination a
+           value, which drops what the destination held. *)
+        Moves.apply_moves frame.moves frame.state statement;
+        in_statement st (fun () -> lower_statement st statement);
+        Moves.apply frame.moves frame.state statement;
+        update_flags st ~before
+      end
+      else Moves.apply frame.moves frame.state statement)
     basic.statements;
+  let before = Moves.copy frame.state in
+  Moves.apply_terminator_moves frame.moves frame.state basic.terminator;
+  update_flags st ~before;
   terminator st region basic.terminator ~origin:basic.terminator_origin
 
 (* A [concurrent] block. Each branch is a [Task] region, which outlining
@@ -1143,7 +1396,9 @@ and lower_statement st (statement : Mir.statement) =
         match destination with
         | Some written ->
             let destination = place st written in
-            clear st destination;
+            (match place_type st destination with
+            | Some (Value ty) -> overwritten st written destination ty
+            | _ -> ());
             destination
         | None -> discarded st
       in
@@ -1194,7 +1449,12 @@ and lower_statement st (statement : Mir.statement) =
    has ended. *)
 and lower_ends st ends =
   List.iter
-    (fun (statement : Mir.statement) -> in_statement st (fun () -> lower_statement st statement))
+    (fun (statement : Mir.statement) ->
+      let frame = mir st in
+      let before = Moves.copy frame.state in
+      in_statement st (fun () -> lower_statement st statement);
+      Moves.apply frame.moves frame.state statement;
+      update_flags st ~before)
     ends
 
 and lir_fork st fork =
@@ -1206,21 +1466,8 @@ and lir_fork st fork =
       Hashtbl.replace forks fork lowered;
       lowered
 
-(* Drops the value at a place that is about to be written, if it holds
-   one. *)
-and clear st place =
-  match place_type st place with
-  | Some (Value ty) when not (trivial st ty) -> emit st.builder (Drop place)
-  | _ -> ()
-
 (* The end of a local: what its end runs, and the drop of what it owns. *)
-and dead st local =
-  (* A block can be lowered before the block that first assigns a local it
-     ends, so the drop makes the local's place if it has none yet. Drop
-     elaboration removes it where the local holds nothing. *)
-  if owns st local then
-    let ty = ground st (info st local).type_ in
-    if not (trivial st ty) then emit st.builder (Drop (local_place st local))
+and dead st local = drop_local st local
 
 and provide st (provided : Mir.provided list) ~can_use_tasks =
   (* The body runs with the evidence of each implementation added. *)
@@ -1322,7 +1569,7 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
          paths. *)
       if List.mem target frame.taken then
         frame.taken <- List.filter (fun taken -> taken <> target) frame.taken
-      else if not (trivial st ty) then emit st.builder (Drop destination);
+      else overwritten st target destination ty;
       match evaluated with
       | Some fresh -> emit st.builder (Assign (destination, Use (owned st fresh ty)))
       | None -> into ?types_ty st value destination ty ~origin)
@@ -1340,7 +1587,7 @@ and build_part st part (value : Mir.rvalue) =
         let { Mir.kind; type_; _ } = info st part in
         let writable = match kind with Lent Mut | Source { mode = Mut; _ } -> true | _ -> false in
         let lent = built_lent st ~writable (ground st type_) (Hashtbl.find (mir st).built part) in
-        let slot = at (local st.builder ~borrowed:true (Value (Lent lent))) in
+        let slot = at (local st.builder (Value (Lent lent))) in
         bind_local st part slot;
         slot
   in
@@ -1519,7 +1766,11 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin
           inner.frame <-
             {
               inner.frame with
-              mir = Some (frame_of_body ~owner:(innermost_scope inner) ~lambdas lambda);
+              mir =
+                Some
+                  (frame_of_body inner ~owner:(innermost_scope inner)
+                     ~passed:(List.map (fun (_, mode, _) -> mode) parameter_places)
+                     ~lambdas lambda);
             };
           List.iter2 (bind_local inner) lambda.captures capture_places;
           make_owned_locals inner;
@@ -1556,7 +1807,7 @@ and mir_into ?(arguments = []) st (expression_mir : Mir.t) (destination : Lir.pl
   let caller = st.frame in
   let exit = block st.builder in
   let frame =
-    frame_of_body ~returns_into:destination ~lambdas:expression_mir.lambdas expression_mir.body
+    frame_of_body st ~returns_into:destination ~lambdas:expression_mir.lambdas expression_mir.body
   in
   st.frame <- { caller with exit = Some (exit, List.length st.scopes); mir = Some frame };
   List.iter2 (bind_local st) expression_mir.body.parameters arguments;
@@ -1689,9 +1940,14 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
         self_place = None;
       };
     List.iter2
-      (fun (parameter : Core.parameter) ((argument : Mir.argument), (_, _, place)) ->
+      (fun (parameter : Core.parameter) ((argument : Mir.argument), (_, ty, place)) ->
         match (argument, parameter.default) with
-        | Default, Some default -> expression_into st default place
+        | Default, Some default ->
+            expression_into st default place;
+            (* The caller made the value, so the statement owns it, until a
+               call that takes it [own] moves it. *)
+            if not (trivial st ty) then
+              (innermost_scope st).owned <- Drop_value place :: (innermost_scope st).owned
         | Default, None -> bug "%s is omitted and has no default" parameter.name
         | Passed _, _ -> ())
       parameters
@@ -1797,13 +2053,14 @@ and terminator st region (ending : Mir.terminator) ~origin =
           let branch = branch_region region in
           ignore (jump ~entry:branch.start st branch target))
         task_end;
-      (* The task evaluates the return value into a temporary of its own
-         before it cancels the group. Several tasks may do so at the same
-         time, and only the first to cancel moves its value out. *)
+      (* The task evaluates the return value into a local of its own before
+         it cancels the group. Several tasks may do so at the same time:
+         the first to cancel moves its value out, and the others drop
+         theirs. *)
       let value =
         match (exit, st.frame.exit, returned_type st) with
         | Exit_return (Some returned), None, Some ty ->
-            let value = temporary st ty in
+            let value = at (local st.builder ~name:"returned" (Value ty)) in
             write_operand st returned value;
             Some value
         | _ -> None
@@ -1874,6 +2131,7 @@ and yield st region ~mode ~part ~resume ~origin =
   (* On the [stop] path the cursor is dropped before it ended, so the
      method drops its owned values and returns. *)
   start st.builder stop;
+  Array.iteri (fun local _ -> drop_local st local) (mir st).body.locals;
   leave_to st 0;
   finish st.builder (Return None);
   start st.builder (block st.builder)
@@ -2134,7 +2392,7 @@ let fill_defaults st mask (body : Mir.body) (places : Lir.place list) =
           in
           let place =
             if mode = Own && not (trivial st ty) then begin
-              let owned_here = binding st ~name ty in
+              let owned_here = at (local builder ~name (Value ty)) in
               let passed_block = block builder in
               unless_passed passed_block;
               start builder passed_block;
@@ -2176,7 +2434,9 @@ let lower_code st path ~parameters =
     Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined
       (mir_of st.context path)
   in
-  let frame = frame_of_body ~owner:(innermost_scope st) ~lambdas:code_mir.lambdas code_mir.body in
+  let frame =
+    frame_of_body st ~owner:(innermost_scope st) ~lambdas:code_mir.lambdas code_mir.body
+  in
   st.frame <- { st.frame with mir = Some frame };
   List.iter2 (bind_local st) code_mir.body.parameters parameters;
   make_owned_locals st;

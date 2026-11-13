@@ -1,8 +1,8 @@
 (* Outlining: each region of a [parallel] statement becomes a nested
    function, and the statement a fork of them.
 
-   It runs after drops are elaborated, while a region is still code of the
-   function around it, run in place and in order. So a region's owned, taken,
+   It runs after lowering has written every drop, while a region is still
+   code of the function around it, run in place and in order. So a region's owned, taken,
    and dropped values are already known, and moving it out changes only
    how it reaches the locals it shares with the code around it: through an
    environment that holds the address of each. *)

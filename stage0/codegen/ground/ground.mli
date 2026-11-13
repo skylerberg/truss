@@ -55,11 +55,3 @@ val path_name : Path.t -> string
    messages. *)
 val to_string : ty -> string
 val argument_to_string : argument -> string
-
-(* The canonical encoding, in deterministic CBOR, that instance keys and the
-   LIR are hashed by. Each path is written by [path], which by default
-   encodes it; test keys pass one that numbers paths, so that no name is in
-   them. *)
-val encode : ?path:(Path.t -> Cbor.t) -> ty -> Cbor.t
-val encode_path : Path.t -> Cbor.t
-val encode_argument : ?path:(Path.t -> Cbor.t) -> argument -> Cbor.t

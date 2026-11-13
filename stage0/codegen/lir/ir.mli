@@ -157,7 +157,7 @@ type terminator = Ir_types.terminator =
   | Yield of { value : operand; resume : block; stop : block option }
 
 type basic_block = Ir_types.basic_block = { statements : statement list; terminator : terminator }
-type local_info = Ir_types.local_info = { ty : ty; name : string option; borrowed : bool }
+type local_info = Ir_types.local_info = { ty : ty; name : string option }
 
 type function_ = Ir_types.function_ = {
   parameters : local list;

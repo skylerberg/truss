@@ -539,7 +539,15 @@ let alive building ~entry ~bound ~(is_method_local : Mir.local -> bool) =
         (Hashtbl.find reaching block) basic.statements
     in
     Hashtbl.replace ending block locals;
-    List.iter (fun target -> flow target locals) (Mir.successors basic.terminator)
+    List.iter
+      (fun target ->
+        (* A loop that pulls values gives its part one on the way into its
+           body. *)
+        match basic.terminator with
+        | For { iteration = Pull _; part; body; _ } when target = body && is_method_local part ->
+            flow target (Locals.add part locals)
+        | _ -> flow target locals)
+      (Mir.successors basic.terminator)
   done;
   fun block -> Option.value (Hashtbl.find_opt ending block) ~default:Locals.empty
 
@@ -820,12 +828,12 @@ let inline_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~
     let copied = block_at building block in
     match copied.terminator with
     | Return _ ->
+        (* The method's parameters end where it returns, as the temporaries
+           that hold its arguments do. *)
         set_block building block
           {
             copied with
-            statements =
-              (copied.statements
-              @ if temporaries = [] then [] else [ { kind = Dead temporaries; origin } ]);
+            statements = copied.statements @ [ { kind = Dead parameters; origin } ];
             terminator = Goto after;
           }
     | Yield { part = yielded; resume; mode } ->
@@ -1217,6 +1225,30 @@ let ends_only_in_statements building part =
       | _ -> true)
     building.blocks
 
+(* Ends the part of each loop of the body's own that pulls values, which
+   holds a value of its own each iteration: where the iteration ends, and on
+   each other way out of the loop's body. A method copied in has ended its
+   own loops' parts already, and its [yield] that now jumps to the caller's
+   code leaves no loop: the caller resumes it. *)
+let end_loop_parts building (body : Mir.body) =
+  let iteration_loops = Mir.iteration_loops (snapshot building body) in
+  for block = 0 to Dynarray.length building.blocks - 1 do
+    match block_at building block with
+    | { terminator = For { iteration = Pull _; part; blocks; loop; _ }; inlined = []; _ } ->
+        let dead : Mir.statement = { kind = Dead [ part ]; origin = loop.origin } in
+        Hashtbl.iter
+          (fun ending owner ->
+            if owner = block then begin
+              let basic = block_at building ending in
+              set_block building ending { basic with statements = basic.statements @ [ dead ] }
+            end)
+          iteration_loops;
+        end_on_exits building ~blocks
+          ~stays:(fun inner -> List.mem inner blocks)
+          ~locals:[ part ] ~iteration:None ~origin:loop.origin
+    | _ -> ()
+  done
+
 (* The instance's MIR with each lending and yielding method it calls
    inlined, as [resolve] finds the method a call reaches. Each method is
    itself inlined into before it is inlined, so a copy of it is final, and
@@ -1292,6 +1324,7 @@ and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
             examine_from start)
     | _ -> ()
   done;
+  end_loop_parts building body;
   {
     body with
     locals = Dynarray.to_array building.locals;

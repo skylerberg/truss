@@ -19,6 +19,10 @@ let scalar env (ty : Ground.ty) =
   | Scalar scalar -> scalar
   | _ -> bug "%s is not a number" (Ground.to_string ty)
 
+let consumed_places : Intrinsic.operation -> int list = function
+  | Array_from_storage -> [ 0 ]
+  | _ -> []
+
 let lower ?(checks = false) ?(value_arguments = []) env builder types operation ~type_arguments
     arguments ~destination ~site =
   let set rvalue =
@@ -599,9 +603,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                 arguments = [ Type (element ()); Value count ];
               }
           in
-          let moved_storage =
-            at (local builder ~borrowed:true (Value (Storage.of_elements (element ()))))
-          in
+          let moved_storage = at (local builder (Value (Storage.of_elements (element ())))) in
           emit builder (Assign (moved_storage, Use (Move (place (argument 0)))));
           if checks then begin
             let other = local builder (Raw Bool) in
@@ -764,11 +766,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           call ~result:(at block) Shared_allocate
             [ Constant (Size_of ty); Constant (Alignment_of ty) ];
           if (Memory_layout.of_type env ty).size > 0 then begin
-            (* The pointer is [borrowed] so that drop elaboration does not
-               track the block's contents, which the [Shared] owns. *)
-            let typed =
-              local builder ~borrowed:true (Pointer { target = Value ty; writable = true })
-            in
+            let typed = local builder (Pointer { target = Value ty; writable = true }) in
             emit builder (Assign (at typed, Use (Copy (at block))));
             emit builder (Assign ({ root = Local typed; projections = [ Deref ] }, Use (value 0)))
           end;
@@ -785,8 +783,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           (* The handle is moved into a local that nothing drops, so its
              descriptor stays open. *)
           let released =
-            local builder ~borrowed:true
-              (Value (Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
+            local builder (Value (Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
           in
           emit builder (Assign (at released, Use (value 0)));
           set (Use (Copy (at released / Field "descriptor")))

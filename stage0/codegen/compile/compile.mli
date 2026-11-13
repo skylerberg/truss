@@ -1,6 +1,6 @@
 (* Compiling a program or a test run from a database of checked
-   definitions: lowering each instance a root reaches, elaborating its
-   drops, building it through the object cache, and running it.
+   definitions: lowering each instance a root reaches, building it through
+   the object cache, and running it.
 
    A step that fails for a reason that is not the compiler's gives [Error]
    with a message: the C compiler or the linker refused, a program run
@@ -63,9 +63,8 @@ val create :
   Build.settings ->
   t
 
-(* An instance's compiled form: its LIR, lowered or generated, with its
-   drops elaborated, in canonical form, or a constant's static data. Each
-   is made once. *)
+(* An instance's C, from its LIR, lowered or generated, or a constant's
+   static data. Each is made once. *)
 
 (* How a test ended, as the runner names it. *)
 type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed

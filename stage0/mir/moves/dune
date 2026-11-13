@@ -1,0 +1,5 @@
+; Which places of a MIR body may hold a value at each point.
+
+(library
+ (name moves)
+ (libraries mir))

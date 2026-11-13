@@ -6,8 +6,8 @@
    is pulled becomes a state machine: a [next] function over a cursor that
    holds the state number, the parameters, and the locals that are live
    across a [yield], and a drop function that ends the method at the [yield]
-   it stopped at. Run this after drop elaboration, so the drops on a
-   [yield]'s [stop] path are already in place. *)
+   it stopped at. Lowering has written the drops on a [yield]'s [stop]
+   path. *)
 
 (* The loop form. [body] is the type of the caller's loop body, whose result
    is a [Bool]: true to continue. A lending method's [yield] has no [stop], so

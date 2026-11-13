@@ -1,5 +1,5 @@
 (* The lowered IR: a small typed control-flow graph for each instance, which
-   drop elaboration and yield lowering transform and the C emitter prints.
+   outlining and yield lowering transform and the C emitter prints.
 
    Locals are mutable slots, not SSA. Every choice about how a value is
    passed is already explicit: a parameter that arrives as a pointer has a

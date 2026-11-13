@@ -80,40 +80,6 @@ let rec compare left right =
   | _ -> Int.compare (rank left) (rank right)
 
 let equal left right = compare left right = 0
-let tagged tag items = Cbor.Array (Cbor.int tag :: items)
-
-let rec encode ?(path = Ground.encode_path) key =
-  let ty = Ground.encode ~path in
-  let arguments arguments = Cbor.Array (List.map (Ground.encode_argument ~path) arguments) in
-  match key with
-  | Code { path = instance_path; type_arguments } ->
-      tagged 0 [ path instance_path; arguments type_arguments ]
-  | Constant instance_path -> tagged 1 [ path instance_path ]
-  | Drop component_type -> tagged 2 [ ty component_type ]
-  | Copy component_type -> tagged 3 [ ty component_type ]
-  | Debug component_type -> tagged 4 [ ty component_type ]
-  | Encode component_type -> tagged 13 [ ty component_type ]
-  | Any_drop component_type -> tagged 15 [ ty component_type ]
-  | Evaluator instance_path -> tagged 14 [ path instance_path ]
-  | Template_check { from_template; texts } ->
-      tagged 16 [ path from_template; Cbor.Array (List.map (fun text -> Cbor.Text text) texts) ]
-  | Call_evaluation { function_; arguments } ->
-      tagged 17
-        [
-          path function_;
-          Cbor.Array (List.map (fun number -> Cbor.Text (Z.to_string number)) arguments);
-        ]
-  | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
-  | Adapter { function_; ty } ->
-      tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
-  | Any_entry key -> tagged 11 [ encode ~path key ]
-  | Any_table { impl; type_arguments } -> tagged 12 [ path impl; arguments type_arguments ]
-  | Locked_entry { capability; name } -> tagged 18 [ path capability; Cbor.Text name ]
-  | Locked_table capability -> tagged 19 [ path capability ]
-  | Entry key -> tagged 7 [ encode ~path key ]
-  | Table { impl; type_arguments } -> tagged 8 [ path impl; arguments type_arguments ]
-  | Program_main main -> tagged 10 [ path main ]
-
 (* Mangling. A Truss name is either [UpperCamelCase], with no [_], or
    [lower_snake_case], with no uppercase letter, no [__], and no [_] at
    either end. So in a symbol, [__] can only separate the parts of a module
