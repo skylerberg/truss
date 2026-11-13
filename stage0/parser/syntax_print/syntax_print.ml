@@ -9,6 +9,14 @@ let path (path : path) =
 
 let mode = function Mut -> "mut" | Own -> "own"
 
+let intended_keyword = function
+  | Intended_function -> "fn"
+  | Intended_constant -> "let"
+  | Intended_type -> "type"
+  | Intended_trait -> "trait"
+  | Intended_capability -> "capability"
+  | Intended_theorem -> "theorem"
+
 let binary = function
   | Multiply -> "*"
   | Divide -> "/"
@@ -303,8 +311,8 @@ and pattern (written : pattern) =
         | End_name name -> name.text
       in
       form (if inclusive then "..=" else "..") [ range_end start; range_end stop ]
-  | Variant { name; fields = None } -> path name
-  | Variant { name; fields = Some fields } -> form (path name) (list pattern_field fields)
+  | Variant { name; fields = None } -> name.text
+  | Variant { name; fields = Some fields } -> form name.text (list pattern_field fields)
   | Record fields -> form "record" (list pattern_field fields)
   | Alternatives alternatives -> form "|" (list pattern alternatives)
   | Pattern_error -> "error"
@@ -468,8 +476,8 @@ let definition ?(methods = []) (definition : definition) =
           @ [ block body ])
     | Law_proof { trait_; law; type_; body } ->
         form "proof" [ path_type_text trait_ ^ "." ^ law.text; "for"; type_head type_; block body ]
-    | Definition_error { keyword; name } ->
-        form "error" [ optional Token.keyword_spelling keyword; optional definition_name name ]
+    | Definition_error { intended; name } ->
+        form "error" [ optional intended_keyword intended; optional definition_name name ]
   in
   match visibility definition.visibility with "" -> body | written -> form written [ body ]
 

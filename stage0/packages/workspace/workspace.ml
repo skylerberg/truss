@@ -1,6 +1,5 @@
 type file = {
   source : Source.t;
-  tokens : Token.t array;
   uses : Syntax.path Syntax.item list;
   definitions : Syntax.definition Syntax.item list;
   diagnostics : Diagnostic.t list;
@@ -20,7 +19,6 @@ let file =
       let parsed, parser_diagnostics = Parser.parse source tokens in
       {
         source;
-        tokens;
         uses = parsed.uses;
         definitions = parsed.definitions;
         diagnostics = lexer_diagnostics @ parser_diagnostics;

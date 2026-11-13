@@ -1,3 +1,3 @@
 (library
  (name syntax_print)
- (libraries syntax token zarith))
+ (libraries syntax zarith))

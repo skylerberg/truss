@@ -169,10 +169,10 @@ let qualified_variant cursor ~qualifier_start ~(variant : Token.t) =
   report cursor Qualified_variant
     (Source.span qualifier_start variant.span.start)
     (Printf.sprintf
-       "A pattern names a variant without its type: `%s`. The type of the scrutinee says which \
-        type's variant it is."
+       "A pattern names a variant alone: `%s`. The type of the scrutinee says which type's variant \
+        it is."
        (Cursor.text cursor variant.span))
-    "Remove the type"
+    "Remove the qualifier"
     [ Diagnostic.delete (Source.span qualifier_start variant.span.start) ]
 
 (* The replacement for a macro of another language, by its name. *)

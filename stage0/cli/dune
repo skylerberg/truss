@@ -32,7 +32,6 @@
   solver
   prover
   evaluator
-  token
   database
   graph_types
   types

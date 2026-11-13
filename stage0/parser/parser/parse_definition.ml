@@ -549,21 +549,31 @@ let law_proof cursor =
   let type_ = type_head cursor in
   Law_proof { trait_; law; type_; body = Parse_expression.body cursor }
 
-(* The keyword and the name of a definition whose header did not parse.
-   [cursor] is at the start of the definition, and its diagnostics are
-   discarded. Later stages use the name to register the definition. *)
-let header cursor =
+(* The intended kind and the name of a definition whose header did not
+   parse. [cursor] is at the start of the definition, and its diagnostics
+   are discarded. Later stages use the name to declare the definition. *)
+let header cursor : intended_kind option * definition_name option =
   ignore (visibility cursor);
-  let keyword = match Cursor.peek_kind cursor with Keyword keyword -> Some keyword | _ -> None in
-  Cursor.advance cursor;
-  let name () : definition_name option =
-    match keyword with
-    | Some (Fn | Let) -> Some (definition_name cursor)
-    | Some (Type | Trait | Capability) -> Some (Plain_name (Atoms.upper cursor "a name"))
-    | Some Theorem -> Some (Plain_name (Atoms.lower cursor "a name"))
+  let intended =
+    match Cursor.peek_kind cursor with
+    | Keyword Fn -> Some Intended_function
+    | Keyword Let -> Some Intended_constant
+    | Keyword Type -> Some Intended_type
+    | Keyword Trait -> Some Intended_trait
+    | Keyword Capability -> Some Intended_capability
+    | Keyword Theorem -> Some Intended_theorem
     | _ -> None
   in
-  (keyword, match name () with name -> name | exception Cursor.Failed -> None)
+  Cursor.advance cursor;
+  let name () : definition_name option =
+    match intended with
+    | Some (Intended_function | Intended_constant) -> Some (definition_name cursor)
+    | Some (Intended_type | Intended_trait | Intended_capability) ->
+        Some (Plain_name (Atoms.upper cursor "a name"))
+    | Some Intended_theorem -> Some (Plain_name (Atoms.lower cursor "a name"))
+    | None -> None
+  in
+  (intended, match name () with name -> name | exception Cursor.Failed -> None)
 
 type empty = |
 

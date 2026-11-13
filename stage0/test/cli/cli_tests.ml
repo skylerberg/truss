@@ -1307,6 +1307,8 @@ let () =
       let root = angles Fixtures.package_with_a_todo_or_an_echo_is_not_published in
       expect_refused root "degrees.truss:2:3: `todo` is not finished code";
       expect_refused root "degrees.truss:6:3: `echo` is not finished code";
+      expect_refused root "degrees.truss:10:13: `echo` is not finished code";
+      expect_refused root "degrees.truss:13:13: `todo` is not finished code";
       expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose test fails is not published" (fun () ->
       let registry = registry () in

@@ -56,10 +56,10 @@ let one_definition source tokens piece parse =
               check cursor definition;
               definition
           | exception Cursor.Failed ->
-              let keyword, name = Parse_definition.header (Cursor.restarted cursor) in
+              let intended, name = Parse_definition.header (Cursor.restarted cursor) in
               {
                 visibility = Private;
-                kind = Definition_error { keyword; name };
+                kind = Definition_error { intended; name };
                 span = Cursor.span_from cursor cursor.first;
                 recovered = [];
                 id = Cursor.fresh_id cursor;

@@ -6,26 +6,35 @@ module Names = Resolve.Names
 module Version = Registry.Version
 module Lock = Registry.Lock
 
-(* Every [todo] and [echo] of the package, with its position. Truss has no
-   comments, and a string literal is one token, so every occurrence of the
-   keyword token is a real [todo] or [echo]. *)
+(* Every [todo] and [echo] of the package, with its position, in order of
+   position in each file. A type defined as [todo] is at its name. *)
 let unfinished (project : Project.t) =
   List.concat_map
     (fun file ->
-      let parsed = Project.parsed project file in
       let source = Project.source project file in
-      List.filter_map
-        (fun (token : Token.t) ->
-          match token.kind with
-          | Keyword ((Todo | Echo) as keyword) ->
-              let line, column = Source.position source token.span.start in
-              Some
-                ( (match keyword with Todo -> "todo" | _ -> "echo"),
-                  Source.path source,
-                  line,
-                  column )
-          | _ -> None)
-        (Array.to_list parsed.tokens))
+      let offsets = ref [] in
+      List.iter
+        (fun (item : Syntax.definition Syntax.item) ->
+          let add keyword (span : Syntax.span) =
+            offsets := ((Syntax.Span.to_source ~base:item.base span).start, keyword) :: !offsets
+          in
+          let rec visit (value : Syntax.expression) =
+            (match value.kind with
+            | Todo -> add "todo" value.span
+            | Echo _ -> add "echo" value.span
+            | _ -> ());
+            Syntax_walk.children visit value
+          in
+          Syntax_walk.definition visit item.value;
+          match item.value.kind with
+          | Type_definition { name; body = Type_todo; _ } -> add "todo" name.span
+          | _ -> ())
+        (Project.parsed project file).definitions;
+      List.map
+        (fun (offset, keyword) ->
+          let line, column = Source.position source offset in
+          (keyword, Source.path source, line, column))
+        (List.sort compare !offsets))
     (Project.files project)
 
 (* The files to publish: the package's own, with its published lock file

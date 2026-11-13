@@ -35,6 +35,7 @@ type resolved = {
   names : target option array;
   brackets : bracket option array;
   holes : (Syntax.id * (string * value) list) list;
+  used_imports : string list;
   diagnostics : Syntax.diagnostic list;
 }
 
@@ -89,6 +90,7 @@ let resolved =
               brackets = Array.make size None;
               diagnostics = [];
               holes = [];
+              used_imports = [];
             }
           in
           let container =
@@ -140,6 +142,7 @@ let resolved =
               names = state.names;
               brackets = state.brackets;
               holes = List.rev state.holes;
+              used_imports = List.sort compare state.used_imports;
               diagnostics =
                 List.sort
                   (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
@@ -150,42 +153,29 @@ let resolved =
 
 (* The errors of a file's [use] lines, in the file's offsets: a module that
    does not exist, two imports with one last name, [standard::intrinsic]
-   outside the standard library, and an import nothing uses, with a fix that
-   deletes it. *)
+   outside the standard library, and an import that no definition's module
+   path begins with, with a fix that deletes it. A file where the parser
+   recovered reports no unused import: resolution skips the broken parts,
+   which may be what uses it. *)
 let file_diagnostics =
   Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_file ~saved:true
     (fun database (path : Path.file) ->
       let module_ = path.module_ in
       let file = Query.demand database Workspace.file path in
-      (* An import is used when a name followed by [::] spells it anywhere
-         outside the [use] lines, read from the tokens, so a use inside a part
-         the parser could not read counts too, as does one in an
-         interpolation. *)
-      let in_use_line (span : Source.span) =
-        List.exists
-          (fun (item : Syntax.path Syntax.item) ->
-            item.base <= span.start && span.start < item.base + String.length item.text)
-          file.uses
+      let is_recovered (item : Syntax.definition Syntax.item) =
+        match item.value with
+        | { kind = Definition_error _; _ } -> true
+        | { recovered; _ } -> recovered <> []
       in
-      let rec module_names (tokens : Token.t array) =
-        List.concat
-          (List.mapi
-             (fun index (token : Token.t) ->
-               match token.kind with
-               | Lower name
-                 when index + 1 < Array.length tokens
-                      && tokens.(index + 1).kind = Punctuation Colon_colon
-                      && not (in_use_line token.span) ->
-                   [ name ]
-               | String literal ->
-                   List.concat_map
-                     (fun (interpolation : Token.interpolation) ->
-                       module_names interpolation.tokens)
-                     (Array.to_list (Token.interpolations literal))
-               | _ -> [])
-             (Array.to_list tokens))
+      let has_recovery = List.exists is_recovered file.definitions in
+      let used =
+        List.concat_map
+          (fun declaration ->
+            match Query.demand database resolved (Names.key_of declaration) with
+            | Some resolved -> resolved.used_imports
+            | None -> [])
+          (Query.demand database Names.declarations_in path)
       in
-      let used = module_names file.tokens in
       let text = Source.text file.source in
       let diagnostics = ref [] in
       let report ?fixes code span message =
@@ -209,7 +199,7 @@ let file_diagnostics =
                     "Another `use` already imports a module named `%s`. Write one of them by its \
                      full path instead."
                     last)
-             else if not (List.mem last used) then begin
+             else if (not has_recovery) && not (List.mem last used) then begin
                let stop = span.stop in
                let stop =
                  if stop < String.length text && text.[stop] = '\n' then stop + 1 else stop

@@ -429,10 +429,10 @@ let () =
   test "a record pattern" (fun () ->
       pattern_of "(index, element: score, ..)" "(record index (element: score) ..)");
   test "a variant pattern" (fun () -> arm_of "Some(Circle(radius, ..))" "(Some (Circle radius ..))");
-  test "a variant from a module" (fun () -> arm_of "geometry::Empty" "geometry::Empty");
   test "qualified constants" (fun () ->
       arm_of "http::ok" "http::ok";
-      arm_of "Status.teapot" "Status.teapot");
+      arm_of "Status.teapot" "Status.teapot";
+      arm_of "http::Status.teapot" "http::Status.teapot");
   test "literals" (fun () ->
       arm_of "-1" "-1";
       arm_of "\"GET\"" "\"GET\"";
