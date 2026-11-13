@@ -24,6 +24,15 @@ val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key l
 (** The roots with more wanted, which a driver sets {!roots} to before it asks for those instances'
     keys: a query cannot set an input. *)
 
+(* Where the results of runs are kept, by the key of the code that ran:
+   each test that passed with nothing to show, and the output of each run
+   of code while compiling. The database keeps them in its store. *)
+type results = { find : string -> string option; add : string -> string -> unit }
+
+(* The result of a run of code while compiling, or that it ran past the
+   compiler's time limit. *)
+type 'a ran = Ran of 'a | Ran_too_long
+
 (* With [checks], the default, the program checks at run time each
    primitive operation that is undefined or wrong where its precondition
    does not hold: an index, a slice, arithmetic, a shift, and a call of
@@ -33,10 +42,15 @@ val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key l
    driver shows files another way. [want] is told which instances' keys are
    about to be asked for, and adds them to [roots]. [worked_on] says whether a package is one of the
    project's own, whose code a development build never copies into
-   another's file; without it, every package but the standard library is. *)
+   another's file; without it, every package but the standard library is.
+   [results] keeps the results of runs between compilers.
+   [evaluation_time_limit], in milliseconds, stops each run of code while
+   compiling, and is 10 seconds by default. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.file -> string) ->
+  ?results:results ->
+  ?evaluation_time_limit:int ->
   want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
   Query.context ->
@@ -83,19 +97,13 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-(* Where test results are kept, by the key of the code each test can run.
-   The database keeps them in its store. *)
-type results = { find : string -> string option; add : string -> string -> unit }
-
 (* Builds a program that runs the tests, each named by its path, runs it,
-   and returns each test's record in the order given. With [results], each
-   test that passes with nothing to show is kept there
-   under the key of the code it can run, and is not built or run again until
-   that code changes; with
-   [rerun], every test runs, and passes are kept again. [progress] is told
-   of each step as it happens. *)
+   and returns each test's record in the order given. With the compiler's
+   results, each test that passes with nothing to show is kept there under
+   the key of the code it can run, and is not built or run again until that
+   code changes; with [rerun], every test runs, and passes are kept again.
+   [progress] is told of each step as it happens. *)
 val run_tests :
-  ?results:results ->
   ?rerun:bool ->
   ?progress:(progress -> unit) ->
   t ->
@@ -148,32 +156,15 @@ val run_key : t -> Instance.key -> (string, string) result
    [from_template]'s clauses that can run, for a template of these literal
    texts and no parts, by its position among the clauses, with whether it
    holds. The prover asks it only of clauses that read the template's
-   literals alone. With [results], each check's results are kept under the
-   key of the code that ran, as test results are. A check that runs past
-   [time_limit], in milliseconds, is stopped. *)
-type template_check = Ran of (int * bool) list | Ran_too_long
-
+   literals alone. *)
 val check_template :
-  ?results:results ->
-  t ->
-  time_limit:int ->
-  from_template:Path.t ->
-  texts:string list ->
-  (template_check, string) result
+  t -> from_template:Path.t -> texts:string list -> ((int * bool) list ran, string) result
 
 (* Evaluates a call of a function that is not generic, whose arguments are
    known integers, or [Bool]s as 0 or 1, by running it: its result as static
-   data, or that it ran past [time_limit], in milliseconds. With [results],
-   results are kept under the key of the code that ran. *)
-type evaluated_call = Returned of Lir.static_value | Call_ran_too_long
-
+   data. *)
 val evaluate_call :
-  ?results:results ->
-  t ->
-  time_limit:int ->
-  function_:Path.t ->
-  arguments:Z.t list ->
-  (evaluated_call, string) result
+  t -> function_:Path.t -> arguments:Z.t list -> (Lir.static_value ran, string) result
 
 (** Code generation's own passes, for their tests. *)
 module For_testing : sig

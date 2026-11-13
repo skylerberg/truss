@@ -57,7 +57,7 @@ let load text =
     Some
       ( database,
         lazy
-          (Compile.create
+          (Compile.create ~evaluation_time_limit:2000
              ~want:(fun lowering wanted ->
                Engine.set engine Compile.roots lowering
                  (Compile.add_roots (Engine.context engine) lowering wanted))
@@ -179,7 +179,7 @@ let run_mutant ~samples text =
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
-                Compile.evaluate_call (Lazy.force compile) ~time_limit:2000 ~function_ ~arguments
+                Compile.evaluate_call (Lazy.force compile) ~function_ ~arguments
               in
               let admitted arguments =
                 candidate.admits = []
@@ -189,7 +189,7 @@ let run_mutant ~samples text =
                     (Top { module_ = example; name = Printf.sprintf "fuzz_requires_%d" index })
                     arguments
                 with
-                | Ok (Returned (Static_scalar (Bool true))) -> true
+                | Ok (Ran (Static_scalar (Bool true))) -> true
                 | _ -> false
               in
               let tried = Hashtbl.create 16 in

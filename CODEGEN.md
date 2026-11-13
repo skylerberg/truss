@@ -274,7 +274,10 @@ whose arguments the prover knows run through this same generator, as
 compiled code, so there is one meaning of Truss code to keep correct. It is
 built for the host with the target's `USize`, so a 32-bit target's results
 are computed on a 64-bit host. A constant's value is written out in binary
-and read back into static data.
+and read back into static data. Each run's output is kept under a key of
+the code that ran, as a test's result is, so a constant, a template check,
+or a call is run again only when that code changes. A run is stopped after
+10 seconds.
 
 ## Tests
 
@@ -325,7 +328,6 @@ a callee that disagree would otherwise compile and link without complaint.
 
 - A check that reports its caller's position, as Rust's `#[track_caller]`
   does.
-- A constant's value kept between runs.
 - Checkers shipped compiled with the toolchain.
 - Converting a float to text without the C library.
 - `match` as a decision tree.

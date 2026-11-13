@@ -236,7 +236,7 @@ let checked_standard = lazy (Database.For_testing.standard_base ())
 
 (* The files of a package named [example], of Truss source, with the
    standard library, ready to compile. Each must check cleanly. *)
-let load_files files =
+let load_files ?results files =
   let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
   Database.load_package (Engine.of_context database)
     ~name:{ owner = None; name = "example" }
@@ -251,13 +251,13 @@ let load_files files =
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
   ( database,
-    Compile.create
+    Compile.create ?results
       ~want:(fun lowering wanted ->
         Engine.set (Engine.of_context database) Compile.roots lowering
           (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
       database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
 
-let load text = load_files [ (example_file, text) ]
+let load ?results text = load_files ?results [ (example_file, text) ]
 
 (* The paths of a module's tests, in order. *)
 let tests_in database module_ =

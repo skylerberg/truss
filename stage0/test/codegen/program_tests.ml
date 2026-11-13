@@ -12,8 +12,8 @@ let () =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
       let run text =
-        let database, compile = load text in
-        match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
+        let database, compile = load ~results text in
+        match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
         | Ok records ->
             ( (if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records
                then 0
@@ -39,10 +39,10 @@ let () =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
       let database, compile =
-        load Fixtures.Program.external_test_gets_the_real_capabilities_it_uses
+        load ~results Fixtures.Program.external_test_gets_the_real_capabilities_it_uses
       in
       let run () =
-        match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
+        match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
         | Ok records -> records
         | Error message -> failwith message
       in

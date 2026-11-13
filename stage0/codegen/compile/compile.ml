@@ -242,8 +242,8 @@ let rec reach =
 
 let () = ignore (Lazy.force reach)
 
-type template_check = Ran of (int * bool) list | Ran_too_long
-type evaluated_call = Returned of Lir.static_value | Call_ran_too_long
+type 'a ran = Ran of 'a | Ran_too_long
+type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
   database : Query.context;
@@ -258,12 +258,12 @@ type t = {
   worked_on : Path.package -> bool;
       (** Whether a package is one of the project's own, whose code a development build never copies
           into another's file *)
-  mutable evaluated : (Path.t * Lir.static_value) list;
-      (** Each constant computed by running code, in this build *)
-  checked : (string, template_check) Hashtbl.t;
-      (** Each template check done in this build, by the key of the code that ran *)
-  called : (string, evaluated_call) Hashtbl.t;
-      (** Each call evaluated in this build, by the key of the code that ran *)
+  results : results option;
+      (** Where the results of runs are kept, by the key of the code that ran *)
+  evaluation_time_limit : int;  (** In milliseconds, for each run of code while compiling *)
+  runs : (string, string ran) Hashtbl.t;
+      (** The output of each run of code while compiling, in this build, by the key of the code that
+          ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
@@ -297,6 +297,11 @@ let result_key compiler root =
 
 (* A test's key, once it has been said to be wanted. *)
 let test_key compiler test = result_key compiler (Lower.test_key test)
+
+(* The key a run of code while compiling is kept under. *)
+let run_key compiler root =
+  compiler.want compiler.lowering [ root ];
+  result_key compiler root
 
 (* The definitions an instance's positions are relative to. *)
 let anchored (instance : Lir.t) =
@@ -514,38 +519,53 @@ and build_and_run ?input ?time_limit ?(in_order = true) compiler ~roots ~startup
   (try Sys.remove output with Sys_error _ -> ());
   result
 
-(* Runs a constant's evaluator and reads back its value. *)
-and evaluate compiler path ty =
-  let root = Instance.Evaluator path in
-  match
-    build_and_run compiler ~roots:[ root ]
-      ~startup:(Startup.evaluator_calling (Instance.symbol root))
-      ~arguments:[]
-  with
-  | 0, output, _ -> decode compiler ty output
-  | status, _, errors ->
-      cannot_build "Evaluating %s ended with status %d: %s" (Path.show path) status errors
+(* Runs the code [root] reaches while compiling, as a program that writes
+   its result to standard output, and returns the result as [read] decodes
+   it, or that the run passed the compiler's time limit. Each run is done
+   once per compiler, and its output is kept in the compiler's results. *)
+and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -> 'value ran =
+ fun compiler root ~read ->
+  let key = run_key compiler root in
+  let ran =
+    match Hashtbl.find_opt compiler.runs key with
+    | Some ran -> ran
+    | None ->
+        let ran =
+          match Option.bind compiler.results (fun results -> results.find key) with
+          | Some output -> Ran output
+          | None -> (
+              match
+                build_and_run compiler ~time_limit:compiler.evaluation_time_limit ~roots:[ root ]
+                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
+                  ~arguments:[]
+              with
+              | 0, output, _ ->
+                  Option.iter (fun results -> results.add key output) compiler.results;
+                  Ran output
+              | 137, _, _ ->
+                  (* Killed at its time limit. *)
+                  Ran_too_long
+              | status, _, errors ->
+                  cannot_build "Running %s while compiling ended with status %d: %s"
+                    (Instance.to_string root) status errors)
+        in
+        Hashtbl.replace compiler.runs key ran;
+        ran
+  in
+  match ran with Ran output -> Ran (read output) | Ran_too_long -> Ran_too_long
 
 (* An instance's LIR from the query, or, for a constant the query could
-   not fold, the value its evaluator computes, once per build. *)
+   not fold, the value its evaluator computes. *)
 and compiled compiler key =
   let compiled =
     match Query.demand compiler.database (Lazy.force lowered) (compiler.lowering, key) with
     | Compiled compiled -> compiled
-    | Evaluate (path, ty) ->
-        let value =
-          match
-            List.find_opt
-              (fun (evaluated_path, _) -> Path.equal evaluated_path path)
-              compiler.evaluated
-          with
-          | Some (_, value) -> value
-          | None ->
-              let value = evaluate compiler path ty in
-              compiler.evaluated <- (path, value) :: compiler.evaluated;
-              value
-        in
-        Data { data_key = Constant path; ty; value }
+    | Evaluate (path, ty) -> (
+        match run_while_compiling compiler (Instance.Evaluator path) ~read:(decode compiler ty) with
+        | Ran value -> Data { data_key = Constant path; ty; value }
+        | Ran_too_long ->
+            cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
+              compiler.evaluation_time_limit)
   in
   if not (Instance.equal (Reachable.compiled_key compiled) key) then
     bug "%s compiled to %s" (Instance.to_string key)
@@ -690,8 +710,6 @@ let parse_report text =
    the machine, so those tests run again. *)
 let is_cacheable record = record.outcome = Passed && record.message = None && record.echo = None
 
-type results = { find : string -> string option; add : string -> string -> unit }
-
 (* A kept result is a pass, so it is only the microseconds of the run that
    kept it. A result in any other form, such as one an earlier version wrote,
    counts as none, so its test runs again and replaces it. *)
@@ -718,8 +736,9 @@ let external_test compiler test =
   | Some (Test_interface uses) when uses <> Types.no_capabilities -> true
   | _ -> false
 
-let run_tests ?results ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
+let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
   reporting compiler @@ fun () ->
+  let results = compiler.results in
   let roots = List.map Lower.test_key tests in
   progress Lowering;
   let keyed test = results <> None && not (external_test compiler test) in
@@ -904,92 +923,39 @@ let build_program compiler ~main ~output =
   let root = Instance.Program_main main in
   build compiler ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
 
-(* The key a run of code while compiling is kept under. *)
-let run_key compiler root =
-  compiler.want compiler.lowering [ root ];
-  result_key compiler root
-
 (* Evaluates a tagged template's check: each of the tag's [from_template]'s
    clauses that can run, for a template of these literal texts, by its
-   position among the clauses, with whether it holds. Results are kept for
-   the compiler's run, and, with [results], under the key of the code that
-   ran, as test results are, which the texts are part of. *)
-let check_template ?results compiler ~time_limit ~from_template ~texts =
+   position among the clauses, with whether it holds. *)
+let check_template compiler ~from_template ~texts =
   reporting compiler @@ fun () ->
   match Lower.template_checked compiler.context from_template with
   | [] -> Ran []
-  | positions -> (
-      let root = Instance.Template_check { from_template; texts } in
-      let key = run_key compiler root in
-      match Hashtbl.find_opt compiler.checked key with
-      | Some checked -> checked
-      | None ->
-          let status, output, errors =
-            match Option.bind results (fun (results : results) -> results.find key) with
-            | Some output -> (0, output, "")
-            | None ->
-                build_and_run compiler ~time_limit ~roots:[ root ]
-                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
-                  ~arguments:[]
-          in
-          let checked =
-            match status with
-            | 0 when String.length output = List.length positions ->
-                Option.iter (fun (results : results) -> results.add key output) results;
-                Ran
-                  (List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
-            | 137 ->
-                (* Killed at its time limit. *)
-                Ran_too_long
-            | status ->
-                cannot_build "Checking a template of %s ended with status %d: %s"
-                  (Path.show from_template) status errors
-          in
-          Hashtbl.replace compiler.checked key checked;
-          checked)
+  | positions ->
+      run_while_compiling compiler
+        (Instance.Template_check { from_template; texts })
+        ~read:(fun output ->
+          if String.length output <> List.length positions then
+            cannot_build "Checking a template of %s wrote %d results for %d clauses."
+              (Path.show from_template) (String.length output) (List.length positions);
+          List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
 
 (* Evaluates a call whose arguments are known, by running it: its result as
-   static data, or that it ran past [time_limit]. *)
-let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
+   static data, or that it ran past the time limit. *)
+let evaluate_call compiler ~function_ ~arguments =
   reporting compiler @@ fun () ->
   match Query.demand compiler.database Interface.Environment.signature function_ with
-  | Some { output = Returns result; _ } -> (
+  | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground (Lower.monomorphic compiler.context) [] result in
-      let root = Instance.Call_evaluation { function_; arguments } in
-      let key = run_key compiler root in
-      match Hashtbl.find_opt compiler.called key with
-      | Some evaluated -> evaluated
-      | None ->
-          let status, output, errors =
-            match Option.bind results (fun (results : results) -> results.find key) with
-            | Some output -> (0, output, "")
-            | None ->
-                build_and_run compiler ~time_limit ~roots:[ root ]
-                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
-                  ~arguments:[]
-          in
-          let evaluated =
-            match status with
-            | 0 ->
-                let value = decode compiler ty output in
-                Option.iter (fun (results : results) -> results.add key output) results;
-                Returned value
-            | 137 ->
-                (* Killed at its time limit. *)
-                Call_ran_too_long
-            | status ->
-                cannot_build "Evaluating a call of %s ended with status %d: %s"
-                  (Path.show function_) status errors
-          in
-          Hashtbl.replace compiler.called key evaluated;
-          evaluated)
+      run_while_compiling compiler
+        (Instance.Call_evaluation { function_; arguments })
+        ~read:(decode compiler ty)
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
 
-let create ?(checks = true) ?(file_name = Path.show_file) ~want
-    ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
-    settings =
+let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_time_limit = 10_000)
+    ~want ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain
+    cache settings =
   let lowering = { target; checks } in
   {
     database;
@@ -1001,9 +967,9 @@ let create ?(checks = true) ?(file_name = Path.show_file) ~want
     settings;
     file_name;
     worked_on;
-    evaluated = [];
-    checked = Hashtbl.create 8;
-    called = Hashtbl.create 8;
+    results;
+    evaluation_time_limit;
+    runs = Hashtbl.create 8;
   }
 
 module For_testing = struct

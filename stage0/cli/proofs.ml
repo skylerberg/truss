@@ -11,11 +11,9 @@ let solver =
     | Error message -> Project.cannot_run "%s" message)
 
 (* The evaluator runs code through the compiler that builds programs. The
-   compiler is created only when a proof needs a run, and run results are
-   cached as test results are. *)
+   compiler is created only when a proof needs a run. *)
 let evaluator (project : Project.t) =
-  Evaluator.of_compiler ~results:(Compiler.test_results ())
-    (lazy (Compiler.create project Development))
+  Evaluator.of_compiler (lazy (Compiler.create project Development))
 
 (* The prover's diagnostics of each of the files, and the state of each
    of its obligations, which a language server shows. A file is proven
