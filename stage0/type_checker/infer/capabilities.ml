@@ -31,7 +31,7 @@ let panic : Types.capability = Capability (Well_known.path Panic)
 
 (* The capability that [concurrent] code uses, because its behavior can
    depend on task scheduling. *)
-let tasks : Types.capability = Capability Core_walk.tasks_capability
+let tasks : Types.capability = Capability (Well_known.path Tasks)
 
 (* [spans] maps a syntax node id to its span. A core node is reported at the
    span of its origin. *)
@@ -549,7 +549,7 @@ let check_monitor_lock checking ~(solved : int -> Types.capability_set) availabl
   let provides_tasks (implementation : Core.implementation) =
     List.exists
       (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
-        Path.equal provided.capability Core_walk.tasks_capability)
+        Path.equal provided.capability (Well_known.path Tasks))
       (Form.capability_impls state implementation.type_)
   in
   let available =

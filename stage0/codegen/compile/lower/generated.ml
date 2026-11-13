@@ -152,7 +152,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
   let mutex = at (local builder ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
   emit builder (Assign (mutex, Convert (Copy (at address), Integer UInt64)));
   let tasks_call name =
-    let slot, signature = capability_method context Core_walk.tasks_capability name in
+    let slot, signature = capability_method context (Well_known.path Tasks) name in
     emit builder
       (Call
          {
@@ -160,7 +160,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
              Evidence_call
                {
                  evidence = tasks;
-                 capability = Core_walk.tasks_capability;
+                 capability = Well_known.path Tasks;
                  slot;
                  signature = fst (entry_signature context signature);
                };

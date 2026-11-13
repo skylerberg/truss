@@ -254,7 +254,6 @@ let definition_children visit = function
   | Empty -> ()
 
 let definition visit core_definition = definition_children (deep visit) core_definition
-let tasks_capability = Well_known.path Tasks
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
@@ -263,7 +262,7 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabi
   let usage = ref No_tasks in
   let rec used (capability : Types.capability) =
     match capability with
-    | Capability path -> if Path.equal path tasks_capability then usage := Uses_tasks
+    | Capability path -> if Path.equal path (Well_known.path Tasks) then usage := Uses_tasks
     | Capability_parameter _ | Capability_projection _ ->
         if !usage = No_tasks then usage := Through_parameter
     | Capability_variable variable -> List.iter used (solved variable :> Types.capability list)

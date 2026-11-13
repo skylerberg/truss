@@ -39,6 +39,9 @@ written.
 | Explicit temporaries, in evaluation order | The order is the order of statements. |
 | Temporaries that hold a borrowed place | `items[next()] += 5` lends `items[...]` once and writes through the loan, which the core form cannot hold across statements. |
 | Specifications as core expressions, and ghost statements | Only the prover reads them; the others skip them. |
+| Each source local's name, mode, and whether it is declared `var` | The ownership check names locals in its errors and checks `var`, without reading the core form. |
+| Each parameter's default, as the MIR of its expression | The callee runs it where the argument is left out. |
+| A body's facts about its `yield`s | A caller reads them from the callee's MIR: whether it yields by position, which methods it yields through, and whether it yields places. |
 
 | The MIR leaves out | Where it is |
 |---|---|
@@ -49,10 +52,19 @@ written.
 
 - **The graph is reducible.** A `while` loop is a natural loop, and Truss has
   no `goto`.
-- **A `for` loop is a structured terminator** whose body is a region, because
-  each consumer needs the body as a unit: code generation runs it at each
-  `yield` or as a task, the ownership check lends the collection for it, and
-  the prover reads the yielding method's contract for each part.
+- **A `for` loop is a structured terminator,** and it lists its body's
+  blocks, because each consumer needs the body as a unit: code generation
+  runs it at each `yield` or as a task, the ownership check lends the
+  collection for it and checks a parallel body for data races, and the
+  prover reads the yielding method's contract for each part. No consumer
+  finds the body by searching the graph.
+- **A `parallel` or `concurrent` block is a `Fork` terminator,** which lists
+  its branches, each with its entry and its blocks, and the block where it
+  ends. Each branch ends with a `Join` that names the next branch's entry,
+  or the block's end after the last branch. Read in order, as the prover and
+  the ownership check's dataflow read it, the branches run one after
+  another; code generation runs them at the same time, and the ownership
+  check compares their blocks for data races.
 - **A `yield` of a constructor built from places is a tree,** built where it
   is yielded, so each consumer reads the places it lends from the `yield`
   itself rather than from the temporary that held it.
@@ -63,6 +75,19 @@ written.
   temporaries, and a `provide` block. An early exit from `concurrent` code
   also ends the tasks it leaves, which the builder finds from the loops and
   tasks it is inside, so the core form holds none of this.
+
+## Validation
+
+A test checks every body of the standard library against the builder's
+promises. A local is never read where some path has ended it. Leaving
+scopes ends what they hold: where a function returns, only its parameters,
+captures, loop parts, and returned values are alive, and no loan is open;
+where an iteration ends, only what was alive or open when the loop started
+still is. A loop's blocks and a branch's blocks are closed: control leaves
+them only by the loop's end, a `Join`, or an exit from tasks. The tests of
+constructs check properties of their MIR, such as the order of calls or
+that a failed guard ends its arm's bindings before the next arm's test, and
+never the MIR's text, so renumbering blocks or locals breaks none.
 
 ## Evaluation order
 

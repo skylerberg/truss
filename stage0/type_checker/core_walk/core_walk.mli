@@ -64,8 +64,6 @@ val statement_exists :
   bool
 (** Whether a statement, or an expression or statement in it, satisfies its test. *)
 
-val tasks_capability : Path.t
-
 (** How code can use [Tasks]. *)
 type tasks_use =
   | Uses_tasks  (** It contains [concurrent] code, or a call in it uses [Tasks]. *)

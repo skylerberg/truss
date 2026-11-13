@@ -691,7 +691,7 @@ let field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
 (* A call of the [Tasks] method [name]. [places] holds one argument for
    each parameter, and the call writes its return value to [result]. *)
 let tasks_call st name ?result (places : Lir.place list) : Lir.statement =
-  let capability = Core_walk.tasks_capability in
+  let capability = Well_known.path Tasks in
   let slot, signature = capability_method st.context capability name in
   let lir_signature, convention = entry_signature st.context signature in
   Call
@@ -738,7 +738,7 @@ let with_group st ~origin (f : Lir.place -> unit) =
 
 (* The type of the function value that [Tasks.spawn] takes. *)
 let task_function_type st : Lir.ty =
-  let _, signature = capability_method st.context Core_walk.tasks_capability "spawn" in
+  let _, signature = capability_method st.context (Well_known.path Tasks) "spawn" in
   match signature.parameters with
   | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
   | _ -> bug "Tasks.spawn does not take a group, a function, and an item"
@@ -1297,7 +1297,7 @@ and provide st (provided : Mir.provided list) ~can_use_tasks =
      this [provide] lists, or else the enclosing one, so that a scheduler
      sees them. An implementation of [Tasks] is never locked: it guards its
      own state. *)
-  let is_tasks (capability, _) = Path.equal capability Core_walk.tasks_capability in
+  let is_tasks (capability, _) = Path.equal capability (Well_known.path Tasks) in
   let tasks =
     if can_use_tasks then
       Option.map snd (List.find_opt is_tasks (List.concat_map snd implementations @ enclosing))
