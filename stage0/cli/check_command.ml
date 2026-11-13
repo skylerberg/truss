@@ -50,7 +50,7 @@ let rounds = 32
 let unused_dependencies (project : Project.t) =
   let root = Database.root project.session in
   List.filter_map
-    (fun (file, package, (problem : Type_checker.manifest_problem)) ->
+    (fun (file, package, (problem : Checks.manifest_problem)) ->
       match problem with
       | Unused dependency ->
           let path = Filename.concat root file in
@@ -61,7 +61,7 @@ let unused_dependencies (project : Project.t) =
                (Json.Object
                   [
                     ("file", Json.String (Project.shown path));
-                    ("message", Json.String (Type_checker.manifest_sentence ~package problem));
+                    ("message", Json.String (Checks.manifest_sentence ~package problem));
                   ]))
       | Not_a_capability _ -> None)
     (Project.manifest_problems project)

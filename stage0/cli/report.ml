@@ -37,7 +37,7 @@ let gather ?(proofs = false) (project : Project.t) =
       Database.problems project.session
       @ List.map
           (fun (file, package, problem) ->
-            Printf.sprintf "%s: %s" file (Type_checker.manifest_sentence ~package problem))
+            Printf.sprintf "%s: %s" file (Checks.manifest_sentence ~package problem))
           (Project.manifest_problems project);
   }
 

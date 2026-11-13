@@ -1,5 +1,5 @@
 (library
- (name type_checker)
+ (name package_checks)
  (libraries
   manifest
   query
@@ -10,13 +10,10 @@
   source
   resolve
   syntax
-  syntax_walk
   types
   intrinsic
   well_known
   core
   core_walk
   interface
-  infer
-  ownership
-  zarith))
+  infer))

@@ -3,7 +3,7 @@
 open Harness
 open Support
 
-let check = Type_checker.For_testing.through Usage
+let check = Checks.For_testing.through Usage
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 

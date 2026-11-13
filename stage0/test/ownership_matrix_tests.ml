@@ -16,7 +16,7 @@
 open Harness
 open Support
 
-let check = Type_checker.For_testing.through Ownership
+let check = Checks.For_testing.through Ownership
 let helpers = Fixtures.Ownership_matrix.helpers
 
 (* A place that stores a [List[Int64]]. *)

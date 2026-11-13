@@ -43,7 +43,7 @@ let () =
   match !loaded with
   | None -> ()
   | Some (database, _)
-    when List.exists (fun (file, _) -> Type_checker.diagnostics database file <> []) files ->
+    when List.exists (fun (file, _) -> Checks.diagnostics database file <> []) files ->
       ()
   | Some (database, compile) -> (
       let tests =

@@ -18,7 +18,7 @@ let loaded =
        (Standard_library.files @ [ (probe, source) ]);
      let database = Engine.context engine in
      let text = (Query.demand database Workspace.file probe).source in
-     (match Type_checker.diagnostics database probe with
+     (match Checks.diagnostics database probe with
      | [] -> ()
      | diagnostics ->
          fail "the source has diagnostics:\n%s"
@@ -77,7 +77,7 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Type_checker.diagnostics database checks)
+          (Checks.diagnostics database checks)
       in
       let expected =
         [

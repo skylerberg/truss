@@ -48,7 +48,7 @@ val problems : session -> string list
     read, a package name used twice, a dependency that is no package of the project. *)
 
 val manifest_problems :
-  session -> Path.package list -> (string * Path.package * Type_checker.manifest_problem) list
+  session -> Path.package list -> (string * Path.package * Checks.manifest_problem) list
 (** The errors in the named packages' manifests that only their code shows: each one's file,
     relative to the project's root, its package, and the problem. Asking checks those packages. *)
 

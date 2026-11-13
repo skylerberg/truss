@@ -81,7 +81,7 @@
   diagnostic
   source
   compile
-  type_checker
+  checks
   prover
   evaluator
   solver

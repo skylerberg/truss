@@ -17,7 +17,7 @@
   intrinsic
   interface
   core
-  type_checker
+  checks
   solver
   prover
   libc

@@ -1,0 +1,15 @@
+(library
+ (name checks)
+ (libraries
+  query
+  phases
+  path
+  workspace
+  diagnostic
+  resolve
+  interface
+  infer
+  patterns
+  usage
+  ownership
+  package_checks))

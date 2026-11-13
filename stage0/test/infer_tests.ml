@@ -5,7 +5,7 @@
 open Harness
 open Support
 
-let check = Type_checker.For_testing.through Infer
+let check = Checks.For_testing.through Infer
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
@@ -766,7 +766,7 @@ let () =
   test "a constant of a derived type of integers in a pattern" (fun () ->
       fine Fixtures.Infer.constant_of_a_derived_type_of_integers_in_a);
   test "a provided method without a time clause cannot be replaced" (fun () ->
-      Support.one_diagnostic ~check:Type_checker.diagnostics
+      Support.one_diagnostic ~check:Checks.diagnostics
         Fixtures.Infer.provided_method_without_a_time_clause_cannot_be "types.not_replaceable");
   test "a loop's cost bound is checked" (fun () ->
       one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")

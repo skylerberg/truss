@@ -6,7 +6,7 @@ open Harness
 open Support
 
 (* Everything the checker reports so far: resolution and interfaces. *)
-let check = Type_checker.For_testing.through Interface
+let check = Checks.For_testing.through Interface
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }

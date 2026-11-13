@@ -31,7 +31,7 @@ let () =
   let timed =
     List.filter_map
       (fun ((file : Path.file), _) ->
-        match Type_checker.diagnostics database file with
+        match Checks.diagnostics database file with
         | _ :: _ -> None
         | [] ->
             let solved = Solver.solved solver in

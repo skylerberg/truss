@@ -121,7 +121,7 @@ let measure database ~record ~is_measured =
           let start = processor_time () in
           List.iter
             (fun (file, _) ->
-              if Type_checker.diagnostics database file = [] then
+              if Checks.diagnostics database file = [] then
                 ignore (Prover.diagnostics ~record database solver file))
             files;
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
@@ -200,8 +200,7 @@ let () =
     timed "type checking" (fun () ->
         List.map
           (fun (module_, files) ->
-            ( module_,
-              List.map (fun (file, _) -> (file, Type_checker.diagnostics database file)) files ))
+            (module_, List.map (fun (file, _) -> (file, Checks.diagnostics database file)) files))
           modules)
   in
   test "the code database kept every result of checking the standard library current" (fun () ->

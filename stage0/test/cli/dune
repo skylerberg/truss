@@ -11,7 +11,7 @@
   database
   graph_types
   build
-  type_checker
+  checks
   manifest
   registry
   compile))

@@ -35,7 +35,7 @@ let () =
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))
               (fun () ->
-                let diagnostics = Type_checker.diagnostics database file in
+                let diagnostics = Checks.diagnostics database file in
                 if
                   not
                     (List.exists
