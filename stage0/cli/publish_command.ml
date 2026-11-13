@@ -12,29 +12,19 @@ let unfinished (project : Project.t) =
   List.concat_map
     (fun file ->
       let source = Project.source project file in
-      let offsets = ref [] in
-      List.iter
+      List.concat_map
         (fun (item : Syntax.definition Syntax.item) ->
-          let add keyword (span : Syntax.span) =
-            offsets := ((Syntax.Span.to_source ~base:item.base span).start, keyword) :: !offsets
-          in
-          let rec visit (value : Syntax.expression) =
-            (match value.kind with
-            | Todo -> add "todo" value.span
-            | Echo _ -> add "echo" value.span
-            | _ -> ());
-            Syntax_walk.children visit value
-          in
-          Syntax_walk.definition visit item.value;
-          match item.value.kind with
-          | Type_definition { name; body = Type_todo; _ } -> add "todo" name.span
-          | _ -> ())
-        (Project.parsed project file).definitions;
-      List.map
-        (fun (offset, keyword) ->
-          let line, column = Source.position source offset in
-          (keyword, Source.path source, line, column))
-        (List.sort compare !offsets))
+          List.map
+            (fun ({ keyword; span; _ } : Inspect.unfinished) ->
+              let line, column =
+                Source.position source (Syntax.Span.to_source ~base:item.base span).start
+              in
+              ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
+                Source.path source,
+                line,
+                column ))
+            (Inspect.unfinished item.value))
+        (Project.parsed project file).definitions)
     (Project.files project)
 
 (* The files to publish: the package's own, with its published lock file

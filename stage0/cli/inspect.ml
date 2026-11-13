@@ -25,44 +25,56 @@ let show_type (tables : Infer.tables) id =
 let local_type (tables : Infer.tables) id =
   match at tables.local_types id with Some type_ -> Types.show type_ | None -> "an unknown type"
 
-let expression_span (definition : definition) id =
-  let span = ref None in
+(* A [todo] or an [echo] of a definition, at its span relative to the
+   definition. A [todo] expression has its id; a type defined as [todo] has
+   none and is at its name. *)
+type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : span }
+
+(* Each [todo] and [echo] of a definition, in source order. *)
+let unfinished (definition : definition) =
+  let found = ref [] in
+  let add keyword id (span : span) = found := { keyword; id; span } :: !found in
   let rec visit (value : expression) =
-    if value.id = id then span := Some value.span else Syntax_walk.children visit value
+    (match value.kind with
+    | Todo -> add `Todo (Some value.id) value.span
+    | Echo _ -> add `Echo (Some value.id) value.span
+    | _ -> ());
+    Syntax_walk.children visit value
   in
   Syntax_walk.definition visit definition;
-  !span
+  (match definition.kind with
+  | Type_definition { name; body = Type_todo; _ } -> add `Todo None name.span
+  | _ -> ());
+  List.sort (fun left right -> compare left.span.start right.span.start) !found
 
 (* Each [todo] of a definition, in source order. Name resolution records
    the bindings in scope at each [todo], and the type checker's tables give
    their types. *)
 let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infer.tables) =
-  let values =
-    List.filter_map
-      (fun (id, scope) ->
-        Option.map
-          (fun (span : span) ->
-            {
-              offset = span.start;
-              expected = Some (show_type tables id);
-              scope =
-                List.map
-                  (fun (name, (value : Resolve.value)) ->
-                    ( name,
-                      match value with
-                      | Value_local binding -> local_type tables binding
-                      | Value_generic _ -> "USize"
-                      | Value_field _ -> "a field"
-                      | Value_law_parameter _ -> "a parameter of the law" ))
-                  scope;
-            })
-          (expression_span definition id))
-      resolved.holes
-  in
-  match definition.kind with
-  | Type_definition { name; body = Type_todo; _ } ->
-      { offset = name.span.start; expected = None; scope = [] } :: values
-  | _ -> values
+  List.filter_map
+    (fun { keyword; id; span } ->
+      match (keyword, id) with
+      | `Echo, _ -> None
+      | `Todo, None -> Some { offset = span.start; expected = None; scope = [] }
+      | `Todo, Some id ->
+          Option.map
+            (fun scope ->
+              {
+                offset = span.start;
+                expected = Some (show_type tables id);
+                scope =
+                  List.map
+                    (fun (name, (value : Resolve.value)) ->
+                      ( name,
+                        match value with
+                        | Value_local binding -> local_type tables binding
+                        | Value_generic _ -> "USize"
+                        | Value_field _ -> "a field"
+                        | Value_law_parameter _ -> "a parameter of the law" ))
+                    scope;
+              })
+            (List.assoc_opt id resolved.holes))
+    (unfinished definition)
 
 type explanation = {
   text : string;  (** The name or expression as written *)
