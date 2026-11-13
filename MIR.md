@@ -2,9 +2,9 @@
 
 The MIR is stage0's mid-level IR: a control-flow graph of each definition's
 body, built from the core form of [TYPECHECKER.md](TYPECHECKER.md). The
-ownership check reads it, and the prover ([PROVER.md](PROVER.md)) and code
-generation ([CODEGEN.md](CODEGEN.md)) are to read it in place of the core
-form (see [Not built](#not-built)).
+ownership check and code generation ([CODEGEN.md](CODEGEN.md)) read it, and
+the prover ([PROVER.md](PROVER.md)) is to read it in place of the core form
+(see [Not built](#not-built)).
 
 ## Motivation
 
@@ -96,13 +96,12 @@ same term.
 
 ## Not built
 
-The builder is built, and the ownership check reads the MIR. The rest comes
-in this order, each step removing the code it replaces:
+The builder is built, and the ownership check and code generation read the
+MIR. The rest comes in this order, each step removing the code it replaces:
 
-1. Code generation lowers the MIR to the LIR, and its lowering of the core
-   form is removed.
-2. The prover runs the MIR forward, and its walk of the core form is
+1. The prover runs the MIR forward, and its walk of the core form is
    removed.
-3. The core form loses the forms that only the builder then reads.
+2. The core form loses the forms that only the builder then reads.
 
-Pattern matching as a decision tree comes after step 1.
+Pattern matching as a decision tree is an improvement of the builder, which
+can come at any time.
