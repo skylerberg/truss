@@ -1,0 +1,171 @@
+use standard::base64
+use standard::cryptography
+use standard::intrinsic
+
+internal let continuation_opcode: UInt8 = 0
+
+internal let text_opcode: UInt8 = 1
+
+internal let binary_opcode: UInt8 = 2
+
+internal let close_opcode: UInt8 = 8
+
+internal let ping_opcode: UInt8 = 9
+
+internal let pong_opcode: UInt8 = 10
+
+internal let protocol_error: UInt16 = 1002
+
+internal let invalid_data: UInt16 = 1007
+
+internal let message_too_big: UInt16 = 1009
+
+internal fn accept_key(key: StringSlice) -> String {
+  var input = key.to_string()
+  mut input.push("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+  let digest = cryptography::sha1(input.slice().bytes())
+  base64::encode(digest[..])
+}
+
+internal fn is_valid_key(key: StringSlice) -> Bool {
+  match base64::decode(key) {
+    Ok(bytes) => bytes.length() == 16
+    Err(_) => false
+  }
+}
+
+internal type Frame(is_final: Bool, opcode: UInt8, payload: List[UInt8])
+
+internal type Parsed =
+  | Incomplete
+  | Complete(frame: Frame, length: USize)
+  | Invalid(code: UInt16, reason: String)
+
+fn invalid(code: UInt16, reason: StringSlice) -> Parsed {
+  Parsed.Invalid(code: code, reason: reason.to_string())
+}
+
+internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize) -> Parsed {
+  if bytes.length() < 2 {
+    return Parsed.Incomplete
+  }
+  let first = bytes[0]
+  let second = bytes[1]
+  if (first & 112) != 0 {
+    return invalid(protocol_error, reason: "a frame with reserved bits set")
+  }
+  let opcode = first & 15
+  let is_final = (first & 128) != 0
+  let is_masked = (second & 128) != 0
+  if is_masked != is_server {
+    let reason = if is_server { "a frame from a client that is not masked".slice() } else { "a masked frame from a server".slice() }
+    return invalid(protocol_error, reason: reason)
+  }
+  if (opcode > 2 && opcode < 8) || opcode > 10 {
+    return invalid(protocol_error, reason: "a frame with an unknown opcode")
+  }
+  var length: UInt64 = intrinsic::convert(second & 127)
+  var at: USize = 2
+  if length == 126 {
+    if bytes.length() < 4 {
+      return Parsed.Incomplete
+    }
+    length = (intrinsic::convert[UInt8, UInt64](bytes[2]) << 8) | intrinsic::convert[UInt8, UInt64](bytes[3])
+    at = 4
+  } else if length == 127 {
+    if bytes.length() < 10 {
+      return Parsed.Incomplete
+    }
+    length = 0
+    let width: USize = 8
+    for index in 0..width {
+      length = (length << 8) | intrinsic::convert[UInt8, UInt64](bytes[2 + index])
+    }
+    if (length >> 63) != 0 {
+      return invalid(protocol_error, reason: "a frame length with its high bit set")
+    }
+    at = 10
+  }
+  if opcode >= 8 && (!is_final || length > 125) {
+    return invalid(protocol_error, reason: "a control frame that is fragmented or longer than 125 bytes")
+  }
+  let limit_wide: UInt64 = intrinsic::convert(limit)
+  if length > limit_wide {
+    return invalid(message_too_big, reason: "a frame larger than the limit")
+  }
+  let size: USize = intrinsic::convert(length)
+  var mask: Array[UInt8, 4] = [0, 0, 0, 0]
+  if is_masked {
+    if bytes.length() < at || bytes.length() - at < 4 {
+      return Parsed.Incomplete
+    }
+    let width: USize = 4
+    for index in 0..width {
+      mask[index] = bytes[at + index]
+    }
+    at += 4
+  }
+  if bytes.length() < at || bytes.length() - at < size {
+    return Parsed.Incomplete
+  }
+  let raw = bytes[at..at + size]
+  var payload: List[UInt8] = List.with_capacity(size)
+  for index in 0..raw.length() {
+    mut payload.push(if is_masked { raw[index] ^ mask[index % 4] } else { raw[index] })
+  }
+  Parsed.Complete(frame: Frame(is_final: is_final, opcode: opcode, payload: own payload), length: at + size)
+}
+
+internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: Option[Array[UInt8, 4]]) -> List[UInt8] {
+  var bytes: List[UInt8] = List.with_capacity(payload.length() + 14)
+  mut bytes.push((if is_final { 128 } else { 0 }) | (opcode & 15))
+  let mask_bit: UInt8 = if mask is Some(_) { 128 } else { 0 }
+  let length = payload.length()
+  if length < 126 {
+    mut bytes.push(mask_bit | intrinsic::convert(length & 127))
+  } else if length < 65536 {
+    mut bytes.push(mask_bit | 126)
+    mut bytes.push(intrinsic::convert((length >> 8) & 255))
+    mut bytes.push(intrinsic::convert(length & 255))
+  } else {
+    mut bytes.push(mask_bit | 127)
+    let wide: UInt64 = intrinsic::convert(length)
+    let width: USize = 8
+    for index in 0..width {
+      mut bytes.push(intrinsic::convert((wide >> (8 * (7 - index))) & 255))
+    }
+  }
+  match mask {
+    Some(key) => {
+      mut bytes.append_slice(key[..])
+      for index in 0..length {
+        mut bytes.push(payload[index] ^ key[index % 4])
+      }
+    }
+    None => mut bytes.append_slice(payload)
+  }
+  bytes
+}
+
+internal fn close_payload(code: UInt16, reason: StringSlice) -> List[UInt8] {
+  var payload: List[UInt8] = [intrinsic::convert((code >> 8) & 255), intrinsic::convert(code & 255)]
+  let bytes = reason.bytes()
+  let kept = if bytes.length() > 123 { 123 } else { bytes.length() }
+  mut payload.append_slice(bytes[0..kept])
+  payload
+}
+
+internal fn close_code(payload: Slice[UInt8]) -> Result[UInt16, UInt16] {
+  if payload.is_empty() {
+    return Ok(1005)
+  }
+  if payload.length() == 1 {
+    return Err(protocol_error)
+  }
+  let code = (intrinsic::convert[UInt8, UInt16](payload[0]) << 8) | intrinsic::convert[UInt8, UInt16](payload[1])
+  let is_valid = (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999)
+  if !is_valid {
+    return Err(protocol_error)
+  }
+  Ok(code)
+}

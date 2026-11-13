@@ -1,13 +1,16 @@
+use standard::base64
 use standard::compression
 use standard::html
 use standard::http::date
 use standard::http::flow
 use standard::http::hpack
 use standard::http::two
+use standard::http::websocket
 use standard::intrinsic
 use standard::json
 use standard::map
 use standard::network
+use standard::random
 use standard::serialization
 use standard::streams
 use standard::tasks
@@ -507,6 +510,16 @@ public fn Responder.start(mut self, status: Status, headers: Headers = Headers(e
     is_end: is_end,
     ack: self.ack.copy(),
   ))
+}
+
+fn Responder.switch_protocols(mut self, fields: own List[hpack::Field]) -> Result[Unit, Error]
+  uses Tasks
+{
+  if self.phase != Phase.Waiting {
+    return Err(Error.Unsupported(message: "a response that has already started"))
+  }
+  self.phase = Phase.Done
+  deliver(self, message: flow::Outbound.Head(stream: self.stream, status: 101, fields: own fields, is_end: false, ack: self.ack.copy()))
 }
 
 public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
@@ -1085,7 +1098,7 @@ fn head_bytes(status: UInt16, fields: Slice[hpack::Field], is_end: Bool, version
       push_text(mut head, text: "Transfer-Encoding: chunked\r\n")
     }
   }
-  if close || (has_payload && !has_length && !is_end && version_one_zero) {
+  if status != 101 && (close || (has_payload && !has_length && !is_end && version_one_zero)) {
     push_text(mut head, text: "Connection: close\r\n")
   }
   push_text(mut head, text: "\r\n")
@@ -1205,17 +1218,23 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
         return
       }
     }
-    let framing = match framing_of(head.headers, is_response: false) {
-      Ok(framing) => own framing
-      Err(error) => {
-        refuse(connection, error: error)
-        return
+    let is_upgrade = has_token(head.headers.get("Connection"), token: "upgrade") && head.headers.contains("Upgrade")
+    let framing = if is_upgrade {
+      Framing.UntilClose
+    } else {
+      match framing_of(head.headers, is_response: false) {
+        Ok(framing) => framing
+        Err(error) => {
+          refuse(connection, error: error)
+          return
+        }
       }
     }
+    let body_limit = if is_upgrade { 18446744073709551615 } else { options.limits.body_bytes }
     if has_token(head.headers.get("Expect"), token: "100-continue") {
       let _ = connection.send_all("HTTP/1.1 100 Continue\r\n\r\n".bytes())
     }
-    let close = if head.version_one_zero {
+    let close = is_upgrade || if head.version_one_zero {
       !has_token(head.headers.get("Connection"), token: "keep-alive")
     } else {
       has_token(head.headers.get("Connection"), token: "close")
@@ -1227,19 +1246,22 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
     var is_reusable = true
     var can_continue = true
     concurrent {
-      is_reusable = pump_body(connection, inbox: mut unread, framing: framing, chunks: chunks, limit: options.limits.body_bytes)
+      is_reusable = pump_body(connection, inbox: mut unread, framing: framing, chunks: chunks, limit: body_limit)
       {
         let request = Request(
           method: own head.method,
           target: own head.target,
           headers: own head.headers,
-          body: channel_body(chunks, credit: None, limit: options.limits.body_bytes),
+          body: channel_body(chunks, credit: None, limit: body_limit),
         )
         var responder = new_responder(outbound, stream: 0, is_head: is_head)
         handler(own request, mut responder)
         let _ = mut responder.finish()
         outbound.close()
         chunks.close()
+        if is_upgrade {
+          return
+        }
       }
       can_continue = write_one(connection, outbound: outbound, version_one_zero: version_one_zero, close: close)
     }
@@ -1909,6 +1931,7 @@ fn open_link(
   is_secure: Bool,
   roots: Result[List[x509::Certificate], SystemError],
   options: ClientOptions,
+  protocols: own List[String],
 ) -> Result[Link, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic
 {
@@ -1923,7 +1946,7 @@ fn open_link(
     Ok(trusted) => trusted.copy()
     Err(error) => return Err(Error.System(error: error))
   }
-  let config = tls::ClientConfig(roots: own trusted, protocols: ["h2", "http/1.1"])
+  let config = tls::ClientConfig(roots: own trusted, protocols: own protocols)
   let secured = match tls::connect(own connection, host: host, config: config) {
     Ok(secured) => own secured
     Err(error) => return Err(Error.Tls(error: own error))
@@ -2004,7 +2027,7 @@ public fn Client.stream[Output, capability Granted](
   let opened = match own started {
     Some(fresh) => own fresh
     None => {
-      let link = open_link(host.slice(), port: port, is_secure: is_secure, roots: self.roots, options: self.options)?
+      let link = open_link(host.slice(), port: port, is_secure: is_secure, roots: self.roots, options: self.options, protocols: ["h2", "http/1.1"])?
       begin_exchange(own link, method: method, url: url, headers: headers, body: body.slice(), limits: self.options.limits)?
     }
   }
@@ -2060,4 +2083,599 @@ public fn get(address: StringSlice, options: ClientOptions = ClientOptions()) ->
 {
   var client = Client.new(options)
   mut client.get(address)
+}
+
+public type Message =
+  | Text(text: String)
+  | Binary(bytes: List[UInt8])
+  derives Equal
+
+type Sending(outbound: tasks::Channel[flow::Outbound], ack: tasks::Channel[Bool], masks: Option[random::Generator], is_closed: Bool)
+
+fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_final: Bool) -> Result[Unit, Error]
+  uses Tasks
+{
+  if sending.is_closed {
+    return Err(Error.Closed)
+  }
+  let mask: Option[Array[UInt8, 4]] = match mut sending.masks {
+    Some(generator) => {
+      let word = mut generator.next()
+      Some([
+        intrinsic::convert(word & 255),
+        intrinsic::convert((word >> 8) & 255),
+        intrinsic::convert((word >> 16) & 255),
+        intrinsic::convert((word >> 24) & 255),
+      ])
+    }
+    None => None
+  }
+  let bytes = websocket::encode(opcode, payload: payload, is_final: is_final, mask: mask)
+  if opcode == websocket::close_opcode {
+    sending.is_closed = true
+  }
+  if sending.outbound.send(flow::Outbound.Data(stream: 0, bytes: own bytes, is_end: false, ack: sending.ack.copy())) is Err(_) {
+    return Err(Error.Closed)
+  }
+  match sending.ack.receive() {
+    Some(true) => Ok(Unit)
+    _ => Err(Error.Closed)
+  }
+}
+
+public opaque type WebSocketReader(
+  body: Body,
+  buffer: List[UInt8],
+  fragments: List[UInt8],
+  fragment_opcode: UInt8,
+  limit: USize,
+  is_server: Bool,
+  sending: Sending,
+  close_code: Option[UInt16],
+)
+
+public opaque type WebSocketWriter(sending: Sending)
+
+public type WebSocketParts(reader: WebSocketReader, writer: WebSocketWriter)
+
+public opaque type WebSocket(reader: WebSocketReader, writer: WebSocketWriter, protocol: Option[String])
+
+fn fail_socket(reader: mut WebSocketReader, code: UInt16, reason: own String) -> Error
+  uses Tasks
+{
+  let payload = websocket::close_payload(code, reason: reason.slice())
+  let _ = send_frame(mut reader.sending, opcode: websocket::close_opcode, payload: payload.slice(), is_final: true)
+  reader.close_code = Some(code)
+  Error.Malformed(message: own reason)
+}
+
+public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
+  uses Handles, Tasks
+{
+  if self.close_code is Some(_) {
+    return Ok(None)
+  }
+  while true {
+    match websocket::parse(self.buffer.slice(), is_server: self.is_server, limit: self.limit) {
+      Incomplete => {
+        let count = mut self.body.read(mut self.buffer, limit: 65536)?
+        if count == 0 {
+          self.close_code = Some(1006)
+          return Ok(None)
+        }
+      }
+      Invalid(code, reason) => return Err(fail_socket(mut self, code: code, reason: own reason))
+      Complete(frame, length) => {
+        if length <= self.buffer.length() {
+          let rest = mut self.buffer.split_off(length)
+          self.buffer = own rest
+        }
+        let opcode = frame.opcode
+        if opcode == websocket::ping_opcode {
+          send_frame(mut self.sending, opcode: websocket::pong_opcode, payload: frame.payload.slice(), is_final: true)?
+        } else if opcode == websocket::close_opcode {
+          let code = match websocket::close_code(frame.payload.slice()) {
+            Ok(code) => code
+            Err(code) => return Err(fail_socket(mut self, code: code, reason: "a close frame with an invalid code"))
+          }
+          self.close_code = Some(code)
+          if !self.sending.is_closed {
+            let reply = if code == 1005 { [] } else { websocket::close_payload(code, reason: "") }
+            let _ = send_frame(mut self.sending, opcode: websocket::close_opcode, payload: reply.slice(), is_final: true)
+          }
+          return Ok(None)
+        } else if opcode != websocket::pong_opcode {
+          if opcode == websocket::continuation_opcode {
+            if self.fragment_opcode == 0 {
+              return Err(fail_socket(mut self, code: websocket::protocol_error, reason: "a continuation frame with no message to continue"))
+            }
+          } else if self.fragment_opcode != 0 {
+            return Err(fail_socket(mut self, code: websocket::protocol_error, reason: "a new message in the middle of a fragmented one"))
+          } else {
+            self.fragment_opcode = opcode
+          }
+          if self.fragments.length() > self.limit || frame.payload.length() > self.limit - self.fragments.length() {
+            return Err(fail_socket(mut self, code: websocket::message_too_big, reason: "a message larger than the limit"))
+          }
+          mut self.fragments.append(own frame.payload)
+          if frame.is_final {
+            let bytes = map::exchange(mut self.fragments, value: [])
+            let kind = self.fragment_opcode
+            self.fragment_opcode = 0
+            if kind == websocket::text_opcode {
+              return match String.from_utf8(own bytes) {
+                Ok(text) => Ok(Some(Message.Text(text: own text)))
+                Err(_) => Err(fail_socket(mut self, code: websocket::invalid_data, reason: "a text message that is not UTF-8"))
+              }
+            }
+            return Ok(Some(Message.Binary(bytes: own bytes)))
+          }
+        }
+      }
+    }
+  }
+}
+
+public fn WebSocketReader.close_code(self) -> Option[UInt16] {
+  self.close_code
+}
+
+public fn WebSocketWriter.send(mut self, message: Message) -> Result[Unit, Error]
+  uses Tasks
+{
+  match message {
+    Text(text) => send_frame(mut self.sending, opcode: websocket::text_opcode, payload: text.slice().bytes(), is_final: true)
+    Binary(bytes) => send_frame(mut self.sending, opcode: websocket::binary_opcode, payload: bytes.slice(), is_final: true)
+  }
+}
+
+public fn WebSocketWriter.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
+  uses Tasks
+{
+  send_frame(mut self.sending, opcode: websocket::text_opcode, payload: text.bytes(), is_final: true)
+}
+
+public fn WebSocketWriter.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
+  uses Tasks
+{
+  send_frame(mut self.sending, opcode: websocket::binary_opcode, payload: bytes, is_final: true)
+}
+
+public fn WebSocketWriter.ping(mut self, payload: Slice[UInt8] = []) -> Result[Unit, Error]
+  uses Tasks
+{
+  let length = if payload.length() > 125 { 125 } else { payload.length() }
+  send_frame(mut self.sending, opcode: websocket::ping_opcode, payload: payload[0..length], is_final: true)
+}
+
+public fn WebSocketWriter.close(mut self, code: UInt16 = 1000, reason: StringSlice = "") -> Result[Unit, Error]
+  uses Tasks
+{
+  if self.sending.is_closed {
+    return Ok(Unit)
+  }
+  let payload = websocket::close_payload(code, reason: reason)
+  send_frame(mut self.sending, opcode: websocket::close_opcode, payload: payload.slice(), is_final: true)
+}
+
+public fn WebSocket.protocol(self) -> Option[StringSlice] {
+  match self.protocol {
+    Some(name) => Some(name.slice())
+    None => None
+  }
+}
+
+public fn WebSocket.receive(mut self) -> Result[Option[Message], Error]
+  uses Handles, Tasks
+{
+  mut self.reader.receive()
+}
+
+public fn WebSocket.send(mut self, message: Message) -> Result[Unit, Error]
+  uses Tasks
+{
+  mut self.writer.send(message)
+}
+
+public fn WebSocket.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
+  uses Tasks
+{
+  mut self.writer.send_text(text)
+}
+
+public fn WebSocket.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
+  uses Tasks
+{
+  mut self.writer.send_binary(bytes)
+}
+
+public fn WebSocket.close(mut self, code: UInt16 = 1000, reason: StringSlice = "") -> Result[Unit, Error]
+  uses Handles, Tasks
+{
+  mut self.writer.close(code, reason: reason)?
+  while mut self.reader.receive()? is Some(_) {}
+  Ok(Unit)
+}
+
+public fn WebSocket.split(own self) -> WebSocketParts {
+  WebSocketParts(reader: own self.reader, writer: own self.writer)
+}
+
+fn new_socket(
+  body: own Body,
+  outbound: tasks::Channel[flow::Outbound],
+  is_server: Bool,
+  masks: own Option[random::Generator],
+  protocol: own Option[String],
+  limit: USize,
+) -> WebSocket {
+  let reader_masks = match masks {
+    Some(generator) => {
+      var split_from = generator.copy()
+      Some(mut split_from.split())
+    }
+    None => None
+  }
+  let reader = WebSocketReader(
+    body: own body,
+    buffer: [],
+    fragments: [],
+    fragment_opcode: 0,
+    limit: limit,
+    is_server: is_server,
+    sending: Sending(outbound: outbound.copy(), ack: tasks::Channel.new(capacity: 1), masks: reader_masks, is_closed: false),
+    close_code: None,
+  )
+  let writer = WebSocketWriter(sending: Sending(outbound: outbound.copy(), ack: tasks::Channel.new(capacity: 1), masks: masks, is_closed: false))
+  WebSocket(reader: own reader, writer: own writer, protocol: own protocol)
+}
+
+fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Option[String] {
+  match header {
+    Some(value) => {
+      for part in value.split(",") {
+        let name = part.trim()
+        for protocol in protocols {
+          if protocol.slice() == name {
+            return Some(protocol.copy())
+          }
+        }
+      }
+      None
+    }
+    None => None
+  }
+}
+
+public fn websocket(
+  request: own Request,
+  responder: mut Responder,
+  protocols: Slice[String] = [],
+  message_limit: USize = 16777216,
+) -> Result[WebSocket, Error]
+  uses Tasks
+{
+  let is_upgrade = request.method == Method.Get && has_token(request.headers.get("Connection"), token: "upgrade")
+    && has_token(request.headers.get("Upgrade"), token: "websocket")
+  let key = request.headers.get("Sec-WebSocket-Key").unwrap_or("".slice()).trim().to_string()
+  if !is_upgrade || !websocket::is_valid_key(key.slice()) {
+    let _ = mut responder.send(Response.text("a WebSocket upgrade is expected here", status: Status.bad_request))
+    return Err(malformed("a request that is not a WebSocket upgrade"))
+  }
+  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13".slice() {
+    let refused = Response.text("only WebSocket version 13 is supported", status: Status(code: 426)).with_header("Sec-WebSocket-Version", value: "13")
+    let _ = mut responder.send(own refused)
+    return Err(Error.Unsupported(message: "a WebSocket version other than 13"))
+  }
+  let protocol = offered_protocol(request.headers.get("Sec-WebSocket-Protocol"), protocols: protocols)
+  var fields: List[hpack::Field] = [
+    hpack::Field(name: "Upgrade", value: "websocket"),
+    hpack::Field(name: "Connection", value: "Upgrade"),
+    hpack::Field(name: "Sec-WebSocket-Accept", value: websocket::accept_key(key.slice())),
+  ]
+  match protocol {
+    Some(name) => mut fields.push(hpack::Field(name: "Sec-WebSocket-Protocol", value: name.copy()))
+    None => {}
+  }
+  mut responder.switch_protocols(own fields)?
+  Ok(new_socket(own request.body, outbound: responder.outbound, is_server: true, masks: None, protocol: own protocol, limit: message_limit))
+}
+
+public type Event(data: String, name: Option[String] = None, id: Option[String] = None, retry_milliseconds: Option[UInt64] = None)
+  derives Equal
+
+public fn Responder.start_events(mut self, headers: Headers = Headers(entries: [])) -> Result[Unit, Error]
+  uses Tasks
+{
+  var all = headers.copy()
+  mut all.set("Content-Type", value: "text/event-stream")
+  mut all.set("Cache-Control", value: "no-cache")
+  mut self.start(Status.ok, headers: all)
+}
+
+fn push_field(output: mut String, name: StringSlice, value: StringSlice) {
+  mut output.push(name)
+  mut output.push(": ")
+  mut output.push(value)
+  mut output.push("\n")
+}
+
+public fn Responder.send_event(mut self, event: Event) -> Result[Unit, Error]
+  uses Tasks
+{
+  var text = ""
+  match event.name {
+    Some(name) => push_field(mut text, name: "event", value: name.slice())
+    None => {}
+  }
+  match event.id {
+    Some(id) => push_field(mut text, name: "id", value: id.slice())
+    None => {}
+  }
+  match event.retry_milliseconds {
+    Some(retry) => push_field(mut text, name: "retry", value: "${retry}".slice())
+    None => {}
+  }
+  for line in event.data.slice().split("\n") {
+    push_field(mut text, name: "data", value: line)
+  }
+  mut text.push("\n")
+  mut self.write(text.slice().bytes())
+}
+
+public fn Responder.send_comment(mut self, comment: StringSlice) -> Result[Unit, Error]
+  uses Tasks
+{
+  var text = ""
+  for line in comment.split("\n") {
+    mut text.push(": ")
+    mut text.push(line)
+    mut text.push("\n")
+  }
+  mut text.push("\n")
+  mut self.write(text.slice().bytes())
+}
+
+public opaque type EventParser(
+  pending: List[UInt8],
+  data: String,
+  has_data: Bool,
+  name: Option[String],
+  id: Option[String],
+  retry: Option[UInt64],
+  is_started: Bool,
+)
+
+public fn EventParser.new() -> EventParser {
+  EventParser(pending: [], data: "", has_data: false, name: None, id: None, retry: None, is_started: false)
+}
+
+fn line_end(bytes: Slice[UInt8]) -> Option[USize]
+  ensures !(result is Some(index) && index >= bytes.length())
+{
+  for index in 0..bytes.length() {
+    if bytes[index] == 10 || bytes[index] == 13 {
+      return Some(index)
+    }
+  }
+  None
+}
+
+fn take_event(parser: mut EventParser) -> Option[Event] {
+  if !parser.has_data {
+    parser.name = None
+    return None
+  }
+  let data = map::exchange(mut parser.data, value: "")
+  parser.has_data = false
+  let name = map::exchange(mut parser.name, value: None)
+  Some(Event(data: own data, name: own name, id: parser.id.copy(), retry_milliseconds: parser.retry))
+}
+
+fn parse_field(parser: mut EventParser, line: StringSlice) {
+  if line.starts_with(":") {
+    return
+  }
+  let colon = line.find(":")
+  let field = match colon {
+    Some(at) => line.part(0, to: at)
+    None => line
+  }
+  var value = match colon {
+    Some(at) => line.part(at + 1, to: line.length())
+    None => "".slice()
+  }
+  if value.starts_with(" ") {
+    value = value.part(1, to: value.length())
+  }
+  if field == "data".slice() {
+    if parser.has_data {
+      mut parser.data.push("\n")
+    }
+    mut parser.data.push(value)
+    parser.has_data = true
+  } else if field == "event".slice() {
+    parser.name = Some(value.to_string())
+  } else if field == "id".slice() {
+    if !value.contains("\u{0}") {
+      parser.id = Some(value.to_string())
+    }
+  } else if field == "retry".slice() {
+    match UInt64.parse(value) {
+      Ok(milliseconds) => parser.retry = Some(milliseconds)
+      Err(_) => {}
+    }
+  }
+}
+
+public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Error]
+  uses Handles, Tasks
+{
+  while true {
+    match line_end(self.pending.slice()) {
+      Some(end) => {
+        var skip = end + 1
+        if self.pending[end] == 13 && end + 1 < self.pending.length() && self.pending[end + 1] == 10 {
+          skip = end + 2
+        }
+        if self.pending[end] == 13 && end + 1 >= self.pending.length() {
+          let count = mut body.read(mut self.pending, limit: 65536)?
+          if count > 0 {
+            continue
+          }
+        }
+        let rest = if skip <= self.pending.length() { mut self.pending.split_off(skip) } else { [] }
+        var line_bytes = map::exchange(mut self.pending, value: own rest)
+        mut line_bytes.truncate(end)
+        var line = String.from_utf8_lossy(line_bytes.slice())
+        if !self.is_started {
+          self.is_started = true
+          if line.slice().starts_with("\u{feff}") {
+            line = line.slice().part(3, to: line.length()).to_string()
+          }
+        }
+        if line.is_empty() {
+          match take_event(mut self) {
+            Some(event) => return Ok(Some(own event))
+            None => {}
+          }
+        } else {
+          parse_field(mut self, line: line.slice())
+        }
+      }
+      None => {
+        let count = mut body.read(mut self.pending, limit: 65536)?
+        if count == 0 {
+          return Ok(None)
+        }
+      }
+    }
+  }
+}
+
+fn write_raw[Stream: streams::Duplex](connection: Stream, outbound: tasks::Channel[flow::Outbound])
+  uses Handles, Tasks
+{
+  for message in outbound.messages() {
+    match own message {
+      Data(bytes, ack, ..) => {
+        let _ = ack.send(connection.send_all(bytes.slice()) is Ok(_))
+      }
+      Head(ack, ..) => {
+        let _ = ack.send(false)
+      }
+      _ => {}
+    }
+  }
+  let _ = connection.close_sending()
+}
+
+fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
+  connection: Stream,
+  inbox: own two::Inbox,
+  request: Slice[UInt8],
+  key: StringSlice,
+  protocols: Slice[String],
+  limits: Limits,
+  message_limit: USize,
+  seed: UInt64,
+  session: (fn(mut WebSocket) -> Output uses Granted),
+) -> Result[Output, Error]
+  uses Handles, Tasks, Granted
+{
+  var unread = own inbox
+  system(connection.send_all(request))?
+  let opening = read_status(connection, inbox: mut unread, limits: limits)?
+  if opening.status.code != 101 {
+    return Err(Error.Unsupported(message: "a server that refused the WebSocket upgrade with ${opening.status.code}"))
+  }
+  let expected = websocket::accept_key(key)
+  if opening.headers.get("Sec-WebSocket-Accept") != Some(expected.slice()) {
+    return Err(malformed("a WebSocket upgrade whose Sec-WebSocket-Accept does not match the key"))
+  }
+  let protocol = match opening.headers.get("Sec-WebSocket-Protocol") {
+    Some(chosen) => match offered_protocol(Some(chosen), protocols: protocols) {
+      Some(name) => Some(own name)
+      None => return Err(malformed("a WebSocket subprotocol that was not offered"))
+    }
+    None => None
+  }
+  let unlimited: USize = 18446744073709551615
+  let chunks = tasks::Channel[flow::Chunk].new(capacity: 16)
+  let outbound = tasks::Channel[flow::Outbound].new(capacity: 16)
+  concurrent {
+    {
+      let _ = pump_body(connection, inbox: mut unread, framing: Framing.UntilClose, chunks: chunks, limit: unlimited)
+    }
+    {
+      var socket = new_socket(
+        channel_body(chunks, credit: None, limit: unlimited),
+        outbound: outbound,
+        is_server: false,
+        masks: Some(random::Generator.seeded(seed)),
+        protocol: own protocol,
+        limit: message_limit,
+      )
+      let output = session(mut socket)
+      outbound.close()
+      chunks.close()
+      return Ok(own output)
+    }
+    write_raw(connection, outbound: outbound)
+  }
+}
+
+public fn Client.websocket[Output, capability Granted](
+  mut self,
+  url: url::Url,
+  session: (fn(mut WebSocket) -> Output uses Granted),
+  headers: Headers = Headers(entries: []),
+  protocols: List[String] = [],
+  message_limit: USize = 16777216,
+) -> Result[Output, Error]
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+{
+  let is_secure = url.scheme() == "wss".slice()
+  if !is_secure && url.scheme() != "ws".slice() {
+    return Err(Error.Unsupported(message: "a WebSocket URL whose scheme is not ws or wss"))
+  }
+  let host = match url.host() {
+    Some(host) => "${host}"
+    None => return Err(malformed("a URL with no host"))
+  }
+  let port = url.port().unwrap_or(if is_secure { 443 } else { 80 })
+  var key_bytes: List[UInt8] = []
+  let first = Random.next()
+  let second = Random.next()
+  let width: USize = 8
+  for index in 0..width {
+    mut key_bytes.push(intrinsic::convert((first >> (8 * index)) & 255))
+    mut key_bytes.push(intrinsic::convert((second >> (8 * index)) & 255))
+  }
+  let key = base64::encode(key_bytes.slice())
+  var upgrade = headers.copy()
+  mut upgrade.set("Upgrade", value: "websocket")
+  mut upgrade.set("Sec-WebSocket-Key", value: key.slice())
+  mut upgrade.set("Sec-WebSocket-Version", value: "13")
+  if !protocols.is_empty() {
+    var offered = ""
+    for protocol in protocols {
+      if !offered.is_empty() {
+        mut offered.push(", ")
+      }
+      mut offered.push(protocol.slice())
+    }
+    mut upgrade.set("Sec-WebSocket-Protocol", value: offered.slice())
+  }
+  var request = request_head(Method.Get, url: url, headers: upgrade, body_length: 0)
+  let ending = request.length().saturating_subtract(2)
+  mut request.truncate(ending)
+  push_text(mut request, text: "Connection: Upgrade\r\n\r\n")
+  let link = open_link(host.slice(), port: port, is_secure: is_secure, roots: self.roots, options: self.options, protocols: ["http/1.1"])?
+  let seed = Random.next()
+  match own link {
+    Plain(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
+    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
+    Multiplexed(..) => Err(Error.Unsupported(message: "a WebSocket over HTTP/2"))
+  }
 }

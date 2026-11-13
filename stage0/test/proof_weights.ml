@@ -33,11 +33,12 @@ let weights =
     ("standard::growth", 2);
     ("standard::hex", 21);
     ("standard::html", 102);
-    ("standard::http", 400);
+    ("standard::http", 215);
     ("standard::http::date", 59);
     ("standard::http::flow", 1);
     ("standard::http::hpack", 56);
     ("standard::http::two", 300);
+    ("standard::http::websocket", 21);
     ("standard::json", 1513);
     ("standard::list", 104);
     ("standard::list::array", 43);
