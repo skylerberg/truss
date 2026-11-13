@@ -175,6 +175,14 @@ public fn Channel[Message: Storable].close(self)
   Tasks.wake(intrinsic::shared_key(self.queue))
 }
 
+public fn Channel[Message: Storable].is_closed(self) -> Bool
+  uses Tasks
+{
+  intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+    queue.closed
+  })
+}
+
 public fn Channel[Message: Storable].messages(self) yields own Message
   uses Tasks
 {
