@@ -34,13 +34,6 @@ let main (project : Project.t) =
          no program."
         (Path.show_package package.name)
 
-let stop_at_diagnostics ~proofs ~json project =
-  let report = Report.gather ~proofs project in
-  if not (Report.clean report) then begin
-    if json then Json.print (Report.document report []) else Report.print report;
-    raise (Stop 1)
-  end
-
 (* Rejects a program whose [main] can reach a [todo] or an [echo] in code,
    or a hole in a proof, and lists each in order of position with the
    definitions from [main] to the one that holds it. *)
@@ -109,7 +102,7 @@ let refuse_unshippable ~json project compile main =
    error. *)
 let build_program ~json (project : Project.t) (build : Compiler.build) ~output =
   let is_release = build = Release in
-  stop_at_diagnostics ~proofs:is_release ~json project;
+  if Report.refused ~json (Report.gather ~proofs:is_release project) then raise (Stop 1);
   let main = main project in
   let compile = Compiler.create ~checks:(not is_release) project build in
   if is_release then refuse_unshippable ~json project compile main;

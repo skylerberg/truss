@@ -68,7 +68,8 @@ an error in the code, reported with the diagnostics.
 - **`--json`** writes one JSON document to standard output instead of the
   report for people. Every document has `"format": 1`, which changes only
   when a field is removed or changes meaning, and `"diagnostics"`. A command
-  that stops at diagnostics still writes its document.
+  that stops at diagnostics still writes its document, with the sentences
+  that say why it stopped, if any, in `"refused"`.
 - **`--no-server`,** or `TRUSS_NO_SERVER=1`, runs the command in its own
   process instead of the background process, for CI, where a process that
   outlives the job is a nuisance.

@@ -231,14 +231,11 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
         List.filter (fun test -> test.module_.package = package.name) selected)
       project.packages
   in
-  if not (Report.clean report) then begin
-    if json then
-      Json.print
-        (Report.document report
-           [ ("tests", Json.List (List.map (fun test -> test_json test None) tests)) ])
-    else Report.print report;
-    1
-  end
+  if
+    Report.refused ~json
+      ~fields:[ ("tests", Json.List (List.map (fun test -> test_json test None) tests)) ]
+      report
+  then 1
   else
     let compile = Compiler.create project Development in
     let progress =

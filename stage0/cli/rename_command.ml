@@ -222,16 +222,13 @@ let run ~directory ~from_ ~to_ ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
   let report = Report.gather project in
-  if not (Report.clean report) then begin
-    (* References are found through type-checked code, which a package
-       with diagnostics lacks in part. *)
-    if json then Json.print (Report.document report [])
-    else begin
-      Report.print report;
-      Output.eprint_line "Fix these first: a rename finds references through checked code."
-    end;
-    1
-  end
+  (* References are found through type-checked code, which a package with
+     diagnostics lacks in part. *)
+  if
+    Report.refused ~json
+      ~reasons:[ "Fix these first: a rename finds references through checked code." ]
+      report
+  then 1
   else
     let plan =
       match target_of project from_ with
@@ -256,12 +253,10 @@ let run ~directory ~from_ ~to_ ~json =
     in
     match caused with
     | _ :: _ ->
-        let caused = Report.of_files caused in
-        if json then Json.print (Report.document caused [])
-        else begin
-          Report.print caused;
-          Output.eprintf "Renaming %s to %s would cause these, so nothing was changed.\n" from_ to_
-        end;
+        Report.refuse ~json (Report.of_files caused)
+          [
+            Printf.sprintf "Renaming %s to %s would cause these, so nothing was changed." from_ to_;
+          ];
         1
     | [] ->
         let edits = edits_json project plan in
