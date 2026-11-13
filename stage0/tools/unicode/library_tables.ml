@@ -1,4 +1,4 @@
-(* Writes standard/text/unicode_data.truss, the tables of character
+(* Writes standard/text/unicode_data/unicode_data.truss, the tables of character
    properties, case mappings, normalization, and grapheme cluster boundaries
    that the standard library reads, from the Unicode data files in the
    directory given as the only argument. See regenerate.sh, which downloads those files and checks their

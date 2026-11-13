@@ -7,14 +7,14 @@ open Support
 (* The printed core form of the definition [name] of the program [text]. *)
 let printed_definition text name =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
+  let file = file_of "app::main" in
   (match
      List.map
        (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
-       (parse_errors database module_)
-     @ Resolve.diagnostics database module_
-     @ Interface.diagnostics database module_
-     @ Infer.diagnostics database module_
+       (parse_errors database file)
+     @ Resolve.diagnostics database file
+     @ Interface.diagnostics database file
+     @ Infer.diagnostics database file
    with
   | [] -> ()
   | actual ->
@@ -27,7 +27,7 @@ let printed_definition text name =
         let key = Resolve.Names.key_of declaration in
         if Path.show key.path = "app::main::" ^ name then Query.demand database Infer.core key
         else None)
-      (Query.demand database Resolve.Names.declarations module_)
+      (Query.demand database Resolve.Names.declarations_in file)
   in
   match actual with
   | Some form -> Core_print.show form
@@ -555,11 +555,11 @@ let () =
   let database = setup [] in
   let forms = ref 0 in
   List.iter
-    (fun ((module_ : Path.module_), _) ->
+    (fun ((file : Path.file), _) ->
       test
-        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_module module_))
-        (fun () -> forms := !forms + check_module_core_invariants database module_))
-    Standard_library.modules;
+        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
+        (fun () -> forms := !forms + check_file_core_invariants database file))
+    Standard_library.files;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
 

@@ -11,18 +11,17 @@ open Codegen_support
 
 let directory = Harness.workspace_path "stage0/test/codegen/library"
 
-let modules =
+(* Each file is a module of its own, named after the file. *)
+let files =
   Sys.readdir directory |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".truss")
   |> List.sort compare
   |> List.map (fun file ->
-      let module_ : Path.module_ =
-        {
-          package = { owner = None; name = "example" };
-          modules = [ Filename.chop_suffix file ".truss" ];
-        }
+      let name = Filename.chop_suffix file ".truss" in
+      let file_path : Path.file =
+        { module_ = { package = { owner = None; name = "example" }; modules = [ name ] }; name }
       in
-      (module_, In_channel.with_open_bin (Filename.concat directory file) In_channel.input_all))
+      (file_path, In_channel.with_open_bin (Filename.concat directory file) In_channel.input_all))
 
 let name_of (path : Path.t) =
   match path with
@@ -38,18 +37,17 @@ let expected_panic (path : Path.t) =
 
 let () =
   let loaded = ref None in
-  let load () = loaded := Some (load_modules modules) in
+  let load () = loaded := Some (load_files files) in
   let checking = "the library's test modules check cleanly" in
   if wanted checking then test checking load else load ();
   match !loaded with
   | None -> ()
   | Some (database, _)
-    when List.exists (fun (module_, _) -> Type_checker.diagnostics database module_ <> []) modules
-    ->
+    when List.exists (fun (file, _) -> Type_checker.diagnostics database file <> []) files ->
       ()
   | Some (database, compile) -> (
       let tests =
-        List.concat_map (fun (module_, _) -> tests_in database module_) modules
+        List.concat_map (fun ((file : Path.file), _) -> tests_in database file.module_) files
         |> List.filter (fun path -> wanted (name_of path))
       in
       match Compile.run_tests compile ~time_limit:10000 tests with

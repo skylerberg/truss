@@ -100,7 +100,7 @@ let () =
       Database.For_testing.set_manifest (Engine.of_context database)
         ~name:{ owner = None; name = "app" }
         ~dependencies:[ { package = { owner = None; name = "clock_library" }; capabilities = [] } ];
-      match codes (check database (module_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual))
 
@@ -111,7 +111,7 @@ let () =
       ~name:{ owner = None; name = "app" }
       ~dependencies:
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ];
-    codes (check database (module_of "app::main"))
+    codes (check database (file_of "app::main"))
   in
   let library = ("clock_library::time", Fixtures.Capabilities.library_time) in
   test "a dependency's trait method can use only the granted capabilities" (fun () ->
@@ -165,7 +165,7 @@ let codes_with_grants files grants =
     ~name:{ owner = None; name = "app" }
     ~dependencies:
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants);
-  (database, codes (check database (module_of "app::main")))
+  (database, codes (check database (file_of "app::main")))
 
 let expect_codes ~expected (_, actual) =
   if actual <> expected then

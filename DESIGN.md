@@ -17,9 +17,10 @@ behind these decisions, see [GOALS.md](GOALS.md).
   section make that possible. [DATABASE.md](DATABASE.md) describes how the
   toolchain caches results and finds a change's dependents.
 - **Each top-level definition stands on its own.** A definition's identity
-  does not depend on its position in its file, the definitions around it, or
-  its layout, so reformatting a file or moving a definition within it
-  changes nothing that depends on it. See
+  does not depend on its file within its module, its position in the file,
+  the definitions around it, or its layout, so reformatting a file or moving
+  a definition within it or to another file of its module changes nothing
+  that depends on it. See
   [Definition identity](#definition-identity).
 - **Code refers to other code by name, never by its content.** Unison refers
   to code by hash, so changing one body changes the hash of everything that
@@ -60,7 +61,7 @@ behind these decisions, see [GOALS.md](GOALS.md).
   rebuilt far too much. Truss's rules keep each lookup to a few places:
   methods live with their type, an `impl` lives with its trait, its type, or
   a type its trait's arguments name, and an unqualified constant comes only
-  from the same file.
+  from the same module.
 - **Renaming or moving a definition redoes little.** Its users' types are
   checked again, which is cheap. Their proofs, test results, and compiled
   code are keyed by content, not by name, so they are found already done.
@@ -1384,8 +1385,9 @@ not, because a package may want that name.
 
 ## Visibility
 
-A definition is visible only within its file unless it says `internal` or
-`public`, which makes keeping code modular the easiest option.
+A definition is visible only within its module, the files of its directory,
+unless it says `internal` or `public`, which makes keeping code modular the
+easiest option.
 
 A public signature cannot mention a private type, since other packages could
 never name it. A `public opaque type` exposes its name but not its contents,
@@ -1633,9 +1635,38 @@ that turns a binding into a comparison leaves the `match` incomplete. A
 constant in a pattern has structural equality, so matching it and comparing
 it with `==` agree.
 
-**Imports bring in modules, not names,** so every name shows where it comes
-from, two modules can both define `ParseError`, and Truss needs no aliases,
-which would let one thing go by different names in different files.
+**Imports bring in modules, not names,** so every name from another module
+shows where it comes from, two modules can both define `ParseError`, and
+Truss needs no aliases, which would let one thing go by different names in
+different files.
+
+**A module is a directory, and its files share one namespace,** as a package
+is in Go and a module in Swift. A file names the definitions of its
+module's other files as it names its own, so splitting a module into files
+is a choice of layout and costs no prefixes. Where each file is a module, as
+in Rust and Python, and imports bring in only modules, a program written as
+several files names its own modules everywhere: a Sudoku solver of 1,950
+lines in eleven files wrote 380 `module::` prefixes, every one to a file of
+its own package. Rust avoids that with imports of names, which Truss does
+not have. Each file keeps its own `use` lines, so a file shows the modules
+it reaches. Lookups stay cheap: a module's names are one index built from
+its files' names, and an edit inside a body changes no file's names, so it
+reaches no lookup.
+
+**A local may hide a definition of its module, and nothing else.** Hiding a
+local of an enclosing scope loses an update or reads a stale value, as an
+inner `err :=` does in Go, so it is an error, as in C# and Java. Hiding a
+function, a constant, or a theorem of the module is safe: a call of a
+hidden function no longer type-checks, and a `match` arm whose bare name
+becomes a constant leaves the `match` incomplete. Forbidding it would make
+an error of adding a definition to one file wherever another file of the
+module has a local of that name, so two correct changes, such as two
+agents', could merge into a broken build. In a pattern that must match
+every value, as a `let`'s, a constant could only make the pattern fail, so
+every bare name there binds. A generic parameter still cannot hide a type of
+its module: an `impl`'s head declares the names in its brackets, so
+`impl Shown for Box[Marker]` would silently mean every `Box` where the type
+`Marker` was meant.
 
 **Every module path starts with a package name,** even inside the package, so
 a path is written the same everywhere and found by searching. Relative paths
@@ -1645,9 +1676,8 @@ make one module look different depending on where it is named from.
 tracked between definitions, not files.
 
 **Modules have their own namespace, marked by `::`.** Where a module name is
-an ordinary name, a variable called `url` hides the module, and with the
-no-hiding rule such natural names would be forbidden and an import could
-break unrelated code.
+an ordinary name, a variable called `url` hides the module for the rest of
+its scope, and an import could change what a name in unrelated code means.
 
 **The prelude holds only `UpperCamelCase` names,** so it never clashes with a
 variable or function. Adding a name can still clash with a user's type, so the

@@ -12,6 +12,8 @@ let solver = Lazy.force Support.solver
 let markdown_files = Harness.markdown_documents ()
 
 (* The codes that mean the block needs context it does not have. *)
+let source_of database file = (Query.demand database Workspace.file file).source
+
 let excerpt_codes =
   [
     "resolve.unknown_name";
@@ -26,15 +28,14 @@ let () =
     (fun name ->
       List.iteri
         (fun index text ->
-          let database = Support.setup [ ("example::main", text) ] in
-          let module_ = Support.module_of "example::main" in
-          let file = Query.demand database Workspace.file module_ in
-          if file.diagnostics = [] then
+          let database = Support.setup [ ("example", text) ] in
+          let file = Support.file_of "example" in
+          if (Query.demand database Workspace.file file).diagnostics = [] then
             test
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))
               (fun () ->
-                let diagnostics = Type_checker.diagnostics database module_ in
+                let diagnostics = Type_checker.diagnostics database file in
                 if
                   not
                     (List.exists
@@ -44,14 +45,16 @@ let () =
                   match diagnostics with
                   | [] -> (
                       match
-                        Prover.diagnostics ~record:(Support.record database) database solver module_
+                        Prover.diagnostics ~record:(Support.record database) database solver file
                       with
                       | [] -> ()
                       | unproven ->
                           fail "%s"
-                            (String.concat "" (List.map (Diagnostic.render file.source) unproven)))
+                            (String.concat ""
+                               (List.map (Diagnostic.render (source_of database file)) unproven)))
                   | diagnostics ->
                       fail "%s"
-                        (String.concat "" (List.map (Diagnostic.render file.source) diagnostics))))
+                        (String.concat ""
+                           (List.map (Diagnostic.render (source_of database file)) diagnostics))))
         (Documents.truss_blocks (Documents.read (Harness.workspace_path name))))
     markdown_files

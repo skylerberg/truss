@@ -50,10 +50,10 @@ let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
   (* A development build names files relative to the current directory,
      as diagnostics do. A release build names them relative to the
      package root, so the program is identical wherever it is built. *)
-  let file_name module_ =
-    match (build, List.assoc_opt module_ project.files) with
-    | Development, Some file -> Project.shown file
-    | _ -> Workspace.file_path module_
+  let file_name file =
+    match (build, List.assoc_opt file project.files) with
+    | Development, Some path -> Project.shown path
+    | _ -> Path.show_file file
   in
   let own = List.map snd (Database.packages project.session) in
   Compile.create ~checks ~file_name

@@ -31,8 +31,10 @@ let rec package_directory ~is_package directory =
   else if directory = "" then None
   else package_directory ~is_package (parent directory)
 
-(* A module file's path under its package's directory, as module names. *)
-let module_names ~directory path =
+(* A file's path under its package's directory, as the file of a module:
+   its directory names the module, and its own name, without [.truss], the
+   file. *)
+let file_of_path ~package ~directory path : Path.file =
   let inside =
     if directory = "" then path
     else
@@ -40,22 +42,26 @@ let module_names ~directory path =
         (String.length directory + 1)
         (String.length path - String.length directory - 1)
   in
-  segments (Filename.chop_suffix inside ".truss")
+  {
+    module_ = { package; modules = segments (parent inside) };
+    name = Filename.chop_suffix (Filename.basename inside) ".truss";
+  }
 
-let module_path ~directory (module_ : Path.module_) =
-  let file = String.concat "/" module_.modules ^ ".truss" in
-  if directory = "" then file else directory ^ "/" ^ file
+let file_path ~directory (file : Path.file) =
+  let path = String.concat "/" (Path.file_names file) in
+  if directory = "" then path else directory ^ "/" ^ path
 
 type package = {
   name : Path.package;
   dependencies : Manifest.dependency list;
   modules : Path.module_ list;
+  files : Path.file list;
   usize_bits : int;
 }
 
 type layout = {
   packages : (string * Manifest.package) list;
-  modules : (string * string * Path.module_) list;
+  files : (string * string * Path.file) list;
   problems : string list;
   time_limit : int;
 }
@@ -142,7 +148,7 @@ let layout =
                     Some (directory, package)))
           parsed
       in
-      let modules =
+      let files =
         List.filter_map
           (fun path ->
             if not (Filename.check_suffix path ".truss") then None
@@ -152,14 +158,11 @@ let layout =
                 (fun directory ->
                   Option.map
                     (fun (package : Manifest.package) ->
-                      ( path,
-                        directory,
-                        ({ package = package.name; modules = module_names ~directory path }
-                          : Path.module_) ))
+                      (path, directory, file_of_path ~package:package.name ~directory path))
                     (List.assoc_opt directory packages)))
           files
       in
-      { packages; modules; problems = List.rev !problems; time_limit })
+      { packages; files; problems = List.rev !problems; time_limit })
 
 type selection = {
   selected : Registry.Selection.package list;
@@ -333,34 +336,38 @@ let package =
     (fun database name ->
       Option.map
         (fun { root; directory; manifest } ->
+          let files =
+            List.filter_map
+              (fun (_, owner, file) -> if owner = directory then Some file else None)
+              (Query.demand database layout root).files
+          in
           {
             name;
             dependencies = manifest.dependencies;
             modules =
-              List.filter_map
-                (fun (_, owner, module_) -> if owner = directory then Some module_ else None)
-                (Query.demand database layout root).modules;
+              List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) files);
+            files;
             usize_bits = manifest.usize_bits;
           })
         (Query.demand database place name))
 
-(* A module's root and its file's path in it. *)
-let module_place =
-  Query.query ~name:"project_module_place" ~phase:Phases.project ~show:Path.show_module
-    (fun database (module_ : Path.module_) ->
-      Option.bind (Query.demand database place module_.package) (fun { root; directory; _ } ->
-          let path = module_path ~directory module_ in
+(* A file's root and its path in it. *)
+let file_place =
+  Query.query ~name:"project_file_place" ~phase:Phases.project ~show:Path.show_file
+    (fun database (file : Path.file) ->
+      Option.bind (Query.demand database place file.module_.package) (fun { root; directory; _ } ->
+          let path = file_path ~directory file in
           if
             List.exists
-              (fun (file, _, _) -> file = path)
-              (Query.demand database layout root).modules
+              (fun (written, _, _) -> written = path)
+              (Query.demand database layout root).files
           then Some (root, path)
           else None))
 
-let module_text =
-  Query.query ~name:"project_module_text" ~phase:Phases.project ~show:Path.show_module
-    (fun database module_ ->
-      Option.bind (Query.demand database module_place module_) (Query.find database text))
+let file_text =
+  Query.query ~name:"project_file_text" ~phase:Phases.project ~show:Path.show_file
+    (fun database file ->
+      Option.bind (Query.demand database file_place file) (Query.find database text))
 
 (* A package that is in a cycle of packages that depend on each other, with
    the cycle. *)

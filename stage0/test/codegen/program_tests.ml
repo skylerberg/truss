@@ -613,8 +613,8 @@ let () =
           Database.load_package (Engine.of_context database)
             ~name:{ owner = None; name = "example" }
             ~dependencies:[]
-            [ (example, text) ];
-          if Type_checker.diagnostics database example = [] then
+            [ (example_file, text) ];
+          if Type_checker.diagnostics database example_file = [] then
             test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->

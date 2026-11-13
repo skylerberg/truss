@@ -17,7 +17,7 @@ val kind_of_named : named -> kind
 val kind_name : kind -> string
 
 type declaration = {
-  module_ : Path.module_;
+  file : Path.file;  (** Where it is written. *)
   path : Path.t;
   ordinal : int;
   index : int;
@@ -55,8 +55,15 @@ type module_lookup =
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
-val lookup_module : Query.context -> from:Path.module_ -> string list -> module_lookup
+val lookup_module : Query.context -> from:Path.file -> string list -> module_lookup
+(** The module that the names before [::] denote in a file, through the file's imports. *)
+
 val declarations : (Path.module_, declaration list) Query.query
+(** A module's declarations, file by file. A definition's ordinal counts the earlier ones with its
+    path across the module, so two files that define one name make a duplicate. *)
+
+val declarations_in : (Path.file, declaration list) Query.query
+(** The declarations written in one file, numbered as in {!declarations}. *)
 
 module Member_map : Map.S with type key = Path.t * string
 
@@ -71,18 +78,22 @@ val members : (Path.t * string, key list) Query.query
 module Declaration_map : Map.S with type key = Path.t * int
 
 val declaration_index : (Path.module_, declaration Declaration_map.t) Query.query
+
+val file_of : (key, Path.file option) Query.query
+(** The file a definition is written in. *)
+
 val container : (key, key option) Query.query
 val contained : (key, key list) Query.query
 val definition : (key, Syntax.definition option) Query.query
 val law_parameters : (Path.t * string, string list option) Query.query
 val spans : (key, Syntax.span array option) Query.query
-val base : (key, (Path.module_ * int) option) Query.query
+val base : (key, (Path.file * int) option) Query.query
 
 val per_definition :
-  Query.context -> Path.module_ -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
+  Query.context -> Path.file -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
 
 val text : (key, string option) Query.query
 
 module For_testing : sig
-  val imports : (Path.module_, (string * Path.module_) list) Query.query
+  val imports : (Path.file, (string * Path.module_) list) Query.query
 end

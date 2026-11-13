@@ -309,14 +309,22 @@ definition = [ visibility ] ( function | type_definition | trait
 visibility = "public" [ "opaque" | "transparent" ] | "internal" ;
 ```
 
-Each file is a module. Nothing about a definition depends on its position in
-the file.
+Each directory of a package is a module, and its files share one namespace
+(see [Module paths](#module-paths)). Nothing about a definition depends on
+its file or its position in the file.
 
 ### Scope
 
-- No name can hide another in scope: not a prelude name, not a definition in
-  the same file, and not a variable of an enclosing scope.
-  `let name = name.trim()` is an error.
+- A name in a body is looked up in its scope, then among the definitions of
+  its module, then in the prelude.
+- A local, a parameter, or a generic parameter cannot hide another of an
+  enclosing scope, or a prelude name. `let name = name.trim()` is an error.
+- A local or a parameter may hide a function, a constant, or a theorem of
+  its module, so adding a definition to one file breaks no local in another.
+- A generic parameter cannot hide a type, a trait, or a capability of its
+  module. An `impl`'s head declares the names in its brackets, so
+  `impl Shown for Box[Marker]` would otherwise mean every `Box` where the
+  type `Marker` was meant.
 - Module names are a namespace of their own, written only before `::`. A
   variable can be named `url` in a file that imports the `url` module.
 - `::` reaches into a module, and `.` into a type or a value.
@@ -946,7 +954,7 @@ fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Out
   method needs, and the method exists only where those bounds hold. The
   method's own go after its name.
 - A method is defined in its type's package, in a file where the type is
-  visible. From another file, the type is named with its module:
+  visible. From another module, the type is named with its module:
   `fn hourly::Forecast.summary(self) -> String`.
 
 ### Versions by receiver mode
@@ -1212,14 +1220,16 @@ match status_code {
   exactly one field, a bare pattern matches that field.
 - Fields can be written in any order, and `..`, the remaining fields, comes
   last.
-- A bare name that names a constant in scope means that constant; any other
-  binds. A constant in a pattern has a type with structural equality (see
+- In a `match` arm, an `is` test, or a `let ... else`, a bare name that names
+  a constant in scope, and no local, means that constant; any other binds. A
+  constant in a pattern has a type with structural equality (see
   [Equality](#equality)).
 - Range patterns match integers and characters.
 - Every alternative of an or-pattern binds the same names, with the same
   types.
 - A pattern in `let`, `var`, `for`, or a lambda's parameters matches every
-  value of its type.
+  value of its type. Every bare name in it binds, and may hide a constant of
+  the module, since a constant could only make the pattern fail.
 
 ### `match`
 
@@ -1680,7 +1690,8 @@ defines code that runs when its value is released.
 
 ### main
 
-A program starts at the `main` of its package's `main` module:
+A program starts at the `main` of its package's root module, the files in the
+directory of its manifest:
 
 ```truss
 fn main(arguments: List[String]) -> ExitCode
@@ -2186,22 +2197,34 @@ use standard::json
 let settings = json::parse(text)?
 ```
 
-- `use` imports a module, never names. Every name that is not local or from
-  the prelude is written with its module.
+- `use` imports a module, never names. Every name that is not local, not a
+  definition of the module, and not from the prelude is written with its
+  module.
+- A `use` belongs to its file. Each file of a module imports the modules it
+  names.
 - There are no import aliases. A full path works without a `use`, and
   importing two modules with the same last name is an error.
 - An unused `use` is an error.
 
 ### Module paths
 
-Each `.truss` file of a package is a module, whose path is the package's
-name, then its directories, then its file name: `forecast/hourly.truss` in
-the `weather` package is `weather::forecast::hourly`.
+Each directory of a package that holds a `.truss` file is a module, whose
+path is the package's name, then the directory's names. The files of
+`forecast/` in the `weather` package, such as `forecast/hourly.truss` and
+`forecast/daily.truss`, are the module `weather::forecast`, and the files
+beside the package's manifest are its root module, `weather`.
 
+- The files of a module share one namespace: each names the others'
+  definitions without a module, private ones included. Two files of a
+  module cannot define one name.
+- A file's name says nothing about its definitions. Moving a definition to
+  another file of its module changes no path.
+- A module's subdirectory is a module of its own: `forecast/hourly/` is
+  `weather::forecast::hourly`, which names `weather::forecast` with `::`
+  like any other module.
 - Every path starts with a package name, including inside the package.
 - There are no relative paths, and a path holds no version.
-- A directory is not a module. File and directory names are
-  `lower_snake_case`.
+- File and directory names are `lower_snake_case`.
 - The modules of a package may use each other in a cycle.
 
 ### The prelude
@@ -2225,7 +2248,7 @@ and the prelude changes only with a language version.
 
 | Keyword | Visible to |
 |---|---|
-| *(none)* | The same file |
+| *(none)* | The same module: every file of its directory |
 | `internal` | The whole package |
 | `public` | Every package |
 

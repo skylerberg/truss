@@ -29,7 +29,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   its hash.
 - **The Unicode tables are generated.** The compiler's tables are in
   `stage0/unicode/unicode_tables.ml`. The standard library's are in
-  `standard/text/unicode_data.truss`, which holds the tables of character
+  `standard/text/unicode_data/unicode_data.truss`, which holds the tables of character
   properties, case mappings, normalization, and grapheme cluster boundaries,
   and nothing else. Both are
   generated from the same version of the Unicode character database, whose
@@ -37,7 +37,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   to a new version of Unicode, change that list and run
   `stage0/tools/unicode/regenerate.sh`. The functions that search the
   library's tables are written by hand, in
-  `standard/text/unicode_tables.truss`. Each function there that names a
+  `standard/text/unicode_tables/unicode_tables.truss`. Each function there that names a
   table assigns its result to a `var`, so that its body is not functional
   and callers know it by its contract. With a functional body the function
   would be known by its definition, and the prover would copy the table

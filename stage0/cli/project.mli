@@ -13,21 +13,25 @@ type t = {
   session : Database.session;
   context : Query.context;
   packages : package list;
-  mutable files : (Path.module_ * string) list;
+  mutable files : (Path.file * string) list;  (** Each file of [packages], with its absolute path *)
 }
 
 val opened : Database.session list ref
-val module_files : Database.session -> package list -> (Path.module_ * string) list
+val file_paths : Database.session -> package list -> (Path.file * string) list
 val load : string -> t
 val package : t -> package
 val is_own : t -> Path.module_ -> bool
 val manifest_problems : t -> (string * Path.package * Type_checker.manifest_problem) list
 val reload : t -> unit
+val files : t -> Path.file list
 val modules : t -> Path.module_ list
-val program_modules : t -> Path.module_ list
-val file : t -> Path.module_ -> string
-val selected : t -> string list -> Path.module_ list
-val parsed : t -> Path.module_ -> Workspace.file
-val source : t -> Path.module_ -> Source.t
+val program_files : t -> Path.file list
+val path : t -> Path.file -> string
+
+val selected : t -> string list -> Path.file list
+(** The files in the paths, each a file or a directory, or every file when there are none. *)
+
+val parsed : t -> Path.file -> Workspace.file
+val source : t -> Path.file -> Source.t
 val shown_workspace_path : t -> string -> string
 val write_file : string -> string -> unit

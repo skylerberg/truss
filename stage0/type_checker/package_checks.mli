@@ -1,9 +1,9 @@
 (** The checks that look at more than one definition of a package. *)
 
-type placed = { module_ : Path.module_; diagnostic : Diagnostic.t }
-(** A diagnostic in the file of the module that holds it, in that file's offsets. *)
+type placed = { file : Path.file; diagnostic : Diagnostic.t }
+(** A diagnostic in the file that holds it, in that file's offsets. *)
 
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list
 (** The package's errors in one file, in order. *)
 
 (** An error in a package's manifest that only its code shows. *)

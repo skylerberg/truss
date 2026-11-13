@@ -4,7 +4,9 @@
 
 open Codegen_support
 
-let probe : Path.module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }
+let probe : Path.file =
+  { module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }; name = "probe" }
+
 let source = Fixtures.Shared.shared_probe
 
 (* The standard library with the probe module, checked, and a compiler for
@@ -13,7 +15,7 @@ let loaded =
   lazy
     (let engine = Engine.create () in
      Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
-       (Standard_library.modules @ [ (probe, source) ]);
+       (Standard_library.files @ [ (probe, source) ]);
      let database = Engine.context engine in
      let text = (Query.demand database Workspace.file probe).source in
      (match Type_checker.diagnostics database probe with
@@ -31,7 +33,7 @@ let loaded =
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->
       let database, compile = Lazy.force loaded in
-      match Compile.run_tests compile ~time_limit:2000 (tests_in database probe) with
+      match Compile.run_tests compile ~time_limit:2000 (tests_in database probe.module_) with
       | Ok records ->
           expect_string
             ~expected:(String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n")))
@@ -46,7 +48,7 @@ let () =
           Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
           match
             Compile.For_testing.run_program compile
-              ~main:(Top { module_ = probe; name = "main" })
+              ~main:(Top { module_ = probe.module_; name = "main" })
               ~arguments:[]
           with
           | Ok (0, output, _) -> expect_string ~expected:"released\n" output
@@ -56,7 +58,9 @@ let () =
 
 (* Where the capability check allows [shared_update] and [shared_key],
    which require [Tasks], and the [Storable] bound on [Shared]'s value. *)
-let checks : Path.module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }
+let checks : Path.file =
+  { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }
+
 let checks_source = Fixtures.Shared.checks_source
 
 let () =
@@ -64,7 +68,7 @@ let () =
     (fun () ->
       let engine = Engine.create () in
       Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
-        (Standard_library.modules @ [ (checks, checks_source) ]);
+        (Standard_library.files @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
       let text = Source.text (Query.demand database Workspace.file checks).source in
       let actual =

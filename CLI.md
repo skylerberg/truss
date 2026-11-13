@@ -301,8 +301,8 @@ truss run [--release] [--] [ARGUMENT...]
 truss build [--output PATH] [--json]
 ```
 
-A package's program starts at the `main` function of its `main` module, as
-described in PACKAGES.md's "Packages", and a package compiles to one program or
+A package's program starts at the `main` function of its root module, the
+files beside its manifest, as described in PACKAGES.md's "Packages", and a package compiles to one program or
 one library, as IMPLEMENTATION.md says. A package without that `main` is a
 library and has no program, so `run` and `build` exit with 2. A function
 named `main` in another module is an ordinary function.
@@ -515,8 +515,9 @@ rewrites every reference to it in every package of the project, regardless
 of the current directory. `TO` is either a new name, as in `truss rename
 weather::forecast::parse read`, or a full path in the same module, or for a
 method, on the same type. Renaming a module, as in `truss rename
-weather::forecast weather::outlook`, moves its file and rewrites every `use`
-of it and every full path to it.
+weather::forecast weather::outlook`, moves the files of its directory and
+rewrites every `use` of it and every full path to it. A subdirectory is a
+module of its own and stays where it is.
 
 The rename is made in a trial, a session that starts from the worktree's
 session and holds only the rename's edits, and is checked there first. It is

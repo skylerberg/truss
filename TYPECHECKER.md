@@ -87,14 +87,17 @@ tables keyed by id.
 
 ## Name resolution
 
-`Resolve` produces the resolved form, reading the definition's tree, the
-file's `use` lines, and other files' exports, each through a query.
+`Resolve` produces the resolved form, reading the definition's tree, its
+file's `use` lines, and the names of its module and of other modules, each
+through a query. A module is a directory, and its names are one index built
+from its files' names.
 
 - **Names are in four namespaces,** told apart by the case rules and `::` and
   `.`: modules, types, values, and members.
 - **An unqualified name** is looked up among the locals in scope, the generic
-  parameters, the file's definitions, then the prelude. At most one matches,
-  because shadowing is an error.
+  parameters, the module's definitions, then the prelude. The first that
+  matches is the referent: a local may hide a definition of the module, and
+  no other hiding is allowed.
 - **A full path starts with a package the file can name.** That name takes two
   segments when the package has an owner: `acme::geometry::vector` is the
   module `vector` of `acme::geometry` if the manifest lists that package.
@@ -941,7 +944,7 @@ A result depends on exactly the queries it demanded:
 | An interface | The interface of `List.push` |
 | A type's shape, or a fact of its definition | The shape of `Point`; when `Option` is `Plain` |
 | A constant's value | `digest_size` |
-| The definitions of one name in a file | Those named `count` in `report.truss` |
+| The definitions of one name in a module | Those named `count` in `weather::report` |
 | A module | Whether `standard::json` exists, and its names `parse` |
 | The members of a type with one name | `List`'s members named `length` |
 | A package's traits that declare a method name | `standard`'s traits with `compare` |

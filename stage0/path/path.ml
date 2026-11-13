@@ -33,6 +33,11 @@ let split_module ~is_package = function
       Some { package = { owner = None; name }; modules }
   | _ -> None
 
+type file = { module_ : module_; name : string }
+
+let file_names file = file.module_.modules @ [ file.name ^ ".truss" ]
+let show_file file = String.concat "/" (package_parts file.module_.package @ file_names file)
+
 type type_head = { type_name : string; generics : string list }
 
 let show_type_head head =

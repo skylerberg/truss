@@ -21,11 +21,11 @@ let run ~directory ~position ~json =
   let project = Project.load (Database.root here.session) in
   let path = Project.real file in
   match List.find_opt (fun (_, file_path) -> file_path = path) project.files with
-  | None -> Project.cannot_run "%s is not a module of a package in this worktree." file
-  | Some (module_, _) -> (
+  | None -> Project.cannot_run "%s is not a file of a package in this worktree." file
+  | Some (written, _) -> (
       let context = project.context in
       let offset =
-        Source.offset Source.Scalar_values (Project.parsed project module_).source ~line:(line - 1)
+        Source.offset Source.Scalar_values (Project.parsed project written).source ~line:(line - 1)
           ~column:(column - 1)
       in
       let symbol_at =
@@ -49,7 +49,7 @@ let run ~directory ~position ~json =
                       (offset - base)
                 | _ -> None)
             | _ -> None)
-          (Query.demand context Names.declarations module_)
+          (Query.demand context Names.declarations_in written)
       in
       match symbol_at with
       | None ->

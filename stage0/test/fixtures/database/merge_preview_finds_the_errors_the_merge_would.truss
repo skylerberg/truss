@@ -1,5 +1,3 @@
-use app::main
-
 fn quadruple(value: Int64) -> Int64 {
-  main::double(main::double(value))
+  double(double(value))
 }

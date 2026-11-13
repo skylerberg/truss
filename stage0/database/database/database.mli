@@ -67,11 +67,12 @@ val lock_fix : session -> string option
     problem whose fix is to write this one. *)
 
 val package_modules : session -> Path.package -> Path.module_ list
+val package_files : session -> Path.package -> Path.file list
 
-val module_file : session -> Path.module_ -> string
-(** A module's file, relative to the project's root. *)
+val file_path : session -> Path.file -> string
+(** A file's path, relative to the project's root. *)
 
-val diagnostics : session -> Path.module_ -> Diagnostic.t list
+val diagnostics : session -> Path.file -> Diagnostic.t list
 (** A file's diagnostics, kept current and saved. *)
 
 val code_packages : session -> Path.package -> Path.package list
@@ -224,10 +225,10 @@ val load_package :
   Engine.t ->
   name:Path.package ->
   dependencies:Manifest.dependency list ->
-  (Path.module_ * string) list ->
+  (Path.file * string) list ->
   unit
 (** Gives an engine a package by itself, as a root of its own: a manifest that says the name, the
-    dependencies, and [usize_bits], which is 32 unless given, and a file for each module. *)
+    dependencies, and [usize_bits], which is 32 unless given, and its files with their texts. *)
 
 val load_standard : Engine.t -> unit
 (** Gives an engine the [standard] package, built into the compiler. *)
@@ -237,16 +238,17 @@ module For_testing : sig
   (** Checks the standard library and keeps its state in the store, unless the store has it, as the
       first session opened in a new store does. *)
 
-  val open_library : ?modules:(Path.module_ * string) list -> string -> (session, string) result
+  val open_library : ?files:(Path.file * string) list -> string -> (session, string) result
   (** The standard library as a state of its own, for working on the library: the [standard] package
-      is the session's own inputs, over no base, set from [modules], which are the sources built
-      into this compiler unless given. The state is opened from the pointer of that name, so each
-      caller that gives its own name keeps its own state, and is kept under
-      {!Compiler_version.digest}, so it is found again after an edit to the library, and by a test
-      as by the command line. An error says that another process has the state open. *)
+      is the session's own inputs, over no base, set from [files], which are the sources built into
+      this compiler unless given. The state is opened from the pointer of that name, so each caller
+      that gives its own name keeps its own state, and is kept under {!Compiler_version.digest}, so
+      it is found again after an edit to the library, and by a test as by the command line. An error
+      says that another process has the state open. *)
 
-  val set_text : Engine.t -> Path.module_ -> string -> unit
-  (** Gives one module of a package set with {!load_package} another text. *)
+  val set_text : Engine.t -> Path.file -> string -> unit
+  (** Gives one file of a package set with {!load_package} another text, adding the file if it has
+      none. *)
 
   val set_manifest :
     ?usize_bits:int ->
@@ -254,7 +256,7 @@ module For_testing : sig
     name:Path.package ->
     dependencies:Manifest.dependency list ->
     unit
-  (** Gives a package set with {!load_package} another manifest, and leaves its modules as they are.
+  (** Gives a package set with {!load_package} another manifest, and leaves its files as they are.
   *)
 
   val engine : session -> Engine.t

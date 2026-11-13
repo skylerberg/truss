@@ -273,7 +273,7 @@ type t = {
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
-  file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
+  file_name : Path.file -> string;  (** The file a position names, which the program reports *)
   worked_on : Path.package -> bool;
       (** Whether a package is one of the project's own, whose code a development build never copies
           into another's file *)
@@ -315,10 +315,10 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
   | Some key -> (
       match Query.demand compiler.database Names.base key with
       | None -> None
-      | Some (module_, base) ->
-          let file = Query.demand compiler.database Workspace.file module_ in
-          let line, _ = Source.position file.source base in
-          Some { definition = path; path = compiler.file_name module_; first_line = line })
+      | Some (file, base) ->
+          let parsed = Query.demand compiler.database Workspace.file file in
+          let line, _ = Source.position parsed.source base in
+          Some { definition = path; path = compiler.file_name file; first_line = line })
 
 (* A value read back from its binary form, as [Glue.encode] writes it, as
    static data. *)
@@ -998,7 +998,7 @@ let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
 
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
 
-let create ?(checks = true) ?(file_name = Workspace.file_path) ~want
+let create ?(checks = true) ?(file_name = Path.show_file) ~want
     ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
     settings =
   let lowering = { target; checks } in

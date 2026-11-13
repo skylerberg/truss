@@ -7,5 +7,5 @@ module Impls = Impls
 module Grants = Grants
 module Check = Check
 
-let diagnostics database module_ =
-  Resolve.Names.per_definition database module_ (Query.demand database Check.diagnostics)
+let diagnostics database file =
+  Resolve.Names.per_definition database file (Query.demand database Check.diagnostics)

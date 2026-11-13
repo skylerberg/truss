@@ -14,7 +14,7 @@ let fine text = no_diagnostics [ ("app::main", text) ]
    appearance of [written], and the innermost expression that starts there. *)
 let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
+  let file = file_of "app::main" in
   let offset = Option.get (Substring.find ~occurrence text written) in
   let actual =
     List.find_map
@@ -47,7 +47,7 @@ let expression_at text written occurrence =
             Syntax_walk.definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      (Query.demand database Resolve.Names.declarations module_)
+      (Query.demand database Resolve.Names.declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -144,8 +144,8 @@ let () =
       let engine = Engine.create ~bases:[ Lazy.force Support.standard ] () in
       Database.load_package ~usize_bits:64 engine ~name:{ owner = None; name = "app" }
         ~dependencies:[]
-        [ (module_of "app::main", Fixtures.Infer.package_that_runs_only_on_64_bit_targets_may_use) ];
-      match check (Engine.context engine) (module_of "app::main") with
+        [ (file_of "app::main", Fixtures.Infer.package_that_runs_only_on_64_bit_targets_may_use) ];
+      match check (Engine.context engine) (file_of "app::main") with
       | [] -> ()
       | actual -> fail "%s" (String.concat "; " (codes actual)));
   test "a negated literal is checked after the negation" (fun () ->
@@ -538,12 +538,12 @@ let () =
       in
       let database = setup [ ("app::main", text "1") ] in
       let engine = Engine.of_context database in
-      let module_ = module_of "app::main" in
+      let file = file_of "app::main" in
       expect_not_recomputed engine
-        ~first:(fun () -> ignore (Infer.diagnostics database module_))
+        ~first:(fun () -> ignore (Infer.diagnostics database file))
         ~again:(fun () ->
-          Database.For_testing.set_text engine module_ (text "2");
-          ignore (Infer.diagnostics database module_))
+          Database.For_testing.set_text engine file (text "2");
+          ignore (Infer.diagnostics database file))
         Infer.type_check_result
         [ top_key "app::main" "caller" ]);
   test "checking twice gives the same result" (fun () ->
@@ -562,7 +562,7 @@ let () =
   test "no table of the standard library holds a type inference left unsolved" (fun () ->
       let database = setup [] in
       List.iter
-        (fun ((module_ : Path.module_), _) ->
+        (fun ((file : Path.file), _) ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
@@ -579,8 +579,8 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            (Query.demand database Resolve.Names.declarations module_))
-        Standard_library.modules)
+            (Query.demand database Resolve.Names.declarations_in file))
+        Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
 
@@ -593,7 +593,7 @@ let () =
       let database =
         setup [ ("app::main", point ^ Fixtures.Infer.type_written_in_a_body_must_meet_its_bounds) ]
       in
-      match codes (check database (module_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a type written in a body that is not a type is an error" (fun () ->
@@ -654,7 +654,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Infer.mistake_is_not_reported_again_as_a_type_that) ]
       in
-      if List.mem "types.cannot_infer" (codes (check database (module_of "app::main"))) then
+      if List.mem "types.cannot_infer" (codes (check database (file_of "app::main"))) then
         fail "cascaded");
   test "a Float32 literal too large is an error" (fun () ->
       one_diagnostic Fixtures.Infer.float32_literal_too_large_is_an_error
@@ -715,7 +715,7 @@ let () =
       in
       List.iter
         (fun (diagnostic : Diagnostic.t) -> if diagnostic.fixes <> [] then fail "offered a fix")
-        (check database (module_of "app::main")));
+        (check database (file_of "app::main")));
   test "the string + fix keeps escapes" (fun () ->
       one_diagnostic Fixtures.Infer.string_fix_keeps_escapes "types.string_addition"
         ~fixed:Fixtures.Infer.string_fix_keeps_escapes_fixed);
@@ -767,7 +767,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Infer.traits_written_arguments_are_the_ones_its_call) ]
       in
-      if not (List.mem "types.no_impl" (codes (check database (module_of "app::main")))) then
+      if not (List.mem "types.no_impl" (codes (check database (file_of "app::main")))) then
         fail "the written argument was ignored");
   test "a literal is the receiver of a trait method written in full" (fun () ->
       fine Fixtures.Infer.literal_is_the_receiver_of_a_trait_method_written);

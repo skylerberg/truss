@@ -3,12 +3,12 @@
 
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
-(* The tests defined in the selected modules, in the package's order, whose
+(* The tests defined in the selected files, in the package's order, whose
    names contain [match_]. *)
 let select (project : Project.t) ~paths ~match_ =
   List.concat_map
-    (fun module_ ->
-      let source = Project.source project module_ in
+    (fun (file : Path.file) ->
+      let source = Project.source project file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match declaration.path with
@@ -22,9 +22,16 @@ let select (project : Project.t) ~paths ~match_ =
                 | Some (_, base) -> fst (Source.position source base)
                 | None -> 0
               in
-              Some { path = declaration.path; module_; name; file = Source.path source; line }
+              Some
+                {
+                  path = declaration.path;
+                  module_ = file.module_;
+                  name;
+                  file = Source.path source;
+                  line;
+                }
           | _ -> None)
-        (Query.demand project.context Resolve.Names.declarations module_))
+        (Query.demand project.context Resolve.Names.declarations_in file))
     (Project.selected project paths)
 
 let label test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
