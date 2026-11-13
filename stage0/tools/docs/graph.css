@@ -10,19 +10,19 @@
   --dependency: #0a7083;
   --dependent: #c0531a;
   --area-0: #64748b;
-  --area-1: #b0472b;
-  --area-2: #8441a2;
-  --area-3: #4a7929;
-  --area-4: #96661b;
-  --area-5: #1d7a66;
-  --area-6: #3555b7;
-  --area-7: #7b6d10;
-  --area-8: #a8326e;
-  --area-9: #2a7697;
-  --area-10: #5d4fc0;
-  --area-11: #9c4646;
-  --area-12: #2f7d4e;
-  --area-13: #a85a12;
+  --area-1: #1a54f0;
+  --area-2: #005b4a;
+  --area-3: #ac6cd1;
+  --area-4: #9d5e01;
+  --area-5: #37830f;
+  --area-6: #f119a7;
+  --area-7: #ee092f;
+  --area-8: #950681;
+  --area-9: #1f98ed;
+  --area-10: #90101c;
+  --area-11: #45418c;
+  --area-12: #cf7f7a;
+  --area-13: #7f0fdc;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -39,19 +39,19 @@
     --dependency: #3cc1d4;
     --dependent: #f08b4c;
     --area-0: #96a4b8;
-    --area-1: #ea8461;
-    --area-2: #c487df;
-    --area-3: #8bc25b;
-    --area-4: #d6a24b;
-    --area-5: #4cc1a6;
-    --area-6: #7f9af0;
-    --area-7: #c8b640;
-    --area-8: #e57fae;
-    --area-9: #62c0e6;
-    --area-10: #a99cf2;
-    --area-11: #e39a9a;
-    --area-12: #7fcc9c;
-    --area-13: #f0a35a;
+    --area-1: #ac639b;
+    --area-2: #19bf2f;
+    --area-3: #da942c;
+    --area-4: #e4da8c;
+    --area-5: #ea43e2;
+    --area-6: #72fc29;
+    --area-7: #8e52fd;
+    --area-8: #718b46;
+    --area-9: #fc7b9b;
+    --area-10: #23dbc1;
+    --area-11: #e62a38;
+    --area-12: #ecc0ef;
+    --area-13: #1d8ef5;
   }
 }
 
@@ -228,7 +228,14 @@ main {
   display: flex;
   align-items: center;
   gap: 7px;
+  margin: 0 -6px;
+  padding: 1px 6px;
+  border-radius: 4px;
   font-family: var(--mono);
+}
+
+.areas div:hover {
+  background: color-mix(in srgb, var(--area-0) 14%, var(--surface));
 }
 
 .areas .count {
@@ -293,12 +300,15 @@ body.areas-page #canvas svg.focused .edge text {
 
 #canvas svg.focused .focus,
 #canvas svg.focused .dependency,
-#canvas svg.focused .dependent {
+#canvas svg.focused .dependent,
+#canvas svg.focused .member {
   opacity: 1;
 }
 
 #canvas .node.focus path,
-#canvas .node.focus polygon {
+#canvas .node.focus polygon,
+#canvas .node.member path,
+#canvas .node.member polygon {
   fill: color-mix(in srgb, var(--area) 35%, var(--surface));
   stroke-width: 2.6;
 }
