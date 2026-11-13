@@ -10,6 +10,7 @@ use standard::intrinsic
 use standard::json
 use standard::map
 use standard::network
+use standard::processes
 use standard::random
 use standard::serialization
 use standard::streams
@@ -1159,11 +1160,13 @@ fn write_one[Stream: streams::Duplex](
   outbound: tasks::Channel[flow::Outbound],
   version_one_zero: Bool,
   close: Bool,
+  stopping: tasks::Channel[Unit],
 ) -> Bool
   uses Handles, Tasks, Clock
 {
   var is_chunked = false
   var can_continue = true
+  var is_closing = close
   for message in outbound.messages() {
     match own message {
       Head(status, fields, is_end, ack, ..) => {
@@ -1178,7 +1181,8 @@ fn write_one[Stream: streams::Duplex](
         if has_payload && !has_length && !is_end && version_one_zero {
           can_continue = false
         }
-        let bytes = head_bytes(status, fields: fields.slice(), is_end: is_end, version_one_zero: version_one_zero, close: close)
+        is_closing = is_closing || stopping.is_closed()
+        let bytes = head_bytes(status, fields: fields.slice(), is_end: is_end, version_one_zero: version_one_zero, close: is_closing)
         let is_sent = connection.send_all(bytes.slice()) is Ok(_)
         can_continue = can_continue && is_sent
         let _ = ack.send(is_sent)
@@ -1205,7 +1209,7 @@ fn write_one[Stream: streams::Duplex](
       _ => {}
     }
   }
-  can_continue && !close
+  can_continue && !is_closing
 }
 
 fn timeout_of(seconds: Int64) -> Option[Duration] {
@@ -1221,8 +1225,50 @@ fn error_status(error: Error) -> Status {
   }
 }
 
-public type ServerOptions(limits: Limits = Limits(), timeout_seconds: Int64 = 30)
+public type ServerOptions(limits: Limits = Limits(), timeout_seconds: Int64 = 30, grace_seconds: Int64 = 30)
   derives Equal
+
+public opaque type Shutdown(closing: tasks::Channel[Unit])
+
+public fn Shutdown.new() -> Shutdown {
+  Shutdown(closing: tasks::Channel[Unit].new())
+}
+
+public fn Shutdown.copy(self) -> Shutdown {
+  Shutdown(closing: self.closing.copy())
+}
+
+public fn Shutdown.begin(self)
+  uses Tasks
+{
+  self.closing.close()
+}
+
+public fn Shutdown.is_begun(self) -> Bool
+  uses Tasks
+{
+  self.closing.is_closed()
+}
+
+public fn Shutdown.wait(self)
+  uses Tasks
+{
+  let _ = self.closing.receive()
+}
+
+public fn Shutdown.begin_on_signal(self)
+  uses Tasks, Signals
+{
+  let _ = Signals.wait([processes::Signal.Terminate, processes::Signal.Interrupt])
+  self.begin()
+}
+
+fn stopping_of(requested: Option[Shutdown]) -> tasks::Channel[Unit] {
+  match requested {
+    Some(shutdown) => shutdown.closing.copy()
+    None => tasks::Channel[Unit].new()
+  }
+}
 
 fn prepare(connection: mut network::Connection, options: ServerOptions)
   uses Handles
@@ -1247,16 +1293,37 @@ fn refuse[Stream: streams::Duplex](connection: Stream, error: Error)
   let _ = connection.send_all(bytes.slice())
 }
 
+fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, stopping: tasks::Channel[Unit]) -> Bool
+  uses Handles, Tasks
+{
+  concurrent {
+    {
+      return match fill(connection, inbox: mut inbox) {
+        Ok(count) => count > 0
+        Err(_) => false
+      }
+    }
+    {
+      let _ = stopping.receive()
+      return false
+    }
+  }
+}
+
 fn serve_one[Stream: streams::Duplex, capability Granted](
   connection: Stream,
   inbox: own two::Inbox,
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions,
+  stopping: tasks::Channel[Unit],
 )
   uses Tasks, Handles, Clock, Granted
 {
   var unread = own inbox
   while true {
+    if stopping.is_closed() || (unread.bytes.is_empty() && !await_request(connection, inbox: mut unread, stopping: stopping)) {
+      return
+    }
     let head = match read_head(connection, inbox: mut unread, limits: options.limits) {
       Ok(Some(head)) => own head
       Ok(None) => return
@@ -1312,7 +1379,7 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
           return
         }
       }
-      can_continue = write_one(connection, outbound: outbound, version_one_zero: version_one_zero, close: close)
+      can_continue = write_one(connection, outbound: outbound, version_one_zero: version_one_zero, close: close, stopping: stopping)
     }
     if !is_reusable || !can_continue {
       return
@@ -1439,6 +1506,7 @@ fn serve_connection[capability Granted](
   connection: own network::Connection,
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions,
+  stopping: tasks::Channel[Unit],
 )
   uses Tasks, Handles, Clock, Granted
 {
@@ -1453,11 +1521,11 @@ fn serve_connection[capability Granted](
     }
   }
   if inbox.bytes[0..3] == "PRI".bytes() {
-    two::serve(opened, inbox: own inbox, header_limit: options.limits.head_bytes, respond: fn(arrival) {
+    two::serve(opened, inbox: own inbox, header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
       answer_arrival(own arrival, handler: handler, limits: options.limits)
     })
   } else {
-    serve_one(opened, inbox: own inbox, handler: handler, options: options)
+    serve_one(opened, inbox: own inbox, handler: handler, options: options, stopping: stopping)
   }
   let _ = opened.close_sending()
 }
@@ -1467,6 +1535,7 @@ fn serve_secured[capability Granted](
   config: tls::ServerConfig,
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions,
+  stopping: tasks::Channel[Unit],
 )
   uses Tasks, Handles, Clock, Random, Panic, Granted
 {
@@ -1477,29 +1546,94 @@ fn serve_secured[capability Granted](
     Err(_) => return
   }
   if secured.protocol() == Some("h2".slice()) {
-    two::serve(secured, inbox: two::Inbox(bytes: []), header_limit: options.limits.head_bytes, respond: fn(arrival) {
+    two::serve(secured, inbox: two::Inbox(bytes: []), header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
       answer_arrival(own arrival, handler: handler, limits: options.limits)
     })
   } else {
-    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options)
+    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options, stopping: stopping)
   }
   let _ = secured.close_sending()
+}
+
+fn accept_until(listener: mut network::Listener, connections: tasks::Channel[network::Connection], stopping: tasks::Channel[Unit])
+  uses Tasks, Handles, Clock
+{
+  concurrent {
+    {
+      for accepted in mut listener.connections() {
+        match own accepted {
+          Ok(connection) => {
+            if connections.send(own connection) is Err(_) {
+              return
+            }
+          }
+          Err(Cancelled) => return
+          Err(_) => Clock.sleep(Duration.milliseconds(10))
+        }
+      }
+    }
+    {
+      let _ = stopping.receive()
+      return
+    }
+  }
+}
+
+fn drain_until[capability Work](
+  connections: tasks::Channel[network::Connection],
+  stopping: tasks::Channel[Unit],
+  grace_seconds: Int64,
+  serve_each: (fn(own network::Connection) uses Work),
+)
+  uses Tasks, Clock, Work
+{
+  concurrent {
+    {
+      concurrent for connection in connections.messages() {
+        serve_each(own connection)
+      }
+      return
+    }
+    {
+      let _ = stopping.receive()
+      if grace_seconds > 0 && grace_seconds <= 1000000000 {
+        Clock.sleep(Duration.seconds(grace_seconds))
+      }
+      return
+    }
+  }
+}
+
+fn run[capability Work](
+  listener: mut network::Listener,
+  stopping: tasks::Channel[Unit],
+  grace_seconds: Int64,
+  serve_each: (fn(own network::Connection) uses Work),
+)
+  uses Tasks, Handles, Clock, Work
+{
+  let connections = tasks::Channel[network::Connection].new()
+  concurrent {
+    {
+      accept_until(mut listener, connections: connections, stopping: stopping)
+      connections.close()
+    }
+    drain_until(connections, stopping: stopping, grace_seconds: grace_seconds, serve_each: serve_each)
+  }
 }
 
 public fn serve[capability Granted](
   listener: mut network::Listener,
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions = ServerOptions(),
+  shutdown: Option[Shutdown] = None,
 )
   uses Tasks, Handles, Clock, Granted
 {
-  concurrent for accepted in mut listener.connections() {
-    match own accepted {
-      Ok(connection) => serve_connection(own connection, handler: handler, options: options)
-      Err(Cancelled) => return
-      Err(_) => Clock.sleep(Duration.milliseconds(10))
-    }
-  }
+  let stopping = stopping_of(shutdown)
+  run(mut listener, stopping: stopping, grace_seconds: options.grace_seconds, serve_each: fn(connection) {
+    serve_connection(own connection, handler: handler, options: options, stopping: stopping)
+  })
 }
 
 public fn serve_tls[capability Granted](
@@ -1507,6 +1641,7 @@ public fn serve_tls[capability Granted](
   config: tls::ServerConfig,
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions = ServerOptions(),
+  shutdown: Option[Shutdown] = None,
 )
   uses Tasks, Handles, Clock, Random, Panic, Granted
 {
@@ -1514,13 +1649,10 @@ public fn serve_tls[capability Granted](
   if configured.protocols.is_empty() {
     configured.protocols = ["h2", "http/1.1"]
   }
-  concurrent for accepted in mut listener.connections() {
-    match own accepted {
-      Ok(connection) => serve_secured(own connection, config: configured, handler: handler, options: options)
-      Err(Cancelled) => return
-      Err(_) => Clock.sleep(Duration.milliseconds(10))
-    }
-  }
+  let stopping = stopping_of(shutdown)
+  run(mut listener, stopping: stopping, grace_seconds: options.grace_seconds, serve_each: fn(connection) {
+    serve_secured(own connection, config: configured, handler: handler, options: options, stopping: stopping)
+  })
 }
 
 type Segment =

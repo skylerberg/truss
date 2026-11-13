@@ -293,6 +293,8 @@ internal type Arrival(stream: UInt32, fields: List[hpack::Field], chunks: tasks:
 
 type Inflow(stream: UInt32, chunks: tasks::Channel[flow::Chunk], block: List[UInt8], has_headers: Bool, is_ending: Bool, is_refused: Bool)
 
+type Admission(is_draining: Bool, last_stream: UInt32, active: Int64)
+
 type Reading(
   decoder: hpack::Decoder,
   inflows: List[Inflow],
@@ -300,7 +302,7 @@ type Reading(
   continuation: Option[UInt32],
   is_going_away: Bool,
   header_limit: USize,
-  active: tasks::Counter,
+  admission: tasks::Cell[Admission],
 )
 
 fn inflow_index(inflows: Slice[Inflow], stream: UInt32) -> Option[USize] {
@@ -347,7 +349,6 @@ fn complete_headers(reading: mut Reading, index: USize, arrivals: tasks::Channel
   }
   if !reading.inflows[index].has_headers {
     reading.inflows[index].has_headers = true
-    let _ = reading.active.add(1)
     let chunks = reading.inflows[index].chunks
     let _ = arrivals.send(Arrival(stream: stream, fields: own fields, chunks: chunks.copy(), outbound: outbound.copy()))
   } else if !reading.inflows[index].is_ending {
@@ -373,7 +374,18 @@ fn serve_headers(reading: mut Reading, frame: own Frame, arrivals: tasks::Channe
         return Err(violation(stream_closed, message: "HEADERS on a stream that is not open"))
       }
       reading.last_stream = frame.stream
-      let is_refused = reading.is_going_away || reading.active.value() >= local_stream_limit
+      let stream = frame.stream
+      let is_going_away = reading.is_going_away
+      let is_admitted = reading.admission.update(fn(admission) {
+        if is_going_away || admission.is_draining || admission.active >= local_stream_limit {
+          false
+        } else {
+          admission.last_stream = stream
+          admission.active += 1
+          true
+        }
+      })
+      let is_refused = !is_admitted
       mut reading.inflows.push(Inflow(
         stream: frame.stream,
         chunks: tasks::Channel.new(capacity: 1024),
@@ -541,7 +553,7 @@ fn read_requests[Stream: streams::Duplex](
     let frame = match read_frame(stream, inbox: mut inbox) {
       Ok(frame) => own frame
       Err(System(TimedOut)) => {
-        if reading.active.value() > 0 {
+        if reading.admission.read(fn(admission) { admission.active > 0 }) {
           continue
         }
         return Failure.System(error: SystemError.TimedOut)
@@ -772,6 +784,15 @@ fn write_message[Stream: streams::Duplex](connection: Stream, writing: mut Writi
         None => {}
       }
     }
+    Drain(last_stream, ack) => {
+      if !writing.is_closing {
+        var payload: List[UInt8] = []
+        push_u32(mut payload, value: last_stream)
+        push_u32(mut payload, value: 0)
+        let _ = send_frame(connection, kind: goaway_frame, flags: 0, id: 0, payload: payload.slice())
+      }
+      let _ = ack.send(true)
+    }
     Goaway(last_stream, code) => {
       if !writing.is_closing {
         var payload: List[UInt8] = []
@@ -812,10 +833,28 @@ fn write_responses[Stream: streams::Duplex](stream: Stream, outbound: tasks::Cha
   }
 }
 
+fn drain(admission: tasks::Cell[Admission], drained: tasks::Channel[Unit], outbound: tasks::Channel[flow::Outbound])
+  uses Tasks
+{
+  let active = admission.update(fn(state) {
+    state.is_draining = true
+    state.active
+  })
+  let last_stream = admission.read(fn(state) { state.last_stream })
+  let ack = tasks::Channel[Bool].new(capacity: 1)
+  if outbound.send(flow::Outbound.Drain(last_stream: last_stream, ack: ack.copy())) is Ok(_) {
+    let _ = ack.receive()
+  }
+  if active > 0 {
+    let _ = drained.receive()
+  }
+}
+
 internal fn serve[Stream: streams::Duplex, capability Granted](
   stream: Stream,
   inbox: own Inbox,
   header_limit: USize,
+  stopping: tasks::Channel[Unit],
   respond: (fn(own Arrival) uses Granted),
 )
   uses Tasks, Handles, Clock, Granted
@@ -830,7 +869,8 @@ internal fn serve[Stream: streams::Duplex, capability Granted](
   }
   let arrivals = tasks::Channel[Arrival].new(capacity: 128)
   let outbound = tasks::Channel[flow::Outbound].new(capacity: 256)
-  let active = tasks::Counter.new()
+  let admission = tasks::Cell[Admission].new(Admission(is_draining: false, last_stream: 0, active: 0))
+  let drained = tasks::Channel[Unit].new()
   var reading = Reading(
     decoder: hpack::Decoder.new(),
     inflows: [],
@@ -838,7 +878,7 @@ internal fn serve[Stream: streams::Duplex, capability Granted](
     continuation: None,
     is_going_away: false,
     header_limit: header_limit,
-    active: active.copy(),
+    admission: admission.copy(),
   )
   concurrent {
     {
@@ -852,11 +892,27 @@ internal fn serve[Stream: streams::Duplex, capability Granted](
     {
       concurrent for arrival in arrivals.messages() {
         respond(own arrival)
-        let _ = active.add(-1)
+        let is_drained = admission.update(fn(state) {
+          if state.active > 0 {
+            state.active -= 1
+          }
+          state.is_draining && state.active == 0
+        })
+        if is_drained {
+          drained.close()
+        }
       }
       outbound.close()
     }
-    write_responses(stream, outbound: outbound)
+    {
+      write_responses(stream, outbound: outbound)
+      return
+    }
+    {
+      let _ = stopping.receive()
+      drain(admission, drained: drained, outbound: outbound)
+      return
+    }
   }
 }
 
