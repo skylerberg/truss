@@ -3,9 +3,10 @@ type block = int
 
 (** Whether a local is a source binding or a temporary. *)
 type local_kind =
-  | Source of { local : Core.local; mode : Types.mode }
-      (** A parameter, [self], or a local that a pattern or a lambda binds. With [Read] or [Mut], it
-          is the place it was bound to, not a copy of it. *)
+  | Source of { local : Core.local; mode : Types.mode; name : string option; is_var : bool }
+      (** A parameter, [self], or a local that a pattern or a lambda binds, with the name it is
+          written with and whether it is declared with [var]. With [Read] or [Mut], it is the place
+          it was bound to, not a copy of it. *)
   | Temporary
       (** A value with no name. It is [Dead] at the end of the statement that makes it, unless it is
           the value of a block, which the enclosing statement reads. *)
@@ -60,6 +61,7 @@ type call = {
   arguments : argument list;  (** One per parameter, in parameter order. *)
   uses : Types.capability_set;
   node : Core.id;  (** The core form's [Call]. *)
+  origin : Core.origin;  (** The call's, for diagnostics. *)
 }
 
 type capture = { local : Core.local; type_ : Types.ty; place : place }
@@ -126,6 +128,8 @@ type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
   | Assign of { target : place; value : rvalue; node : Core.id option }
+      (** [node] is the core expression whose value the assignment computes, where it computes one,
+          for the prover's messages. *)
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
       (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
@@ -140,15 +144,16 @@ and statement_kind =
   | Assert of operand  (** An [assert] that can run. *)
   | Echo of operand
   | Provide of { provided : provided list; can_use_tasks : bool }
+      (** The start of a [provide] block. [can_use_tasks] says whether its body can use [Tasks], so
+          that tasks may call a [mut] implementation at the same time. *)
   | Provide_end
-  | Fork_start of { fork : Core.origin; concurrent : bool }
-      (** The start of a branch of a [parallel] or [concurrent] block. *)
-  | Fork_end of { fork : Core.origin }  (** The end of the block's last branch. *)
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
   | Matched of { patterns : Core.origin list }
+      (** An arm of a [match] whose patterns, by their origins, matched here, before its guard. Only
+          the prover reads it, to tell which arm a counterexample takes. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
 type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
@@ -182,18 +187,41 @@ type left_task = {
 }
 (** A task an early exit leaves. *)
 
+type branch = {
+  entry : block;
+  blocks : block list;  (** Every block of the branch, [entry] first. *)
+}
+(** A branch of a [parallel] or [concurrent] block. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
   | Switch_variant of { place : place; cases : (string * block) list }
-  | For of { iteration : iteration; part : local; body : block; after : block; loop : loop }
+  | For of {
+      iteration : iteration;
+      part : local;
+      body : block;
+      blocks : block list;  (** Every block of the body, [body] first, nested loops' included. *)
+      after : block;
+      loop : loop;
+    }
       (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
           {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
           [loop]'s schedule says. *)
+  | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
+      (** A [parallel] or [concurrent] block, which [fork] names by its statement's origin. Its
+          branches run at the same time, and each ends with a {!Join}; read in order, each runs
+          after the one before it. [join] is where the block ends, if a branch reaches it. A branch
+          that no path reaches is not listed. *)
+  | Join of { fork : Core.origin; next : block }
+      (** The end of a branch of the {!Fork} [fork]. Read in order, [next] runs after it: the next
+          branch's entry, or the block's end after the last branch. *)
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
+      (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
+          taken. The exit ends the scopes inside the innermost task before it. *)
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
@@ -211,12 +239,31 @@ type basic_block = {
 
 type body = {
   parameters : local list;
+  defaults : (local * t) list;
+      (** For each parameter with a default, the MIR of the default, which the callee runs where the
+          argument is left out. *)
   captures : local list;
+      (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
+          order. *)
   locals : local_info array;
   blocks : basic_block array;  (** The entry is block 0. *)
 }
 
-type t = { body : body; lambdas : body array }
+and t = { body : body; lambdas : body array; yielding : yielding }
+
+and yielding = {
+  by_position : bool;
+      (** The body is one [for] loop over a range of integers, and the loop body is one [yield]. The
+          iterations share no state, so a [parallel for] or a [concurrent for] over the method can
+          run the range loop's iterations at the same time. *)
+  through : Path.t list;
+      (** The yielding functions it delegates to: those a [for] loop iterates over where the loop
+          body yields. *)
+  yields_places : bool;
+      (** A [yield] lends a place that outlives the method's frame, such as [self[index]], rather
+          than a temporary. *)
+}
+(** Facts of a body about its [yield]s, which a caller of a yielding method reads. *)
 
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
@@ -282,6 +329,9 @@ type builder = {
           and the next task or the exit's target, and the loans of each at the exit. The scopes'
           ends are read once the body is built, since a later branch can still bind a local in one.
       *)
+  mutable yield_count : int;  (** The [yield]s built so far. *)
+  mutable through : Path.t list;  (** The yielding functions a loop that yields iterates over. *)
+  mutable yields_places : bool;  (** Whether a [yield] lends a place that outlives the body. *)
 }
 
 let create ~lambdas =
@@ -301,6 +351,9 @@ let create ~lambdas =
     binds_into = Bindings;
     tasks = [];
     task_exits = Hashtbl.create 1;
+    yield_count = 0;
+    through = [];
+    yields_places = false;
   }
 
 let new_local b kind type_ origin =
@@ -376,11 +429,11 @@ let register_binding b local =
 (* The local a core local is bound to. Each alternative of a pattern binds
    the same locals, and a loop binds its pattern again on each iteration, so
    a core local has one local wherever it is bound. *)
-let bind_source b (local : Core.local) mode type_ origin =
+let bind_source ?name ?(is_var = false) b (local : Core.local) mode type_ origin =
   match Hashtbl.find_opt b.sources local with
   | Some found -> found
   | None ->
-      let found = new_local b (Source { local; mode }) type_ origin in
+      let found = new_local b (Source { local; mode; name; is_var }) type_ origin in
       Hashtbl.replace b.sources local found;
       (match b.deferred with
       | Some deferred -> b.deferred <- Some (found :: deferred)
@@ -509,6 +562,16 @@ let exit_depth b (exit : task_exit) =
   | (Exit_to _ | Exit_iteration), loop :: _ -> Some loop.depth
   | _, [] -> None
 
+(* A place a [yield] lends that outlives the method's frame: a local, a
+   constant, or an element of a storage, rather than a temporary or a part
+   that a call lends. *)
+let rec outlives_body (place : Core.place) =
+  match place with
+  | Local _ | Constant _ -> true
+  | Field { base; _ } -> outlives_body base
+  | Lent index -> Option.is_some (Core_walk.storage_index index)
+  | Temporary _ -> false
+
 (* Expressions *)
 
 let rec expression b (node : Core.expression) : operand option =
@@ -523,7 +586,7 @@ let rec expression b (node : Core.expression) : operand option =
       | Boolean value -> Some (Constant { value = Boolean value; type_ = node.type_ })
       | String value -> Some (Constant { value = String value; type_ = node.type_ })
       | Template { literals; call = { kind = Call called; _ } } ->
-          let* call = call_of b called ~node:node.id in
+          let* call = call_of b called ~node:node.id ~origin:node.origin in
           let local = temporary b node.type_ origin in
           emit b (Template { destination = at local; literals; call }) origin;
           Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
@@ -572,7 +635,7 @@ let rec expression b (node : Core.expression) : operand option =
                 (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
           | [] -> bug "a record update without a base")
       | Slice { call = { kind = Call called; _ }; _ } -> (
-          let* call = call_of b called ~node:node.id in
+          let* call = call_of b called ~node:node.id ~origin:node.origin in
           match call.arguments with
           | Passed { value = Borrow { place = base; _ }; _ } :: _ ->
               let local = temporary b node.type_ origin in
@@ -741,7 +804,8 @@ let rec expression b (node : Core.expression) : operand option =
             body;
           } ->
           quantifier_loop b node quantifier pattern body (fun ~each ->
-              each_loop b ~origin ~pattern ~called ~node:call.id ~loop:(no_clauses origin) ~each)
+              each_loop b ~origin ~pattern ~called ~node:call.id ~call_origin:call.origin
+                ~loop:(no_clauses origin) ~each)
       | Collection_literal { construction = Specification_only; _ }
       | Map_literal _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _
       | Specification_function _ | Method_time _ ->
@@ -908,7 +972,7 @@ and place b (found : Core.place) : place option =
           let* base = place b base in
           Some (project base (Field field))
       | Lent ({ kind = Call called; _ } as lending) -> (
-          let* call = call_of b called ~node:lending.id in
+          let* call = call_of b called ~node:lending.id ~origin:lending.origin in
           match called.lends with
           | Some mode ->
               let part = new_local b (Lent mode) lending.type_ lending.origin in
@@ -942,7 +1006,7 @@ and callee_of b (callee : Core.callee) : callee option =
       Some (Indirect value)
 
 (* A call: its callee, then its arguments in order. *)
-and call_of b (called : Core.call) ~node : call option =
+and call_of b (called : Core.call) ~node ~origin : call option =
   let* callee = callee_of b called.callee in
   let* values =
     in_order b
@@ -967,7 +1031,7 @@ and call_of b (called : Core.call) ~node : call option =
             | [] -> bug "a call with fewer values than arguments"))
       called.arguments
   in
-  Some { callee; arguments; uses = called.uses; node }
+  Some { callee; arguments; uses = called.uses; node; origin }
 
 and call_value b (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
@@ -984,7 +1048,7 @@ and call_value b (node : Core.expression) (called : Core.call) =
       in
       hold ~node:node.id b node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->
-      let* call = call_of b called ~node:node.id in
+      let* call = call_of b called ~node:node.id ~origin:node.origin in
       if diverges node.type_ then begin
         emit b (Call { destination = None; call }) origin;
         terminate b Unreachable origin;
@@ -1262,6 +1326,7 @@ and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
                        ];
                      uses = Types.no_capabilities;
                      node = pattern.id;
+                     origin = pattern.origin;
                    };
                })
             origin;
@@ -1285,8 +1350,10 @@ and bind ?(owned = false) b (pattern : Core.pattern) (scrutinee : place) =
   let bind = bind ~owned in
   match pattern.kind with
   | Wildcard | Literal _ | Range _ | Equal_to _ -> ()
-  | Bind { local; mode; _ } ->
-      let found = bind_source b local (if owned then Own else mode) pattern.type_ pattern.origin in
+  | Bind { local; mode; name; is_var } ->
+      let found =
+        bind_source ~name ~is_var b local (if owned then Own else mode) pattern.type_ pattern.origin
+      in
       emit b (Live [ found ]) pattern.origin;
       assign b (at found)
         (Operand
@@ -1472,7 +1539,9 @@ and statement b (node : Core.statement) =
           | None -> ()
           | Some right_value -> (
               let local =
-                new_local b (Source { local = bound; mode }) (operand_type right) origin
+                new_local b
+                  (Source { local = bound; mode; name = None; is_var = false })
+                  (operand_type right) origin
               in
               Hashtbl.replace b.sources bound local;
               add_temporary b local;
@@ -1513,8 +1582,8 @@ and statement b (node : Core.statement) =
               range_loop b ~origin ~pattern ~start ~stop ~inclusive ~loop ~each:(fun bind_part ->
                   each ~bind_part)
           | Yielding_call ({ kind = Call called; _ } as call) ->
-              each_loop b ~origin ~pattern ~called ~node:call.id ~loop ~each:(fun bind_part ->
-                  each ~bind_part)
+              each_loop b ~origin ~pattern ~called ~node:call.id ~call_origin:call.origin ~loop
+                ~each:(fun bind_part -> each ~bind_part)
           | Yielding_call _ -> bug "a loop over an expression that is not a call"
           | Cursor { cursor; next } ->
               cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each:(fun bind_part ->
@@ -1536,32 +1605,53 @@ and statement b (node : Core.statement) =
           start b after
       | Parallel branches | Concurrent branches ->
           let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
-          List.iteri
-            (fun index (branch : Core.statement) ->
-              emit b (Fork_start { fork = origin; concurrent }) branch.origin;
-              if concurrent then begin
-                (* The branch ends at the start of the next one, which runs
-                   whether or not this one leaves early. *)
-                let branch_end = new_block b in
-                b.tasks <-
-                  (Core.Branch { block = origin; index }, (List.length b.scopes, Some branch_end))
-                  :: b.tasks;
-                statement b branch;
-                b.tasks <- List.tl b.tasks;
-                goto b branch_end branch.origin;
-                start b branch_end
-              end
-              else statement b branch)
-            branches;
-          emit b (Fork_end { fork = origin }) origin
+          let entries = List.map (fun _ -> new_block b) branches and join = new_block b in
+          let entry = b.current in
+          let branches =
+            List.mapi
+              (fun index (branch : Core.statement) ->
+                let branch_entry = List.nth entries index in
+                let next =
+                  if index + 1 < List.length entries then List.nth entries (index + 1) else join
+                in
+                start b branch_entry;
+                let first = b.block_count in
+                if concurrent then begin
+                  (* The branch's task ends at its [Join], which the
+                      other branches go on from whether or not this one
+                      leaves early. *)
+                  let branch_end = new_block b in
+                  b.tasks <-
+                    (Core.Branch { block = origin; index }, (List.length b.scopes, Some branch_end))
+                    :: b.tasks;
+                  statement b branch;
+                  b.tasks <- List.tl b.tasks;
+                  goto b branch_end branch.origin;
+                  start b branch_end
+                end
+                else statement b branch;
+                terminate b (Join { fork = origin; next }) branch.origin;
+                {
+                  entry = branch_entry;
+                  blocks =
+                    branch_entry :: List.init (b.block_count - first) (fun index -> first + index);
+                })
+              branches
+          in
+          b.current <- entry;
+          terminate b (Fork { fork = origin; concurrent; branches; join = Some join }) origin;
+          start b join
       | Proof proof -> emit b (Proof proof) origin
       | Assert { condition = { value; executable = true }; _ } -> (
           match expression b value with Some value -> emit b (Assert value) origin | None -> ())
       | Assert { condition = { value; executable = false }; _ } ->
           emit b (Ghost_assert value) origin
-      | Yield { mode; part } -> (
-          match yielded b mode part with
+      | Yield { mode; part = written } -> (
+          match yielded b mode written with
           | Some part ->
+              b.yield_count <- b.yield_count + 1;
+              if List.exists outlives_body (Core_walk.lent_places written) then
+                b.yields_places <- true;
               let resume = new_block b in
               terminate b (Yield { mode; part; resume }) origin;
               start b resume
@@ -1647,8 +1737,9 @@ and leave_tasks b tasks exit origin =
 and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~each =
   let part = new_local b Temporary pattern.type_ origin in
   let inside = new_block b and after = new_block b in
-  terminate b (For { iteration; part; body = inside; after; loop }) origin;
+  let entry = b.current in
   start b inside;
+  let first = b.block_count in
   looping b ~break_:after ~continue_:Next_iteration (fun () ->
       each (fun () ->
           (match iteration with
@@ -1670,6 +1761,9 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
           | Range _ -> bind ~owned:true b pattern (at part)
           | Yielding _ | Pull _ -> bind b pattern (at part)));
   terminate b Iteration_end origin;
+  let blocks = inside :: List.init (b.block_count - first) (fun index -> first + index) in
+  b.current <- entry;
+  terminate b (For { iteration; part; body = inside; blocks; after; loop }) origin;
   start b after
 
 and range_loop b ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
@@ -1680,10 +1774,16 @@ and range_loop b ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
   | _ -> ()
 
 (* A loop over a call of a yielding method. *)
-and each_loop b ~origin ~pattern ~called ~node ~loop ~each =
+and each_loop b ~origin ~pattern ~called ~node ~call_origin ~loop ~each =
   Option.iter
-    (fun call -> for_loop b ~origin ~pattern ~iteration:(Yielding call) ~loop ~each)
-    (call_of b called ~node)
+    (fun (call : call) ->
+      let yields_before = b.yield_count in
+      for_loop b ~origin ~pattern ~iteration:(Yielding call) ~loop ~each;
+      match call.callee with
+      | Function { path; _ } when b.yield_count > yields_before && not (List.mem path b.through) ->
+          b.through <- path :: b.through
+      | _ -> ())
+    (call_of b called ~node ~origin:call_origin)
 
 (* A loop that pulls a cursor until it has no next value. *)
 and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
@@ -1729,8 +1829,15 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
   let capture_locals =
     List.map
       (fun (capture : Core.capture) ->
+        let name =
+          match Option.map (Hashtbl.find b.infos) (Hashtbl.find_opt b.sources capture.local) with
+          | Some { kind = Source { name; _ }; _ } -> name
+          | _ -> None
+        in
         let local =
-          new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0
+          new_local inner
+            (Source { local = capture.local; mode = Read; name; is_var = false })
+            capture.type_ 0
         in
         Hashtbl.replace inner.sources capture.local local;
         local)
@@ -1744,7 +1851,8 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
           List.map
             (fun (pattern : Core.pattern) ->
               match pattern.kind with
-              | Bind { local; mode; _ } -> bind_source inner local mode pattern.type_ pattern.origin
+              | Bind { local; mode; name; is_var } ->
+                  bind_source ~name ~is_var inner local mode pattern.type_ pattern.origin
               | _ -> new_local inner Temporary pattern.type_ pattern.origin)
             parameters
         in
@@ -1759,7 +1867,7 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
   b.lambdas := body :: !(b.lambdas);
   List.length !(b.lambdas) - 1
 
-and finish ?(captures = []) b ~parameters : body =
+and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
   let blocks =
     Array.init b.block_count (fun index ->
         let pending = Hashtbl.find b.pending index in
@@ -1796,6 +1904,7 @@ and finish ?(captures = []) b ~parameters : body =
   in
   {
     parameters;
+    defaults;
     captures;
     locals = Array.init b.local_count (Hashtbl.find b.infos);
     blocks = canonical blocks;
@@ -1815,13 +1924,39 @@ and canonical (blocks : basic_block array) =
   let renumbered = Array.make (Array.length blocks) (-1) in
   List.iteri (fun index block -> renumbered.(block) <- index) !order;
   let target block = renumbered.(block) in
+  let reached blocks =
+    List.filter_map (fun block -> if visited.(block) then Some (target block) else None) blocks
+  in
   let renumber = function
     | Goto block -> Goto (target block)
     | Branch { condition; yes; no } -> Branch { condition; yes = target yes; no = target no }
     | Switch_variant { place; cases } ->
         Switch_variant
           { place; cases = List.map (fun (variant, block) -> (variant, target block)) cases }
-    | For loop -> For { loop with body = target loop.body; after = target loop.after }
+    | For loop ->
+        For
+          {
+            loop with
+            body = target loop.body;
+            blocks = reached loop.blocks;
+            after = target loop.after;
+          }
+    | Fork fork ->
+        Fork
+          {
+            fork with
+            branches =
+              List.filter_map
+                (fun branch ->
+                  if visited.(branch.entry) then
+                    Some { entry = target branch.entry; blocks = reached branch.blocks }
+                  else None)
+                fork.branches;
+            join =
+              Option.bind fork.join (fun join ->
+                  if visited.(join) then Some (target join) else None);
+          }
+    | Join { fork; next } -> Join { fork; next = target next }
     | Yield yielded -> Yield { yielded with resume = target yielded.resume }
     | Exit_tasks { tasks; exit } ->
         Exit_tasks
@@ -1853,32 +1988,31 @@ and successors = function
   | Branch { yes; no; _ } -> [ yes; no ]
   | Switch_variant { cases; _ } -> List.map snd cases
   | For { body; after; _ } -> [ body; after ]
+  | Fork { branches = first :: _; _ } -> [ first.entry ]
+  | Fork { branches = []; _ } -> []
+  | Join { next; _ } -> [ next ]
   | Yield { resume; _ } -> [ resume ]
   | Exit_tasks { exit; tasks } -> (
       (match exit with Exit_to block -> [ block ] | Exit_return _ | Exit_iteration -> [])
       @ match tasks with innermost :: _ -> Option.to_list innermost.task_end | [] -> [])
   | Iteration_end | Return _ | Unreachable | Todo -> []
 
-(* The innermost [For] whose body each [Iteration_end] ends: the one that
-   reaches it from its body without passing a [For] nested in that body. *)
+(* The innermost [For] whose body each [Iteration_end] ends. Blocks are in
+   reverse postorder, so a loop comes before the loops nested in it, which
+   then replace it. *)
 let iteration_loops (body : body) =
   let loops = Hashtbl.create 4 in
   Array.iteri
     (fun index (block : basic_block) ->
       match block.terminator with
-      | For { body = inside; after; _ } ->
-          let visited = Hashtbl.create 8 in
-          let rec visit block =
-            if block <> after && not (Hashtbl.mem visited block) then begin
-              Hashtbl.replace visited block ();
-              match body.blocks.(block).terminator with
+      | For { blocks; _ } ->
+          List.iter
+            (fun inside ->
+              match body.blocks.(inside).terminator with
               | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
-                  Hashtbl.replace loops block index
-              | For { after = inner_after; _ } -> visit inner_after
-              | terminator -> List.iter visit (successors terminator)
-            end
-          in
-          visit inside
+                  Hashtbl.replace loops inside index
+              | _ -> ())
+            blocks
       | _ -> ())
     body.blocks;
   loops
@@ -1929,7 +2063,43 @@ let conditional_lends (body : body) =
       if ended_before || reaches 0 then Some part else None)
     !lends
 
-let of_definition (definition : Core.definition) =
+(* Whether a body is one [for] loop over a range whose body is one [yield]. *)
+let yields_by_position (body : Core.block) =
+  match (body.statements, body.value) with
+  | ( [
+        {
+          kind =
+            For
+              {
+                iteration = Integer_range _;
+                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
+                _;
+              };
+          _;
+        };
+      ],
+      None ) ->
+      true
+  | _ -> false
+
+let no_yields = { by_position = false; through = []; yields_places = false }
+
+let rec of_expression ?(parameters = []) (written : Core.expression) =
+  let b = create ~lambdas:(ref []) in
+  let parameters =
+    List.map
+      (fun (parameter : Core.parameter) ->
+        bind_source ~name:parameter.name b parameter.local parameter.mode parameter.type_ 0)
+      parameters
+  in
+  start b (new_block b);
+  in_scope b written.origin (fun () ->
+      in_statement b written.origin (fun () ->
+          Option.iter (fun value -> return_ b (Some value) written.origin) (expression b written)));
+  let body = finish b ~parameters in
+  { body; lambdas = Array.of_list (List.rev !(b.lambdas)); yielding = no_yields }
+
+and of_definition (definition : Core.definition) =
   let code =
     match definition with
     | Function { parameters; body = Some body; _ } -> Some (parameters, body, true)
@@ -1940,19 +2110,37 @@ let of_definition (definition : Core.definition) =
   Option.map
     (fun ((parameters : Core.parameter list), (body : Core.block), returns) ->
       let b = create ~lambdas:(ref []) in
-      let parameters =
+      let locals =
         List.map
           (fun (parameter : Core.parameter) ->
-            bind_source b parameter.local parameter.mode parameter.type_ 0)
+            bind_source ~name:parameter.name b parameter.local parameter.mode parameter.type_ 0)
           parameters
+      in
+      let defaults =
+        List.concat
+          (List.map2
+             (fun (parameter : Core.parameter) local ->
+               match parameter.default with
+               | Some default -> [ (local, of_expression default) ]
+               | None -> [])
+             parameters locals)
       in
       start b (new_block b);
       in_scope b 0 (fun () ->
           Option.iter
             (fun value -> return_ b (if returns then Some value else None) 0)
             (block b body));
-      let body = finish b ~parameters in
-      { body; lambdas = Array.of_list (List.rev !(b.lambdas)) })
+      let finished = finish b ~parameters:locals ~defaults in
+      {
+        body = finished;
+        lambdas = Array.of_list (List.rev !(b.lambdas));
+        yielding =
+          {
+            by_position = yields_by_position body;
+            through = List.rev b.through;
+            yields_places = b.yields_places;
+          };
+      })
     code
 
 (* Text *)
@@ -2057,9 +2245,6 @@ let show_statement (statement : statement) =
       Printf.sprintf "provide %s"
         (show_operands (List.map (fun (p : provided) -> p.value) provided))
   | Provide_end -> "provide end"
-  | Fork_start { fork; concurrent } ->
-      Printf.sprintf "%s branch of #%d" (if concurrent then "concurrent" else "parallel") fork
-  | Fork_end { fork } -> Printf.sprintf "end of #%d" fork
   | Loan_start { loan; borrowed; mode; duration } ->
       Printf.sprintf "loan %d: %s %s for %s" loan (show_mode mode) (show_operand borrowed)
         (match duration with
@@ -2102,6 +2287,13 @@ let show_terminator = function
               (show_operand stop)
         | Pull { cursor; _ } -> "pull " ^ show_place cursor)
         body after
+  | Fork { fork; concurrent; branches; join } ->
+      Printf.sprintf "%s #%d %s%s"
+        (if concurrent then "concurrent" else "parallel")
+        fork
+        (String.concat " " (List.map (fun branch -> string_of_int branch.entry) branches))
+        (match join with Some join -> Printf.sprintf " join %d" join | None -> "")
+  | Join { fork; next } -> Printf.sprintf "join #%d then %d" fork next
   | Iteration_end -> "next"
   | Yield { mode; part; resume } ->
       Printf.sprintf "yield %s %s %d" (show_mode mode) (show_yielded part) resume
@@ -2139,21 +2331,6 @@ let show (mir : t) =
     :: List.mapi
          (fun index body -> Printf.sprintf "lambda %d\n%s" index (show_body body))
          (Array.to_list mir.lambdas))
-
-let of_expression ?(parameters = []) (written : Core.expression) =
-  let b = create ~lambdas:(ref []) in
-  let parameters =
-    List.map
-      (fun (parameter : Core.parameter) ->
-        bind_source b parameter.local parameter.mode parameter.type_ 0)
-      parameters
-  in
-  start b (new_block b);
-  in_scope b written.origin (fun () ->
-      in_statement b written.origin (fun () ->
-          Option.iter (fun value -> return_ b (Some value) written.origin) (expression b written)));
-  let body = finish b ~parameters in
-  { body; lambdas = Array.of_list (List.rev !(b.lambdas)) }
 
 let of_path =
   Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->

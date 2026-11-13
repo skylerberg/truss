@@ -10154,10 +10154,6 @@ let mir_statement context frame run (statement : Mir.statement) =
                  | _ -> frame)
                frame provided)
       | None -> Some frame)
-  | Fork_start { concurrent = false; _ } | Fork_end _ ->
-      (* Branches are disjoint, so they can run in order. *)
-      Some frame
-  | Fork_start { concurrent = true; _ } -> Some frame
 
 (* The MIR of a body that runs, with its core form's nodes. A function for
    specifications only, and a proof, never runs, so it has no MIR, and is
@@ -10375,6 +10371,22 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
     let span = span_of frame.source block.terminator_origin in
     match block.terminator with
     | Goto target -> jump target frame
+    (* The branches of a [parallel] or [concurrent] block are disjoint, so
+       they can run in order. *)
+    | Fork { branches = first :: _; _ } -> jump first.entry frame
+    | Fork { branches = []; _ } -> ()
+    | Join { fork; next } ->
+        (* Where a [concurrent] block ends, the paths that left a branch early
+           take their exits. *)
+        let ends =
+          Array.exists
+            (fun (forking : Mir.basic_block) ->
+              match forking.terminator with
+              | Fork { fork = started; join = Some join; _ } -> started = fork && join = next
+              | _ -> false)
+            body.blocks
+        in
+        jump next (if ends then concurrent_end frame fork ~jump ~iteration_end else frame)
     | Branch { condition; yes; no } ->
         let test = mir_operand context frame run condition in
         if frame.checking && Hashtbl.mem index.conditions block.terminator_origin then begin
@@ -10408,7 +10420,7 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
           context.unfinished <- frame.condition :: context.unfinished
         end
     | Iteration_end -> iteration_end frame
-    | For { iteration; part; body = first; after; loop } -> (
+    | For { iteration; part; body = first; after; loop; _ } -> (
         match Hashtbl.find_opt index.statements loop.origin with
         | Some
             ({ kind = For { pattern; iteration = written; clauses; body = written_body; _ }; _ } as
@@ -10536,12 +10548,9 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
       List.fold_left
         (fun frame (statement : Mir.statement) ->
           Option.bind frame (fun frame ->
-              match statement.kind with
-              | Fork_end { fork } -> Some (concurrent_end frame fork ~jump ~iteration_end)
-              | _ ->
-                  Option.map
-                    (fun frame -> mir_bindings context frame run)
-                    (mir_statement context frame run statement)))
+              Option.map
+                (fun frame -> mir_bindings context frame run)
+                (mir_statement context frame run statement)))
         (Some frame) block.statements
     in
     Option.iter (fun frame -> terminator frame block ~jump ~iteration_end) ended

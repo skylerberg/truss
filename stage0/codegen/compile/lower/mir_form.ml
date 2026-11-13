@@ -21,19 +21,23 @@ open Lir_builder
 let mir st =
   match st.frame.mir with Some mir -> mir | None -> bug "MIR lowering outside a MIR frame"
 
-(* The parameters of a function or a method, and its body as Core. The body
-   decides whether a yielding method yields by position and how many
-   [yield]s a lending method has. *)
-let core_of context path : Core.parameter list * Core.block =
-  match demand context Infer.core_of_path path with
-  | Some ({ definition = Function { parameters; body = Some body; _ }; _ }, _) -> (parameters, body)
-  | Some ({ definition = Test body; _ }, _) -> ([], body)
-  | _ -> bug "%s has no body in its core form" (Path.show path)
-
 let mir_of context path : Mir.t =
   match demand context Mir.of_path path with
   | Some (mir, _) -> mir
   | None -> bug "%s has no MIR" (Path.show path)
+
+(* A parameter's mode, name, and type, from its local. *)
+let parameter_of (body : Mir.body) local =
+  match body.locals.(local) with
+  | { kind = Source { mode; name; _ }; type_; _ } -> (mode, Option.value name ~default:"_", type_)
+  | _ -> bug "a parameter that is no source local"
+
+(* Where a default's expression is, for a report about it. *)
+let default_origin (default : Mir.t) =
+  Array.fold_left
+    (fun found (block : Mir.basic_block) ->
+      match block.terminator with Return _ -> block.terminator_origin | _ -> found)
+    0 default.body.blocks
 
 (* How many [yield]s a lending method's body has. *)
 let yield_count (body : Mir.body) =
@@ -426,10 +430,9 @@ type region = {
   depth : int;  (** The number of scopes the region's blocks are lowered in *)
   start : entry;  (** The state the region's code starts in *)
   enclosing : region option;
-  ending : (int * Lir.block * (Mir.block * int) option ref) option;
-      (** For a branch of a [concurrent] block: the block's fork, the block the branch's end goes
-          to, and where the branch ends, the position of the next branch's start or the block's end
-      *)
+  ending : (int * Lir.block) option;
+      (** For a branch of a [concurrent] block: the block's fork, and the block its {!Mir.Join} goes
+          to *)
 }
 
 let save (st : state) = { evidence = st.evidence; provides = (mir st).provides }
@@ -1106,91 +1109,48 @@ and run_region st region ~entry:(block, index) =
 
 and lower_from st region block index =
   let basic = (mir st).body.blocks.(block) in
-  let rec statements position = function
-    | [] -> terminator st region basic.terminator ~origin:basic.terminator_origin
-    | (statement : Mir.statement) :: rest -> (
-        match (statement.kind, region.ending) with
-        | (Fork_start { fork; concurrent = true } | Fork_end { fork }), Some (ending, after, ended)
-          when fork = ending ->
-            ended := Some (block, position);
-            finish st.builder (Goto after);
-            start st.builder (Lir_builder.block st.builder)
-        | Fork_start { fork; concurrent = true }, _ -> (
-            match concurrent_block st region ~fork (block, position) with
-            | Some (block, position) -> lower_from st region block (position + 1)
-            | None ->
-                (* No branch reaches the block's end, so nothing after it
-                   runs. *)
-                unreachable_block st)
-        | _ ->
-            in_statement st (fun () -> lower_statement st statement);
-            statements (position + 1) rest)
-  in
-  statements index (List.filteri (fun position _ -> position >= index) basic.statements)
+  List.iteri
+    (fun position (statement : Mir.statement) ->
+      if position >= index then in_statement st (fun () -> lower_statement st statement))
+    basic.statements;
+  terminator st region basic.terminator ~origin:basic.terminator_origin
 
-(* A [concurrent] block, from the start of its first branch at [entry]. Each
-   branch is a [Task] region, which outlining turns into a nested function.
-   The code after the regions spawns each function as a task of one group.
-   Gives the position of the block's end, if a branch reaches it. *)
-and concurrent_block st region ~fork (entry_block, entry_index) =
-  let body = mir st in
-  (* The fork is the [concurrent] statement's origin, which names its
-     branches' tasks. Each branch that can run starts with a statement of
-     the MIR. *)
-  let starts =
-    Array.fold_left
-      (fun count (basic : Mir.basic_block) ->
-        count
-        + List.length
-            (List.filter
-               (fun (statement : Mir.statement) ->
-                 match statement.kind with
-                 | Fork_start { fork = started; _ } -> started = fork
-                 | _ -> false)
-               basic.statements))
-      0 body.body.blocks
-  in
+(* A [concurrent] block. Each branch is a [Task] region, which outlining
+   turns into a nested function, and the code after the regions spawns each
+   function as a task of one group. The block's end follows, if a branch
+   reaches it. *)
+and concurrent_block st region ~fork ~(branches : Mir.branch list) ~join =
   let function_type = task_function_type st in
   let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
   emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
   (* Each branch's early exits and function value are made before the first
      region, since the code around the regions reads them. *)
-  let branches =
-    List.init starts (fun _ -> (new_early_exits st, local st.builder ~name:"task" function_type))
+  let tasks =
+    List.map (fun _ -> (new_early_exits st, local st.builder ~name:"task" function_type)) branches
   in
-  let ended = ref None in
   with_group st ~origin:fork (fun group ->
       let lir_fork = fresh_fork st in
-      let rec branch index position =
-        let early_exits, function_value = List.nth branches index in
-        emit st.builder (Region { fork = lir_fork; region = Task { function_value; item } });
-        let reached = ref None in
-        task_body st
-          ~id:(Branch { block = fork; index })
-          ~group ~early_exits
-          (fun task ->
-            let inner = new_region st ~enclosing:region ~ending:(fork, task.end_block, reached) in
-            run_region st inner ~entry:position);
-        match !reached with
-        | Some (block, position) -> (
-            let basic = body.body.blocks.(block) in
-            match (List.nth basic.statements position).kind with
-            | Fork_start _ -> branch (index + 1) (block, position + 1)
-            | _ -> ended := Some (block, position))
-        | None -> ()
-      in
-      branch 0 (entry_block, entry_index + 1);
+      List.iteri
+        (fun index ((branch : Mir.branch), (early_exits, function_value)) ->
+          emit st.builder (Region { fork = lir_fork; region = Task { function_value; item } });
+          task_body st
+            ~id:(Branch { block = fork; index })
+            ~group ~early_exits
+            (fun task ->
+              let inner = new_region st ~enclosing:region ~ending:(fork, task.end_block) in
+              run_region st inner ~entry:(branch.entry, 0)))
+        (List.combine branches tasks);
       emit st.builder (Regions_end { fork = lir_fork });
       (* [spawn] returns false once the group is cancelled, and the branch
          then never runs. *)
       List.iter
         (fun (_, function_value) ->
           ignore (tasks_bool st "spawn" [ group; at function_value; at item ]))
-        branches);
+        tasks);
   List.iter
     (fun (early_exits, _) -> resume_early_exit st region ~lower_ends:(lower_ends st) early_exits)
-    branches;
-  !ended
+    tasks;
+  match join with Some join -> goto st region join | None -> unreachable_block st
 
 and lower_statement st (statement : Mir.statement) =
   let origin = statement.origin in
@@ -1247,11 +1207,6 @@ and lower_statement st (statement : Mir.statement) =
           st.evidence <- enclosing;
           frame.provides <- rest
       | [] -> bug "the end of a provide that did not start")
-  | Fork_start { fork; concurrent = false } ->
-      if may_fork st then emit st.builder (Region { fork = lir_fork st fork; region = Branch })
-  | Fork_end { fork } ->
-      if may_fork st then emit st.builder (Regions_end { fork = lir_fork st fork })
-  | Fork_start { concurrent = true; _ } -> bug "a concurrent branch outside its block"
 
 (* Lowers the ends of scopes that a task's early exit leaves, once the task
    has ended. *)
@@ -1581,7 +1536,13 @@ and field_default_place st ty ~variant ~field =
    writes its value to [destination], from the expression's MIR. [arguments]
    are the parameters it reads, with their places. *)
 and expression_into ?(arguments = []) st (expression : Core.expression) (destination : Lir.place) =
-  let expression_mir = Mir.of_expression ~parameters:(List.map fst arguments) expression in
+  mir_into st
+    (Mir.of_expression ~parameters:(List.map fst arguments) expression)
+    ~arguments:(List.map snd arguments) destination
+
+(* Lowers the MIR of one expression, with its parameters bound to
+   [arguments], into [destination]. *)
+and mir_into ?(arguments = []) st (expression_mir : Mir.t) (destination : Lir.place) =
   let caller = st.frame in
   let exit = block st.builder in
   let frame =
@@ -1596,7 +1557,7 @@ and expression_into ?(arguments = []) st (expression : Core.expression) (destina
       exit = Some (exit, List.length st.scopes);
       mir = Some frame;
     };
-  List.iter2 (bind_local st) expression_mir.body.parameters (List.map snd arguments);
+  List.iter2 (bind_local st) expression_mir.body.parameters arguments;
   lower_body st frame;
   finish st.builder Unreachable;
   start st.builder exit;
@@ -1778,7 +1739,6 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
   if List.exists (Path.equal path) st.frame.inlined then
     unsupported ~at:call_site "%s, which lends through a call to itself" (Path.show path);
   let method_mir = mir_of st.context path in
-  let parameters, _ = core_of st.context path in
   let exit = block st.builder in
   let caller = st.frame in
   st.frame <-
@@ -1822,7 +1782,7 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
       let place =
         match
           ( List.find_opt (fun (position, _, _, _) -> position = index) arguments,
-            (List.nth parameters index).default )
+            List.assoc_opt local method_mir.body.defaults )
         with
         | Some (_, _, _, place), _ -> place
         | None, Some default ->
@@ -1830,7 +1790,7 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
                parameter's mode. *)
             let default_ty = ground st (info st local).type_ in
             let place = binding st default_ty in
-            in_statement st (fun () -> expression_into st default place);
+            in_statement st (fun () -> mir_into st default place);
             place
         | None, None -> bug "%s is given no argument for parameter %d" (Path.show path) index
       in
@@ -2043,7 +2003,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
              started in. *)
           let rec branch_region (around : region) =
             match (around.ending, tasks, around.enclosing) with
-            | Some (fork, _, _), (Branch { block; _ }, _) :: _, _ when fork = block -> around
+            | Some (fork, _), (Branch { block; _ }, _) :: _, _ when fork = block -> around
             | _, _, Some enclosing -> branch_region enclosing
             | _, _, None -> bug "an early exit from a branch outside its block"
           in
@@ -2063,10 +2023,40 @@ and terminator st region (ending : Mir.terminator) ~origin =
       in
       early_exit st region ~tasks ~exit ~value
   | Yield { mode; part; resume } -> yield st region ~mode ~part ~resume ~origin
-  | For { iteration; part; body; after; loop } ->
+  | For { iteration; part; body; after; loop; _ } ->
       claim st region after;
       for_loop st region ~iteration ~part ~body ~loop;
       goto st region after
+  | Fork { fork; concurrent = true; branches; join } ->
+      concurrent_block st region ~fork ~branches ~join
+  | Fork { fork; concurrent = false; branches; _ } -> (
+      (* A [parallel] block's branches are regions of the code, which
+         outlining runs at the same time. *)
+      match branches with
+      | first :: _ ->
+          if may_fork st then emit st.builder (Region { fork = lir_fork st fork; region = Branch });
+          goto st region first.entry
+      | [] -> unreachable_block st)
+  | Join { fork; next } -> (
+      match region.ending with
+      | Some (ending, end_block) when ending = fork ->
+          finish st.builder (Goto end_block);
+          start st.builder (block st.builder)
+      | _ ->
+          (if may_fork st then
+             let is_branch =
+               Array.exists
+                 (fun (basic : Mir.basic_block) ->
+                   match basic.terminator with
+                   | Fork { fork = started; branches; _ } when started = fork ->
+                       List.exists (fun (branch : Mir.branch) -> branch.entry = next) branches
+                   | _ -> false)
+                 (mir st).body.blocks
+             in
+             emit st.builder
+               (if is_branch then Region { fork = lir_fork st fork; region = Branch }
+                else Regions_end { fork = lir_fork st fork }));
+          goto st region next)
 
 and yield st region ~mode ~part ~resume ~origin =
   match st.frame.on_yield with
@@ -2131,9 +2121,7 @@ and loop_body st region ~part ~body (value : Lir.place) =
 
 (* Whether a yielding method yields by position: its body is one range loop
    that yields once each iteration. *)
-and yields_by_position st path =
-  let _, (body : Core.block) = core_of st.context path in
-  Core_walk.yields_by_position body
+and yields_by_position st path = (mir_of st.context path).yielding.by_position
 
 (* A loop over the cursor of a yielding method's call: the pulled method's
    [next] is called until it gives [None]. *)
@@ -2429,17 +2417,18 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
    takes the argument or the default. A parameter that is a view is pointed
    at the default's value, or given its bits, and the function owns that
    value. *)
-let fill_defaults st mask (parameters : (Core.parameter * Lir.place) list) =
+let fill_defaults st mask (body : Mir.body) (places : Lir.place list) =
   let builder = st.builder in
   let bit = ref (-1) in
-  List.map
-    (fun ((parameter : Core.parameter), arrived) ->
-      match parameter.default with
+  List.map2
+    (fun parameter arrived ->
+      let mode, name, type_ = parameter_of body parameter in
+      match List.assoc_opt parameter body.defaults with
       | None -> arrived
       | Some default ->
           incr bit;
           let bit = !bit in
-          let ty = ground st parameter.type_ in
+          let ty = ground st type_ in
           let passed = local builder (Raw (Integer UInt64))
           and is_passed = local builder (Raw Bool) in
           emit builder
@@ -2454,19 +2443,20 @@ let fill_defaults st mask (parameters : (Core.parameter * Lir.place) list) =
           in
           let pulled reason =
             if st.pulling then
-              unsupported ~at:(site_of st default.origin)
-                "a default for %s, %s, in a yielding method that is pulled" parameter.name reason
+              unsupported
+                ~at:(site_of st (default_origin default))
+                "a default for %s, %s, in a yielding method that is pulled" name reason
           in
           let place =
-            if parameter.mode = Own && not (trivial st ty) then begin
-              let owned_here = binding st ~name:parameter.name ty in
+            if mode = Own && not (trivial st ty) then begin
+              let owned_here = binding st ~name ty in
               let passed_block = block builder in
               unless_passed passed_block;
               start builder passed_block;
               emit builder (Assign (owned_here, Use (Move arrived)));
               finish builder (Goto after);
               start builder fill;
-              in_statement st (fun () -> expression_into st default owned_here);
+              in_statement st (fun () -> mir_into st default owned_here);
               owned_here
             end
             else begin
@@ -2477,22 +2467,22 @@ let fill_defaults st mask (parameters : (Core.parameter * Lir.place) list) =
                   | { projections = [ Deref ]; root = Local pointer } ->
                       pulled "which is passed by address";
                       let value = binding st ty in
-                      expression_into st default value;
+                      mir_into st default value;
                       emit builder
                         (Assign (at pointer, Use (Address { place = value; writable = true })))
                   | place when not (trivial st ty) ->
                       pulled "which is a view";
                       let value = binding st ty in
-                      expression_into st default value;
+                      mir_into st default value;
                       emit builder (Assign (place, Use (Copy value)))
-                  | place -> expression_into st default place);
+                  | place -> mir_into st default place);
               arrived
             end
           in
           finish builder (Goto after);
           start builder after;
           place)
-    parameters
+    body.parameters places
 
 (* Lowers the MIR of the code at [path] in the current frame, with its
    parameters in [parameters], in order. *)

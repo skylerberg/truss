@@ -8,9 +8,10 @@ type block = int
 
 (** Whether a local is a source binding or a temporary. *)
 type local_kind =
-  | Source of { local : Core.local; mode : Types.mode }
-      (** A parameter, [self], or a local that a pattern or a lambda binds. With [Read] or [Mut], it
-          is the place it was bound to, not a copy of it. *)
+  | Source of { local : Core.local; mode : Types.mode; name : string option; is_var : bool }
+      (** A parameter, [self], or a local that a pattern or a lambda binds, with the name it is
+          written with and whether it is declared with [var]. With [Read] or [Mut], it is the place
+          it was bound to, not a copy of it. *)
   | Temporary
       (** A value with no name. It is [Dead] at the end of the statement that makes it, unless it is
           the value of a block, which the enclosing statement reads. *)
@@ -65,6 +66,7 @@ type call = {
   arguments : argument list;  (** One per parameter, in parameter order. *)
   uses : Types.capability_set;
   node : Core.id;  (** The core form's [Call]. *)
+  origin : Core.origin;  (** The call's, for diagnostics. *)
 }
 
 type capture = { local : Core.local; type_ : Types.ty; place : place }
@@ -150,10 +152,6 @@ and statement_kind =
       (** The start of a [provide] block. [can_use_tasks] says whether its body can use [Tasks], so
           that tasks may call a [mut] implementation at the same time. *)
   | Provide_end
-  | Fork_start of { fork : Core.origin; concurrent : bool }
-      (** The start of a branch of a [parallel] or [concurrent] block, which [fork] names by its
-          statement's origin. *)
-  | Fork_end of { fork : Core.origin }  (** The end of the block's last branch. *)
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
@@ -194,14 +192,35 @@ type left_task = {
 }
 (** A task an early exit leaves. *)
 
+type branch = {
+  entry : block;
+  blocks : block list;  (** Every block of the branch, [entry] first. *)
+}
+(** A branch of a [parallel] or [concurrent] block. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
   | Switch_variant of { place : place; cases : (string * block) list }
-  | For of { iteration : iteration; part : local; body : block; after : block; loop : loop }
+  | For of {
+      iteration : iteration;
+      part : local;
+      body : block;
+      blocks : block list;  (** Every block of the body, [body] first, nested loops' included. *)
+      after : block;
+      loop : loop;
+    }
       (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
           {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
           [loop]'s schedule says. *)
+  | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
+      (** A [parallel] or [concurrent] block, which [fork] names by its statement's origin. Its
+          branches run at the same time, and each ends with a {!Join}; read in order, each runs
+          after the one before it. [join] is where the block ends, if a branch reaches it. A branch
+          that no path reaches is not listed. *)
+  | Join of { fork : Core.origin; next : block }
+      (** The end of a branch of the {!Fork} [fork]. Read in order, [next] runs after it: the next
+          branch's entry, or the block's end after the last branch. *)
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
@@ -225,6 +244,9 @@ type basic_block = {
 
 type body = {
   parameters : local list;
+  defaults : (local * t) list;
+      (** For each parameter with a default, the MIR of the default, which the callee runs where the
+          argument is left out. *)
   captures : local list;
       (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
           order. *)
@@ -232,7 +254,21 @@ type body = {
   blocks : basic_block array;  (** The entry is block 0. *)
 }
 
-type t = { body : body; lambdas : body array }
+and t = { body : body; lambdas : body array; yielding : yielding }
+
+and yielding = {
+  by_position : bool;
+      (** The body is one [for] loop over a range of integers, and the loop body is one [yield]. The
+          iterations share no state, so a [parallel for] or a [concurrent for] over the method can
+          run the range loop's iterations at the same time. *)
+  through : Path.t list;
+      (** The yielding functions it delegates to: those a [for] loop iterates over where the loop
+          body yields. *)
+  yields_places : bool;
+      (** A [yield] lends a place that outlives the method's frame, such as [self[index]], rather
+          than a temporary. *)
+}
+(** Facts of a body about its [yield]s, which a caller of a yielding method reads. *)
 
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)

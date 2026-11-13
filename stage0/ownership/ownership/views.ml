@@ -618,32 +618,33 @@ let check context (graph : Graph.t) : task_hazard option =
       | Enter | Move_out_of_lent _ | Bind _ | Scope_end _ | Task_end _ | Exit | Bind_views _ -> ())
     graph.points;
   (* The places that a range of points mutates, and the places that it uses. *)
-  let effects (range : range) =
+  let effects points =
     let changes = ref [] and uses = ref [] in
-    for index = range.first to range.limit - 1 do
-      let point = graph.points.(index) in
-      (* A use of a view uses the places that it views, and a write through
+    List.iter
+      (fun index ->
+        let point = graph.points.(index) in
+        (* A use of a view uses the places that it views, and a write through
          a slice mutates the places that the slice views. *)
-      let viewed place =
-        List.map
-          (fun (view : view) -> view.place)
-          (resolve context before.(index) [ { place; copied_out = true } ])
-      in
-      match point.action with
-      | Read place -> uses := (place :: viewed place) @ !uses
-      | Mutate place ->
-          uses := (place :: viewed place) @ !uses;
-          changes := (place, point.origin) :: !changes
-      | Write_through place ->
-          changes := List.map (fun viewed -> (viewed, point.origin)) (viewed place) @ !changes
-      | Assign place -> changes := (place, point.origin) :: !changes
-      | Move { place; type_; returned; captured; _ } -> (
-          uses := place :: !uses;
-          match verdict context place ~type_ ~returned ~captured with
-          | Moves -> changes := (place, point.origin) :: !changes
-          | Reads | Refused _ -> ())
-      | _ -> ()
-    done;
+        let viewed place =
+          List.map
+            (fun (view : view) -> view.place)
+            (resolve context before.(index) [ { place; copied_out = true } ])
+        in
+        match point.action with
+        | Read place -> uses := (place :: viewed place) @ !uses
+        | Mutate place ->
+            uses := (place :: viewed place) @ !uses;
+            changes := (place, point.origin) :: !changes
+        | Write_through place ->
+            changes := List.map (fun viewed -> (viewed, point.origin)) (viewed place) @ !changes
+        | Assign place -> changes := (place, point.origin) :: !changes
+        | Move { place; type_; returned; captured; _ } -> (
+            uses := place :: !uses;
+            match verdict context place ~type_ ~returned ~captured with
+            | Moves -> changes := (place, point.origin) :: !changes
+            | Reads | Refused _ -> ())
+        | _ -> ())
+      points;
     (!changes, !uses)
   in
   (* Data races between the branches of a [parallel] or [concurrent] block:
@@ -699,11 +700,12 @@ let check context (graph : Graph.t) : task_hazard option =
      for]: the body can mutate only the locals of one iteration, which are
      the loop's pattern variables and the locals that the body binds. *)
   List.iter
-    (fun ({ keyword; body = range; bound } : fork_join_loop) ->
+    (fun ({ keyword; body; bound } : fork_join_loop) ->
       let bound = ref bound in
-      for index = range.first to range.limit - 1 do
-        match graph.points.(index).action with Bind locals -> bound := locals @ !bound | _ -> ()
-      done;
+      List.iter
+        (fun index ->
+          match graph.points.(index).action with Bind locals -> bound := locals @ !bound | _ -> ())
+        body;
       List.iter
         (fun ((place : Place.t), origin) ->
           let outside =
@@ -717,6 +719,6 @@ let check context (graph : Graph.t) : task_hazard option =
                  "Data race: the iterations of a `%s for` run at the same time, so the body can \
                   mutate only its own element and its own locals."
                  keyword))
-        (fst (effects range)))
+        (fst (effects body)))
     graph.fork_join_loops;
   !task_hazard

@@ -288,20 +288,22 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabi
 
 let can_use_tasks ?solved (body : block) : bool = tasks_use ?solved body <> No_tasks
 
-let yields_by_position (body : block) : bool =
-  match (body.statements, body.value) with
-  | ( [
-        {
-          kind =
-            For
-              {
-                iteration = Integer_range _;
-                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
-                _;
-              };
-          _;
-        };
-      ],
-      None ) ->
-      true
-  | _ -> false
+(* A [List], a [Slice], or an [Array]. An element of one of these is a
+   place. An index of any other collection is a call of the collection's
+   [at], which lends the element. *)
+let is_storage type_ =
+  Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_
+
+(* If the expression is an index of a [List], a [Slice], or an [Array],
+   the collection that is indexed. *)
+let storage_index (value : expression) : place option =
+  match value.kind with
+  | Call
+      {
+        callee = Trait_method { trait; name = "at"; self_type; _ };
+        arguments = Passed { value = Place collection; _ } :: _;
+        _;
+      }
+    when Well_known.is Index trait.trait && is_storage self_type ->
+      Some collection
+  | _ -> None

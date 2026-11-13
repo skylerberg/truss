@@ -20,7 +20,6 @@ type context = {
           implementation, so no view may be stored in [self] or returned from it. *)
   mutable mutable_locals : Core.local list;  (** The locals declared with [var]. *)
   mutable diagnostics : Syntax.diagnostic list;
-  mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
       (** Pairs of index calls or slices of one collection, by origin, that must select disjoint
           elements. Each pair becomes a [Disjoint] obligation for the prover. *)
@@ -92,49 +91,56 @@ let show context (place : Place.t) =
   ^ String.concat ""
       (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
 
-(* The names and kinds of the definition's locals, from its parameters and
-   its patterns, and the marks of its arguments. *)
-let collect context (definition : Core.definition) =
-  (match definition with
-  | Function { parameters; _ } ->
-      List.iter
-        (fun (parameter : Core.parameter) ->
-          Hashtbl.replace context.names parameter.local parameter.name;
-          Hashtbl.replace context.kinds parameter.local (kind_of_mode parameter.mode);
-          Hashtbl.replace context.types parameter.local parameter.type_;
-          context.parameters <- parameter.local :: context.parameters)
-        parameters
-  | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.definition
-    {
-      Core_walk.ignore_all with
-      expression =
-        (fun (node : Core.expression) ->
-          match node.kind with
-          | Call { arguments; _ } ->
-              List.iter
-                (function
-                  | Core.Passed { mode; value; mark = Some mark } ->
-                      let origin =
-                        match value with
-                        | Place core_place -> Core_walk.place_origin core_place
-                        | Value value -> value.origin
-                      in
-                      Hashtbl.replace context.marks origin (mode, mark)
-                  | Passed { mark = None; _ } | Default -> ())
-                arguments
-          | _ -> ());
-      pattern =
-        (fun (node : Core.pattern) ->
-          match node.kind with
-          | Bind { local; name; mode; is_var } ->
-              if is_var then context.mutable_locals <- local :: context.mutable_locals;
-              Hashtbl.replace context.names local name;
-              Hashtbl.replace context.kinds local (kind_of_mode mode);
-              Hashtbl.replace context.types local node.type_
-          | _ -> ());
-    }
-    definition
+(* The names, kinds, and types of the definition's locals, which its MIR's
+   source locals carry, and the marks of its arguments. A lambda's capture
+   is its enclosing body's local, which that body describes. *)
+let collect context (mir : Mir.t) =
+  let mark (argument : Mir.argument) =
+    match argument with
+    | Passed
+        {
+          mode;
+          value = Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ };
+          mark = Some mark;
+        } ->
+        Hashtbl.replace context.marks origin (mode, mark)
+    | Passed _ | Default -> ()
+  in
+  let marks (call : Mir.call) = List.iter mark call.arguments in
+  let body (body : Mir.body) =
+    Array.iteri
+      (fun local (info : Mir.local_info) ->
+        match info.kind with
+        | Source { local = core; mode; name = Some name; is_var }
+          when not (List.mem local body.captures) ->
+            Hashtbl.replace context.names core name;
+            Hashtbl.replace context.kinds core (kind_of_mode mode);
+            Hashtbl.replace context.types core info.type_;
+            if is_var then context.mutable_locals <- core :: context.mutable_locals
+        | Source _ | Temporary | Lent _ -> ())
+      body.locals;
+    Array.iter
+      (fun (block : Mir.basic_block) ->
+        List.iter
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+                marks call
+            | _ -> ())
+          block.statements;
+        match block.terminator with For { iteration = Yielding call; _ } -> marks call | _ -> ())
+      body.blocks
+  in
+  body mir.body;
+  Array.iter body mir.lambdas;
+  context.parameters <-
+    List.rev
+      (List.filter_map
+         (fun local ->
+           match mir.body.locals.(local).kind with
+           | Source { local = core; _ } -> Some core
+           | Temporary | Lent _ -> None)
+         mir.body.parameters)
 
 (* The edits that replace a move by a copy: insert [.copy()] after the place
    and delete the [own] mark before it. *)
