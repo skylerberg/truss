@@ -1,6 +1,5 @@
 // Draws the page around the Graphviz drawing in #canvas. LIBRARIES, from
-// graph_data.js, lists every declared dependency. The drawing omits edges that
-// a longer path implies, so the highlighting and the panel read LIBRARIES.
+// graph_data.js, lists every declared dependency, as the drawing does.
 (() => {
   const canvas = document.getElementById("canvas");
   const panel = document.getElementById("panel");
@@ -75,8 +74,7 @@
     for (const library of LIBRARIES) counts.set(library.area, counts.get(library.area) + 1);
     return `
       <h2>${LIBRARIES.length} libraries</h2>
-      <p>An arrow points from a library to a library it depends on. An arrow
-      that a longer path implies is not drawn.</p>
+      <p>An arrow points from a library to a library it depends on.</p>
       <p>Hover over a library to highlight its
       <b class="dependency-key">dependencies</b> and its
       <b class="dependent-key">dependents</b> and list them here. Click a
