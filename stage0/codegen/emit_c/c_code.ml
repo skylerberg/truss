@@ -252,7 +252,6 @@ let statement_c context fc buffer (statement : Lir.statement) =
       | Some (text, Value sum) ->
           line "t_runtime_free(%s);" (block_pointer context text sum variant)
       | _ -> bug "a block of a place that is not a sum type")
-  | Region _ | Regions_end _ -> bug "a region that outlining left in place"
   | Fork { branches } ->
       let operand lir_operand =
         match operand_c context fc lir_operand with

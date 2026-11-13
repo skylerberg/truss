@@ -70,51 +70,52 @@ let () =
 
 (* Outlining *)
 
-let outlined (instance : Lir.t) =
-  Lir.For_testing.to_string (Lir.canonical_instance (Outline.instance (shape_env ()) instance))
-
 let () =
-  test "a region's own local goes with it, and a shared one is reached through the environment"
-    (fun () ->
+  test
+    "an outlined function's own local goes with it, and a shared one is reached through its \
+     environment" (fun () ->
       let int = Lir.Value int32 in
       let add left right = Lir.Binary (Add, copy left, copy right) in
-      let actual =
-        outlined
-          (instance "entry"
-             (function_ ~parameters:[ 0 ] ~result:int
-                [ local int; local int; local int; local int ]
-                [
-                  block
-                    [
-                      Region { fork = 0; region = Branch };
-                      Assign (at 3, add 0 0);
-                      Assign (at 1, add 3 0);
-                      Region { fork = 0; region = Branch };
-                      Assign (at 2, Use (copy 0));
-                      Regions_end { fork = 0 };
-                      Assign (at 1, add 1 2);
-                    ]
-                    (Return (Some (copy 1)));
-                ]))
+      let builder = Lir_builder.create () in
+      let parameter = Lir_builder.local builder int in
+      let sum = Lir_builder.local builder int in
+      let other = Lir_builder.local builder int in
+      Lir_builder.start builder (Lir_builder.block builder);
+      let first =
+        Lir_builder.outline builder ~nested:0 ~parts:[] (fun () ->
+            let own = Lir_builder.local builder int in
+            Lir_builder.emit builder (Assign (at own, add parameter parameter));
+            Lir_builder.emit builder (Assign (at sum, add own parameter));
+            Lir_builder.finish builder (Return None))
       in
+      let second =
+        Lir_builder.outline builder ~nested:1 ~parts:[] (fun () ->
+            Lir_builder.emit builder (Assign (at other, Use (copy parameter)));
+            Lir_builder.finish builder (Return None))
+      in
+      let address holder = Lir.Address { place = at holder; writable = false } in
+      Lir_builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
+      Lir_builder.emit builder (Assign (at sum, add sum other));
+      Lir_builder.finish builder (Return (Some (copy sum)));
+      let main =
+        Lir_builder.build builder ~env:(shape_env ()) ~parameters:[ parameter ] ~result:(Some int)
+      in
+      let nested = List.map snd (List.sort compare (Lir_builder.outlined_functions builder)) in
       expect_string
         ~expected:
           (String.concat "\n"
              [
                "test::entry fn(_0: Int32) -> Int32";
                "b0: _1.capture0 = &mut _0; _1.capture1 = &mut _2; _3.capture0 = &mut _0; \
-                _3.capture1 = &mut _4; fork nested 0(&_1), nested 1(&_3); goto b1";
-               "b1: _2 = _2 + _4; return _2";
+                _3.capture1 = &mut _4; fork nested 0(&_1), nested 1(&_3); _2 = _2 + _4; return _2";
                "nested 0 fn(_0: raw nullable)";
                "b0: _1 = _0; goto b1";
-               "b1: _2 = **_1.capture0 + **_1.capture0; **_1.capture1 = _2 + **_1.capture0; goto b2";
-               "b2: return";
+               "b1: _2 = **_1.capture0 + **_1.capture0; **_1.capture1 = _2 + **_1.capture0; return";
                "nested 1 fn(_0: raw nullable)";
                "b0: _1 = _0; goto b1";
-               "b1: **_1.capture1 = **_1.capture0; goto b2";
-               "b2: return";
+               "b1: **_1.capture1 = **_1.capture0; return";
              ])
-        actual)
+        (Lir.For_testing.to_string (Lir.canonical_instance (instance ~nested "entry" main))))
 
 (* Coroutines *)
 

@@ -37,10 +37,6 @@ type lowered_outcome =
   | Folded of Lir.data
   | Evaluate of Path.t * Ground.ty
 
-(* An instance with its regions outlined, in canonical form. *)
-let outlined (context : Lower.context) (instance : Lir.t) =
-  Lir.Code (Lir.canonical_instance (Outline.instance (Lower.env context) instance))
-
 (* A lowering context of its own for one computation, which reads a pulled
    method's cursor and another constant's value through the queries below,
    so that each is made once and its readers are known. *)
@@ -79,7 +75,7 @@ and emitted (context : Lower.context) (compiled : Lir.compiled) =
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-  let code instance = emitted context (outlined context instance) in
+  let code instance = emitted context (Code (Lir.canonical_instance instance)) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)

@@ -19,7 +19,6 @@
   libc
   lir
   glue
-  outline
   yields
   reachable
   moves

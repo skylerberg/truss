@@ -3,7 +3,7 @@
    decision about the order of evaluation, the scope of temporaries and
    bindings, and the flow of patterns and loops, so this lowering decides
    only what is the LIR's: pointers, layout, the calling convention, drops,
-   and the outlining of regions.
+   and the outlining of [parallel] and [concurrent] code.
 
    A body is lowered as regions. A region is the code of one body that is
    lowered in one state of the scopes: a whole body, the body of a [for]
@@ -270,7 +270,6 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     built;
     owner;
     returns_into;
-    forks = Hashtbl.create 1;
     provides = [];
     returned =
       Array.fold_left
@@ -971,18 +970,30 @@ let task_function_type st : Lir.ty =
   | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
   | _ -> bug "Tasks.spawn does not take a group, a function, and an item"
 
-(* Lowers the body of a task with [f]. The body starts at the region mark
-   that the caller has just emitted. Every exit from the task jumps to
-   [end_block], which is the current block when this returns. *)
-let task_body st ~(id : Core.task) ~group ~early_exits (f : task -> unit) =
-  let task =
-    { id; group; early_exits; end_block = block st.builder; scope_depth = List.length st.scopes }
+(* Writes the body of a task with [f], as an outlined function given
+   [parts]. Every
+   exit from the task jumps to [end_block], where the task returns. Gives
+   the task's function value, for [Tasks.spawn]. *)
+let task_body st ~(id : Core.task) ~group ~early_exits ~parts (f : task -> unit) : Lir.rvalue =
+  let nested, environment =
+    outlined st ~parts (fun () ->
+        let task =
+          {
+            id;
+            group;
+            early_exits;
+            end_block = block st.builder;
+            scope_depth = List.length st.scopes;
+          }
+        in
+        st.tasks <- task :: st.tasks;
+        f task;
+        st.tasks <- List.tl st.tasks;
+        finish st.builder (Goto task.end_block);
+        start st.builder task.end_block;
+        finish st.builder (Return None))
   in
-  st.tasks <- task :: st.tasks;
-  f task;
-  st.tasks <- List.tl st.tasks;
-  finish st.builder (Goto task.end_block);
-  start st.builder task.end_block
+  Function_value { code = Nested nested; environment = Some environment }
 
 (* Evidence for the capabilities of one [mut] implementation whose calls
    are mutually exclusive. The implementation's capabilities share one
@@ -1109,17 +1120,18 @@ let resume_early_exit st region ~lower_ends (exits : early_exits) =
    [not_spawned] then drops the item, and the enclosing code breaks out of
    the loop that produces the items. *)
 let spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : unit -> unit) =
-  let fork = fresh_fork st in
   let function_value = local st.builder ~name:"task" (task_function_type st) in
-  emit st.builder (Region { fork; region = Task { function_value; item = loop.item } });
-  task_body st
-    ~id:(Iteration { loop = loop.origin })
-    ~group:loop.group ~early_exits:loop.early_exits
-    (fun task ->
-      (* A [continue] of the loop ends the task. A [break] of the loop
-         never jumps: it is an early exit that ends the task. *)
-      looping st ~continue_:task.end_block ~break_:task.end_block ~depth:task.scope_depth f);
-  emit st.builder (Regions_end { fork });
+  emit st.builder
+    (Assign
+       ( at function_value,
+         task_body st
+           ~id:(Iteration { loop = loop.origin })
+           ~group:loop.group ~early_exits:loop.early_exits ~parts:[ loop.item ]
+           (fun task ->
+             (* A [continue] of the loop ends the task. A [break] of the loop
+                never jumps: it is an early exit that ends the task. *)
+             looping st ~continue_:task.end_block ~break_:task.end_block ~depth:task.scope_depth f)
+       ));
   let spawned = tasks_bool st "spawn" [ loop.group; at function_value; at loop.item ] in
   let next = block st.builder and cancelled = block st.builder in
   Lir_builder.branch st.builder spawned ~yes:next ~no:cancelled;
@@ -1350,40 +1362,36 @@ and lower_from st region block index =
   update_flags st ~before;
   terminator st region basic.terminator ~origin:basic.terminator_origin
 
-(* A [concurrent] block. Each branch is a [Task] region, which outlining
-   turns into a nested function, and the code after the regions spawns each
-   function as a task of one group. The block's end follows, if a branch
-   reaches it. *)
+(* A [concurrent] block. Each branch is a task, an outlined function, and
+   the code after them spawns each as a task of one group. The block's end
+   follows, if a branch reaches it. *)
 and concurrent_block st region ~fork ~(branches : Mir.branch list) ~join =
   let function_type = task_function_type st in
   let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
   emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
-  (* Each branch's early exits and function value are made before the first
-     region, since the code around the regions reads them. *)
-  let tasks =
-    List.map (fun _ -> (new_early_exits st, local st.builder ~name:"task" function_type)) branches
-  in
+  let tasks = List.map (fun branch -> (branch, new_early_exits st)) branches in
   with_group st ~origin:fork (fun group ->
-      let lir_fork = fresh_fork st in
-      List.iteri
-        (fun index ((branch : Mir.branch), (early_exits, function_value)) ->
-          emit st.builder (Region { fork = lir_fork; region = Task { function_value; item } });
-          task_body st
-            ~id:(Branch { block = fork; index })
-            ~group ~early_exits
-            (fun task ->
-              let inner = new_region st ~enclosing:region ~ending:(fork, task.end_block) in
-              run_region st inner ~entry:(branch.entry, 0)))
-        (List.combine branches tasks);
-      emit st.builder (Regions_end { fork = lir_fork });
+      let functions =
+        List.mapi
+          (fun index ((branch : Mir.branch), early_exits) ->
+            task_body st
+              ~id:(Branch { block = fork; index })
+              ~group ~early_exits ~parts:[ item ]
+              (fun task ->
+                let inner = new_region st ~enclosing:region ~ending:(fork, task.end_block) in
+                run_region st inner ~entry:(branch.entry, 0)))
+          tasks
+      in
       (* [spawn] returns false once the group is cancelled, and the branch
          then never runs. *)
       List.iter
-        (fun (_, function_value) ->
-          ignore (tasks_bool st "spawn" [ group; at function_value; at item ]))
-        tasks);
+        (fun code ->
+          let function_value = at (local st.builder ~name:"task" function_type) in
+          emit st.builder (Assign (function_value, code));
+          ignore (tasks_bool st "spawn" [ group; function_value; at item ]))
+        functions);
   List.iter
-    (fun (early_exits, _) -> resume_early_exit st region ~lower_ends:(lower_ends st) early_exits)
+    (fun (_, early_exits) -> resume_early_exit st region ~lower_ends:(lower_ends st) early_exits)
     tasks;
   match join with Some join -> goto st region join | None -> unreachable_block st
 
@@ -1456,15 +1464,6 @@ and lower_ends st ends =
       Moves.apply frame.moves frame.state statement;
       update_flags st ~before)
     ends
-
-and lir_fork st fork =
-  let forks = (mir st).forks in
-  match Hashtbl.find_opt forks fork with
-  | Some lowered -> lowered
-  | None ->
-      let lowered = fresh_fork st in
-      Hashtbl.replace forks fork lowered;
-      lowered
 
 (* The end of a local: what its end runs, and the drop of what it owns. *)
 and dead st local = drop_local st local
@@ -2073,34 +2072,35 @@ and terminator st region (ending : Mir.terminator) ~origin =
       goto st region after
   | Fork { fork; concurrent = true; branches; join } ->
       concurrent_block st region ~fork ~branches ~join
-  | Fork { fork; concurrent = false; branches; _ } -> (
-      (* A [parallel] block's branches are regions of the code, which
-         outlining runs at the same time. *)
+  | Fork { fork; concurrent = false; branches; join } -> (
+      (* A [parallel] block's branches are outlined functions, which the
+         runtime runs at the same time. Where they cannot be outlined, they
+         run in order, each joining to the next. *)
       match branches with
-      | first :: _ ->
-          if may_fork st then emit st.builder (Region { fork = lir_fork st fork; region = Branch });
-          goto st region first.entry
-      | [] -> unreachable_block st)
+      | [] -> unreachable_block st
+      | first :: _ when not (may_fork st) -> goto st region first.entry
+      | _ -> (
+          let forked =
+            List.map
+              (fun (branch : Mir.branch) ->
+                outlined st ~parts:[] (fun () ->
+                    let end_block = block st.builder in
+                    run_region st
+                      (new_region st ~enclosing:region ~ending:(fork, end_block))
+                      ~entry:(branch.entry, 0);
+                    finish st.builder (Goto end_block);
+                    start st.builder end_block;
+                    finish st.builder (Return None)))
+              branches
+          in
+          emit st.builder (Fork { branches = forked });
+          match join with Some join -> goto st region join | None -> unreachable_block st))
   | Join { fork; next } -> (
       match region.ending with
       | Some (ending, end_block) when ending = fork ->
           finish st.builder (Goto end_block);
           start st.builder (block st.builder)
-      | _ ->
-          (if may_fork st then
-             let is_branch =
-               Array.exists
-                 (fun (basic : Mir.basic_block) ->
-                   match basic.terminator with
-                   | Fork { fork = started; branches; _ } when started = fork ->
-                       List.exists (fun (branch : Mir.branch) -> branch.entry = next) branches
-                   | _ -> false)
-                 (mir st).body.blocks
-             in
-             emit st.builder
-               (if is_branch then Region { fork = lir_fork st fork; region = Branch }
-                else Regions_end { fork = lir_fork st fork }));
-          goto st region next)
+      | _ -> goto st region next)
 
 (* A [yield] of the pulled version of a method, the only [yield] left once
    the methods a body runs are inlined: it stays in the code, and yield
@@ -2231,10 +2231,10 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
   in
   match schedule with
   | Chunked ->
-      (* The loop is a region that covers a part of the range's indexes,
-         counted from 0 as [UInt64], so that a range of any integer type
-         has as many indexes as fit. As it is written here it covers them
-         all; outlining has it run for parts of them at the same time. *)
+      (* The loop's body is an outlined function that covers a part of the
+         range's indexes, counted from 0 as [UInt64], so that a range of any
+         integer type has as many indexes as fit. The runtime runs it for
+         parts of them at the same time. *)
       let wide = Lir.Raw (Integer UInt64) in
       let one = constant_int UInt64 Z.one in
       let first_value = binding st ~name:"start" element in
@@ -2268,36 +2268,40 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
             emit st.builder
               (Assign
                  (at last, Binary (Subtract, Copy (at last), constant_int UInt64 (Z.of_int 0x800)))));
-      let fork = fresh_fork st in
-      emit st.builder (Region { fork; region = Chunk { first; last } });
-      let index = local st.builder ~name:"index" wide in
-      emit st.builder (Assign (at index, Use (Copy (at first))));
-      let again = block st.builder and step = block st.builder and done_ = block st.builder in
-      finish st.builder (Goto again);
-      start st.builder again;
-      in_scope st (fun () ->
-          let offset = binding st element in
-          let bound = binding st element in
-          emit st.builder (Assign (offset, Convert (Copy (at index), scalar)));
-          emit st.builder (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
-          if characters then
-            when_ st.builder
-              (both
-                 (compare Less (Copy first_value) (constant 0xD800))
-                 (compare Greater_equal (Copy bound) (constant 0xD800)))
-              (fun () -> emit st.builder (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
-          looping st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
-      finish st.builder (Goto step);
-      start st.builder step;
-      let ended = local st.builder (Raw Bool) in
-      emit st.builder (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
-      let next = block st.builder in
-      Lir_builder.branch st.builder (Copy (at ended)) ~yes:done_ ~no:next;
-      start st.builder next;
-      emit st.builder (Assign (at index, Binary (Add, Copy (at index), one)));
-      finish st.builder (Goto again);
-      start st.builder done_;
-      emit st.builder (Regions_end { fork });
+      let body, environment =
+        outlined st ~parts:[ first; last ] (fun () ->
+            let index = local st.builder ~name:"index" wide in
+            emit st.builder (Assign (at index, Use (Copy (at first))));
+            let again = block st.builder and step = block st.builder and done_ = block st.builder in
+            finish st.builder (Goto again);
+            start st.builder again;
+            in_scope st (fun () ->
+                let offset = binding st element in
+                let bound = binding st element in
+                emit st.builder (Assign (offset, Convert (Copy (at index), scalar)));
+                emit st.builder (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
+                if characters then
+                  when_ st.builder
+                    (both
+                       (compare Less (Copy first_value) (constant 0xD800))
+                       (compare Greater_equal (Copy bound) (constant 0xD800)))
+                    (fun () ->
+                      emit st.builder (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
+                looping st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
+            finish st.builder (Goto step);
+            start st.builder step;
+            let ended = local st.builder (Raw Bool) in
+            emit st.builder (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
+            let next = block st.builder in
+            Lir_builder.branch st.builder (Copy (at ended)) ~yes:done_ ~no:next;
+            start st.builder next;
+            emit st.builder (Assign (at index, Binary (Add, Copy (at index), one)));
+            finish st.builder (Goto again);
+            start st.builder done_;
+            finish st.builder (Return None))
+      in
+      emit st.builder
+        (Fork_range { body; environment; first = Copy (at first); last = Copy (at last) });
       finish st.builder (Goto after);
       start st.builder after
   | Sequential | Spawned _ ->

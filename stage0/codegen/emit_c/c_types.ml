@@ -13,7 +13,7 @@ type key =
   | Evidence of int
       (** The evidence that a [provide] builds on the stack, with room for this many pointers to the
           evidence its [impl] uses. It has a name so that every use of it in a file is one C type: a
-          region that captures such a local holds a pointer to it. *)
+          function outlined around such a local holds a pointer to it. *)
 
 let compare_key left right =
   match (left, right) with

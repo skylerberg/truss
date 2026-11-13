@@ -162,7 +162,6 @@ let function_ env (instance : Lir.t) label (function_ : Lir.function_) =
                     bug "a call that passes %d arguments to a target that takes %d" passed_count
                       arity)
                 (target_signature instance target)
-          | Region _ | Regions_end _ -> bug "a region that outlining left in place"
           | Fork { branches } ->
               List.iter
                 (fun (nested, _) -> forked nested [ Lir.Raw (Nullable_pointer Opaque) ])

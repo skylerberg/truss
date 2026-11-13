@@ -1,5 +1,5 @@
 (* The lowered IR: a small typed control-flow graph for each instance, which
-   outlining and yield lowering transform and the C emitter prints.
+   yield lowering transforms and the C emitter prints.
 
    Locals are mutable slots, not SSA. Every choice about how a value is
    passed is already explicit: a parameter that arrives as a pointer has a
@@ -40,10 +40,6 @@ val visit_terminator : visitor -> terminator -> unit
 
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list
-
-(* The blocks that can be reached from block 0, each before the blocks it
-   goes to, but for the blocks a loop goes back to. *)
-val reverse_postorder : basic_block array -> block list
 
 (* Whether a local of the type takes no room, so that no code names it. *)
 val erased : Memory_layout.env -> ty -> bool
