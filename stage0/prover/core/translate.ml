@@ -3421,22 +3421,26 @@ and handle_descriptor context handle =
 
 and intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.operation) types
     operands ~arguments ~changed result_type =
-  let known = arrive context frame "result" result_type in
+  (* A value of the result's type, made only where an operation needs one,
+     so that an operation the logic models adds no symbol. *)
+  let known = lazy (arrive context frame "result" result_type) in
   match (operation, types) with
   | Shared_update, _ ->
       (* [change]'s result, which is a function value's result: valid. *)
-      assume_valid context frame result_type known;
-      known
+      assume_valid context frame result_type (Lazy.force known);
+      Lazy.force known
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
       | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_shorten | Storage_push
       | Storage_pop | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut
       | Storage_view | View_at_mut | View_swap | Storage_view_mut | Storage_take_view
       | View_take_view | View_length | View_at | View_slice ),
       element :: _ ) ->
-      buffer_operation context frame ~site operation element operands ~changed known
+      buffer_operation context frame ~site operation element operands ~changed (Lazy.force known)
   | Compare_bytes, _ ->
-      buffer_operation context frame ~site operation (Types.builtin UInt8) operands ~changed known
-  | Libc function_, _ -> libc_call context frame ~site function_ operands ~changed known
+      buffer_operation context frame ~site operation (Types.builtin UInt8) operands ~changed
+        (Lazy.force known)
+  | Libc function_, _ ->
+      libc_call context frame ~site function_ operands ~changed (Lazy.force known)
   | Libc_number number, _ -> libc_number context frame number
   | (System_is_os _ | System_is_architecture _), _ ->
       (* The system a program runs on is one for the whole run, and it is at
@@ -3475,17 +3479,18 @@ and intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
               Operation
                 ( "<=",
                   [
-                    Operation ("+", [ known; Operation ("*", [ int bytes; length ]) ]);
+                    Operation ("+", [ Lazy.force known; Operation ("*", [ int bytes; length ]) ]);
                     Integer (Z.shift_left Z.one 64);
                   ] )
-              &&& (Operation (">", [ length; int 0 ]) ==> Operation (">=", [ known; int 1 ])));
-          known
-      | _ -> known)
+              &&& (Operation (">", [ length; int 0 ])
+                  ==> Operation (">=", [ Lazy.force known; int 1 ])));
+          Lazy.force known
+      | _ -> Lazy.force known)
   | Environment_entry, _ ->
       (* An entry is a C string without its end, so none of its bytes is
          zero. *)
       let byte = Types.builtin UInt8 in
-      let model = buffer_model context View byte known in
+      let model = buffer_model context View byte (Lazy.force known) in
       let length = sequence_length context byte model in
       (match sequence_at context byte model (Logic.Symbol (variable "entry.index")) with
       | Some at ->
@@ -3497,25 +3502,26 @@ and intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
                    &&& Operation ("<", [ Symbol (variable "entry.index"); length ])
                    ==> not_ (equal at (int 0))) ))
       | None -> ());
-      known
+      Lazy.force known
   | Handle_from, _ -> (
       (* A handle's descriptor is a function of it, and the one it was made
          from. *)
       match operands with
       | [ descriptor ] ->
-          assume context frame (Logic.equal (handle_descriptor context known) descriptor);
-          known
-      | _ -> known)
+          assume context frame
+            (Logic.equal (handle_descriptor context (Lazy.force known)) descriptor);
+          Lazy.force known
+      | _ -> Lazy.force known)
   | Handle_descriptor, _ -> (
       match operands with
       | [ handle ] ->
           let descriptor = handle_descriptor context handle in
           assume context frame (in_range (Types.builtin Int32) descriptor);
           descriptor
-      | _ -> known)
+      | _ -> Lazy.force known)
   | _ ->
       primitive_operation context frame ~site operation types operands ~arguments
-        ~fallback:(fun () -> known)
+        ~fallback:(fun () -> Lazy.force known)
 
 (* A function of the C library, by its row of the C library's table. It
    is given only an address into a storage, so each storage it is lent
@@ -3524,7 +3530,7 @@ and intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
    room after a storage's elements must be there, elements of a view or of
    a storage it changes must be there, and a view it reads up to a zero
    must end with one. A storage passed as room keeps its elements; one
-   passed as its elements to change has elements nothing more is known of.
+   passed as its elements to change has elements nothing more is (Lazy.force known) of.
    A result that is not negative is at most the parameter the row names. *)
 and libc_call context frame ~(site : Invocation.site) (function_ : Libc.function_) operands ~changed
     known =
