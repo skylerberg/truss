@@ -2,7 +2,7 @@ fn make() -> List[Int64] {
   [1, 2, 3]
 }
 
-fn run_example() -> USize {
+fn f() -> USize {
   var views: List[Slice[Int64]] = []
   mut views.push(make()[0..2])
   views.length()

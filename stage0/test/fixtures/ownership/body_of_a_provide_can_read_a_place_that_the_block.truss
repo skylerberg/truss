@@ -1,4 +1,4 @@
-fn run_example() -> USize {
+fn f() -> USize {
   let fixed = Fixed(value: 1)
   provide fixed {
     count() + fixed.value

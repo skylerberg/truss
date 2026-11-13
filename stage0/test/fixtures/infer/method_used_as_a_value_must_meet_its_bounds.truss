@@ -2,7 +2,7 @@ fn Square.fits[Other: Shape](self, other: Other) -> Bool {
   true
 }
 
-fn run_example() {
+fn f() {
   let fits: fn(Square, Int64) -> Bool = Square.fits
   let _ = fits
 }

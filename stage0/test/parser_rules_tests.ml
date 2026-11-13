@@ -18,48 +18,43 @@ let () =
         "(fn hourly::Forecast.summary (self) -> String (block todo))");
   test "clauses in the order written" (fun () ->
       definition Fixtures.Parser_rules.clauses_in_the_order_written
-        "(fn run_example ((first_number: Int64)) -> Int64 (ensures (> result first_number)) \
-         (requires (> first_number 0)) (decreases first_number 1) (uses Clock) (block \
-         first_number))");
+        "(fn f ((x: Int64)) -> Int64 (ensures (> result x)) (requires (> x 0)) (decreases x 1) \
+         (uses Clock) (block x))");
   test "cost clauses" (fun () ->
       definition Fixtures.Parser_rules.cost_clauses
-        "(fn run_example ((visit: (fn (Item) (cost time finite)))) (cost amortized time (O (* \
-         (call (. items length)) (call time visit)))) (cost allocations (<= 1)) (cost (calls \
-         visit) (== 2)) (cost (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (cost \
-         time finite) (block))");
+        "(fn f ((visit: (fn (Item) (cost time finite)))) (cost amortized time (O (* (call (. items \
+         length)) (call time visit)))) (cost allocations (<= 1)) (cost (calls visit) (== 2)) (cost \
+         (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (cost time finite) (block))");
   test "parsing continues after a misspelled cost word" (fun () ->
-      error "fn run_example() cost time fnite {}" ~code:Cost_word ~at:"fnite"
-        ~fixed:"fn run_example() cost time finite {}";
-      let _, diagnostics = parse "fn run_example() cost tme fnite {}" in
+      error "fn f() cost time fnite {}" ~code:Cost_word ~at:"fnite"
+        ~fixed:"fn f() cost time finite {}";
+      let _, diagnostics = parse "fn f() cost tme fnite {}" in
       if codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a trait's body on the next line" (fun () ->
-      definition Fixtures.Parser_rules.traits_body_on_the_next_line "(trait Payload (type Kappa))");
+      definition Fixtures.Parser_rules.traits_body_on_the_next_line "(trait T (type K))");
   test "a misspelled cost word has a fix" (fun () ->
-      error "fn run_example() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
-        ~fixed:"fn run_example() cost allocations == 0 {}");
+      error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
+        ~fixed:"fn f() cost allocations == 0 {}");
   test "finite is only for time" (fun () ->
-      error "fn run_example() cost allocations finite {}" ~code:Finite_not_time ~at:"finite");
+      error "fn f() cost allocations finite {}" ~code:Finite_not_time ~at:"finite");
   test "cost potential belongs to a type" (fun () ->
-      error "fn run_example() cost potential first_number {}" ~code:Misplaced_potential
-        ~at:"potential");
+      error "fn f() cost potential x {}" ~code:Misplaced_potential ~at:"potential");
   test "uses appears at most once" (fun () ->
-      error "fn run_example() uses Clock uses Random {}" ~code:Repeated_clause ~at:"uses Random");
+      error "fn f() uses Clock uses Random {}" ~code:Repeated_clause ~at:"uses Random");
   test "a missing body gets { todo }" (fun () ->
-      error "fn run_example() -> Int64\nfn second_example() {}" ~code:Missing_body
-        ~at:"\nfn second_example"
-        ~fixed:"fn run_example() -> Int64 { todo }\nfn second_example() {}");
-  test "self only in a method" (fun () ->
-      error "fn run_example(self) {}" ~code:Misplaced_self ~at:"self");
+      error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
+        ~fixed:"fn f() -> Int64 { todo }\nfn g() {}");
+  test "self only in a method" (fun () -> error "fn f(self) {}" ~code:Misplaced_self ~at:"self");
   test "self only first" (fun () ->
-      error "fn Payload.run_example(first_number: Int64, self) {}" ~code:Misplaced_self ~at:"self");
+      error "fn T.f(x: Int64, self) {}" ~code:Misplaced_self ~at:"self");
   test "a parameter cannot be named result" (fun () ->
-      error "fn run_example(result: Int64) {}" ~code:Reserved_specification_name ~at:"result");
+      error "fn f(result: Int64) {}" ~code:Reserved_specification_name ~at:"result");
   test "a function cannot be named old" (fun () ->
       error "fn old() {}" ~code:Reserved_specification_name ~at:"old");
   test "types" (fun () ->
-      definition "type Point(first_number: Float64, second_number: Float64 = 0.0)"
-        "(type Point ((first_number: Float64) (second_number: Float64 (= 0e0))))";
+      definition "type Point(x: Float64, y: Float64 = 0.0)"
+        "(type Point ((x: Float64) (y: Float64 (= 0e0))))";
       definition "type DiscardLog()" "(type DiscardLog ())";
       definition "type Bit = Zero | One" "(type Bit (= Zero One))";
       definition "public opaque type Session = todo" "(public opaque (type Session = todo))";
@@ -69,10 +64,9 @@ let () =
          self)))");
   test "a trait" (fun () ->
       definition Fixtures.Parser_rules.trait
-        "(trait Ordered : Equal (type Key: Hash) (law transitive ((first_value: Self) \
-         (second_value: Self)) (requires (<= first_value second_value)) (block true)) (fn compare \
-         (self (other: Self)) -> Ordering) (fn max (own self (other: own Self)) -> Self (ensures \
-         true) (block self)))";
+        "(trait Ordered : Equal (type Key: Hash) (law transitive ((a: Self) (b: Self)) (requires \
+         (<= a b)) (block true)) (fn compare (self (other: Self)) -> Ordering) (fn max (own self \
+         (other: own Self)) -> Self (ensures true) (block self)))";
       definition "trait Loggable: Display + Hash {}" "(trait Loggable : Display + Hash)");
   test "an impl" (fun () ->
       definition Fixtures.Parser_rules.impl
@@ -95,7 +89,7 @@ let () =
         ~code:Unexpected_token ~at:"\n{";
       error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot_2
         ~code:Unexpected_token ~at:"}";
-      error "type Point(first_number: Int64)\n  derives Self.Uses" ~code:Unexpected_token ~at:"Self");
+      error "type Point(x: Int64)\n  derives Self.Uses" ~code:Unexpected_token ~at:"Self");
   test "a capability" (fun () ->
       definition Fixtures.Parser_rules.capability
         "(capability Clock (fn now () -> Instant) (fn sleep ((duration: Duration))))");
@@ -121,22 +115,21 @@ let () =
   test "a test's name is a plain string" (fun () ->
       error "test \"a${b}\" {}" ~code:Interpolation_not_allowed ~at:"\"a");
   test "an impl takes no visibility" (fun () ->
-      error "public impl Alpha for Beta {}" ~code:Misplaced_visibility ~at:"public"
-        ~fixed:"impl Alpha for Beta {}");
+      error "public impl A for B {}" ~code:Misplaced_visibility ~at:"public"
+        ~fixed:"impl A for B {}");
   test "an impl's trait arguments declare no generic parameter, as the recursive type check assumes"
     (fun () -> error "impl Selected[Carried: Shown] for Marker {}" ~code:Unexpected_token ~at:":");
   test "a test takes no visibility" (fun () ->
       error "internal test \"a\" {}" ~code:Misplaced_visibility ~at:"internal"
         ~fixed:"test \"a\" {}");
   test "a law's proof takes no visibility" (fun () ->
-      error "public proof Alpha.second_value for Gamma {}" ~code:Misplaced_visibility ~at:"public"
-        ~fixed:"proof Alpha.second_value for Gamma {}");
+      error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
+        ~fixed:"proof A.b for C {}");
   test "only a type is opaque" (fun () ->
-      error "public opaque fn run_example() {}" ~code:Misplaced_opaque ~at:"opaque"
-        ~fixed:"public fn run_example() {}");
+      error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque" ~fixed:"public fn f() {}");
   test "an impl with a visibility and a modifier has one diagnostic" (fun () ->
-      error "public opaque impl Alpha for Beta {}" ~code:Misplaced_visibility ~at:"public"
-        ~fixed:"impl Alpha for Beta {}")
+      error "public opaque impl A for B {}" ~code:Misplaced_visibility ~at:"public"
+        ~fixed:"impl A for B {}")
 
 (* Precedence and combinations that need parentheses *)
 
@@ -145,129 +138,90 @@ let () =
   let combination text ~at ~code ~fixes =
     match fixes with
     | fixed :: alternatives ->
-        body_error ("let first_number = " ^ text) ~code ~at ~fixed:("let first_number = " ^ fixed)
-          ~alternatives:(List.map (( ^ ) "let first_number = ") alternatives)
-    | [] -> body_error ("let first_number = " ^ text) ~code ~at
+        body_error ("let x = " ^ text) ~code ~at ~fixed:("let x = " ^ fixed)
+          ~alternatives:(List.map (( ^ ) "let x = ") alternatives)
+    | [] -> body_error ("let x = " ^ text) ~code ~at
   in
   test "bitwise and comparison: Rust's reading, then C's" (fun () ->
       combination "flags & mask == 0" ~at:"==" ~code:Needs_parentheses
         ~fixes:[ "(flags & mask) == 0"; "flags & (mask == 0)" ]);
   test "shift and addition: C and Rust's reading, then Go and Swift's" (fun () ->
-      combination "first_value << second_value + 1" ~at:"<<" ~code:Needs_parentheses
-        ~fixes:[ "first_value << (second_value + 1)"; "(first_value << second_value) + 1" ]);
+      combination "a << b + 1" ~at:"<<" ~code:Needs_parentheses
+        ~fixes:[ "a << (b + 1)"; "(a << b) + 1" ]);
   test "& and | read the same everywhere" (fun () ->
-      combination "first_value & second_value | third_value" ~at:"|" ~code:Needs_parentheses
-        ~fixes:[ "(first_value & second_value) | third_value" ]);
+      combination "a & b | c" ~at:"|" ~code:Needs_parentheses ~fixes:[ "(a & b) | c" ]);
   test "& and | read the same on the right" (fun () ->
-      combination "third_value | first_value & second_value" ~at:"|" ~code:Needs_parentheses
-        ~fixes:[ "third_value | (first_value & second_value)" ]);
+      combination "c | a & b" ~at:"|" ~code:Needs_parentheses ~fixes:[ "c | (a & b)" ]);
   test "a reading that needs more parentheses inside && gets them" (fun () ->
-      combination "first_value & second_value == third_value && fourth_value" ~at:"=="
-        ~code:Needs_parentheses
-        ~fixes:
-          [
-            "(first_value & second_value) == third_value && fourth_value";
-            "(first_value & (second_value == third_value)) && fourth_value";
-          ]);
+      combination "a & b == c && d" ~at:"==" ~code:Needs_parentheses
+        ~fixes:[ "(a & b) == c && d"; "(a & (b == c)) && d" ]);
   test "the other reading takes the operand next to the operator" (fun () ->
-      combination "text_value & first_value + second_value + third_value" ~at:"&"
-        ~code:Needs_parentheses
-        ~fixes:
-          [
-            "text_value & (first_value + second_value + third_value)";
-            "(text_value & first_value) + second_value + third_value";
-          ]);
+      combination "s & a + b + c" ~at:"&" ~code:Needs_parentheses
+        ~fixes:[ "s & (a + b + c)"; "(s & a) + b + c" ]);
   test "the same bitwise operator chains" (fun () ->
-      statement "let first_number = first_value | second_value | third_value"
-        "(let first_number (| (| first_value second_value) third_value))");
-  test "shifts chain" (fun () ->
-      statement "let first_number = first_value << 1 >> 2"
-        "(let first_number (>> (<< first_value 1) 2))");
+      statement "let x = a | b | c" "(let x (| (| a b) c))");
+  test "shifts chain" (fun () -> statement "let x = a << 1 >> 2" "(let x (>> (<< a 1) 2))");
   test "&& and || cannot be mixed" (fun () ->
-      combination "first_value && second_value || third_value" ~at:"||" ~code:Needs_parentheses
-        ~fixes:
-          [
-            "(first_value && second_value) || third_value";
-            "first_value && (second_value || third_value)";
-          ]);
+      combination "a && b || c" ~at:"||" ~code:Needs_parentheses
+        ~fixes:[ "(a && b) || c"; "a && (b || c)" ]);
   test "comparisons do not chain" (fun () ->
-      combination "first_value < second_value < third_value" ~at:"< third_value"
-        ~code:Needs_parentheses
-        ~fixes:[ "first_value < second_value && second_value < third_value" ]);
+      combination "a < b < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[ "a < b && b < c" ]);
   test "a chained comparison without a simple middle has no fix" (fun () ->
-      combination "first_value < run_example(second_value) < third_value" ~at:"< third_value"
-        ~code:Needs_parentheses ~fixes:[]);
+      combination "a < f(b) < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[]);
   test "is does not chain" (fun () ->
       combination "a is B == c" ~at:"==" ~code:Needs_parentheses ~fixes:[]);
   test "ranges do not chain" (fun () ->
       combination "0..10..20" ~at:"..20" ~code:Needs_parentheses ~fixes:[]);
   test "==> does not chain: Dafny's reading first" (fun () ->
-      error "fn run_example() requires first_value ==> second_value ==> third_value {}"
-        ~code:Needs_parentheses ~at:"==> third_value"
-        ~fixed:"fn run_example() requires first_value ==> (second_value ==> third_value) {}"
-        ~alternatives:
-          [ "fn run_example() requires (first_value ==> second_value) ==> third_value {}" ]);
+      error "fn f() requires a ==> b ==> c {}" ~code:Needs_parentheses ~at:"==> c"
+        ~fixed:"fn f() requires a ==> (b ==> c) {}"
+        ~alternatives:[ "fn f() requires (a ==> b) ==> c {}" ]);
   test "parentheses settle a combination" (fun () ->
-      statement "let first_number = (flags & mask) == 0"
-        "(let first_number (== (paren (& flags mask)) 0))");
+      statement "let x = (flags & mask) == 0" "(let x (== (paren (& flags mask)) 0))");
   test "a quantifier may end && in a specification" (fun () ->
-      definition
-        "fn run_example() requires first_value && exists first_number in text_value => \
-         first_number {}"
-        "(fn run_example () (requires (&& first_value (exists (in first_number text_value) \
-         first_number))) (block))");
+      definition "fn f() requires a && exists x in s => x {}"
+        "(fn f () (requires (&& a (exists (in x s) x))) (block))");
   test "a quantifier elsewhere needs parentheses" (fun () ->
-      error "fn run_example() requires count + forall first_number in text_value => first_number {}"
-        ~code:Needs_parentheses ~at:"forall"
-        ~fixed:
-          "fn run_example() requires count + (forall first_number in text_value => first_number) {}");
+      error "fn f() requires count + forall x in s => x {}" ~code:Needs_parentheses ~at:"forall"
+        ~fixed:"fn f() requires count + (forall x in s => x) {}");
   test "echo as an operand needs parentheses" (fun () ->
-      body_error "let first_number = count + echo first_number" ~code:Needs_parentheses ~at:"echo"
-        ~fixed:"let first_number = count + (echo first_number)");
+      body_error "let x = count + echo x" ~code:Needs_parentheses ~at:"echo"
+        ~fixed:"let x = count + (echo x)");
   test "each combination in a chain is reported" (fun () ->
-      let _, diagnostics =
-        body_of "let first_number = first_value < second_value < third_value < fourth_value"
-      in
+      let _, diagnostics = body_of "let x = a < b < c < d" in
       if List.length diagnostics <> 2 then fail "got %d diagnostics" (List.length diagnostics))
 
 (* Checks on a whole definition *)
 
 let () =
   test "a quantifier over a range is an expression in code" (fun () ->
-      statement "let first_number = forall step_index in text_value => step_index"
-        "(let first_number (forall (in step_index text_value) step_index))");
+      statement "let x = forall i in s => i" "(let x (forall (in i s) i))");
   test "a quantifier over a type in a test" (fun () ->
       error Fixtures.Parser_rules.quantifier_over_a_type_in_a_test ~code:Specification_only
         ~at:"forall");
   test "==> in a test" (fun () ->
       error Fixtures.Parser_rules.in_a_test ~code:Specification_only ~at:"==>");
   test "==> in a constant" (fun () ->
-      error "let first_number: Bool = first_value ==> second_value" ~code:Specification_only
-        ~at:"==>");
+      error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
   test "==> and a quantifier over a type in a function's body are left to the type checker"
     (fun () ->
       definition Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
-        "(fn run_example () -> Bool (block (==> first_value (forall value: Int64 (== value \
-         value)))))");
+        "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
   test "a yielding method's parameter cannot be named yielded or finished" (fun () ->
       error Fixtures.Parser_rules.yielding_methods_parameter_cannot_be_named_yielded
         ~code:Reserved_specification_name ~at:"yielded";
-      definition "fn run_example(finished: Bool) {}" "(fn run_example ((finished: Bool)) (block))");
+      definition "fn f(finished: Bool) {}" "(fn f ((finished: Bool)) (block))");
   test "a loop's cost clause" (fun () ->
       statement "for row in rows\n  cost time O(yielded.length())\n{}"
         "(for row rows (cost time (O (call (. yielded length)))) (block))");
   test "a loop's cost is not amortized or finite" (fun () ->
-      body_error "while first_value\n  cost amortized time O(1)\n{}" ~code:Loop_cost_bound
-        ~at:"cost";
-      body_error "while first_value\n  cost time finite\n{}" ~code:Loop_cost_bound ~at:"cost");
+      body_error "while a\n  cost amortized time O(1)\n{}" ~code:Loop_cost_bound ~at:"cost";
+      body_error "while a\n  cost time finite\n{}" ~code:Loop_cost_bound ~at:"cost");
   test "specifications allow forall" (fun () ->
-      definition
-        "type Structure(items: List[Int64])\n\
-        \  invariant forall step_index in items => step_index > 0"
-        "(type Structure ((items: List[Int64])) (invariant (forall (in step_index items) (> \
-         step_index 0))))";
-      statement "while first_value\n  invariant forall step_index in text_value => step_index\n{}"
-        "(while first_value (invariant (forall (in step_index text_value) step_index)) (block))");
+      definition "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
+        "(type S ((items: List[Int64])) (invariant (forall (in i items) (> i 0))))";
+      statement "while a\n  invariant forall i in s => i\n{}"
+        "(while a (invariant (forall (in i s) i)) (block))");
   test "assert outside tests and proofs" (fun () ->
       body_error "assert true" ~code:Misplaced_assert ~at:"assert");
   test "assert in a proof block" (fun () ->
@@ -280,97 +234,75 @@ let () =
   test "yield only in a method that yields" (fun () ->
       body_error "yield 1" ~code:Misplaced_yield ~at:"yield";
       definition Fixtures.Parser_rules.yield_only_in_a_method_that_yields
-        "(fn Payload.each (self) yields Int64 (block (yield 1)))");
+        "(fn T.each (self) yields Int64 (block (yield 1)))");
   test "a method that lends" (fun () ->
       definition Fixtures.Parser_rules.method_that_lends
         "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (yield (mut ([] (. \
          self cells) 0)))))");
   test "lends own" (fun () ->
-      error "fn Payload.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
-        ~fixed:"fn Payload.part(own self) lends Part {}");
+      error "fn T.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
+        ~fixed:"fn T.part(own self) lends Part {}");
   test "yield in a lambda" (fun () ->
       error Fixtures.Parser_rules.yield_in_a_lambda ~code:Misplaced_yield ~at:"yield 1");
   test "yield in concurrent code" (fun () ->
       error Fixtures.Parser_rules.yield_in_concurrent_code ~code:Misplaced_yield ~at:"yield 1";
-      error Fixtures.Parser_rules.yield_in_concurrent_code_2 ~code:Misplaced_yield
-        ~at:"yield first_number");
+      error Fixtures.Parser_rules.yield_in_concurrent_code_2 ~code:Misplaced_yield ~at:"yield x");
   test "break outside a loop" (fun () -> body_error "break" ~code:Misplaced_loop_exit ~at:"break");
   test "continue across a lambda" (fun () ->
-      body_error "for first_number in text_value {\n  run_example(fn() { continue })\n}"
-        ~code:Misplaced_loop_exit ~at:"continue");
+      body_error "for x in s {\n  f(fn() { continue })\n}" ~code:Misplaced_loop_exit ~at:"continue");
   test "break and continue in a loop" (fun () ->
-      statement "while true {\n  if first_value { break } else { continue }\n}"
-        "(while true (block (if first_value (block break) (block continue))))");
+      statement "while true {\n  if a { break } else { continue }\n}"
+        "(while true (block (if a (block break) (block continue))))");
   test "return leaving a parallel block" (fun () ->
       body_error "parallel {\n  return\n}" ~code:Leaves_parallel ~at:"return");
   test "? leaving a parallel for" (fun () ->
-      body_error
-        "parallel for first_number in text_value {\n\
-        \  let second_number = run_example(first_number)?\n\
-         }"
-        ~code:Leaves_parallel ~at:"?");
+      body_error "parallel for x in s {\n  let y = f(x)?\n}" ~code:Leaves_parallel ~at:"?");
   test "break in a parallel for" (fun () ->
-      body_error "parallel for first_number in text_value {\n  break\n}" ~code:Leaves_parallel
-        ~at:"break");
+      body_error "parallel for x in s {\n  break\n}" ~code:Leaves_parallel ~at:"break");
   test "continue in a parallel for" (fun () ->
-      statement "parallel for first_number in text_value {\n  continue\n}"
-        "(parallel-for first_number text_value (block continue))");
+      statement "parallel for x in s {\n  continue\n}" "(parallel-for x s (block continue))");
   test "break leaving a branch" (fun () ->
-      body_error "while first_value {\n  parallel {\n    break\n  }\n}" ~code:Leaves_parallel
-        ~at:"break");
+      body_error "while a {\n  parallel {\n    break\n  }\n}" ~code:Leaves_parallel ~at:"break");
   test "a loop inside a branch" (fun () ->
-      statement "parallel {\n  for first_number in text_value { break }\n}"
-        "(parallel (block (for first_number text_value (block break))))");
+      statement "parallel {\n  for x in s { break }\n}" "(parallel (block (for x s (block break))))");
   test "return in a lambda inside a branch" (fun () ->
-      statement "parallel {\n  run_example(fn() { return })\n}"
-        "(parallel (block (call run_example (fn () (block (return))))))");
+      statement "parallel {\n  f(fn() { return })\n}"
+        "(parallel (block (call f (fn () (block (return))))))");
   test "return, ?, and break leaving a concurrent block or loop" (fun () ->
-      statement "concurrent {\n  return\n  let second_number = run_example(first_number)?\n}"
-        "(concurrent (block (return) (let second_number (? (call run_example first_number)))))";
-      statement
-        "concurrent for first_number in text_value {\n\
-        \  if first_value { break } else { continue }\n\
-         }"
-        "(concurrent-for first_number text_value (block (if first_value (block break) (block \
-         continue))))";
-      statement "while first_value {\n  concurrent {\n    break\n  }\n}"
-        "(while first_value (block (concurrent (block break))))");
+      statement "concurrent {\n  return\n  let y = f(x)?\n}"
+        "(concurrent (block (return) (let y (? (call f x)))))";
+      statement "concurrent for x in s {\n  if a { break } else { continue }\n}"
+        "(concurrent-for x s (block (if a (block break) (block continue))))";
+      statement "while a {\n  concurrent {\n    break\n  }\n}"
+        "(while a (block (concurrent (block break))))");
   test "return leaving a parallel block inside a concurrent one" (fun () ->
       body_error "concurrent {\n  parallel {\n    return\n  }\n}" ~code:Leaves_parallel ~at:"return");
   test "echo in a specification" (fun () ->
-      error "fn run_example(first_number: Int64) requires echo first_number > 0 {}"
-        ~code:Echo_in_specification ~at:"echo");
+      error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification ~at:"echo");
   test "a statement rule applies in every block" (fun () ->
       body_error Fixtures.Parser_rules.statement_rule_applies_in_every_block ~code:Misplaced_assert
         ~at:"assert");
   test "echo in a proof" (fun () ->
-      body_error "proof {\n  echo first_number\n}" ~code:Echo_in_specification ~at:"echo")
+      body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
 
 (* Recovery *)
 
 let () =
   test "an error in a statement leaves the next one parsed" (fun () ->
-      let statements, diagnostics = body_of "let first_number = 1 2 3\nlet second_number = 2" in
+      let statements, diagnostics = body_of "let x = 1 2 3\nlet y = 2" in
       if codes diagnostics <> [ "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics));
-      if List.map Syntax_print.statement statements <> [ "error"; "(let second_number 2)" ] then
+      if List.map Syntax_print.statement statements <> [ "error"; "(let y 2)" ] then
         fail "wrong statements");
   test "each bad item in brackets gets its own error" (fun () ->
-      let statements, diagnostics =
-        body_of
-          "run_example(1 +, first_number, 2 3, second_example(first_value second_value))\n\
-           let second_number = 2"
-      in
+      let statements, diagnostics = body_of "f(1 +, x, 2 3, g(a b))\nlet y = 2" in
       if
         codes diagnostics
         <> [ "parser.unexpected_token"; "parser.unexpected_token"; "parser.unexpected_token" ]
       then fail "got [%s]" (String.concat "; " (codes diagnostics));
       if
         List.map Syntax_print.statement statements
-        <> [
-             "(call run_example error first_number error (call second_example error))";
-             "(let second_number 2)";
-           ]
+        <> [ "(call f error x error (call g error))"; "(let y 2)" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "an error in a clause leaves the body parsed" (fun () ->
       let file, diagnostics =
@@ -380,9 +312,7 @@ let () =
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       match file.definitions with
       | [ { value; _ } ] ->
-          if
-            Syntax_print.For_testing.definition value
-            <> "(fn run_example () error (ensures true) (block first_number))"
+          if Syntax_print.For_testing.definition value <> "(fn f () error (ensures true) (block x))"
           then fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
   test "an error in a member leaves the next member parsed" (fun () ->
@@ -398,7 +328,7 @@ let () =
       if codes diagnostics <> [ "lexer.unclosed_bracket" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a reserved word is reported as reserved" (fun () ->
-      error "fn run_example[Payload]() where Payload: Hash {}" ~code:Reserved_word ~at:"where")
+      error "fn f[T]() where T: Hash {}" ~code:Reserved_word ~at:"where")
 
 (* Syntax from other languages *)
 
@@ -406,47 +336,41 @@ let () =
   test "i++" (fun () -> body_error "count++" ~code:Increment ~at:"++" ~fixed:"count += 1");
   test "i--" (fun () -> body_error "items[0]--" ~code:Increment ~at:"--" ~fixed:"items[0] -= 1");
   test "--x" (fun () ->
-      body_error "let second_number = --first_number" ~code:Double_negation ~at:"--"
-        ~fixed:"let second_number = -(-first_number)");
+      body_error "let y = --x" ~code:Double_negation ~at:"--" ~fixed:"let y = -(-x)");
   test "a comma after a match arm" (fun () ->
-      body_error "match first_value {\n  Alpha => 1,\n  Beta => 2\n}" ~code:Match_arm_comma ~at:","
-        ~fixed:"match first_value {\n  Alpha => 1\n  Beta => 2\n}");
+      body_error "match a {\n  A => 1,\n  B => 2\n}" ~code:Match_arm_comma ~at:","
+        ~fixed:"match a {\n  A => 1\n  B => 2\n}");
   test "x ? a : b" (fun () ->
-      body_error "let second_number = ready ? first : second" ~code:Conditional_operator ~at:"?"
-        ~fixed:"let second_number = if ready { first } else { second }");
+      body_error "let y = ready ? first : second" ~code:Conditional_operator ~at:"?"
+        ~fixed:"let y = if ready { first } else { second }");
   test "x ? a : b takes the whole left side as the condition" (fun () ->
-      body_error "let larger = first_value > second_value ? first_value : second_value"
-        ~code:Conditional_operator ~at:"?"
-        ~fixed:"let larger = if first_value > second_value { first_value } else { second_value }");
+      body_error "let larger = a > b ? a : b" ~code:Conditional_operator ~at:"?"
+        ~fixed:"let larger = if a > b { a } else { b }");
   test "let mut" (fun () ->
       body_error "let mut count = 0" ~code:Let_mut ~at:"mut" ~fixed:"var count = 0");
-  test "&x" (fun () ->
-      body_error "run_example(&first_number)" ~code:Address_of ~at:"&"
-        ~fixed:"run_example(first_number)");
+  test "&x" (fun () -> body_error "f(&x)" ~code:Address_of ~at:"&" ~fixed:"f(x)");
   test "& between two names" (fun () ->
       body_error "match& value {\n  _ => todo\n}" ~code:Address_of ~at:"&"
         ~fixed:"match value {\n  _ => todo\n}");
   test "&mut x" (fun () ->
       body_error "sort(&mut items)" ~code:Address_of ~at:"&" ~fixed:"sort(mut items)");
   test "|x| x + 1" (fun () ->
-      body_error "let run_example = items.map(|item| item + 1)" ~code:Closure_bars ~at:"|"
-        ~fixed:"let run_example = items.map(fn(item) { item + 1 })");
+      body_error "let f = items.map(|item| item + 1)" ~code:Closure_bars ~at:"|"
+        ~fixed:"let f = items.map(fn(item) { item + 1 })");
   test "|x| with a block" (fun () ->
-      body_error "let run_example = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
-        ~fixed:"let run_example = items.map(fn(item) { item })");
+      body_error "let f = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
+        ~fixed:"let f = items.map(fn(item) { item })");
   test "|x| before let ... else" (fun () ->
       body_error Fixtures.Parser_rules.x_before_let_else ~code:Closure_bars ~at:"||"
         ~fixed:Fixtures.Parser_rules.x_before_let_else_fixed);
   test "|| x" (fun () ->
-      body_error "let run_example = run(|| 1)" ~code:Closure_bars ~at:"||"
-        ~fixed:"let run_example = run(fn() { 1 })");
+      body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||" ~fixed:"let f = run(fn() { 1 })");
   test "Point { x: 1.0 }" (fun () ->
-      body_error "let probe_point = Point { first_number: 1.0, second_number: 2.0 }"
-        ~code:Brace_record ~at:"{ first_number"
-        ~fixed:"let probe_point = Point(first_number: 1.0, second_number: 2.0)");
+      body_error "let p = Point { x: 1.0, y: 2.0 }" ~code:Brace_record ~at:"{ x"
+        ~fixed:"let p = Point(x: 1.0, y: 2.0)");
   test "parse::<Int64>(text)" (fun () ->
-      body_error "let limit_count = parse::<Int64>(text)" ~code:Turbofish ~at:"<"
-        ~fixed:"let limit_count = parse[Int64](text)");
+      body_error "let n = parse::<Int64>(text)" ~code:Turbofish ~at:"<"
+        ~fixed:"let n = parse[Int64](text)");
   test "List<String> in a type" (fun () ->
       body_error "let names: List<String> = []" ~code:Angle_brackets ~at:"<"
         ~fixed:"let names: List[String] = []";
@@ -493,22 +417,20 @@ let () =
       body_error "todo!()" ~code:Macro_call ~at:"!" ~fixed:"todo";
       body_error "unreachable!(\"never\")" ~code:Macro_call ~at:"!");
   test "a negation after a name is not a macro" (fun () ->
-      let _, diagnostics = body_of "let different = first_value != (second_value)" in
+      let _, diagnostics = body_of "let different = a != (b)" in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a tuple" (fun () ->
       body_error "let pair = (1, 2)" ~code:Tuple ~at:"(" ~occurrence:2;
       body_error "let first = pair.0" ~code:Tuple ~at:"0";
       body_error "let pair: (Int64, String) = make()" ~code:Tuple ~at:"(" ~occurrence:2);
   test "a ** b" (fun () ->
-      body_error "let square = first_number ** 2" ~code:Power_operator ~at:"**";
-      let statements, _ = body_of "let second_number = first_value + first_number ** 2" in
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(let second_number (+ first_value (* first_number 2)))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      body_error "let square = x ** 2" ~code:Power_operator ~at:"**";
+      let statements, _ = body_of "let y = a + x ** 2" in
+      if List.map Syntax_print.statement statements <> [ "(let y (+ a (* x 2)))" ] then
+        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "name := value" (fun () ->
       body_error "count := 0" ~code:Short_declaration ~at:":=" ~fixed:"let count = 0";
-      body_error "point.first_number := 0" ~code:Short_declaration ~at:":=";
+      body_error "point.x := 0" ~code:Short_declaration ~at:":=";
       let statements, _ = body_of "count := 0" in
       if List.map Syntax_print.statement statements <> [ "(let count 0)" ] then
         fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
@@ -522,11 +444,10 @@ let () =
       if List.map Syntax_print.statement statements <> [ "(let total (call sum items))" ] then
         fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "a lambda with annotations" (fun () ->
-      body_error "let double = fn(first_number: Int64) { first_number * 2 }" ~code:Lambda_annotation
-        ~at:": Int64" ~fixed:"let double = fn(first_number) { first_number * 2 }";
-      body_error "let double = fn(first_number) -> Int64 { first_number * 2 }"
-        ~code:Lambda_annotation ~at:" -> Int64"
-        ~fixed:"let double = fn(first_number) { first_number * 2 }");
+      body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation ~at:": Int64"
+        ~fixed:"let double = fn(x) { x * 2 }";
+      body_error "let double = fn(x) -> Int64 { x * 2 }" ~code:Lambda_annotation ~at:" -> Int64"
+        ~fixed:"let double = fn(x) { x * 2 }");
   test "List<String>.new() in an expression" (fun () ->
       body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
         ~fixed:"let names = List[String].new()";
@@ -559,8 +480,8 @@ let () =
         ~fixed:"let name = user.name.unwrap_or(\"guest\")";
       body_error "let port = settings.port ?: 80" ~code:Null_coalescing ~at:"?"
         ~fixed:"let port = settings.port.unwrap_or(80)";
-      body_error "let total = first_value + second_value ?? 0" ~code:Null_coalescing ~at:"?"
-        ~fixed:"let total = (first_value + second_value).unwrap_or(0)";
+      body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
+        ~fixed:"let total = (a + b).unwrap_or(0)";
       let statements, _ = body_of "let port = settings.port ?? 80" in
       if
         List.map Syntax_print.statement statements
@@ -573,13 +494,13 @@ let () =
       body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let names = items.map(fn(item) { item.name })");
   test "it in an interpolation is renamed too" (fun () ->
-      body_error "let first_number = items.map { \"${it.name}\" }" ~code:Trailing_lambda ~at:"{ \""
-        ~fixed:"let first_number = items.map(fn(item) { \"${item.name}\" })");
+      body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda ~at:"{ \""
+        ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
   test "the lambda's parameter is a plain singular, or element" (fun () ->
-      body_error "let first_number = entries.map { it.key }" ~code:Trailing_lambda ~at:"{ it"
-        ~fixed:"let first_number = entries.map(fn(entry) { entry.key })";
-      body_error "let first_number = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
-        ~fixed:"let first_number = statuses.map(fn(element) { element.code })");
+      body_error "let x = entries.map { it.key }" ~code:Trailing_lambda ~at:"{ it"
+        ~fixed:"let x = entries.map(fn(entry) { entry.key })";
+      body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
+        ~fixed:"let x = statuses.map(fn(element) { element.code })");
   test "items.map { it.name } is parsed as the call its fix writes" (fun () ->
       let statements, _ = body_of "let names = items.map { it.name }" in
       if
@@ -587,21 +508,20 @@ let () =
         <> [ "(let names (call (. items map) (fn (item) (block (. item name)))))" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "parse::<List[Int64]> is parsed as the brackets it means" (fun () ->
-      let statements, _ = body_of "let limit_count = parse::<List[Int64]>(text)" in
+      let statements, _ = body_of "let n = parse::<List[Int64]>(text)" in
       if
         List.map Syntax_print.statement statements
-        <> [ "(let limit_count (call ([] parse ([] List Int64)) text))" ]
+        <> [ "(let n (call ([] parse ([] List Int64)) text))" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "x as Int64" (fun () ->
-      body_error "let limit_count = size as Int64" ~code:As_conversion ~at:"as"
-        ~fixed:"let limit_count = Int64.from(size)"
-        ~alternatives:[ "let limit_count = Int64.try_from(size)" ]);
+      body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
+        ~fixed:"let n = Int64.from(size)"
+        ~alternatives:[ "let n = Int64.try_from(size)" ]);
   test "loop" (fun () ->
       body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop" ~fixed:"while true {\n  todo\n}");
   test "const" (fun () ->
       error "const pi: Float64 = 3.14" ~code:Reserved_word ~at:"const"
         ~fixed:"let pi: Float64 = 3.14");
   test "elif" (fun () ->
-      body_error "if first_value {\n  run_example()\n}\nelif second_value {\n  second_example()\n}"
-        ~code:Elif ~at:"elif"
-        ~fixed:"if first_value {\n  run_example()\n} else if second_value {\n  second_example()\n}")
+      body_error "if a {\n  f()\n}\nelif b {\n  g()\n}" ~code:Elif ~at:"elif"
+        ~fixed:"if a {\n  f()\n} else if b {\n  g()\n}")

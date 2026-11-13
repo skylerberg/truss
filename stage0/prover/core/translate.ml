@@ -800,6 +800,20 @@ let quote source origin =
 (* Where a node of the form read here is. *)
 let at frame (node : expression) = span_of frame.source node.origin
 
+(* The base, the start, and the stop, if any, of a slice's call. *)
+let slice_parts (call : expression) =
+  match call.kind with
+  | Call
+      {
+        arguments = Passed { value = Place base; _ } :: Passed { value = Value start; _ } :: rest;
+        _;
+      } -> (
+      match rest with
+      | [] -> (base, start, None)
+      | [ Passed { value = Value stop; _ } ] -> (base, start, Some stop)
+      | _ -> bug "a slice whose call has more than three arguments")
+  | _ -> bug "a slice whose call does not take its base and its bounds"
+
 (* Types *)
 
 let builtin ty = Types.builtin_of ty
@@ -1851,23 +1865,9 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
   | Collection_literal { elements; _ } -> Some (list_literal context frame node elements)
   | Map_literal { entries; _ } -> Some (map_literal context frame node entries)
   | Record_update { base; updates } -> Some (with_ context frame node base updates)
-  | Slice
-      {
-        base;
-        call =
-          {
-            kind =
-              Call
-                {
-                  arguments =
-                    [ _; Passed { value = Value start; _ }; Passed { value = Value stop; _ } ];
-                  _;
-                };
-            _;
-          };
-      } ->
-      Some (slice context frame node base ~start:(Some start) ~stop:(Some stop) ~inclusive:false)
-  | Slice _ -> unsupported (at frame node) "a slice whose call is not of `slice_range`"
+  | Slice { call } ->
+      let base, start, stop = slice_parts call in
+      Some (slice context frame node base ~start:(Some start) ~stop ~inclusive:false)
   | Call call_ -> (
       match resolved_call context frame node call_ with
       | Some _ when Types.equal (type_of context frame node) Types.Never ->
@@ -2873,32 +2873,10 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
             let type_ = operand_type context frame operand in
             let frame, term, run =
               match operand with
-              | Value
-                  ({
-                     kind =
-                       Slice
-                         {
-                           base;
-                           call =
-                             {
-                               kind =
-                                 Call
-                                   {
-                                     arguments =
-                                       [
-                                         _;
-                                         Passed { value = Value start; _ };
-                                         Passed { value = Value stop; _ };
-                                       ];
-                                     _;
-                                   };
-                               _;
-                             };
-                         };
-                     _;
-                   } as slice_node) ->
+              | Value ({ kind = Slice { call }; _ } as slice_node) ->
+                  let base, start, stop = slice_parts call in
                   let frame, term, low, high =
-                    slice_run context frame slice_node base ~start:(Some start) ~stop:(Some stop)
+                    slice_run context frame slice_node base ~start:(Some start) ~stop
                       ~inclusive:false
                   in
                   (frame, term, Some (low, high))
@@ -3020,7 +2998,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             let changed = arrive context frame "changed" passed.type_ in
             try store context frame place changed
             with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame place)
-        | Types.Mut, Some (Value { kind = Slice { base; _ }; _ }) -> (
+        | Types.Mut, Some (Value { kind = Slice { call }; _ }) -> (
+            let base, _, _ = slice_parts call in
             (* The callee changes the elements of the run the slice views,
                and nothing else of its owner: the slice read again after the
                call is a view of the new run, which the callee's
@@ -4563,7 +4542,9 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
     | Some stop ->
         let frame, high = value context frame stop in
         (frame, if inclusive then Costs.plus high (Logic.int 1) else high)
-    | None -> (frame, length)
+    | None ->
+        assume context frame (Operation ("<=", [ Logic.int 0; length ]));
+        (frame, length)
   in
   oblige context frame Requires span
     (Printf.sprintf "`%s` may not be within the collection." (quote frame.source node.origin))
@@ -8636,7 +8617,8 @@ and changed_places ?(condition : expression option) frame (body : block) : chang
               List.iter
                 (function
                   | Passed { mode = Types.Mut; value = Place place; _ } -> note place
-                  | Passed { mode = Types.Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
+                  | Passed { mode = Types.Mut; value = Value { kind = Slice { call }; _ }; _ } ->
+                      let base, _, _ = slice_parts call in
                       note base
                   | Passed _ | Default -> ())
                 arguments

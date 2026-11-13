@@ -1,3 +1,3 @@
-fn run_example() -> Shout {
+fn f() -> Shout {
   Shout"hey"
 }

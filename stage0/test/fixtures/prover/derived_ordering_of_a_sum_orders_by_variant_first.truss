@@ -4,7 +4,7 @@ type Light =
   | On
   derives Equal, Ordered
 
-fn run_example(level: Int64) -> Bool
+fn f(level: Int64) -> Bool
   ensures result
 {
   Light.Off < Light.Dim(level: level) && Light.Dim(level: level) < Light.On

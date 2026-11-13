@@ -11,7 +11,7 @@ fn Tree.odd(self) yields Int64 {
   }
 }
 
-fn run_example(tree: Tree) -> Option[Int64] {
+fn f(tree: Tree) -> Option[Int64] {
   var cursor = tree.odd()
   mut cursor.next()
 }

@@ -1,4 +1,4 @@
-fn run_example(small: UInt8) {
+fn f(small: UInt8) {
   let base: UInt8 = 1
   let next = base.wrapping_add(1)
   let first: UInt8 = base

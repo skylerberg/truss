@@ -2,7 +2,7 @@ fn window(items: List[Int64], start: USize) -> Slice[Int64] {
   items[start..]
 }
 
-fn run_example(items: List[Int64]) -> Slice[Int64] {
+fn f(items: List[Int64]) -> Slice[Int64] {
   let start: USize = 1
   window(items, start)
 }

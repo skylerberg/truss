@@ -1,3 +1,3 @@
-fn run_example() {
-  let first_number = (1 +
+fn f() {
+  let x = (1 +
 }

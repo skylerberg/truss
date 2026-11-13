@@ -53,12 +53,24 @@ let load_standard engine = set_standard engine Standard_library.modules
 
 (* The standard library, checked whole in an engine of its own. Its sources
    never change, so the engine is frozen as a fixed base, which every state
-   reads. *)
+   reads. The library checks cleanly, so a diagnostic in it is a compiler
+   bug, reported here: code built on it would otherwise meet a definition
+   that has no core form. *)
 let check_standard engine =
   load_standard engine;
-  List.iter
-    (fun (module_, _) -> ignore (Engine.get engine Type_checker.file_diagnostics module_))
-    Standard_library.modules
+  let rendered =
+    List.concat_map
+      (fun (module_, _) ->
+        match Engine.get engine Type_checker.file_diagnostics module_ with
+        | [] -> []
+        | diagnostics ->
+            let source = (Engine.get engine Workspace.file module_).source in
+            List.map (Diagnostic.render source) diagnostics)
+      Standard_library.modules
+  in
+  if rendered <> [] then
+    Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
+      (String.concat "" rendered)
 
 let standard_base () =
   let engine = Engine.create () in

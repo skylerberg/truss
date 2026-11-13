@@ -4,7 +4,7 @@ fn table() -> USize
   todo
 }
 
-fn run_example() -> USize
+fn f() -> USize
   cost time O(1)
 {
   table()

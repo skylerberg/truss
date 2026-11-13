@@ -2,6 +2,6 @@ type Config(name: String, port: UInt16)
 
 fn take(name: own String) {}
 
-fn run_example(config: mut Config) {
+fn f(config: mut Config) {
   take(own config.name)
 }

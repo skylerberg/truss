@@ -1,4 +1,6 @@
 use standard::cryptography::elliptic
+use standard::cryptography::keccak
+use standard::cryptography::mlkem
 use standard::cryptography::modular
 use standard::intrinsic
 
@@ -433,6 +435,45 @@ public fn sha384(bytes: Slice[UInt8]) -> Array[UInt8, 48]
   var hasher = Sha384.new()
   mut hasher.update(bytes)
   own hasher.finish()
+}
+
+fn fill_32(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
+  var filled: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let width: USize = 32
+  for index in 0..width {
+    if index < bytes.length() {
+      filled[index] = bytes[index]
+    }
+  }
+  filled
+}
+
+public fn sha3_256(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
+  let digest = keccak::hash(136, message: bytes, suffix: 6, count: 32)
+  fill_32(digest.slice())
+}
+
+public fn sha3_512(bytes: Slice[UInt8]) -> Array[UInt8, 64] {
+  let digest = keccak::hash(72, message: bytes, suffix: 6, count: 64)
+  var filled: Array[UInt8, 64] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let width: USize = 64
+  for index in 0..width {
+    if index < digest.length() {
+      filled[index] = digest[index]
+    }
+  }
+  filled
+}
+
+public fn shake128(bytes: Slice[UInt8], length: USize) -> List[UInt8] {
+  keccak::hash(168, message: bytes, suffix: 31, count: length)
+}
+
+public fn shake256(bytes: Slice[UInt8], length: USize) -> List[UInt8] {
+  keccak::hash(136, message: bytes, suffix: 31, count: length)
 }
 
 public fn sha1(bytes: Slice[UInt8]) -> Array[UInt8, 20]
@@ -4352,4 +4393,76 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UI
   mut encoded.append(own hashed)
   mut encoded.push(188)
   signed_or_crash(self, encoded: encoded.slice())
+}
+
+public opaque type DecapsulationKey(bytes: List[UInt8])
+  derives Copyable
+
+public opaque type EncapsulationKey(bytes: List[UInt8])
+  derives Equal, Copyable
+
+public type Encapsulation(ciphertext: List[UInt8], shared: SecretKey)
+
+public fn DecapsulationKey.from_seed(seed: Array[UInt8, 64]) -> DecapsulationKey {
+  let pair = mlkem::generate(seed[0..32], rejection: seed[32..64])
+  DecapsulationKey(bytes: own pair.decapsulation)
+}
+
+public fn DecapsulationKey.generate() -> DecapsulationKey
+  uses Random
+{
+  let first = random_32_bytes()
+  let second = random_32_bytes()
+  let pair = mlkem::generate(first[..], rejection: second[..])
+  DecapsulationKey(bytes: own pair.decapsulation)
+}
+
+public fn DecapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[DecapsulationKey] {
+  if bytes.length() == mlkem::decapsulation_key_length && mlkem::is_valid_decapsulation_key(bytes)
+    && mlkem::is_valid_encapsulation_key(bytes[1152..2336])
+  {
+    Some(DecapsulationKey(bytes: bytes.to_list()))
+  } else {
+    None
+  }
+}
+
+public fn DecapsulationKey.bytes(self) -> Slice[UInt8] {
+  self.bytes.slice()
+}
+
+public fn DecapsulationKey.encapsulation_key(self) -> EncapsulationKey {
+  let stop = if self.bytes.length() >= 2336 { 2336 } else { self.bytes.length() }
+  let start = if stop >= 1152 { 1152 } else { stop }
+  EncapsulationKey(bytes: self.bytes[start..stop].to_list())
+}
+
+public fn DecapsulationKey.decapsulate(self, ciphertext: Slice[UInt8]) -> Option[SecretKey] {
+  if ciphertext.length() != mlkem::ciphertext_length {
+    return None
+  }
+  let shared = mlkem::decapsulate(self.bytes.slice(), ciphertext: ciphertext)
+  if shared.length() != 32 {
+    return None
+  }
+  Some(SecretKey(bytes: fill_32(shared.slice())))
+}
+
+public fn EncapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[EncapsulationKey] {
+  if mlkem::is_valid_encapsulation_key(bytes) { Some(EncapsulationKey(bytes: bytes.to_list())) } else { None }
+}
+
+public fn EncapsulationKey.bytes(self) -> Slice[UInt8] {
+  self.bytes.slice()
+}
+
+public fn EncapsulationKey.encapsulate_with(self, message: Array[UInt8, 32]) -> Encapsulation {
+  let encapsulated = mlkem::encapsulate(self.bytes.slice(), message: message[..])
+  Encapsulation(ciphertext: own encapsulated.ciphertext, shared: SecretKey(bytes: fill_32(encapsulated.shared.slice())))
+}
+
+public fn EncapsulationKey.encapsulate(self) -> Encapsulation
+  uses Random
+{
+  self.encapsulate_with(random_32_bytes())
 }

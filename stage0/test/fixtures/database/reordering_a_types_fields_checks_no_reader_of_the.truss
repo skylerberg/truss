@@ -1,5 +1,5 @@
 use app::point
 
 fn width(of: point::Point) -> Int64 {
-  of.first_number
+  of.x
 }

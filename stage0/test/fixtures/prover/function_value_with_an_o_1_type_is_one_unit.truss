@@ -4,7 +4,7 @@ fn run(transform: (fn(Int64) -> Int64 cost time O(1))) -> Int64
   transform(1)
 }
 
-fn run_example() -> Int64
+fn f() -> Int64
   cost time O(1)
 {
   run(fn(value) { value })

@@ -5,7 +5,7 @@ fn is_small(value: Int64) -> Bool
   small
 }
 
-fn run_example() -> Bool
+fn f() -> Bool
   ensures result
 {
   is_small(3)

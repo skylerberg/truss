@@ -1,4 +1,4 @@
-fn second_example() -> Int64 {
+fn g() -> Int64 {
   let value = todo
   value
 }

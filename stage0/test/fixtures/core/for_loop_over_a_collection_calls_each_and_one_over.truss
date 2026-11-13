@@ -1,4 +1,4 @@
-fn second_example(items: List[Int64]) -> Int64 {
+fn g(items: List[Int64]) -> Int64 {
   var total = 0
   for item in items {
     total += item

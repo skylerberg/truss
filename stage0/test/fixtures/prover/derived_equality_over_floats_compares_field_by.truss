@@ -1,8 +1,8 @@
-type Point(first_number: Float64, second_number: Float64)
+type Point(x: Float64, y: Float64)
   derives Equal
 
-fn run_example() -> Bool
+fn f() -> Bool
   ensures result
 {
-  Point(first_number: 0.0, second_number: 1.0) == Point(first_number: -0.0, second_number: 1.0)
+  Point(x: 0.0, y: 1.0) == Point(x: -0.0, y: 1.0)
 }

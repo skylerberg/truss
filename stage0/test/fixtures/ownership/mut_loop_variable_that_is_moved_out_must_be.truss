@@ -1,4 +1,4 @@
-fn run_example(holders: mut List[Holder]) -> USize {
+fn f(holders: mut List[Holder]) -> USize {
   var total: USize = 0
   for holder in mut holders {
     let items = own holder.items

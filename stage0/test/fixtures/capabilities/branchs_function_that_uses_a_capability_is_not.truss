@@ -1,4 +1,4 @@
-fn run_example(fast: Bool) -> Instant {
+fn f(fast: Bool) -> Instant {
   let action: fn() -> Instant = if fast { still } else { tick }
   action()
 }

@@ -2,7 +2,7 @@ type Color =
   | Red
   | Green
 
-fn run_example(color: Option[Color]) -> Int64 {
+fn f(color: Option[Color]) -> Int64 {
   match color {
     Some(Red | Red) => 1
     _ => 2

@@ -426,11 +426,24 @@ let x25519_group: USize = 29
 
 let p256_group: USize = 23
 
+let hybrid_group: USize = 4588
+
 fn retry_random() -> List[UInt8] {
   hex_bytes("cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c")
 }
 
-type Share(group: USize, private_x25519: Option[cryptography::AgreementKey], private_p256: Option[cryptography::EcdhKey], public_key: List[UInt8])
+type Share(
+  group: USize,
+  private_x25519: Option[cryptography::AgreementKey],
+  private_p256: Option[cryptography::EcdhKey],
+  private_kem: Option[cryptography::DecapsulationKey],
+  public_key: List[UInt8],
+)
+
+fn x25519_public(key: cryptography::AgreementKey) -> List[UInt8] {
+  let point = key.public_key()
+  point.bytes[..].to_list()
+}
 
 fn new_share(group: USize) -> Share
   uses Random, Panic
@@ -438,12 +451,30 @@ fn new_share(group: USize) -> Share
   if group == p256_group {
     let key = cryptography::EcdhKey.generate(cryptography::Curve.P256)
     let public_key = key.public_key()
-    Share(group: group, private_x25519: None, private_p256: Some(own key), public_key: own public_key)
-  } else {
-    let key = cryptography::AgreementKey.generate()
-    let point = key.public_key()
-    let public_key = point.bytes[..].to_list()
-    Share(group: x25519_group, private_x25519: Some(own key), private_p256: None, public_key: own public_key)
+    return Share(group: group, private_x25519: None, private_p256: Some(own key), private_kem: None, public_key: own public_key)
+  }
+  let key = cryptography::AgreementKey.generate()
+  if group == hybrid_group {
+    let kem = cryptography::DecapsulationKey.generate()
+    let encapsulation = kem.encapsulation_key()
+    var public_key = encapsulation.bytes().to_list()
+    mut public_key.append(x25519_public(key))
+    return Share(group: group, private_x25519: Some(own key), private_p256: None, private_kem: Some(own kem), public_key: own public_key)
+  }
+  let public_key = x25519_public(key)
+  Share(group: x25519_group, private_x25519: Some(own key), private_p256: None, private_kem: None, public_key: own public_key)
+}
+
+fn x25519_secret(key: own cryptography::AgreementKey, peer: Slice[UInt8]) -> Result[List[UInt8], Error] {
+  if peer.length() != 32 {
+    return Err(protocol_error("an X25519 key share that is not 32 bytes"))
+  }
+  match own key.agree(cryptography::AgreementPublicKey(bytes: array_of_32(peer))) {
+    Some(secret) => {
+      let exposed = secret.expose()
+      Ok(exposed[..].to_list())
+    }
+    None => Err(protocol_error("an X25519 key share of low order"))
   }
 }
 
@@ -451,28 +482,63 @@ fn agree(share: own Share, peer: Slice[UInt8]) -> Result[List[UInt8], Error]
   uses Panic
 {
   if share.group == p256_group {
-    match own share.private_p256 {
+    return match own share.private_p256 {
       Some(key) => match own key.agree(peer) {
         Some(secret) => Ok(own secret)
         None => Err(protocol_error("a key share that is not a point on P-256"))
       }
       None => Err(protocol_error("no key for the group"))
     }
-  } else {
-    if peer.length() != 32 {
-      return Err(protocol_error("an X25519 key share that is not 32 bytes"))
-    }
-    match own share.private_x25519 {
-      Some(key) => match own key.agree(cryptography::AgreementPublicKey(bytes: array_of_32(peer))) {
-        Some(secret) => {
-          let exposed = secret.expose()
-          Ok(exposed[..].to_list())
-        }
-        None => Err(protocol_error("an X25519 key share of low order"))
-      }
-      None => Err(protocol_error("no key for the group"))
-    }
   }
+  let key = match own share.private_x25519 {
+    Some(key) => own key
+    None => return Err(protocol_error("no key for the group"))
+  }
+  if share.group != hybrid_group {
+    return x25519_secret(own key, peer: peer)
+  }
+  if peer.length() != 1120 {
+    return Err(protocol_error("an X25519MLKEM768 key share that is not 1120 bytes"))
+  }
+  let decapsulated = match share.private_kem {
+    Some(kem) => kem.decapsulate(peer[0..1088])
+    None => None
+  }
+  let kem_secret = match decapsulated {
+    Some(secret) => secret.expose()
+    None => return Err(protocol_error("no key for the group"))
+  }
+  var shared = kem_secret[..].to_list()
+  mut shared.append(x25519_secret(own key, peer: peer[1088..1120])?)
+  Ok(own shared)
+}
+
+type Response(public_key: List[UInt8], shared: List[UInt8])
+
+fn respond(group: USize, peer: Slice[UInt8]) -> Result[Response, Error]
+  uses Random, Panic
+{
+  if group != hybrid_group {
+    let share = new_share(group)
+    let public_key = share.public_key.copy()
+    let shared = agree(own share, peer: peer)?
+    return Ok(Response(public_key: own public_key, shared: own shared))
+  }
+  if peer.length() != 1216 {
+    return Err(Error.Alert(description: 47))
+  }
+  let encapsulation = match cryptography::EncapsulationKey.from_bytes(peer[0..1184]) {
+    Some(encapsulation) => own encapsulation
+    None => return Err(Error.Alert(description: 47))
+  }
+  let sealed = encapsulation.encapsulate()
+  let key = cryptography::AgreementKey.generate()
+  var public_key = sealed.ciphertext.copy()
+  mut public_key.append(x25519_public(key))
+  let kem_secret = sealed.shared.expose()
+  var shared = kem_secret[..].to_list()
+  mut shared.append(x25519_secret(own key, peer: peer[1184..1216])?)
+  Ok(Response(public_key: own public_key, shared: own shared))
 }
 
 let signature_schemes: Array[UInt16, 6] = [1027, 1283, 2052, 2053, 2054, 2055]
@@ -494,7 +560,7 @@ fn alpn_extension(protocols: Slice[String]) -> List[UInt8] {
   list
 }
 
-fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: StringSlice, protocols: Slice[String], share: Share, cookie: Slice[UInt8]) -> List[UInt8] {
+fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: StringSlice, protocols: Slice[String], shares: Slice[Share], cookie: Slice[UInt8]) -> List[UInt8] {
   var body: List[UInt8] = [3, 3]
   mut body.append_slice(random)
   push_vector8(mut body, content: session)
@@ -514,6 +580,7 @@ fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: String
   }
   var groups: List[UInt8] = []
   var group_list: List[UInt8] = []
+  push_u16(mut group_list, value: hybrid_group)
   push_u16(mut group_list, value: x25519_group)
   push_u16(mut group_list, value: p256_group)
   push_vector16(mut groups, content: group_list.slice())
@@ -541,12 +608,14 @@ fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: String
     push_vector16(mut wrapped, content: cookie)
     extension(mut extensions, kind: 44, content: wrapped.slice())
   }
-  var entry: List[UInt8] = []
-  push_u16(mut entry, value: share.group)
-  push_vector16(mut entry, content: share.public_key.slice())
-  var shares: List[UInt8] = []
-  push_vector16(mut shares, content: entry.slice())
-  extension(mut extensions, kind: 51, content: shares.slice())
+  var entries: List[UInt8] = []
+  for share in shares {
+    push_u16(mut entries, value: share.group)
+    push_vector16(mut entries, content: share.public_key.slice())
+  }
+  var key_shares: List[UInt8] = []
+  push_vector16(mut key_shares, content: entries.slice())
+  extension(mut extensions, kind: 51, content: key_shares.slice())
   push_vector16(mut body, content: extensions.slice())
   body
 }
@@ -773,8 +842,8 @@ public fn connect[Stream: streams::Reader + streams::Writer](stream: own Stream,
   var wire = Wire(reader: streams::BufferedReader.new(own stream, capacity: 16709), receiving: None, sending: None, buffered: [], transcript: [])
   let random = random_bytes(32)
   let session = random_bytes(32)
-  var share = new_share(x25519_group)
-  let first = client_hello(random.slice(), session: session.slice(), server_name: host, protocols: config.protocols.slice(), share: share, cookie: [])
+  var shares: List[Share] = [new_share(hybrid_group), new_share(x25519_group)]
+  let first = client_hello(random.slice(), session: session.slice(), server_name: host, protocols: config.protocols.slice(), shares: shares.slice(), cookie: [])
   write_message(mut wire, kind: 1, body: first.slice())?
   var reply = expect_message(mut wire, kind: 2)?
   var hello = parse_server_hello(reply.body.slice(), session: session.slice())?
@@ -793,15 +862,21 @@ public fn connect[Stream: streams::Reader + streams::Writer](stream: own Stream,
       Some(group) => group
       None => return Err(protocol_error("a HelloRetryRequest without a group"))
     }
-    if (group != x25519_group && group != p256_group) || group == share.group {
+    var is_offered = false
+    for share in shares {
+      if share.group == group {
+        is_offered = true
+      }
+    }
+    if (group != x25519_group && group != p256_group && group != hybrid_group) || is_offered {
       return Err(protocol_error("a HelloRetryRequest for a group that cannot be used"))
     }
     let cookie = match find_extension(hello.extensions.slice(), kind: 44) {
       Some(content) => if content.length() >= 2 { content[2..].to_list() } else { [] }
       None => []
     }
-    share = new_share(group)
-    let second = client_hello(random.slice(), session: session.slice(), server_name: host, protocols: config.protocols.slice(), share: share, cookie: cookie.slice())
+    shares = [new_share(group)]
+    let second = client_hello(random.slice(), session: session.slice(), server_name: host, protocols: config.protocols.slice(), shares: shares.slice(), cookie: cookie.slice())
     write_message(mut wire, kind: 1, body: second.slice())?
     reply = expect_message(mut wire, kind: 2)?
     let retried = parse_server_hello(reply.body.slice(), session: session.slice())?
@@ -820,8 +895,20 @@ public fn connect[Stream: streams::Reader + streams::Writer](stream: own Stream,
     Some(entry) => own entry
     None => return Err(protocol_error("a ServerHello without a key share"))
   }
-  if server_share.kind != share.group {
-    return Err(protocol_error("a key share for a group that was not offered"))
+  var chosen: Option[USize] = None
+  for index in 0..shares.length() {
+    if shares[index].group == server_share.kind {
+      chosen = Some(index)
+    }
+  }
+  let share = match chosen {
+    Some(index) => {
+      if index >= shares.length() {
+        return Err(protocol_error("a key share for a group that was not offered"))
+      }
+      mut shares.remove_at(index)
+    }
+    None => return Err(protocol_error("a key share for a group that was not offered"))
   }
   let shared = agree(own share, peer: server_share.content.slice())?
   mut wire.transcript.append_slice(reply.raw.slice())
@@ -1000,23 +1087,22 @@ fn choose_suite(suites: Slice[UInt8]) -> Option[Suite] {
 fn offered_share(extensions: Slice[Extension]) -> Option[Extension] {
   let content = find_extension(extensions, kind: 51)?
   var at: USize = 2
-  var p256: Option[Extension] = None
+  var best: Option[Extension] = None
+  var best_rank: USize = 0
   while at < content.length() && content.length() - at >= 4 {
     let group = u16_at(content.slice(), at: at)?
     let length = u16_at(content.slice(), at: at + 2)?
     if content.length() - at - 4 < length {
       return None
     }
-    let key = content[at + 4..at + 4 + length].to_list()
-    if group == x25519_group {
-      return Some(Extension(kind: group, content: own key))
-    }
-    if group == p256_group {
-      p256 = Some(Extension(kind: group, content: own key))
+    let rank: USize = if group == hybrid_group { 3 } else if group == x25519_group { 2 } else if group == p256_group { 1 } else { 0 }
+    if rank > best_rank {
+      best_rank = rank
+      best = Some(Extension(kind: group, content: content[at + 4..at + 4 + length].to_list()))
     }
     at += 4 + length
   }
-  p256
+  best
 }
 
 fn lists_u16(content: Slice[UInt8], value: USize) -> Bool {
@@ -1032,7 +1118,9 @@ fn lists_u16(content: Slice[UInt8], value: USize) -> Bool {
 
 fn supported_group(extensions: Slice[Extension]) -> Option[USize] {
   let content = find_extension(extensions, kind: 10)?
-  if lists_u16(content.slice(), value: x25519_group) {
+  if lists_u16(content.slice(), value: hybrid_group) {
+    Some(hybrid_group)
+  } else if lists_u16(content.slice(), value: x25519_group) {
     Some(x25519_group)
   } else if lists_u16(content.slice(), value: p256_group) {
     Some(p256_group)
@@ -1158,9 +1246,9 @@ public fn accept[Stream: streams::Reader + streams::Writer](stream: own Stream, 
     None => return Err(Error.Alert(description: 40))
   }
   let protocol = choose_protocol(config.protocols.slice(), extensions: hello.extensions.slice())?
-  let share = new_share(client_share.kind)
-  let public_key = share.public_key.copy()
-  let shared = agree(own share, peer: client_share.content.slice())?
+  let response = respond(client_share.kind, peer: client_share.content.slice())?
+  let public_key = response.public_key.copy()
+  let shared = response.shared.copy()
   mut wire.transcript.append_slice(message.raw.slice())
   require_record_boundary(wire)?
   let random = random_bytes(32)

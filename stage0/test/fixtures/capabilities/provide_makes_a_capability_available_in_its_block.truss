@@ -12,7 +12,7 @@ fn stamp() -> Instant
   Clock.now()
 }
 
-fn run_example() -> Instant {
+fn f() -> Instant {
   provide FixedClock(time: Instant.epoch) {
     stamp()
   }

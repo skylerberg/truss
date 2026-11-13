@@ -1,4 +1,4 @@
-fn run_example(often: Bool) -> USize {
+fn f(often: Bool) -> USize {
   var data: List[Int64] = [1, 2, 3]
   var views: List[Slice[Int64]] = []
   if often {

@@ -205,7 +205,7 @@ theorem limbs_order_agrees_with_equal(first: Sequence[UInt64], second: Sequence[
   requires below <= first.length()
   requires below <= second.length()
   ensures (limbs_order(first, second: second, below: below) == Ordering.Equal)
-    == (forall index in 0..below => first[index] == second[index])
+    == (forall i in 0..below => first[i] == second[i])
   decreases below
   cost time finite
 {
@@ -433,14 +433,14 @@ fn divide_small(limbs: mut List[UInt64], divisor: UInt64) -> UInt64
 }
 
 fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
-  ensures forall position in 0..result.length() => result.model()[position] <= 4294967295
+  ensures forall i in 0..result.length() => result.model()[i] <= 4294967295
   cost time finite
 {
   var digits: List[UInt64] = List.with_capacity(limbs.length().saturating_multiply(2))
   var index: USize = 0
   while index < limbs.length()
     invariant index <= limbs.length()
-    invariant forall position in 0..digits.length() => digits.model()[position] <= 4294967295
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
     decreases limbs.length() - index
   {
     mut digits.push(limbs[index] % half_base)
@@ -448,7 +448,7 @@ fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
     index += 1
   }
   while digits.length() > 0 && digits[digits.length() - 1] == 0
-    invariant forall position in 0..digits.length() => digits.model()[position] <= 4294967295
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
     decreases digits.length()
   {
     let _ = mut digits.pop()
@@ -1213,7 +1213,7 @@ impl Ordered for BigInteger {
 proof Ordered.agrees_with_equal for BigInteger {
   assert (first.magnitude == second.magnitude)
     == (first.magnitude.length() == second.magnitude.length()
-      && forall index in 0..first.magnitude.length() => first.magnitude.model()[index] == second.magnitude.model()[index])
+      && forall i in 0..first.magnitude.length() => first.magnitude.model()[i] == second.magnitude.model()[i])
   if first.magnitude.length() == second.magnitude.length() {
     limbs_order_agrees_with_equal(
       first.magnitude.model(),

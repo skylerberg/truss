@@ -1,4 +1,4 @@
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result == 2
 {
   let numbers: Array[Int64, 3] = [1, 2, 3]

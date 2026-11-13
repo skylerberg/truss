@@ -1,4 +1,4 @@
-fn second_example(rows: mut List[List[Int64]]) {
+fn g(rows: mut List[List[Int64]]) {
   for cell in mut rows[0] {
     cell = 0
   }

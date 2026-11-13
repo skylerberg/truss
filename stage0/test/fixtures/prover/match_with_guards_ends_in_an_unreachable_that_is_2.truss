@@ -1,7 +1,7 @@
-fn run_example(value: Int64) -> Int64 {
+fn f(value: Int64) -> Int64 {
   match value {
-    first_number if first_number > 0 => 1
-    first_number if first_number < 0 => 2
+    x if x > 0 => 1
+    x if x < 0 => 2
     _ => unreachable
   }
 }

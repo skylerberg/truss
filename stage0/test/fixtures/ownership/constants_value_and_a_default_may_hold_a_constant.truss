@@ -2,6 +2,6 @@ let first: List[Int64] = [1, 2]
 
 let both: List[List[Int64]] = [first, first]
 
-fn run_example(rows: List[List[Int64]] = [first]) -> USize {
+fn f(rows: List[List[Int64]] = [first]) -> USize {
   rows.length() + both.length()
 }

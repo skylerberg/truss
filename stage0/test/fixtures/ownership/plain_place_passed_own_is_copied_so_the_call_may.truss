@@ -1,5 +1,5 @@
 fn both(first: Int64, second: own Int64) {}
 
-fn run_example(count: Int64) {
+fn f(count: Int64) {
   both(count, second: count)
 }

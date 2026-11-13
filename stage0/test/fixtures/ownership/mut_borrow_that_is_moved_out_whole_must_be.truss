@@ -1,4 +1,4 @@
-fn run_example(holder: mut Holder) -> Holder {
+fn f(holder: mut Holder) -> Holder {
   let moved = own holder
   moved
 }

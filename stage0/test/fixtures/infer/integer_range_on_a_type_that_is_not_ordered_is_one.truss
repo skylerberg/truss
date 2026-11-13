@@ -1,4 +1,4 @@
-fn run_example(ready: Bool) -> Int64 {
+fn f(ready: Bool) -> Int64 {
   match ready {
     1..=2 => 1
     _ => 2

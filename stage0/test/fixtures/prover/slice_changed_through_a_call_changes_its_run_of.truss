@@ -1,11 +1,11 @@
 fn zero(part: mut Slice[Int64])
   ensures part.length() == old(part.length())
-  ensures forall step_index in 0..part.length() => part.model()[step_index] == 0
+  ensures forall i in 0..part.length() => part.model()[i] == 0
 {
   todo
 }
 
-fn run_example(items: mut List[Int64])
+fn f(items: mut List[Int64])
   requires items.length() >= 4
   ensures items[1] == 0
   ensures items[3] == old(items[3])

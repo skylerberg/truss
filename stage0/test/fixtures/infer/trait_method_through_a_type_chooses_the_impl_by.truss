@@ -1,3 +1,3 @@
-fn run_example(count: Int32) -> Int64 {
+fn f(count: Int32) -> Int64 {
   Int64.from(count)
 }

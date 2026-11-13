@@ -7,8 +7,8 @@ trait Ordered: Equal {
     self
   }
 
-  law transitive(first_value: Self, second_value: Self)
-    requires first_value <= second_value
+  law transitive(a: Self, b: Self)
+    requires a <= b
   {
     true
   }

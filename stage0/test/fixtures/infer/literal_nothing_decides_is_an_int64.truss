@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   var best = 0
   best += 1
 }

@@ -1,4 +1,4 @@
-fn run_example(first: mut Int64, second: mut Int64)
+fn f(first: mut Int64, second: mut Int64)
   requires first < 100 && second < 100
   ensures first == old(first) + 1 && second == old(second) + 1
   uses Tasks

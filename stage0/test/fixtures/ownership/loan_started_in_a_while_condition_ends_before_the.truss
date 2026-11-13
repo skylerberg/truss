@@ -1,4 +1,4 @@
-fn run_example(counter: mut Counter) {
+fn f(counter: mut Counter) {
   while counter.current() < 3 {
     mut counter.step()
   }

@@ -1,6 +1,6 @@
 type Box(value: Int64)
 
-fn run_example(count: UInt32) -> Int64 {
+fn f(count: UInt32) -> Int64 {
   var box = Box(value: 0)
   for _ in 0..count {
     box.value = 1

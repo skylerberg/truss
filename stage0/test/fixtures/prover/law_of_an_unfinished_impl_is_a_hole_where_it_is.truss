@@ -23,7 +23,7 @@ impl Sized for Box {
   }
 }
 
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result > 0
 {
   Box(size: 0).measure()

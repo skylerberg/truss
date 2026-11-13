@@ -1,0 +1,14 @@
+fn counted(counter: mut USize) -> List[USize] {
+  counter += 1
+  [1, 2, 3, 4]
+}
+
+test "once" {
+  var counter: USize = 0
+  assert counted(mut counter)[1..].length() == 3
+  assert counter == 1
+  assert counted(mut counter)[..=1].length() == 2
+  assert counter == 2
+  assert counted(mut counter)[..][3] == 4
+  assert counter == 3
+}

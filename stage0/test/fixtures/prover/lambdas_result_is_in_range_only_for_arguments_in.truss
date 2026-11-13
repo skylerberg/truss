@@ -1,6 +1,6 @@
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result == 1
 {
-  let same: (fn(Int64) -> Int64 cost time finite) = fn(first_number) { first_number }
+  let same: (fn(Int64) -> Int64 cost time finite) = fn(x) { x }
   same(0)
 }

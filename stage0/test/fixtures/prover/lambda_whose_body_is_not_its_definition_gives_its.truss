@@ -1,4 +1,4 @@
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result == 4
 {
   apply(fn(each) { var next = each

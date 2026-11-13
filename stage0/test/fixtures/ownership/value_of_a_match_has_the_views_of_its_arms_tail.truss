@@ -1,4 +1,4 @@
-fn run_example(items: mut List[Int64], pick: Option[USize]) -> USize {
+fn f(items: mut List[Int64], pick: Option[USize]) -> USize {
   let part = match pick {
     Some(count) => items[..count]
     None => items[..]

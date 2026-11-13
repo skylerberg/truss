@@ -1,4 +1,4 @@
-fn run_example(range: Span)
+fn f(range: Span)
   ensures range.low <= range.high
 {
 }

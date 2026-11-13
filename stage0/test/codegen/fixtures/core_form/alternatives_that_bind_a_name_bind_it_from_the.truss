@@ -7,9 +7,9 @@ type Shape =
 
 fn size(shape: Shape) -> Int64 {
   match shape {
-    Circle(radius: limit_count) | Square(side: limit_count, ..) => limit_count
-    Labelled(inner: limit_count, ..) | Named(count: limit_count, ..) if limit_count > 100 => 100
-    Labelled(inner: limit_count, ..) | Named(count: limit_count, ..) => limit_count
+    Circle(radius: n) | Square(side: n, ..) => n
+    Labelled(inner: n, ..) | Named(count: n, ..) if n > 100 => 100
+    Labelled(inner: n, ..) | Named(count: n, ..) => n
     Point => 0
   }
 }

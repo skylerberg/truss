@@ -1,6 +1,6 @@
 let limit: Int64 = 10
 
-fn second_example(count: Int64, name: String) -> Int64 {
+fn g(count: Int64, name: String) -> Int64 {
   let size = match count {
     limit => 1
     0..5 => 2

@@ -1,3 +1,3 @@
-type Point(first_number: Int64)
+type Point(x: Int64)
 
-fn run_example(run: (fn() cost calls(Point) <= 1)) {}
+fn f(run: (fn() cost calls(Point) <= 1)) {}

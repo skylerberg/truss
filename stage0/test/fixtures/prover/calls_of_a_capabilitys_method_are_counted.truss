@@ -2,7 +2,7 @@ capability Meter {
   fn tick()
 }
 
-fn run_example(items: List[Int64])
+fn f(items: List[Int64])
   uses Meter
   cost calls(Meter.tick) == items.length()
 {

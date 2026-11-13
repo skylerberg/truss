@@ -5,7 +5,7 @@ fn checked() -> Bool
   todo
 }
 
-fn run_example()
+fn f()
   requires checked()
 {
 }

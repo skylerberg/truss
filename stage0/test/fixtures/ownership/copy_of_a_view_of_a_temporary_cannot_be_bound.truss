@@ -1,4 +1,4 @@
-fn run_example() -> USize {
+fn f() -> USize {
   let part = make().slice().copy()
   part.length()
 }

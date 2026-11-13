@@ -5,7 +5,7 @@ fn count(items: Slice[Int64]) -> USize
   items.length()
 }
 
-fn run_example(items: List[Int64]) -> USize
+fn f(items: List[Int64]) -> USize
   ensures result == items.length()
 {
   count(items)

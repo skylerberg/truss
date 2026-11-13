@@ -1,3 +1,3 @@
-fn second_example() -> Set[Int64] {
+fn g() -> Set[Int64] {
   []
 }

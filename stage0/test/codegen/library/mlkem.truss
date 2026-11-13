@@ -1,0 +1,111 @@
+use standard::cryptography
+use standard::hex
+use standard::random
+
+fn hex_of(bytes: Slice[UInt8]) -> String {
+  hex::encode(bytes)
+}
+
+fn digest_of(bytes: Slice[UInt8]) -> String {
+  let digest = cryptography::sha256(bytes)
+  hex::encode(digest[..])
+}
+
+fn same(decapsulated: Option[cryptography::SecretKey], expected: cryptography::SecretKey) -> Bool {
+  match decapsulated {
+    Some(key) => key.expose() == expected.expose()
+    None => false
+  }
+}
+
+fn seed_of(first: UInt8, step: UInt8) -> Array[UInt8, 64] {
+  var seed: Array[UInt8, 64] = Array.filled(0)
+  var value = first
+  let width: USize = 64
+  for index in 0..width {
+    seed[index] = value
+    value = value.wrapping_add(step)
+  }
+  seed
+}
+
+fn message_of(first: UInt8, step: UInt8) -> Array[UInt8, 32] {
+  var message: Array[UInt8, 32] = Array.filled(0)
+  var value = first
+  let width: USize = 32
+  for index in 0..width {
+    message[index] = value
+    value = value.wrapping_add(step)
+  }
+  message
+}
+
+test "SHA-3 and SHAKE give the digests of FIPS 202" {
+  let empty: List[UInt8] = []
+  let sha3_empty = cryptography::sha3_256(empty)
+  assert hex_of(sha3_empty[..]) == "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
+  let sha3_abc = cryptography::sha3_256("abc".bytes())
+  assert hex_of(sha3_abc[..]) == "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"
+  let sha3_512_abc = cryptography::sha3_512("abc".bytes())
+  assert hex_of(sha3_512_abc[..])
+    == "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"
+  let long: List[UInt8] = List.filled(97, count: 200)
+  let sha3_long = cryptography::sha3_256(long)
+  assert hex_of(sha3_long[..]) == "cce34485baf2bf2aca99b94833892a4f52896d3d153f7b840cc4f9fe695f1387"
+  let shake128 = cryptography::shake128("abc".bytes(), length: 64)
+  assert hex_of(shake128)
+    == "5881092dd818bf5cf8a3ddb793fbcba74097d5c526a6d35f97b83351940f2cc844c50af32acd3f2cdd066568706f509bc1bdde58295dae3f891a9a0fca578378"
+  let shake256 = cryptography::shake256("abc".bytes(), length: 200)
+  assert shake256.length() == 200 && digest_of(shake256) == "0afce65607381104e0f97c2c25159cee64dc63543cacd75165a3a10dd4635bc1"
+}
+
+test "ML-KEM-768 keys, ciphertexts, and shared secrets match OpenSSL's for a seed" {
+  let key = cryptography::DecapsulationKey.from_seed(seed_of(0, step: 1))
+  let public_key = key.encapsulation_key()
+  assert public_key.bytes().length() == 1184 && key.bytes().length() == 2400
+  assert digest_of(public_key.bytes()) == "0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9"
+  assert digest_of(key.bytes()) == "dac268bde6a8dd238e9887117d6b664e7a7a9350ad6b7c08a948e504809572a5"
+  let sealed = public_key.encapsulate_with(message_of(100, step: 1))
+  assert sealed.ciphertext.length() == 1088
+  assert digest_of(sealed.ciphertext) == "57fe559432dbb3c5547c73f155820622f7efdd532e4330360a36ebf7d2ddec55"
+  let shared = sealed.shared.expose()
+  assert hex_of(shared[..]) == "c5a74110c158acbaf9c01deb86fa6cc10c14533feda54bec1fdd000d61f07e4e"
+  assert same(key.decapsulate(sealed.ciphertext), expected: sealed.shared)
+  var tampered = sealed.ciphertext.copy()
+  tampered[1087] = tampered[1087] ^ 1
+  match key.decapsulate(tampered) {
+    Some(rejected) => {
+      let bytes = rejected.expose()
+      assert hex_of(bytes[..]) == "450f098e8b4a904272b398ab217b3c536e7cea405a6f9a01c04ee76a0fa35320"
+    }
+    None => assert false
+  }
+  assert key.decapsulate(tampered[0..100]) is None
+}
+
+test "ML-KEM-768 matches a second seed, and keys are checked when read" {
+  let key = cryptography::DecapsulationKey.from_seed(seed_of(7, step: 0))
+  let public_key = key.encapsulation_key()
+  assert digest_of(public_key.bytes()) == "c12e9e39db6758fc2ba63a638785b04f8efe3d7df23ba09803b4e39ba2fbc707"
+  let sealed = public_key.encapsulate_with(message_of(9, step: 0))
+  assert digest_of(sealed.ciphertext) == "c0b6d6d88bc92832875f4056378739c46bffff32c369aa2e66b3ea8552784243"
+  let shared = sealed.shared.expose()
+  assert hex_of(shared[..]) == "afcf18dfd6b710a09b5cf591d0eb8229d83aa10904934a3ca60a52da5ff36b96"
+  assert cryptography::EncapsulationKey.from_bytes(public_key.bytes()) == Some(public_key.copy())
+  var out_of_range = public_key.bytes().to_list()
+  out_of_range[0] = 255
+  out_of_range[1] = 255
+  assert cryptography::EncapsulationKey.from_bytes(out_of_range) is None
+  assert cryptography::DecapsulationKey.from_bytes(key.bytes()) is Some(_)
+  var wrong_hash = key.bytes().to_list()
+  wrong_hash[2340] = wrong_hash[2340] ^ 1
+  assert cryptography::DecapsulationKey.from_bytes(wrong_hash) is None
+}
+
+test "a generated key decapsulates what its encapsulation key encapsulates" {
+  provide random::SeededRandom.new(5) {
+    let key = cryptography::DecapsulationKey.generate()
+    let sealed = key.encapsulation_key().encapsulate()
+    assert same(key.decapsulate(sealed.ciphertext), expected: sealed.shared)
+  }
+}

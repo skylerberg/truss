@@ -324,14 +324,14 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  ensures forall position in from..result => text.byte(position) >= 48 && text.byte(position) <= 57
+  ensures forall i in from..result => text.byte(i) >= 48 && text.byte(i) <= 57
   cost time O(result - from)
 {
   var index = from
   while index < text.length() && text.byte(index) >= 48 && text.byte(index) <= 57
     invariant from <= index
     invariant index <= text.length()
-    invariant forall position in from..index => text.byte(position) >= 48 && text.byte(position) <= 57
+    invariant forall i in from..index => text.byte(i) >= 48 && text.byte(i) <= 57
     decreases text.length() - index
     cost time O(index - from)
   {
@@ -343,7 +343,7 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
 internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[UInt64]
   requires from <= to
   requires to <= text.length()
-  requires forall position in from..to => text.byte(position) >= 48 && text.byte(position) <= 57
+  requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
   cost time O(to - from)
 {
   var value: UInt64 = 0
@@ -369,7 +369,7 @@ internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[U
 internal fn parse_fraction(text: StringSlice, from: USize, to: USize, unit: UInt64) -> UInt64
   requires from <= to
   requires to <= text.length()
-  requires forall position in from..to => text.byte(position) >= 48 && text.byte(position) <= 57
+  requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
   requires 0 < unit && unit <= 3600000000000
   ensures result < unit
   cost time O(to - from)

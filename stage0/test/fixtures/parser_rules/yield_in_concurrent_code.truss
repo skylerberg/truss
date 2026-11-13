@@ -1,4 +1,4 @@
-fn Payload.each(self) yields Int64 {
+fn T.each(self) yields Int64 {
   concurrent {
     yield 1
   }

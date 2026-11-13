@@ -1,4 +1,4 @@
-fn second_example(count: Int64) -> Bool
+fn g(count: Int64) -> Bool
   ensures result == (forall value: Int64 => value + 0 == value)
   ensures old(count) == count
 {

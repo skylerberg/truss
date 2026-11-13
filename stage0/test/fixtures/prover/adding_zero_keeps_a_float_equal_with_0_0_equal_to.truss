@@ -1,4 +1,4 @@
-fn run_example(value: Float64) -> Bool
+fn f(value: Float64) -> Bool
   ensures result
 {
   value + 0.0 == value

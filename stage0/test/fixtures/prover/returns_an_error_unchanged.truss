@@ -1,4 +1,4 @@
-fn run_example(value: Result[Int64, Bool]) -> Result[Int64, Bool]
+fn f(value: Result[Int64, Bool]) -> Result[Int64, Bool]
   ensures match value {
     Err(error) => result == Err(error)
     Ok(_) => true

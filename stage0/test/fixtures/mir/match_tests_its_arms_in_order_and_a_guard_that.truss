@@ -1,6 +1,6 @@
-fn second_example(value: Option[Int64]) -> Int64 {
+fn g(value: Option[Int64]) -> Int64 {
   match value {
-    Some(first_number) if first_number > 0 => first_number
+    Some(x) if x > 0 => x
     Some(_) | None => 0
   }
 }

@@ -1,4 +1,4 @@
 theorem low_byte(items: List[UInt32])
-  ensures forall step_index in 0..items.length() => (items[step_index] & 255) <= 255
+  ensures forall i in 0..items.length() => (items[i] & 255) <= 255
 {
 }

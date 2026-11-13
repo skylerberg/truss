@@ -1,5 +1,5 @@
-fn Payload.each(self) yields Int64 {
-  concurrent for first_number in text_value {
-    yield first_number
+fn T.each(self) yields Int64 {
+  concurrent for x in s {
+    yield x
   }
 }

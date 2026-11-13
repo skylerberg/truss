@@ -1,4 +1,4 @@
-fn run_example(value: Int8) -> Int8
+fn f(value: Int8) -> Int8
   ensures result == -1
 {
   proof {

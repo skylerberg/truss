@@ -5,7 +5,7 @@ fn bump(count: mut Int64)
   count += 1
 }
 
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result == 5
 {
   var value: Int64 = 3

@@ -3,7 +3,7 @@ fn greetings() yields String {
   yield "hi"
 }
 
-fn run_example() -> Option[String] {
+fn f() -> Option[String] {
   var each = greetings()
   mut each.next()
 }

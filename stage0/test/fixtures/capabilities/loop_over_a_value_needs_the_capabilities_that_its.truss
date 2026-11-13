@@ -6,7 +6,7 @@ fn Ticker.each(self) yields Instant
   yield Clock.now()
 }
 
-fn run_example(ticker: Ticker) {
+fn f(ticker: Ticker) {
   for tick in ticker {
     let _ = tick
   }

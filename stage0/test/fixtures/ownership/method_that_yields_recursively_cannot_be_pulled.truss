@@ -17,7 +17,7 @@ fn Tree.each(self) yields Int64 {
   }
 }
 
-fn run_example(tree: Tree) -> Option[Int64] {
+fn f(tree: Tree) -> Option[Int64] {
   var cursor = tree.each()
   mut cursor.next()
 }

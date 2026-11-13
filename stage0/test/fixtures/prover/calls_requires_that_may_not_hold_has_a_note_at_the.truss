@@ -5,6 +5,6 @@ fn halved(count: Int64) -> Int64
   count / 2
 }
 
-fn run_example(value: Int64) -> Int64 {
+fn f(value: Int64) -> Int64 {
   halved(value)
 }

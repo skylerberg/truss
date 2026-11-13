@@ -1,4 +1,4 @@
-fn run_example(items: List[UInt32])
+fn f(items: List[UInt32])
   cost time O(items.length())
 {
   for item in items {

@@ -1,4 +1,4 @@
-fn run_example() -> Bool
+fn f() -> Bool
   uses Dice
   ensures result
 {

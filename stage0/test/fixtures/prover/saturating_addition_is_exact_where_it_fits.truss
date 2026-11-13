@@ -1,4 +1,4 @@
-fn run_example(first: Int8, second: Int8) -> Int8
+fn f(first: Int8, second: Int8) -> Int8
   requires first + second <= Int8.maximum
   requires first + second >= Int8.minimum
   ensures result == first + second

@@ -1,9 +1,9 @@
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result == 5
 {
-  var first_number: Int64 = 0
+  var x: Int64 = 0
   proof {
-    first_number = 5
+    x = 5
   }
-  first_number
+  x
 }

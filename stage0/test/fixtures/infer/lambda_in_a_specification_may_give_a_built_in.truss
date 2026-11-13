@@ -1,4 +1,4 @@
-fn run_example(rows: List[List[Int64]])
+fn f(rows: List[List[Int64]])
   requires rows.model().sum(fn(cells) { cells.length() }) > 0
 {
 }

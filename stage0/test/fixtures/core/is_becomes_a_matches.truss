@@ -1,4 +1,4 @@
-fn second_example(shape: Shape) -> Int64 {
+fn g(shape: Shape) -> Int64 {
   if shape is Circle(radius) { return radius }
   0
 }

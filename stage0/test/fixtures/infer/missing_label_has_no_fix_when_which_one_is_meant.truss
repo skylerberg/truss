@@ -1,5 +1,5 @@
-fn second_example(first_value: Int64, second_value: Int64, third_value: Int64) {}
+fn g(a: Int64, b: Int64, c: Int64) {}
 
-fn run_example() {
-  second_example(1, 2, 3)
+fn f() {
+  g(1, 2, 3)
 }

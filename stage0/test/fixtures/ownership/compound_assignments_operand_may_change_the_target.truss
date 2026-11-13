@@ -3,6 +3,6 @@ fn grow(bag: mut Bag) -> Bag {
   Bag(items: [])
 }
 
-fn run_example(bag: mut Bag) {
+fn f(bag: mut Bag) {
   bag += grow(mut bag)
 }

@@ -1,5 +1,5 @@
 use standard::intrinsic
 
-fn run_example(left: Int64) -> Int64 {
+fn f(left: Int64) -> Int64 {
   intrinsic::add(left, left)
 }

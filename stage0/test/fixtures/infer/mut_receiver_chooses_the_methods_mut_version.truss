@@ -1,4 +1,4 @@
-fn run_example() {
+fn f() {
   var items: List[Int64] = []
   mut items.push(1)
 }
