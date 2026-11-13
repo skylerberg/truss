@@ -272,7 +272,7 @@ let sync =
   command "sync" ~doc:"Update the project's session from its files, and do nothing else."
     Term.(
       const (fun () ->
-          ignore (Project.current ());
+          ignore (Command_packages.current ());
           Outcome.Exit 0)
       $ common)
 
@@ -379,7 +379,7 @@ let evaluate arguments =
     | exception Report.Errors report ->
         if Output.json () then Json.print (Report.document report []) else Report.print report;
         Outcome.Exit 1
-    | exception Project.Cannot_run message ->
+    | exception Outcome.Cannot_run message ->
         Output.eprint_line message;
         Outcome.Exit 2
     | exception Compiler_bug.Bug bug ->

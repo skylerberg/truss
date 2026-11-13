@@ -29,8 +29,8 @@ let declarations context packages =
     packages
 
 (* Each definition that changed, was added, or was removed, in order. *)
-let changes (project : Project.t) base =
-  let mine = project.session in
+let changes session base =
+  let mine = session in
   let changed = Hashtbl.create 32 in
   let order = ref [] in
   List.iter
@@ -42,7 +42,7 @@ let changes (project : Project.t) base =
         Hashtbl.replace changed path (if List.mem part parts then parts else parts @ [ part ])
       end)
     (Database.changes mine base);
-  let old_context = Database.context base and context = project.context in
+  let old_context = Database.context base and context = Database.context session in
   let paths context session =
     List.map
       (fun (declaration : Names.declaration) -> declaration.path)
@@ -104,7 +104,7 @@ let changes (project : Project.t) base =
    key differs, each with whether a result is cached for its current key.
    A test's key is the hash of the code it can reach. Computing keys lowers
    code but compiles nothing, so it needs no C compiler. *)
-let tests_changed (project : Project.t) base =
+let tests_changed session base =
   let keys context session =
     Compile.test_keys
       (Compiler.lowering_only session context)
@@ -113,7 +113,7 @@ let tests_changed (project : Project.t) base =
            match declaration.path with Test _ -> Some declaration.path | _ -> None)
          (declarations context (Database.packages session)))
   in
-  let mine = keys project.context project.session in
+  let mine = keys (Database.context session) session in
   let theirs = keys (Database.context base) base in
   let results = Compiler.results () in
   List.filter_map
@@ -166,20 +166,19 @@ let print_change change =
             (List.map (fun (edge : Graph_types.edge) -> Path.show edge.dependent) change.dependents)))
 
 let run ~base =
-  let project = Project.current () in
-  let report = Report.gather project in
-  let session = project.session in
+  let session, packages = Command_packages.current () in
+  let report = Report.gather session packages in
   match Database.base_commit session base with
   | None ->
-      Project.cannot_run
+      Outcome.cannot_run
         "No base commit: name one with --base, or work in a git worktree with a default branch."
   | Some commit -> (
       match Database.open_commit_of session commit with
-      | Error message -> Project.cannot_run "%s" message
+      | Error message -> Outcome.cannot_run "%s" message
       | Ok base_session ->
-          let changes = changes project base_session in
+          let changes = changes session base_session in
           (* Lowering requires code without diagnostics. *)
-          let tests = if Report.clean report then tests_changed project base_session else [] in
+          let tests = if Report.clean report then tests_changed session base_session else [] in
           if Output.json () then
             Json.print
               (Report.document report

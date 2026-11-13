@@ -8,10 +8,10 @@ module Lock = Registry.Lock
 
 (* Every [todo] and [echo] of the package, with its position, in order of
    position in each file. A type defined as [todo] is at its name. *)
-let unfinished (project : Project.t) =
+let unfinished session packages =
   List.concat_map
     (fun file ->
-      let source = Project.source project file in
+      let source = Command_packages.source session packages file in
       List.concat_map
         (fun (item : Syntax.definition Syntax.item) ->
           List.map
@@ -24,13 +24,13 @@ let unfinished (project : Project.t) =
                 line,
                 column ))
             (Inspect.unfinished item.value))
-        (Project.parsed project file).definitions)
-    (Project.files project)
+        (Query.demand (Database.context session) Workspace.file file).definitions)
+    (Command_packages.files session packages)
 
 (* The files to publish: the package's own, with its published lock file
    in place of the project's. *)
-let files (package : Project.package) (record : Lock.t) =
-  List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.files package.directory)
+let files directory (record : Lock.t) =
+  List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.files directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
 (* The published lock file's entries: each registry package that the
@@ -39,8 +39,7 @@ let files (package : Project.package) (record : Lock.t) =
    files match a version the registry holds, which is then its version. Any
    other project package is a problem, since a package may depend only on
    registry packages. *)
-let record (project : Project.t) registry (package : Project.package) =
-  let session = project.session in
+let record session registry (package : Path.package) =
   let root = Database.root session in
   let built = Database.registry_packages session in
   let directory_of name =
@@ -54,7 +53,7 @@ let record (project : Project.t) registry (package : Project.package) =
     List.filter_map
       (fun (dependency : Manifest.dependency) ->
         if (not code) || List.mem dependency.package used then Some dependency.package else None)
-      (Query.demand project.context Workspace.dependencies name)
+      (Query.demand (Database.context session) Workspace.dependencies name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =
@@ -89,24 +88,24 @@ let record (project : Project.t) registry (package : Project.package) =
     List.iter visit (dependencies ~code:true name);
     List.sort (fun (left : Lock.entry) right -> Path.compare_package left.name right.name) !entries
   and published_as name directory =
-    let hash = Registry.Content.hash (files { name; directory } (closure name)) in
+    let hash = Registry.Content.hash (files directory (closure name)) in
     List.find_map
       (fun (version, version_hash) -> if version_hash = hash then Some (version, hash) else None)
       (Registry.Index.versions registry name)
   in
-  let entries = closure package.name in
+  let entries = closure package in
   (entries, List.sort_uniq compare !problems)
 
 (* The package's failing tests that have no [uses], each with its
    outcome. *)
-let failed_tests (project : Project.t) =
+let failed_tests session packages =
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
-        match Query.demand project.context Interface.Environment.interface test.path with
+        match Query.demand (Database.context session) Interface.Environment.interface test.path with
         | Some (Test_interface uses) -> uses = Types.no_capabilities
         | _ -> false)
-      (Test_command.select project ~paths:[] ~match_:None)
+      (Test_command.select session packages ~paths:[] ~match_:None)
   in
   List.concat
     (List.map2
@@ -117,7 +116,7 @@ let failed_tests (project : Project.t) =
              Printf.sprintf "%s: %s" (Test_command.label test) (Compile.show_outcome record.outcome);
            ])
        tests
-       (Test_command.run_tests project tests))
+       (Test_command.run_tests session packages tests))
 
 (* The name to publish an incompatible release under: the name with the
    next number after [_v]. *)
@@ -140,12 +139,12 @@ type outcome =
   | Unchanged of Version.t
   | Refused of string list
 
-let decide (project : Project.t) registry (package : Project.package) =
-  let name = package.name in
-  match record project registry package with
+let decide session registry (package : Path.package) =
+  let name = package in
+  match record session registry package with
   | _, (_ :: _ as problems) -> Refused problems
   | record, [] -> (
-      let files = files package record in
+      let files = files (Command_packages.directory session package) record in
       let hash = Registry.Content.hash files in
       match Registry.Index.newest registry name with
       | None -> Published { version = Version.first name; files; grows = [] }
@@ -155,14 +154,14 @@ let decide (project : Project.t) registry (package : Project.package) =
           | Error message -> Refused [ message ]
           | Ok published ->
               let changes, narrowed =
-                Compatibility.compare ~before:(Database.context published) ~after:project.context
-                  name
+                Compatibility.compare ~before:(Database.context published)
+                  ~after:(Database.context session) name
               in
               let breaks =
                 List.map
                   (fun (path, description) ->
                     let was = Signatures.of_path (Database.context published) path
-                    and now = Signatures.of_path project.context path in
+                    and now = Signatures.of_path (Database.context session) path in
                     String.concat ""
                       (Printf.sprintf "%s %s." (Path.show path) description
                       ::
@@ -205,21 +204,20 @@ let decide (project : Project.t) registry (package : Project.package) =
 
 let run () =
   let json = Output.json () in
-  let project = Project.current () in
-  let package = Project.package project in
-  let name = package.name in
+  let session, packages = Command_packages.current () in
+  let name = Command_packages.one packages in
   if name.owner = None then
-    Project.cannot_run
+    Outcome.cannot_run
       "`%s` has no owner in its name, which a published package's has, such as `acme::%s`."
       name.name name.name;
   let registry =
     match Registry.Index.current () with
     | Some registry -> registry
     | None ->
-        Project.cannot_run "No registry is set. Set `%s` to the registry's directory."
+        Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
           Registry.Index.variable
   in
-  let report = Report.gather ~proofs:true project in
+  let report = Report.gather ~proofs:true session packages in
   let refuse sentences =
     if json then
       Json.print
@@ -229,7 +227,7 @@ let run () =
     raise (Outcome.Stop 1)
   in
   if not (Report.clean report) then raise (Report.Errors report);
-  (match unfinished project with
+  (match unfinished session packages with
   | [] -> ()
   | unfinished_code ->
       refuse
@@ -238,10 +236,10 @@ let run () =
              Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
            unfinished_code
         @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
-  (match failed_tests project with
+  (match failed_tests session packages with
   | [] -> ()
   | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
-  match decide project registry package with
+  match decide session registry name with
   | Refused sentences -> refuse sentences
   | Unchanged version ->
       if json then

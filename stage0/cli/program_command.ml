@@ -5,9 +5,9 @@
 
 (* A package's program starts at the [main] of its root module, the
    package's top directory. *)
-let main_of (project : Project.t) (package : Project.package) =
-  let module_ : Path.module_ = { package = package.name; modules = [] } in
-  if not (List.mem module_ (Project.modules project)) then None
+let main_of session packages (package : Path.package) =
+  let module_ : Path.module_ = { package; modules = [] } in
+  if not (List.mem module_ (Command_packages.modules session packages)) then None
   else
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
@@ -15,33 +15,33 @@ let main_of (project : Project.t) (package : Project.package) =
         | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
             Some declaration.path
         | _ -> None)
-      (Query.demand project.context Resolve.Names.declarations module_)
+      (Query.demand (Database.context session) Resolve.Names.declarations module_)
 
-let mains (project : Project.t) = List.filter_map (main_of project) project.packages
+let mains session packages = List.filter_map (main_of session packages) packages
 
 (* The package's [main]. A package without one is a library, which is not
    an error in its code, so the command exits with 2. *)
-let main (project : Project.t) =
-  let package = Project.package project in
-  match main_of project package with
+let main session packages =
+  let package = Command_packages.one packages in
+  match main_of session packages package with
   | Some main -> main
   | None ->
-      Project.cannot_run
+      Outcome.cannot_run
         "The package %s has no `main` in its root module, a file in its top directory, so it has \
          no program."
-        (Path.show_package package.name)
+        (Path.show_package package)
 
 (* Rejects a program whose [main] can reach a [todo] or an [echo] in code,
    or a hole in a proof, and lists each in order of position with the
    definitions from [main] to the one that holds it. *)
-let refuse_unshippable project compile main =
+let refuse_unshippable session packages compile main =
   let in_code =
     match Compile.unshippable compile ~main with
-    | Error message -> Project.cannot_run "%s" message
+    | Error message -> Outcome.cannot_run "%s" message
     | Ok unshippable ->
         List.map
           (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
-            ( Project.shown_workspace_path project file,
+            ( Command_packages.shown_workspace_path session packages file,
               line,
               column,
               (failure :> [ `Todo | `Echo | `Proof_hole ]),
@@ -51,7 +51,7 @@ let refuse_unshippable project compile main =
   let in_proofs =
     List.map
       (fun (definition, file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-      (Proofs.holes_reached project main)
+      (Proofs.holes_reached session packages main)
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
@@ -98,33 +98,34 @@ let refuse_unshippable project compile main =
    code. A development build skips the prover and keeps the checks; a
    [todo] it reaches stops the program, and an [echo] writes to standard
    error. *)
-let build_program ?output (project : Project.t) (build : Compiler.build) =
+let build_program ?output session packages (build : Compiler.build) =
   let is_release = build = Release in
-  let report = Report.gather ~proofs:is_release project in
+  let report = Report.gather ~proofs:is_release session packages in
   if not (Report.clean report) then raise (Report.Errors report);
-  let main = main project in
-  let compile = Compiler.create ~checks:(not is_release) project build in
-  if is_release then refuse_unshippable project compile main;
+  let main = main session packages in
+  let compile = Compiler.create ~checks:(not is_release) session packages build in
+  if is_release then refuse_unshippable session packages compile main;
   let output = Option.value output ~default:(Compile.fresh_program compile) in
   match Compile.build_program compile ~main ~output with
-  | Error message -> Project.cannot_run "%s" message
+  | Error message -> Outcome.cannot_run "%s" message
   | Ok () -> output
 
 (* [truss run]: builds the command's one package, and returns the program
    for the client to run on its terminal with the arguments, so it can
    prompt and read input. *)
 let run ~release ~arguments =
-  let program = build_program (Project.current ()) (if release then Release else Development) in
+  let session, packages = Command_packages.current () in
+  let program = build_program session packages (if release then Release else Development) in
   Outcome.Run_program { program; arguments }
 
 (* [truss build]: builds for release to [output], or else to a file named
    after the package in the current directory. *)
 let build ~output =
-  let project = Project.current () in
-  let package = Project.package project in
-  let output = Project.normalize (Option.value output ~default:(Path.show_package package.name)) in
-  ignore (build_program project Release ~output);
+  let session, packages = Command_packages.current () in
+  let package = Command_packages.one packages in
+  let output = Shown_path.normalize (Option.value output ~default:(Path.show_package package)) in
+  ignore (build_program session packages Release ~output);
   if Output.json () then
-    Json.print (Json.document ~diagnostics:[] [ ("output", Json.String (Project.shown output)) ])
-  else Output.printf "Built %s.\n" (Project.shown output);
+    Json.print (Json.document ~diagnostics:[] [ ("output", Json.String (Shown_path.shown output)) ])
+  else Output.printf "Built %s.\n" (Shown_path.shown output);
   Outcome.Exit 0

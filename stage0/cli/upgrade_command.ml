@@ -18,7 +18,7 @@ let wanted text =
     match Manifest.parse_name written with
     | Some ({ owner = Some _; _ } as name) -> name
     | _ ->
-        Project.cannot_run
+        Outcome.cannot_run
           "`%s` is not a registry package's name, which is an owner and a name, such as \
            `acme::geometry`."
           written
@@ -29,7 +29,7 @@ let wanted text =
         match Version.parse version with
         | Some version -> version
         | None ->
-            Project.cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
+            Outcome.cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
               version)
       version )
 
@@ -120,9 +120,9 @@ type signature = {
    trial session with those versions before any file is written: each
    changed signature with its dependents in the project, and the
    diagnostics that the project would have and does not have now. *)
-let consequences (project : Project.t) text =
-  let trial = Database.trial project.session [ ("truss.lock", Some text) ] in
-  let own = List.map snd (Database.packages project.session) in
+let consequences session text =
+  let trial = Database.trial session [ ("truss.lock", Some text) ] in
+  let own = List.map snd (Database.packages session) in
   let ours path = List.mem (Path.package path) own in
   let changed =
     List.sort_uniq Path.compare
@@ -133,7 +133,7 @@ let consequences (project : Project.t) text =
              when difference = Changed && List.mem part Signatures.parts && not (ours path) ->
                Some path
            | _ -> None)
-         (Database.changes trial project.session))
+         (Database.changes trial session))
   in
   let edges = Database.dependents trial changed in
   let signatures =
@@ -152,7 +152,7 @@ let consequences (project : Project.t) text =
             Some
               {
                 path;
-                before = Signatures.of_path project.context path;
+                before = Signatures.of_path (Database.context session) path;
                 after = Signatures.of_path (Database.context trial) path;
                 dependents;
               })
@@ -168,7 +168,7 @@ let consequences (project : Project.t) text =
             (Database.diagnostics session file))
         (List.concat_map (Database.package_files session) own)
   in
-  let now = diagnostics project.session in
+  let now = diagnostics session in
   (signatures, List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial))
 
 let report ~lock ~signatures ~broken =
@@ -217,13 +217,13 @@ let report ~lock ~signatures ~broken =
     end
   end
 
-let lock_file (project : Project.t) = Filename.concat (Database.root project.session) "truss.lock"
+let lock_file session = Filename.concat (Database.root session) "truss.lock"
 
 let run ~names =
-  let project = Project.current () in
+  let session, _ = Command_packages.current () in
   let set = List.map wanted names in
-  match Database.plan_lock project.session ~set ~all:(names = []) with
-  | Error message -> Project.cannot_run "%s" message
+  match Database.plan_lock session ~set ~all:(names = []) with
+  | Error message -> Outcome.cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
       if lock = [] then begin
@@ -233,9 +233,9 @@ let run ~names =
         0
       end
       else begin
-        let signatures, broken = consequences project plan.text in
-        Project.write_file (lock_file project) plan.text;
-        Project.reload project;
+        let signatures, broken = consequences session plan.text in
+        Command_packages.write_file (lock_file session) plan.text;
+        Database.refresh session;
         report ~lock ~signatures ~broken;
         if broken = [] then 0 else 1
       end

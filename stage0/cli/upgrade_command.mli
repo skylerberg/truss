@@ -19,5 +19,5 @@ type signature = {
 }
 
 val report : lock:change list -> signatures:signature list -> broken:string list -> unit
-val lock_file : Project.t -> string
+val lock_file : Database.session -> string
 val run : names:string list -> int
