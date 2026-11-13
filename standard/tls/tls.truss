@@ -5,6 +5,7 @@ use standard::map
 use standard::network
 use standard::intrinsic
 use standard::streams
+use standard::tasks
 use standard::x509
 
 public type Error =
@@ -277,35 +278,38 @@ public type ServerConfig(chain: List[x509::Certificate], key: x509::PrivateKey, 
 
 type Message(kind: UInt8, body: List[UInt8], raw: List[UInt8])
 
-type Wire[Stream: streams::Reader + streams::Writer](
-  reader: streams::BufferedReader[Stream],
+type Wire[Stream: streams::Duplex](
+  stream: Stream,
+  raw: List[UInt8],
   receiving: Option[Keys],
   sending: Option[Keys],
   buffered: List[UInt8],
   transcript: List[UInt8],
 )
 
-fn read_exactly[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream], count: USize) -> Result[List[UInt8], Error]
-  uses Handles
+fn read_exactly[Stream: streams::Duplex](wire: mut Wire[Stream], count: USize) -> Result[List[UInt8], Error]
+  uses Handles, Tasks
   ensures !(result is Ok(bytes) && bytes.length() != count)
 {
-  var bytes: List[UInt8] = []
-  while bytes.length() < count
-    invariant bytes.length() <= count
-  {
-    match mut wire.reader.read(mut bytes, limit: count - bytes.length()) {
+  while wire.raw.length() < count {
+    match wire.stream.receive(mut wire.raw, limit: 16709) {
       Ok(0) => return Err(Error.System(error: SystemError.UnexpectedEnd))
       Ok(_) => {}
       Err(error) => return Err(Error.System(error: error))
     }
+  }
+  let rest = mut wire.raw.split_off(count)
+  let bytes = map::exchange(mut wire.raw, value: own rest)
+  if bytes.length() != count {
+    return Err(protocol_error("a record that ends early"))
   }
   Ok(own bytes)
 }
 
 type Record(content_type: UInt8, content: List[UInt8])
 
-fn read_record[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream]) -> Result[Record, Error]
-  uses Handles
+fn read_record[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Record, Error]
+  uses Handles, Tasks
 {
   let header = read_exactly(mut wire, count: 5)?
   let length = intrinsic::convert[UInt8, USize](header[3]) * 256 + intrinsic::convert[UInt8, USize](header[4])
@@ -345,8 +349,8 @@ fn alert_of(content: Slice[UInt8]) -> Error {
   }
 }
 
-fn write_record[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, Error]
-  uses Handles
+fn write_record[Stream: streams::Duplex](wire: mut Wire[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, Error]
+  uses Handles, Tasks
 {
   var bytes: List[UInt8] = []
   match mut wire.sending {
@@ -366,12 +370,11 @@ fn write_record[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream
       mut bytes.append_slice(content)
     }
   }
-  system(mut wire.reader.source().write_all(bytes.slice()))?
-  system(mut wire.reader.source().flush())
+  system(wire.stream.send_all(bytes.slice()))
 }
 
-fn read_message[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream]) -> Result[Message, Error]
-  uses Handles
+fn read_message[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Message, Error]
+  uses Handles, Tasks
 {
   while true {
     if wire.buffered.length() >= 4 {
@@ -397,8 +400,8 @@ fn read_message[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream
   }
 }
 
-fn write_message[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream], kind: UInt8, body: Slice[UInt8]) -> Result[Unit, Error]
-  uses Handles
+fn write_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8, body: Slice[UInt8]) -> Result[Unit, Error]
+  uses Handles, Tasks
 {
   var message: List[UInt8] = [kind]
   push_vector24(mut message, content: body)
@@ -725,31 +728,76 @@ fn finished_data(function: cryptography::HashFunction, base: Slice[UInt8], trans
   keyed_hash(function, key: key.slice(), message: digest.slice())
 }
 
-public opaque type Connection[Stream: streams::Reader + streams::Writer](
-  wire: Wire[Stream],
-  suite: Suite,
-  receiving_secret: List[UInt8],
-  sending_secret: List[UInt8],
+type Incoming(
+  keys: Keys,
+  secret: List[UInt8],
+  raw: List[UInt8],
   unread: List[UInt8],
-  unread_start: USize,
-  protocol: Option[String],
-  peer: List[x509::Certificate],
-  closed: Bool,
+  handshake: List[UInt8],
+  is_closed: Bool,
 )
 
-public fn Connection[Stream: streams::Reader + streams::Writer].protocol(self) -> Option[StringSlice] {
+type Outgoing(keys: Keys, secret: List[UInt8], must_update: Bool, is_closed: Bool)
+
+public opaque type Connection[Stream: streams::Duplex](
+  stream: Stream,
+  suite: Suite,
+  incoming: tasks::Cell[Incoming],
+  outgoing: tasks::Cell[Outgoing],
+  reading: tasks::Limiter,
+  writing: tasks::Limiter,
+  protocol: Option[String],
+  peer: List[x509::Certificate],
+)
+
+public fn Connection[Stream: streams::Duplex].protocol(self) -> Option[StringSlice] {
   match self.protocol {
     Some(name) => Some(name.slice())
     None => None
   }
 }
 
-public fn Connection[Stream: streams::Reader + streams::Writer].peer_certificates(self) -> Slice[x509::Certificate] {
+public fn Connection[Stream: streams::Duplex].peer_certificates(self) -> Slice[x509::Certificate] {
   self.peer.slice()
 }
 
-public fn Connection[Stream: streams::Reader + streams::Writer].stream(mut self) lends mut Stream {
-  yield mut self.wire.reader.source()
+public fn Connection[Stream: streams::Duplex].stream(self) lends Stream {
+  yield self.stream
+}
+
+fn established[Stream: streams::Duplex](
+  wire: own Wire[Stream],
+  suite: Suite,
+  receiving_secret: own List[UInt8],
+  sending_secret: own List[UInt8],
+  protocol: own Option[String],
+  peer: own List[x509::Certificate],
+) -> Connection[Stream] {
+  var opened = own wire
+  let incoming = Incoming(
+    keys: Keys.from_secret(suite, secret: receiving_secret.slice()),
+    secret: own receiving_secret,
+    raw: own opened.raw,
+    unread: [],
+    handshake: [],
+    is_closed: false,
+  )
+  let outgoing = Outgoing(
+    keys: Keys.from_secret(suite, secret: sending_secret.slice()),
+    secret: own sending_secret,
+    must_update: false,
+    is_closed: false,
+  )
+  Connection(
+    stream: own opened.stream,
+    suite: suite,
+    incoming: tasks::Cell.new(own incoming),
+    outgoing: tasks::Cell.new(own outgoing),
+    reading: tasks::Limiter.new(1),
+    writing: tasks::Limiter.new(1),
+    protocol: own protocol,
+    peer: own peer,
+  )
 }
 
 fn key_schedule(function: cryptography::HashFunction, shared: Slice[UInt8]) -> List[UInt8] {
@@ -792,8 +840,8 @@ fn parse_certificates(body: Slice[UInt8]) -> Result[List[x509::Certificate], Err
   Ok(own chain)
 }
 
-fn expect_message[Stream: streams::Reader + streams::Writer](wire: mut Wire[Stream], kind: UInt8) -> Result[Message, Error]
-  uses Handles
+fn expect_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8) -> Result[Message, Error]
+  uses Handles, Tasks
 {
   let message = read_message(mut wire)?
   if message.kind != kind {
@@ -828,7 +876,7 @@ fn traffic(suite: Suite, secret: Slice[UInt8]) -> Option[Keys] {
   Some(Keys.from_secret(suite, secret: secret))
 }
 
-fn require_record_boundary[Stream: streams::Reader + streams::Writer](wire: Wire[Stream]) -> Result[Unit, Error] {
+fn require_record_boundary[Stream: streams::Duplex](wire: Wire[Stream]) -> Result[Unit, Error] {
   if wire.buffered.is_empty() {
     Ok(Unit)
   } else {
@@ -836,10 +884,10 @@ fn require_record_boundary[Stream: streams::Reader + streams::Writer](wire: Wire
   }
 }
 
-public fn connect[Stream: streams::Reader + streams::Writer](stream: own Stream, host: StringSlice, config: ClientConfig) -> Result[Connection[Stream], Error]
-  uses Handles, Random, Clock, Panic
+public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice, config: ClientConfig) -> Result[Connection[Stream], Error]
+  uses Handles, Tasks, Random, Clock, Panic
 {
-  var wire = Wire(reader: streams::BufferedReader.new(own stream, capacity: 16709), receiving: None, sending: None, buffered: [], transcript: [])
+  var wire = Wire(stream: own stream, raw: [], receiving: None, sending: None, buffered: [], transcript: [])
   let random = random_bytes(32)
   let session = random_bytes(32)
   var shares: List[Share] = [new_share(hybrid_group), new_share(x25519_group)]
@@ -1017,19 +1065,13 @@ public fn connect[Stream: streams::Reader + streams::Writer](stream: own Stream,
   }
   let client_finished = finished_data(function, base: client_handshake.slice(), transcript: wire.transcript.slice())
   write_message(mut wire, kind: 20, body: client_finished.slice())?
-  wire.receiving = traffic(suite, secret: server_application.slice())
-  wire.sending = traffic(suite, secret: client_application.slice())
-  wire.transcript = []
-  Ok(Connection(
-    wire: own wire,
+  Ok(established(
+    own wire,
     suite: suite,
     receiving_secret: own server_application,
     sending_secret: own client_application,
-    unread: [],
-    unread_start: 0,
     protocol: own protocol,
     peer: own chain,
-    closed: false,
   ))
 }
 
@@ -1202,10 +1244,10 @@ fn server_hello(random: Slice[UInt8], session: Slice[UInt8], suite: Suite, share
   body
 }
 
-public fn accept[Stream: streams::Reader + streams::Writer](stream: own Stream, config: ServerConfig) -> Result[Connection[Stream], Error]
-  uses Handles, Random, Panic
+public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConfig) -> Result[Connection[Stream], Error]
+  uses Handles, Tasks, Random, Panic
 {
-  var wire = Wire(reader: streams::BufferedReader.new(own stream, capacity: 16709), receiving: None, sending: None, buffered: [], transcript: [])
+  var wire = Wire(stream: own stream, raw: [], receiving: None, sending: None, buffered: [], transcript: [])
   var message = expect_message(mut wire, kind: 1)?
   var hello = parse_client_hello(message.body.slice())?
   let suite = match choose_suite(hello.suites.slice()) {
@@ -1305,18 +1347,13 @@ public fn accept[Stream: streams::Reader + streams::Writer](stream: own Stream, 
     return Err(Error.Alert(description: 51))
   }
   require_record_boundary(wire)?
-  wire.receiving = traffic(suite, secret: client_application.slice())
-  wire.transcript = []
-  Ok(Connection(
-    wire: own wire,
+  Ok(established(
+    own wire,
     suite: suite,
     receiving_secret: own client_application,
     sending_secret: own server_application,
-    unread: [],
-    unread_start: 0,
     protocol: own protocol,
     peer: [],
-    closed: false,
   ))
 }
 
@@ -1324,41 +1361,60 @@ fn update_secret(function: cryptography::HashFunction, secret: Slice[UInt8]) -> 
   expand_label(function, secret: secret, label: "traffic upd", context: [], length: function.length())
 }
 
-fn receive[Stream: streams::Reader + streams::Writer](connection: mut Connection[Stream]) -> Result[Unit, Error]
-  uses Handles
-{
-  while connection.unread_start >= connection.unread.length() && !connection.closed {
-    let record = match read_record(mut connection.wire) {
-      Ok(record) => own record
-      Err(Closed) => {
-        connection.closed = true
-        return Ok(Unit)
-      }
-      Err(error) => return Err(own error)
+fn absorb(incoming: mut Incoming, suite: Suite) -> Result[Bool, Error] {
+  var wants_update = false
+  while incoming.raw.length() >= 5 && !incoming.is_closed {
+    let length = intrinsic::convert[UInt8, USize](incoming.raw[3]) * 256 + intrinsic::convert[UInt8, USize](incoming.raw[4])
+    if length > 16640 {
+      return Err(protocol_error("a record longer than TLS allows"))
     }
-    if record.content_type == 23 {
-      connection.unread = own record.content
-      connection.unread_start = 0
-    } else if record.content_type == 22 {
-      mut connection.wire.buffered.append(own record.content)
-      while connection.wire.buffered.length() >= 4 {
-        let length = intrinsic::convert[UInt8, USize](connection.wire.buffered[1]) * 65536
-          + intrinsic::convert[UInt8, USize](connection.wire.buffered[2]) * 256
-          + intrinsic::convert[UInt8, USize](connection.wire.buffered[3])
-        if connection.wire.buffered.length() - 4 < length {
+    if incoming.raw.length() - 5 < length {
+      return Ok(wants_update)
+    }
+    let rest = mut incoming.raw.split_off(5 + length)
+    let record = map::exchange(mut incoming.raw, value: own rest)
+    if record.length() < 5 {
+      return Err(protocol_error("a record that ends early"))
+    }
+    let outer = record[0]
+    if outer == 21 {
+      return Err(alert_of(record[5..]))
+    }
+    if outer != 23 {
+      return Err(protocol_error("a record that is not encrypted after the keys changed"))
+    }
+    let opened = open_record(mut incoming.keys, header: record[0..5], sealed: record[5..])?
+    if opened.content_type == 23 {
+      mut incoming.unread.append(own opened.content)
+    } else if opened.content_type == 21 {
+      match alert_of(opened.content.slice()) {
+        Closed => incoming.is_closed = true
+        failure => return Err(own failure)
+      }
+    } else if opened.content_type == 22 {
+      mut incoming.handshake.append(own opened.content)
+      while incoming.handshake.length() >= 4 {
+        let size = intrinsic::convert[UInt8, USize](incoming.handshake[1]) * 65536
+          + intrinsic::convert[UInt8, USize](incoming.handshake[2]) * 256
+          + intrinsic::convert[UInt8, USize](incoming.handshake[3])
+        if size > 262144 {
+          return Err(protocol_error("a handshake message that is too long"))
+        }
+        if incoming.handshake.length() - 4 < size {
           break
         }
-        let message = read_message(mut connection.wire)?
-        if message.kind == 24 {
-          let function = connection.suite.hash()
-          connection.receiving_secret = update_secret(function, secret: connection.receiving_secret.slice())
-          connection.wire.receiving = traffic(connection.suite, secret: connection.receiving_secret.slice())
-          if message.body.length() == 1 && message.body[0] == 1 {
-            write_record(mut connection.wire, content_type: 22, content: [24, 0, 0, 1, 0])?
-            connection.sending_secret = update_secret(function, secret: connection.sending_secret.slice())
-            connection.wire.sending = traffic(connection.suite, secret: connection.sending_secret.slice())
+        let remaining = mut incoming.handshake.split_off(4 + size)
+        let message = map::exchange(mut incoming.handshake, value: own remaining)
+        if message.length() < 4 {
+          return Err(protocol_error("a handshake message that ends early"))
+        }
+        if message[0] == 24 {
+          incoming.secret = update_secret(suite.hash(), secret: incoming.secret.slice())
+          incoming.keys = Keys.from_secret(suite, secret: incoming.secret.slice())
+          if message.length() == 5 && message[4] == 1 {
+            wants_update = true
           }
-        } else if message.kind != 4 {
+        } else if message[0] != 4 {
           return Err(protocol_error("a handshake message after the handshake"))
         }
       }
@@ -1366,7 +1422,42 @@ fn receive[Stream: streams::Reader + streams::Writer](connection: mut Connection
       return Err(protocol_error("a record of an unknown content type"))
     }
   }
-  Ok(Unit)
+  Ok(wants_update)
+}
+
+type Taken(bytes: List[UInt8], is_closed: Bool)
+
+fn take(incoming: mut Incoming, limit: USize) -> Taken {
+  if incoming.unread.is_empty() {
+    return Taken(bytes: [], is_closed: incoming.is_closed)
+  }
+  let count = if incoming.unread.length() < limit { incoming.unread.length() } else { limit }
+  let rest = mut incoming.unread.split_off(count)
+  let bytes = map::exchange(mut incoming.unread, value: own rest)
+  Taken(bytes: own bytes, is_closed: false)
+}
+
+fn seal(outgoing: mut Outgoing, suite: Suite, content_type: UInt8, content: Slice[UInt8]) -> Result[List[UInt8], Error] {
+  if outgoing.is_closed {
+    return Err(Error.Closed)
+  }
+  var bytes: List[UInt8] = []
+  if outgoing.must_update {
+    mut bytes.append(seal_record(mut outgoing.keys, content_type: 22, content: [24, 0, 0, 1, 0]))
+    outgoing.secret = update_secret(suite.hash(), secret: outgoing.secret.slice())
+    outgoing.keys = Keys.from_secret(suite, secret: outgoing.secret.slice())
+    outgoing.must_update = false
+  }
+  var start: USize = 0
+  while start < content.length() {
+    let end = if content.length() - start > 16384 { start + 16384 } else { content.length() }
+    mut bytes.append(seal_record(mut outgoing.keys, content_type: content_type, content: content[start..end]))
+    start = end
+  }
+  if content_type == 21 {
+    outgoing.is_closed = true
+  }
+  Ok(own bytes)
 }
 
 fn system_error(failure: Error) -> SystemError {
@@ -1377,50 +1468,98 @@ fn system_error(failure: Error) -> SystemError {
   }
 }
 
-impl streams::Reader for Connection[Stream: streams::Reader + streams::Writer] {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
-    uses Handles
+type Received(bytes: List[UInt8], is_closed: Bool, wants_update: Bool, failure: Option[Error])
+
+fn absorb_and_take(incoming: mut Incoming, suite: Suite, chunk: Slice[UInt8], limit: USize) -> Received {
+  mut incoming.raw.append_slice(chunk)
+  let wants_update = match absorb(mut incoming, suite: suite) {
+    Ok(wants) => wants
+    Err(failure) => return Received(bytes: [], is_closed: false, wants_update: false, failure: Some(own failure))
+  }
+  let taken = take(mut incoming, limit: limit)
+  Received(bytes: own taken.bytes, is_closed: taken.is_closed, wants_update: wants_update, failure: None)
+}
+
+fn receive_locked[Stream: streams::Duplex](connection: Connection[Stream], limit: USize) -> Result[List[UInt8], SystemError]
+  uses Handles, Tasks
+{
+  let suite = connection.suite
+  var chunk: List[UInt8] = []
+  while true {
+    let received = connection.incoming.update(fn(incoming) { absorb_and_take(mut incoming, suite: suite, chunk: chunk.slice(), limit: limit) })
+    if received.wants_update {
+      connection.outgoing.update(fn(outgoing) { outgoing.must_update = true })
+    }
+    match received.failure {
+      Some(failure) => return Err(system_error(failure))
+      None => {}
+    }
+    if !received.bytes.is_empty() || received.is_closed {
+      return Ok(own received.bytes)
+    }
+    mut chunk.clear()
+    let count = connection.stream.receive(mut chunk, limit: 16709)?
+    if count == 0 {
+      return Err(SystemError.UnexpectedEnd)
+    }
+  }
+}
+
+fn send_sealed[Stream: streams::Duplex](connection: Connection[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, SystemError]
+  uses Handles, Tasks
+{
+  let suite = connection.suite
+  let sealed = connection.outgoing.update(fn(outgoing) { seal(mut outgoing, suite: suite, content_type: content_type, content: content) })
+  match own sealed {
+    Ok(bytes) => connection.stream.send_all(bytes.slice())
+    Err(failure) => Err(system_error(failure))
+  }
+}
+
+impl streams::Duplex for Connection[Stream: streams::Duplex] {
+  fn receive(self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles, Tasks
   {
     if limit == 0 {
       return Ok(0)
     }
-    match receive(mut self) {
-      Ok(_) => {}
-      Err(error) => return Err(system_error(error))
+    let outcome = self.reading.hold(fn() { receive_locked(self, limit: limit) })
+    let bytes = match own outcome {
+      Some(Ok(bytes)) => own bytes
+      Some(Err(error)) => return Err(error)
+      None => return Err(SystemError.Cancelled)
     }
-    if self.unread_start >= self.unread.length() {
-      return Ok(0)
+    var chunk = own bytes
+    if chunk.length() > limit {
+      mut chunk.truncate(limit)
     }
-    let available = self.unread.length() - self.unread_start
-    let count = if available < limit { available } else { limit }
-    mut buffer.append_slice(self.unread[self.unread_start..self.unread_start + count])
-    self.unread_start += count
+    let count = chunk.length()
+    mut buffer.append(own chunk)
     Ok(count)
   }
-}
 
-impl streams::Writer for Connection[Stream: streams::Reader + streams::Writer] {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
-    uses Handles
+  fn send(self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles, Tasks
   {
     if bytes.is_empty() {
       return Ok(0)
     }
-    match write_record(mut self.wire, content_type: 23, content: bytes) {
-      Ok(_) => Ok(bytes.length())
-      Err(error) => Err(system_error(error))
+    let outcome = self.writing.hold(fn() { send_sealed(self, content_type: 23, content: bytes) })
+    match outcome {
+      Some(Ok(_)) => Ok(bytes.length())
+      Some(Err(error)) => Err(error)
+      None => Err(SystemError.Cancelled)
     }
   }
 
-  fn flush(mut self) -> Result[Unit, SystemError]
-    uses Handles
+  fn close_sending(self) -> Result[Unit, SystemError]
+    uses Handles, Tasks
   {
-    Ok(Unit)
+    let outcome = self.writing.hold(fn() { send_sealed(self, content_type: 21, content: [1, 0]) })
+    let _ = self.stream.close_sending()
+    match outcome {
+      Some(result) => result
+      None => Err(SystemError.Cancelled)
+    }
   }
-}
-
-public fn Connection[Stream: streams::Reader + streams::Writer].close(mut self) -> Result[Unit, Error]
-  uses Handles
-{
-  write_record(mut self.wire, content_type: 21, content: [1, 0])
 }

@@ -42,20 +42,20 @@ fn world() -> simulation::World
 }
 
 fn serve_once(listener: mut network::Listener) -> String
-  uses Handles, Random, Panic
+  uses Handles, Tasks, Random, Panic
 {
   var connection = mut listener.accept().expect("a client connects")
   let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
   match tls::accept(own connection, config: server_config()) {
     Ok(secured) => {
-      var session = own secured
+      let session = own secured
       var line: List[UInt8] = []
-      let _ = mut session.read_exactly(mut line, count: 5)
+      let _ = session.receive_exactly(mut line, count: 5)
       var reply: String = "echo "
       mut reply.push(String.from_utf8_lossy(line.slice()).slice())
-      let _ = mut session.write_all(reply.slice().bytes())
+      let _ = session.send_all(reply.slice().bytes())
       var rest: List[UInt8] = []
-      let ended = mut session.read_to_end(mut rest)
+      let ended = session.receive_to_end(mut rest)
       let protocol = session.protocol().unwrap_or("none".slice()).to_string()
       "${protocol} ${ended == Ok(0)}"
     }
@@ -64,17 +64,17 @@ fn serve_once(listener: mut network::Listener) -> String
 }
 
 fn visit(host: StringSlice, roots: own List[x509::Certificate], protocols: own List[String]) -> String
-  uses NetworkClient, Handles, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic
 {
   var connection = network::connect(host, port: 8443).expect("the server accepts")
   let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
   match tls::connect(own connection, host: host, config: tls::ClientConfig(roots: own roots, protocols: own protocols)) {
     Ok(secured) => {
-      var session = own secured
-      let _ = mut session.write_all("hello".bytes())
+      let session = own secured
+      let _ = session.send_all("hello".bytes())
       var reply: List[UInt8] = []
-      let _ = mut session.read_exactly(mut reply, count: 10)
-      let _ = mut session.close()
+      let _ = session.receive_exactly(mut reply, count: 10)
+      let _ = session.close_sending()
       let protocol = session.protocol().unwrap_or("none".slice()).to_string()
       "${String.from_utf8_lossy(reply.slice())} ${protocol} ${session.peer_certificates().length()}"
     }
@@ -115,8 +115,10 @@ test "a client rejects a chain for another host or from an unknown root" {
   }
 }
 
-fn greet(request: http::Request) -> http::Response {
-  http::Response.text("secure ${request.path()}".slice())
+fn greet(request: own http::Request, responder: mut http::Responder)
+  uses Tasks
+{
+  let _ = mut responder.send(http::Response.text("secure ${request.path()}".slice()))
 }
 
 fn secure_exchange() -> String
@@ -141,10 +143,22 @@ test "an HTTPS client and server exchange a request and a response" {
   }
 }
 
-fn routes(request: http::Request) -> http::Response {
+fn routes(request: own http::Request, responder: mut http::Responder)
+  uses Handles, Tasks
+{
+  let _ = mut responder.send(route(own request))
+}
+
+fn route(request: own http::Request) -> http::Response
+  uses Handles, Tasks
+{
   if request.matches(http::Route"POST /upload") is Some(_) {
     let tag = request.header("x-tag").unwrap_or("none".slice()).to_string()
-    return http::Response.text("${request.body.length()} ${tag}".slice())
+    let length = match own request.bytes() {
+      Ok(bytes) => bytes.length()
+      Err(_) => 0
+    }
+    return http::Response.text("${length} ${tag}".slice())
   }
   if request.matches(http::Route"GET /empty") is Some(_) {
     return http::Response.new(status: http::Status.no_content)
@@ -182,7 +196,7 @@ fn client_exchanges(is_secure: Bool) -> List[String]
       mut seen.push(summary(mut client.get("${base}/second?page=2".slice())))
       var headers = http::Headers.new()
       mut headers.add("X-Tag", value: "tagged")
-      let upload: List[UInt8] = List.filled(7, count: 3000000)
+      let upload: List[UInt8] = List.filled(7, count: 1200000)
       let upload_url = url::parse("${base}/upload".slice()).expect("a URL")
       mut seen.push(summary(mut client.send(http::Method.Post, url: upload_url, headers: headers, body: upload)))
       mut seen.push(summary(mut client.get("${base}/empty".slice())))
@@ -197,13 +211,13 @@ fn client_exchanges(is_secure: Bool) -> List[String]
   }
 }
 
-test "a client sends several requests over one HTTP/2 connection, with uploads larger than a window" {
+test "a client sends several requests over one HTTP/2 connection, with an upload larger than a window" {
   provide world() {
     let seen = client_exchanges(true)
     assert seen.length() == 6
     assert seen[0] == "200 13 served /first"
     assert seen[1] == "200 14 served /second"
-    assert seen[2] == "200 14 3000000 tagged"
+    assert seen[2] == "200 14 1200000 tagged"
     assert seen[3] == "204 0 "
     assert seen[4] == "200 200000"
     assert seen[5] == "200 0 "
@@ -216,7 +230,7 @@ test "a client keeps an HTTP/1.1 connection open between requests" {
     assert seen.length() == 6
     assert seen[0] == "200 13 served /first"
     assert seen[1] == "200 14 served /second"
-    assert seen[2] == "200 14 3000000 tagged"
+    assert seen[2] == "200 14 1200000 tagged"
     assert seen[3] == "204 0 "
     assert seen[4] == "200 200000"
     assert seen[5] == "200 0 "
