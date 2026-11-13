@@ -270,6 +270,22 @@ main {
   stroke: var(--edge);
 }
 
+#canvas .edge text {
+  fill: var(--muted);
+}
+
+body.areas-page main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.areas-page #canvas {
+  cursor: default;
+}
+
+body.areas-page #canvas svg.focused .edge text {
+  fill: var(--ink);
+}
+
 #canvas svg.focused .node,
 #canvas svg.focused .edge {
   opacity: 0.16;
