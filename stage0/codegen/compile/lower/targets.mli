@@ -98,6 +98,17 @@ val provided_evidence :
   ('a * Path.t * Types.substitution) list ->
   ('a * Lir.operand) list
 
+val instance_call :
+  Lowering.state ->
+  signature:Types.signature ->
+  substitution:Types.substitution ->
+  arguments:(Types.mode * Ground.ty * Lir.place) list ->
+  ?mask:int ->
+  unit ->
+  Lir.signature * Convention.result * Lir.operand list
+(** The signature of a call of a function instance with arguments that are places of their parameter
+    types, its result, and the operands it passes, without the call. *)
+
 val call_instance :
   Lowering.state ->
   Instance.key ->

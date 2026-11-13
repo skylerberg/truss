@@ -540,8 +540,11 @@ let all_passed (signature : Types.signature) =
 (* Calls an instance with an argument in a place for each parameter. [mask]
    says which of the parameters with defaults were passed, where the call
    left some to the callee; without it every argument is one to use. *)
-let call_instance st key ~(signature : Types.signature) ~substitution
-    ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ?mask ~destination () =
+(* The signature of a call of a function instance with arguments that are
+   places of their parameter types, its result, and the operands it passes:
+   each argument, then the mask of defaults passed, then the evidence. *)
+let instance_call st ~(signature : Types.signature) ~substitution
+    ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ?mask () =
   let mask = match mask with Some mask -> mask | None -> all_passed signature in
   let lir_signature, result =
     lir_signature st.context substitution ~parameters:(interface_parameters signature)
@@ -552,9 +555,16 @@ let call_instance st key ~(signature : Types.signature) ~substitution
     (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
     @ List.map (evidence_of st) (evidence_for st.context substitution signature.uses)
   in
+  (lir_signature, result, passed @ mask)
+
+let call_instance st key ~(signature : Types.signature) ~substitution
+    ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ?mask ~destination () =
+  let lir_signature, result, operands =
+    instance_call st ~signature ~substitution ~arguments ?mask ()
+  in
   let target = Lir.Direct { function_ = Instance (called key); signature = lir_signature } in
   emit st.builder
-    (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
+    (Call { target; arguments = operands; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
 
 (* A number literal's value. *)

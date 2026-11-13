@@ -92,7 +92,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)
-  | Looped yielding ->
+  | Looped { yielding; _ } ->
       Compiled
         (elaborate_code context (Lower.instance context key)
            ~yields_lowered:
@@ -106,14 +106,15 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       Compiled
         (Code
            (Lir.canonical_instance
-              {
-                key;
-                main =
-                  Yields.cursor_drop (Lower.env context) ~cursor ~owned
-                    ~evidence:(Lower.pulled_evidence context yielding function_)
-                    function_;
-                nested = [||];
-              }))
+              (Outline.instance (Lower.env context)
+              @@ {
+                   key;
+                   main =
+                     Yields.cursor_drop (Lower.env context) ~cursor ~owned
+                       ~evidence:(Lower.pulled_evidence context yielding function_)
+                       function_;
+                   nested = [||];
+                 })))
   | Cursor_next yielding ->
       let function_, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
@@ -121,14 +122,15 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       Compiled
         (Code
            (Lir.canonical_instance
-              {
-                key;
-                main =
-                  Yields.cursor_next (Lower.env context) ~cursor ~result
-                    ~evidence:(Lower.pulled_evidence context yielding function_)
-                    function_;
-                nested = [||];
-              }))
+              (Outline.instance (Lower.env context)
+              @@ {
+                   key;
+                   main =
+                     Yields.cursor_next (Lower.env context) ~cursor ~result
+                       ~evidence:(Lower.pulled_evidence context yielding function_)
+                       function_;
+                   nested = [||];
+                 })))
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)

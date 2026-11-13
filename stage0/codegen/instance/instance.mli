@@ -27,9 +27,11 @@ type key =
   | Cursor_next of Ground.yielding
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)
-  | Looped of Ground.yielding
+  | Looped of { yielding : Ground.yielding; chunked : bool }
       (** A yielding method in loop form: it takes its caller's loop body last, as a function value
-          that it calls at each [yield], and that returns whether to go on *)
+          that it calls at each [yield], and that returns whether to go on. [chunked] is for a
+          [parallel for] over a method that yields by position: the method's range loop runs in
+          parts at once, and the body always goes on. *)
   | Adapter of { function_ : key; ty : Ground.function_type }
       (** A named function used as a function value: it takes the environment and ignores it *)
   | Entry of key

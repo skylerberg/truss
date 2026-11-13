@@ -430,12 +430,16 @@ type region = {
       (** For a branch of a [concurrent] block: the block's fork, the block the branch's end goes
           to, and where the branch ends, the position of the next branch's start or the block's end
       *)
+  loop_body : int option;
+      (** For the body of a loop over a method in loop form: the loop, whose body outlining makes a
+          function of its own, so that a jump out of it goes through one of its exits *)
 }
 
 let save (st : state) = { evidence = st.evidence; provides = (mir st).provides }
 
-let new_region ?ending ?enclosing (st : state) =
+let new_region ?ending ?enclosing ?loop_body (st : state) =
   {
+    loop_body;
     region_frame = st.frame;
     region_body = mir st;
     lowered = Hashtbl.create 16;
@@ -456,17 +460,39 @@ let rec owner_of region body block =
   if region.region_body == body && Hashtbl.mem region.lowered block then Some region
   else Option.bind region.enclosing (fun enclosing -> owner_of enclosing body block)
 
+(* The loops whose bodies a jump from [region] to [owner] leaves,
+   innermost first. *)
+let rec loops_left region owner =
+  if region == owner then []
+  else
+    Option.to_list region.loop_body
+    @ match region.enclosing with Some enclosing -> loops_left enclosing owner | None -> []
+
+(* The block that leaves the bodies of [loops], innermost first, by an exit
+   of each, and goes on at [target]. *)
+let exits_through st loops target =
+  List.fold_right
+    (fun loop next ->
+      let exit = block st.builder in
+      in_block st.builder exit (fun () ->
+          emit st.builder (Loop_exit { loop });
+          finish st.builder (Goto next));
+      exit)
+    loops target
+
 (* The LIR block a jump from [region] to a block of the MIR goes to. A jump
-   to a block of an enclosing region leaves the scopes between. *)
+   to a block of an enclosing region leaves the scopes between, inside the
+   region, and then leaves each loop body between by one of its exits. *)
 let jump ?entry st region target : Lir.block =
   match owner_of region region.region_body target with
   | Some owner when owner == region -> Hashtbl.find region.lowered target
   | Some owner ->
       let pad = block st.builder in
       let lowered = Hashtbl.find owner.lowered target in
+      let leaving = exits_through st (loops_left region owner) lowered in
       in_block st.builder pad (fun () ->
           leave_to st owner.depth;
-          finish st.builder (Goto lowered));
+          finish st.builder (Goto leaving));
       pad
   | None ->
       let lowered = block st.builder in
@@ -500,6 +526,18 @@ let break_loop st =
       start st.builder (block st.builder)
   | [] -> bug "a break outside a loop"
 
+(* Ends the current block with [terminator], a way out of the function.
+   From the body of a loop over a method in loop form, whose code outlining
+   moves into a function of its own, it first leaves each such body around
+   it by one of its exits. *)
+let leave_function st (terminator : Lir.terminator) =
+  match st.active_loops with
+  | [] -> finish st.builder terminator
+  | loops ->
+      let leaving = block st.builder in
+      in_block st.builder leaving (fun () -> finish st.builder terminator);
+      finish st.builder (Goto (exits_through st loops leaving))
+
 (* Returns from the function, whose result is already written. In an
    inlined method or an expression lowered on its own, jumps to its end
    instead. *)
@@ -507,10 +545,10 @@ let return_from_frame st =
   (match st.frame.exit with
   | Some (exit, depth) ->
       leave_to st depth;
-      finish st.builder (Goto exit)
+      finish st.builder (Goto (exits_through st st.active_loops exit))
   | None ->
       leave_to st 0;
-      finish st.builder (return_result st));
+      leave_function st (return_result st));
   start st.builder (block st.builder)
 
 (* Calls *)
@@ -944,6 +982,23 @@ let spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
   spawn_iteration st loop
     ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ())))
     (fun () -> in_scope st (fun () -> each (unbox ())))
+
+(* Spawns a task for one iteration whose part is the place [value], which
+   the task reads or changes where it is, through its address in the item:
+   the ownership check has verified that the place stays valid, and that no
+   other code uses it, until the group is joined. *)
+let spawn_with_address st (loop : spawn_loop) (value : Lir.place) ~writable
+    ~(each : Lir.place -> unit) =
+  let ty = loop.element in
+  let item = at loop.item in
+  emit st.builder
+    (Assign (item, Convert (Address { place = whole st value; writable }, Integer UInt64)));
+  spawn_iteration st loop
+    ~not_spawned:(fun () -> ())
+    (fun () ->
+      let pointer = local st.builder ~borrowed:true (Pointer { target = Value ty; writable }) in
+      emit st.builder (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
+      in_scope st (fun () -> each (at pointer / Deref)))
 
 (* Lent values *)
 
@@ -1621,7 +1676,10 @@ and expression_into ?(arguments = []) st (expression : Core.expression) (destina
       mir = Some frame;
     };
   List.iter2 (bind_local st) expression_mir.body.parameters (List.map snd arguments);
+  let enclosing_loops = st.active_loops in
+  st.active_loops <- [];
   lower_body st frame;
+  st.active_loops <- enclosing_loops;
   finish st.builder Unreachable;
   start st.builder exit;
   st.frame <- caller
@@ -1860,7 +1918,10 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
       in
       bind_local st local place)
     method_mir.body.parameters;
+  let enclosing_loops = st.active_loops in
+  st.active_loops <- [];
   lower_body ?enclosing st frame;
+  st.active_loops <- enclosing_loops;
   finish st.builder Unreachable;
   pop_scope st owner;
   start st.builder exit;
@@ -2089,7 +2150,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
   | Yield { mode; part; resume } -> yield st region ~mode ~part ~resume ~origin
   | For { iteration; part; body; after; loop } ->
       claim st region after;
-      for_loop st region ~iteration ~part ~body ~loop;
+      for_loop st region ~iteration ~part ~body ~after ~loop;
       goto st region after
 
 and yield st region ~mode ~part ~resume ~origin =
@@ -2143,7 +2204,7 @@ and yield st region ~mode ~part ~resume ~origin =
       start st.builder (block st.builder)
   | None -> (
       match st.form with
-      | Looped { body } ->
+      | Looped { body; chunked } ->
           (* In the loop form a [yield] calls the caller's body with the
              part, as the body's type passes it, and the method goes on
              where the body says so. On the [stop] path the body has left
@@ -2166,21 +2227,28 @@ and yield st region ~mode ~part ~resume ~origin =
           let value =
             match pass st mode ty yielded with Some value -> value | None -> Lir.Constant Null
           in
-          let resume = jump st region resume and stop = block st.builder in
-          finish st.builder (Yield { value; resume; stop = Some stop });
-          start st.builder stop;
-          leave_to st 0;
-          finish st.builder (Return None);
+          let resume = jump st region resume in
+          if chunked then
+            (* The body of a [parallel for] cannot leave it, so it always
+               goes on. *)
+            finish st.builder (Yield { value; resume; stop = None })
+          else begin
+            let stop = block st.builder in
+            finish st.builder (Yield { value; resume; stop = Some stop });
+            start st.builder stop;
+            leave_to st 0;
+            leave_function st (Return None)
+          end;
           start st.builder (block st.builder)
       | Ordinary | Pulled -> bug "a yield outside a yielding method")
 
 (* Lowers a [for] loop's body as a region of its own, once [value] is the
    place of the element. *)
-and loop_body st region ~part ~body (value : Lir.place) =
+and loop_body ?loop st region ~part ~body (value : Lir.place) =
   let caller = st.frame in
   st.frame <- region.region_frame;
   bind_local st part value;
-  let inner = new_region ~enclosing:region st in
+  let inner = new_region ~enclosing:region ?loop_body:loop st in
   st.frame <- caller;
   run_region st inner ~entry:(body, 0)
 
@@ -2198,9 +2266,39 @@ and pull_cursor st (yielding : Ground.yielding) cursor ~(each : Lir.place -> uni
     ~call_next:(fun destination -> call_next st yielding cursor destination)
     ~body:each
 
-and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : Mir.loop) =
+(* Whether the body of a [for] loop, from [body] up to [after], yields. *)
+and body_yields st ~body ~after =
+  let blocks = (mir st).body.blocks in
+  let visited = Hashtbl.create 8 in
+  let rec visit block =
+    block <> after
+    && (not (Hashtbl.mem visited block))
+    && begin
+      Hashtbl.replace visited block ();
+      match blocks.(block).terminator with
+      | Yield _ -> true
+      | terminator -> List.exists visit (Mir.successors terminator)
+    end
+  in
+  visit body
+
+and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~after:loop_after ~(loop : Mir.loop)
+    =
   let origin = loop.origin in
-  let each = loop_body st region ~part ~body in
+  (* A loop over a yielding method's call is a loop region, whose body
+     outlining makes a function the method calls. Where the body yields for
+     a method whose [yield]s cannot call a body, a pulled method's state or
+     an inlined lending method's place, the loop pulls a cursor over the
+     call instead. *)
+  let looped =
+    match iteration with
+    | Yielding _
+      when (is_pulled st || st.frame.on_yield <> None) && body_yields st ~body ~after:loop_after ->
+        None
+    | Yielding _ -> Some (fresh_fork st)
+    | Range _ | Pull _ -> None
+  in
+  let each = loop_body ?loop:looped st region ~part ~body in
   match loop.schedule with
   | Concurrent_loop ->
       (* The enclosing code runs the iteration and spawns one task for each
@@ -2216,15 +2314,15 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : Mir.loo
               element = ground st (info st part).type_;
             }
           in
-          for_each st region ~origin ~schedule:(Spawned spawning) ~iteration ~each);
+          for_each st ~origin ~schedule:(Spawned spawning) ~iteration ~each ?looped);
       resume_early_exit st region ~lower_ends:(lower_ends st) early_exits
-  | Parallel_loop -> for_each st region ~origin ~schedule:Chunked ~iteration ~each
-  | Core.Sequential -> for_each st region ~origin ~schedule:Sequential ~iteration ~each
+  | Parallel_loop -> for_each st ~origin ~schedule:Chunked ~iteration ~each ?looped
+  | Core.Sequential -> for_each st ~origin ~schedule:Sequential ~iteration ~each ?looped
 
 (* Lowers a loop over [iteration]. [each] lowers the loop body for the
    place of one value. The loop is the innermost loop for the body: the end
    of an iteration starts the next one. *)
-and for_each st region ~origin ~(schedule : schedule) ~(iteration : Mir.iteration)
+and for_each ?looped st ~origin ~(schedule : schedule) ~(iteration : Mir.iteration)
     ~(each : Lir.place -> unit) =
   (* [st.next_range] is set when a [parallel for] or a [concurrent for] is
      inlining a method that yields by position. This range loop is then
@@ -2248,75 +2346,45 @@ and for_each st region ~origin ~(schedule : schedule) ~(iteration : Mir.iteratio
   | Range { start = low; stop = high; inclusive } ->
       range_loop st ~schedule ~low ~high ~inclusive ~each
   | Yielding call -> (
-      (* The yielding method is inlined here, with the loop body at each of
-         its [yield]s. *)
-      match resolve_callee st call.callee with
-      | None -> bug "a loop over a call that resolves to no method"
-      | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
-          (* The method is already inlined around this loop, so inlining
-             it again would never end. The loop pulls a cursor over the
-             call instead. *)
-          let yielding : Ground.yielding = { method_ = path; type_arguments } in
+      match (resolve_callee st call.callee, looped) with
+      | None, _ -> bug "a loop over a call that resolves to no method"
+      | Some (method_, type_arguments), None ->
+          (* A body that yields where a [yield] cannot call a body: the loop
+             pulls a cursor over the call. *)
+          let yielding : Ground.yielding = { method_; type_arguments } in
           in_scope st (fun () ->
               let cursor = boxed_cursor st yielding in
               call_into st call cursor ~origin;
               own_in_scope st cursor;
               pull_cursor st yielding cursor ~each:owned_each)
-      | Some (path, type_arguments) ->
+      | Some (method_, type_arguments), Some loop ->
+          let yielding : Ground.yielding = { method_; type_arguments } in
           let mode =
-            match (signature_of st.context path).output with
+            match (signature_of st.context method_).output with
             | Yields (mode, _) -> mode
-            | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show path)
+            | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show method_)
           in
-          in_scope st (fun () ->
-              (* The arguments live as long as the loop. *)
-              let arguments = arguments_to_inline st path type_arguments call.arguments in
-              let caller = st.frame in
-              (* A [break] leaves the inlined method, whose scopes are inside
-                 this depth. *)
-              let depth = List.length st.scopes in
-              let after = block st.builder in
-              (* A method that yields by position has one range loop, and
-                 that loop takes this loop's schedule. Any other method runs
-                 sequentially in the enclosing code, and a task is spawned at
-                 each of its [yield]s with the yielded value. The task
-                 outlives the [yield]. The ownership check has verified that
-                 a place the task borrows stays valid and unchanged until the
-                 group is joined, and it rejects a [yield] of a [mut]
-                 place. *)
-              let each_yielded =
-                match schedule with
-                | (Chunked | Spawned _) when yields_by_position st path ->
-                    st.next_range <- schedule;
-                    fun value ~owned:_ -> each value
-                | Sequential | Chunked -> fun value ~owned:_ -> each value
-                | Spawned loop ->
-                    if mode = Mut then
-                      bug
-                        "a `concurrent for` over %s, which yields `mut` places and not by position"
-                        (Path.show path);
-                    fun value ~owned -> spawn_with_item st loop (whole st value) ~owned ~each
-              in
-              inline ~enclosing:region st path type_arguments ~arguments
-                ~call_site:(site_of st origin) ~on_yield:(fun yielded ~owned ~resume ->
-                  let inner = st.frame in
-                  st.frame <- caller;
-                  let scope_depth = List.length st.scopes in
-                  in_scope st (fun () ->
-                      st.loops <-
-                        {
-                          continue_ = resume;
-                          continue_depth = scope_depth;
-                          break_ = after;
-                          break_depth = depth;
-                        }
-                        :: st.loops;
-                      each_yielded yielded ~owned;
-                      st.loops <- List.tl st.loops);
-                  finish st.builder (Goto resume);
-                  st.frame <- inner);
-              finish st.builder (Goto after);
-              start st.builder after))
+          (* A [concurrent for] spawns a task for each part the method
+             gives. The task outlives the call of the body: the ownership
+             check has verified that a place the task borrows stays valid
+             and unchanged until the group is joined, and it rejects a
+             [yield] of a [mut] place that is not by position. *)
+          let each_part =
+            match schedule with
+            | Spawned spawning ->
+                if mode = Mut && not (yields_by_position st method_) then
+                  bug "a `concurrent for` over %s, which yields `mut` places and not by position"
+                    (Path.show method_);
+                if mode = Own then fun value -> spawn_with_item st spawning value ~owned:true ~each
+                else fun value -> spawn_with_address st spawning value ~writable:(mode = Mut) ~each
+            | Sequential | Chunked -> each
+          in
+          let chunked =
+            match schedule with
+            | Chunked -> yields_by_position st method_
+            | Sequential | Spawned _ -> false
+          in
+          looped_loop st ~loop ~yielding ~chunked ~mode ~arguments:call.arguments ~each:each_part)
   | Pull { cursor; next = None } -> (
       match mir_place_type st cursor with
       | Ground.Cursor yielding -> pull_cursor st yielding (place st cursor) ~each:owned_each
@@ -2328,6 +2396,80 @@ and for_each st region ~origin ~(schedule : schedule) ~(iteration : Mir.iteratio
       pull_loop st ~option:(result_type st next)
         ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
         ~body:owned_each
+
+(* A loop over a yielding method's call, which the method runs in its loop
+   form: it calls the loop's body, a region of its own that outlining makes
+   a function, at each [yield]. The body goes on at its [Loop_next], and
+   leaves by an exit of the loop, its [break] one of them. *)
+and looped_loop st ~loop ~(yielding : Ground.yielding) ~chunked ~mode ~arguments ~each =
+  in_scope st (fun () ->
+      let signature = signature_of st.context yielding.method_ in
+      let substitution = bind signature.generics yielding.type_arguments in
+      let arguments, mask = evaluate_arguments st signature substitution arguments in
+      let lir_signature, _, operands =
+        instance_call st ~signature ~substitution ~arguments ~mask ()
+      in
+      let body_type = loop_body_type st.context yielding in
+      let part_type =
+        match body_type.parameters with
+        | [ (_, ty) ] -> ty
+        | _ -> bug "a loop body that does not take one part"
+      in
+      let target =
+        Lir.Direct
+          {
+            function_ = Instance (Looped { yielding; chunked });
+            signature =
+              {
+                lir_signature with
+                parameters = lir_signature.parameters @ [ Lir.Value (Function body_type) ];
+              };
+          }
+      in
+      let parameter = Convention.parameter st.context.env (Monomorphic.mode mode) part_type in
+      let part = Option.map (fun ty -> local st.builder ~borrowed:(mode <> Own) ty) parameter in
+      let exit = local st.builder ~name:"exit" (Raw (Integer UInt32)) in
+      let head = block st.builder
+      and entry = block st.builder
+      and next = block st.builder
+      and broken = block st.builder
+      and after = block st.builder in
+      finish st.builder (Goto head);
+      in_block st.builder head (fun () ->
+          finish st.builder
+            (Loop_call
+               {
+                 loop;
+                 target;
+                 arguments = operands;
+                 go_on = Value (Monomorphic.builtin Bool);
+                 body = entry;
+                 after;
+                 exit;
+               }));
+      in_block st.builder next (fun () ->
+          finish st.builder (Loop_next { loop; body = entry; after }));
+      in_block st.builder broken (fun () ->
+          emit st.builder (Loop_exit { loop });
+          finish st.builder (Goto after));
+      start st.builder entry;
+      emit st.builder (Loop_body { loop; part });
+      let value =
+        match (part, parameter) with
+        | Some part, Some (Pointer _) -> at part / Deref
+        | Some part, Some _ -> at part
+        | _ -> temporary st part_type
+      in
+      let depth = List.length st.scopes in
+      st.active_loops <- loop :: st.active_loops;
+      st.loops <-
+        { continue_ = next; continue_depth = depth; break_ = broken; break_depth = depth }
+        :: st.loops;
+      in_scope st (fun () -> each value);
+      st.loops <- List.tl st.loops;
+      st.active_loops <- List.tl st.active_loops;
+      finish st.builder (Goto next);
+      start st.builder after)
 
 (* A loop over a range of integers or characters. *)
 and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusive ~each =

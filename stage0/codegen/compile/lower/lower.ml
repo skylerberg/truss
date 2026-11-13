@@ -216,11 +216,15 @@ let source_code context key ~path ~type_arguments : Lir.t =
    method is, with each [yield] calling the loop body that yield lowering
    adds as its last parameter, and with a [stop] path where the body says
    to stop. *)
-let looped context key (yielding : Ground.yielding) : Lir.t =
+let looped context key (yielding : Ground.yielding) ~chunked : Lir.t =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let parameters, _ = Mir_form.core_of context yielding.method_ in
   let body = Mir_form.loop_body_type context yielding in
-  let st = enter context ~form:(Looped { body }) (frame_of code ~inlined:[ yielding.method_ ]) in
+  let st =
+    enter context ~form:(Looped { body; chunked }) (frame_of code ~inlined:[ yielding.method_ ])
+  in
+  (* The method's one range loop takes the schedule of the [parallel for]. *)
+  if chunked then st.next_range <- Chunked;
   let _, _, parameter_locals, places = begin_body st ~parameters in
   Mir_form.lower_code st yielding.method_ ~parameters:places;
   {
@@ -237,7 +241,7 @@ let instance context (key : Instance.key) : Lir.t =
   | Adapter { function_; ty } -> adapter context key ~function_ ~ty
   | Program_main main -> program_main context key main
   | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
-  | Looped yielding -> looped context key yielding
+  | Looped { yielding; chunked } -> looped context key yielding ~chunked
   | _ -> bug "%s is not code from source" (Instance.to_string key)
 
 let loop_body_type = Mir_form.loop_body_type

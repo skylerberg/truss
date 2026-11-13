@@ -169,7 +169,7 @@ type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
    where each stays as a state of its cursor, or in its loop form, where
    each calls the caller's loop body, of type [body], and stops where the
    body says to. Any other code has no [yield]. *)
-type form = Ordinary | Pulled | Looped of { body : Ground.function_type }
+type form = Ordinary | Pulled | Looped of { body : Ground.function_type; chunked : bool }
 
 type state = {
   context : context;
@@ -190,6 +190,9 @@ type state = {
   mutable inlined_owned : Lir.place list;
       (** The locals of the methods inlined since the lending call being lowered began, which the
           path that skips the rest of the method drops *)
+  mutable active_loops : int list;
+      (** The loops over methods in loop form whose bodies the code being lowered is in, in its own
+          frame, innermost first: a [return] leaves each body by one of its exits *)
 }
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
@@ -223,6 +226,7 @@ let enter context ?(form = Ordinary) ?(nested = ref []) frame =
     tasks = [];
     next_range = Sequential;
     inlined_owned = [];
+    active_loops = [];
   }
 
 let is_pulled st = st.form = Pulled
