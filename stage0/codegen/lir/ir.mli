@@ -198,7 +198,6 @@ type visitor = { place : place -> unit; operand : operand -> unit }
 val visit_statement : visitor -> statement -> unit
 val visit_terminator : visitor -> terminator -> unit
 val successors : terminator -> block list
-val reverse_postorder : basic_block array -> block list
 val map_statement : place:(place -> place) -> block:'a -> statement -> statement
 val map_terminator : place:(place -> place) -> block:(block -> block) -> terminator -> terminator
 val canonical : function_ -> function_

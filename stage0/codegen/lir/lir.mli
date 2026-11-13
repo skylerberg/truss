@@ -41,10 +41,6 @@ val visit_terminator : visitor -> terminator -> unit
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list
 
-(* The blocks that can be reached from block 0, each before the blocks it
-   goes to, but for the blocks a loop goes back to. *)
-val reverse_postorder : basic_block array -> block list
-
 (* Whether a local of the type takes no room, so that no code names it. *)
 val erased : Memory_layout.env -> ty -> bool
 
