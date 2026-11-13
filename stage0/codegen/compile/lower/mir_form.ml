@@ -35,6 +35,41 @@ let mir_of context path : Mir.t =
   | Some (mir, _) -> mir
   | None -> bug "%s has no MIR" (Path.show path)
 
+(* How many [yield]s a lending method's body has. *)
+let yield_count (body : Mir.body) =
+  Array.fold_left
+    (fun count (block : Mir.basic_block) ->
+      match block.terminator with Yield _ -> count + 1 | _ -> count)
+    0 body.blocks
+
+(* Whether nothing runs after a [yield] on any path through a body: from
+   each [yield], the paths only end scopes and loans until they return no
+   value. *)
+let each_yield_is_last (body : Mir.body) =
+  let visited = Hashtbl.create 8 in
+  let rec runs_nothing block =
+    Hashtbl.mem visited block
+    || begin
+      Hashtbl.replace visited block ();
+      let { Mir.statements; terminator; _ } = body.blocks.(block) in
+      List.for_all
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ -> true
+          | _ -> false)
+        statements
+      &&
+      match terminator with
+      | Goto target -> runs_nothing target
+      | Return (None | Some (Constant { value = Unit; _ })) -> true
+      | _ -> false
+    end
+  in
+  Array.for_all
+    (fun (block : Mir.basic_block) ->
+      match block.terminator with Yield { resume; _ } -> runs_nothing resume | _ -> true)
+    body.blocks
+
 let spans st =
   match demand st.context Names.spans st.frame.code.definition_key with
   | Some spans -> spans
@@ -1914,8 +1949,9 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
    out of it, so the innermost scope owns the lend. Where nothing is left,
    as for an index into a [List], the method ends at its [yield]. *)
 and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
-  let _, body = core_of st.context path in
-  let several = Method_yields.count body > 1 in
+  let body = (mir_of st.context path).body in
+  let yields = yield_count body in
+  let several = yields > 1 in
   let depth = List.length st.scopes in
   let goes_on = block st.builder in
   (* A method with a [yield] on each of several paths lends whichever it
@@ -1946,7 +1982,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
         List.filteri (fun position _ -> List.length st.scopes - position > depth) st.scopes
       in
       let owns_nothing = List.for_all (fun (scope : scope) -> scope.owned = []) scopes in
-      if (not several) && Method_yields.each_is_last body && owns_nothing then
+      if (not several) && each_yield_is_last body && owns_nothing then
         finish st.builder (Goto resume)
       else begin
         List.iter
@@ -1995,7 +2031,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
       start st.builder goes_on);
   match !lent with
   | Some place -> place
-  | None when Method_yields.count body = 0 ->
+  | None when yields = 0 ->
       (* The method has no [yield], so it never returns, and the code after
          the call never runs. The place is never read. *)
       temporary st ty
