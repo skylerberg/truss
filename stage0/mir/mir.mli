@@ -216,6 +216,10 @@ type t = { body : body; lambdas : body array }
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)
 
+val iteration_loops : body -> (block, block) Hashtbl.t
+(** For each block whose terminator ends an iteration, an {!Iteration_end} or an {!Exit_tasks} to
+    {!Exit_iteration}, the block of the innermost {!For} whose body it ends. *)
+
 val of_definition : Core.definition -> t option
 (** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. *)
 
