@@ -101,8 +101,8 @@ Reserved everywhere:
 any assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait transparent true type unreachable use uses var while
-with yield yields
+Self test theorem todo trait true type unreachable use uses var while with yield
+yields
 ```
 
 Reserved for later use, and an error if written:
@@ -118,7 +118,7 @@ name resolution gives the rest their meaning:
 
 ```text
 amortized time allocations allocated_bytes calls O finite potential
-log power result old
+log power result old by bit_vector
 ```
 
 | Words | Meaning |
@@ -130,6 +130,7 @@ log power result old
 | `old(e)` | The value of `e` when the function was called, inside a specification |
 | `identical(a, b)` | Whether two values of one type are the same value, inside a specification |
 | `yielded`, `finished` | The history of a lending or yielding method, inside its `ensures`, and `yielded` in a `for` loop's clauses |
+| `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 
 A parameter cannot be named `result`, and no function can be named `old` or
 `identical`. Elsewhere the words are ordinary names: in
@@ -306,7 +307,7 @@ module_path = LOWER_NAME { "::" LOWER_NAME } ;
 definition = [ visibility ] ( function | type_definition | trait
                             | capability | constant | theorem )
            | impl | test | law_proof ;
-visibility = "public" [ "opaque" | "transparent" ] | "internal" ;
+visibility = "public" [ "opaque" ] | "internal" ;
 ```
 
 Each file is a module. Nothing about a definition depends on its position in
@@ -1133,7 +1134,7 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "concurrent" block
           | "concurrent" "for" pattern [ ":" type ] "in" expression { loop_clause } block
           | "proof" block
-          | "assert" expression
+          | "assert" expression [ "by" "bit_vector" ]
           | "yield" expression ;
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -1169,6 +1170,11 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   and `continue` appear only in loops.
 - `assert` appears only in tests, theorems, and proofs. In a proof it is
   proven, and in a test it is checked when the test runs.
+- `assert condition by bit_vector` is proven alone, for every value of the
+  integers and booleans it names, with its bitwise operations exact, and then
+  holds where it is written. It names only integers and booleans. A fact it
+  needs from the proof around it is a hypothesis it states:
+  `assert used < 64 ==> (word >> used) == 0 by bit_vector`.
 
 ### Patterns
 
@@ -2081,14 +2087,16 @@ proof Ordered.transitive for Box[Item: Ordered] {
 
 ### Bodies and contracts in proofs
 
-- A pure function with a `time` clause and a functional body is known to the
-  prover by its body. A functional body uses `let`, `if`, `match`, `is`,
-  calls, fields, building values, `with`, operators, and quantifiers, and
-  has no `var`, assignment, or loop, and passes nothing `mut` or `own`.
-- Every other function is known by its `requires` and `ensures`.
-- A body is read only where everything it reads is visible, and in another
-  package only when the function is `transparent`. A trait's provided method
-  is read everywhere.
+- A function or a method of a type is known to its callers' proofs by its
+  `requires` and `ensures`, in every package. A function whose body is its
+  meaning states it in its `ensures`:
+  `ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])`.
+- A method of a trait or an `impl` is known by its body, where the body is
+  functional: `let`, `if`, `match`, `is`, calls, fields, building values,
+  `with`, operators, and quantifiers, with no `var`, assignment, or loop, and
+  nothing passed `mut` or `own`. A trait's provided method is read in every
+  package, and a method an `impl` writes in the `impl`'s package.
+- A clause is read only where everything it reads is visible.
 - A function with a `requires` is defined only where it holds.
 
 ### Writing specifications
@@ -2235,15 +2243,11 @@ and the prelude changes only with a language version.
   set for a type as a whole.
 - A public signature cannot mention a private or `internal` type, and
   neither can a public type's fields unless the type is opaque.
-- The contracts of a public function, of a method of a public trait or
-  capability, and of a method of an `impl` that other packages can use call
-  no private or `internal` function and name no such constant.
-- `transparent` shows a public function's body to the proofs of other
-  packages, which makes the body part of the package's interface. It applies
-  only to a function or a method of a type whose body is a definition: it
-  has a `time` clause, no `uses`, and no `mut` parameter, and returns its
-  result. The body calls only public functions and names only public
-  constants.
+- The `requires` and `cost` of a public function, of a method of a public
+  trait or capability, and of a method of an `impl` that other packages can
+  use call no private or `internal` function and name no such constant. An
+  `ensures` may name any function the definition can, so that callers in its
+  package can know its result in terms of private helpers.
 
 ## No foreign code
 

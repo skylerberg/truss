@@ -163,15 +163,21 @@ its own, so a change to the rest invalidates nothing beyond the definition:
 - **A function's specification is separate from its body.** It is the core
   form of the parameters and the contract, built before the body so its nodes
   are numbered the same whatever the body is. It holds the body only where a
-  caller's proof reads it: a function in the logic, and a trait's provided
-  method. A second result, the exported specification, is what another
-  package's proofs read, with a body only for a `public transparent`
-  function.
-- **The exported specification names only public definitions**
-  (`types.private_in_public`), since another package's proofs read it, and
-  the contract of a function other packages cannot see is not compared between
-  releases. Type invariants, laws, and the `requires` of a function-typed
-  parameter are not checked for this yet.
+  caller's proof reads it: a method of a trait or an `impl` in the logic, and
+  never a function's or a method of a type's. A second result, the exported
+  specification, is what another package's proofs read, with no function's
+  body.
+- **A public `requires` and `cost` name only public definitions**
+  (`types.private_in_public`), since another package's proofs must meet or
+  count on them, and the contract of a function other packages cannot see is
+  not compared between releases. An `ensures` may name a private function, so
+  that callers in the package can know a public function's result in terms of
+  its private helpers. Type invariants, laws, and the `requires` of a
+  function-typed parameter are not checked yet. The compatibility check does
+  not compare the contracts of the private functions these clauses name.
+- **An assertion `by bit_vector` names only integers and booleans**
+  (`types.not_bit_vector`), since the prover decides it over the bits of
+  their fixed widths.
 - **A shape has its fields in the order of their names,** so reordering fields
   leaves it equal. The declaration order is a result of its own, which only a
   derived `Ordered` reads.

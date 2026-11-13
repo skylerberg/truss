@@ -4,6 +4,7 @@ use standard::list::slice
 use standard::map
 
 fn strictly_ascending[Element: Ordered](elements: Sequence[Element]) -> Bool
+  ensures result == (forall first in 0..elements.length() => forall second in 0..elements.length() => first < second ==> elements[first] < elements[second])
   cost time finite
 {
   forall i in 0..elements.length() => forall j in 0..elements.length() => i < j ==> elements[i] < elements[j]
@@ -364,6 +365,7 @@ public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Elemen
 }
 
 public fn collections::SortedSet[Element: Ordered].length(self) -> USize
+  ensures result == (self.elements.length())
   cost time O(1)
 {
   self.elements.length()
@@ -377,6 +379,7 @@ public fn collections::SortedSet[Element: Ordered].is_empty(self) -> Bool
 }
 
 public fn collections::SortedSet[Element: Ordered].contains(self, element: Element) -> Bool
+  ensures result == (self.search(element) is Ok(_))
   cost time O(log(self.length()) * time(Element.compare))
 {
   self.search(element) is Ok(_)

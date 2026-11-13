@@ -173,7 +173,7 @@ let statement_children visit (node : statement) =
       block visit body
   | Parallel branches | Concurrent branches -> List.iter visit.statement branches
   | Proof body -> block visit body
-  | Assert { value; _ } -> visit.expression value
+  | Assert { condition = { value; _ }; _ } -> visit.expression value
   | Yield { part; _ } -> operand visit part
 
 let pattern_children visit (node : pattern) =

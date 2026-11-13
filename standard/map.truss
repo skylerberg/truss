@@ -8,6 +8,7 @@ public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Valu
 public type Entry[Key, Value](key: Key, value: Value)
 
 internal fn entries_model[Key, Value](entries: Sequence[Entry[Key, Value]]) -> FiniteMap[Key, Value]
+  ensures identical(result, entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }))
   cost time finite
 {
   entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
@@ -23,14 +24,16 @@ impl Model for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-public transparent fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
+public fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
+  ensures result == (exists other: Key => map.contains_key(other) && other == key)
   cost time finite
 {
   exists other: Key => map.contains_key(other) && other == key
 }
 
-public transparent fn Map[Key: Hash + Ordered, Value].length(self) -> USize
+public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
   ensures result == self.model().size()
+  ensures result == (self.entries.length())
   cost time O(1)
 {
   self.entries.length()
@@ -139,8 +142,7 @@ public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(self.length() * time(Key.equal))
 {
-  var is_present = self.index_of(key) < self.entries.length()
-  is_present
+  self.index_of(key) < self.entries.length()
 }
 
 public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value)

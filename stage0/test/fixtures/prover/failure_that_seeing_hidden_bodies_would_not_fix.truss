@@ -1,3 +1,0 @@
-fn first(items: List[Int64]) -> Int64 {
-  items[0]
-}

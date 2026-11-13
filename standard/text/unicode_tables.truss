@@ -67,99 +67,85 @@ fn expansion_of(expansions: Slice[UInt32], code: UInt32) -> Option[Expansion]
 internal fn is_alphabetic(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::alphabetic_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::alphabetic_ranges[..], code: code)
 }
 
 internal fn is_numeric(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::numeric_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::numeric_ranges[..], code: code)
 }
 
 internal fn is_uppercase(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::uppercase_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::uppercase_ranges[..], code: code)
 }
 
 internal fn is_lowercase(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::lowercase_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::lowercase_ranges[..], code: code)
 }
 
 internal fn is_cased(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::cased_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::cased_ranges[..], code: code)
 }
 
 internal fn is_case_ignorable(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::case_ignorable_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::case_ignorable_ranges[..], code: code)
 }
 
 internal fn is_wide(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::wide_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::wide_ranges[..], code: code)
 }
 
 internal fn is_zero_width(code: UInt32) -> Bool
   cost time O(1)
 {
-  var contained = ranges_contain(unicode_data::zero_width_ranges[..], code: code)
-  contained
+  ranges_contain(unicode_data::zero_width_ranges[..], code: code)
 }
 
 internal fn uppercase_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var mapped = mapping_of(unicode_data::uppercase_mappings[..], code: code)
-  mapped
+  mapping_of(unicode_data::uppercase_mappings[..], code: code)
 }
 
 internal fn lowercase_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var mapped = mapping_of(unicode_data::lowercase_mappings[..], code: code)
-  mapped
+  mapping_of(unicode_data::lowercase_mappings[..], code: code)
 }
 
 internal fn folded_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var mapped = mapping_of(unicode_data::fold_mappings[..], code: code)
-  mapped
+  mapping_of(unicode_data::fold_mappings[..], code: code)
 }
 
 internal fn uppercase_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  var expanded = expansion_of(unicode_data::uppercase_expansions[..], code: code)
-  expanded
+  expansion_of(unicode_data::uppercase_expansions[..], code: code)
 }
 
 internal fn lowercase_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  var expanded = expansion_of(unicode_data::lowercase_expansions[..], code: code)
-  expanded
+  expansion_of(unicode_data::lowercase_expansions[..], code: code)
 }
 
 internal fn fold_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  var expanded = expansion_of(unicode_data::fold_expansions[..], code: code)
-  expanded
+  expansion_of(unicode_data::fold_expansions[..], code: code)
 }
 
 fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
@@ -274,8 +260,7 @@ fn pair_value(pairs: Slice[UInt32], first: UInt32, second: UInt32) -> Option[UIn
 internal fn composition_of(first: UInt32, second: UInt32) -> Option[UInt32]
   cost time O(1)
 {
-  var composite = pair_value(unicode_data::composition_pairs[..], first: first, second: second)
-  composite
+  pair_value(unicode_data::composition_pairs[..], first: first, second: second)
 }
 
 internal fn grapheme_properties_of(code: UInt32) -> UInt32

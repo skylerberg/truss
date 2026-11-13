@@ -18,9 +18,9 @@ let finish cursor start visibility kind : definition =
     id = Cursor.fresh_id cursor;
   }
 
-(* [public], [public opaque], [public transparent], or [internal], with the
-   tokens that spelled it. [modifier] is the token of [public] and the token
-   of the [opaque] or [transparent] after it. *)
+(* [public], [public opaque], or [internal], with the tokens that spelled
+   it. [modifier] is the token of [public] and the token of the [opaque]
+   after it. *)
 type written_visibility = {
   visibility : visibility;
   tokens : Token.t list;
@@ -37,7 +37,6 @@ let visibility cursor =
       in
       match Cursor.peek_kind cursor with
       | Keyword Opaque -> modified Public_opaque
-      | Keyword Transparent -> modified Public_transparent
       | _ -> { visibility = Public; tokens = [ public ]; modifier = None })
   | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.next cursor ]; modifier = None }
   | _ -> { visibility = Private; tokens = []; modifier = None }
@@ -615,25 +614,13 @@ let top_level cursor ~function_ =
   (match (visibility, modifier, kind) with
   | _, None, _
   | Public_opaque, Some _, Left (Type_definition _)
-  | Public_transparent, Some _, (Left (Function _) | Right _)
   | _, Some _, Left (Impl _ | Test _ | Law_proof _) ->
       ()
   | _, Some (public, word), _ ->
-      let (code : Diagnostic.Code.parser), message, spelled =
-        match visibility with
-        | Public_opaque ->
-            (Diagnostic.Code.Misplaced_opaque, "Only a type can be `opaque`.", "opaque")
-        | Public_transparent ->
-            ( Misplaced_transparent,
-              "Only a function or a method of a type can be `transparent`.",
-              "transparent" )
-        | Private | Internal | Public -> Cursor.fail cursor "a visibility with a modifier"
-      in
-      Cursor.report cursor code word.span message
+      Cursor.report cursor Misplaced_opaque word.span "Only a type can be `opaque`."
         ~fixes:
           [
-            Diagnostic.fix
-              (Printf.sprintf "Remove `%s`" spelled)
+            Diagnostic.fix "Remove `opaque`"
               [ Diagnostic.delete (Source.span public.span.stop word.span.stop) ];
           ]);
   if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the definition";

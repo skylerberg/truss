@@ -4,6 +4,7 @@ use standard::list::slice
 use standard::map
 
 fn strictly_ascending[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]]) -> Bool
+  ensures result == (forall first in 0..entries.length() => forall second in 0..entries.length() => first < second ==> entries[first].key < entries[second].key)
   cost time finite
 {
   forall i in 0..entries.length() => forall j in 0..entries.length() => i < j ==> entries[i].key < entries[j].key
@@ -256,6 +257,7 @@ public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Ele
 }
 
 public fn collections::SortedMap[Key: Ordered, Value].length(self) -> USize
+  ensures result == (self.entries.length())
   cost time O(1)
 {
   self.entries.length()
@@ -269,6 +271,7 @@ public fn collections::SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
 }
 
 public fn collections::SortedMap[Key: Ordered, Value].contains(self, key: Key) -> Bool
+  ensures result == (self.search(key) is Ok(_))
   cost time O(log(self.length()) * time(Key.compare))
 {
   self.search(key) is Ok(_)
@@ -656,6 +659,10 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
 fn collections::SortedMap[Key: Ordered, Value].position_of(self, key: Key) -> USize
   requires self.search(key) is Ok(_)
   ensures result < self.entries.length()
+  ensures result == (match self.search(key) {
+      Ok(index) => index
+      Err(index) => index
+    })
   cost time O(log(self.entries.length()) * time(Key.compare))
 {
   match self.search(key) {

@@ -4,7 +4,12 @@ use standard::intrinsic
 public type Ordering = Less | Equal | Greater
   derives Equal
 
-public transparent fn Ordering.reversed(self) -> Ordering
+public fn Ordering.reversed(self) -> Ordering
+  ensures identical(result, match self {
+      Less => Ordering.Greater
+      Equal => Ordering.Equal
+      Greater => Ordering.Less
+    })
   cost time O(1)
 {
   match self {
@@ -14,7 +19,8 @@ public transparent fn Ordering.reversed(self) -> Ordering
   }
 }
 
-public transparent fn Ordering.then(self, next: Ordering) -> Ordering
+public fn Ordering.then(self, next: Ordering) -> Ordering
+  ensures identical(result, if self == Ordering.Equal { next } else { self })
   cost time O(1)
 {
   if self == Ordering.Equal { next } else { self }

@@ -53,13 +53,15 @@ internal fn List[Element].elements(self) -> intrinsic::View[Element] {
 
 public fn List[Element].length(self) -> USize
   ensures result == self.model().length()
+  ensures result == (intrinsic::storage_length(self.storage))
   cost time O(1)
   cost allocations == 0
 {
   intrinsic::storage_length(self.storage)
 }
 
-public transparent fn List[Element].is_empty(self) -> Bool
+public fn List[Element].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
   cost time O(1)
   cost allocations == 0
 {
@@ -274,6 +276,7 @@ public fn Array[Element, count: USize].to_list(own self) -> List[Element]
 
 public fn Slice[Element].length(self) -> USize
   ensures result == self.model().length()
+  ensures result == (intrinsic::view_length(self.elements))
   cost time O(1)
   cost allocations == 0
 {
@@ -445,8 +448,9 @@ public fn List[Element].collect[Source: Cursor[Element = Element]](source: own S
   items
 }
 
-public transparent fn List[Element].capacity(self) -> USize
+public fn List[Element].capacity(self) -> USize
   ensures result >= self.length()
+  ensures result == (intrinsic::storage_capacity(self.storage))
   cost time O(1)
   cost allocations == 0
 {

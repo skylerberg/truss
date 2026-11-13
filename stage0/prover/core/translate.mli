@@ -26,14 +26,11 @@ type obligation = {
   cited : (Names.key * span) option;
   fixes : Syntax.span Diagnostic.fix list;
   query : Logic.query;
-  contracts_alone : Logic.query option;
   values : (Logic.symbol * string) list;
   locals : (Logic.symbol * string) list;
-  constants : Costs.constants list;
   evaluation : evaluation option;
   known_calls : known_call list;
   decisions : (string * string option * Logic.term * Logic.term) list;
-  hidden : (string * bool) list;
 }
 
 type outcome = { obligations : obligation list; holes : (Names.key * span) list }
@@ -92,7 +89,7 @@ and frame = {
 type changed = { changed_locals : Core.local list; changes_self : bool }
 
 type loop_rule =
-  | Clause_bound of Core.cost * Costs.constants option
+  | Clause_bound of Core.cost
   | Per_iteration of { per : Logic.term; per_held : (Logic.term * Logic.term) option }
 
 type loop_cost = {
@@ -142,7 +139,6 @@ type context = {
   datatypes : (string, unit) Hashtbl.t;
   stated : (stated, unit) Hashtbl.t;
   mutable facts : Logic.term list;
-  unfolded : (Logic.term, unit) Hashtbl.t;
   mutable obligations : obligation list;
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;
@@ -159,9 +155,7 @@ type context = {
   home : Names.key;
   mutable laws_assumed : string list;
   mutable counters : Costs.counter list;
-  mutable own_constants : (Costs.counter * Costs.constants) list;
-  mutable groups : Costs.constants list;
-  counter_numbers : (Costs.counter, int) Hashtbl.t;
+  mutable own_bounds : Costs.counter list;
   fresh_order : (Logic.symbol, int) Hashtbl.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
@@ -176,9 +170,7 @@ type context = {
   mutable known_calls : known_call list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable iteration_returns : (Core.origin * Types.ty option) list;
-  reveal : bool;
   mutable entry : Logic.symbol list;
-  mutable hidden_bodies : (Logic.symbol * (string * bool)) list;
   mutable cursors : (Logic.term * cursor) list;
   mutable proving : bool;
   mutable holes : (Names.key * span) list;
@@ -215,13 +207,11 @@ val definition_span : source -> Span.t
 type promise = {
   counter : Costs.counter;
   clause : Core.cost;
-  constants : Costs.constants option;
   written_in : source;
   inherited : bool;
 }
 
 val function_ :
-  ?reveal:bool ->
   ?proof:bool ->
   ?updating_helper:bool ->
   ?inherited:part * Types.substitution * Core.block option ->
@@ -234,7 +224,6 @@ val function_ :
     function proven once for each type a bound allows. *)
 
 val laws :
-  ?reveal:bool ->
   Query.context ->
   source ->
   impl:Path.t ->
@@ -244,7 +233,7 @@ val laws :
   at:span ->
   outcome
 
-val type_ : ?reveal:bool -> Query.context -> source -> path:Path.t -> outcome
-val test : ?reveal:bool -> Query.context -> source -> path:Path.t -> outcome
-val constant : ?reveal:bool -> Query.context -> source -> path:Path.t -> outcome
-val theorem : ?reveal:bool -> Query.context -> source -> path:Path.t -> outcome
+val type_ : Query.context -> source -> path:Path.t -> outcome
+val test : Query.context -> source -> path:Path.t -> outcome
+val constant : Query.context -> source -> path:Path.t -> outcome
+val theorem : Query.context -> source -> path:Path.t -> outcome

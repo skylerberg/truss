@@ -8,13 +8,7 @@ type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
 
 val covers : clause:target -> counter:target -> bool
-
-type constants = { factor : Logic.symbol; addend : Logic.symbol; mutable pairs : (Z.t * Z.t) list }
-
-val pairs : (Z.t * Z.t) list
-val constants : Symbol.cost_group -> constants
-val bound : constants -> Logic.term -> Logic.term
-val pin : constants -> Z.t * Z.t -> Logic.term
+val bound : Logic.term -> Logic.term
 val plus : Logic.term -> Logic.term -> Logic.term
 val minus : Logic.term -> Logic.term -> Logic.term
 val times : Logic.term -> Logic.term -> Logic.term

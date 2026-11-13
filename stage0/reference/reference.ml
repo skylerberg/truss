@@ -62,7 +62,6 @@ let token (kind : Token.kind) : Truss.token option =
         | Theorem -> THEOREM
         | Todo -> TODO
         | Trait -> TRAIT
-        | Transparent -> TRANSPARENT
         | True -> TRUE
         | Type -> TYPE
         | Unreachable -> UNREACHABLE

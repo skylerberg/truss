@@ -1,3 +1,0 @@
-public transparent fn double(value: Int64) -> Int64 {
-  value + value
-}

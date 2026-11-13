@@ -1,6 +1,5 @@
 use standard::core
 use standard::list
-use standard::list::slice
 
 public fn List[Element].get(self, index: USize) lends Option[Element]
 
@@ -135,7 +134,8 @@ public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Optio
   self.slice().find_slice(needle)
 }
 
-public transparent fn List[Element: Ordered].is_sorted(self) -> Bool
+public fn List[Element: Ordered].is_sorted(self) -> Bool
+  ensures result == (self.slice().is_sorted())
   cost time finite
 {
   self.slice().is_sorted()
@@ -395,9 +395,6 @@ public fn List[Element: Ordered].sort(mut self)
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
   mut self[..].sort()
-  proof {
-    slice::sorted_from_model(self.slice(), bound: self.length())
-  }
 }
 
 public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))

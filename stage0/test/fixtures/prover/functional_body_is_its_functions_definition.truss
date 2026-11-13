@@ -1,4 +1,5 @@
 fn is_small(value: Int64) -> Bool
+  ensures result == (value < 10)
   cost time finite
 {
   value < 10

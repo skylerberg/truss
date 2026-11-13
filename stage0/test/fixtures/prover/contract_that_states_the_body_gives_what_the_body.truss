@@ -1,0 +1,15 @@
+fn halved(value: Int64) -> Int64
+  requires value >= 0
+  ensures result == value / 2
+  cost time O(1)
+{
+  value / 2
+}
+
+fn quartered(value: Int64) -> Int64
+  requires value >= 0
+  ensures result <= value / 2
+  cost time O(1)
+{
+  halved(halved(value))
+}

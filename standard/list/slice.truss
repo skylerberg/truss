@@ -337,7 +337,8 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
   find_with_table(self, needle: needle, table: table.slice())
 }
 
-public transparent fn Slice[Element: Ordered].is_sorted(self) -> Bool
+public fn Slice[Element: Ordered].is_sorted(self) -> Bool
+  ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
   cost time finite
 {
   forall i in 1..self.length() => self[i - 1] <= self[i]
@@ -447,6 +448,28 @@ theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, f
   }
 }
 
+theorem excluded_below[Element: Ordered](items: Slice[Element], target: Element, middle: USize)
+  requires forall position in 1..items.length() => items.model()[position - 1] <= items.model()[position]
+  requires middle < items.length()
+  requires items[middle] < target
+  ensures forall position in 0..middle + 1 => !(items.model()[position] == target)
+  cost time finite
+{
+  sorted_from_model(items, bound: items.length())
+  sorted_below(items, target: target, last: middle, bound: middle + 1)
+}
+
+theorem excluded_above[Element: Ordered](items: Slice[Element], target: Element, middle: USize)
+  requires forall position in 1..items.length() => items.model()[position - 1] <= items.model()[position]
+  requires middle < items.length()
+  requires target < items[middle]
+  ensures forall position in middle..items.length() => !(items.model()[position] == target)
+  cost time finite
+{
+  sorted_from_model(items, bound: items.length())
+  sorted_above(items, target: target, first: middle, bound: middle)
+}
+
 public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
   requires forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   ensures match result {
@@ -455,9 +478,6 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
   }
   cost time O(log(self.length()) * time(Element.compare))
 {
-  proof {
-    sorted_from_model(self, bound: self.length())
-  }
   var low: USize = 0
   var high = self.length()
   while low < high
@@ -472,14 +492,14 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
     match self[middle].compare(target) {
       Less => {
         proof {
-          sorted_below(self, target: target, last: middle, bound: middle + 1)
+          excluded_below(self, target: target, middle: middle)
         }
         low = middle + 1
       }
       Greater => {
         proof {
           greater_is_less_reversed(self[middle], second: target)
-          sorted_above(self, target: target, first: middle, bound: middle)
+          excluded_above(self, target: target, middle: middle)
         }
         high = middle
       }
@@ -924,6 +944,7 @@ fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, pare
   requires limit <= items.length()
   requires 0 <= parent
   requires parent < limit / 2
+  ensures result == (items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent]))
   cost time finite
 {
   items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent])
@@ -932,6 +953,7 @@ fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, pare
 fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer) -> Bool
   requires limit <= items.length()
   requires 0 <= floor
+  ensures result == (forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent))
   cost time finite
 {
   forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent)
@@ -940,6 +962,7 @@ fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floo
 fn is_heap_except[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer, hole: Integer) -> Bool
   requires limit <= items.length()
   requires 0 <= floor
+  ensures result == (forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent))
   cost time finite
 {
   forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent)
@@ -950,6 +973,8 @@ fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integ
   requires 0 <= hole
   requires 0 <= above
   requires above < items.length()
+  ensures result == (hole >= limit / 2
+      || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above])))
   cost time finite
 {
   hole >= limit / 2
@@ -1577,12 +1602,25 @@ impl Equal for Slice[Element: Equal] {
   }
 }
 
-public transparent fn lexicographic[Element: Ordered](
+public fn lexicographic[Element: Ordered](
   first: Sequence[Element],
   second: Sequence[Element],
   from: Integer,
 ) -> Ordering
   requires 0 <= from
+  ensures result == (if from < first.length() && from < second.length() {
+      if first[from].compare(second[from]) == Ordering.Equal {
+        lexicographic(first, second: second, from: from + 1)
+      } else {
+        first[from].compare(second[from])
+      }
+    } else if first.length() < second.length() {
+      Ordering.Less
+    } else if first.length() > second.length() {
+      Ordering.Greater
+    } else {
+      Ordering.Equal
+    })
   decreases first.length() - from
   cost time finite
 {

@@ -176,7 +176,7 @@ let () =
   test "an index a range loop bounds" (fun () -> proven Fixtures.Prover.index_a_range_loop_bounds);
   test "assigning to an element checks its index" (fun () ->
       not_proven Fixtures.Prover.assigning_to_an_element_checks_its_index "prover.requires");
-  test "a functional body is its function's definition" (fun () ->
+  test "a function's ensures is what its callers know" (fun () ->
       proven Fixtures.Prover.functional_body_is_its_functions_definition);
   test "a body with a loop is not a definition" (fun () ->
       not_proven Fixtures.Prover.body_with_a_loop_is_not_a_definition "prover.ensures");
@@ -466,6 +466,10 @@ let () =
       proven Fixtures.Prover.signed_bitwise_operations_are_twos_complement);
   test "a shift by a literal is a multiplication" (fun () ->
       proven Fixtures.Prover.shift_by_a_literal_is_a_multiplication);
+  test "a bit-vector assertion holds for every value of its variables" (fun () ->
+      not_proven Fixtures.Prover.bit_vector_assertion_holds_for_every_value "prover.assertion");
+  test "a bit-vector assertion states its hypotheses" (fun () ->
+      proven Fixtures.Prover.bit_vector_assertion_states_its_hypotheses);
   test "a bitwise fact that does not hold has a counterexample" (fun () ->
       not_proven Fixtures.Prover.bitwise_fact_that_does_not_hold_has_a "prover.ensures")
 
@@ -959,27 +963,36 @@ let across library program =
     [ (Support.module_of "app::main", "use lib::numbers\n\n" ^ program) ];
   check database (Support.module_of "app::main")
 
-let doubling marker = "public " ^ marker ^ Fixtures.Prover.doubling_2
+let public_doubling ensures =
+  Printf.sprintf
+    "public fn double(limit_count: Int64) -> Int64\n\
+    \  requires limit_count < 1000 && limit_count > -1000\n\
+     %s  cost time O(1)\n\
+     {\n\
+    \  limit_count * 2\n\
+     }\n"
+    ensures
 
 let () =
-  test "a caller in another package reads a transparent function's body" (fun () ->
+  test "a caller in another package reads its callee's contract" (fun () ->
       match
-        across (doubling "transparent ")
-          Fixtures.Prover.caller_in_another_package_reads_a_transparent
+        across
+          (public_doubling "  ensures result == limit_count * 2\n")
+          Fixtures.Prover.caller_in_another_package_reads_its_callees
       with
       | [] -> ()
       | actual ->
           fail "%s"
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-  test "a caller in another package does not read a body that is not transparent" (fun () ->
-      match across (doubling "") Fixtures.Prover.caller_in_another_package_does_not_read_a_body with
-      | [ diagnostic ] ->
-          if not (contains diagnostic.message "is not visible in this package") then
-            fail "message %S" diagnostic.message
+  test "a caller in another package does not read its callee's body" (fun () ->
+      match
+        across (public_doubling "") Fixtures.Prover.caller_in_another_package_does_not_read_its
+      with
+      | [ _ ] -> ()
       | actual -> fail "%d diagnostics" (List.length actual));
-  test "a call in another package is not run unless its function is transparent" (fun () ->
-      match across (doubling "") Fixtures.Prover.call_in_another_package_is_not_run_unless_its with
+  test "a call in another package is not run" (fun () ->
+      match across (public_doubling "") Fixtures.Prover.call_in_another_package_is_not_run with
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics" (List.length actual))
 (* Plain and amortized bounds together *)
@@ -1039,29 +1052,6 @@ let () =
 let () =
   test "a callee's ensures under its requires holds for every bound value" (fun () ->
       proven Fixtures.Prover.callees_ensures_under_its_requires_holds_for_every)
-
-(* Notes about hidden bodies *)
-
-let () =
-  test "a failure that seeing hidden bodies would not fix names none of them" (fun () ->
-      let actual = message Fixtures.Prover.failure_that_seeing_hidden_bodies_would_not_fix in
-      if contains actual "is not visible in this package" then fail "message %S" actual);
-  test "a note about several hidden bodies says some may not be needed" (fun () ->
-      match
-        across Fixtures.Prover.two_hidden_bodies
-          Fixtures.Prover.note_names_every_hidden_body_it_revealed
-      with
-      | [ diagnostic ] ->
-          if
-            not
-              (contains diagnostic.message
-                 "The bodies of `lib::numbers::double`, `lib::numbers::identity` are not visible"
-              && contains diagnostic.message "some may not be needed")
-          then fail "message %S" diagnostic.message
-      | actual ->
-          fail "%s"
-            (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
 (* Early exits from concurrent loops *)
 
@@ -1185,7 +1175,7 @@ let () =
 (* Definitions under a quantifier *)
 
 let () =
-  test "a definition with branches, called under a quantifier on no bound value, is unfolded"
+  test "a contract with branches, called under a quantifier on no bound value, holds there"
     (fun () -> proven Fixtures.Prover.definition_with_branches_called_under_a_quantifier);
   test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
       proven Fixtures.Prover.derived_ordering_of_a_one_field_record_is_its);
@@ -1440,30 +1430,10 @@ let () =
       in
       let shallow = most 3 and deep = most 6 in
       if deep > shallow then fail "written %d times nested 3 deep, %d times 6 deep" shallow deep);
-  test "a query over an unfolded definition can be asked with the contract alone" (fun () ->
-      let database =
-        Support.setup
-          [ ("app::main", Fixtures.Prover.query_over_an_unfolded_definition_can_be_asked) ]
-      in
-      let key =
-        List.find
-          (fun (declaration : Resolve.Names.declaration) ->
-            Path.show declaration.path = "app::main::f")
-          (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
-      in
-      match Query.demand database Prover.proof (Resolve.Names.key_of key) with
-      | Obligations { obligations; _ } -> (
-          match
-            List.find_opt
-              (fun (obligation : Prover.Translate.obligation) -> obligation.code = Ensures)
-              obligations
-          with
-          | Some { query; contracts_alone = Some alone; _ } ->
-              if List.length alone.facts >= List.length query.facts then
-                fail "the contract alone keeps every fact"
-          | Some _ -> fail "no query with the contract alone"
-          | None -> fail "no ensures obligation")
-      | _ -> fail "expected obligations")
+  test "a callee is known by its contract, not its body" (fun () ->
+      not_proven Fixtures.Prover.callee_with_an_ensures_is_known_by_its_contract "prover.ensures");
+  test "a contract that states the body gives what the body would" (fun () ->
+      proven Fixtures.Prover.contract_that_states_the_body_gives_what_the_body)
 
 (* Triggers *)
 
