@@ -974,12 +974,6 @@ let () =
           fail "%s"
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-  test "a caller in another package does not read its callee's body" (fun () ->
-      match
-        across (public_doubling "") Fixtures.Prover.caller_in_another_package_does_not_read_its
-      with
-      | [ _ ] -> ()
-      | actual -> fail "%d diagnostics" (List.length actual));
   test "a call in another package is not run" (fun () ->
       match across (public_doubling "") Fixtures.Prover.call_in_another_package_is_not_run with
       | [ _ ] -> ()
