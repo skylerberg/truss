@@ -19,6 +19,9 @@ let find () =
   in
   first [] candidates
 
+let added_flags_variable = "TRUSS_CFLAGS"
+let split_flags text = List.filter (( <> ) "") (String.split_on_char ' ' text)
+
 let required_flags =
   [
     "-std=c11";

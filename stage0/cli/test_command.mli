@@ -10,7 +10,6 @@ val run :
   timings:bool ->
   rerun:bool ->
   json:bool ->
-  sanitize:bool ->
   int
 
 module For_testing : sig

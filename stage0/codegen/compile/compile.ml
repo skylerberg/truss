@@ -242,25 +242,6 @@ let rec reach =
 
 let () = ignore (Lazy.force reach)
 
-(* The key a test's result is kept under: the key of everything its code can
-   reach, the version of code generation, and the target, since [USize] is
-   a [typedef] in the C, so the LIR can be the same for two widths while
-   results such as [USize.maximum] are not. *)
-let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 test key"
-
-let test_key_query =
-  Query.query ~name:"test_key" ~phase:Phases.keys ~saved:true ~portable:true
-    ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
-    (fun database (lowering, path) ->
-      derive_test_key
-        (Cbor.encode
-           (Cbor.Array
-              [
-                Cbor.int Lir.version;
-                target_key lowering.target;
-                Bytes (Query.demand database (Lazy.force reach) (lowering, Lower.test_key path));
-              ])))
-
 type template_check = Ran of (int * bool) list | Ran_too_long
 type evaluated_call = Returned of Lir.static_value | Call_ran_too_long
 
@@ -294,8 +275,28 @@ exception Cannot_build of string
 
 let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
 
+(* The key that the result of a run from [root] is kept under, once [root]
+   is wanted. It hashes the key of everything [root] can reach, code
+   generation's version, the target, and the build's added C flags. The
+   target is part of it because [USize] is a [typedef] in the C, so the LIR
+   can be the same for two widths while [USize.maximum] is not. The flags
+   are part of it because a sanitizer can stop a run that passes without
+   one. *)
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-13 result key"
+
+let result_key compiler root =
+  derive_result_key
+    (Cbor.encode
+       (Cbor.Array
+          [
+            Cbor.int Lir.version;
+            target_key compiler.lowering.target;
+            Bytes (Query.demand compiler.database (Lazy.force reach) (compiler.lowering, root));
+            Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
+          ]))
+
 (* A test's key, once it has been said to be wanted. *)
-let test_key compiler test = Query.demand compiler.database test_key_query (compiler.lowering, test)
+let test_key compiler test = result_key compiler (Lower.test_key test)
 
 (* The definitions an instance's positions are relative to. *)
 let anchored (instance : Lir.t) =
@@ -811,7 +812,7 @@ type unshippable = {
   way : Path.t list;  (** The definitions from [main] to the one that holds it *)
 }
 
-let unshippable compiler ~main ~echo =
+let unshippable compiler ~main =
   reporting compiler @@ fun () ->
   let root = Instance.Program_main main in
   let reached =
@@ -838,11 +839,9 @@ let unshippable compiler ~main ~echo =
                   (fun (function_ : Lir.function_) ->
                     Array.to_list function_.blocks
                     |> List.concat_map (fun (block : Lir.basic_block) ->
-                        (if echo then
-                           List.filter_map
-                             (function Lir.Echo { site; _ } -> Some (`Echo, site) | _ -> None)
-                             block.statements
-                         else [])
+                        List.filter_map
+                          (function Lir.Echo { site; _ } -> Some (`Echo, site) | _ -> None)
+                          block.statements
                         @
                         match block.terminator with
                         | Fail { failure = Todo; site; _ } -> [ (`Todo, site) ]
@@ -905,20 +904,10 @@ let build_program compiler ~main ~output =
   let root = Instance.Program_main main in
   build compiler ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
 
-(* The key a run of code while compiling is kept under: the key of everything
-   its root can reach, which its inputs are part of. *)
-let derive_run_key = Blake3.derive_key ~context:"truss 2026-11-12 compile-time run key"
-
+(* The key a run of code while compiling is kept under. *)
 let run_key compiler root =
   compiler.want compiler.lowering [ root ];
-  derive_run_key
-    (Cbor.encode
-       (Cbor.Array
-          [
-            Cbor.int Lir.version;
-            target_key compiler.lowering.target;
-            Bytes (Query.demand compiler.database (Lazy.force reach) (compiler.lowering, root));
-          ]))
+  result_key compiler root
 
 (* Evaluates a tagged template's check: each of the tag's [from_template]'s
    clauses that can run, for a template of these literal texts, by its

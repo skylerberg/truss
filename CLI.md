@@ -85,7 +85,7 @@ output.
 | Status | Meaning |
 |---|---|
 | 0 | The command succeeded, and the code has no error |
-| 1 | The code has an error: a diagnostic, a failed test, or a build rejected for a `todo` |
+| 1 | The code has an error: a diagnostic, a failed test, or a release build rejected for a `todo`, an `echo`, or a hole in a proof |
 | 2 | The command could not run: a bad argument, a path that names nothing, no `truss.toml`, no C compiler, or a compiler bug |
 
 Once the program starts, `truss run` exits with the program's status.
@@ -163,19 +163,32 @@ truss run [--release] [--] [ARGUMENT...]
 truss build [--output PATH] [--json]
 ```
 
-**`truss run`** builds a development program and runs it on the terminal
-with the arguments. It rejects a program whose `main` reaches a `todo`.
-**`--release`** builds as `truss build` does, for timing the program, but
-keeps the run-time checks, since it does not run the prover.
-
 **`truss build`** builds a release program. It rejects a program with an
-unproven obligation, and a program whose `main` reaches a `todo` or an
-`echo`, with the call path from `main`:
+unproven obligation, and a program whose `main` can reach a `todo` or an
+`echo` in code, with the call path from `main`, or a hole in a proof:
 
 ```text
 render.truss:12:14: `todo` can be reached from `main`, so the program cannot be built.
     weather::main::main -> weather::render::render
 ```
+
+Every obligation of a release program is proven, so it omits the run-time
+checks that the proofs replace.
+
+**`truss run`** is `truss build` followed by running the program on the
+terminal with the arguments, except that it builds for development unless
+given **`--release`**. A development build does not run the prover, so it
+keeps the run-time checks. It refuses nothing that its `main` reaches: a
+`todo` that runs stops the program with its position, and an `echo` writes
+to standard error.
+
+| | Development: `truss run` | Release: `truss build`, `truss run --release` |
+|---|---|---|
+| Proofs | Not run | Every obligation proven |
+| Run-time checks | Kept | Omitted |
+| A `todo` that `main` can reach | Stops the program if it runs | Rejected |
+| An `echo` that `main` can reach | Writes to standard error | Rejected |
+| A hole in a proof that `main` relies on | Allowed | Rejected |
 
 The program is written to `--output`, or to a file named after the package.
 Every intermediate file is in the cache, so a package has no build
@@ -403,9 +416,12 @@ not running. The process runs the same command-line code, so the result is
 the same as in the client's own process. `truss new` and `truss clean` read
 no code, so they always run in the client's process.
 
-**`--sanitize`,** on `test` and `run`, builds with AddressSanitizer and
-UndefinedBehaviorSanitizer, for working on the compiler. A memory error in
-Truss code can come only from a compiler bug, so every report is one.
+**`TRUSS_CFLAGS`** adds flags, separated by spaces, to every command
+that compiles or links C, for working on the compiler. Set to a sanitizer's,
+such as `-fsanitize=address,undefined`, it finds compiler bugs, since a
+memory error or undefined behavior in Truss code can come only from one.
+The flags are part of each object's key and each test result's key. The
+client sends its value to the background process with each command.
 
 ## Left out
 

@@ -185,27 +185,21 @@ let cache =
        | Some directory when directory <> "" -> directory
        | _ -> Filename.concat (Lazy.force scratch) "objects"))
 
-(* [TRUSS_SANITIZE=1] builds every test's C with AddressSanitizer and
-   UndefinedBehaviorSanitizer, as [truss --sanitize] does, and
-   [TRUSS_SANITIZE=thread] with ThreadSanitizer, which watches the threads
-   that run branches at once; a report is a compiler bug. *)
-let sanitizers =
-  match Sys.getenv_opt "TRUSS_SANITIZE" with
-  | Some "1" ->
-      [
-        "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer";
-      ]
-  | Some "thread" -> [ "-fsanitize=thread"; "-fno-omit-frame-pointer" ]
-  | _ -> []
+(* The flags in [TRUSS_CFLAGS], as [truss] adds them. CI sets them to a
+   sanitizer's, so a report is a compiler bug. *)
+let added_flags =
+  Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
 let settings : Build.settings =
-  { build = Development; optimization = O1; extra = strict @ sanitizers }
+  { build = Development; optimization = O1; extra = strict @ added_flags }
 
 (* The thread counts that a program on threads is run with. More threads
    than cores makes them interleave more. A sanitizer slows a program
    several times, so under one a program runs once, with a count above the
    number of cores. *)
-let worker_counts = if sanitizers = [] then [ 1; 2; 8; 32 ] else [ 8 ]
+let worker_counts =
+  if List.exists (String.starts_with ~prefix:"-fsanitize=") added_flags then [ 8 ]
+  else [ 1; 2; 8; 32 ]
 
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)

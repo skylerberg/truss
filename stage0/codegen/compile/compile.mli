@@ -108,13 +108,13 @@ val run_tests :
    for testing the runner on LIR no source compiles to, such as a test
    that leaves a block allocated. *)
 
-(* Each test's key: the hash of the code it can run, as "Test results"
-   says, which changes exactly when the test's outcome may. A test that
-   cannot be lowered has none. *)
+(* Each test's key: the hash of the code it can run and of the build's
+   added C flags, which changes exactly when the test's outcome may. A test
+   that cannot be lowered has none. *)
 val test_keys : t -> Path.t list -> (Path.t * string) list
 
-(* A [todo], or an [echo], that a program can reach, which a build that
-   ships refuses: its file and position, as the program would report them,
+(* A [todo] or an [echo] that a program can reach, which a release build
+   refuses: its file and position, as the program would report them,
    and the definitions on the way from [main] to the one that holds it. *)
 type unshippable = {
   failure : [ `Todo | `Echo ];
@@ -124,9 +124,9 @@ type unshippable = {
   way : Path.t list;
 }
 
-(* Every [todo] the program whose [main] is at that path can reach, and with
-   [echo], every [echo], once each, in order of position. *)
-val unshippable : t -> main:Path.t -> echo:bool -> (unshippable list, string) result
+(* Every [todo] and [echo] the program whose [main] is at that path can
+   reach, once each, in order of position. *)
+val unshippable : t -> main:Path.t -> (unshippable list, string) result
 
 (* Builds the program whose [main] is at that path into an executable at
    [output]. *)
@@ -138,9 +138,10 @@ val build_program : t -> main:Path.t -> output:string -> (unit, string) result
    linked with the runtime that starts no threads, as a test program is, so
    its tasks and [parallel] branches run sequentially. *)
 
-(* The key a run of code while compiling is kept under: the key of
-   everything the root can reach, with the version of code generation and
-   the target, which changes exactly when the run's result may. *)
+(* The key a run of code while compiling is kept under: the hash of the
+   code the root can reach, code generation's version, the target, and the
+   build's added C flags, which changes exactly when the run's result
+   may. *)
 val run_key : t -> Instance.key -> (string, string) result
 
 (* Evaluates a tagged template's check by running it: each of the tag's

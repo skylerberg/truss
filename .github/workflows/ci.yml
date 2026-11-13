@@ -270,7 +270,7 @@ jobs:
 
       - name: Test generated code under sanitizers
         env:
-          TRUSS_SANITIZE: "1"
+          TRUSS_CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
           ASAN_OPTIONS: detect_leaks=0
         run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
 
@@ -321,7 +321,7 @@ jobs:
 
       - name: Test programs on threads under ThreadSanitizer
         env:
-          TRUSS_SANITIZE: thread
+          TRUSS_CFLAGS: -fsanitize=thread -fno-omit-frame-pointer
           TRUSS_OBJECT_CACHE: /home/runner/.cache/truss-objects
         run: |
           opam exec -- dune build stage0/test/codegen/parallel_tests.exe stage0/test/codegen/shared_tests.exe stage0/test/codegen/concurrent_tests.exe

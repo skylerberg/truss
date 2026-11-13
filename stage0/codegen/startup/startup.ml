@@ -165,7 +165,7 @@ _Noreturn void t_runtime_assertion_failed(const uint8_t *message, t_usize length
 _Noreturn void t_runtime_todo(const uint8_t *message, t_usize length, const struct t_anchor *anchor,
                               uint32_t line, uint32_t column) {
   t_describe(message, length, anchor, line, column);
-  t_end(t_incomplete, "todo reached: ", 101);
+  t_end(t_incomplete, "", 101);
 }
 
 void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, uint32_t line,

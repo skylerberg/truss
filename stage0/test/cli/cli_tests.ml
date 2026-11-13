@@ -84,7 +84,11 @@ let () =
         (Arguments.prepare [ "truss"; "run"; "--release"; "input.txt"; "-v" ]));
   test "a -- after run is kept as written" (fun () ->
       expect_strings ~expected:[ "truss"; "run"; "--"; "-x" ]
-        (Arguments.prepare [ "truss"; "run"; "--"; "-x" ]))
+        (Arguments.prepare [ "truss"; "run"; "--"; "-x" ]));
+  test "--no-server after run is an option of run, not the program's" (fun () ->
+      expect_strings
+        ~expected:[ "truss"; "run"; "--no-server"; "--release"; "--"; "input.txt" ]
+        (Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
 
 (* Finding the package *)
 
@@ -161,8 +165,7 @@ let () =
       in
       let status, output =
         captured (fun () ->
-            Program_command.run ~directory:(Filename.concat root "app") ~release:false
-              ~sanitize:false ~arguments:[])
+            Program_command.run ~directory:(Filename.concat root "app") ~release:false ~arguments:[])
       in
       if status <> Outcome.Exit 1 || not (contains output "lib/arith/arith.truss") then
         fail "%s" output);
@@ -460,7 +463,8 @@ let () =
         captured (fun () -> Program_command.build ~directory:root ~output:None ~json:false)
       in
       if outcome <> Outcome.Exit 1 then fail "did not refuse";
-      if not (contains output "a `todo` in a proof") then fail "%s" output)
+      if not (contains output "main.truss:3:5: `todo` in a proof can be reached") then
+        fail "%s" output)
 
 (* The test runner's report *)
 
@@ -567,9 +571,7 @@ let () =
           (package [ ("main.truss", Fixtures.todo_main_can_reach_is_refused_with_the_way_from) ])
       in
       match
-        Compile.unshippable (lowering project)
-          ~main:(List.hd (Program_command.mains project))
-          ~echo:false
+        Compile.unshippable (lowering project) ~main:(List.hd (Program_command.mains project))
       with
       | Ok [ { failure = `Todo; line = 6; way; _ } ] ->
           expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
@@ -610,9 +612,7 @@ let () =
       let reached_from called =
         let project = program called in
         match
-          Compile.unshippable (lowering project)
-            ~main:(List.hd (Program_command.mains project))
-            ~echo:false
+          Compile.unshippable (lowering project) ~main:(List.hd (Program_command.mains project))
         with
         | Ok unshippable -> unshippable
         | Error message -> failwith message
@@ -642,18 +642,16 @@ let () =
              ])
       in
       if not (Report.clean (Report.gather project)) then fail "has diagnostics");
-  test "an echo is refused only by a build that ships" (fun () ->
+  test "an echo main can reach is refused" (fun () ->
       let project =
-        Project.load
-          (package [ ("main.truss", Fixtures.echo_is_refused_only_by_a_build_that_ships) ])
+        Project.load (package [ ("main.truss", Fixtures.echo_main_can_reach_is_refused) ])
       in
-      let main = List.hd (Program_command.mains project) in
-      let compile = lowering project in
       match
-        (Compile.unshippable compile ~main ~echo:false, Compile.unshippable compile ~main ~echo:true)
+        Compile.unshippable (lowering project) ~main:(List.hd (Program_command.mains project))
       with
-      | Ok [], Ok [ { failure = `Echo; _ } ] -> ()
-      | _ -> fail "refused differently")
+      | Ok [ { failure = `Echo; line = 2; _ } ] -> ()
+      | Ok reached -> fail "found %d" (List.length reached)
+      | Error message -> fail "%s" message)
 
 (* Renaming *)
 
