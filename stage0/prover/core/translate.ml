@@ -226,6 +226,19 @@ type passed = {
           callee's changes. *)
 }
 
+(* How a [for] loop's body runs and its iterations' values are read, where
+   the MIR gives them: [run_body] runs the body from the frame inside it,
+   given the element, and gives the frames that end an iteration and those
+   that leave by [break]; [range] is a range's bounds, [arguments] a
+   yielding call's arguments by position, and [cursor] the place of a
+   cursor pulled. *)
+type driven = {
+  run_body : frame -> Logic.term -> frame list * frame list;
+  range : (Logic.term * Logic.term) option;
+  arguments : (int -> (Logic.term * passed_place option) option) option;
+  cursor : passed_place option;
+}
+
 (* A fact stated once in a definition's proof, by its subject. *)
 type stated =
   | In_range of Logic.symbol  (** That a symbol's values are in its type's range. *)
@@ -8949,10 +8962,11 @@ and iterations_so_far context head costs =
 and one_step (counter : Costs.counter) =
   match counter.resource with Time -> Logic.int 1 | _ -> Costs.zero
 
-and for_ context frame (node : statement) (pattern : pattern) (iteration : iteration) clauses body =
+and for_ ?driven context frame (node : statement) (pattern : pattern) (iteration : iteration)
+    clauses body =
   let outer = context.iteration_returns in
   context.iteration_returns <- [];
-  let ended = loop_over context frame node pattern iteration clauses body in
+  let ended = loop_over ?driven context frame node pattern iteration clauses body in
   let returning, others =
     List.partition (fun (loop, _) -> loop = node.origin) context.iteration_returns
   in
@@ -8967,14 +8981,20 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
       Some (restrict ended (Logic.not_ returned))
   | _ -> ended
 
-and loop_over context frame (node : statement) (pattern : pattern) (iteration : iteration) clauses
-    body =
+and loop_over ?driven context frame (node : statement) (pattern : pattern) (iteration : iteration)
+    clauses body =
   let span = span_of frame.source node.origin in
   match iteration with
   | Integer_range { start; stop; inclusive } ->
       let element = substituted context frame pattern.type_ in
-      let frame, low = value context frame start in
-      let frame, high = value context frame stop in
+      let frame, low, high =
+        match driven with
+        | Some { range = Some (low, high); _ } -> (frame, low, high)
+        | _ ->
+            let frame, low = value context frame start in
+            let frame, high = value context frame stop in
+            (frame, low, high)
+      in
       let outer_yielded = frame.yielded in
       (* In the loop's clauses, the pattern names the next index: [low] plus
          the iterations so far. *)
@@ -9019,25 +9039,22 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
           costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
-      let exits = { breaks = []; continues = [] } in
-      let inside =
-        { (restrict head (Logic.Operation ("<", [ iterations; count ]))) with loop = Some exits }
-      in
+      let inside = restrict head (Logic.Operation ("<", [ iterations; count ])) in
       let through = appended context inside element before index in
       let inside = { inside with yielded = outer_yielded } in
       let inside = spend context inside one_step in
-      let _, inside = pattern_match context inside pattern index element in
-      let finished = block_value context inside body in
-      let ends =
-        (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
+      let run_body =
+        match driven with
+        | Some driven -> driven.run_body
+        | None -> core_loop_body context pattern element body
       in
+      let ends, breaks = run_body inside index in
       let with_through (exit_frame : frame) =
         at_index
           { exit_frame with loop = frame.loop; yielded = Some through }
           (Costs.plus index (Logic.int 1))
       in
-      end_iterations context frame node clauses start ~head ~inside ~ends ~breaks:exits.breaks
-        ~with_through;
+      end_iterations context frame node clauses start ~head ~inside ~ends ~breaks ~with_through;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
         loop_exit context
@@ -9050,31 +9067,46 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
             loop_exit context (with_through exit_frame) costs
               ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
               ~most)
-          exits.breaks
+          breaks
       in
       leave_loop context frame
         (List.map
            (fun (exit_frame : frame) -> { exit_frame with yielded = outer_yielded })
            (exit_ :: left))
-  | Yielding_call ({ kind = Call call_; _ } as driven) ->
-      each_loop context frame node pattern driven call_ clauses body
+  | Yielding_call ({ kind = Call call_; _ } as yielding) ->
+      each_loop ?driven context frame node pattern yielding call_ clauses body
   | Yielding_call _ -> unsupported span "this `for` loop"
   | Cursor { cursor; next = None } -> (
       match place_type context frame cursor with
       | Types.Cursor { method_; _ } as cursor_type ->
-          pulled_loop context frame node pattern cursor clauses body ~cursor_type ~method_
+          pulled_loop ?driven context frame node pattern cursor clauses body ~cursor_type ~method_
       | _ -> unsupported span "this `for` loop")
   | Cursor { cursor; next = Some next } ->
-      own_cursor_loop context frame node pattern cursor next clauses body
+      own_cursor_loop ?driven context frame node pattern cursor next clauses body
         ~cursor_type:(place_type context frame cursor)
+
+(* A loop's body, read from its core form: the pattern binds the element,
+   and the body runs. *)
+and core_loop_body context (pattern : pattern) element_type body inside element =
+  let exits = { breaks = []; continues = [] } in
+  let _, inside =
+    pattern_match context { inside with loop = Some exits } pattern element element_type
+  in
+  let finished = block_value context inside body in
+  ((match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues, exits.breaks)
 
 (* A [for] loop over a yielding method: each element is a fresh value
    that meets the method's clauses for each part, and the loop ends when
    the method has a [time] clause. *)
-and each_loop context frame (node : statement) (pattern : pattern) (driven : expression)
+and each_loop ?driven context frame (node : statement) (pattern : pattern) (yielding : expression)
     (call_ : call) clauses body =
   let span = span_of frame.source node.origin in
-  let frame, values = call_arguments context frame driven call_ ~facts_for:(fun _ _ _ -> []) in
+  let frame, values =
+    call_arguments
+      ?given:(Option.bind driven (fun (driven : driven) -> driven.arguments))
+      context frame yielding call_
+      ~facts_for:(fun _ _ _ -> [])
+  in
   let arguments = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
   let path, terminates, contract, substitution =
     match call_.callee with
@@ -9171,7 +9203,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         | _ -> changed)
       in_body values
   in
-  receiving_loop context frame node pattern clauses body ~element_type ~changed
+  receiving_loop ?driven context frame node pattern clauses body ~element_type ~changed
     ~start:(fun head -> some_parts context head element_type)
     ~receive:(fun head before ->
       (* Each time round, the method either yields another part or ends. *)
@@ -9203,10 +9235,11 @@ and with_cursor frame (node : statement) (changed : changed) (cursor : place) =
 (* A [for] loop over a cursor pulls it until it ends, putting the cursor
    that is left back where it was. Its [yielded] is everything the cursor
    has yielded, before the loop too. *)
-and pulled_loop context frame (node : statement) pattern (cursor_place : place) clauses body
+and pulled_loop ?driven context frame (node : statement) pattern (cursor_place : place) clauses body
     ~cursor_type ~method_ =
   let span = span_of frame.source node.origin in
-  let frame, cursor = place_value context frame cursor_place in
+  let cursor_access = cursor_access context driven cursor_place in
+  let cursor = cursor_access.read frame in
   let cursor_method =
     match List.assoc_opt cursor context.cursors with
     | Some cursor_method -> cursor_method
@@ -9218,10 +9251,10 @@ and pulled_loop context frame (node : statement) pattern (cursor_place : place) 
       (Logic.Boolean false);
   let changed = with_cursor frame node (changed_places frame body) cursor_place in
   let at_head = ref cursor in
-  receiving_loop context frame node pattern clauses body ~element_type:cursor_method.element
+  receiving_loop ?driven context frame node pattern clauses body ~element_type:cursor_method.element
     ~changed
     ~start:(fun head ->
-      let _, cursor = place_value context { head with checking = false } cursor_place in
+      let cursor = cursor_access.read head in
       context.cursors <- (cursor, cursor_method) :: context.cursors;
       at_head := cursor;
       cursor_yielded context cursor_type cursor_method.element cursor)
@@ -9234,17 +9267,25 @@ and pulled_loop context frame (node : statement) pattern (cursor_place : place) 
         has_another = Logic.Is (constructor_name option_type (Some "Some"), pulled);
         element = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]);
         through = cursor_yielded context cursor_type cursor_method.element later;
-        advance = (fun (frame : frame) -> store context frame cursor_place later);
+        advance = (fun (frame : frame) -> cursor_access.write frame later);
       })
+
+(* The place of a cursor a loop pulls: where the MIR gives it, or its core
+   place. *)
+and cursor_access context driven cursor_place =
+  match driven with
+  | Some { cursor = Some access; _ } -> access
+  | _ -> core_place context cursor_place
 
 (* A [for] loop over a value of a type's own [Cursor]: each iteration
    calls its [next] by the [impl]'s contract, and the loop ends at [None].
    Such a cursor promises no end, so in a function that must end, the loop
    needs a [decreases] clause, which each iteration decreases. *)
-and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor_place : place)
-    (next : callee) clauses body ~cursor_type =
+and own_cursor_loop ?driven context frame (node : statement) (pattern : pattern)
+    (cursor_place : place) (next : callee) clauses body ~cursor_type =
   let span = span_of frame.source node.origin in
-  let frame, _ = place_value context frame cursor_place in
+  let cursor_access = cursor_access context driven cursor_place in
+  ignore (cursor_access.read frame);
   let element_type = substituted context frame pattern.type_ in
   let trait, evidence =
     match next with
@@ -9296,7 +9337,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
       measures
   in
   let changed = with_cursor frame node (changed_places frame body) cursor_place in
-  receiving_loop context frame node pattern clauses body ~element_type ~changed
+  receiving_loop ?driven context frame node pattern clauses body ~element_type ~changed
     ~each_iteration:(fun ~head ~ends ->
       (* The pull is part of the iteration, so the measure is compared from
          the head, before it. *)
@@ -9314,9 +9355,9 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
         | None -> ())
     ~start:(fun head -> some_parts context head element_type)
     ~receive:(fun head before ->
-      let _, cursor = place_value context { head with checking = false } cursor_place in
+      let cursor = cursor_access.read head in
       let havoc_mut (frame : frame) =
-        store context frame cursor_place (arrive context frame "changed" cursor_type)
+        cursor_access.write frame (arrive context frame "changed" cursor_type)
       in
       let after, pulled =
         contract_call ~lent_final:None context head pulling call_ path contract
@@ -9325,7 +9366,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
               position = 0;
               mode = Types.Mut;
               operand = Some (Place cursor_place);
-              passed_place = Some (core_place context cursor_place);
+              passed_place = Some cursor_access;
               type_ = cursor_type;
               term = cursor;
               run = None;
@@ -9346,16 +9387,16 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
         through = appended context inside element_type before element;
         advance =
           (fun (frame : frame) ->
-            let _, now = place_value context { after with checking = false } cursor_place in
-            { (store context frame cursor_place now) with spent = after.spent });
+            let now = cursor_access.read after in
+            { (cursor_access.write frame now) with spent = after.spent });
       })
 
 (* A [for] loop that receives parts one at a time: from a yielding method
    it calls, or from a cursor it pulls. [start] is the parts received before
    an iteration, at the head, and [receive] is the part an iteration
    receives, with the method's [ensures] for it assumed. *)
-and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (node : statement)
-    (pattern : pattern) clauses body ~element_type ~changed ~start ~receive =
+and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?driven context frame
+    (node : statement) (pattern : pattern) clauses body ~element_type ~changed ~start ~receive =
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
   let loop = enter_loop context frame ~entry clauses ~changed body in
@@ -9370,21 +9411,18 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (restrict head received.has_another) in
-  let exits = { breaks = []; continues = [] } in
-  let inside = spend context inside one_step in
-  let _, inside =
-    pattern_match context
-      { inside with loop = Some exits; yielded = frame.yielded }
-      pattern received.element element_type
+  let inside = { (spend context inside one_step) with yielded = frame.yielded } in
+  let run_body =
+    match driven with
+    | Some (driven : driven) -> driven.run_body
+    | None -> core_loop_body context pattern element_type body
   in
-  let finished = block_value context inside body in
-  let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
+  let ends, breaks = run_body inside received.element in
   each_iteration ~head ~ends;
   let with_through (exit_frame : frame) =
     { exit_frame with loop = frame.loop; yielded = Some through }
   in
-  end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks:exits.breaks
-    ~with_through;
+  end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks ~with_through;
   let ended = received.advance (restrict head (Logic.not_ received.has_another)) in
   let varies = mentions_fresh_after context loop.fresh_mark in
   let ended_facts = facts_since context ended_mark @ facts_since context loop.facts_mark in
@@ -9402,7 +9440,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
           ~most:
             (Costs.upper_bounds ~varies ~facts:ended_facts
                (sequence_length context element_type through)))
-      exits.breaks
+      breaks
   in
   leave_loop context frame
     (List.map
@@ -9511,8 +9549,12 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
   in
   let terminator (ending : Mir.terminator) =
     match ending with
-    | Goto _ | Branch _ | Switch_variant _ | Return _ | Unreachable | Todo -> true
-    | For _ | Iteration_end | Yield _ | Exit_tasks _ -> false
+    | Goto _ | Branch _ | Switch_variant _ | Return _ | Unreachable | Todo | Iteration_end -> true
+    | For { loop; _ } -> (
+        match Hashtbl.find_opt index.statements loop.origin with
+        | Some { kind = For _; _ } -> true
+        | _ -> false)
+    | Yield _ | Exit_tasks _ -> false
   in
   mir.lambdas = [||]
   && List.for_all
@@ -9768,28 +9810,32 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~node ~span =
   | Convert _ | Array _ | To_any _ | Function_value _ | Lambda _ ->
       bug "a form the MIR's reading does not cover"
 
+(* A place of the MIR as the place of a [mut] argument. *)
+let mir_passed_place context run place =
+  {
+    read = (fun frame -> read_place context { frame with checking = false } run place);
+    write = (fun frame term -> write_place context frame run place term);
+  }
+
+(* The values of a call's arguments that the MIR has evaluated, by position,
+   with the place of each passed [mut]. *)
+let mir_arguments context frame run (arguments : Mir.argument list) position =
+  match List.nth_opt arguments position with
+  | Some (Passed { value; mode; _ }) ->
+      let place =
+        match (mode, value) with
+        | Types.Mut, Borrow { place; _ } -> Some (mir_passed_place context run place)
+        | _ -> None
+      in
+      Some (mir_operand context frame run value, place)
+  | Some Default | None -> None
+
 (* A call, through the callee's contract, with the arguments the MIR has
    evaluated. Gives [None] where the call never returns. *)
 let mir_call context frame run (call : Mir.call) =
   match Hashtbl.find_opt run.index.expressions call.node with
   | Some ({ kind = Call called; _ } as node) -> (
-      let given position =
-        match List.nth_opt call.arguments position with
-        | Some (Passed { value; mode; _ }) ->
-            let place =
-              match (mode, value) with
-              | Types.Mut, Borrow { place; _ } ->
-                  Some
-                    {
-                      read =
-                        (fun frame -> read_place context { frame with checking = false } run place);
-                      write = (fun frame term -> write_place context frame run place term);
-                    }
-              | _ -> None
-            in
-            Some (mir_operand context frame run value, place)
-        | Some Default | None -> None
-      in
+      let given = mir_arguments context frame run call.arguments in
       match resolved_call ~given context frame node called with
       | Some _ when Types.equal (type_of context frame node) Types.Never -> None
       | translated -> translated)
@@ -9923,7 +9969,7 @@ let mir_run context start index (body : Mir.body) =
   let count = Array.length body.blocks in
   let incoming = Array.make count [] in
   let ran = Array.make count false in
-  let terminator frame position (block : Mir.basic_block) ~jump =
+  let rec terminator frame (block : Mir.basic_block) ~jump ~iteration_end =
     let span = span_of frame.source block.terminator_origin in
     match block.terminator with
     | Goto target -> jump target frame
@@ -9959,11 +10005,53 @@ let mir_run context start index (body : Mir.body) =
           context.holes <- (context.home, span) :: context.holes;
           context.unfinished <- frame.condition :: context.unfinished
         end
-    | For _ | Iteration_end | Yield _ | Exit_tasks _ ->
-        ignore position;
-        bug "a form the MIR's reading does not cover"
-  in
-  let run_block position frame ~jump =
+    | Iteration_end -> iteration_end frame
+    | For { iteration; part; body = first; after; loop } -> (
+        match Hashtbl.find_opt index.statements loop.origin with
+        | Some
+            ({ kind = For { pattern; iteration = written; clauses; body = written_body; _ }; _ } as
+             node) -> (
+            let body_blocks = reached body ~from:[ first ] ~avoid:(fun block -> block = after) in
+            (* An iteration: the part takes the element, and the body's blocks
+               run, each once, to the end of the iteration or a [break]. *)
+            let run_body inside element =
+              let inside =
+                bind inside (mir_key run part)
+                  (substituted context inside body.locals.(part).type_)
+                  element
+              in
+              let ends = ref [] and breaks = ref [] in
+              incoming.(first) <- [ inside ];
+              run_region ~inside:(Hashtbl.mem body_blocks)
+                ~jump:(fun target frame ->
+                  if target = after then breaks := frame :: !breaks else jump target frame)
+                ~iteration_end:(fun frame -> ends := frame :: !ends);
+              (List.rev !ends, List.rev !breaks)
+            in
+            let operand = mir_operand context frame run in
+            let driven =
+              {
+                run_body;
+                range =
+                  (match iteration with
+                  | Range { start; stop; _ } -> Some (operand start, operand stop)
+                  | Yielding _ | Pull _ -> None);
+                arguments =
+                  (match iteration with
+                  | Yielding call -> Some (mir_arguments context frame run call.arguments)
+                  | Range _ | Pull _ -> None);
+                cursor =
+                  (match iteration with
+                  | Pull { cursor; _ } -> Some (mir_passed_place context run cursor)
+                  | Range _ | Yielding _ -> None);
+              }
+            in
+            match for_ ~driven context frame node pattern written clauses written_body with
+            | Some ended -> jump after ended
+            | None -> ())
+        | _ -> bug "a loop of the MIR whose core loop is not known")
+    | Yield _ | Exit_tasks _ -> bug "a form the MIR's reading does not cover"
+  and run_block position frame ~jump ~iteration_end =
     let block = body.blocks.(position) in
     let ended =
       List.fold_left
@@ -9971,11 +10059,11 @@ let mir_run context start index (body : Mir.body) =
           Option.bind frame (fun frame -> mir_statement context frame run statement))
         (Some frame) block.statements
     in
-    Option.iter (fun frame -> terminator frame position block ~jump) ended
-  in
+    Option.iter (fun frame -> terminator frame block ~jump ~iteration_end) ended
   (* Runs the blocks of a region, each once, in order, from the frames that
-     reach them. A jump to a block outside the region leaves by [jump]. *)
-  let rec run_region ~inside ~jump =
+     reach them. A jump to a block outside the region leaves by [jump], and
+     the end of an iteration of the innermost [for] by [iteration_end]. *)
+  and run_region ~inside ~jump ~iteration_end =
     for position = 0 to count - 1 do
       if inside position && not ran.(position) then begin
         ran.(position) <- true;
@@ -9990,12 +10078,12 @@ let mir_run context start index (body : Mir.body) =
               else jump target frame
             in
             match body.blocks.(position).header with
-            | Some natural -> run_loop position natural entry ~jump:local_jump
-            | None -> run_block position entry ~jump:local_jump)
+            | Some natural -> run_loop position natural entry ~jump:local_jump ~iteration_end
+            | None -> run_block position entry ~jump:local_jump ~iteration_end)
       end
     done
   (* A [while] loop, from the frame on entry to its header. *)
-  and run_loop header (natural : Mir.natural_loop) frame ~jump =
+  and run_loop header (natural : Mir.natural_loop) frame ~jump ~iteration_end =
     let node, condition, clauses, loop_body =
       match Hashtbl.find_opt index.statements natural.loop.origin with
       | Some ({ kind = While { condition; clauses; body; _ }; _ } as node) ->
@@ -10066,7 +10154,7 @@ let mir_run context start index (body : Mir.body) =
     in
     ran.(header) <- true;
     leaving_from := header;
-    run_block header head ~jump:loop_jump;
+    run_block header head ~jump:loop_jump ~iteration_end;
     for position = 0 to count - 1 do
       if in_loop position && not ran.(position) then begin
         if position = natural.body then enter_body ();
@@ -10079,10 +10167,10 @@ let mir_run context start index (body : Mir.body) =
         | Some entry -> (
             match body.blocks.(position).header with
             | Some inner ->
-                run_loop position inner entry ~jump:(fun target frame ->
+                run_loop position inner entry ~iteration_end ~jump:(fun target frame ->
                     leaving_from := position;
                     loop_jump target frame)
-            | None -> run_block position entry ~jump:loop_jump)
+            | None -> run_block position entry ~jump:loop_jump ~iteration_end)
       end
     done;
     let inside =
@@ -10181,6 +10269,7 @@ let mir_run context start index (body : Mir.body) =
   run_region
     ~inside:(fun _ -> true)
     ~jump:(fun target frame -> incoming.(target) <- frame :: incoming.(target))
+    ~iteration_end:(fun _ -> bug "the end of an iteration outside a loop")
 
 (* Definitions *)
 
