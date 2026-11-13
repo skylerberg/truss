@@ -1,0 +1,405 @@
+use standard::cryptography
+use standard::json
+use standard::jwk
+use standard::serialization
+
+public type Error =
+  | Malformed(message: String)
+  | Algorithm(name: String)
+  | NoKey
+  | Signature
+  | Expired
+  | NotYetValid
+  | Issuer
+  | Audience
+  | Claims(error: json::Error)
+  | Key(error: jwk::Error)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Malformed(message) => {
+        mut output.write("a malformed JWT: ")
+        mut output.write(message.slice())
+      }
+      Algorithm(name) => {
+        mut output.write("a JWT signed with ")
+        mut output.write(name.slice())
+        mut output.write(", which these rules do not accept")
+      }
+      NoKey => mut output.write("no key that can verify this JWT")
+      Signature => mut output.write("a JWT whose signature does not verify")
+      Expired => mut output.write("a JWT that has expired")
+      NotYetValid => mut output.write("a JWT that is not valid yet")
+      Issuer => mut output.write("a JWT from another issuer")
+      Audience => mut output.write("a JWT for another audience")
+      Claims(error) => error.display(mut output)
+      Key(error) => error.display(mut output)
+    }
+  }
+}
+
+fn malformed(message: StringSlice) -> Error {
+  Error.Malformed(message: message.to_string())
+}
+
+public type Algorithm = Hs256 | Hs384 | Hs512 | Rs256 | Rs384 | Rs512 | Ps256 | Ps384 | Ps512 | Es256 | Es384 | EdDsa
+  derives Equal
+
+public fn Algorithm.name(self) -> StringSlice {
+  match self {
+    Hs256 => "HS256"
+    Hs384 => "HS384"
+    Hs512 => "HS512"
+    Rs256 => "RS256"
+    Rs384 => "RS384"
+    Rs512 => "RS512"
+    Ps256 => "PS256"
+    Ps384 => "PS384"
+    Ps512 => "PS512"
+    Es256 => "ES256"
+    Es384 => "ES384"
+    EdDsa => "EdDSA"
+  }.slice()
+}
+
+public fn Algorithm.from_name(name: StringSlice) -> Option[Algorithm] {
+  let all: List[Algorithm] = [
+    Algorithm.Hs256, Algorithm.Hs384, Algorithm.Hs512, Algorithm.Rs256, Algorithm.Rs384, Algorithm.Rs512,
+    Algorithm.Ps256, Algorithm.Ps384, Algorithm.Ps512, Algorithm.Es256, Algorithm.Es384, Algorithm.EdDsa,
+  ]
+  for algorithm in all {
+    if algorithm.name() == name {
+      return Some(algorithm)
+    }
+  }
+  None
+}
+
+fn hash_of(algorithm: Algorithm) -> cryptography::HashFunction {
+  match algorithm {
+    Hs384 | Rs384 | Ps384 | Es384 => cryptography::HashFunction.Sha384
+    Hs512 | Rs512 | Ps512 => cryptography::HashFunction.Sha512
+    _ => cryptography::HashFunction.Sha256
+  }
+}
+
+fn mac(function: cryptography::HashFunction, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+  match function {
+    Sha384 => {
+      let code = cryptography::hmac_sha384(key, message: message)
+      code[..].to_list()
+    }
+    Sha512 => {
+      let code = cryptography::hmac_sha512(key, message: message)
+      code[..].to_list()
+    }
+    Sha256 => {
+      let code = cryptography::hmac_sha256(key, message: message)
+      code[..].to_list()
+    }
+  }
+}
+
+fn curve_of(algorithm: Algorithm) -> cryptography::Curve {
+  if algorithm == Algorithm.Es384 { cryptography::Curve.P384 } else { cryptography::Curve.P256 }
+}
+
+fn sign_with(key: jwk::Key, algorithm: Algorithm, input: Slice[UInt8]) -> Result[List[UInt8], Error]
+  uses Random, Panic
+{
+  let function = hash_of(algorithm)
+  match key.material {
+    Secret(bytes) => match algorithm {
+      Hs256 | Hs384 | Hs512 => Ok(mac(function, key: bytes.slice(), message: input))
+      _ => Err(Error.NoKey)
+    }
+    RsaPrivate(private_key) => match algorithm {
+      Rs256 | Rs384 | Rs512 => Ok(private_key.sign_pkcs1(function, message: input))
+      Ps256 | Ps384 | Ps512 => Ok(private_key.sign_pss(function, message: input))
+      _ => Err(Error.NoKey)
+    }
+    EcPrivate(private_key) => {
+      let is_matching = match algorithm {
+        Es256 | Es384 => private_key.verifying_key().curve() == curve_of(algorithm)
+        _ => false
+      }
+      if !is_matching {
+        return Err(Error.NoKey)
+      }
+      Ok(private_key.sign(input))
+    }
+    Ed25519Private(private_key) => {
+      if algorithm != Algorithm.EdDsa {
+        return Err(Error.NoKey)
+      }
+      let signature = private_key.sign(input)
+      Ok(signature.bytes[..].to_list())
+    }
+    _ => Err(Error.NoKey)
+  }
+}
+
+fn verifies(key: jwk::Key, algorithm: Algorithm, input: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+  uses Panic
+{
+  let function = hash_of(algorithm)
+  let public_key = key.public_key()
+  match public_key.material {
+    Secret(bytes) => match algorithm {
+      Hs256 | Hs384 | Hs512 => {
+        let expected = mac(function, key: bytes.slice(), message: input)
+        cryptography::constant_time_equal(expected.slice(), second: signature)
+      }
+      _ => false
+    }
+    RsaPublic(rsa) => match algorithm {
+      Rs256 | Rs384 | Rs512 => rsa.verify_pkcs1(function, message: input, signature: signature)
+      Ps256 | Ps384 | Ps512 => rsa.verify_pss(function, message: input, signature: signature)
+      _ => false
+    }
+    EcPublic(ec) => match algorithm {
+      Es256 | Es384 => ec.curve() == curve_of(algorithm) && ec.verify(input, signature: signature)
+      _ => false
+    }
+    Ed25519Public(ed) => {
+      if algorithm != Algorithm.EdDsa || signature.length() != 64 {
+        return false
+      }
+      var bytes: Array[UInt8, 64] = Array.filled(0)
+      let width: USize = 64
+      for index in 0..width {
+        bytes[index] = signature[index]
+      }
+      ed.verify(input, signature: cryptography::Signature(bytes: bytes))
+    }
+    _ => false
+  }
+}
+
+fn segment(value: json::Value) -> String {
+  let text = value.to_text()
+  jwk::encoded(text.slice().bytes())
+}
+
+public fn sign[Item: serialization::Serialize](
+  claims: Item,
+  key: jwk::Key,
+  algorithm: Algorithm,
+) -> Result[String, Error]
+  uses Random, Panic
+{
+  var header: Map[String, json::Value] = [:]
+  mut header.insert("alg", value: json::Value.String(value: algorithm.name().to_string()))
+  mut header.insert("typ", value: json::Value.String(value: "JWT"))
+  match key.id {
+    Some(id) => mut header.insert("kid", value: json::Value.String(value: id.copy()))
+    None => {}
+  }
+  var input = segment(json::Value.Object(members: own header))
+  mut input.push(".")
+  mut input.push(segment(json::to_value(claims)).slice())
+  let signature = sign_with(key, algorithm: algorithm, input: input.slice().bytes())?
+  mut input.push(".")
+  mut input.push(jwk::encoded(signature.slice()).slice())
+  Ok(own input)
+}
+
+public type Validation(
+  algorithms: List[Algorithm],
+  issuer: Option[String] = None,
+  audience: Option[String] = None,
+  leeway_seconds: Int64 = 60,
+  requires_expiration: Bool = true,
+)
+  derives Equal
+
+public type Header(algorithm: Algorithm, key_id: Option[String], kind: Option[String])
+  derives Equal
+
+public type Token(header: Header, claims: json::Value)
+  derives Equal
+
+public fn Token.claims[Item: serialization::Deserialize](self) -> Result[Item, Error] {
+  match json::from_value[Item](self.claims.copy()) {
+    Ok(item) => Ok(own item)
+    Err(error) => Err(Error.Claims(error: json::Error.Deserialize(error: own error)))
+  }
+}
+
+fn decoded_json(text: StringSlice) -> Result[json::Value, Error] {
+  let bytes = match jwk::decoded(text) {
+    Ok(bytes) => own bytes
+    Err(_) => return Err(malformed("a segment that is not base64url"))
+  }
+  match json::parse_bytes(bytes.slice()) {
+    Ok(value) => Ok(own value)
+    Err(_) => Err(malformed("a segment that is not JSON"))
+  }
+}
+
+fn text_member(value: json::Value, name: StringSlice) -> Option[String] {
+  match value.get(name) {
+    Some(member) => match member.as_text() {
+      Some(text) => Some(text.to_string())
+      None => None
+    }
+    None => None
+  }
+}
+
+fn seconds_of(claims: json::Value, name: StringSlice) -> Result[Option[Int64], Error] {
+  match claims.get(name) {
+    Some(value) => match value.as_int64() {
+      Some(seconds) => Ok(Some(seconds))
+      None => Err(Error.Malformed(message: "a \"${name}\" claim that is not a whole number of seconds"))
+    }
+    None => Ok(None)
+  }
+}
+
+fn has_audience(claims: json::Value, audience: StringSlice) -> Bool {
+  match claims.get("aud") {
+    Some(value) => {
+      match value.as_text() {
+        Some(text) => return text == audience
+        None => {}
+      }
+      match value.as_items() {
+        Some(items) => {
+          for item in items {
+            if item.as_text() == Some(audience) {
+              return true
+            }
+          }
+          false
+        }
+        None => false
+      }
+    }
+    None => false
+  }
+}
+
+fn is_named(key: jwk::Key, key_id: Option[String]) -> Bool {
+  match key_id {
+    Some(wanted) => match key.id {
+      Some(id) => id == wanted
+      None => false
+    }
+    None => true
+  }
+}
+
+fn check_signature(keys: Slice[jwk::Key], key_id: Option[String], algorithm: Algorithm, input: Slice[UInt8], signature: Slice[UInt8]) -> Result[Unit, Error]
+  uses Panic
+{
+  var has_candidate = false
+  for key in keys {
+    if is_named(key, key_id: key_id) {
+      has_candidate = true
+      if verifies(key, algorithm: algorithm, input: input, signature: signature) {
+        return Ok(Unit)
+      }
+    }
+  }
+  if has_candidate { Err(Error.Signature) } else { Err(Error.NoKey) }
+}
+
+public fn verify(token: StringSlice, keys: Slice[jwk::Key], rules: Validation) -> Result[Token, Error]
+  uses Clock, Panic
+{
+  let parts: List[StringSlice] = List.collect(token.split("."))
+  if parts.length() != 3 {
+    return Err(malformed("a token that does not have three segments"))
+  }
+  let header = decoded_json(parts[0])?
+  let name = match text_member(header, name: "alg") {
+    Some(name) => own name
+    None => return Err(malformed("a header without a text \"alg\""))
+  }
+  let algorithm = match Algorithm.from_name(name.slice()) {
+    Some(algorithm) => algorithm
+    None => return Err(Error.Algorithm(name: own name))
+  }
+  var is_allowed = false
+  for allowed in rules.algorithms {
+    if allowed == algorithm {
+      is_allowed = true
+    }
+  }
+  if !is_allowed {
+    return Err(Error.Algorithm(name: own name))
+  }
+  if header.get("crit") is Some(_) {
+    return Err(malformed("a header with critical extensions"))
+  }
+  let key_id = text_member(header, name: "kid")
+  let signature = match jwk::decoded(parts[2]) {
+    Ok(bytes) => own bytes
+    Err(_) => return Err(malformed("a signature that is not base64url"))
+  }
+  var input = parts[0].to_string()
+  mut input.push(".")
+  mut input.push(parts[1])
+  check_signature(keys, key_id: key_id, algorithm: algorithm, input: input.slice().bytes(), signature: signature.slice())?
+  let claims = decoded_json(parts[1])?
+  if claims.as_members() is None {
+    return Err(malformed("claims that are not a JSON object"))
+  }
+  let now = Clock.now().unix_seconds()
+  match seconds_of(claims, name: "exp")? {
+    Some(expires) => {
+      if now > expires.saturating_add(rules.leeway_seconds) {
+        return Err(Error.Expired)
+      }
+    }
+    None => {
+      if rules.requires_expiration {
+        return Err(malformed("a token without \"exp\""))
+      }
+    }
+  }
+  match seconds_of(claims, name: "nbf")? {
+    Some(starts) => {
+      if now.saturating_add(rules.leeway_seconds) < starts {
+        return Err(Error.NotYetValid)
+      }
+    }
+    None => {}
+  }
+  match seconds_of(claims, name: "iat")? {
+    Some(issued) => {
+      if now.saturating_add(rules.leeway_seconds) < issued {
+        return Err(Error.NotYetValid)
+      }
+    }
+    None => {}
+  }
+  match rules.issuer {
+    Some(issuer) => {
+      if text_member(claims, name: "iss") != Some(issuer.copy()) {
+        return Err(Error.Issuer)
+      }
+    }
+    None => {}
+  }
+  match rules.audience {
+    Some(audience) => {
+      if !has_audience(claims, audience: audience.slice()) {
+        return Err(Error.Audience)
+      }
+    }
+    None => {}
+  }
+  let kind = text_member(header, name: "typ")
+  Ok(Token(header: Header(algorithm: algorithm, key_id: own key_id, kind: own kind), claims: own claims))
+}
+
+public fn verify_with_set(token: StringSlice, keys: jwk::KeySet, rules: Validation) -> Result[Token, Error]
+  uses Clock, Panic
+{
+  verify(token, keys: keys.keys.slice(), rules: rules)
+}

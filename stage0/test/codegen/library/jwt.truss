@@ -1,0 +1,198 @@
+use standard::jwk
+use standard::jwt
+use standard::serialization
+use standard::simulation
+
+type Claims(sub: String, exp: Int64, iss: String, aud: List[String])
+  derives Equal, serialization::Serialize, serialization::Deserialize
+
+type Short(sub: String, exp: Int64)
+  derives Equal, serialization::Serialize, serialization::Deserialize
+
+type Starting(sub: String, exp: Int64, nbf: Int64)
+  derives serialization::Serialize
+
+type Unexpiring(sub: String)
+  derives serialization::Serialize
+
+fn key(text: StringSlice) -> jwk::Key
+  uses Panic
+{
+  match jwk::Key.parse(text) {
+    Ok(key) => own key
+    Err(error) => Panic.crash("${error}".slice())
+  }
+}
+
+fn rules(algorithm: jwt::Algorithm) -> jwt::Validation {
+  jwt::Validation(algorithms: [algorithm], issuer: Some("https://issuer.test"), audience: Some("web"))
+}
+let rs256_token: String = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InJzMjU2In0.eyJzdWIiOiJhZGEiLCJleHAiOjQxMDI0NDQ4MDAsImF1ZCI6WyJhcGkiLCJ3ZWIiXSwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIudGVzdCJ9.SmTKJ5xkmuJ4ZpLGkpu3Tko8VWy5_znNTt8EPnOIYJZx_nWJGLLCPhYsrXsRE5cDZcoz4ZSbUsjtazONFNI_E6jTTjOOx2gmsikWjLiMLyIqGEzldIC1H7J3KNlK9MpSTaNjRFvGmLfUXas7xfs4kVRTtRncrxvqFgf0RAYMvJ-Q_dQ2vfQYZtAV4FTOl5NB_m_lZY3G8jAPhIw0yB-2-N2tdasUq_AP7nZPtth-q6YxupLF5_ffH0dNgKa528gEgNIzMtOIAwZN2uilcS59NTnZZv6uKhrwpttzBfUAHVgpEhyncaGDBoe9AuWazT4GxWcq-xTI3yhqThH5F4QspQ"
+let rs256_private: String = "{\"kty\":\"RSA\",\"n\":\"rGtDpO2yF7sXt87B4gOwZVhyM9Hpw6BHrfw2hANhY--eqaGsenvauddxjwh6kP7f2JGCug2VzxTbWIXDtRVO74Jl8KDi1f-G1Y8gFEe_-B7XMdyvA46VHPbM2OUN659TfXa_RmqO0HD9o5eKONxAPIUykoCAWyjYvWxJG4NM1v-p6YmRIb473nS1pfxOe1THPFC8COD7UkuakZ0gLuDLUg1QBkB_CbwiPkYV3Y3rzjWwCINeBk-o4fOCpiSGqSNJ0EARwFlBP4kf3oxf8uJ1GBPiDFp5KdTHGZWrPiJyB_wRLFW-UPeZwGzIJlbuyH-NNOfdVyebwVNzpswNBh5gQw\",\"e\":\"AQAB\",\"d\":\"UW3hRxnJU-LU60a3E46JdvukB-w5-l2OrNFiT8um6cNHzDZiVoB7Bu0EoTgwZp0wy7_BHSyAVYo0o6SdDr8vBfewPEpHhyjEncSYMmvGcqDiIhbnAweKTeETUtYu0lpvXGBCKrf1leTfLS1LJtqCbfK8NSuCM0thvWhQSLGkjx7sbyxqN_QP5jNyaBBd0im4bV3nlmY6aZtZfnimD6zpCXGPo5iI_m2XcPH2s1y0Gylvw_2mQWVGkxkf7zcSa84-SymCH1i6RCiiuDhxsTd6UJjxKtVHJbrjD5vUabsJB-e0BjC-FZluLCRLWU0MODekZGFw3HMGEcyEEe-sBdj_GQ\",\"p\":\"8Lhfrs3foM5V3-qNAGKLuK3xo41nOgbu3FgdHZA0awuzwtNIhi7C_2TClHKhpC5N4AsuqhCoU3xyQVAPLxhLXBfrdccNyGzB9mYXAvRRKzP4amia1PjaKLuhte2pt2o57tGgApjtf-VOdANpLfHXzWBIjv-reJuzsllFM1RIK8k\",\"q\":\"t10EiYoatlrofDgY5QrbTluiZrxlcFsO-FA4JKkckPzzvStsjifTn8Mf94h_KjGA-Kzc65Tre5bC33qsmu4Uxf7EnOShhcbU0YSS-WO2VY6CL9hU-5hYd6E54IQy6lcmpe4r4u3NBYI3xTVj9UqABuUULnyjo7NVp_-DPHzOmas\",\"dp\":\"qiOWtWWbpvvPpHkSefAtEzYWcWPzTwcxcpnw0kFnWzWlM5HEU9rfRkYAZY30A6gasL0WmWs2nfN6igE9CitgsFHTwaYUbtG38iDMKPFoIWIVNZiDvv24rEuaC41UhGfXVJ3jO5K9YsU_Qy5Z-_hQcD-aaT_6AUADrY39JD9w10k\",\"dq\":\"EaSvpRRW0akZqao0KwXKaFXE4KHMGO2KGTaO0Gg9SW4tfcxJ27vVTxAVaVoG8mZlBIiNkVV4-yFciuhg5191PD_xZy9Qo3CoVaiuA7UmfEEEIdptAvB7wrcOvJ270HSmUV0DeAhtq9QFzcH_ZkDO5NryAC8aB8xft5SMaiuQLZU\",\"qi\":\"RWi8EBnO1e4wuVos3zBmWtQr8fNLTOywUfmNgaiS-UxgQPm9qn8OdltIJy-1dOe9XogzG6luuHDLHMHJ2xz9-BKuBYndWOsrJ3CG3IfR9IBo4Yc9h8sjD4zJrZrU6aBT8_zSyK-IJnxpxml7xJfYQKz55fQ7-Wgt0cUp5UwnRis\",\"kid\":\"rs256\"}"
+let rs256_public: String = "{\"kty\":\"RSA\",\"n\":\"rGtDpO2yF7sXt87B4gOwZVhyM9Hpw6BHrfw2hANhY--eqaGsenvauddxjwh6kP7f2JGCug2VzxTbWIXDtRVO74Jl8KDi1f-G1Y8gFEe_-B7XMdyvA46VHPbM2OUN659TfXa_RmqO0HD9o5eKONxAPIUykoCAWyjYvWxJG4NM1v-p6YmRIb473nS1pfxOe1THPFC8COD7UkuakZ0gLuDLUg1QBkB_CbwiPkYV3Y3rzjWwCINeBk-o4fOCpiSGqSNJ0EARwFlBP4kf3oxf8uJ1GBPiDFp5KdTHGZWrPiJyB_wRLFW-UPeZwGzIJlbuyH-NNOfdVyebwVNzpswNBh5gQw\",\"e\":\"AQAB\",\"kid\":\"rs256\"}"
+let ps384_token: String = "eyJhbGciOiJQUzM4NCIsInR5cCI6IkpXVCIsImtpZCI6InBzMzg0In0.eyJzdWIiOiJhZGEiLCJleHAiOjQxMDI0NDQ4MDAsImF1ZCI6WyJhcGkiLCJ3ZWIiXSwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIudGVzdCJ9.ZFQyKdFYDRqZ-dgEcrEG9RwbNPVy_ojaexMB-hQHZuoJ9ArbI9RcmiMbIi0zccSrlwSg1cJNKp6w1SrC39kJtwUbsWaZXDhFqdOhi7iYWbLQlrrRpUJF6ynlK4EdPiXBirjPb9yyMPveXjTMHRrHSSZTcSmvDk6NqJTQ2k02P2JNZDC9a8UyzwoiWV0D8wML49TA-oI5OFtVHtac5xtNELs30IyuNQesvOVfgcSoPrl_kKbRMFqO9EwOeJh3pTtb0GQmDv7Rzb6cwsTwgjpSFw8cFUMb1pVXFqsRAxOBOoqHwIz6FZXKqbuuE55-_JZMBDJ0rg5X9sWQF7sRCTBjdw"
+let ps384_private: String = "{\"kty\":\"RSA\",\"n\":\"tjQ0uxVlzg7mPCJiIkb7etYDhSzLey-AiIGT50l5BBxWTN6QXWR_Uyxq2zmy2kdt0i-EuoD30fM7meuXM_k5-uS18WE9849xvw4QRgezZ8u02rGoT70-osFS81BQs63ngQB6Hy0cilD24JEAD45Y152Mr-30aStJnt_RRozBKF3KOgGFp0eDiwLT-ZIPpuQGIBtEwZ7JapzrjWM_wxy2cNe-l4ITW8tT7zEj4JrTyD_GsOlYLNYOxWU354-7ruRdbbc5yHM6FnduGgvlqYbegtJuKSkPmrIaOVh8H3wEoI7pWHX_LC2KLPPRysQV6ngl0rZya6F3yZMtUtikz1c5fw\",\"e\":\"AQAB\",\"d\":\"Fsx8hqZcSUbq_z5MKj7Yi9vIr_rVcVIV0r7oC2pRpraHA_JbfRwspHMr4ceb_h0u_Dxu7slheRdm71Ef5-R5IVBKBeyljFr4IDB5z9F53PSL6kuNpICpHEN1hjWYC4uoqqctIMaLyjDsW1g5ejjVHBG-P2tWiGxet28JKDtHli3D9fs88xdW41E4W1Pusirl7N695b0I1FsJ9pSwC8ba8_4R885fisPrycOYrMJFiHp6da2D6DbatcJ1b6Z7YP9OVyqWkHHBmAXF1OuN_9HIC5Hu41b4kYfIdTq0Wq7L3JpMx1Pmyt7OmKTeuemMdPICQI9P0vgt8Bzg0fy5cJSDAQ\",\"p\":\"64zhywiUU9rswchxuyLYmbh27JVXCxT-yM6JqC4ZtPNET-oI06PsT3Z6GmwBRiePnqpW3nv-ScOLMwspFfln_E9pVhithB-RueRjCmyEdFsWVaUiDX_2xfn9cSFpJAMqxme9UKwNV1zvPvJ4JeEBtVlfeeF57pUzgR46YhCB7QE\",\"q\":\"xgWynCgoXLreV5pOFCxV99xz-uE4Oemr3IyJv8aenlEjDPhqvMmKnnZUmBfenPKeTUNugpCmOsWoqGgWMtgpsGF4nn3kZYIJz8jKruXLVd5PxZ_cvhDLKCL5SEqxUiwI9BwjtRwx8l2HQSu7k24b-uwD_4INqNGjXsJERzs0pn8\",\"dp\":\"JvfFmusubrj3Fg_tEMJxBu1Hb1g9cC3nAJ16lIIb6p2cHYRgNXMW8wZsqNZZV5vP3LXdbS0iIl3hN26PO31pQIp6qK2odwUp_JDV-bF-MCmphj2tZoJW9uWmkgKu_DAx8WTUIvZztpI_WjCOw-V3fOLuMqGkpF22iZPQoMyOUgE\",\"dq\":\"K5Xrd1WbdLWo5M1Q7D3J-lFqscjK0GxvaI8CbtSv6xbeyScQj1cpDLHs8sEmPZNlZoo2E8T04bDJ669lW3Ga03jQzMnW8MTLlhGTEyX_OHpDQrNqKeeWX9I63j-aggSxP9HFxkJbeAZAFAclNVEiFXvHcYDVstfZxqypzKfqcc8\",\"qi\":\"D29VrHR445pWdKA9pwwfwedNpgzbqDgdwIk0BkuCVINLKeJ4h-QbL0ErNCDcldBPqqAZ5xSJbEIqQSgPXbKjb7L203L9jL9o0AG7JgTEJ3hbjAFemFumreeHtNNQ3-dEYzdsVuN9KpB_RflVGmva_pcTGzM7jYKYku256RPY61M\",\"kid\":\"ps384\"}"
+let ps384_public: String = "{\"kty\":\"RSA\",\"n\":\"tjQ0uxVlzg7mPCJiIkb7etYDhSzLey-AiIGT50l5BBxWTN6QXWR_Uyxq2zmy2kdt0i-EuoD30fM7meuXM_k5-uS18WE9849xvw4QRgezZ8u02rGoT70-osFS81BQs63ngQB6Hy0cilD24JEAD45Y152Mr-30aStJnt_RRozBKF3KOgGFp0eDiwLT-ZIPpuQGIBtEwZ7JapzrjWM_wxy2cNe-l4ITW8tT7zEj4JrTyD_GsOlYLNYOxWU354-7ruRdbbc5yHM6FnduGgvlqYbegtJuKSkPmrIaOVh8H3wEoI7pWHX_LC2KLPPRysQV6ngl0rZya6F3yZMtUtikz1c5fw\",\"e\":\"AQAB\",\"kid\":\"ps384\"}"
+let es256_token: String = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImVzMjU2In0.eyJzdWIiOiJhZGEiLCJleHAiOjQxMDI0NDQ4MDAsImF1ZCI6WyJhcGkiLCJ3ZWIiXSwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIudGVzdCJ9.445ywU3nrqFOUhdqYpqSJg-2r02iY8JZSqaBA-oxkXxPoHUCDzhIokw6KO1y_gLh4ihzOfz9Ym9-6VeJ6pM5Zg"
+let es256_private: String = "{\"kty\":\"EC\",\"x\":\"SVfkKrBod4OXd1DsoQfNIL69XxhO85zha0_R6M_Y9lE\",\"y\":\"hdjdVXFFOWzNYr7DuGq0P887Q3dV6SnLgr9P772Ogfc\",\"crv\":\"P-256\",\"d\":\"efc5X_iNCDZa9PAbDeu63TnWuXhsxg59v59HNH6kKKQ\",\"kid\":\"es256\"}"
+let es256_public: String = "{\"kty\":\"EC\",\"x\":\"SVfkKrBod4OXd1DsoQfNIL69XxhO85zha0_R6M_Y9lE\",\"y\":\"hdjdVXFFOWzNYr7DuGq0P887Q3dV6SnLgr9P772Ogfc\",\"crv\":\"P-256\",\"kid\":\"es256\"}"
+let es384_token: String = "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCIsImtpZCI6ImVzMzg0In0.eyJzdWIiOiJhZGEiLCJleHAiOjQxMDI0NDQ4MDAsImF1ZCI6WyJhcGkiLCJ3ZWIiXSwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIudGVzdCJ9.oMlNIL-GcQQTnAm5RoF8piCdacE_RQ6di-Dor0uIQf_Qi6RB6_eKSlPzFi5S9CdDs80m6mxmbrNbdsLt952xdStNgSsTVGjo2yc4JSyQBt6f2GD6WP9zFumhYOhnLUJJ"
+let es384_private: String = "{\"kty\":\"EC\",\"x\":\"Y5BWH7F6FFgUi1EK_wR3squu2ui7UJ4BiuQTHvQGqmMbm48wjMbC9QG4XH4ibgvl\",\"y\":\"wWViivUY5mTgIsf3Y7e5RAOO3QYu6yn7afHvu5SJrRj3tRmhBtyy5Pe9IZtvaT3H\",\"crv\":\"P-384\",\"d\":\"WdirDvwTyOVvNgqkTnzGVPtQJ9fO2E00m7CdGMX3Pa5mFJGWSlCa4IKEJIEmHtOd\",\"kid\":\"es384\"}"
+let es384_public: String = "{\"kty\":\"EC\",\"x\":\"Y5BWH7F6FFgUi1EK_wR3squu2ui7UJ4BiuQTHvQGqmMbm48wjMbC9QG4XH4ibgvl\",\"y\":\"wWViivUY5mTgIsf3Y7e5RAOO3QYu6yn7afHvu5SJrRj3tRmhBtyy5Pe9IZtvaT3H\",\"crv\":\"P-384\",\"kid\":\"es384\"}"
+let eddsa_token: String = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6ImVkZHNhIn0.eyJzdWIiOiJhZGEiLCJleHAiOjQxMDI0NDQ4MDAsImF1ZCI6WyJhcGkiLCJ3ZWIiXSwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIudGVzdCJ9.M4NdAOAgdTLctyJ_HvduTUt0bDc5QzEFB0rXPEMDY-PiZveraaZcYRghHaTp-Yg_rFA0kHG9lSwHlmV8FjwBDg"
+let eddsa_private: String = "{\"crv\":\"Ed25519\",\"d\":\"pAiZUjrH-ndMDEpxubdRfCbP0rBK9s6ixvn5j3yOtbk\",\"x\":\"auJHbabrWwhns7l4n7rv_yTufVxjO50Iu0GMOSQh7Mo\",\"kty\":\"OKP\",\"kid\":\"eddsa\"}"
+let eddsa_public: String = "{\"crv\":\"Ed25519\",\"x\":\"auJHbabrWwhns7l4n7rv_yTufVxjO50Iu0GMOSQh7Mo\",\"kty\":\"OKP\",\"kid\":\"eddsa\"}"
+test "the HS256 example of RFC 7515 verifies, and only for rules that accept HS256" {
+  provide simulation::World.new() {
+    let secret = key("{\"kty\":\"oct\",\"k\":\"AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow\"}")
+    let token = "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    match jwt::verify(token, keys: [secret.copy()], rules: jwt::Validation(algorithms: [jwt::Algorithm.Hs256], issuer: Some("joe"))) {
+      Ok(verified) => assert verified.header.algorithm == jwt::Algorithm.Hs256 && verified.header.kind == Some("JWT")
+      Err(error) => Panic.crash("${error}".slice())
+    }
+    assert jwt::verify(token, keys: [secret.copy()], rules: jwt::Validation(algorithms: [jwt::Algorithm.Rs256])) == Err(jwt::Error.Algorithm(name: "HS256"))
+    assert jwt::verify(token, keys: [secret.copy()], rules: jwt::Validation(algorithms: [jwt::Algorithm.Hs256], issuer: Some("eve"))) == Err(jwt::Error.Issuer)
+    let other = key("{\"kty\":\"oct\",\"k\":\"c2VjcmV0\"}")
+    assert jwt::verify(token, keys: [own other], rules: jwt::Validation(algorithms: [jwt::Algorithm.Hs256])) == Err(jwt::Error.Signature)
+  }
+}
+test "tokens that Node signed verify with their public JWKs, and Truss signs tokens that verify" {
+  provide simulation::World.new() {
+    let rs256_key = key(rs256_public.slice())
+    match jwt::verify(rs256_token.slice(), keys: [rs256_key.copy()], rules: rules(jwt::Algorithm.Rs256)) {
+      Ok(verified) => {
+        assert verified.header.key_id == Some("rs256")
+        assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
+      }
+      Err(error) => Panic.crash("RS256: ${error}".slice())
+    }
+    let rs256_signer = key(rs256_private.slice())
+    assert rs256_signer.is_private() && !rs256_key.is_private()
+    match jwt::sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: rs256_signer, algorithm: jwt::Algorithm.Rs256) {
+      Ok(signed) => {
+        let verified = jwt::verify(signed.slice(), keys: [rs256_key.copy()], rules: rules(jwt::Algorithm.Rs256))
+        assert verified is Ok(_)
+      }
+      Err(error) => Panic.crash("RS256 signing: ${error}".slice())
+    }
+    let ps384_key = key(ps384_public.slice())
+    match jwt::verify(ps384_token.slice(), keys: [ps384_key.copy()], rules: rules(jwt::Algorithm.Ps384)) {
+      Ok(verified) => {
+        assert verified.header.key_id == Some("ps384")
+        assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
+      }
+      Err(error) => Panic.crash("PS384: ${error}".slice())
+    }
+    let ps384_signer = key(ps384_private.slice())
+    assert ps384_signer.is_private() && !ps384_key.is_private()
+    match jwt::sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: ps384_signer, algorithm: jwt::Algorithm.Ps384) {
+      Ok(signed) => {
+        let verified = jwt::verify(signed.slice(), keys: [ps384_key.copy()], rules: rules(jwt::Algorithm.Ps384))
+        assert verified is Ok(_)
+      }
+      Err(error) => Panic.crash("PS384 signing: ${error}".slice())
+    }
+    let es256_key = key(es256_public.slice())
+    match jwt::verify(es256_token.slice(), keys: [es256_key.copy()], rules: rules(jwt::Algorithm.Es256)) {
+      Ok(verified) => {
+        assert verified.header.key_id == Some("es256")
+        assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
+      }
+      Err(error) => Panic.crash("ES256: ${error}".slice())
+    }
+    let es256_signer = key(es256_private.slice())
+    assert es256_signer.is_private() && !es256_key.is_private()
+    match jwt::sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: es256_signer, algorithm: jwt::Algorithm.Es256) {
+      Ok(signed) => {
+        let verified = jwt::verify(signed.slice(), keys: [es256_key.copy()], rules: rules(jwt::Algorithm.Es256))
+        assert verified is Ok(_)
+      }
+      Err(error) => Panic.crash("ES256 signing: ${error}".slice())
+    }
+    let es384_key = key(es384_public.slice())
+    match jwt::verify(es384_token.slice(), keys: [es384_key.copy()], rules: rules(jwt::Algorithm.Es384)) {
+      Ok(verified) => {
+        assert verified.header.key_id == Some("es384")
+        assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
+      }
+      Err(error) => Panic.crash("ES384: ${error}".slice())
+    }
+    let es384_signer = key(es384_private.slice())
+    assert es384_signer.is_private() && !es384_key.is_private()
+    match jwt::sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: es384_signer, algorithm: jwt::Algorithm.Es384) {
+      Ok(signed) => {
+        let verified = jwt::verify(signed.slice(), keys: [es384_key.copy()], rules: rules(jwt::Algorithm.Es384))
+        assert verified is Ok(_)
+      }
+      Err(error) => Panic.crash("ES384 signing: ${error}".slice())
+    }
+    let eddsa_key = key(eddsa_public.slice())
+    match jwt::verify(eddsa_token.slice(), keys: [eddsa_key.copy()], rules: rules(jwt::Algorithm.EdDsa)) {
+      Ok(verified) => {
+        assert verified.header.key_id == Some("eddsa")
+        assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
+      }
+      Err(error) => Panic.crash("EdDSA: ${error}".slice())
+    }
+    let eddsa_signer = key(eddsa_private.slice())
+    assert eddsa_signer.is_private() && !eddsa_key.is_private()
+    match jwt::sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: eddsa_signer, algorithm: jwt::Algorithm.EdDsa) {
+      Ok(signed) => {
+        let verified = jwt::verify(signed.slice(), keys: [eddsa_key.copy()], rules: rules(jwt::Algorithm.EdDsa))
+        assert verified is Ok(_)
+      }
+      Err(error) => Panic.crash("EdDSA signing: ${error}".slice())
+    }
+  }
+}
+
+test "a token is refused for a key of the wrong kind, an expired time, a future start, a missing expiration, or another audience" {
+  provide simulation::World.new() {
+    let rsa_public = key(rs256_public.slice())
+    let confused = jwk::Key(material: jwk::Material.Secret(bytes: rsa_public.to_text().slice().bytes().to_list()))
+    match jwt::sign(Short(sub: "eve", exp: 4102444800), key: confused, algorithm: jwt::Algorithm.Hs256) {
+      Ok(forged) => assert jwt::verify(forged.slice(), keys: [rsa_public.copy()], rules: jwt::Validation(algorithms: [jwt::Algorithm.Hs256, jwt::Algorithm.Rs256])) == Err(jwt::Error.Signature)
+      Err(_) => assert false
+    }
+    let secret = jwk::Key(material: jwk::Material.Secret(bytes: List.filled(7, count: 32)), id: Some("one"))
+    let hs = jwt::Validation(algorithms: [jwt::Algorithm.Hs256])
+    let expired = jwt::sign(Short(sub: "ada", exp: -100), key: secret, algorithm: jwt::Algorithm.Hs256).ok().unwrap_or("")
+    assert jwt::verify(expired.slice(), keys: [secret.copy()], rules: hs) == Err(jwt::Error.Expired)
+    let lenient = jwt::Validation(algorithms: [jwt::Algorithm.Hs256], leeway_seconds: 200)
+    assert jwt::verify(expired.slice(), keys: [secret.copy()], rules: lenient) is Ok(_)
+    let later = jwt::sign(Short(sub: "ada", exp: 1000), key: secret, algorithm: jwt::Algorithm.Hs256).ok().unwrap_or("")
+    assert jwt::verify(later.slice(), keys: [secret.copy()], rules: hs) is Ok(_)
+    let wrong_id = jwk::Key(material: jwk::Material.Secret(bytes: List.filled(7, count: 32)), id: Some("two"))
+    assert jwt::verify(later.slice(), keys: [own wrong_id], rules: hs) == Err(jwt::Error.NoKey)
+    assert jwt::verify("a.b", keys: [secret.copy()], rules: hs) is Err(Malformed(_))
+    let starting = jwt::sign(Starting(sub: "ada", exp: 4102444800, nbf: 1000), key: secret, algorithm: jwt::Algorithm.Hs256).ok().unwrap_or("")
+    assert jwt::verify(starting.slice(), keys: [secret.copy()], rules: hs) == Err(jwt::Error.NotYetValid)
+    let unexpiring = jwt::sign(Unexpiring(sub: "ada"), key: secret, algorithm: jwt::Algorithm.Hs256).ok().unwrap_or("")
+    assert jwt::verify(unexpiring.slice(), keys: [secret.copy()], rules: hs) is Err(Malformed(_))
+    let optional = jwt::Validation(algorithms: [jwt::Algorithm.Hs256], requires_expiration: false)
+    assert jwt::verify(unexpiring.slice(), keys: [secret.copy()], rules: optional) is Ok(_)
+    let for_web = jwt::sign(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: secret, algorithm: jwt::Algorithm.Hs256).ok().unwrap_or("")
+    assert jwt::verify(for_web.slice(), keys: [secret.copy()], rules: jwt::Validation(algorithms: [jwt::Algorithm.Hs256], audience: Some("web"))) is Ok(_)
+    assert jwt::verify(for_web.slice(), keys: [secret.copy()], rules: jwt::Validation(algorithms: [jwt::Algorithm.Hs256], audience: Some("api"))) == Err(jwt::Error.Audience)
+  }
+}
+
+test "a JWK has the RFC 7638 thumbprint, round-trips through JSON, and a key set finds keys by id" {
+  let rsa = key("{\"kty\":\"RSA\",\"n\":\"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw\",\"e\":\"AQAB\",\"alg\":\"RS256\",\"kid\":\"2011-04-29\"}")
+  assert rsa.thumbprint() == "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+  assert key(rsa.to_text().slice()).thumbprint() == rsa.thumbprint()
+  let ec = key(es256_private.slice())
+  let public_text = ec.public_key().to_text()
+  assert !public_text.slice().contains("\"d\"") && ec.to_text().slice().contains("\"d\"")
+  assert key(ec.to_text().slice()).thumbprint() == ec.thumbprint()
+  match jwk::KeySet.parse("{\"keys\":[${rs256_public},${eddsa_public},{\"kty\":\"unknown\"}]}".slice()) {
+    Ok(set) => {
+      assert set.keys.length() == 2
+      assert set.find("eddsa") is Some(_) && set.find("nothing") is None
+      assert jwk::KeySet.parse(set.to_text().slice()) is Ok(_)
+    }
+    Err(error) => Panic.crash("${error}".slice())
+  }
+  assert jwk::Key.parse("{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AA\",\"y\":\"AA\"}") is Err(_)
+}
+
