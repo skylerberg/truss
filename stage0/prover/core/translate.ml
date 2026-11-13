@@ -9862,9 +9862,10 @@ let mir_statement context frame run (statement : Mir.statement) =
       bug "a form the MIR's reading does not cover"
 
 (* The MIR of the body of a function proven, with its core form's nodes,
-   where the MIR's reading covers it. *)
-let mir_of context (source : source) parameters =
-  if source.key = Some context.home then
+   where the MIR's reading covers it. A function for specifications only,
+   and a proof, never runs, so it has no MIR. *)
+let mir_of context (source : source) parameters ~runs =
+  if runs && source.key = Some context.home then
     match Mir.of_definition source.core.definition with
     | Some mir ->
         let index = core_index source.core.definition in
@@ -10321,7 +10322,15 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
         | Finite -> ())
     promised;
   let finished =
-    match mir_of context source parameters with
+    match
+      mir_of context source parameters
+        ~runs:
+          ((not proof)
+          &&
+          match signature with
+          | Some (signature : Types.signature) -> not signature.specification_only
+          | None -> false)
+    with
     | Some (index, mir) ->
         mir_run context start index mir.body;
         None
