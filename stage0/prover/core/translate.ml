@@ -9702,7 +9702,7 @@ let mir_argument_place context run (mode : Types.mode) (value : Mir.operand) =
     | Some slice -> Some slice
     | None -> (
         match (run.body.locals.(local).kind, Hashtbl.find_opt run.definitions local) with
-        | ( Temporary,
+        | ( (Temporary | Lent _),
             Some
               ( Operand
                   ( Use { place = { root = Local copied; projections = [] }; _ }
@@ -9926,7 +9926,7 @@ let borrowed run (place : Mir.place) =
     match place.root with
     | Local local when not (List.mem local visited) -> (
         match (run.body.locals.(local).kind, Hashtbl.find_opt run.definitions local) with
-        | Temporary, Some (Operand (Borrow { place = held; _ }), _, _) ->
+        | (Temporary | Lent _), Some (Operand (Borrow { place = held; _ }), _, _) ->
             let held = through (local :: visited) held in
             { held with Mir.projections = held.Mir.projections @ place.Mir.projections }
         | _ -> place)
