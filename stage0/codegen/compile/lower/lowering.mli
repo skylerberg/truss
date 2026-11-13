@@ -23,19 +23,45 @@ type frame = {
   bindings : (Syntax.id, Lir.place) Hashtbl.t;
   synthetic : (int, Lir.place) Hashtbl.t;
   mutable self_place : Lir.place option;
-  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> stop:Lir.block -> unit) option;
+  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
   yield_into : Lir.place option;
   lent_into : (Lir.place * Ground.lent) option;
   inlined : Path.t list;
   reported : Lir.site option;
   exit : (Lir.block * int) option;
+  mir : mir_frame option;
 }
+
+and mir_frame = {
+  body : Mir.body;
+  lambdas : Mir.body array;
+  places : (Mir.local, Lir.place) Hashtbl.t;
+  ends : (Mir.local, cleanup list) Hashtbl.t;
+  conditionally_lent : Mir.local list;
+  mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
+  aliases : (Mir.local, int) Hashtbl.t;
+  constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
+  owner : scope option;
+  returns_into : Lir.place option;
+  forks : (int, int) Hashtbl.t;
+  mutable provides : (Path.t * Lir.operand) list list;
+  returned : Mir.local list;
+  mutable taken : Mir.place list;
+}
+
+and conditional_lend = { ran : Lir.local; mutable skipped : Lir.place list }
 
 type early_exits = {
   winner : Lir.place;
   mutable return_value : Lir.place option;
   scope : scope;
-  mutable exits : (Core.task list * Core.expression) list;
+  mutable exits : early_exit list;
+}
+
+and early_exit = {
+  ends : Mir.statement list;
+  remaining : (Core.task * Mir.statement list) list;
+  exit : Mir.task_exit;
 }
 
 type task = {
@@ -66,11 +92,11 @@ type state = {
   mutable result : result_slot;
   nested : Lir.function_ option list ref;
   mutable evidence : (Path.t * Lir.operand) list;
-  mutable compound_target : Lir.place option;
   pulling : bool;
   mutable forks : int;
   mutable tasks : task list;
   mutable next_range : schedule;
+  mutable inlined_owned : Lir.place list;
 }
 
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
@@ -134,6 +160,7 @@ val looping :
   state -> continue_:Lir.block -> break_:Lir.block -> depth:int -> (unit -> unit) -> unit
 
 val replace : state -> Lir.place -> Ground.ty -> by:Lir.place -> unit
+val place_type : state -> Lir.place -> Lir.ty option
 val lent_at : state -> Lir.place -> Ground.lent option
 val project : state -> Lir.place -> Lir.projection -> Lir.place
 val constant_int : Memory_layout.integer -> Z.t -> Lir.operand

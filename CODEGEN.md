@@ -1,9 +1,11 @@
 # Truss Code Generator
 
-Stage0's code generation covers everything between the core form of
-[TYPECHECKER.md](TYPECHECKER.md) and a program that runs. It takes the core
-form of each definition the program can reach and produces C, which a C
-compiler and a linker turn into a program. Every proof obligation has been
+Stage0's code generation covers everything between the MIR of
+[MIR.md](MIR.md) and a program that runs. It takes the MIR of each
+definition the program can reach and produces C, which a C compiler and a
+linker turn into a program. A default, a constant's value, and a template's
+`requires` check are core expressions, each lowered through the MIR of that
+one expression. Every proof obligation has been
 discharged by then, and nothing used only by proofs is compiled.
 
 It checks nothing about the program: a failure here is a compiler bug, or a
@@ -20,7 +22,7 @@ checked definitions
                             └──────────── LIR, cached per instance ────────┘
 ```
 
-Code generation reads core forms through queries of the code database. It
+Code generation reads MIR and core forms through queries of the code database. It
 does not depend on the prover, and neither the prover nor the database
 depends on it; only drivers do.
 
@@ -36,7 +38,7 @@ already needs the platform's C toolchain.
 
 ### Why one IR before C
 
-A small IR, the LIR, between the core form and C text gives one place for
+A small IR, the LIR, between the MIR and C text gives one place for
 every transformation, since drop elaboration, the cursor state machine, and
 outlining `parallel` branches are passes over a control-flow graph. It is
 also what early cutoff compares: a definition whose LIR is unchanged
@@ -124,10 +126,12 @@ how each Truss parameter becomes C parameters:
 A move is a copy of the value's bytes, after which the source place holds
 nothing to drop.
 
-- **Every value has an owner from its first moment:** a scope owns the
-  values dropped as it ends, and scopes are one stack, so `return`, `?`,
-  `break`, and a loop's stop at a `yield` each leave exactly the scopes they
-  leave.
+- **Every value has an owner from its first moment.** A local of the MIR
+  that owns its value is dropped where the MIR marks it dead. A scope owns
+  the values that lowering itself makes, and the scope around an inlined or
+  pulled method owns all of the method's locals, so a `break` at a `yield`
+  and a `yield`'s stop drop them. Scopes are one stack, and a jump out of a
+  loop's body leaves exactly the scopes it leaves.
 - **Drop elaboration** works as Rust's does: lowering writes a drop wherever
   a scope ends, and a dataflow analysis finds which places and fields may
   still own a value there, with a flag where only some paths do.
@@ -149,6 +153,10 @@ loop, with no coroutine at run time. A lend with nothing left to do, as for
 an index into a `List`, costs nothing. The design that replaces inlining is
 to pass the caller's code to the method as a function, which inlining in the
 C compiler makes as cheap.
+
+**The rest of a lending method runs at its part's end,** which the MIR
+marks. Where some path reaches that end without the call, a flag, one for
+each region that tasks may run at once, says whether the call ran.
 
 **A pulled yielding method is a state machine,** as C# and Kotlin compile
 iterators. Each `yield` is a state, and the locals live across a `yield`
@@ -310,7 +318,6 @@ a callee that disagree would otherwise compile and link without complaint.
 
 ## Not built
 
-- Lowering from the MIR.
 - A check that reports its caller's position, as Rust's `#[track_caller]`
   does.
 - A constant's value kept between runs.
