@@ -11,10 +11,11 @@ val file_of : string -> Path.file
 val top_key : string -> string -> Resolve.Names.key
 (** The key of a top-level definition, by its module and name: [top_key "app::main" "caller"]. *)
 
-val setup : (string * string) list -> Query.context
+val setup : ?dependencies:(string * string) list -> (string * string) list -> Query.context
 (** A database with the standard library and the given files, each named as {!file_of} reads it,
-    with its text. Each package's manifest grants nothing and lists no dependencies. The standard
-    library is a fixed base that every test shares. *)
+    with its text. Each pair of [dependencies], such as [("app", "lib")], makes the first package
+    depend on the second; each manifest grants nothing. The standard library is a fixed base that
+    every test shares, so it is checked once per run. *)
 
 val standard : Engine.t Lazy.t
 (** That base. *)

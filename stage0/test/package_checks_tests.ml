@@ -200,38 +200,28 @@ let () =
 
 let () =
   test "an impl overlaps an impl in a package it depends on" (fun () ->
-      let database = Engine.context (Engine.create ()) in
-      Database.load_standard (Engine.of_context database);
-      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
-        ~dependencies:[]
-        [
-          ( file_of "lib::vector",
-            Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on );
-        ];
-      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
-        ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
-        [
-          ( file_of "app::main",
-            Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on_2 );
-        ];
+      let database =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [
+            ("lib::vector", Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on);
+            ("app::main", Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on_2);
+          ]
+      in
       match codes (Type_checker.diagnostics database (file_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "an impl in another package cannot give a type another version of its method" (fun () ->
-      let database = Engine.context (Engine.create ()) in
-      Database.load_standard (Engine.of_context database);
-      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
-        ~dependencies:[]
-        [
-          ( file_of "lib::counter",
-            Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another );
-        ];
-      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
-        ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
-        [
-          ( file_of "app::main",
-            Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another_2 );
-        ];
+      let database =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [
+            ( "lib::counter",
+              Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another );
+            ( "app::main",
+              Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another_2 );
+          ]
+      in
       match codes (Type_checker.diagnostics database (file_of "app::main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));

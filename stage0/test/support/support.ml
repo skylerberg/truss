@@ -24,13 +24,22 @@ let top_key module_name name : Resolve.Names.key =
    that it is checked once. *)
 let standard = lazy (Database.For_testing.standard_base ())
 
-let setup files =
+let setup ?(dependencies = []) files =
   let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in
   let files = List.map (fun (name, text) -> (file_of name, text)) files in
   let package_of ((file : Path.file), _) = file.module_.package in
+  let dependencies_of (package : Path.package) =
+    List.filter_map
+      (fun (dependent, dependency) ->
+        if dependent = package.name then
+          Some { Manifest.package = { owner = None; name = dependency }; capabilities = [] }
+        else None)
+      dependencies
+  in
   List.iter
     (fun package ->
-      Database.load_package (Engine.of_context database) ~name:package ~dependencies:[]
+      Database.load_package (Engine.of_context database) ~name:package
+        ~dependencies:(dependencies_of package)
         (List.filter (fun file -> package_of file = package) files))
     (List.sort_uniq compare (List.map package_of files));
   database
@@ -476,8 +485,8 @@ let no_diagnostics ~check files =
       ignore (check_file_core_invariants database (file_of name)))
     files
 
-let one_diagnostic ~check ?(setup = setup) ?(file = "app::main") ?(others = []) ?fixed ?says text
-    code =
+let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main") ?(others = [])
+    ?fixed ?says text code =
   let database = setup ((file, text) :: others) in
   match checked ~check database file with
   | [ (diagnostic : Diagnostic.t) ] -> (

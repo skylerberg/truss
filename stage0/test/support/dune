@@ -15,6 +15,7 @@
   types
   resolve
   interface
+  manifest
   infer
   core
   core_walk))
