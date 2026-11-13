@@ -1175,7 +1175,7 @@ and lower_statement st (statement : Mir.statement) =
       | _ -> bug "next on a place that is not a cursor")
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
   | Dead locals -> List.iter (dead st) locals
-  | Assert condition ->
+  | Assert { condition; _ } ->
       let holds = value st condition in
       let failed = block st.builder and after = block st.builder in
       Lir_builder.branch st.builder holds ~yes:after ~no:failed;
@@ -1488,7 +1488,7 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin
       match ground_argument st (Value (Value_parameter parameter)) with
       | Value number -> assign (Use (constant_of st ty (Integer_value number)))
       | _ -> bug "the value parameter %s is not a number" parameter.name)
-  | Lambda { body = index; captures } ->
+  | Lambda { body = index; captures; _ } ->
       if st.pulling then
         unsupported ~at:(site_of st origin) "a lambda in a yielding method that is pulled";
       let function_type =
@@ -1960,7 +1960,7 @@ and construct_copied st ty ~variant ~fields ~destination =
 and terminator st region (ending : Mir.terminator) ~origin =
   match ending with
   | Goto target -> goto st region target
-  | Branch { condition; yes; no } ->
+  | Branch { condition; yes; no; _ } ->
       let condition = in_statement st (fun () -> value st condition) in
       let yes = jump st region yes and no = jump st region no in
       Lir_builder.branch st.builder condition ~yes ~no;
@@ -1970,7 +1970,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
       let cases = List.map (fun (variant, target) -> (variant, jump st region target)) cases in
       finish st.builder (Switch_variant { place = tested; cases; default = None });
       start st.builder (block st.builder)
-  | Unreachable -> unreachable_block st
+  | Unreachable | Written_unreachable -> unreachable_block st
   | Todo ->
       let message = "todo reached" in
       finish st.builder

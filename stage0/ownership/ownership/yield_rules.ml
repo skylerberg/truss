@@ -37,8 +37,8 @@ let yield_counts (body : Mir.body) : count list =
     | Exit_tasks { exit = Exit_to target; _ } -> flow target counts
     | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
         Option.iter (fun loop -> flow loop counts) (Hashtbl.find_opt iteration_loops block)
-    | (Goto _ | Branch _ | Switch_variant _ | For _ | Fork _ | Join _ | Todo | Unreachable) as
-      terminator ->
+    | ( Goto _ | Branch _ | Switch_variant _ | For _ | Fork _ | Join _ | Todo | Unreachable
+      | Written_unreachable ) as terminator ->
         List.iter (fun target -> flow target counts) (Mir.successors terminator)
   done;
   List.sort_uniq compare !returned

@@ -94,9 +94,10 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand  (** A [copy()] that the compiler implements. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : capture list }
+  | Lambda of { body : int; captures : capture list; written : Core.expression }
       (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
-          the order of its body's {!body.captures}. *)
+          the order of its body's {!body.captures}. [written] is the lambda as written, which the
+          prover reads as a function's definition. *)
   | Value_parameter of Types.parameter
 
 (** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
@@ -146,7 +147,9 @@ and statement_kind =
       (** The next value of the built-in cursor of a yielding method, an [Option]. *)
   | Live of local list  (** These locals start to hold values here. *)
   | Dead of local list  (** These locals hold nothing from here on. *)
-  | Assert of operand  (** An [assert] that can run. *)
+  | Assert of { condition : operand; bit_vector : Core.expression option }
+      (** An [assert] that can run. One proven by bit vectors has its condition as written in
+          [bit_vector], which the prover reads as a formula. *)
   | Echo of operand
   | Provide of { provided : provided list; can_use_tasks : bool }
       (** The start of a [provide] block. [can_use_tasks] says whether its body can use [Tasks], so
@@ -155,13 +158,21 @@ and statement_kind =
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
-  | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
+  | Ghost_assert of { condition : Core.expression; by_bit_vector : bool }
+      (** An [assert] that cannot run. Only the prover reads it. *)
   | Matched of { patterns : Core.origin list }
       (** An arm of a [match] whose patterns, by their origins, matched here, before its guard. Only
           the prover reads it, to tell which arm a counterexample takes. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
-type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
+type loop = {
+  clauses : Core.loop_clause list;
+  schedule : Core.loop_mode;
+  origin : Core.origin;
+  formula : Core.expression option;
+      (** The formula the prover reads for the loop: the quantifier a loop runs, or a [while] loop's
+          condition, from which it guesses a measure that decreases. *)
+}
 (** The clauses of a loop, which its header carries. *)
 
 (** What a [for] loop iterates over. *)
@@ -200,7 +211,9 @@ type branch = {
 
 type terminator =
   | Goto of block
-  | Branch of { condition : operand; yes : block; no : block }
+  | Branch of { condition : operand; yes : block; no : block; is_if_condition : bool }
+      (** [is_if_condition]: the condition is an [if]'s, as written, which the prover names where it
+          shows a path a counterexample takes. *)
   | Switch_variant of { place : place; cases : (string * block) list }
   | For of {
       iteration : iteration;
@@ -227,7 +240,9 @@ type terminator =
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
       (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
           taken. The exit ends the scopes inside the innermost task before it. *)
-  | Unreachable  (** A point the prover shows is never reached. *)
+  | Unreachable  (** A point that no path reaches, as the type checker has shown. *)
+  | Written_unreachable
+      (** An [unreachable] written in code, which the prover shows no path reaches. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
 type natural_loop = { loop : loop; body : block; after : block }

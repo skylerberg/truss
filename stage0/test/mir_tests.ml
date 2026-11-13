@@ -69,7 +69,7 @@ let effects (statement : Mir.statement) =
       (place_locals cursor @ read, given, [])
   | Live locals -> ([], locals, [])
   | Dead locals -> ([], [], locals)
-  | Assert value | Echo value -> (operand_locals value, [], [])
+  | Assert { condition = value; _ } | Echo value -> (operand_locals value, [], [])
   | Provide { provided; _ } ->
       ( List.concat_map (fun (provided : Mir.provided) -> operand_locals provided.value) provided,
         [],
@@ -85,7 +85,10 @@ let terminator_reads : Mir.terminator -> Mir.local list = function
   | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
   | Yield { part; _ } -> yielded_locals part
   | Return (Some value) | Exit_tasks { exit = Exit_return (Some value); _ } -> operand_locals value
-  | Goto _ | Fork _ | Join _ | Iteration_end | Return None | Exit_tasks _ | Unreachable | Todo -> []
+  | Goto _ | Fork _ | Join _ | Iteration_end
+  | Return None
+  | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
+      []
 
 (* The validator *)
 
@@ -494,7 +497,7 @@ let () =
         List.find_map
           (fun (_, terminator) ->
             match (terminator : Mir.terminator) with
-            | Branch { condition; yes; no } when List.mem a (operand_locals condition) ->
+            | Branch { condition; yes; no; _ } when List.mem a (operand_locals condition) ->
                 Some (yes, no)
             | _ -> None)
           (terminators body)

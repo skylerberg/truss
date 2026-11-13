@@ -188,12 +188,16 @@ fact is guarded by its path's condition, and where paths join, each local
 that differs gets a fresh symbol, so a body's queries grow with the body, not
 with its number of paths. A body that runs is run from its MIR, block by
 block in reverse postorder, so its order of evaluation and its scopes are the
-ones code generation compiles. Each computation it names, such as a call or
-a constructor, is read through the same functions as in a specification,
-given its operands' values, so code and specification give the same term.
-A specification, a proof, a `proof` block, and a quantifier's body are
-formulas, which the type checker keeps free of loops, assignments, and early
-exits, and are read from the core form.
+ones code generation compiles. The prover reads code from the MIR alone.
+Each computation, such as a call or a constructor, is described by where it
+is, its type, and its operands' values, whichever form it comes from, and
+read through the same functions in code and in a specification, so both
+give the same term. A specification, a proof, a `proof` block, and a
+quantifier's body are formulas, which the type checker keeps free of loops,
+assignments, and early exits, and are read from the core form. The MIR
+carries the formulas the prover reads in code: a loop's clauses, a running
+quantifier, a `while` loop's condition, from which a measure is guessed, a
+lambda's definition, and an `assert ... by bit_vector`.
 
 - **A call** asserts each `requires`, gives each `mut` argument a fresh
   value, keeping its old one for `old`, and assumes each `ensures` and the

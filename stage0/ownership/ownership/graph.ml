@@ -837,7 +837,7 @@ let statement builder ~is_var (statement : Mir.statement) =
   | Pull { destination; cursor } ->
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
       hold builder destination { nothing with views = views_of_copy builder cursor }
-  | Assert value | Echo value -> evaluate builder value
+  | Assert { condition = value; _ } | Echo value -> evaluate builder value
   | Provide { provided; _ } ->
       List.iter
         (fun (provided : Mir.provided) ->
@@ -987,7 +987,8 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       | Join { fork; _ } ->
           let ended = emit builder (Bind []) origin in
           Hashtbl.replace task_points (fork, index) ended
-      | Goto _ | Fork _ | Exit_tasks _ | Iteration_end | Unreachable | Todo -> ());
+      | Goto _ | Fork _ | Exit_tasks _ | Iteration_end | Unreachable | Written_unreachable | Todo ->
+          ());
       firsts.(index) <- (if index = 0 then entry else first);
       lasts.(index) <- (match builder.last with Some last -> last | None -> first))
     body.blocks;
