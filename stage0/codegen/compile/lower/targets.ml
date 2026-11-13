@@ -274,24 +274,24 @@ let cursor_into st ~path ~type_arguments ~(signature : Types.signature)
    caller passes: that is the only evidence its code can reach. [output] is
    the lambda's result, which a [?] in it returns early. *)
 let nested_function st ~(function_type : Ground.function_type) ~(output : Types.result option)
-    ~(captures : ('key * Lir.place * Ground.ty) list)
-    ~(bind_capture : state -> 'key -> Lir.place -> unit)
-    ~(body : state -> (Lir.place * Ground.mode * Ground.ty) list -> unit) destination =
+    ~(captures : (Lir.place * Ground.ty) list)
+    ~(body : state -> captures:Lir.place list -> (Lir.place * Ground.mode * Ground.ty) list -> unit)
+    destination =
   let index = List.length !(st.nested) in
   st.nested := !(st.nested) @ [ None ];
   let captured =
     List.mapi
-      (fun position (key, place, ty) -> (Printf.sprintf "capture%d" position, key, place, ty))
+      (fun position (place, ty) -> (Printf.sprintf "capture%d" position, place, ty))
       captures
   in
   let environment =
     List.map
-      (fun (name, _, _, ty) -> (name, Lir.Pointer { target = Value ty; writable = false }))
+      (fun (name, _, ty) -> (name, Lir.Pointer { target = Value ty; writable = false }))
       captured
   in
   let environment_local = at (local st.builder (Environment index)) in
   List.iter
-    (fun (name, _, place, _) ->
+    (fun (name, place, _) ->
       emit st.builder
         (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
     captured;
@@ -307,8 +307,6 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
     enter st.context ~pulling:st.pulling ~nested:st.nested
       {
         st.frame with
-        bindings = Hashtbl.copy st.frame.bindings;
-        synthetic = Hashtbl.copy st.frame.synthetic;
         on_yield = None;
         yield_into = None;
         lent_into = None;
@@ -336,12 +334,13 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
   in
   start builder (block builder);
   emit builder (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
-  List.iter
-    (fun (name, key, _, _) ->
-      bind_capture inner key
-        { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
-    captured;
-  body inner (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
+  body inner
+    ~captures:
+      (List.map
+         (fun (name, _, _) ->
+           { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
+         captured)
+    (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
   let function_ =
     finish_function inner ~first:[ environment_parameter ]
       ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
@@ -435,8 +434,6 @@ let in_type_definition st (ty : Ground.ty) nested_function =
           text = text_of st.context key;
           substitution = bind interface.type_generics arguments;
         };
-      bindings = Hashtbl.create 1;
-      synthetic = Hashtbl.create 1;
       self_place = None;
     };
   let result = nested_function () in

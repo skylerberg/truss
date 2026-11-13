@@ -53,6 +53,12 @@ written.
   each consumer needs the body as a unit: code generation runs it at each
   `yield` or as a task, the ownership check lends the collection for it, and
   the prover reads the yielding method's contract for each part.
+- **A `yield` of a constructor built from places is a tree,** built where it
+  is yielded, so each consumer reads the places it lends from the `yield`
+  itself rather than from the temporary that held it.
+- **A lambda's captures are locals of its body,** and its `Lambda` value
+  gives each capture's place in the enclosing body, so a consumer binds them
+  as it binds parameters.
 - **A jump out of scopes ends what it leaves:** loans, bindings,
   temporaries, and a `provide` block. An early exit from `concurrent` code
   also ends the tasks it leaves, which the builder finds from the loops and

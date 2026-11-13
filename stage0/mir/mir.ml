@@ -62,6 +62,10 @@ type call = {
   node : Core.id;  (** The core form's [Call]. *)
 }
 
+type capture = { local : Core.local; type_ : Types.ty; place : place }
+(** A local that a lambda captures: its core local, its type, and its place in the enclosing body.
+*)
+
 type rvalue =
   | Operand of operand
   | Operation of {
@@ -83,9 +87,23 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand  (** A [copy()] that the compiler implements. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : Core.capture list }
-      (** A function value made from a lambda. [body] indexes {!t.lambdas}. *)
+  | Lambda of { body : int; captures : capture list }
+      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
+          the order of its body's {!body.captures}. *)
   | Value_parameter of Types.parameter
+
+(** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
+    place: it is built where it is yielded, and is no value of its own. *)
+type yielded =
+  | Part of operand
+  | Built of {
+      variant : string option;
+      fields : (string * yielded option) list;
+      type_ : Types.ty;
+      node : Core.id;
+    }
+      (** A constructor of [type_], with every field in evaluation order. [None] takes the field's
+          default. [node] is its core node. *)
 
 type provided = {
   mode : Types.mode;
@@ -173,7 +191,7 @@ type terminator =
           {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
           [loop]'s schedule says. *)
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
-  | Yield of { mode : Types.mode; part : operand; resume : block }
+  | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
   | Unreachable  (** A point the prover shows is never reached. *)
@@ -193,6 +211,7 @@ type basic_block = {
 
 type body = {
   parameters : local list;
+  captures : local list;
   locals : local_info array;
   blocks : basic_block array;  (** The entry is block 0. *)
 }
@@ -249,7 +268,6 @@ type builder = {
   mutable scopes : scope list;  (** Innermost first. *)
   mutable loops : enclosing_loop list;
   mutable compound_target : place option;
-  mutable yield_mode : Types.mode;
   lambdas : body list ref;  (** In reverse, shared by the bodies of a definition. *)
   mutable loan_count : int;
   mutable deferred : local list option;
@@ -277,7 +295,6 @@ let create ~lambdas =
     scopes = [];
     loops = [];
     compound_target = None;
-    yield_mode = Read;
     lambdas;
     loan_count = 0;
     deferred = None;
@@ -521,7 +538,20 @@ let rec expression b (node : Core.expression) : operand option =
       | Value_parameter parameter -> hold (Value_parameter parameter)
       | Lambda { parameters; captures; body; _ } ->
           let index = lambda b parameters captures body in
-          hold (Lambda { body = index; captures })
+          hold
+            (Lambda
+               {
+                 body = index;
+                 captures =
+                   List.map
+                     (fun (capture : Core.capture) ->
+                       {
+                         local = capture.local;
+                         type_ = capture.type_;
+                         place = at (source b capture.local);
+                       })
+                     captures;
+               })
       | Construct { variant; fields } ->
           let* fields = construct_fields b fields in
           hold (Construct { variant; fields })
@@ -780,8 +810,7 @@ and held b (value : operand) type_ origin =
       assign b (at local) (Operand value) origin;
       Borrow { place = at local; type_; mode; origin }
 
-(* The fields of a constructor, in evaluation order. A field that is a place
-   lends it to the value, with the enclosing [yield]'s mode. *)
+(* The fields of a constructor, in evaluation order. *)
 and construct_fields b fields =
   let given =
     List.filter_map (fun (name, field) -> Option.map (fun field -> (name, field)) field) fields
@@ -792,16 +821,7 @@ and construct_fields b fields =
          (fun (_, (field : Core.operand)) ->
            ( (fun () ->
                match field with
-               | Place written ->
-                   let* lent = place b written in
-                   Some
-                     (Borrow
-                        {
-                          place = lent;
-                          type_ = Core_walk.place_type written;
-                          mode = b.yield_mode;
-                          origin = Core_walk.place_origin written;
-                        })
+               | Place _ -> bug "a constructor field that is a place, outside a yield"
                | Value value -> expression b value),
              operand_type field,
              operand_origin field ))
@@ -820,6 +840,46 @@ and construct_fields b fields =
                  (name, Some value)
              | [] -> bug "a constructor with fewer values than fields"))
        fields)
+
+(* What a [yield] yields, with its mode. A constructor that has a place
+   among its fields, to any depth, is built where it is yielded: its leaves,
+   each place it lends and each value, are evaluated in order. *)
+and yielded b (mode : Types.mode) (part : Core.operand) : yielded option =
+  let rec lends : Core.operand -> bool = function
+    | Place _ -> true
+    | Value { kind = Construct { fields; _ }; _ } ->
+        List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends field) fields
+    | Value _ -> false
+  in
+  match part with
+  | Value { kind = Construct _; _ } when lends part ->
+      let rec leaves (field : Core.operand) =
+        match field with
+        | Value { kind = Construct { fields; _ }; _ } when lends field ->
+            List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
+        | _ -> [ ((fun () -> operand b mode field), operand_type field, operand_origin field) ]
+      in
+      let* values = in_order b (leaves part) in
+      let remaining = ref values in
+      let rec rebuild (field : Core.operand) =
+        match field with
+        | Value ({ kind = Construct { variant; fields }; _ } as node) when lends field ->
+            Built
+              {
+                variant;
+                fields = List.map (fun (name, field) -> (name, Option.map rebuild field)) fields;
+                type_ = node.type_;
+                node = node.id;
+              }
+        | _ -> (
+            match !remaining with
+            | value :: rest ->
+                remaining := rest;
+                Part value
+            | [] -> bug "a yielded constructor with fewer values than fields")
+      in
+      Some (rebuild part)
+  | _ -> Option.map (fun value -> Part value) (operand b mode part)
 
 (* An operand passed with a mode: a place is borrowed, and a value is
    evaluated. *)
@@ -1500,11 +1560,7 @@ and statement b (node : Core.statement) =
       | Assert { condition = { value; executable = false }; _ } ->
           emit b (Ghost_assert value) origin
       | Yield { mode; part } -> (
-          let enclosing = b.yield_mode in
-          b.yield_mode <- mode;
-          let part = operand b mode part in
-          b.yield_mode <- enclosing;
-          match part with
+          match yielded b mode part with
           | Some part ->
               let resume = new_block b in
               terminate b (Yield { mode; part; resume }) origin;
@@ -1670,11 +1726,16 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
 
 and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (body : Core.block) =
   let inner = create ~lambdas:b.lambdas in
-  List.iter
-    (fun (capture : Core.capture) ->
-      Hashtbl.replace inner.sources capture.local
-        (new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0))
-    captures;
+  let capture_locals =
+    List.map
+      (fun (capture : Core.capture) ->
+        let local =
+          new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0
+        in
+        Hashtbl.replace inner.sources capture.local local;
+        local)
+      captures
+  in
   let entry = new_block inner in
   start inner entry;
   let parameter_locals =
@@ -1694,11 +1755,11 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
         Option.iter (fun value -> return_ inner (Some value) 0) (block inner body);
         locals)
   in
-  let body = finish inner ~parameters:parameter_locals in
+  let body = finish inner ~parameters:parameter_locals ~captures:capture_locals in
   b.lambdas := body :: !(b.lambdas);
   List.length !(b.lambdas) - 1
 
-and finish b ~parameters : body =
+and finish ?(captures = []) b ~parameters : body =
   let blocks =
     Array.init b.block_count (fun index ->
         let pending = Hashtbl.find b.pending index in
@@ -1735,6 +1796,7 @@ and finish b ~parameters : body =
   in
   {
     parameters;
+    captures;
     locals = Array.init b.local_count (Hashtbl.find b.infos);
     blocks = canonical blocks;
   }
@@ -1820,6 +1882,52 @@ let iteration_loops (body : body) =
       | _ -> ())
     body.blocks;
   loops
+
+(* The parts of lending calls whose [Dead] some path from the entry reaches
+   without passing the [Lend]: a temporary lives to its statement's end, so
+   a lend in one arm of a [match], or on one side of [&&], leaves a path to
+   the part's end that never lent it. Its lend's end then runs only where the
+   lend did. *)
+let conditional_lends (body : body) =
+  let ends_of part (statement : statement) =
+    match statement.kind with Dead locals -> List.mem part locals | _ -> false
+  in
+  let ends_in part (block : basic_block) =
+    List.exists (ends_of part) block.statements
+    ||
+    match block.terminator with
+    | Exit_tasks { tasks; _ } ->
+        List.exists (fun (left : left_task) -> List.exists (ends_of part) left.ends) tasks
+    | _ -> false
+  in
+  let lends = ref [] in
+  Array.iteri
+    (fun index (block : basic_block) ->
+      List.iteri
+        (fun position (statement : statement) ->
+          match statement.kind with
+          | Lend { part; _ } -> lends := (part, index, position) :: !lends
+          | _ -> ())
+        block.statements)
+    body.blocks;
+  List.filter_map
+    (fun (part, lending, position) ->
+      let ended_before =
+        List.exists (ends_of part)
+          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
+      in
+      let visited = Array.make (Array.length body.blocks) false in
+      let rec reaches block =
+        block <> lending
+        && (not visited.(block))
+        && begin
+          visited.(block) <- true;
+          ends_in part body.blocks.(block)
+          || List.exists reaches (successors body.blocks.(block).terminator)
+        end
+      in
+      if ended_before || reaches 0 then Some part else None)
+    !lends
 
 let of_definition (definition : Core.definition) =
   let code =
@@ -1964,6 +2072,18 @@ let show_statement (statement : statement) =
   | Matched _ -> "matched"
   | Proof _ -> "proof"
 
+let rec show_yielded = function
+  | Part operand -> show_operand operand
+  | Built { variant; fields; _ } ->
+      Printf.sprintf "%s(%s)"
+        (match variant with Some variant -> variant | None -> "record")
+        (String.concat ", "
+           (List.map
+              (fun (name, field) ->
+                Printf.sprintf "%s: %s" name
+                  (match field with Some field -> show_yielded field | None -> "default"))
+              fields))
+
 let show_terminator = function
   | Goto block -> Printf.sprintf "goto %d" block
   | Branch { condition; yes; no } ->
@@ -1984,7 +2104,7 @@ let show_terminator = function
         body after
   | Iteration_end -> "next"
   | Yield { mode; part; resume } ->
-      Printf.sprintf "yield %s %s %d" (show_mode mode) (show_operand part) resume
+      Printf.sprintf "yield %s %s %d" (show_mode mode) (show_yielded part) resume
   | Return None -> "return"
   | Return (Some value) -> "return " ^ show_operand value
   | Exit_tasks { tasks; exit } ->

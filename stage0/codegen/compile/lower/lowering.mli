@@ -20,8 +20,6 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 
 type frame = {
   code : Definitions.code;
-  bindings : (Syntax.id, Lir.place) Hashtbl.t;
-  synthetic : (int, Lir.place) Hashtbl.t;
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
   yield_into : Lir.place option;
@@ -40,7 +38,6 @@ and mir_frame = {
   conditionally_lent : Mir.local list;
   mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
-  constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
   owner : scope option;
   returns_into : Lir.place option;
   forks : (int, int) Hashtbl.t;

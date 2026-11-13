@@ -52,9 +52,12 @@ val nested_function :
   Lowering.state ->
   function_type:Ground.function_type ->
   output:Types.result option ->
-  captures:('key * Lir.place * Ground.ty) list ->
-  bind_capture:(Lowering.state -> 'key -> Lir.place -> unit) ->
-  body:(Lowering.state -> (Lir.place * Ground.mode * Ground.ty) list -> unit) ->
+  captures:(Lir.place * Ground.ty) list ->
+  body:
+    (Lowering.state ->
+    captures:Lir.place list ->
+    (Lir.place * Ground.mode * Ground.ty) list ->
+    unit) ->
   Lir.place ->
   unit
 

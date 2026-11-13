@@ -35,6 +35,41 @@ let mir_of context path : Mir.t =
   | Some (mir, _) -> mir
   | None -> bug "%s has no MIR" (Path.show path)
 
+(* How many [yield]s a lending method's body has. *)
+let yield_count (body : Mir.body) =
+  Array.fold_left
+    (fun count (block : Mir.basic_block) ->
+      match block.terminator with Yield _ -> count + 1 | _ -> count)
+    0 body.blocks
+
+(* Whether nothing runs after a [yield] on any path through a body: from
+   each [yield], the paths only end scopes and loans until they return no
+   value. *)
+let each_yield_is_last (body : Mir.body) =
+  let visited = Hashtbl.create 8 in
+  let rec runs_nothing block =
+    Hashtbl.mem visited block
+    || begin
+      Hashtbl.replace visited block ();
+      let { Mir.statements; terminator; _ } = body.blocks.(block) in
+      List.for_all
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ -> true
+          | _ -> false)
+        statements
+      &&
+      match terminator with
+      | Goto target -> runs_nothing target
+      | Return (None | Some (Constant { value = Unit; _ })) -> true
+      | _ -> false
+    end
+  in
+  Array.for_all
+    (fun (block : Mir.basic_block) ->
+      match block.terminator with Yield { resume; _ } -> runs_nothing resume | _ -> true)
+    body.blocks
+
 let spans st =
   match demand st.context Names.spans st.frame.code.definition_key with
   | Some spans -> spans
@@ -51,53 +86,11 @@ let site_of st (origin : Core.origin) =
 let failure_site st (origin : Core.origin) =
   match st.frame.reported with Some site -> site | None -> site_of st origin
 
-(* The parts of lending calls whose end some path from the entry reaches
-   without passing the call. *)
-let conditionally_lent (body : Mir.body) =
-  let ends_of part (statement : Mir.statement) =
-    match statement.kind with Dead locals -> List.mem part locals | _ -> false
-  in
-  let ends_in part (block : Mir.basic_block) =
-    List.exists (ends_of part) block.statements
-    ||
-    match block.terminator with
-    | Exit_tasks { tasks; _ } ->
-        List.exists (fun (left : Mir.left_task) -> List.exists (ends_of part) left.ends) tasks
-    | _ -> false
-  in
-  let lends = ref [] in
-  Array.iteri
-    (fun index (block : Mir.basic_block) ->
-      List.iteri
-        (fun position (statement : Mir.statement) ->
-          match statement.kind with
-          | Lend { part; _ } -> lends := (part, index, position) :: !lends
-          | _ -> ())
-        block.statements)
-    body.blocks;
-  List.filter_map
-    (fun (part, lending, position) ->
-      let ended_before =
-        List.exists (ends_of part)
-          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
-      in
-      let visited = Array.make (Array.length body.blocks) false in
-      let rec reaches block =
-        block <> lending
-        && (not visited.(block))
-        && begin
-          visited.(block) <- true;
-          ends_in part body.blocks.(block)
-          || List.exists reaches (Mir.successors body.blocks.(block).terminator)
-        end
-      in
-      if ended_before || reaches 0 then Some part else None)
-    !lends
-
-(* The MIR of one body, ready to lower: which locals alias a place, and
-   which temporaries hold a constructor that lends places. *)
+(* The MIR of one body, ready to lower: how many times each local that
+   names a place is bound to one, which is more than once where several
+   patterns bind it. *)
 let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
-  let aliases = Hashtbl.create 8 and built = Hashtbl.create 8 in
+  let aliases = Hashtbl.create 8 in
   Array.iter
     (fun (block : Mir.basic_block) ->
       List.iter
@@ -108,41 +101,17 @@ let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
             ->
               Hashtbl.replace aliases local
                 (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
-          | Assign
-              {
-                target = { root = Local local; projections = [] };
-                value = Construct { variant; fields };
-                _;
-              } ->
-              Hashtbl.replace built local (variant, fields)
           | _ -> ())
         block.statements)
     body.blocks;
-  let rec lends local =
-    match Hashtbl.find_opt built local with
-    | Some (_, fields) ->
-        List.exists
-          (fun (_, (field : Mir.operand option)) ->
-            match field with
-            | Some (Borrow _) -> true
-            | Some (Use { place = { root = Local inner; projections = [] }; _ }) -> lends inner
-            | _ -> false)
-          fields
-    | None -> false
-  in
-  let constructs = Hashtbl.create 2 in
-  Hashtbl.iter
-    (fun local construct -> if lends local then Hashtbl.replace constructs local construct)
-    built;
   {
     body;
     lambdas;
     places = Hashtbl.create 32;
     ends = Hashtbl.create 4;
-    conditionally_lent = conditionally_lent body;
+    conditionally_lent = Mir.conditional_lends body;
     lent = Hashtbl.create 1;
     aliases;
-    constructs;
     owner;
     returns_into;
     forks = Hashtbl.create 1;
@@ -165,36 +134,22 @@ let info st local = (mir st).body.locals.(local)
 let core_local st local =
   match (info st local).kind with Source { local; _ } -> Some local | Temporary | Lent _ -> None
 
-let core_place st (local : Core.local) =
-  let place =
-    match local with
-    | Named id -> Hashtbl.find_opt st.frame.bindings id
-    | Self -> st.frame.self_place
-    | Synthetic number -> Hashtbl.find_opt st.frame.synthetic number
-  in
-  match place with Some place -> place | None -> bug "a core local with no place"
-
-let bind_core st (local : Core.local) place =
-  match local with
-  | Named id -> Hashtbl.replace st.frame.bindings id place
-  | Synthetic number -> Hashtbl.replace st.frame.synthetic number place
-  | Self -> st.frame.self_place <- Some place
-
 (* Whether a local of the MIR owns its value, so that its end drops it: a
    temporary, or a binding that took its value. Any other local is the place
    it was lent or bound to. *)
 let owns st local =
   let frame = mir st in
   (not (Hashtbl.mem frame.aliases local))
-  && (not (Hashtbl.mem frame.constructs local))
   &&
   match (info st local).kind with
   | Temporary | Source { mode = Own; _ } -> true
   | Source { mode = Read | Mut; _ } | Lent _ -> false
 
+(* Binds a local of the MIR to its place. The place of [self] is also the
+   code's own, which the evidence of a capability it implements names. *)
 let bind_local st local place =
   Hashtbl.replace (mir st).places local place;
-  Option.iter (fun core -> bind_core st core place) (core_local st local)
+  if core_local st local = Some Self then st.frame.self_place <- Some place
 
 (* Where the value a [return] returns is written: the slot of the
    function's result, or of the value of an expression lowered on its own.
@@ -228,22 +183,12 @@ and new_place st local : Lir.place =
   bind_local st local place;
   place
 
-(* The place of a local of the MIR: made when it first holds a value, or,
-   for a parameter or a capture, where its core local is. *)
+(* The place of a local of the MIR: made when it first holds a value. A
+   parameter and a capture are bound before the code runs. *)
 let local_place st local : Lir.place =
-  let frame = mir st in
-  match Hashtbl.find_opt frame.places local with
+  match Hashtbl.find_opt (mir st).places local with
   | Some place -> place
-  | None -> (
-      match (info st local).kind with
-      | Source { local = core; mode }
-        when List.mem local frame.body.parameters || (mode <> Own && not (owns st local)) -> (
-          match core with
-          | Named id when Hashtbl.mem st.frame.bindings id -> core_place st core
-          | Self when st.frame.self_place <> None -> core_place st core
-          | Synthetic number when Hashtbl.mem st.frame.synthetic number -> core_place st core
-          | _ -> fresh_place st local)
-      | _ -> fresh_place st local)
+  | None -> fresh_place st local
 
 (* Has the local's end run [cleanups], besides dropping what it owns. *)
 let at_end st local cleanups = Hashtbl.replace (mir st).ends local cleanups
@@ -460,14 +405,6 @@ let write_operand st (operand : Mir.operand) (destination : Lir.place) =
   | Take { place = written; _ } -> take st (taken st written) ty ~destination
   | Borrow { place = written; _ } ->
       emit st.builder (Assign (destination, Use (Copy (whole st (place st written)))))
-
-(* The constructor that lends places, which a temporary holds, that an
-   operand reads. *)
-let construct_of st (operand : Mir.operand) =
-  match operand with
-  | Use { place = { root = Local local; projections = [] }; _ } ->
-      Hashtbl.find_opt (mir st).constructs local
-  | _ -> None
 
 let discarded st = temporary st (Monomorphic.builtin Unit)
 
@@ -1042,26 +979,27 @@ let rec lent_type st : Ground.lent option =
     | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
   in
   let parts = yielded_parts st in
-  if mode = Own || not (List.exists (fun part -> construct_of st part <> None) parts) then None
+  let is_built : Mir.yielded -> bool = function Built _ -> true | Part _ -> false in
+  if mode = Own || not (List.exists is_built parts) then None
   else Some (lent_type_of st ~writable:(mode = Mut) (yielded_type_of_frame st) parts)
 
-and lent_type_of st ~writable ty (parts : Mir.operand list) : Ground.lent =
-  let field_operands variant name =
+and lent_type_of st ~writable ty (parts : Mir.yielded list) : Ground.lent =
+  let field_parts variant name =
     List.concat_map
-      (fun part ->
-        match construct_of st part with
-        | Some (constructed, fields) when constructed = variant -> (
+      (fun (part : Mir.yielded) ->
+        match part with
+        | Built { variant = constructed; fields; _ } when constructed = variant -> (
             match List.assoc_opt name fields with Some (Some field) -> [ field ] | _ -> [])
         | _ -> [])
       parts
   in
   let lent_field_for variant (name, field_ty) : Ground.lent_field option =
-    let operands = field_operands variant name in
+    let fields = field_parts variant name in
     let holds : Ground.holds option =
-      if List.exists (fun operand -> construct_of st operand <> None) operands then
-        Some (Nested (lent_type_of st ~writable field_ty operands))
+      if List.exists (function Mir.Built _ -> true | Part _ -> false) fields then
+        Some (Nested (lent_type_of st ~writable field_ty fields))
       else if
-        List.exists (function Mir.Borrow _ -> true | _ -> false) operands
+        List.exists (function Mir.Part (Borrow _) -> true | _ -> false) fields
         || not (trivial st field_ty)
       then Some Address
       else None
@@ -1443,9 +1381,6 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ })
     when Hashtbl.mem frame.aliases local ->
       alias st local (place st source) ~writable:(mode = Mut)
-  | { root = Local local; projections = [] }, Construct _ when Hashtbl.mem frame.constructs local ->
-      (* The [yield] that yields it builds it. *)
-      ()
   | _ -> (
       let ty = target_type st target value in
       let types_ty =
@@ -1615,16 +1550,16 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin
           | _ -> None)
         ~captures:
           (List.map
-             (fun (capture : Core.capture) ->
-               (capture.local, whole st (core_place st capture.local), ground st capture.type_))
+             (fun (capture : Mir.capture) ->
+               (whole st (place st capture.place), ground st capture.type_))
              captures)
-        ~bind_capture:bind_core
-        ~body:(fun inner parameter_places ->
+        ~body:(fun inner ~captures:capture_places parameter_places ->
           inner.frame <-
             {
               inner.frame with
               mir = Some (frame_of_body ~owner:(innermost_scope inner) ~lambdas lambda);
             };
+          List.iter2 (bind_local inner) lambda.captures capture_places;
           make_owned_locals inner;
           List.iter2
             (fun local (place, _, _) -> bind_local inner local place)
@@ -1643,23 +1578,26 @@ and field_default_place st ty ~variant ~field =
       (place, default_ty))
 
 (* Evaluates a core expression that runs on its own, such as a default, and
-   writes its value to [destination], from the expression's MIR. *)
-and expression_into ?parameters st (expression : Core.expression) (destination : Lir.place) =
-  let expression_mir = Mir.of_expression ?parameters expression in
+   writes its value to [destination], from the expression's MIR. [arguments]
+   are the parameters it reads, with their places. *)
+and expression_into ?(arguments = []) st (expression : Core.expression) (destination : Lir.place) =
+  let expression_mir = Mir.of_expression ~parameters:(List.map fst arguments) expression in
   let caller = st.frame in
   let exit = block st.builder in
+  let frame =
+    frame_of_body ~returns_into:destination ~lambdas:expression_mir.lambdas expression_mir.body
+  in
   st.frame <-
     {
       caller with
-      bindings = Hashtbl.copy caller.bindings;
-      synthetic = Hashtbl.copy caller.synthetic;
       on_yield = None;
       yield_into = None;
       lent_into = None;
       exit = Some (exit, List.length st.scopes);
+      mir = Some frame;
     };
-  lower_body st
-    (frame_of_body ~returns_into:destination ~lambdas:expression_mir.lambdas expression_mir.body);
+  List.iter2 (bind_local st) expression_mir.body.parameters (List.map snd arguments);
+  lower_body st frame;
   finish st.builder Unreachable;
   start st.builder exit;
   st.frame <- caller
@@ -1785,8 +1723,6 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
             text = text_of st.context key;
             substitution = [];
           };
-        bindings = Hashtbl.create 1;
-        synthetic = Hashtbl.create 1;
         self_place = None;
       };
     List.iter2
@@ -1848,8 +1784,6 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
   st.frame <-
     {
       code = code_of st.context path type_arguments;
-      bindings = Hashtbl.create 16;
-      synthetic = Hashtbl.create 4;
       self_place = None;
       on_yield = Some on_yield;
       yield_into = None;
@@ -1914,8 +1848,9 @@ and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call
    out of it, so the innermost scope owns the lend. Where nothing is left,
    as for an index into a [List], the method ends at its [yield]. *)
 and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
-  let _, body = core_of st.context path in
-  let several = Method_yields.count body > 1 in
+  let body = (mir_of st.context path).body in
+  let yields = yield_count body in
+  let several = yields > 1 in
   let depth = List.length st.scopes in
   let goes_on = block st.builder in
   (* A method with a [yield] on each of several paths lends whichever it
@@ -1946,7 +1881,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
         List.filteri (fun position _ -> List.length st.scopes - position > depth) st.scopes
       in
       let owns_nothing = List.for_all (fun (scope : scope) -> scope.owned = []) scopes in
-      if (not several) && Method_yields.each_is_last body && owns_nothing then
+      if (not several) && each_yield_is_last body && owns_nothing then
         finish st.builder (Goto resume)
       else begin
         List.iter
@@ -1995,7 +1930,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
       start st.builder goes_on);
   match !lent with
   | Some place -> place
-  | None when Method_yields.count body = 0 ->
+  | None when yields = 0 ->
       (* The method has no [yield], so it never returns, and the code after
          the call never runs. The place is never read. *)
       temporary st ty
@@ -2005,21 +1940,22 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
    [lent]. A field that holds an address is given the address of a place,
    or of a temporary that the [yield]'s statement owns, which the method
    drops once it resumes. *)
-and lend_into st (lent : Ground.lent) (part : Mir.operand) ~destination =
-  match construct_of st part with
-  | Some (variant, fields) ->
+and lend_into st (lent : Ground.lent) (part : Mir.yielded) ~destination =
+  match part with
+  | Built { variant; fields; _ } ->
       let fields =
         List.map
-          (fun (name, (field : Mir.operand option)) ->
+          (fun (name, (field : Mir.yielded option)) ->
             let holds = lent_field lent variant name in
             let evaluated () =
               match field with
-              | Some (Borrow { place = written; _ }) -> snapshot st (place st written)
-              | Some field -> operand_place st field
+              | Some (Part (Borrow { place = written; _ })) -> snapshot st (place st written)
+              | Some (Part field) -> operand_place st field
+              | Some (Built _) -> bug "a built field that holds no lent value"
               | None -> fst (field_default_place st lent.base ~variant ~field:name)
             in
             match (holds, field) with
-            | Some (Nested inner), Some nested when construct_of st nested <> None ->
+            | Some (Nested inner), Some (Built _ as nested) ->
                 let nested_lent = at (local st.builder ~borrowed:true (Value (Lent inner))) in
                 lend_into st inner nested ~destination:nested_lent;
                 (name, Lir.Copy nested_lent)
@@ -2030,32 +1966,30 @@ and lend_into st (lent : Ground.lent) (part : Mir.operand) ~destination =
           fields
       in
       emit st.builder (Assign (destination, Build { ty = Lent lent; variant; fields }))
-  | None ->
+  | Part part ->
       emit st.builder (Assign (destination, Use (Copy (lent_from st lent (operand_part st part)))))
 
 (* For a cursor, whose caller keeps [next]'s result: a constructor that
    lends places, with a copy of each place in place of the place, which it
    owns. *)
-and construct_copied st ty (variant, fields) ~destination =
+and construct_copied st ty ~variant ~fields ~destination =
   let fields =
     List.map
-      (fun (name, (field : Mir.operand option)) ->
+      (fun (name, (field : Mir.yielded option)) ->
         match field with
-        | Some (Borrow { place = written; type_; _ }) ->
+        | Some (Part (Borrow { place = written; type_; _ })) ->
             let field_ty = ground st type_ in
             let fresh_copy = temporary st field_ty in
             Glue.copy_into st.context.glue st.builder ~destination:fresh_copy
               ~source:(whole st (place st written))
               field_ty;
             (name, owned st fresh_copy field_ty)
-        | Some nested -> (
-            let nested_ty = operand_type st nested in
-            match construct_of st nested with
-            | Some construct ->
-                let inner = at (local st.builder (Value nested_ty)) in
-                construct_copied st nested_ty construct ~destination:inner;
-                (name, owned st inner nested_ty)
-            | None -> (name, value st nested))
+        | Some (Built { variant; fields; type_; _ }) ->
+            let nested_ty = ground st type_ in
+            let inner = at (local st.builder (Value nested_ty)) in
+            construct_copied st nested_ty ~variant ~fields ~destination:inner;
+            (name, owned st inner nested_ty)
+        | Some (Part nested) -> (name, value st nested)
         | None ->
             let default, default_ty = field_default_place st ty ~variant ~field:name in
             (name, owned st default default_ty))
@@ -2142,11 +2076,12 @@ and yield st region ~mode ~part ~resume ~origin =
         | Some (slot, lent), _, _ ->
             lend_into st lent part ~destination:slot;
             (slot, false)
-        | None, Borrow { place = written; _ }, _ -> (place st written, mode = Types.Own)
-        | None, _, Some slot ->
+        | None, Part (Borrow { place = written; _ }), _ -> (place st written, mode = Types.Own)
+        | None, Part part, Some slot ->
             write_operand st part slot;
             (slot, true)
-        | None, _, None -> (operand_place st part, true)
+        | None, Part part, None -> (operand_place st part, true)
+        | None, Built _, _ -> bug "a yielded constructor with no lent value to build it in"
       in
       on_yield place ~owned ~resume:(jump st region resume);
       start st.builder (block st.builder)
@@ -2157,22 +2092,22 @@ and yield st region ~mode ~part ~resume ~origin =
          place it yields. *)
       let ty = yielded_type_of_frame st in
       let yielded =
-        match (construct_of st part, part) with
-        | Some _, _ when mode = Mut ->
+        match part with
+        | Built _ when mode = Mut ->
             unsupported ~at:(site_of st origin)
               "a cursor over a method that lends places to be changed"
-        | Some construct, _ ->
+        | Built { variant; fields; _ } ->
             let copy = temporary st ty in
-            construct_copied st ty construct ~destination:copy;
+            construct_copied st ty ~variant ~fields ~destination:copy;
             copy
-        | None, Borrow { place = written; _ } when trivial st ty -> whole st (place st written)
-        | None, Borrow { place = written; _ } ->
+        | Part (Borrow { place = written; _ }) when trivial st ty -> whole st (place st written)
+        | Part (Borrow { place = written; _ }) ->
             let copy = temporary st ty in
             Glue.copy_into st.context.glue st.builder ~destination:copy
               ~source:(whole st (place st written))
               ty;
             copy
-        | None, _ -> operand_place st part
+        | Part part -> operand_place st part
       in
       let resume = jump st region resume and stop = block st.builder in
       finish st.builder (Yield { value = owned st yielded ty; resume; stop = Some stop });
@@ -2494,71 +2429,77 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
    takes the argument or the default. A parameter that is a view is pointed
    at the default's value, or given its bits, and the function owns that
    value. *)
-let fill_defaults st mask (parameters : Core.parameter list) =
+let fill_defaults st mask (parameters : (Core.parameter * Lir.place) list) =
   let builder = st.builder in
-  let defaulted =
-    List.filter_map
-      (fun (parameter : Core.parameter) ->
-        Option.map (fun default -> (parameter, default)) parameter.default)
-      parameters
-  in
-  List.iteri
-    (fun bit ((parameter : Core.parameter), (default : Core.expression)) ->
-      let ty = ground st parameter.type_ in
-      let passed = local builder (Raw (Integer UInt64)) and is_passed = local builder (Raw Bool) in
-      emit builder
-        (Assign
-           ( at passed,
-             Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
-      emit builder
-        (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
-      let arrived = core_place st parameter.local in
-      let fill = block builder and after = block builder in
-      let unless_passed other =
-        Lir_builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
-      in
-      let pulled reason =
-        if st.pulling then
-          unsupported ~at:(site_of st default.origin)
-            "a default for %s, %s, in a yielding method that is pulled" parameter.name reason
-      in
-      if parameter.mode = Own && not (trivial st ty) then begin
-        let owned_here = binding st ~name:parameter.name ty in
-        bind_core st parameter.local owned_here;
-        let passed_block = block builder in
-        unless_passed passed_block;
-        start builder passed_block;
-        emit builder (Assign (owned_here, Use (Move arrived)));
-        finish builder (Goto after);
-        start builder fill;
-        in_statement st (fun () -> expression_into st default owned_here)
-      end
-      else begin
-        unless_passed after;
-        start builder fill;
-        in_statement st (fun () ->
-            match arrived with
-            | { projections = [ Deref ]; root = Local pointer } ->
-                pulled "which is passed by address";
-                let value = binding st ty in
-                expression_into st default value;
-                emit builder (Assign (at pointer, Use (Address { place = value; writable = true })))
-            | place when not (trivial st ty) ->
-                pulled "which is a view";
-                let value = binding st ty in
-                expression_into st default value;
-                emit builder (Assign (place, Use (Copy value)))
-            | place -> expression_into st default place)
-      end;
-      finish builder (Goto after);
-      start builder after)
-    defaulted
+  let bit = ref (-1) in
+  List.map
+    (fun ((parameter : Core.parameter), arrived) ->
+      match parameter.default with
+      | None -> arrived
+      | Some default ->
+          incr bit;
+          let bit = !bit in
+          let ty = ground st parameter.type_ in
+          let passed = local builder (Raw (Integer UInt64))
+          and is_passed = local builder (Raw Bool) in
+          emit builder
+            (Assign
+               ( at passed,
+                 Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
+          emit builder
+            (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+          let fill = block builder and after = block builder in
+          let unless_passed other =
+            Lir_builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
+          in
+          let pulled reason =
+            if st.pulling then
+              unsupported ~at:(site_of st default.origin)
+                "a default for %s, %s, in a yielding method that is pulled" parameter.name reason
+          in
+          let place =
+            if parameter.mode = Own && not (trivial st ty) then begin
+              let owned_here = binding st ~name:parameter.name ty in
+              let passed_block = block builder in
+              unless_passed passed_block;
+              start builder passed_block;
+              emit builder (Assign (owned_here, Use (Move arrived)));
+              finish builder (Goto after);
+              start builder fill;
+              in_statement st (fun () -> expression_into st default owned_here);
+              owned_here
+            end
+            else begin
+              unless_passed after;
+              start builder fill;
+              in_statement st (fun () ->
+                  match arrived with
+                  | { projections = [ Deref ]; root = Local pointer } ->
+                      pulled "which is passed by address";
+                      let value = binding st ty in
+                      expression_into st default value;
+                      emit builder
+                        (Assign (at pointer, Use (Address { place = value; writable = true })))
+                  | place when not (trivial st ty) ->
+                      pulled "which is a view";
+                      let value = binding st ty in
+                      expression_into st default value;
+                      emit builder (Assign (place, Use (Copy value)))
+                  | place -> expression_into st default place);
+              arrived
+            end
+          in
+          finish builder (Goto after);
+          start builder after;
+          place)
+    parameters
 
-(* Lowers the MIR of the code at [path] in the current frame, whose
-   parameters are bound. *)
-let lower_code st path =
+(* Lowers the MIR of the code at [path] in the current frame, with its
+   parameters in [parameters], in order. *)
+let lower_code st path ~parameters =
   let code_mir = mir_of st.context path in
   let frame = frame_of_body ~owner:(innermost_scope st) ~lambdas:code_mir.lambdas code_mir.body in
   st.frame <- { st.frame with mir = Some frame };
+  List.iter2 (bind_local st) code_mir.body.parameters parameters;
   make_owned_locals st;
   lower_body st frame

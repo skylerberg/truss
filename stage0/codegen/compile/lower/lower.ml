@@ -55,17 +55,17 @@ let bind_parameters ?how st (parameters : Core.parameter list) =
           ~owned:(parameter.mode = Own && bit = None)
           (Monomorphic.mode parameter.mode) ty
       in
-      Mir_form.bind_core st parameter.local place;
-      (arrives, parameter.mode, ty, bit))
+      (arrives, parameter.mode, ty, bit, place))
     parameters
 
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
    given, with its defaults filled in. Returns the parameters bound, the
-   mask, and every parameter's local in order. *)
+   mask, every parameter's local in order, and each parameter's place. *)
 let begin_body ?how st ~(parameters : Core.parameter list) =
   let code = st.frame.code in
   let bound = bind_parameters ?how st parameters in
+  let places = List.map (fun (_, _, _, _, place) -> place) bound in
   let mask =
     if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
     else None
@@ -74,10 +74,15 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
   start st.builder (block st.builder);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
-  Option.iter (fun mask -> Mir_form.fill_defaults st mask parameters) mask;
-  ( bound,
+  let places =
+    match mask with
+    | Some mask -> Mir_form.fill_defaults st mask (List.combine parameters places)
+    | None -> places
+  in
+  ( List.map (fun (arrives, mode, ty, bit, _) -> (arrives, mode, ty, bit)) bound,
     mask,
-    List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
+    List.filter_map (fun (arrives, _, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence,
+    places )
 
 (* The pulled version of a yielding method: lowered as the method is, but
    holding its arguments as a cursor does, and with its own [yield]s left
@@ -90,7 +95,7 @@ let pulled context (yielding : Ground.yielding) :
   let code = code_of context yielding.method_ yielding.type_arguments in
   let parameters, _ = Mir_form.core_of context yielding.method_ in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
-  let bound, mask, parameter_locals =
+  let bound, mask, parameter_locals, places =
     begin_body st ~how:(Convention.held context.env) ~parameters
   in
   let owned =
@@ -110,7 +115,7 @@ let pulled context (yielding : Ground.yielding) :
         else None)
       bound
   in
-  Mir_form.lower_code st yielding.method_;
+  Mir_form.lower_code st yielding.method_ ~parameters:places;
   (finish_function st ~first:[] ~rest:parameter_locals (), owned)
 
 let code_state context path =
@@ -142,13 +147,12 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
           ~parts:[]
       in
-      Mir_form.bind_core st parameter.local template;
       let output = Constants.begin_output st in
       List.iter
         (fun (clause : Core.condition) ->
           if clause.executable then begin
             let holds = temporary st context.bool in
-            Mir_form.expression_into ~parameters:[ parameter ] st clause.value holds;
+            Mir_form.expression_into ~arguments:[ (parameter, template) ] st clause.value holds;
             Glue.encode_call context.glue st.builder
               ~output:(Address { place = output; writable = true })
               context.bool holds
@@ -200,8 +204,8 @@ let source_code context key ~path ~type_arguments : Lir.t =
   let st = enter context (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
-  let _, _, parameter_locals = begin_body st ~parameters in
-  Mir_form.lower_code st path;
+  let _, _, parameter_locals, places = begin_body st ~parameters in
+  Mir_form.lower_code st path ~parameters:places;
   {
     key;
     main = finish_function st ~returns ~first:[] ~rest:parameter_locals ();

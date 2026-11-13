@@ -9096,8 +9096,6 @@ type run = {
   lends : (Mir.local, frame -> Logic.term -> frame) Hashtbl.t;
       (** For each part lent to change, how its final value goes back where it was lent from, as the
           lend ends *)
-  constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
-      (** The constructor each temporary is built by, for a [yield] of places it holds *)
   passed_lambdas : (Core.id, unit) Hashtbl.t;
       (** The lambdas written as a call's arguments, which the call reads with its parameter's facts
       *)
@@ -9584,35 +9582,49 @@ let mir_lend context frame run part (call : Mir.call) =
       | None -> None)
   | _ -> bug "a lend of the MIR whose core call is not known"
 
-(* Whether a yielded operand lends places: it is a place, or a constructor
-   applied to places, to any depth. *)
-let rec mir_lends_places run (operand : Mir.operand) =
-  match operand with
-  | Borrow _ -> true
-  | Use { place = { root = Local local; projections = [] }; _ } -> (
-      match Hashtbl.find_opt run.constructs local with
-      | Some (_, fields) ->
-          List.exists
-            (function _, Some field -> mir_lends_places run field | _, None -> false)
-            fields
-      | None -> false)
-  | Use _ | Take _ | Constant _ -> false
+(* Whether a yielded value lends places: it is a place, or a constructor
+   built where it is yielded. *)
+let mir_lends_places (part : Mir.yielded) =
+  match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Constant _) -> false
+
+(* The value a [yield] yields, and the frame after it is built: a
+   constructor built where it is yielded is built here, from its fields. *)
+let rec mir_yielded context frame run (part : Mir.yielded) =
+  match part with
+  | Part operand -> (frame, mir_operand context frame run operand)
+  | Built { variant; fields; node; _ } -> (
+      match Hashtbl.find_opt run.index.expressions node with
+      | Some ({ kind = Construct { fields = written; _ }; _ } as constructed) ->
+          let frame, values =
+            List.fold_left
+              (fun (frame, values) (name, field) ->
+                match field with
+                | Some field ->
+                    let frame, term = mir_yielded context frame run field in
+                    (frame, (name, term) :: values)
+                | None -> (frame, values))
+              (frame, []) fields
+          in
+          construct
+            ~given:(fun name -> List.assoc_opt name values)
+            context frame constructed variant written
+      | _ -> bug "a yielded constructor whose core node is no constructor")
 
 (* The frame after the caller's changes to a part lent [mut] come back, as
    [after]: each place the part lends has its part of [after]. A variant's
    field is its part only where [after] is still that variant, and is
    otherwise a value nothing more is known about. *)
-let rec mir_written_back context run ty (operand : Mir.operand) frame after =
-  match operand with
-  | Borrow { place; _ } -> write_place context frame run place after
-  | Use { place = { root = Local local; projections = [] }; _ } -> (
-      match (Hashtbl.find_opt run.constructs local, constructors context ty) with
-      | Some (variant, fields), Some shape ->
+let rec mir_written_back context run ty (part : Mir.yielded) frame after =
+  match part with
+  | Part (Borrow { place; _ }) -> write_place context frame run place after
+  | Built { variant; fields; _ } -> (
+      match constructors context ty with
+      | Some shape ->
           let shaped = Option.value (List.assoc_opt variant shape) ~default:[] in
           List.fold_left
             (fun frame (name, field) ->
               match (field, List.assoc_opt name shaped) with
-              | Some field, Some field_type when mir_lends_places run field ->
+              | Some field, Some field_type when mir_lends_places field ->
                   let field_type = substituted context frame field_type in
                   let selected = field_of context frame ty variant name field_type after in
                   let value =
@@ -9627,10 +9639,8 @@ let rec mir_written_back context run ty (operand : Mir.operand) frame after =
                   mir_written_back context run field_type field frame value
               | _ -> frame)
             frame fields
-      | Some _, None ->
-          raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty)))
-      | None, _ -> frame)
-  | Use _ | Take _ | Constant _ -> frame
+      | None -> raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty))))
+  | Part (Use _ | Take _ | Constant _) -> frame
 
 (* The frame with each binding of a part to change holding the part's
    value, for the core form's expressions that name the binding: a loop's
@@ -9901,7 +9911,6 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
                     body = lambda_body;
                     places = Hashtbl.create 1;
                     lends = Hashtbl.create 1;
-                    constructs = Hashtbl.create 1;
                     slices = Hashtbl.create 1;
                     provides = Hashtbl.create 1;
                     passed_lambdas = Hashtbl.create 1;
@@ -9934,29 +9943,12 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
             called.arguments
       | _ -> ())
     index.expressions;
-  let constructs = Hashtbl.create 4 in
-  Array.iter
-    (fun (block : Mir.basic_block) ->
-      List.iter
-        (fun (statement : Mir.statement) ->
-          match statement.kind with
-          | Assign
-              {
-                target = { root = Local local; projections = [] };
-                value = Construct { variant; fields };
-                _;
-              } ->
-              Hashtbl.replace constructs local (variant, fields)
-          | _ -> ())
-        block.statements)
-    body.blocks;
   let run =
     {
       index;
       body;
       places = Hashtbl.create 4;
       lends = Hashtbl.create 4;
-      constructs;
       slices = Hashtbl.create 2;
       provides = Hashtbl.create 2;
       passed_lambdas;
@@ -10144,10 +10136,14 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
     | Yield { mode; part; resume } -> (
         match Hashtbl.find_opt index.statements block.terminator_origin with
         | Some ({ kind = Yield _; _ } as node) -> (
-            let handed = mir_operand context frame run part in
-            let part_type = mir_operand_type context frame part in
+            let frame, handed = mir_yielded context frame run part in
+            let part_type =
+              match part with
+              | Part operand -> mir_operand_type context frame operand
+              | Built { type_; _ } -> substituted context frame type_
+            in
             match
-              yield_part context frame node mode ~handed ~lends:(mir_lends_places run part)
+              yield_part context frame node mode ~handed ~lends:(mir_lends_places part)
                 ~write_back:(fun frame after ->
                   mir_written_back context run part_type part frame after)
             with
