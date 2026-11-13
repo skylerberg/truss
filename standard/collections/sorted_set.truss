@@ -4,9 +4,10 @@ use standard::list::slice
 use standard::map
 
 fn strictly_ascending[Element: Ordered](elements: Sequence[Element]) -> Bool
+  ensures result == (forall first in 0..elements.length() => forall second in 0..elements.length() => first < second ==> elements[first] < elements[second])
   cost time finite
 {
-  forall first in 0..elements.length() => forall second in 0..elements.length() => first < second ==> elements[first] < elements[second]
+  forall i in 0..elements.length() => forall j in 0..elements.length() => i < j ==> elements[i] < elements[j]
 }
 
 theorem ascending_below[Element: Ordered](
@@ -20,7 +21,7 @@ theorem ascending_below[Element: Ordered](
   requires bound <= last
   requires last < elements.length()
   requires elements[last] <= element
-  ensures forall index in 0..bound => elements[index] < element
+  ensures forall i in 0..bound => elements[i] < element
   decreases bound
   cost time finite
 {
@@ -41,7 +42,7 @@ theorem ascending_above[Element: Ordered](
   requires first < bound
   requires bound <= elements.length()
   requires element <= elements[first]
-  ensures forall index in bound..elements.length() => element < elements[index]
+  ensures forall i in bound..elements.length() => element < elements[i]
   decreases elements.length() - bound
   cost time finite
 {
@@ -58,8 +59,8 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
       && self.elements.model()[index] <= element
       && element <= self.elements.model()[index]
     Err(index) => index <= self.elements.length()
-      && (forall position in 0..index => self.elements.model()[position] < element)
-      && (forall position in index..self.elements.length() => element < self.elements.model()[position])
+      && (forall i in 0..index => self.elements.model()[i] < element)
+      && (forall i in index..self.elements.length() => element < self.elements.model()[i])
   }
   cost time O(log(self.elements.length()) * time(Element.compare))
 {
@@ -68,8 +69,8 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
   while low < high
     invariant low <= high
     invariant high <= self.elements.length()
-    invariant forall position in 0..low => self.elements.model()[position] < element
-    invariant forall position in high..self.elements.length() => element < self.elements.model()[position]
+    invariant forall i in 0..low => self.elements.model()[i] < element
+    invariant forall i in high..self.elements.length() => element < self.elements.model()[i]
     decreases high - low
     cost time O((log(self.elements.length()) - log(high - low)) * time(Element.compare))
   {
@@ -120,8 +121,8 @@ theorem present_where_equal[Element: Ordered](set: collections::SortedSet[Elemen
 
 theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element], element: Element, split: USize)
   requires split <= set.elements.length()
-  requires forall position in 0..split => set.elements.model()[position] < element
-  requires forall position in split..set.elements.length() => element < set.elements.model()[position]
+  requires forall i in 0..split => set.elements.model()[i] < element
+  requires forall i in split..set.elements.length() => element < set.elements.model()[i]
   ensures set.search(element) is Err(_)
   cost time finite
 {
@@ -139,8 +140,8 @@ theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element
 
 fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Element) -> USize
   ensures result <= self.elements.length()
-  ensures forall position in 0..result => self.elements.model()[position] < element
-  ensures forall position in result..self.elements.length() => element <= self.elements.model()[position]
+  ensures forall i in 0..result => self.elements.model()[i] < element
+  ensures forall i in result..self.elements.length() => element <= self.elements.model()[i]
   cost time O(log(self.elements.length()) * time(Element.compare))
 {
   match self.search(element) {
@@ -157,8 +158,8 @@ fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Ele
 
 fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) -> USize
   ensures result <= self.elements.length()
-  ensures forall position in 0..result => self.elements.model()[position] <= element
-  ensures forall position in result..self.elements.length() => element < self.elements.model()[position]
+  ensures forall i in 0..result => self.elements.model()[i] <= element
+  ensures forall i in result..self.elements.length() => element < self.elements.model()[i]
   cost time O(log(self.elements.length()) * time(Element.compare))
 {
   match self.search(element) {
@@ -208,12 +209,12 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
   while left.length() > 0 || right.length() > 0
     invariant strictly_ascending(left.model())
     invariant strictly_ascending(right.model())
-    invariant forall earlier in 0..descending.length() => forall later in 0..descending.length() =>
-      earlier < later ==> descending.model()[later] < descending.model()[earlier]
-    invariant forall earlier in 0..left.length() => forall later in 0..descending.length() =>
-      left.model()[earlier] < descending.model()[later]
-    invariant forall earlier in 0..right.length() => forall later in 0..descending.length() =>
-      right.model()[earlier] < descending.model()[later]
+    invariant forall i in 0..descending.length() => forall j in 0..descending.length() =>
+      i < j ==> descending.model()[j] < descending.model()[i]
+    invariant forall i in 0..left.length() => forall j in 0..descending.length() =>
+      left.model()[i] < descending.model()[j]
+    invariant forall i in 0..right.length() => forall j in 0..descending.length() =>
+      right.model()[i] < descending.model()[j]
     decreases left.length() + right.length()
   {
     var from_left = right.length() == 0
@@ -292,10 +293,10 @@ fn combined[Element: Ordered + Copyable](
         invariant intrinsic::storage_length(output) <= index + other_index
         invariant !keeps_second_only ==> intrinsic::storage_length(output) <= index
         invariant strictly_ascending(intrinsic::storage_model(output))
-        invariant forall earlier in 0..intrinsic::storage_length(output) => forall later in index..first.length() =>
-          intrinsic::storage_model(output)[earlier] < first.model()[later]
-        invariant forall earlier in 0..intrinsic::storage_length(output) => forall later in other_index..second.length() =>
-          intrinsic::storage_model(output)[earlier] < second.model()[later]
+        invariant forall i in 0..intrinsic::storage_length(output) => forall j in index..first.length() =>
+          intrinsic::storage_model(output)[i] < first.model()[j]
+        invariant forall i in 0..intrinsic::storage_length(output) => forall j in other_index..second.length() =>
+          intrinsic::storage_model(output)[i] < second.model()[j]
       {
         if index < first.length() && other_index < second.length() {
           match first[index].compare(second[other_index]) {
@@ -364,6 +365,7 @@ public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Elemen
 }
 
 public fn collections::SortedSet[Element: Ordered].length(self) -> USize
+  ensures result == (self.elements.length())
   cost time O(1)
 {
   self.elements.length()
@@ -377,6 +379,7 @@ public fn collections::SortedSet[Element: Ordered].is_empty(self) -> Bool
 }
 
 public fn collections::SortedSet[Element: Ordered].contains(self, element: Element) -> Bool
+  ensures result == (self.search(element) is Ok(_))
   cost time O(log(self.length()) * time(Element.compare))
 {
   self.search(element) is Ok(_)
@@ -520,7 +523,7 @@ public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[E
   while index < end
     invariant first <= index
     invariant index <= self.elements.length()
-    invariant forall position in first..end => range.contains(self.elements.model()[position])
+    invariant forall i in first..end => range.contains(self.elements.model()[i])
     decreases self.elements.length() - index
   {
     yield self.elements[index]
@@ -538,13 +541,13 @@ public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(El
   for index in 0..count
     invariant elements.length() == count
     invariant retained <= index
-    invariant forall earlier in 0..retained => forall later in 0..retained =>
-      earlier < later ==> elements.model()[earlier] < elements.model()[later]
-    invariant forall earlier in 0..retained => forall later in index..count =>
-      elements.model()[earlier] < elements.model()[later]
-    invariant forall earlier in index..count =>
-      forall later in index..count =>
-        earlier < later ==> elements.model()[earlier] < elements.model()[later]
+    invariant forall i in 0..retained => forall j in 0..retained =>
+      i < j ==> elements.model()[i] < elements.model()[j]
+    invariant forall i in 0..retained => forall j in index..count =>
+      elements.model()[i] < elements.model()[j]
+    invariant forall i in index..count =>
+      forall j in index..count =>
+        i < j ==> elements.model()[i] < elements.model()[j]
   {
     if keep(elements[index]) {
       mut elements.swap(retained, second: index)

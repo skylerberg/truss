@@ -2668,3 +2668,7 @@ let program_calling entry =
     \  return (int)%s((int32_t)count, (void *)arguments);\n\
      }\n"
     entry entry
+
+module For_testing = struct
+  let main_calling = main_calling
+end

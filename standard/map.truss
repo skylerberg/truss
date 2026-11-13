@@ -1,13 +1,14 @@
 use standard::core
 
 public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Value]])
-  invariant forall first in 0..entries.length() => forall second in 0..entries.length() =>
-    first < second ==> !(entries.model()[first].key == entries.model()[second].key)
+  invariant forall i in 0..entries.length() => forall j in 0..entries.length() =>
+    i < j ==> !(entries.model()[i].key == entries.model()[j].key)
   derives Copyable
 
 public type Entry[Key, Value](key: Key, value: Value)
 
 internal fn entries_model[Key, Value](entries: Sequence[Entry[Key, Value]]) -> FiniteMap[Key, Value]
+  ensures identical(result, entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }))
   cost time finite
 {
   entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
@@ -23,14 +24,16 @@ impl Model for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-public transparent fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
+public fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
+  ensures result == (exists other: Key => map.contains_key(other) && other == key)
   cost time finite
 {
   exists other: Key => map.contains_key(other) && other == key
 }
 
-public transparent fn Map[Key: Hash + Ordered, Value].length(self) -> USize
+public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
   ensures result == self.model().size()
+  ensures result == (self.entries.length())
   cost time O(1)
 {
   self.entries.length()
@@ -39,7 +42,7 @@ public transparent fn Map[Key: Hash + Ordered, Value].length(self) -> USize
 internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> USize
   ensures result <= self.entries.length()
   ensures result < self.entries.length() ==> self.entries.model()[result].key == key
-  ensures forall position in 0..self.entries.length() => position == result || !(self.entries.model()[position].key == key)
+  ensures forall i in 0..self.entries.length() => i == result || !(self.entries.model()[i].key == key)
   ensures (result < self.entries.length()) == contains_equal_key(self.model(), key: key)
   cost time O(self.entries.length() * time(Key.equal))
 {
@@ -50,7 +53,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> USize
     invariant match_index <= self.entries.length()
     invariant match_index < self.entries.length() ==> self.entries.model()[match_index].key == key
     invariant match_index == self.entries.length() ==>
-      forall position in 0..index => !(self.entries.model()[position].key == key)
+      forall i in 0..index => !(self.entries.model()[i].key == key)
     decreases self.entries.length() - index
     cost time O(index * time(Key.equal))
   {
@@ -61,8 +64,8 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> USize
   }
   proof {
     assert identical(self.model(), entries_model(self.entries.model()))
-    assert forall position in 0..self.entries.model().length() =>
-      self.model().contains_key(self.entries.model()[position].key)
+    assert forall i in 0..self.entries.model().length() =>
+      self.model().contains_key(self.entries.model()[i].key)
   }
   match_index
 }
@@ -84,10 +87,10 @@ internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position:
   ensures self.entries.length() == old(self.entries.length())
   ensures identical(result, old(self.entries.model())[position].value)
   ensures identical(self.entries.model()[position].value, value)
-  ensures forall index in 0..self.entries.length() =>
-    identical(self.entries.model()[index].key, old(self.entries.model())[index].key)
-  ensures forall index in 0..self.entries.length() =>
-    index == position || identical(self.entries.model()[index], old(self.entries.model())[index])
+  ensures forall i in 0..self.entries.length() =>
+    identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
+  ensures forall i in 0..self.entries.length() =>
+    i == position || identical(self.entries.model()[i], old(self.entries.model())[i])
   ensures identical(self.model().get(old(self.entries.model())[position].key), value)
   ensures forall other: Key => self.model().contains_key(other) == old(self.model()).contains_key(other)
   ensures forall other: Key =>
@@ -111,20 +114,20 @@ internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position:
       old(self.entries.model()).update(position, value: self.entries.model()[position]),
     )
     assert identical(self.model(), entries_model(self.entries.model()))
-    assert forall index in 0..self.entries.length() =>
-      identical(self.entries.model()[index].key, old(self.entries.model())[index].key)
-    assert forall index in 0..self.entries.length() =>
-      index == position || identical(self.entries.model()[index], old(self.entries.model())[index])
-    assert forall index in 0..old(self.entries.model()).length() =>
-      entries_model(self.entries.model()).contains_key(old(self.entries.model())[index].key)
-    assert forall index in 0..self.entries.model().length() =>
-      entries_model(old(self.entries.model())).contains_key(self.entries.model()[index].key)
-    assert forall first in 0..self.entries.model().length() =>
-      forall second in 0..self.entries.model().length() =>
-        first == second || !identical(self.entries.model()[first].key, self.entries.model()[second].key)
-    assert forall first in 0..old(self.entries.model()).length() =>
-      forall second in 0..old(self.entries.model()).length() =>
-        first == second || !identical(old(self.entries.model())[first].key, old(self.entries.model())[second].key)
+    assert forall i in 0..self.entries.length() =>
+      identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
+    assert forall i in 0..self.entries.length() =>
+      i == position || identical(self.entries.model()[i], old(self.entries.model())[i])
+    assert forall i in 0..old(self.entries.model()).length() =>
+      entries_model(self.entries.model()).contains_key(old(self.entries.model())[i].key)
+    assert forall j in 0..self.entries.model().length() =>
+      entries_model(old(self.entries.model())).contains_key(self.entries.model()[j].key)
+    assert forall i in 0..self.entries.model().length() =>
+      forall j in 0..self.entries.model().length() =>
+        i == j || !identical(self.entries.model()[i].key, self.entries.model()[j].key)
+    assert forall i in 0..old(self.entries.model()).length() =>
+      forall j in 0..old(self.entries.model()).length() =>
+        i == j || !identical(old(self.entries.model())[i].key, old(self.entries.model())[j].key)
     assert forall other: Key =>
       entries_model(self.entries.model()).contains_key(other)
         == entries_model(old(self.entries.model())).contains_key(other)
@@ -139,8 +142,7 @@ public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(self.length() * time(Key.equal))
 {
-  var is_present = self.index_of(key) < self.entries.length()
-  is_present
+  self.index_of(key) < self.entries.length()
 }
 
 public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value)
@@ -191,8 +193,8 @@ internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, v
     !(other == key) && old(self.model()).contains_key(other) ==>
       identical(self.model().get(other), old(self.model()).get(other))
   ensures self.entries.length() == old(self.entries.length()) + 1
-  ensures forall index in 0..old(self.entries.length()) =>
-    identical(self.entries.model()[index], old(self.entries.model())[index])
+  ensures forall i in 0..old(self.entries.length()) =>
+    identical(self.entries.model()[i], old(self.entries.model())[i])
   ensures identical(self.entries.model()[old(self.entries.length())].key, key)
   ensures identical(self.entries.model()[old(self.entries.length())].value, value)
   ensures identical(
@@ -205,27 +207,27 @@ internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, v
   let position = self.entries.length()
   proof {
     assert identical(self.model(), entries_model(self.entries.model()))
-    assert forall index in 0..self.entries.model().length() =>
-      self.model().contains_key(self.entries.model()[index].key)
-    assert forall index in 0..self.entries.model().length() => !(self.entries.model()[index].key == key)
+    assert forall i in 0..self.entries.model().length() =>
+      self.model().contains_key(self.entries.model()[i].key)
+    assert forall i in 0..self.entries.model().length() => !(self.entries.model()[i].key == key)
   }
   mut self.entries.push(Entry(key: own key, value: own value))
   proof {
     assert identical(self.model(), entries_model(self.entries.model()))
-    assert forall index in 0..old(self.entries.model()).length() =>
-      identical(self.entries.model()[index], old(self.entries.model())[index])
-    assert forall index in 0..old(self.entries.model()).length() =>
-      entries_model(self.entries.model()).contains_key(old(self.entries.model())[index].key)
-    assert forall index in 0..old(self.entries.model()).length() =>
-      entries_model(old(self.entries.model())).contains_key(old(self.entries.model())[index].key)
-    assert forall index in 0..self.entries.model().length() =>
-      index == position || entries_model(old(self.entries.model())).contains_key(self.entries.model()[index].key)
-    assert forall first in 0..self.entries.model().length() =>
-      forall second in 0..self.entries.model().length() =>
-        first == second || !identical(self.entries.model()[first].key, self.entries.model()[second].key)
-    assert forall first in 0..old(self.entries.model()).length() =>
-      forall second in 0..old(self.entries.model()).length() =>
-        first == second || !identical(old(self.entries.model())[first].key, old(self.entries.model())[second].key)
+    assert forall i in 0..old(self.entries.model()).length() =>
+      identical(self.entries.model()[i], old(self.entries.model())[i])
+    assert forall i in 0..old(self.entries.model()).length() =>
+      entries_model(self.entries.model()).contains_key(old(self.entries.model())[i].key)
+    assert forall i in 0..old(self.entries.model()).length() =>
+      entries_model(old(self.entries.model())).contains_key(old(self.entries.model())[i].key)
+    assert forall j in 0..self.entries.model().length() =>
+      j == position || entries_model(old(self.entries.model())).contains_key(self.entries.model()[j].key)
+    assert forall i in 0..self.entries.model().length() =>
+      forall j in 0..self.entries.model().length() =>
+        i == j || !identical(self.entries.model()[i].key, self.entries.model()[j].key)
+    assert forall i in 0..old(self.entries.model()).length() =>
+      forall j in 0..old(self.entries.model()).length() =>
+        i == j || !identical(old(self.entries.model())[i].key, old(self.entries.model())[j].key)
     assert forall other: Key =>
       !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
     assert forall other: Key =>
@@ -393,8 +395,8 @@ public fn Map[Key: Hash + Ordered, Value].retain(
   for index in 0..count
     invariant self.entries.length() == count
     invariant kept_count <= index
-    invariant forall earlier in 0..self.entries.length() => forall later in 0..self.entries.length() =>
-      earlier < later ==> !(self.entries.model()[earlier].key == self.entries.model()[later].key)
+    invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
+      i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
   {
     if keep(self.entries[index]) {
       mut self.entries.swap(kept_count, second: index)
@@ -412,8 +414,8 @@ public fn Map[Key: Hash + Ordered, Value].extend[Source: Cursor[Element = Entry[
 {
   var cursor = own entries
   while mut cursor.next() is Some(entry)
-    invariant forall first in 0..self.entries.length() => forall second in 0..self.entries.length() =>
-      first < second ==> !(self.entries.model()[first].key == self.entries.model()[second].key)
+    invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
+      i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
   {
     mut self.insert(own entry.key, value: own entry.value)
   }
@@ -528,8 +530,8 @@ public fn Map[Key: Hash + Ordered, Value].values(mut self) yields mut Value
   while index < self.entries.length()
     invariant self.entries.length() == old(self.entries.length())
     invariant index <= self.entries.length()
-    invariant forall first in 0..self.entries.length() => forall second in 0..self.entries.length() =>
-      first < second ==> !(self.entries.model()[first].key == self.entries.model()[second].key)
+    invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
+      i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
     decreases self.entries.length() - index
   {
     yield mut self.entries[index].value
@@ -538,17 +540,17 @@ public fn Map[Key: Hash + Ordered, Value].values(mut self) yields mut Value
 }
 
 internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, other: Map[Key, Value]) -> Bool
-  ensures result == (forall first in 0..self.entries.length() => exists second in 0..other.entries.length() =>
-    self.entries.model()[first].key == other.entries.model()[second].key
-      && self.entries.model()[first].value == other.entries.model()[second].value)
+  ensures result == (forall i in 0..self.entries.length() => exists j in 0..other.entries.length() =>
+    self.entries.model()[i].key == other.entries.model()[j].key
+      && self.entries.model()[i].value == other.entries.model()[j].value)
   cost time O(self.entries.length() * (1 + other.entries.length() * time(Key.equal) + time(Value.equal)))
 {
   var index: USize = 0
   while index < self.entries.length()
     invariant index <= self.entries.length()
-    invariant forall first in 0..index => exists second in 0..other.entries.length() =>
-      self.entries.model()[first].key == other.entries.model()[second].key
-        && self.entries.model()[first].value == other.entries.model()[second].value
+    invariant forall i in 0..index => exists j in 0..other.entries.length() =>
+      self.entries.model()[i].key == other.entries.model()[j].key
+        && self.entries.model()[i].value == other.entries.model()[j].value
     decreases self.entries.length() - index
     cost time O(index * (1 + other.entries.length() * time(Key.equal) + time(Value.equal)))
   {
@@ -577,8 +579,8 @@ impl From[List[Entry[Key, Value]]] for Map[Key: Hash + Ordered, Value] {
   fn from(value: own List[Entry[Key, Value]]) -> Map[Key, Value] {
     var map: Map[Key, Value] = Map.with_capacity(value.length())
     for entry in own value
-      invariant forall first in 0..map.entries.length() => forall second in 0..map.entries.length() =>
-        first < second ==> !(map.entries.model()[first].key == map.entries.model()[second].key)
+      invariant forall i in 0..map.entries.length() => forall j in 0..map.entries.length() =>
+        i < j ==> !(map.entries.model()[i].key == map.entries.model()[j].key)
     {
       mut map.insert(own entry.key, value: own entry.value)
     }

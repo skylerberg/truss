@@ -18,7 +18,7 @@ public fn Sequence[Element].length(self) -> Integer
 public fn Sequence[Element].append(self, value: Element) -> Sequence[Element]
   ensures result.length() == self.length() + 1
   ensures identical(result[self.length()], value)
-  ensures forall index in 0..self.length() => identical(result[index], self[index])
+  ensures forall i in 0..self.length() => identical(result[i], self[i])
   ensures forall measure: (fn(Element) -> Integer cost time finite) => result.sum(measure) == self.sum(measure) + measure(value)
   cost time finite
 {
@@ -27,8 +27,8 @@ public fn Sequence[Element].append(self, value: Element) -> Sequence[Element]
 
 public fn Sequence[Element].concatenate(self, other: Sequence[Element]) -> Sequence[Element]
   ensures result.length() == self.length() + other.length()
-  ensures forall index in 0..self.length() => identical(result[index], self[index])
-  ensures forall index in 0..other.length() => identical(result[self.length() + index], other[index])
+  ensures forall i in 0..self.length() => identical(result[i], self[i])
+  ensures forall i in 0..other.length() => identical(result[self.length() + i], other[i])
   ensures forall measure: (fn(Element) -> Integer cost time finite) => result.sum(measure) == self.sum(measure) + other.sum(measure)
   cost time finite
 {
@@ -39,7 +39,7 @@ public fn Sequence[Element].update(self, index: Integer, value: Element) -> Sequ
   requires 0 <= index && index < self.length()
   ensures result.length() == self.length()
   ensures identical(result[index], value)
-  ensures forall position in 0..self.length() => position == index || identical(result[position], self[position])
+  ensures forall i in 0..self.length() => i == index || identical(result[i], self[i])
   ensures forall measure: (fn(Element) -> Integer cost time finite) =>
     result.sum(measure) == self.sum(measure) - measure(self[index]) + measure(value)
   cost time finite
@@ -48,7 +48,7 @@ public fn Sequence[Element].update(self, index: Integer, value: Element) -> Sequ
 }
 
 public fn Sequence[Element].contains(self, value: Element) -> Bool
-  ensures result == (exists index in 0..self.length() => identical(self[index], value))
+  ensures result == (exists i in 0..self.length() => identical(self[i], value))
   cost time finite
 {
   todo
@@ -56,9 +56,9 @@ public fn Sequence[Element].contains(self, value: Element) -> Bool
 
 public fn Sequence[Element].elements(self) -> FiniteSet[Element]
   ensures forall value: Element =>
-    result.contains(value) == (exists index in 0..self.length() => identical(self[index], value))
-  ensures (forall first in 0..self.length() => forall second in 0..self.length() =>
-    first == second || !identical(self[first], self[second])) ==> result.size() == self.length()
+    result.contains(value) == (exists i in 0..self.length() => identical(self[i], value))
+  ensures (forall i in 0..self.length() => forall j in 0..self.length() =>
+    i == j || !identical(self[i], self[j])) ==> result.size() == self.length()
   cost time finite
 {
   todo
@@ -70,11 +70,11 @@ public fn Sequence[Element].to_map[Key, Value](
   value: (fn(Element) -> Value cost time finite),
 ) -> FiniteMap[Key, Value]
   ensures forall each: Key =>
-    result.contains_key(each) == (exists index in 0..self.length() => identical(key(self[index]), each))
-  ensures (forall first in 0..self.length() => forall second in 0..self.length() =>
-    first == second || !identical(key(self[first]), key(self[second]))) ==>
+    result.contains_key(each) == (exists i in 0..self.length() => identical(key(self[i]), each))
+  ensures (forall i in 0..self.length() => forall j in 0..self.length() =>
+    i == j || !identical(key(self[i]), key(self[j]))) ==>
       result.size() == self.length()
-      && forall first in 0..self.length() => identical(result.get(key(self[first])), value(self[first]))
+      && forall i in 0..self.length() => identical(result.get(key(self[i])), value(self[i]))
   cost time finite
 {
   todo
@@ -82,7 +82,7 @@ public fn Sequence[Element].to_map[Key, Value](
 
 public fn Sequence[Element].sum(self, measure: (fn(Element) -> Integer cost time finite)) -> Integer
   ensures self.length() == 0 ==> result == 0
-  ensures (forall index in 0..self.length() => measure(self[index]) >= 0) ==> result >= 0
+  ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0
   cost time finite
 {
   todo

@@ -27,7 +27,7 @@ let store_with_standard =
     (let directory = fresh "standard" in
      Database.reset ();
      Unix.putenv "TRUSS_CACHE" directory;
-     Database.prepare_store ();
+     Database.For_testing.prepare_store ();
      Database.flush_store ();
      Database.reset ();
      directory)
@@ -48,7 +48,7 @@ let fresh_store ?(empty = false) () =
       then failwith "could not copy the store")
     standard;
   Unix.putenv "TRUSS_CACHE" directory;
-  Database.Testing.logging := true
+  Database.For_testing.logging := true
 
 let package () =
   let directory = fresh "package" in
@@ -75,13 +75,13 @@ let errors directory =
   List.length actual + List.length (Database.problems session)
 
 let executed directory =
-  match Database.Testing.session_engine directory with
-  | Some engine -> Engine.executed engine
+  match Database.For_testing.session_engine directory with
+  | Some engine -> Engine.For_testing.executed engine
   | None -> []
 
 let computed directory query =
-  match Database.Testing.session_engine directory with
-  | Some engine -> Engine.computed engine query
+  match Database.For_testing.session_engine directory with
+  | Some engine -> Engine.For_testing.computed engine query
   | None -> []
 
 let checked directory = computed directory Infer.type_check_result
@@ -102,7 +102,9 @@ let shapes_method name : Resolve.Names.key =
     ordinal = 0;
   }
 
-let clear directory = Option.iter Engine.clear_log (Database.Testing.session_engine directory)
+let clear directory =
+  Option.iter Engine.For_testing.clear_log (Database.For_testing.session_engine directory)
+
 let contains = Substring.contains
 
 let expect_errors directory count =
@@ -393,9 +395,12 @@ let () =
       write second "part_3.truss"
         (module_text 3 ^ Fixtures.Database.new_worktrees_state_is_a_difference_over_the_state);
       expect_errors second 0;
-      match (Database.Testing.session_engine first, Database.Testing.session_engine second) with
+      match
+        (Database.For_testing.session_engine first, Database.For_testing.session_engine second)
+      with
       | Some whole, Some difference ->
-          let own = Engine.count difference and all = List.length (Engine.nodes whole) in
+          let own = Engine.For_testing.count difference
+          and all = List.length (Engine.nodes whole) in
           if own * 2 >= all then
             fail "the second holds %d nodes of its own, and the first state has %d" own all
       | _ -> fail "no sessions")
@@ -414,7 +419,7 @@ let doubling : Path.t =
       name = "doubling";
     }
 
-let test_body_reads_signature : Database.edge =
+let test_body_reads_signature : Graph_types.edge =
   {
     dependent = doubling;
     dependent_part = "body";
@@ -452,7 +457,7 @@ let () =
       let dependencies = Database.dependencies session [ keep ] in
       if dependencies = [] then fail "keep depends on nothing";
       List.iter
-        (fun (edge : Database.edge) ->
+        (fun (edge : Graph_types.edge) ->
           if contains (Path.show edge.dependency) "standard::html" then
             fail "keep depends on %s" (Path.show edge.dependency))
         dependencies);
@@ -552,7 +557,7 @@ let () =
               (List.exists
                  (fun (path, part, difference) ->
                    Path.equal path double && part = Some "signature"
-                   && difference = Database.Changed)
+                   && difference = Graph_types.Changed)
                  (Database.changes session base))
           then
             fail "double's signature is not changed: %s"
@@ -561,7 +566,7 @@ let () =
                     (fun (path, part, digest) ->
                       Printf.sprintf "%s %s %s" (Path.show path) (Option.value part ~default:"-")
                         (match digest with
-                        | Database.Changed -> "changed"
+                        | Graph_types.Changed -> "changed"
                         | Added -> "added"
                         | Same -> "same"))
                     (Database.changes session base))));
@@ -588,7 +593,7 @@ let () =
             not
               (List.exists
                  (function
-                   | Database.Reads { this_worktree = true; change; reads } ->
+                   | Graph_types.Reads { this_worktree = true; change; reads } ->
                        change.path = Some quadruple && reads.path = Some double
                    | _ -> false)
                  overlaps)
@@ -597,7 +602,7 @@ let () =
               (String.concat "; "
                  (List.map
                     (function
-                      | Database.Both_change problem -> "both " ^ problem.label
+                      | Graph_types.Both_change problem -> "both " ^ problem.label
                       | Reads { this_worktree; change; reads } ->
                           Printf.sprintf "%b %s %s" this_worktree change.label reads.label)
                     overlaps)));
@@ -631,7 +636,8 @@ let () =
             not
               (List.exists
                  (function
-                   | Database.Reads { this_worktree = true; reads; _ } -> reads.path = Some double
+                   | Graph_types.Reads { this_worktree = true; reads; _ } ->
+                       reads.path = Some double
                    | _ -> false)
                  overlaps)
           then fail "no overlap found");
@@ -667,14 +673,15 @@ let library_function name =
   Printf.sprintf "internal fn %s(value: Int64) -> Int64 {\n  value\n}\n" name
 
 let open_library modules =
-  match Database.open_library ~modules "tests" with
+  match Database.For_testing.open_library ~modules "tests" with
   | Ok library -> library
   | Error message -> failwith message
 
 let check_library library modules =
   List.iter
     (fun (module_, _) ->
-      ignore (Engine.get (Database.Testing.engine library) Type_checker.file_diagnostics module_))
+      ignore
+        (Engine.get (Database.For_testing.engine library) Type_checker.file_diagnostics module_))
     modules;
   Database.save_session library
 
@@ -687,10 +694,10 @@ let () =
       Database.reset ();
       let second = (library_module "second", library_function "other") in
       let library = open_library [ first; second ] in
-      let engine = Database.Testing.engine library in
-      Engine.clear_log engine;
+      let engine = Database.For_testing.engine library in
+      Engine.For_testing.clear_log engine;
       check_library library [ first; second ];
-      let checked = Engine.computed engine Infer.type_check_result in
+      let checked = Engine.For_testing.computed engine Infer.type_check_result in
       let in_module (module_, _) =
         List.exists (fun (key : Resolve.Names.key) -> key.module_ = module_) checked
       in
@@ -703,7 +710,7 @@ let () =
       check_library (open_library [ first; second ]) [ first; second ];
       Database.reset ();
       let library = open_library [ first ] in
-      let context = Engine.context (Database.Testing.engine library) in
+      let context = Engine.context (Database.For_testing.engine library) in
       if Query.demand context Project.module_text (fst second) <> None then
         fail "the module's text is still set";
       if List.mem (fst second) (Query.demand context Workspace.modules Path.standard_package) then

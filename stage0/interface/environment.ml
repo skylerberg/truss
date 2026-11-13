@@ -399,11 +399,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
                   (generics, Some self)
             in
             let context = { context with self_type } in
-            ( Function_interface
-                {
-                  (Lower.signature context ~owner:path ~head ~self_type signature) with
-                  transparent = definition.visibility = Public_transparent;
-                },
+            ( Function_interface (Lower.signature context ~owner:path ~head ~self_type signature),
               context )
         | Type_definition { generics; body; clauses; _ } ->
             let type_generics = Lower.generics context path generics in

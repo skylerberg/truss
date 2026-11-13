@@ -1,7 +1,7 @@
 val unmarshal : string -> 'a
 val forget_fingerprint : Nodes.node -> unit
 val fingerprint : Nodes.t -> Nodes.node -> string option
-val ensure_stored : Nodes.t -> Nodes.node -> unit
+val ensure_stored : ?stores_every_value:bool -> Nodes.t -> Nodes.node -> unit
 val key_part : Nodes.t -> Nodes.node -> string option
 val stored_bytes : Nodes.t -> Nodes.node -> string option
 val input_value : Nodes.t -> ('key, 'value) Nodes.input_cell -> 'value option

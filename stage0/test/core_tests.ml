@@ -150,8 +150,7 @@ let () =
      intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
      own 2); intrinsic::storage_push(mut place storage, own 3); \
      standard::list::List.from_storage[Int64](own storage) }; let _ = slice \
-     standard::list::List.slice_range[Int64](place numbers, 1, \
-     standard::list::List.length[Int64](place numbers)); lent Index.at for List[Int64] by \
+     standard::list::List.slice_from[Int64](place numbers, 1); lent Index.at for List[Int64] by \
      standard::list::impl Index for List[Element](place numbers, 0) lends }";
   expect_body "a set literal becomes `with_capacity` and one `insert` per element"
     Fixtures.Core.set_literal_becomes_with_capacity_and_one_insert
@@ -277,8 +276,8 @@ let () =
         <> "{ if standard::list::List.is_empty[String](place self.books) { yield \
             Option[First].None() } else { yield Option[First].Some(value: First(title: place lent \
             Index.at for List[String] by standard::list::impl Index for List[Element](place \
-            self.books, 0) lends, rest: slice standard::list::List.slice_range[String](place \
-            self.books, 1, standard::list::List.length[String](place self.books)))) } }"
+            self.books, 0) lends, rest: slice standard::list::List.slice_from[String](place \
+            self.books, 1))) } }"
       then fail "found:\n%s" actual);
   test "a constructor yielded `mut` lends the places that are marked `mut`" (fun () ->
       let actual =
@@ -579,7 +578,7 @@ let printed_derived text type_name trait name receiver =
                 List.find
                   (fun (path : Path.t) ->
                     match path with Top { name; _ } -> name = trait | _ -> false)
-                  (List.map Well_known.path Well_known.all);
+                  (List.map Well_known.path Well_known.For_testing.all);
             };
         name;
         receiver;
@@ -823,7 +822,7 @@ let () =
       in
       if actual <> expected then fail "found:\n%s" actual)
 
-(* [Infer.specification] *)
+(* [Infer.For_testing.specification] *)
 
 let () =
   let specification text name =
@@ -835,7 +834,7 @@ let () =
           if Path.show key.path = "app::main::" ^ name then
             Option.map
               (fun form -> (database, key, form))
-              (Query.demand database Infer.specification key)
+              (Query.demand database Infer.For_testing.specification key)
           else None)
         (Query.demand database Resolve.Names.declarations (module_of "app::main"))
     in
@@ -865,42 +864,33 @@ let () =
       if
         equal (bump "counter += by") Fixtures.Core.editing_a_clause_changes_the_specification "bump"
       then fail "the specification did not change");
-  test "editing the body of a function in the logic changes its specification" (fun () ->
-      if equal (double "value + value") (double "value * 2") "double" then
-        fail "the specification did not change");
+  test "editing the body of a function leaves its specification equal" (fun () ->
+      if not (equal (double "value + value") (double "value * 2") "double") then
+        fail "the specification changed");
   test "a specification without its body meets the core form's invariants" (fun () ->
       let database, key, form = specification (bump "counter += by") "bump" in
       (match form.definition with
       | Function { body = None; _ } -> ()
       | _ -> fail "the body is in the specification");
       check_core_invariants database key form);
-  test "the specification that other packages read has the body of a transparent function only"
-    (fun () ->
-      let exported modifier =
-        let database =
-          setup
-            [
-              ( "app::main",
-                Printf.sprintf
-                  "public%s fn double(value: Int64) -> Int64\n\
-                  \  cost time O(1)\n\
-                   {\n\
-                  \  value + value\n\
-                   }\n"
-                  modifier );
-            ]
-        in
+  test "the specification that other packages read has no function's body" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "public fn double(value: Int64) -> Int64\n  cost time O(1)\n{\n  value + value\n}\n"
+            );
+          ]
+      in
+      match
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            Query.demand database Infer.exported_specification (Resolve.Names.key_of declaration))
+            Query.demand database Infer.For_testing.exported_specification
+              (Resolve.Names.key_of declaration))
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
-      in
-      (match exported " transparent" with
-      | Some { definition = Function { body = Some _; _ }; _ } -> ()
-      | _ -> fail "the body of a transparent function is not in the exported specification");
-      match exported "" with
+      with
       | Some { definition = Function { body = None; _ }; _ } -> ()
-      | _ -> fail "the body of a function that is not transparent is in the exported specification");
+      | _ -> fail "the body of a function is in the exported specification");
   test "a theorem's specification has no body" (fun () ->
       let _, _, form = specification Fixtures.Core.theorems_specification_has_no_body "doubled" in
       match form.definition with
@@ -915,7 +905,8 @@ let () =
           (fun (declaration : Resolve.Names.declaration) ->
             match declaration.path with
             | Method { name = "bump"; _ } ->
-                Query.demand database Infer.specification (Resolve.Names.key_of declaration)
+                Query.demand database Infer.For_testing.specification
+                  (Resolve.Names.key_of declaration)
             | _ -> None)
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
       in

@@ -786,6 +786,30 @@ let comparison state (value : expression) operator (left : expression) (right : 
       | Greater_equal -> not_ (is "Less")
       | _ -> bug "this operator is not a comparison")
 
+(* Whether a condition calls a lending method and binds a name that may
+   alias the lent part: a name bound [mut], or one whose type is a view or
+   is not [Plain]. Such a name would dangle if the lends ended with the
+   condition, so they last until the guarded block ends. A [Plain] name bound
+   read-only holds a copy. *)
+let binds_lent_part state (condition : Core.expression) =
+  let may_alias (pattern : Core.pattern) =
+    match pattern.kind with
+    | Bind { mode = Mut; _ } -> true
+    | Bind { mode = Read | Own; _ } ->
+        State.is_view state pattern.type_ || not (State.plain state pattern.type_)
+    | Wildcard | Variant _ | Record _ | Alternatives _ | Literal _ | Range _ | Equal_to _ -> false
+  in
+  let lends (place : Core.place) = match place with Lent _ -> true | _ -> false in
+  let found_lend = ref false and found_alias = ref false in
+  Core_walk.expression
+    {
+      Core_walk.ignore_all with
+      place = (fun place -> if lends place then found_lend := true);
+      pattern = (fun pattern -> if may_alias pattern then found_alias := true);
+    }
+    condition;
+  !found_lend && !found_alias
+
 (* Whether a condition can be evaluated at run time. It cannot if it
    contains a quantifier, a value of type [Integer], a specification-only
    expression such as [old] or [result], or a call of a specification-only
@@ -1074,10 +1098,10 @@ let try_ state (value : expression) (inner : expression) ~(output : Types.ty)
         ];
     }
 
-(* A slice expression, [base[start..stop]]. The node holds the call of the
-   base type's [slice_range] that creates the view, with the bounds
-   computed: a missing start is [0], a missing stop is the length of the
-   base, and an inclusive stop is [stop + 1]. *)
+(* A slice expression, [base[start..stop]]. The node holds the call that
+   creates the view: the base type's [slice_range], or its [slice_from]
+   when the stop is missing, so that the base appears once. A missing
+   start is [0], and an inclusive stop is [stop + 1]. *)
 let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let origin = value.id in
   let make = synthetic_expression state ~origin in
@@ -1099,26 +1123,19 @@ let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive
          })
   in
   let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
+  let bound value : Core.argument = Passed { mode = Read; value = Value value; mark = None } in
   let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
-  let stop =
-    match stop with
-    | Some stop when inclusive ->
-        make usize (Operator { operation = Add; arguments = [ stop; make usize (Integer Z.one) ] })
-    | Some stop -> stop
-    | None -> call "length" [ receiver ] usize
-  in
-  Slice
-    {
-      base;
-      call =
-        call "slice_range"
-          [
-            receiver;
-            Passed { mode = Read; value = Value start; mark = None };
-            Passed { mode = Read; value = Value stop; mark = None };
-          ]
-          (type_of state value);
-    }
+  let viewed = type_of state value in
+  match stop with
+  | None -> Slice { call = call "slice_from" [ receiver; bound start ] viewed }
+  | Some stop ->
+      let stop =
+        if inclusive then
+          make usize
+            (Operator { operation = Add; arguments = [ stop; make usize (Integer Z.one) ] })
+        else stop
+      in
+      Slice { call = call "slice_range" [ receiver; bound start; bound stop ] viewed }
 
 (* A set or a map literal, desugared to a block: create the collection
    with capacity for the entries, insert each entry, and evaluate to the

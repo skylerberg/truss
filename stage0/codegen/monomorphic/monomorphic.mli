@@ -31,10 +31,9 @@ val mode : Types.mode -> Ground.mode
    its instance's [Source] needs. *)
 val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 
-(* A ground type, written back as the checker's, so that the checker's own
-   substitution and its lookups apply to it, and the substitution of
-   generic parameters by ground arguments. *)
-val back : Ground.ty -> Types.ty
+(* The substitution of generic parameters by ground arguments, as the
+   type checker's types, so that the checker's own substitution and its
+   lookups apply to it. *)
 val substitution : Types.generic list -> Ground.argument list -> Types.substitution
 
 (* The ground type of a built-in. *)

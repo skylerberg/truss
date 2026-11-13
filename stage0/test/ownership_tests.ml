@@ -1,12 +1,9 @@
-module Patterns = Type_checker.For_testing.Patterns
-module Usage = Type_checker.For_testing.Usage
-
 (* The tests of moves, loans, and views. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Ownership
+let check = Type_checker.For_testing.through Ownership
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = Fixtures.Ownership.keep
@@ -734,7 +731,34 @@ let () =
   test "an is binding in an if inside a loop may be moved" (fun () ->
       fine (make ^ Fixtures.Ownership.is_binding_in_an_if_inside_a_loop_may_be_moved));
   test "a let-else binding inside a loop may be moved" (fun () ->
-      fine (make ^ Fixtures.Ownership.let_else_binding_inside_a_loop_may_be_moved))
+      fine (make ^ Fixtures.Ownership.let_else_binding_inside_a_loop_may_be_moved));
+  (* The body runs only where the whole condition is true, so where [text]
+     was bound again. *)
+  test "an `is` binding after `&&` in a `while` condition may be moved in every iteration"
+    (fun () ->
+      fine (make ^ Fixtures.Ownership.is_binding_after_and_in_a_while_condition_may_be_moved))
+
+(* The lends of an [if] or a [while] condition *)
+
+let () =
+  test "a `Plain` name that an `if` condition binds is a copy, which views nothing" (fun () ->
+      fine Fixtures.Ownership.copy_bound_by_an_if_condition_does_not_view_the);
+  test "the then-block may mutate the lender when the condition binds only copies" (fun () ->
+      fine Fixtures.Ownership.then_block_may_mutate_the_lender_when_the_condition);
+  test "a name bound before a test after `&&` fails ends with the part it aliases" (fun () ->
+      fine Fixtures.Ownership.name_bound_before_a_false_test_ends_with_the);
+  test "the else-block may mutate the lender" (fun () ->
+      fine Fixtures.Ownership.else_block_may_mutate_the_lender);
+  test
+    "the then-block cannot mutate the lender while a name the condition binds aliases the lent part"
+    (fun () ->
+      one_diagnostic Fixtures.Ownership.then_block_cannot_mutate_the_lender_while_a_name_the
+        "ownership.changed_while_viewed");
+  test
+    "a `while` body cannot mutate the lender while a name the condition binds aliases the lent part"
+    (fun () ->
+      one_diagnostic Fixtures.Ownership.while_body_cannot_mutate_the_lender_while_a_name_the
+        "ownership.changed_while_viewed")
 
 (* The prover's part *)
 

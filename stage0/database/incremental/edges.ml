@@ -189,7 +189,8 @@ let seed engine (node : node) =
    result a root, unless the driver only observes: a root is part of the
    state, so it is written, though the node's result is as it was. A base's
    node is copied into the engine to be its root there, since a base never
-   changes. *)
+   changes. A fixed base's node that the engine has not copied is current
+   in the state and is never collected, so it needs no root. *)
 let record_read (context : context) (node : node) =
   match context.frame with
   | Some frame ->
@@ -200,11 +201,18 @@ let record_read (context : context) (node : node) =
   | None ->
       let engine = context.engine in
       if (not engine.frozen) && (not context.observing) && not node.root then begin
-        let own = if node.engine == engine then node else shadow engine node in
-        if not own.root then begin
-          own.root <- true;
-          Hashtbl.replace engine.unsaved own.id own
-        end
+        let own =
+          if node.engine == engine then Some node
+          else
+            match Hashtbl.find_opt engine.shadows node.id with
+            | Some own -> Some own
+            | None -> if node.engine.fixed then None else Some (shadow engine node)
+        in
+        match own with
+        | Some own when not own.root ->
+            own.root <- true;
+            Hashtbl.replace engine.unsaved own.id own
+        | Some _ | None -> ()
       end
 
 (* A cycle: every frame from the one for [node] to the newest is on it, so

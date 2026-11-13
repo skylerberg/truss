@@ -364,7 +364,9 @@ val number_name : number -> string
 val number_type : number -> scalar
 val value : system -> number -> int
 
-val check : system -> string
-(** A C file that includes the system's own headers and compiles only if every number has the value
-    given here, every prototype is the one the headers declare, and every structure a function takes
-    is laid out as the storage passed for it. *)
+module For_testing : sig
+  val check : system -> string
+  (** A C file that includes the system's own headers and compiles only if every number has the
+      value given here, every prototype is the one the headers declare, and every structure a
+      function takes is laid out as the storage passed for it. *)
+end

@@ -12,9 +12,6 @@ let current () =
   | Some root when root <> "" -> Some { root }
   | _ -> None
 
-let at root = { root }
-let root registry = registry.root
-
 let package_directory registry name =
   List.fold_left Filename.concat registry.root (Path.package_parts name)
 

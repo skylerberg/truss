@@ -79,6 +79,7 @@ public fn Duration.from_seconds(seconds: Float64) -> Option[Duration]
 }
 
 public fn Duration.total_nanoseconds(self) -> Int64
+  ensures result == (self.nanoseconds)
   cost time O(1)
 {
   self.nanoseconds
@@ -122,6 +123,7 @@ public fn Duration.is_zero(self) -> Bool
 }
 
 public fn Duration.is_negative(self) -> Bool
+  ensures result == (self.nanoseconds < 0)
   cost time O(1)
 {
   self.nanoseconds < 0
@@ -322,14 +324,14 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  ensures forall position in from..result => text.byte(position) >= 48 && text.byte(position) <= 57
+  ensures forall i in from..result => text.byte(i) >= 48 && text.byte(i) <= 57
   cost time O(result - from)
 {
   var index = from
   while index < text.length() && text.byte(index) >= 48 && text.byte(index) <= 57
     invariant from <= index
     invariant index <= text.length()
-    invariant forall position in from..index => text.byte(position) >= 48 && text.byte(position) <= 57
+    invariant forall i in from..index => text.byte(i) >= 48 && text.byte(i) <= 57
     decreases text.length() - index
     cost time O(index - from)
   {
@@ -341,7 +343,7 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
 internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[UInt64]
   requires from <= to
   requires to <= text.length()
-  requires forall position in from..to => text.byte(position) >= 48 && text.byte(position) <= 57
+  requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
   cost time O(to - from)
 {
   var value: UInt64 = 0
@@ -367,7 +369,7 @@ internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[U
 internal fn parse_fraction(text: StringSlice, from: USize, to: USize, unit: UInt64) -> UInt64
   requires from <= to
   requires to <= text.length()
-  requires forall position in from..to => text.byte(position) >= 48 && text.byte(position) <= 57
+  requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
   requires 0 < unit && unit <= 3600000000000
   ensures result < unit
   cost time O(to - from)
@@ -502,6 +504,7 @@ public fn Instant.from_unix_seconds(seconds: Int64) -> Option[Instant]
 }
 
 public fn Instant.unix_nanoseconds(self) -> Int64
+  ensures result == (self.nanoseconds)
   cost time O(1)
 {
   self.nanoseconds
@@ -514,6 +517,7 @@ public fn Instant.unix_milliseconds(self) -> Int64
 }
 
 public fn Instant.unix_seconds(self) -> Int64
+  ensures result == (self.nanoseconds.floor_divide(1000000000))
   cost time O(1)
 {
   self.nanoseconds.floor_divide(1000000000)
@@ -983,7 +987,8 @@ public fn Weekday.number_from_monday(self) -> UInt8
   }
 }
 
-public transparent fn Weekday.is_weekend(self) -> Bool
+public fn Weekday.is_weekend(self) -> Bool
+  ensures result == (self is Saturday | Sunday)
   cost time O(1)
 {
   self is Saturday | Sunday
@@ -1084,6 +1089,31 @@ internal fn weekday_from_number(number: Int64) -> Weekday
 internal fn march_month(day_of_year: Int64) -> Int64
   requires 0 <= day_of_year && day_of_year <= 365
   ensures 0 <= result && result <= 11
+  ensures result == (if day_of_year < 31 {
+      0
+    } else if day_of_year < 61 {
+      1
+    } else if day_of_year < 92 {
+      2
+    } else if day_of_year < 122 {
+      3
+    } else if day_of_year < 153 {
+      4
+    } else if day_of_year < 184 {
+      5
+    } else if day_of_year < 214 {
+      6
+    } else if day_of_year < 245 {
+      7
+    } else if day_of_year < 275 {
+      8
+    } else if day_of_year < 306 {
+      9
+    } else if day_of_year < 337 {
+      10
+    } else {
+      11
+    })
   cost time O(1)
 {
   if day_of_year < 31 {
@@ -1116,6 +1146,31 @@ internal fn march_month(day_of_year: Int64) -> Int64
 internal fn march_start(month: Int64) -> Int64
   requires 0 <= month && month <= 11
   ensures 0 <= result && result <= 337
+  ensures result == (if month == 0 {
+      0
+    } else if month == 1 {
+      31
+    } else if month == 2 {
+      61
+    } else if month == 3 {
+      92
+    } else if month == 4 {
+      122
+    } else if month == 5 {
+      153
+    } else if month == 6 {
+      184
+    } else if month == 7 {
+      214
+    } else if month == 8 {
+      245
+    } else if month == 9 {
+      275
+    } else if month == 10 {
+      306
+    } else {
+      337
+    })
   cost time O(1)
 {
   if month == 0 {
@@ -1350,7 +1405,8 @@ public fn Date.from_day_of_year(year: Int32, day_of_year: UInt16) -> Option[Date
   }
 }
 
-public transparent fn Date.is_leap_year(year: Int32) -> Bool
+public fn Date.is_leap_year(year: Int32) -> Bool
+  ensures result == ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)
   cost time O(1)
 {
   (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
@@ -1423,7 +1479,8 @@ public fn Date.days_until(self, other: Date) -> Int64
   to - from
 }
 
-public transparent fn Date.at(self, time: TimeOfDay) -> DateTime
+public fn Date.at(self, time: TimeOfDay) -> DateTime
+  ensures identical(result, DateTime(date: self, time: time))
   cost time O(1)
 {
   DateTime(date: self, time: time)

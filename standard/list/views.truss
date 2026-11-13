@@ -1,6 +1,5 @@
 use standard::core
 use standard::list
-use standard::list::slice
 
 public fn List[Element].get(self, index: USize) lends Option[Element]
 
@@ -65,7 +64,7 @@ public fn List[Element].split_at(self, index: USize) -> core::Pair[Slice[Element
 
 public fn List[Element: Equal].contains(self, item: Element) -> Bool
 
-  ensures result == (exists index in 0..self.length() => self.model()[index] == item)
+  ensures result == (exists i in 0..self.length() => self.model()[i] == item)
   cost time O(self.length() * time(Element.equal))
 {
   self.slice().contains(item)
@@ -75,7 +74,7 @@ public fn List[Element: Equal].index_of(self, item: Element) -> Option[USize]
 
   ensures match result {
     Some(index) => index < self.length() && self.model()[index] == item
-      && (forall position in 0..index => !(self.model()[position] == item))
+      && (forall i in 0..index => !(self.model()[i] == item))
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
@@ -87,7 +86,7 @@ public fn List[Element: Equal].last_index_of(self, item: Element) -> Option[USiz
 
   ensures match result {
     Some(index) => index < self.length() && self.model()[index] == item
-      && (forall position: USize => index < position && position < self.length() ==> !(self.model()[position] == item))
+      && (forall i: USize => index < i && i < self.length() ==> !(self.model()[i] == item))
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
@@ -99,8 +98,8 @@ public fn List[Element].find_index(self, matching: (fn(Element) -> Bool cost tim
 
   ensures match result {
     Some(index) => index < self.length() && matching(self.model()[index])
-      && (forall position in 0..index => !matching(self.model()[position]))
-    None => forall position in 0..self.length() => !matching(self.model()[position])
+      && (forall i in 0..index => !matching(self.model()[i]))
+    None => forall i in 0..self.length() => !matching(self.model()[i])
   }
   cost time O(self.length() * time(matching))
 {
@@ -110,7 +109,7 @@ public fn List[Element].find_index(self, matching: (fn(Element) -> Bool cost tim
 public fn List[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
 
   ensures result == (prefix.length() <= self.length()
-    && forall index in 0..prefix.length() => self.model()[index] == prefix.model()[index])
+    && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
   cost time O(prefix.length() * time(Element.equal))
 {
   self.slice().starts_with(prefix)
@@ -119,7 +118,7 @@ public fn List[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
 public fn List[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
 
   ensures result == (suffix.length() <= self.length()
-    && forall index in 0..suffix.length() => self.model()[self.length() - suffix.length() + index] == suffix.model()[index])
+    && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
   cost time O(suffix.length() * time(Element.equal))
 {
   self.slice().ends_with(suffix)
@@ -135,14 +134,15 @@ public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Optio
   self.slice().find_slice(needle)
 }
 
-public transparent fn List[Element: Ordered].is_sorted(self) -> Bool
+public fn List[Element: Ordered].is_sorted(self) -> Bool
+  ensures result == (self.slice().is_sorted())
   cost time finite
 {
   self.slice().is_sorted()
 }
 
 public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
-  requires forall position in 1..self.length() => self.model()[position - 1] <= self.model()[position]
+  requires forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   ensures match result {
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
@@ -181,7 +181,7 @@ public fn List[Element: Copyable].to_list(self) -> List[Element]
 
 public fn List[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
-  ensures forall index in 0..result.length() => keep(result.model()[index])
+  ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
   self.slice().filter(keep)
@@ -339,11 +339,11 @@ public fn List[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut
 public fn List[Element].rotate_left(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
-  ensures forall index: Integer =>
-    0 <= index && index < self.length() - by ==> identical(self.model()[index], old(self.model())[index + by])
-  ensures forall index: Integer =>
-    self.length() - by <= index && index < self.length() ==>
-      identical(self.model()[index], old(self.model())[index + by - self.length()])
+  ensures forall i: Integer =>
+    0 <= i && i < self.length() - by ==> identical(self.model()[i], old(self.model())[i + by])
+  ensures forall i: Integer =>
+    self.length() - by <= i && i < self.length() ==>
+      identical(self.model()[i], old(self.model())[i + by - self.length()])
   cost time O(self.length())
 {
   mut self[..].rotate_left(by)
@@ -352,8 +352,8 @@ public fn List[Element].rotate_left(mut self, by: USize)
 public fn List[Element].rotate_right(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
-  ensures forall index in by..self.length() => identical(self.model()[index], old(self.model())[index - by])
-  ensures forall index in 0..by => identical(self.model()[index], old(self.model())[index + self.length() - by])
+  ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
+  ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
   cost time O(self.length())
 {
   mut self[..].rotate_right(by)
@@ -361,7 +361,7 @@ public fn List[Element].rotate_right(mut self, by: USize)
 
 public fn List[Element: Copyable].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
-  ensures forall index in 0..self.length() => identical(self.model()[index], value)
+  ensures forall i in 0..self.length() => identical(self.model()[i], value)
   cost time O(self.length() * time(Element.copy))
 {
   mut self[..].fill(value)
@@ -370,7 +370,7 @@ public fn List[Element: Copyable].fill(mut self, value: Element)
 public fn List[Element: Copyable].copy_from(mut self, source: Slice[Element])
   requires source.length() == self.length()
   ensures self.length() == old(self.length())
-  ensures forall index in 0..self.length() => identical(self.model()[index], source.model()[index])
+  ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
   cost time O(self.length() * time(Element.copy))
 {
   mut self[..].copy_from(source)
@@ -391,13 +391,10 @@ public fn List[Element].update_each[capability Granted](
 public fn List[Element: Ordered].sort(mut self)
   ensures self.length() == old(self.length())
   ensures self.is_sorted()
-  ensures forall index in 1..self.length() => self.model()[index - 1] <= self.model()[index]
+  ensures forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
   mut self[..].sort()
-  proof {
-    slice::sorted_from_model(self.slice(), bound: self.length())
-  }
 }
 
 public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))

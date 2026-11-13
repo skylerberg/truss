@@ -84,14 +84,20 @@ let fingerprint engine (node : node) =
 
 (* Puts a value's bytes in the store, if its fingerprint was computed
    before the engine had one. *)
-let ensure_stored engine (node : node) =
+let ensure_stored ?(stores_every_value = false) engine (node : node) =
   match (engine.store, node.cell) with
   | Some store, Input (_, { slot = Set value; _ }) -> ignore (store.put (bytes_of value))
-  | Some store, Result (query, { outcome = Some (Value value); _ }) when query.saved -> (
+  | Some store, Result (query, { outcome = Some (Value value); _ })
+    when query.saved || stores_every_value -> (
       match node.fingerprint with
-      | Hashed { hash; stored = false } ->
-          ignore (store.put (bytes_of value));
-          node.fingerprint <- Hashed { hash; stored = true }
+      | Hashed { hash; stored = false } -> (
+          (* An unsaved query's value may hold a function, which cannot be
+             stored; such a value is computed again where it is read. *)
+          match bytes_of value with
+          | bytes ->
+              ignore (store.put bytes);
+              node.fingerprint <- Hashed { hash; stored = true }
+          | exception Invalid_argument _ when not query.saved -> ())
       | Hashed { stored = true; _ } | Opaque _ | Unknown -> ())
   | _ -> ()
 

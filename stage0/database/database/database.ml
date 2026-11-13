@@ -53,12 +53,24 @@ let load_standard engine = set_standard engine Standard_library.modules
 
 (* The standard library, checked whole in an engine of its own. Its sources
    never change, so the engine is frozen as a fixed base, which every state
-   reads. *)
+   reads. The library checks cleanly, so a diagnostic in it is a compiler
+   bug, reported here: code built on it would otherwise meet a definition
+   that has no core form. *)
 let check_standard engine =
   load_standard engine;
-  List.iter
-    (fun (module_, _) -> ignore (Engine.get engine Type_checker.file_diagnostics module_))
-    Standard_library.modules
+  let rendered =
+    List.concat_map
+      (fun (module_, _) ->
+        match Engine.get engine Type_checker.file_diagnostics module_ with
+        | [] -> []
+        | diagnostics ->
+            let source = (Engine.get engine Workspace.file module_).source in
+            List.map (Diagnostic.render source) diagnostics)
+      Standard_library.modules
+  in
+  if rendered <> [] then
+    Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
+      (String.concat "" rendered)
 
 let standard_base () =
   let engine = Engine.create () in
@@ -114,7 +126,7 @@ let stored_standard () =
       Engine.attach engine store ~version:identity;
       check_standard engine;
       Store.add_result store ~kind:"package" ~key:(standard_key identity)
-        (Engine.write ~full:true engine);
+        (Engine.write ~full:true ~stores_every_value:true engine);
       Engine.freeze ~fixed:true engine;
       engine
 
@@ -467,13 +479,6 @@ let sessions = Session.sessions
 
 let check_all session = ignore (diagnostics_of session (packages session))
 
-type edge = Session.Graph.edge = {
-  dependent : Path.t;
-  dependent_part : string;
-  dependency : Path.t;
-  dependency_part : string;
-}
-
 let after_checking question session paths =
   check_all session;
   question (Session.engine session) paths
@@ -492,14 +497,24 @@ let all_declarations session =
         (package_modules session name))
     (packages session)
 
-let matches name path =
-  let shown = Path.show path in
+(* Whether [name] is a path's text or the end of it after [::] or [.]. *)
+let ends_path name shown =
   shown = name
   ||
   let name_length = String.length name and shown_length = String.length shown in
   shown_length > name_length
   && String.sub shown (shown_length - name_length) name_length = name
   && (shown.[shown_length - name_length - 1] = ':' || shown.[shown_length - name_length - 1] = '.')
+
+(* A method is written without its receiver, which [Path.show] appends for
+   [mut self] and [own self], so [Counter.bump] names every version of the
+   method and [Counter.bump(mut self)] names one. *)
+let matches name (path : Path.t) =
+  ends_path name (Path.show path)
+  ||
+  match path with
+  | Method method_ -> ends_path name (Path.show (Method { method_ with receiver = Read }))
+  | _ -> false
 
 let find_definitions session name =
   List.sort_uniq Path.compare
@@ -509,8 +524,6 @@ let find_definitions session name =
        (all_declarations session))
 
 (* Comparing a session with another, such as its base commit's *)
-
-type difference = Session.Graph.difference = Changed | Added | Same
 
 let changes mine theirs =
   check_all mine;
@@ -527,12 +540,6 @@ let base_commit session base =
       | None, _ -> None)
 
 let open_commit_of session commit = open_commit ~repository:(root session) commit
-
-type place = Session.Graph.place = { path : Path.t option; part : string option; label : string }
-
-type overlap = Session.Graph.overlap =
-  | Both_change of place
-  | Reads of { this_worktree : bool; change : place; reads : place }
 
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
@@ -878,7 +885,10 @@ let servers = Session.Server.serving
 let stop = Session.Server.stop
 let store_directory = Session.Server.store_directory
 
-module Testing = struct
+module For_testing = struct
+  let prepare_store = prepare_store
+  let open_library = open_library
+
   (* Gives one module of a package given by itself another text. *)
   let set_text engine (module_ : Path.module_) text =
     let root = Project.package_root module_.package in

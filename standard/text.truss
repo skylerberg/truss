@@ -74,10 +74,10 @@ internal fn push_bytes(storage: mut intrinsic::Storage[UInt8], text: StringSlice
 {
   for index in 0..text.length()
     invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage)) + index
-    invariant forall position in 0..old(intrinsic::storage_length(storage)) =>
-      identical(intrinsic::storage_model(storage)[position], old(intrinsic::storage_model(storage))[position])
-    invariant forall position in 0..index =>
-      identical(intrinsic::storage_model(storage)[old(intrinsic::storage_length(storage)) + position], text.model()[position])
+    invariant forall i in 0..old(intrinsic::storage_length(storage)) =>
+      identical(intrinsic::storage_model(storage)[i], old(intrinsic::storage_model(storage))[i])
+    invariant forall i in 0..index =>
+      identical(intrinsic::storage_model(storage)[old(intrinsic::storage_length(storage)) + i], text.model()[i])
     invariant intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
     cost allocations == 0
   {
@@ -178,6 +178,7 @@ fn utf8_sequence(bytes: intrinsic::View[UInt8], at: USize) -> USize
 
 public fn StringSlice.length(self) -> USize
   ensures result == self.model().length()
+  ensures result == (intrinsic::view_length(self.bytes))
   cost time O(1)
   cost allocations == 0
 {
@@ -559,6 +560,7 @@ public fn String.collect[Source: Cursor[Element = Character]](source: own Source
 
 public fn String.capacity(self) -> USize
   ensures result >= self.length()
+  ensures result == (intrinsic::storage_capacity(self.storage))
   cost time O(1)
 {
   intrinsic::storage_capacity(self.storage)

@@ -94,7 +94,7 @@ let () =
       in
       let env = create target_64 ~shape_of:(shapes [ ("Tree", tree) ]) in
       expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
-        (to_string (Memory_layout.block env (named "Tree") "Node")));
+        (For_testing.to_string (Memory_layout.block env (named "Tree") "Node")));
   test "an Array holds its elements in place" (fun () ->
       expect_string ~expected:"32/1 array(32 x 1/1 UInt8)" (describe (array uint8 32)));
   test "USize follows the target's pointer width" (fun () ->

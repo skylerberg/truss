@@ -1,4 +1,5 @@
 fn used_bits(length: USize) -> UInt64
+  ensures result == (if length % 64 == 0 { UInt64.maximum } else { 5 })
   cost time O(1)
 {
   if length % 64 == 0 { UInt64.maximum } else { 5 }

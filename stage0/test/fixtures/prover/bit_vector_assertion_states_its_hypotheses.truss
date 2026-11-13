@@ -1,0 +1,9 @@
+fn f(value: UInt8) -> UInt8
+  requires value < 16
+  ensures result == 0
+{
+  proof {
+    assert value < 16 ==> (value & 16) == 0 by bit_vector
+  }
+  value & 16
+}

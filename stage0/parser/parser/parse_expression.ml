@@ -1514,7 +1514,16 @@ and statement cursor : statement =
       finish (Proof (body cursor))
   | Keyword Assert ->
       Cursor.advance cursor;
-      finish (Assert (expression cursor))
+      let value = expression cursor in
+      let by_bit_vector =
+        match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
+        | Lower "by", Lower "bit_vector" ->
+            Cursor.advance cursor;
+            Cursor.advance cursor;
+            true
+        | _ -> false
+      in
+      finish (Assert { value; by_bit_vector })
   | Keyword Yield ->
       Cursor.advance cursor;
       finish (Yield (expression cursor))

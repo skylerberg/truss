@@ -124,7 +124,8 @@ and place =
   | Lent of expression
       (** The part of a value that a lending call returns, such as [items[index]] (a call of
           [Index.at]) or [grid.cell(position)]. The expression is a {!Call} whose [lends] is
-          [Some _]. The borrow lasts until the end of the enclosing statement. *)
+          [Some _]. The borrow lasts until the end of the enclosing statement, except in the
+          condition of an {!If} or a {!While}, where its [binds_lent_part] says how long. *)
   | Temporary of expression
       (** A value that has no place of its own, stored in a temporary for the enclosing statement so
           that part of it can be accessed, as in [origin().x]. *)
@@ -186,14 +187,15 @@ and kind =
   | Record_update of { base : expression; updates : (string list * expression) list }
       (** [base with (...)]: a copy of the record [base] with some fields replaced. Each update
           gives the path to a field (for a nested field, several names) and the new value. *)
-  | Slice of { base : place; call : expression }
+  | Slice of { call : expression }
       (** [base[start..stop]]: a view of a range of a list, a slice, or an array. The view borrows
           [base]: it is some of the elements of that place.
 
-          [call] creates the view. It is a call of the base type's [slice_range] with three
-          arguments: [base], the start, and the stop, which is exclusive. The bounds are already
-          computed: a missing start is [0], a missing stop is the length of [base], and an inclusive
-          stop is [stop + 1]. The two bounds are passed as values. *)
+          [call] creates the view. Its first argument is [base], passed as a place, and the only
+          occurrence of [base], so a temporary base is evaluated once. With a stop, it is a call of
+          the base type's [slice_range] with the start and the exclusive stop; without one, it is a
+          call of [slice_from] with the start. A missing start is [0] and an inclusive stop is
+          [stop + 1]. The bounds are passed as values. *)
   (* Calls and operators *)
   | Call of call
   | Operator of { operation : Intrinsic.operation; arguments : expression list }
@@ -221,7 +223,18 @@ and kind =
       (** Converts a value to [any Trait]. [evidence] is the [impl] of the trait for the value's
           type. *)
   (* Control flow *)
-  | If of { condition : expression; then_ : block; else_ : block option }
+  | If of {
+      condition : expression;
+      then_ : block;
+      else_ : block option;
+      binds_lent_part : bool;
+          (** The condition calls a lending method and binds a name that may alias the lent part: a
+              name bound [mut], or one whose type is a view or is not [Plain]. The condition's lends
+              then last until [then_] ends, so that the name cannot dangle. Otherwise they end with
+              the condition, every name it binds holds a copy, and [then_] can mutate the lender, as
+              in [if counts.get(word) is Some(count) { counts[word] = count + 1 }]. The lends never
+              last into [else_]. *)
+    }
   | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
@@ -343,7 +356,14 @@ and statement_kind =
       body : block;
       mode : loop_mode;
     }
-  | While of { condition : expression; clauses : loop_clause list; body : block }
+  | While of {
+      condition : expression;
+      clauses : loop_clause list;
+      body : block;
+      binds_lent_part : bool;
+          (** As for {!If}: whether the condition's lends last until [body] ends, or end with the
+              condition. *)
+    }
   | Parallel of statement list
       (** A [parallel] block. Each statement is a branch. A branch uses no capability but [Panic],
           and no early exit leaves one. *)
@@ -352,7 +372,8 @@ and statement_kind =
           capabilities that are available around the block. The block ends when every branch has
           ended. A branch is named by the block's id and its index, from 0 (see {!Task_exit}). *)
   | Proof of block
-  | Assert of condition
+  | Assert of { condition : condition; by_bit_vector : bool }
+      (** [by_bit_vector]: proven alone, for every value of the variables it names. *)
   | Yield of { mode : Types.mode; part : operand }
       (** [yield] in a lending or yielding method. [mode] is the mode in the method's signature. *)
 

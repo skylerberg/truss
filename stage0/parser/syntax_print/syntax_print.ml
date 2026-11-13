@@ -274,7 +274,8 @@ and statement (statement : statement) =
   | Parallel body -> form "parallel" [ block body ]
   | Concurrent body -> form "concurrent" [ block body ]
   | Proof body -> form "proof" [ block body ]
-  | Assert value -> form "assert" [ expression value ]
+  | Assert { value; by_bit_vector } ->
+      form "assert" (expression value :: (if by_bit_vector then [ "by"; "bit_vector" ] else []))
   | Yield value -> form "yield" [ expression value ]
   | Statement_error -> "error"
 
@@ -319,7 +320,6 @@ let visibility = function
   | Internal -> "internal"
   | Public -> "public"
   | Public_opaque -> "public opaque"
-  | Public_transparent -> "public transparent"
 
 let type_head (head : type_head) = path head.path ^ generics head.generics
 
@@ -494,3 +494,8 @@ let file (file : file) =
   String.concat "\n"
     (List.map (fun (item : path item) -> form "use" [ path item.value ]) file.uses
     @ definitions file.definitions)
+
+module For_testing = struct
+  let definition = definition
+  let definitions = definitions
+end

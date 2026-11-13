@@ -20,27 +20,12 @@ type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnost
 val diagnostics_in_file : _ parsed -> Diagnostic.t list
 (** A piece's diagnostics, moved by its base to their place in the file. *)
 
-val definition :
-  Source.t -> Token.t array -> piece -> Syntax.definition parsed * Syntax.definition parsed list
-(** A definition, with the checks that need its whole tree, and the methods written inside it when
-    it is a trait, an [impl], or a capability. Each method is a definition of its own, parsed from
-    its own tokens, with its own positions and node ids. *)
-
 val use_line : Source.t -> Token.t array -> piece -> Syntax.path option parsed
 (** A [use] line, and its path if it parsed. Whether it comes before every definition depends on the
     rest of the file, so {!parse} checks it. *)
 
 val parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list
 (** A whole file, with its diagnostics in the file's offsets, in order of position. *)
-
-val begins_statement : Token.kind -> bool
-(** Whether a token is in the first set of a statement. [Layout] must let every such token begin a
-    statement, or a line break before one emits no [Newline] and two statements parse as one. The
-    exceptions are [..] and [..=], which begin an expression only inside brackets, where line breaks
-    are ignored. *)
-
-val spelled_words : string list
-(** The names the parser recognizes by their spelling, in [cost] clauses. *)
 
 (** {1 The documents' examples}
 
@@ -55,3 +40,20 @@ val example_definition : Source.t -> Token.t array -> piece -> example * Diagnos
 
 val example_statement : Source.t -> Token.t array -> piece -> Diagnostic.t list
 (** A statement, as a line of a block. *)
+
+module For_testing : sig
+  val definition :
+    Source.t -> Token.t array -> piece -> Syntax.definition parsed * Syntax.definition parsed list
+  (** A definition, with the checks that need its whole tree, and the methods written inside it when
+      it is a trait, an [impl], or a capability. Each method is a definition of its own, parsed from
+      its own tokens, with its own positions and node ids. *)
+
+  val begins_statement : Token.kind -> bool
+  (** Whether a token is in the first set of a statement. [Layout] must let every such token begin a
+      statement, or a line break before one emits no [Newline] and two statements parse as one. The
+      exceptions are [..] and [..=], which begin an expression only inside brackets, where line
+      breaks are ignored. *)
+
+  val spelled_words : string list
+  (** The names the parser recognizes by their spelling, in [cost] clauses. *)
+end

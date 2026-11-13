@@ -60,7 +60,6 @@ module Code : sig
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
-    | Misplaced_transparent
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -124,6 +123,7 @@ module Code : sig
     | Character_scalar_count
     | Misplaced_self_type
     | Mismatch
+    | Not_bit_vector
     | Cannot_infer
     | Missing_label
     | Unknown_label
@@ -140,7 +140,6 @@ module Code : sig
     | Not_callable
     | Not_a_value
     | No_impl
-    | Not_a_definition
     | Mismatched_integers
     | String_addition
     | Literal_out_of_range
@@ -344,8 +343,6 @@ module Collector : sig
   (** In order of position. *)
 end
 
-val limit : int
-
 val shown : t list -> t list
 (** The diagnostics to list: at most {!limit}, and then, if there were more, one with the code
     [Too_many_diagnostics] that counts the rest, so that a binary file opened by mistake gives a
@@ -372,3 +369,7 @@ val json_string : string -> string
 val quote : string -> string
 (** Text in double quotes, with quotes, backslashes, control characters, and bytes that are not
     valid UTF-8 escaped, so that text in any script stays readable and the result is valid UTF-8. *)
+
+module For_testing : sig
+  val limit : int
+end

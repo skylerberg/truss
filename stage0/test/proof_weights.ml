@@ -20,17 +20,22 @@ let weights =
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 3298);
+    ("standard::cryptography", 1470);
     ("standard::cryptography::elliptic", 247);
+    ("standard::cryptography::keccak", 41);
+    ("standard::cryptography::mlkem", 63);
     ("standard::cryptography::modular", 201);
     ("standard::csv", 45);
     ("standard::cursors", 4);
+    ("standard::der", 24);
     ("standard::environment", 68);
     ("standard::files", 893);
     ("standard::growth", 2);
     ("standard::hex", 21);
     ("standard::html", 102);
-    ("standard::http", 524);
+    ("standard::http", 182);
+    ("standard::http::hpack", 56);
+    ("standard::http::two", 173);
     ("standard::json", 1513);
     ("standard::list", 104);
     ("standard::list::array", 43);
@@ -58,7 +63,7 @@ let weights =
     ("standard::set", 320);
     ("standard::simulation", 1911);
     ("standard::specification", 3);
-    ("standard::streams", 33);
+    ("standard::streams", 28);
     ("standard::system::calls", 7);
     ("standard::system::clock", 1);
     ("standard::system::console", 1);
@@ -87,11 +92,13 @@ let weights =
     ("standard::text::unicode_data", 184);
     ("standard::text::unicode_tables", 296);
     ("standard::time", 553);
+    ("standard::tls", 295);
     ("standard::toml", 1453);
     ("standard::unicode", 18);
     ("standard::url", 102);
     ("standard::uuid", 31);
     ("standard::writing", 5);
+    ("standard::x509", 96);
   ]
 
 let letters_for_one = 43

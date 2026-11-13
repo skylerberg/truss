@@ -58,7 +58,6 @@ type t =
   | Text_copied_from  (** The function that makes a [String] from a C string. *)
   | Run_tests  (** The entry point of a test executable. *)
 
-val all : t list
 val path : t -> Path.t
 val of_path : Path.t -> t option
 
@@ -71,5 +70,6 @@ val specification : Path.module_
 val system_module : string -> Path.module_
 (** A module of [standard::system], which holds the system implementation of each capability. *)
 
-val in_system : Path.module_ -> bool
-(** Whether a module is [standard::system] or one of its modules. *)
+module For_testing : sig
+  val all : t list
+end

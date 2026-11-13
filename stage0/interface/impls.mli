@@ -13,10 +13,6 @@ val derivable : Path.t -> bool
 val index : (Path.package, ((Path.t * Path.t) * Path.t) list) Query.query
 (** Every [impl] of a package, written or derived, by trait and type constructor. *)
 
-val real_implementation : Query.context -> Path.t -> Path.t option
-(** The system implementation of a capability: its one [impl] in [standard::system], which the
-    program's entry point provides to [main]. *)
-
 val impls_for : Query.context -> Path.t -> Path.package -> (Path.t * Path.t) list
 (** The impls of a package for a type, each with its trait. *)
 

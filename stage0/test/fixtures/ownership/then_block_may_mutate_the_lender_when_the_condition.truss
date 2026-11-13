@@ -1,0 +1,11 @@
+fn f(words: List[String]) -> Map[String, Int64] {
+  var counts: Map[String, Int64] = [:]
+  for word in words {
+    if counts.get(word) is Some(count) {
+      counts[word.copy()] = count.saturating_add(1)
+    } else {
+      counts[word.copy()] = 1
+    }
+  }
+  counts
+}

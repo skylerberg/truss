@@ -80,14 +80,6 @@ val demand : context -> ('key, 'value) query -> 'key -> 'value
     demand made outside any query first brings the state up to date through the query's phase; later
     phases keep their queued results until something of theirs is read, or {!stabilize}. *)
 
-val known : context -> ('key, 'value) query -> 'key -> 'value option
-(** The result the state holds for a query and key, if no change could have reached it: the phases
-    before the query's are brought up to date, and nothing of the query's own phase is computed. No
-    read is recorded and the result is not made a root. [None] for a result the state does not hold,
-    one whose reads may have changed, and one that raised. Raises [Invalid_argument] while a query
-    runs, since a read that is not recorded would make the query's result depend on the engine's
-    contents. *)
-
 (** {1 Engines} *)
 
 val create : ?log:bool -> ?bases:t list -> unit -> t
@@ -218,11 +210,13 @@ val record_facts : t -> unit
     reads. Another state whose reads have the same fingerprints finds it instead of computing.
     {!write} does this too. *)
 
-val write : ?full:bool -> t -> string
+val write : ?full:bool -> ?stores_every_value:bool -> t -> string
 (** Writes the state as an artifact in the store, and returns its name. The artifact holds the
     engine's own nodes that changed since the last write, as a difference over the artifact the
     engine was opened from or last wrote; with [~full:true], or when there is no such artifact, it
-    holds the whole state apart from its fixed bases. *)
+    holds the whole state apart from its fixed bases. Only saved results' values are stored, unless
+    [~stores_every_value:true], as for a fixed base, which is written once and read by every state
+    over it. *)
 
 type chain_size = { whole : int; differences : int; depth : int }
 (** How many nodes the whole state an engine's artifact chain starts from holds, how many the

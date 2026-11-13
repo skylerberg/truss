@@ -86,13 +86,13 @@ public fn Slice[Element].split_at(self, index: USize) -> core::Pair[Slice[Elemen
 
 public fn Slice[Element: Equal].contains(self, item: Element) -> Bool
 
-  ensures result == (exists position in 0..self.length() => self.model()[position] == item)
+  ensures result == (exists i in 0..self.length() => self.model()[i] == item)
   cost time O(self.length() * time(Element.equal))
 {
   var index: USize = 0
   while index < self.length()
     invariant index <= self.length()
-    invariant forall position in 0..index => !(self.model()[position] == item)
+    invariant forall i in 0..index => !(self.model()[i] == item)
     decreases self.length() - index
     cost time O(index * time(Element.equal))
   {
@@ -108,7 +108,7 @@ public fn Slice[Element: Equal].index_of(self, item: Element) -> Option[USize]
 
   ensures match result {
     Some(index) => index < self.length() && self.model()[index] == item
-      && (forall position in 0..index => !(self.model()[position] == item))
+      && (forall i in 0..index => !(self.model()[i] == item))
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
@@ -116,7 +116,7 @@ public fn Slice[Element: Equal].index_of(self, item: Element) -> Option[USize]
   var index: USize = 0
   while index < self.length()
     invariant index <= self.length()
-    invariant forall position in 0..index => !(self.model()[position] == item)
+    invariant forall i in 0..index => !(self.model()[i] == item)
     decreases self.length() - index
     cost time O(index * time(Element.equal))
   {
@@ -132,7 +132,7 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[USi
 
   ensures match result {
     Some(index) => index < self.length() && self.model()[index] == item
-      && (forall offset: USize => index < offset && offset < self.length() ==> !(self.model()[offset] == item))
+      && (forall i: USize => index < i && i < self.length() ==> !(self.model()[i] == item))
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
@@ -140,7 +140,7 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[USi
   var index = self.length()
   while index > 0
     invariant index <= self.length()
-    invariant forall position in index..self.length() => !(self.model()[position] == item)
+    invariant forall i in index..self.length() => !(self.model()[i] == item)
     decreases index
     cost time O((self.length() - index) * time(Element.equal))
   {
@@ -156,15 +156,15 @@ public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost t
 
   ensures match result {
     Some(index) => index < self.length() && predicate(self.model()[index])
-      && (forall position in 0..index => !predicate(self.model()[position]))
-    None => forall position in 0..self.length() => !predicate(self.model()[position])
+      && (forall i in 0..index => !predicate(self.model()[i]))
+    None => forall i in 0..self.length() => !predicate(self.model()[i])
   }
   cost time O(self.length() * time(predicate))
 {
   var index: USize = 0
   while index < self.length()
     invariant index <= self.length()
-    invariant forall position in 0..index => !predicate(self.model()[position])
+    invariant forall i in 0..index => !predicate(self.model()[i])
     decreases self.length() - index
     cost time O(index * time(predicate))
   {
@@ -179,7 +179,7 @@ public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost t
 public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
 
   ensures result == (prefix.length() <= self.length()
-    && forall position in 0..prefix.length() => self.model()[position] == prefix.model()[position])
+    && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
   cost time O(prefix.length() * time(Element.equal))
 {
   if prefix.length() > self.length() {
@@ -188,7 +188,7 @@ public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Boo
   var index: USize = 0
   while index < prefix.length()
     invariant index <= prefix.length()
-    invariant forall position in 0..index => self.model()[position] == prefix.model()[position]
+    invariant forall i in 0..index => self.model()[i] == prefix.model()[i]
     decreases prefix.length() - index
     cost time O(index * time(Element.equal))
   {
@@ -203,7 +203,7 @@ public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Boo
 public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
 
   ensures result == (suffix.length() <= self.length()
-    && forall position in 0..suffix.length() => self.model()[self.length() - suffix.length() + position] == suffix.model()[position])
+    && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
   cost time O(suffix.length() * time(Element.equal))
 {
   if suffix.length() > self.length() {
@@ -213,7 +213,7 @@ public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
   var index: USize = 0
   while index < suffix.length()
     invariant index <= suffix.length()
-    invariant forall position in 0..index => self.model()[start + position] == suffix.model()[position]
+    invariant forall i in 0..index => self.model()[start + i] == suffix.model()[i]
     decreases suffix.length() - index
     cost time O(index * time(Element.equal))
   {
@@ -227,7 +227,7 @@ public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
 
 fn failure_table[Element: Equal](needle: Slice[Element]) -> List[USize]
   ensures result.length() == needle.length()
-  ensures forall position in 0..result.length() => result.model()[position] <= position
+  ensures forall i in 0..result.length() => result.model()[i] <= i
   cost time O(needle.length() * time(Element.equal))
 {
   var table: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(needle.length())
@@ -243,7 +243,7 @@ fn failure_table[Element: Equal](needle: Slice[Element]) -> List[USize]
     invariant matched < index
     invariant intrinsic::storage_length(table) == index
     invariant intrinsic::storage_capacity(table) == needle.length()
-    invariant forall position in 0..index => intrinsic::storage_model(table)[position] <= position
+    invariant forall i in 0..index => intrinsic::storage_model(table)[i] <= i
     decreases needle.length() - index
     cost time O((4 * index - matched) * time(Element.equal))
   {
@@ -274,7 +274,7 @@ fn matched_after[Element: Equal](
   requires index < haystack.length()
   requires matched < needle.length()
   requires table.length() == needle.length()
-  requires forall position in 0..table.length() => table.model()[position] <= position
+  requires forall i in 0..table.length() => table.model()[i] <= i
   ensures result <= matched + 1
   ensures result <= needle.length()
   cost time O((matched + 3 - result) * time(Element.equal))
@@ -293,7 +293,7 @@ fn matched_after[Element: Equal](
 fn find_with_table[Element: Equal](haystack: Slice[Element], needle: Slice[Element], table: Slice[USize]) -> Option[USize]
   requires needle.length() > 0
   requires table.length() == needle.length()
-  requires forall position in 0..table.length() => table.model()[position] <= position
+  requires forall i in 0..table.length() => table.model()[i] <= i
   ensures match result {
     Some(index) => index + needle.length() <= haystack.length()
     None => true
@@ -337,10 +337,11 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
   find_with_table(self, needle: needle, table: table.slice())
 }
 
-public transparent fn Slice[Element: Ordered].is_sorted(self) -> Bool
+public fn Slice[Element: Ordered].is_sorted(self) -> Bool
+  ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
   cost time finite
 {
-  forall index in 1..self.length() => self[index - 1] <= self[index]
+  forall i in 1..self.length() => self[i - 1] <= self[i]
 }
 
 internal theorem at_most_then_less[Element: Ordered](first: Element, second: Element, third: Element)
@@ -415,8 +416,8 @@ theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, l
   requires bound <= last + 1
   requires bound <= items.length()
   requires items[last] < target
-  ensures forall index in 0..bound => items[index] < target
-  ensures forall index in 0..items.length() => index < bound ==> !(items.model()[index] == target)
+  ensures forall i in 0..bound => items[i] < target
+  ensures forall i in 0..items.length() => i < bound ==> !(items.model()[i] == target)
   decreases bound
   cost time finite
 {
@@ -434,8 +435,8 @@ theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, f
   requires bound <= items.length()
   requires first < items.length()
   requires target < items[first]
-  ensures forall index in bound..items.length() => target < items[index]
-  ensures forall index in bound..items.length() => !(items.model()[index] == target)
+  ensures forall i in bound..items.length() => target < items[i]
+  ensures forall i in bound..items.length() => !(items.model()[i] == target)
   decreases items.length() - bound
   cost time finite
 {
@@ -447,24 +448,43 @@ theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, f
   }
 }
 
+theorem excluded_below[Element: Ordered](items: Slice[Element], target: Element, middle: USize)
+  requires forall position in 1..items.length() => items.model()[position - 1] <= items.model()[position]
+  requires middle < items.length()
+  requires items[middle] < target
+  ensures forall position in 0..middle + 1 => !(items.model()[position] == target)
+  cost time finite
+{
+  sorted_from_model(items, bound: items.length())
+  sorted_below(items, target: target, last: middle, bound: middle + 1)
+}
+
+theorem excluded_above[Element: Ordered](items: Slice[Element], target: Element, middle: USize)
+  requires forall position in 1..items.length() => items.model()[position - 1] <= items.model()[position]
+  requires middle < items.length()
+  requires target < items[middle]
+  ensures forall position in middle..items.length() => !(items.model()[position] == target)
+  cost time finite
+{
+  sorted_from_model(items, bound: items.length())
+  sorted_above(items, target: target, first: middle, bound: middle)
+}
+
 public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
-  requires forall position in 1..self.length() => self.model()[position - 1] <= self.model()[position]
+  requires forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   ensures match result {
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
   }
   cost time O(log(self.length()) * time(Element.compare))
 {
-  proof {
-    sorted_from_model(self, bound: self.length())
-  }
   var low: USize = 0
   var high = self.length()
   while low < high
     invariant low <= high
     invariant high <= self.length()
-    invariant forall position in 0..low => !(self.model()[position] == target)
-    invariant forall position in high..self.length() => !(self.model()[position] == target)
+    invariant forall i in 0..low => !(self.model()[i] == target)
+    invariant forall i in high..self.length() => !(self.model()[i] == target)
     decreases high - low
     cost time O((log(self.length()) - log(high - low)) * time(Element.compare))
   {
@@ -472,14 +492,14 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
     match self[middle].compare(target) {
       Less => {
         proof {
-          sorted_below(self, target: target, last: middle, bound: middle + 1)
+          excluded_below(self, target: target, middle: middle)
         }
         low = middle + 1
       }
       Greater => {
         proof {
           greater_is_less_reversed(self[middle], second: target)
-          sorted_above(self, target: target, first: middle, bound: middle)
+          excluded_above(self, target: target, middle: middle)
         }
         high = middle
       }
@@ -495,11 +515,11 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
 }
 
 public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
-  requires forall first in 0..self.length() => forall second in first..self.length() =>
-    before(self.model()[second]) ==> before(self.model()[first])
+  requires forall i in 0..self.length() => forall j in i..self.length() =>
+    before(self.model()[j]) ==> before(self.model()[i])
   ensures result <= self.length()
-  ensures forall index in 0..result => before(self.model()[index])
-  ensures forall index in result..self.length() => !before(self.model()[index])
+  ensures forall i in 0..result => before(self.model()[i])
+  ensures forall i in result..self.length() => !before(self.model()[i])
   cost time O(log(self.length()) * time(before))
 {
   var low: USize = 0
@@ -507,8 +527,8 @@ public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost
   while low < high
     invariant low <= high
     invariant high <= self.length()
-    invariant forall index in 0..low => before(self.model()[index])
-    invariant forall index in high..self.length() => !before(self.model()[index])
+    invariant forall i in 0..low => before(self.model()[i])
+    invariant forall i in high..self.length() => !before(self.model()[i])
     decreases high - low
     cost time O((log(self.length()) - log(high - low)) * time(before))
   {
@@ -568,8 +588,8 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   for index in 0..self.length()
     invariant intrinsic::storage_length(copy) == index
     invariant intrinsic::storage_capacity(copy) == self.length()
-    invariant forall position in 0..index =>
-      identical(intrinsic::storage_model(copy)[position], self.model()[position])
+    invariant forall i in 0..index =>
+      identical(intrinsic::storage_model(copy)[i], self.model()[i])
   {
     intrinsic::storage_push(mut copy, value: self[index].copy())
   }
@@ -578,14 +598,14 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
 
 public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
-  ensures forall position in 0..result.length() => keep(result.model()[position])
+  ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
   var retained: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
     invariant intrinsic::storage_length(retained) <= index
     invariant intrinsic::storage_capacity(retained) == self.length()
-    invariant forall position in 0..intrinsic::storage_length(retained) => keep(intrinsic::storage_model(retained)[position])
+    invariant forall i in 0..intrinsic::storage_length(retained) => keep(intrinsic::storage_model(retained)[i])
   {
     if keep(self[index]) {
       intrinsic::storage_push(mut retained, value: self[index].copy())
@@ -805,8 +825,8 @@ public fn Slice[Element].swap(mut self, first: USize, second: USize)
   ensures self.length() == old(self.length())
   ensures identical(self.model()[first], old(self.model())[second])
   ensures identical(self.model()[second], old(self.model())[first])
-  ensures forall index in 0..self.length() =>
-    index == first || index == second || identical(self.model()[index], old(self.model())[index])
+  ensures forall i in 0..self.length() =>
+    i == first || i == second || identical(self.model()[i], old(self.model())[i])
   cost time O(1)
 {
   intrinsic::view_swap(mut self.elements, first: first, second: second)
@@ -816,9 +836,9 @@ internal fn Slice[Element].reverse_between(mut self, start: USize, stop: USize)
   requires start <= stop
   requires stop <= self.length()
   ensures self.length() == old(self.length())
-  ensures forall index in start..stop => identical(self.model()[index], old(self.model())[start + stop - 1 - index])
-  ensures forall index in 0..start => identical(self.model()[index], old(self.model())[index])
-  ensures forall index in stop..self.length() => identical(self.model()[index], old(self.model())[index])
+  ensures forall i in start..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+  ensures forall i in 0..start => identical(self.model()[i], old(self.model())[i])
+  ensures forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
   cost time O(stop - start)
 {
   var low = start
@@ -829,11 +849,11 @@ internal fn Slice[Element].reverse_between(mut self, start: USize, stop: USize)
     invariant high <= stop
     invariant low <= high
     invariant low + high == start + stop
-    invariant forall index in start..low => identical(self.model()[index], old(self.model())[start + stop - 1 - index])
-    invariant forall index in high..stop => identical(self.model()[index], old(self.model())[start + stop - 1 - index])
-    invariant forall index in low..high => identical(self.model()[index], old(self.model())[index])
-    invariant forall index in 0..start => identical(self.model()[index], old(self.model())[index])
-    invariant forall index in stop..self.length() => identical(self.model()[index], old(self.model())[index])
+    invariant forall i in start..low => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+    invariant forall i in high..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+    invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
+    invariant forall i in 0..start => identical(self.model()[i], old(self.model())[i])
+    invariant forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
     decreases high - low
     cost time O(low - start)
   {
@@ -845,8 +865,8 @@ internal fn Slice[Element].reverse_between(mut self, start: USize, stop: USize)
 
 public fn Slice[Element].reverse(mut self)
   ensures self.length() == old(self.length())
-  ensures forall index in 0..self.length() =>
-    identical(self.model()[index], old(self.model())[self.length() - 1 - index])
+  ensures forall i in 0..self.length() =>
+    identical(self.model()[i], old(self.model())[self.length() - 1 - i])
   cost time O(self.length())
 {
   mut self.reverse_between(0, stop: self.length())
@@ -855,11 +875,11 @@ public fn Slice[Element].reverse(mut self)
 public fn Slice[Element].rotate_left(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
-  ensures forall index: Integer =>
-    0 <= index && index < self.length() - by ==> identical(self.model()[index], old(self.model())[index + by])
-  ensures forall index: Integer =>
-    self.length() - by <= index && index < self.length() ==>
-      identical(self.model()[index], old(self.model())[index + by - self.length()])
+  ensures forall i: Integer =>
+    0 <= i && i < self.length() - by ==> identical(self.model()[i], old(self.model())[i + by])
+  ensures forall i: Integer =>
+    self.length() - by <= i && i < self.length() ==>
+      identical(self.model()[i], old(self.model())[i + by - self.length()])
   cost time O(self.length())
 {
   mut self.reverse_between(0, stop: by)
@@ -870,8 +890,8 @@ public fn Slice[Element].rotate_left(mut self, by: USize)
 public fn Slice[Element].rotate_right(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
-  ensures forall index in by..self.length() => identical(self.model()[index], old(self.model())[index - by])
-  ensures forall index in 0..by => identical(self.model()[index], old(self.model())[index + self.length() - by])
+  ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
+  ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
   cost time O(self.length())
 {
   mut self.rotate_left(self.length() - by)
@@ -879,12 +899,12 @@ public fn Slice[Element].rotate_right(mut self, by: USize)
 
 public fn Slice[Element: Copyable].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
-  ensures forall position in 0..self.length() => identical(self.model()[position], value)
+  ensures forall i in 0..self.length() => identical(self.model()[i], value)
   cost time O(self.length() * time(Element.copy))
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
-    invariant forall position in 0..index => identical(self.model()[position], value)
+    invariant forall i in 0..index => identical(self.model()[i], value)
   {
     self[index] = value.copy()
   }
@@ -893,12 +913,12 @@ public fn Slice[Element: Copyable].fill(mut self, value: Element)
 public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
   requires source.length() == self.length()
   ensures self.length() == old(self.length())
-  ensures forall position in 0..self.length() => identical(self.model()[position], source.model()[position])
+  ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
   cost time O(self.length() * time(Element.copy))
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
-    invariant forall position in 0..index => identical(self.model()[position], source.model()[position])
+    invariant forall i in 0..index => identical(self.model()[i], source.model()[i])
   {
     self[index] = source[index].copy()
   }
@@ -924,6 +944,7 @@ fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, pare
   requires limit <= items.length()
   requires 0 <= parent
   requires parent < limit / 2
+  ensures result == (items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent]))
   cost time finite
 {
   items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent])
@@ -932,6 +953,7 @@ fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, pare
 fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer) -> Bool
   requires limit <= items.length()
   requires 0 <= floor
+  ensures result == (forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent))
   cost time finite
 {
   forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent)
@@ -940,6 +962,7 @@ fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floo
 fn is_heap_except[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer, hole: Integer) -> Bool
   requires limit <= items.length()
   requires 0 <= floor
+  ensures result == (forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent))
   cost time finite
 {
   forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent)
@@ -950,6 +973,8 @@ fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integ
   requires 0 <= hole
   requires 0 <= above
   requires above < items.length()
+  ensures result == (hole >= limit / 2
+      || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above])))
   cost time finite
 {
   hole >= limit / 2
@@ -998,7 +1023,7 @@ theorem swap_keeps_heap_except[Element: Ordered](
   requires hole > floor ==> children_are_at_most(before.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
   requires identical(after.model()[hole], before.model()[child])
   requires identical(after.model()[child], before.model()[hole])
-  requires forall index in 0..before.length() => index == hole || index == child || identical(after.model()[index], before.model()[index])
+  requires forall i in 0..before.length() => i == hole || i == child || identical(after.model()[i], before.model()[i])
   requires parent_holds(after.model(), limit: limit, parent: hole)
   ensures forall parent in floor..limit =>
     parent >= bound || parent == child || parent_holds(after.model(), limit: limit, parent: parent)
@@ -1037,11 +1062,11 @@ theorem swap_keeps_bound[Element: Ordered](
   requires first < limit
   requires second < limit
   requires bound <= limit
-  requires forall index in 0..limit => before[index] <= before[top]
+  requires forall i in 0..limit => before[i] <= before[top]
   requires identical(after.model()[first], before.model()[second])
   requires identical(after.model()[second], before.model()[first])
-  requires forall index in 0..before.length() => index == first || index == second || identical(after.model()[index], before.model()[index])
-  ensures forall index in 0..limit => index >= bound || after[index] <= after[top]
+  requires forall i in 0..before.length() => i == first || i == second || identical(after.model()[i], before.model()[i])
+  ensures forall i in 0..limit => i >= bound || after[i] <= after[top]
   decreases bound
   cost time finite
 {
@@ -1075,15 +1100,15 @@ fn sink_once[Element: Ordered](
   requires is_heap_except(items.model(), limit: limit, floor: floor, hole: hole)
   requires hole <= floor || children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
   requires top >= items.length() || limit <= top
-  requires top >= items.length() || (forall index in 0..limit => items[index] <= items[top])
+  requires top >= items.length() || (forall i in 0..limit => items[i] <= items[top])
   ensures items.length() == old(items.length())
   ensures result == hole || result == 2 * hole + 1 || result == 2 * hole + 2
   ensures result < limit
   ensures result == hole ==> is_heap_from(items.model(), limit: limit, floor: floor)
   ensures result != hole ==> is_heap_except(items.model(), limit: limit, floor: floor, hole: result)
   ensures result != hole ==> children_are_at_most(items.model(), limit: limit, hole: result, above: hole)
-  ensures forall index in limit..items.length() => identical(items.model()[index], old(items.model())[index])
-  ensures top < items.length() ==> forall index in 0..limit => items[index] <= items[top]
+  ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
   cost time O(time(Element.compare))
 {
   let left = 2 * hole + 1
@@ -1155,11 +1180,11 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USiz
   requires limit <= items.length()
   requires is_heap_except(items.model(), limit: limit, floor: start, hole: start)
   requires top >= items.length() || limit <= top
-  requires top >= items.length() || (forall index in 0..limit => items[index] <= items[top])
+  requires top >= items.length() || (forall i in 0..limit => items[i] <= items[top])
   ensures items.length() == old(items.length())
   ensures is_heap_from(items.model(), limit: limit, floor: start)
-  ensures forall index in limit..items.length() => identical(items.model()[index], old(items.model())[index])
-  ensures top < items.length() ==> forall index in 0..limit => items[index] <= items[top]
+  ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
   cost time O(log(items.length()) * time(Element.compare))
 {
   if start >= limit / 2 {
@@ -1179,8 +1204,8 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USiz
     invariant !settled ==> is_heap_except(items.model(), limit: limit, floor: start, hole: hole)
     invariant !settled && hole > start ==> children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
     invariant settled ==> is_heap_from(items.model(), limit: limit, floor: start)
-    invariant forall index in limit..items.length() => identical(items.model()[index], old(items.model())[index])
-    invariant top < items.length() ==> forall index in 0..limit => items[index] <= items[top]
+    invariant forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
+    invariant top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
     decreases limit - hole + (if settled { 0 } else { 1 })
     cost time O(log(width) * time(Element.compare))
   {
@@ -1216,7 +1241,7 @@ theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: USi
   requires limit <= items.length()
   requires is_heap_from(items.model(), limit: limit, floor: 0)
   requires bound <= limit
-  ensures forall position in 0..items.length() => position < bound ==> items[position] <= items[0]
+  ensures forall i in 0..items.length() => i < bound ==> items[i] <= items[0]
   decreases bound
   cost time finite
 {
@@ -1251,7 +1276,7 @@ theorem moving_root_keeps_heap[Element: Ordered](before: Slice[Element], after: 
   requires limit <= before.length()
   requires bound <= (limit - 1) / 2
   requires is_heap_from(before.model(), limit: limit, floor: 0)
-  requires forall index in 0..before.length() => index == 0 || index == limit - 1 || identical(after.model()[index], before.model()[index])
+  requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
   ensures forall parent in 0..limit => parent >= bound || parent == 0 || parent_holds(after.model(), limit: limit - 1, parent: parent)
   decreases bound
   cost time finite
@@ -1270,11 +1295,11 @@ theorem moved_root_is_largest[Element: Ordered](before: Slice[Element], after: S
   requires 2 <= limit
   requires limit <= before.length()
   requires bound <= limit - 1
-  requires forall index in 0..before.length() => index < limit ==> before[index] <= before[0]
+  requires forall i in 0..before.length() => i < limit ==> before[i] <= before[0]
   requires identical(after.model()[0], before.model()[limit - 1])
   requires identical(after.model()[limit - 1], before.model()[0])
-  requires forall index in 0..before.length() => index == 0 || index == limit - 1 || identical(after.model()[index], before.model()[index])
-  ensures forall index in 0..limit - 1 => index >= bound || after[index] <= after[limit - 1]
+  requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
+  ensures forall i in 0..limit - 1 => i >= bound || after[i] <= after[limit - 1]
   decreases bound
   cost time finite
 {
@@ -1290,9 +1315,9 @@ theorem unchanged_tail_stays_sorted[Element: Ordered](before: Slice[Element], af
   requires before.length() == after.length()
   requires from <= bound
   requires bound <= before.length()
-  requires forall index in 1..before.length() => index > from ==> before[index - 1] <= before[index]
-  requires forall index in from..before.length() => identical(after.model()[index], before.model()[index])
-  ensures forall index in 1..after.length() => index > from && index < bound ==> after[index - 1] <= after[index]
+  requires forall i in 1..before.length() => i > from ==> before[i - 1] <= before[i]
+  requires forall i in from..before.length() => identical(after.model()[i], before.model()[i])
+  ensures forall i in 1..after.length() => i > from && i < bound ==> after[i - 1] <= after[i]
   decreases bound - from
   cost time finite
 {
@@ -1309,12 +1334,12 @@ fn put_largest_last[Element: Ordered](items: mut Slice[Element], unsorted: USize
   requires 2 <= unsorted
   requires unsorted <= items.length()
   requires is_heap_from(items.model(), limit: unsorted, floor: 0)
-  requires unsorted >= items.length() || (forall index in 0..unsorted => items[index] <= items[unsorted])
+  requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
   ensures items.length() == old(items.length())
   ensures is_heap_except(items.model(), limit: unsorted - 1, floor: 0, hole: 0)
-  ensures forall index in 0..unsorted - 1 => items[index] <= items[unsorted - 1]
+  ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
   ensures identical(items.model()[unsorted - 1], old(items.model())[0])
-  ensures forall index in unsorted..items.length() => identical(items.model()[index], old(items.model())[index])
+  ensures forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
   cost time O(1)
 {
@@ -1334,18 +1359,18 @@ fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: US
   requires 2 <= unsorted
   requires unsorted <= items.length()
   requires is_heap_from(items.model(), limit: unsorted, floor: 0)
-  requires forall index in 1..items.length() => index <= unsorted || items[index - 1] <= items[index]
-  requires unsorted >= items.length() || (forall index in 0..unsorted => items[index] <= items[unsorted])
+  requires forall i in 1..items.length() => i <= unsorted || items[i - 1] <= items[i]
+  requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
   ensures items.length() == old(items.length())
   ensures is_heap_from(items.model(), limit: unsorted - 1, floor: 0)
-  ensures forall index in 1..items.length() => index > unsorted - 1 ==> items[index - 1] <= items[index]
-  ensures forall index in 0..unsorted - 1 => items[index] <= items[unsorted - 1]
+  ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
+  ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
   cost time O(log(items.length()) * time(Element.compare))
 {
   put_largest_last(mut items, unsorted: unsorted)
   settle(mut items, start: 0, limit: unsorted - 1, top: unsorted - 1)
   proof {
-    assert forall index in unsorted..items.length() => identical(items.model()[index], old(items.model())[index])
+    assert forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
     unchanged_tail_stays_sorted(old(items), after: items, from: unsorted, bound: items.length())
     assert unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
   }
@@ -1363,8 +1388,8 @@ fn drain_heap[Element: Ordered](items: mut Slice[Element])
     invariant items.length() == count
     invariant unsorted <= count
     invariant is_heap_from(items.model(), limit: unsorted, floor: 0)
-    invariant forall index in 1..count => index > unsorted ==> items[index - 1] <= items[index]
-    invariant unsorted < count ==> forall index in 0..unsorted => items[index] <= items[unsorted]
+    invariant forall i in 1..count => i > unsorted ==> items[i - 1] <= items[i]
+    invariant unsorted < count ==> forall i in 0..unsorted => items[i] <= items[unsorted]
     decreases unsorted
     cost time O((count - unsorted) * log(count) * time(Element.compare))
   {
@@ -1376,7 +1401,7 @@ fn drain_heap[Element: Ordered](items: mut Slice[Element])
 theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: USize)
   requires items.is_sorted()
   requires bound <= items.length()
-  ensures forall index in 1..items.length() => index < bound ==> items.model()[index - 1] <= items.model()[index]
+  ensures forall i in 1..items.length() => i < bound ==> items.model()[i - 1] <= items.model()[i]
   decreases bound
   cost time finite
 {
@@ -1389,16 +1414,16 @@ theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: USize)
 
 public theorem is_sorted_orders_model[Element: Ordered](items: Slice[Element])
   requires items.is_sorted()
-  ensures forall index in 1..items.length() => items.model()[index - 1] <= items.model()[index]
+  ensures forall i in 1..items.length() => items.model()[i - 1] <= items.model()[i]
   cost time finite
 {
   sorted_in_model(items, bound: items.length())
 }
 
 internal theorem sorted_from_model[Element: Ordered](items: Slice[Element], bound: USize)
-  requires forall index in 1..items.length() => items.model()[index - 1] <= items.model()[index]
+  requires forall i in 1..items.length() => items.model()[i - 1] <= items.model()[i]
   requires bound <= items.length()
-  ensures forall index in 1..items.length() => index < bound ==> items[index - 1] <= items[index]
+  ensures forall i in 1..items.length() => i < bound ==> items[i - 1] <= items[i]
   decreases bound
   cost time finite
 {
@@ -1412,7 +1437,7 @@ internal theorem sorted_from_model[Element: Ordered](items: Slice[Element], boun
 public fn Slice[Element: Ordered].sort(mut self)
   ensures self.length() == old(self.length())
   ensures self.is_sorted()
-  ensures forall index in 1..self.length() => self.model()[index - 1] <= self.model()[index]
+  ensures forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
   build_heap(mut self)
@@ -1557,7 +1582,7 @@ public fn Slice[Element].max_by(
 impl Equal for Slice[Element: Equal] {
   fn equal(self, other: Slice[Element]) -> Bool
     ensures result == (self.length() == other.length()
-      && forall position in 0..self.length() => self.model()[position] == other.model()[position])
+      && forall i in 0..self.length() => self.model()[i] == other.model()[i])
   {
     if self.length() != other.length() {
       return false
@@ -1565,7 +1590,7 @@ impl Equal for Slice[Element: Equal] {
     var index: USize = 0
     while index < self.length()
       invariant index <= self.length()
-      invariant forall position in 0..index => self.model()[position] == other.model()[position]
+      invariant forall i in 0..index => self.model()[i] == other.model()[i]
       decreases self.length() - index
     {
       if self[index] != other[index] {
@@ -1577,12 +1602,25 @@ impl Equal for Slice[Element: Equal] {
   }
 }
 
-public transparent fn lexicographic[Element: Ordered](
+public fn lexicographic[Element: Ordered](
   first: Sequence[Element],
   second: Sequence[Element],
   from: Integer,
 ) -> Ordering
   requires 0 <= from
+  ensures result == (if from < first.length() && from < second.length() {
+      if first[from].compare(second[from]) == Ordering.Equal {
+        lexicographic(first, second: second, from: from + 1)
+      } else {
+        first[from].compare(second[from])
+      }
+    } else if first.length() < second.length() {
+      Ordering.Less
+    } else if first.length() > second.length() {
+      Ordering.Greater
+    } else {
+      Ordering.Equal
+    })
   decreases first.length() - from
   cost time finite
 {
@@ -1608,7 +1646,7 @@ internal theorem lexicographic_agrees_with_equal[Element: Ordered](
 )
   requires 0 <= from
   ensures (lexicographic(first, second: second, from: from) == Ordering.Equal)
-    == (first.length() == second.length() && forall index in from..first.length() => first[index] == second[index])
+    == (first.length() == second.length() && forall i in from..first.length() => first[i] == second[i])
   decreases first.length() - from
   cost time finite
 {

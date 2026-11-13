@@ -34,6 +34,7 @@
   evaluator
   token
   database
+  graph_types
   types
   syntax_print
   ownership

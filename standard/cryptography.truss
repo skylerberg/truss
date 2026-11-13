@@ -1,4 +1,6 @@
 use standard::cryptography::elliptic
+use standard::cryptography::keccak
+use standard::cryptography::mlkem
 use standard::cryptography::modular
 use standard::intrinsic
 
@@ -433,6 +435,45 @@ public fn sha384(bytes: Slice[UInt8]) -> Array[UInt8, 48]
   var hasher = Sha384.new()
   mut hasher.update(bytes)
   own hasher.finish()
+}
+
+fn fill_32(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
+  var filled: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let width: USize = 32
+  for index in 0..width {
+    if index < bytes.length() {
+      filled[index] = bytes[index]
+    }
+  }
+  filled
+}
+
+public fn sha3_256(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
+  let digest = keccak::hash(136, message: bytes, suffix: 6, count: 32)
+  fill_32(digest.slice())
+}
+
+public fn sha3_512(bytes: Slice[UInt8]) -> Array[UInt8, 64] {
+  let digest = keccak::hash(72, message: bytes, suffix: 6, count: 64)
+  var filled: Array[UInt8, 64] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let width: USize = 64
+  for index in 0..width {
+    if index < digest.length() {
+      filled[index] = digest[index]
+    }
+  }
+  filled
+}
+
+public fn shake128(bytes: Slice[UInt8], length: USize) -> List[UInt8] {
+  keccak::hash(168, message: bytes, suffix: 31, count: length)
+}
+
+public fn shake256(bytes: Slice[UInt8], length: USize) -> List[UInt8] {
+  keccak::hash(136, message: bytes, suffix: 31, count: length)
 }
 
 public fn sha1(bytes: Slice[UInt8]) -> Array[UInt8, 20]
@@ -2557,6 +2598,58 @@ internal fn aes_substitute(byte: UInt8) -> UInt8
     ^ 0x63
 }
 
+internal type AesKeys(bytes: Array[UInt8, 240], rounds: USize)
+  invariant rounds == 10 || rounds == 14
+
+internal fn aes128_round_keys(key: Array[UInt8, 16]) -> AesKeys
+  cost time O(1)
+  cost allocations == 0
+{
+  var keys: Array[UInt8, 240] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let key_length: USize = 16
+  for index in 0..key_length
+    cost allocations == 0
+  {
+    keys[index] = key[index]
+  }
+  var round_constant: UInt8 = 1
+  let words: USize = 40
+  for step in 0..words
+    cost allocations == 0
+  {
+    let word = step + 4
+    let at = 4 * word
+    var first = keys[at - 4]
+    var second = keys[at - 3]
+    var third = keys[at - 2]
+    var fourth = keys[at - 1]
+    if word % 4 == 0 {
+      let rotated = first
+      first = aes_substitute(second) ^ round_constant
+      second = aes_substitute(third)
+      third = aes_substitute(fourth)
+      fourth = aes_substitute(rotated)
+      round_constant = gf256_double(round_constant)
+    }
+    keys[at] = keys[at - 16] ^ first
+    keys[at + 1] = keys[at - 15] ^ second
+    keys[at + 2] = keys[at - 14] ^ third
+    keys[at + 3] = keys[at - 13] ^ fourth
+  }
+  AesKeys(bytes: keys, rounds: 10)
+}
+
 internal fn aes256_round_keys(key: Array[UInt8, 32]) -> Array[UInt8, 240]
   cost time O(1)
   cost allocations == 0
@@ -2662,21 +2755,21 @@ internal fn aes_mix_columns(state: Array[UInt8, 16]) -> Array[UInt8, 16]
   mixed
 }
 
-internal fn aes256_encrypt_block(keys: Array[UInt8, 240], block: Array[UInt8, 16]) -> Array[UInt8, 16]
+internal fn aes_encrypt_block(keys: AesKeys, block: Array[UInt8, 16]) -> Array[UInt8, 16]
   cost time O(1)
   cost allocations == 0
 {
   var state = block
-  aes_add_round_key(mut state, keys: keys, round: 0)
-  let rounds: USize = 13
-  for round in 0..rounds
+  aes_add_round_key(mut state, keys: keys.bytes, round: 0)
+  let middle = keys.rounds - 1
+  for round in 0..middle
     cost allocations == 0
   {
     state = aes_mix_columns(aes_substitute_and_shift(state))
-    aes_add_round_key(mut state, keys: keys, round: round + 1)
+    aes_add_round_key(mut state, keys: keys.bytes, round: round + 1)
   }
   state = aes_substitute_and_shift(state)
-  aes_add_round_key(mut state, keys: keys, round: 14)
+  aes_add_round_key(mut state, keys: keys.bytes, round: keys.rounds)
   state
 }
 
@@ -2827,7 +2920,7 @@ internal fn aes_gcm_counter_block(nonce: Array[UInt8, 12], counter: UInt32) -> A
 internal fn aes_gcm_xor(
   output: mut intrinsic::Storage[UInt8],
   input: Slice[UInt8],
-  keys: Array[UInt8, 240],
+  keys: AesKeys,
   nonce: Array[UInt8, 12],
 )
   requires intrinsic::storage_length(output) + input.length() <= intrinsic::storage_capacity(output)
@@ -2846,14 +2939,14 @@ internal fn aes_gcm_xor(
   {
     if index % 16 == 0 {
       let number: UInt32 = intrinsic::convert((index / 16 + 2) % 4294967296)
-      block = aes256_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: number))
+      block = aes_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: number))
     }
     intrinsic::storage_push(mut output, value: input[index] ^ block[index % 16])
   }
 }
 
 internal fn aes_gcm_tag(
-  keys: Array[UInt8, 240],
+  keys: AesKeys,
   nonce: Array[UInt8, 12],
   associated_data: Slice[UInt8],
   ciphertext: Slice[UInt8],
@@ -2862,14 +2955,14 @@ internal fn aes_gcm_tag(
   cost allocations == 0
 {
   let zero: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  var hash = Ghash.new(Block128.from_bytes(aes256_encrypt_block(keys, block: zero)))
+  var hash = Ghash.new(Block128.from_bytes(aes_encrypt_block(keys, block: zero)))
   mut hash.update(associated_data)
   mut hash.pad_to_block()
   mut hash.update(ciphertext)
   mut hash.pad_to_block()
   mut hash.update_bit_length(associated_data.length())
   mut hash.update_bit_length(ciphertext.length())
-  let mask = aes256_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: 1))
+  let mask = aes_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: 1))
   var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let count: USize = 16
   for index in 0..count
@@ -2890,7 +2983,7 @@ internal fn aes256_gcm_seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  let keys = aes256_round_keys(key)
+  let keys = AesKeys(bytes: aes256_round_keys(key), rounds: 14)
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
   aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
   let tag = aes_gcm_tag(
@@ -2916,7 +3009,55 @@ internal fn aes256_gcm_open(
   }
   cost time O(sealed.length() + associated_data.length())
 {
-  let keys = aes256_round_keys(key)
+  let keys = AesKeys(bytes: aes256_round_keys(key), rounds: 14)
+  let length = sealed.length() - 16
+  let ciphertext = sealed[..length]
+  let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
+  if !constant_time_equal(tag[..], second: sealed[length..]) {
+    return Err(AuthenticationError())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  aes_gcm_xor(mut output, input: ciphertext, keys: keys, nonce: nonce)
+  Ok(List(storage: own output))
+}
+
+internal fn aes128_gcm_seal(
+  key: Array[UInt8, 16],
+  nonce: Array[UInt8, 12],
+  plaintext: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> List[UInt8]
+  requires plaintext.length() <= USize.maximum - 16
+  ensures result.length() == plaintext.length() + 16
+  cost time O(plaintext.length() + associated_data.length())
+{
+  let keys = aes128_round_keys(key)
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
+  aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
+  let tag = aes_gcm_tag(
+    keys,
+    nonce: nonce,
+    associated_data: associated_data,
+    ciphertext: Slice(elements: intrinsic::storage_view(output)),
+  )
+  push_tag(mut output, tag: tag)
+  List(storage: own output)
+}
+
+internal fn aes128_gcm_open(
+  key: Array[UInt8, 16],
+  nonce: Array[UInt8, 12],
+  sealed: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> Result[List[UInt8], AuthenticationError]
+  requires sealed.length() >= 16
+  ensures match result {
+    Ok(plaintext) => plaintext.length() + 16 == sealed.length()
+    Err(_) => true
+  }
+  cost time O(sealed.length() + associated_data.length())
+{
+  let keys = aes128_round_keys(key)
   let length = sealed.length() - 16
   let ciphertext = sealed[..length]
   let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
@@ -4137,6 +4278,7 @@ public opaque type RsaPrivateKey(
   second_exponent: List[UInt8],
   coefficient: List[UInt8],
 )
+  derives Copyable
 
 public fn RsaPrivateKey.new(
   public_key: RsaPublicKey,
@@ -4251,4 +4393,76 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UI
   mut encoded.append(own hashed)
   mut encoded.push(188)
   signed_or_crash(self, encoded: encoded.slice())
+}
+
+public opaque type DecapsulationKey(bytes: List[UInt8])
+  derives Copyable
+
+public opaque type EncapsulationKey(bytes: List[UInt8])
+  derives Equal, Copyable
+
+public type Encapsulation(ciphertext: List[UInt8], shared: SecretKey)
+
+public fn DecapsulationKey.from_seed(seed: Array[UInt8, 64]) -> DecapsulationKey {
+  let pair = mlkem::generate(seed[0..32], rejection: seed[32..64])
+  DecapsulationKey(bytes: own pair.decapsulation)
+}
+
+public fn DecapsulationKey.generate() -> DecapsulationKey
+  uses Random
+{
+  let first = random_32_bytes()
+  let second = random_32_bytes()
+  let pair = mlkem::generate(first[..], rejection: second[..])
+  DecapsulationKey(bytes: own pair.decapsulation)
+}
+
+public fn DecapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[DecapsulationKey] {
+  if bytes.length() == mlkem::decapsulation_key_length && mlkem::is_valid_decapsulation_key(bytes)
+    && mlkem::is_valid_encapsulation_key(bytes[1152..2336])
+  {
+    Some(DecapsulationKey(bytes: bytes.to_list()))
+  } else {
+    None
+  }
+}
+
+public fn DecapsulationKey.bytes(self) -> Slice[UInt8] {
+  self.bytes.slice()
+}
+
+public fn DecapsulationKey.encapsulation_key(self) -> EncapsulationKey {
+  let stop = if self.bytes.length() >= 2336 { 2336 } else { self.bytes.length() }
+  let start = if stop >= 1152 { 1152 } else { stop }
+  EncapsulationKey(bytes: self.bytes[start..stop].to_list())
+}
+
+public fn DecapsulationKey.decapsulate(self, ciphertext: Slice[UInt8]) -> Option[SecretKey] {
+  if ciphertext.length() != mlkem::ciphertext_length {
+    return None
+  }
+  let shared = mlkem::decapsulate(self.bytes.slice(), ciphertext: ciphertext)
+  if shared.length() != 32 {
+    return None
+  }
+  Some(SecretKey(bytes: fill_32(shared.slice())))
+}
+
+public fn EncapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[EncapsulationKey] {
+  if mlkem::is_valid_encapsulation_key(bytes) { Some(EncapsulationKey(bytes: bytes.to_list())) } else { None }
+}
+
+public fn EncapsulationKey.bytes(self) -> Slice[UInt8] {
+  self.bytes.slice()
+}
+
+public fn EncapsulationKey.encapsulate_with(self, message: Array[UInt8, 32]) -> Encapsulation {
+  let encapsulated = mlkem::encapsulate(self.bytes.slice(), message: message[..])
+  Encapsulation(ciphertext: own encapsulated.ciphertext, shared: SecretKey(bytes: fill_32(encapsulated.shared.slice())))
+}
+
+public fn EncapsulationKey.encapsulate(self) -> Encapsulation
+  uses Random
+{
+  self.encapsulate_with(random_32_bytes())
 }

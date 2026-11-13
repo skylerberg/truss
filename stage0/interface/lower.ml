@@ -535,5 +535,4 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
           | Own, Function _ -> Some parameter.name
           | _ -> None)
         parameters;
-    transparent = false;
   }

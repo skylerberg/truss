@@ -21,6 +21,19 @@ internal type Decoded(character: Character, length: USize)
 
 internal fn sequence_length(first: UInt8) -> USize
   ensures result <= 4
+  ensures result == (if first < 128 {
+      1
+    } else if first < 194 {
+      0
+    } else if first < 224 {
+      2
+    } else if first < 240 {
+      3
+    } else if first < 245 {
+      4
+    } else {
+      0
+    })
   cost time O(1)
   cost allocations == 0
 {
@@ -167,7 +180,8 @@ public fn StringSlice.is_ascii(self) -> Bool
   true
 }
 
-public transparent fn StringSlice.is_boundary(self, offset: USize) -> Bool
+public fn StringSlice.is_boundary(self, offset: USize) -> Bool
+  ensures result == (offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80))
   cost time O(1)
 {
   offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80)
@@ -332,7 +346,7 @@ public fn StringSlice.split_at(self, offset: USize) -> core::Pair[StringSlice, S
 
 internal fn failure_table(pattern: StringSlice) -> List[USize]
   ensures result.length() == pattern.length()
-  ensures forall position in 0..result.length() => result.model()[position] <= position
+  ensures forall i in 0..result.length() => result.model()[i] <= i
   cost time O(pattern.length())
 {
   var table: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(pattern.length())
@@ -348,7 +362,7 @@ internal fn failure_table(pattern: StringSlice) -> List[USize]
     invariant matched < index
     invariant intrinsic::storage_length(table) == index
     invariant intrinsic::storage_capacity(table) == pattern.length()
-    invariant forall position in 0..index => intrinsic::storage_model(table)[position] <= position
+    invariant forall i in 0..index => intrinsic::storage_model(table)[i] <= i
     decreases pattern.length() - index
     cost time O(2 * index - matched)
   {
@@ -373,7 +387,7 @@ internal fn StringSlice.advance(self, pattern: StringSlice, table: Slice[USize],
   requires index < self.length()
   requires matched < pattern.length()
   requires table.length() == pattern.length()
-  requires forall position in 0..table.length() => table.model()[position] <= position
+  requires forall i in 0..table.length() => table.model()[i] <= i
   ensures result <= matched + 1
   ensures result <= pattern.length()
   cost time O(matched + 1 - result)
@@ -392,7 +406,7 @@ internal fn StringSlice.advance(self, pattern: StringSlice, table: Slice[USize],
 internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[USize]) -> Option[USize]
   requires pattern.length() > 0
   requires table.length() == pattern.length()
-  requires forall position in 0..table.length() => table.model()[position] <= position
+  requires forall i in 0..table.length() => table.model()[i] <= i
   ensures !(result is Some(offset)
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length())
@@ -534,12 +548,16 @@ public fn StringSlice.occurrences(self, pattern: StringSlice) -> USize
 }
 
 public fn StringSlice.starts_with(self, prefix: StringSlice) -> Bool
+  ensures result ==> prefix.length() <= self.length()
+  ensures result == (prefix.length() <= self.length() && self.matches_at(prefix, offset: 0))
   cost time O(prefix.length())
 {
   prefix.length() <= self.length() && self.matches_at(prefix, offset: 0)
 }
 
 public fn StringSlice.ends_with(self, suffix: StringSlice) -> Bool
+  ensures result ==> suffix.length() <= self.length()
+  ensures result == (suffix.length() <= self.length() && self.matches_at(suffix, offset: self.length() - suffix.length()))
   cost time O(suffix.length())
 {
   suffix.length() <= self.length() && self.matches_at(suffix, offset: self.length() - suffix.length())

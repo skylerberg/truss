@@ -217,3 +217,7 @@ let instance context (key : Instance.key) : Lir.t =
   | Program_main main -> program_main context key main
   | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
   | _ -> bug "%s is not code from source" (Instance.to_string key)
+
+module For_testing = struct
+  let constant_value = constant_value
+end

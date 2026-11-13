@@ -13,6 +13,7 @@ public fn Handle.simulated(number: UInt64) -> Handle
 }
 
 public fn Handle.number(self) -> UInt64
+  ensures result == (self.number)
   cost time O(1)
 {
   self.number
@@ -306,6 +307,10 @@ public fn BufferedReader[Source: Reader].peek(mut self, count: USize) -> Result[
   let available = self.pending.length() - self.start
   let shown = if available < count { available } else { count }
   Ok(self.pending.slice_range(self.start, stop: self.start + shown))
+}
+
+public fn BufferedReader[Source: Reader].buffered(self) -> USize {
+  self.pending.length() - self.start
 }
 
 public fn BufferedReader[Source: Reader].finish(own self) -> Source {

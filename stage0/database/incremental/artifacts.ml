@@ -77,7 +77,7 @@ type artifact = {
 let same_reads engine reads (base : node) =
   List.map identity reads = List.map identity (current_reads engine base)
 
-let write ?(full = false) engine =
+let write ?(full = false) ?stores_every_value engine =
   let store = require_store engine in
   check_can_change engine;
   sweep engine;
@@ -134,7 +134,7 @@ let write ?(full = false) engine =
         place
   in
   let written ?(unset = false) (node : node) saved_reads =
-    ensure_stored engine node;
+    ensure_stored ?stores_every_value engine node;
     node.written <- (if full then In_whole else In_difference);
     Some
       {

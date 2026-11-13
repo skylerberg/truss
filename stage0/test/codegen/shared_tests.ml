@@ -45,7 +45,9 @@ let () =
         (fun workers ->
           Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
           match
-            Compile.run_program compile ~main:(Top { module_ = probe; name = "main" }) ~arguments:[]
+            Compile.For_testing.run_program compile
+              ~main:(Top { module_ = probe; name = "main" })
+              ~arguments:[]
           with
           | Ok (0, output, _) -> expect_string ~expected:"released\n" output
           | Ok (status, _, errors) -> fail "ended with status %d: %s" status errors

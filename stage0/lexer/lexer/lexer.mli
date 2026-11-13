@@ -8,5 +8,9 @@ val lex : Source.t -> Token.t array * Diagnostic.t list
 
 (** The lexer's own modules, for its tests. *)
 module For_testing : sig
-  module Layout = Layout
+  val can_end : Token.kind -> bool
+  (** Whether a token can end a statement. *)
+
+  val can_begin : Token.kind -> bool
+  (** Whether a token can begin a statement. *)
 end

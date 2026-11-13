@@ -36,61 +36,35 @@ let covers ~clause ~counter =
       Path.equal left right && left_method = right_method
   | _ -> false
 
-(* The constants of one [O(...)] bound: two symbols, which each query that
-   mentions them pins to one pair from the list, tried in order. *)
-type constants = {
-  factor : Logic.symbol;
-  addend : Logic.symbol;
-  mutable pairs : (Z.t * Z.t) list;
-      (** Cut to the first when the bound is assumed of another function in a cycle, which is proven
-          with that pair. *)
-}
-
-let pairs = [ (Z.shift_left Z.one 17, Z.shift_left Z.one 16); (Z.shift_left Z.one 17, Z.zero) ]
-
-let constants group =
-  { factor = Symbol.Cost_factor group; addend = Symbol.Cost_addend group; pairs }
-
-(* [c * f + d]. *)
-let bound constants bound_function =
+(* [O(f)] promises a cost of at most [c * f + d] for some constants. Every
+   bound is proven with the same [c] and [d], so a call back into a
+   definition through a cycle assumes the bound the definition proves. *)
+let bound bound_function =
   Logic.Operation
     ( "+",
       [
-        Logic.Operation ("*", [ Logic.Symbol constants.factor; bound_function ]);
-        Logic.Symbol constants.addend;
+        Logic.Operation ("*", [ Logic.Integer (Z.shift_left Z.one 17); bound_function ]);
+        Logic.Integer (Z.shift_left Z.one 16);
       ] )
-
-let pin constants (factor, addend) =
-  Logic.(
-    equal (Symbol constants.factor) (Integer factor)
-    &&& equal (Symbol constants.addend) (Integer addend))
 
 let plus left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.add left_value right_value)
-  | (Logic.Integer left_value, other | other, Logic.Integer left_value)
-    when Z.equal left_value Z.zero ->
-      other
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.add x y)
+  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.zero -> other
   | _ -> Logic.Operation ("+", [ left; right ])
 
 let minus left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.sub left_value right_value)
-  | other, Logic.Integer left_value when Z.equal left_value Z.zero -> other
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.sub x y)
+  | other, Logic.Integer x when Z.equal x Z.zero -> other
   | _ when left = right -> zero
   | _ -> Logic.Operation ("-", [ left; right ])
 
 let times left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.mul left_value right_value)
-  | (Logic.Integer left_value, other | other, Logic.Integer left_value)
-    when Z.equal left_value Z.one ->
-      other
-  | (Logic.Integer left_value, _ | _, Logic.Integer left_value) when Z.equal left_value Z.zero ->
-      zero
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.mul x y)
+  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.one -> other
+  | (Logic.Integer x, _ | _, Logic.Integer x) when Z.equal x Z.zero -> zero
   | _ -> Logic.Operation ("*", [ left; right ])
 
 let at_most left right = Logic.Operation ("<=", [ left; right ])
@@ -102,8 +76,7 @@ let at_least_zero term =
 
 let larger left right =
   match (left, right) with
-  | Logic.Integer left_value, Logic.Integer right_value ->
-      Logic.Integer (Z.max left_value right_value)
+  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.max x y)
   | _ when left = right -> left
   | _ -> Logic.ite (Logic.Operation (">=", [ left; right ])) left right
 

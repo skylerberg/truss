@@ -37,81 +37,72 @@ let truth value = Some (Lir.Static_scalar (Bool value))
 let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
     (right : Lir.static_value) =
   match (left, right) with
-  | Static_scalar (Integer (kind, left_value)), Static_scalar (Integer (_, right_value)) -> (
+  | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
       let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
       let number value =
         let* kind = integer_kind st ty in
         integer st kind value
       in
       let shift by =
-        if Z.sign right_value >= 0 && Z.lt right_value (Z.of_int bits) then
-          number (by left_value (Z.to_int right_value))
-        else None
+        if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
       in
       match operation with
-      | Add -> number (Z.add left_value right_value)
-      | Subtract -> number (Z.sub left_value right_value)
-      | Multiply -> number (Z.mul left_value right_value)
-      | Divide -> if Z.equal right_value Z.zero then None else number (Z.div left_value right_value)
-      | Remainder ->
-          if Z.equal right_value Z.zero then None else number (Z.rem left_value right_value)
-      | Bit_and -> number (Z.logand left_value right_value)
-      | Bit_or -> number (Z.logor left_value right_value)
-      | Bit_xor -> number (Z.logxor left_value right_value)
+      | Add -> number (Z.add x y)
+      | Subtract -> number (Z.sub x y)
+      | Multiply -> number (Z.mul x y)
+      | Divide -> if Z.equal y Z.zero then None else number (Z.div x y)
+      | Remainder -> if Z.equal y Z.zero then None else number (Z.rem x y)
+      | Bit_and -> number (Z.logand x y)
+      | Bit_or -> number (Z.logor x y)
+      | Bit_xor -> number (Z.logxor x y)
       | Shift_left -> shift Z.shift_left
       | Shift_right -> shift Z.shift_right
       | _ -> None)
-  | Static_scalar (Float64 left_value), Static_scalar (Float64 right_value) -> (
+  | Static_scalar (Float64 x), Static_scalar (Float64 y) -> (
       let number value = Some (Lir.Static_scalar (Float64 (Int64.bits_of_float value))) in
-      let left_value = Int64.float_of_bits left_value
-      and right_value = Int64.float_of_bits right_value in
+      let x = Int64.float_of_bits x and y = Int64.float_of_bits y in
       match operation with
-      | Add -> number (left_value +. right_value)
-      | Subtract -> number (left_value -. right_value)
-      | Multiply -> number (left_value *. right_value)
-      | Divide -> number (left_value /. right_value)
+      | Add -> number (x +. y)
+      | Subtract -> number (x -. y)
+      | Multiply -> number (x *. y)
+      | Divide -> number (x /. y)
       | _ -> None)
-  | Static_scalar (Float32 left_value), Static_scalar (Float32 right_value) -> (
+  | Static_scalar (Float32 x), Static_scalar (Float32 y) -> (
       let number value = Some (Lir.Static_scalar (Float32 (Int32.bits_of_float value))) in
-      let left_value = Int32.float_of_bits left_value
-      and right_value = Int32.float_of_bits right_value in
+      let x = Int32.float_of_bits x and y = Int32.float_of_bits y in
       match operation with
-      | Add -> number (left_value +. right_value)
-      | Subtract -> number (left_value -. right_value)
-      | Multiply -> number (left_value *. right_value)
-      | Divide -> number (left_value /. right_value)
+      | Add -> number (x +. y)
+      | Subtract -> number (x -. y)
+      | Multiply -> number (x *. y)
+      | Divide -> number (x /. y)
       | _ -> None)
   | _ -> None
 
 let negated st (value : Lir.static_value) =
   match value with
-  | Static_scalar (Integer (kind, left_value)) -> integer st kind (Z.neg left_value)
-  | Static_scalar (Float64 left_value) ->
-      Some
-        (Lir.Static_scalar
-           (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits left_value)))))
-  | Static_scalar (Float32 left_value) ->
-      Some
-        (Lir.Static_scalar
-           (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits left_value)))))
+  | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
+  | Static_scalar (Float64 x) ->
+      Some (Lir.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
+  | Static_scalar (Float32 x) ->
+      Some (Lir.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
   | _ -> None
 
 (* A comparison of two folded integers or two folded [Bool]s. *)
 let compared (comparison : Core.comparison) (left : Lir.static_value) (right : Lir.static_value) =
   match (left, right) with
-  | Static_scalar (Integer (_, left_value)), Static_scalar (Integer (_, right_value)) ->
+  | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->
       truth
         (match comparison with
-        | Equal -> Z.equal left_value right_value
-        | Not_equal -> not (Z.equal left_value right_value)
-        | Less -> Z.lt left_value right_value
-        | Less_equal -> Z.leq left_value right_value
-        | Greater -> Z.gt left_value right_value
-        | Greater_equal -> Z.geq left_value right_value)
-  | Static_scalar (Bool left_value), Static_scalar (Bool right_value) -> (
+        | Equal -> Z.equal x y
+        | Not_equal -> not (Z.equal x y)
+        | Less -> Z.lt x y
+        | Less_equal -> Z.leq x y
+        | Greater -> Z.gt x y
+        | Greater_equal -> Z.geq x y)
+  | Static_scalar (Bool x), Static_scalar (Bool y) -> (
       match comparison with
-      | Equal -> truth (left_value = right_value)
-      | Not_equal -> truth (left_value <> right_value)
+      | Equal -> truth (x = y)
+      | Not_equal -> truth (x <> y)
       | Less | Less_equal | Greater | Greater_equal -> None)
   | _ -> None
 
@@ -192,15 +183,13 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
       compared comparison left right
   | Not inner -> (
       let* inner = fold_here inner in
-      match inner with Static_scalar (Bool left_value) -> truth (not left_value) | _ -> None)
+      match inner with Static_scalar (Bool x) -> truth (not x) | _ -> None)
   | And (left, right) | Or (left, right) -> (
       let* left = fold_here left in
       let* right = fold_here right in
       match (value.kind, left, right) with
-      | And _, Static_scalar (Bool left_value), Static_scalar (Bool right_value) ->
-          truth (left_value && right_value)
-      | Or _, Static_scalar (Bool left_value), Static_scalar (Bool right_value) ->
-          truth (left_value || right_value)
+      | And _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x && y)
+      | Or _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x || y)
       | _ -> None)
   | Block { statements; value = Some result; _ } ->
       let* _ = all (List.map (fold_statement ~depth st locals) statements) in

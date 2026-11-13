@@ -328,6 +328,7 @@ internal fn parse_path_query_fragment(text: StringSlice, from: USize) -> Result[
 
 internal fn starts_authority(text: StringSlice, from: USize) -> Bool
   requires from <= text.length()
+  ensures result == (text.length() - from >= 2 && text.byte(from) == 47 && text.byte(from + 1) == 47)
   cost time O(1)
   cost allocations == 0
 {

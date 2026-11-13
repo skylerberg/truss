@@ -45,7 +45,8 @@ let run ~directory ~position ~json =
                         (fun (result : Infer.type_check_result) -> result.tables)
                         (Query.demand context Infer.type_check_result key)
                     in
-                    Inspect.explain_at definition resolved tables ~text (offset - base)
+                    Inspect.explain_at ~path:key.path definition resolved tables ~text
+                      (offset - base)
                 | _ -> None)
             | _ -> None)
           (Query.demand context Names.declarations module_)

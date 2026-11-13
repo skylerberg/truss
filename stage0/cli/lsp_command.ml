@@ -412,3 +412,14 @@ let check_buffers = function
 let check_arguments ~root encoding buffers =
   "__check-buffers" :: root :: encoding_name encoding
   :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
+
+module For_testing = struct
+  let position = position
+  let offset = offset
+
+  type nonrec server = server
+
+  let create = create
+  let handle server message = ignore (handle server message)
+  let refresh = refresh
+end

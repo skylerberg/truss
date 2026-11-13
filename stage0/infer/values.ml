@@ -312,6 +312,7 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
                     let branch = build_expression state branch in
                     { Core.statements = []; value = Some branch })
               else_;
+          binds_lent_part = Form.binds_lent_part state condition;
         });
   match else_ with
   | None ->

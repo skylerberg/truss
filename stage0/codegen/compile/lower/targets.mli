@@ -135,13 +135,3 @@ val pull_loop :
   unit
 
 val boxed_cursor : Lowering.state -> Ground.yielding -> Lir.place
-
-val trait_call :
-  Lowering.state ->
-  trait:Path.t ->
-  name:string ->
-  receiver:Path.receiver ->
-  self:Ground.ty ->
-  arguments:(Types.mode * Ground.ty * Lir.place) list ->
-  destination:Lir.place ->
-  unit

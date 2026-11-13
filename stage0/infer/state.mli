@@ -149,6 +149,7 @@ val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val implements : state -> Types.ty -> Types.trait_reference -> Impls.evidence option
 val plain : state -> Types.ty -> bool
+val is_view : state -> Types.ty -> bool
 val copyable : state -> Types.ty -> bool
 val associated : state -> Types.ty -> Types.trait_reference -> string -> at:Syntax.span -> Types.ty
 val evidence_of : Impls.evidence -> Tables.evidence

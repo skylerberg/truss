@@ -437,6 +437,7 @@ let form database (path : Path.t) : Core.t option =
                                     });
                              then_ = giving (ordering "Less");
                              else_ = Some (giving (ordering "Greater"));
+                             binds_lent_part = false;
                            })
                     in
                     let compared =

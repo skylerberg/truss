@@ -35,6 +35,7 @@ public fn Decoder.new(bytes: Slice[UInt8]) -> Decoder
 }
 
 public fn Decoder.position(self) -> USize
+  ensures result == (self.position)
   cost time O(1)
 {
   self.position
@@ -232,6 +233,7 @@ public fn Encoder.onto(bytes: own List[UInt8]) -> Encoder
 }
 
 public fn Encoder.length(self) -> USize
+  ensures result == (self.bytes.length())
   cost time O(1)
 {
   self.bytes.length()

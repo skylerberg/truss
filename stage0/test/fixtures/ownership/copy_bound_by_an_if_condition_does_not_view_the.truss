@@ -1,0 +1,13 @@
+type Cell(index: USize)
+
+fn f(units: List[USize], links: mut List[Cell]) {
+  for unit in units {
+    var ends: List[Cell] = []
+    mut ends.push(Cell(index: unit))
+    if ends.first() is Some(start) && ends.last() is Some(end) {
+      mut links.push(start)
+      mut ends.push(end)
+      mut links.push(end)
+    }
+  }
+}

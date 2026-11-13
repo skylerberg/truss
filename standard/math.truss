@@ -158,6 +158,15 @@ fn limbs_order(first: Sequence[UInt64], second: Sequence[UInt64], below: Integer
   requires 0 <= below
   requires below <= first.length()
   requires below <= second.length()
+  ensures identical(result, if below == 0 {
+      Ordering.Equal
+    } else if first[below - 1] < second[below - 1] {
+      Ordering.Less
+    } else if first[below - 1] > second[below - 1] {
+      Ordering.Greater
+    } else {
+      limbs_order(first, second: second, below: below - 1)
+    })
   decreases below
   cost time finite
 {
@@ -173,6 +182,13 @@ fn limbs_order(first: Sequence[UInt64], second: Sequence[UInt64], below: Integer
 }
 
 fn magnitude_order(first: Sequence[UInt64], second: Sequence[UInt64]) -> Ordering
+  ensures identical(result, if first.length() < second.length() {
+      Ordering.Less
+    } else if first.length() > second.length() {
+      Ordering.Greater
+    } else {
+      limbs_order(first, second: second, below: first.length())
+    })
   cost time finite
 {
   if first.length() < second.length() {
@@ -189,7 +205,7 @@ theorem limbs_order_agrees_with_equal(first: Sequence[UInt64], second: Sequence[
   requires below <= first.length()
   requires below <= second.length()
   ensures (limbs_order(first, second: second, below: below) == Ordering.Equal)
-    == (forall index in 0..below => first[index] == second[index])
+    == (forall i in 0..below => first[i] == second[i])
   decreases below
   cost time finite
 {
@@ -417,14 +433,14 @@ fn divide_small(limbs: mut List[UInt64], divisor: UInt64) -> UInt64
 }
 
 fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
-  ensures forall position in 0..result.length() => result.model()[position] <= 4294967295
+  ensures forall i in 0..result.length() => result.model()[i] <= 4294967295
   cost time finite
 {
   var digits: List[UInt64] = List.with_capacity(limbs.length().saturating_multiply(2))
   var index: USize = 0
   while index < limbs.length()
     invariant index <= limbs.length()
-    invariant forall position in 0..digits.length() => digits.model()[position] <= 4294967295
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
     decreases limbs.length() - index
   {
     mut digits.push(limbs[index] % half_base)
@@ -432,7 +448,7 @@ fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
     index += 1
   }
   while digits.length() > 0 && digits[digits.length() - 1] == 0
-    invariant forall position in 0..digits.length() => digits.model()[position] <= 4294967295
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
     decreases digits.length()
   {
     let _ = mut digits.pop()
@@ -474,6 +490,59 @@ fn shifted_digit(digits: Slice[UInt64], index: USize, shift: USize) -> UInt64
 }
 
 type DigitDivision(quotient: List[UInt64], remainder: List[UInt64])
+
+fn subtract_multiple(remainder: mut List[UInt64], scaled: Slice[UInt64], position: USize, estimate: UInt64) -> UInt64
+  requires position + scaled.length() < remainder.length()
+  ensures remainder.length() == old(remainder.length())
+  cost time finite
+{
+  let count = scaled.length()
+  let length = remainder.length()
+  var borrow: UInt64 = 0
+  var carry: UInt64 = 0
+  var index: USize = 0
+  while index < count
+    invariant index <= count
+    invariant borrow <= 1
+    invariant remainder.length() == length
+    decreases count - index
+  {
+    let product = estimate.wrapping_multiply(scaled[index]).wrapping_add(carry)
+    carry = product / half_base
+    let subtracted = product % half_base + borrow
+    let target = remainder[position + index] % half_base
+    if target >= subtracted {
+      remainder[position + index] = target - subtracted
+      borrow = 0
+    } else {
+      remainder[position + index] = target + half_base - subtracted
+      borrow = 1
+    }
+    index += 1
+  }
+  let top = remainder[position + count] % half_base
+  let subtracted = carry % half_base + borrow
+  if top >= subtracted {
+    remainder[position + count] = top - subtracted
+    estimate % half_base
+  } else {
+    var carried: UInt64 = 0
+    index = 0
+    while index < count
+      invariant index <= count
+      invariant carried <= 1
+      invariant remainder.length() == length
+      decreases count - index
+    {
+      let total = remainder[position + index] % half_base + scaled[index] % half_base + carried
+      remainder[position + index] = total % half_base
+      carried = total / half_base
+      index += 1
+    }
+    remainder[position + count] = (top + half_base - subtracted + carried) % half_base
+    estimate.wrapping_subtract(1) % half_base
+  }
+}
 
 fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivision
   requires divisor.length() >= 2
@@ -529,52 +598,7 @@ fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivisi
       estimate -= 1
       rest = rest.wrapping_add(leading)
     }
-    var borrow: UInt64 = 0
-    var carry: UInt64 = 0
-    index = 0
-    while index < count
-      invariant index <= count
-      invariant borrow <= 1
-      invariant remainder.length() == dividend.length() + 1
-      invariant scaled.length() == count
-      decreases count - index
-    {
-      let product = estimate.wrapping_multiply(scaled[index]).wrapping_add(carry)
-      carry = product / half_base
-      let subtracted = product % half_base + borrow
-      let target = remainder[position + index] % half_base
-      if target >= subtracted {
-        remainder[position + index] = target - subtracted
-        borrow = 0
-      } else {
-        remainder[position + index] = target + half_base - subtracted
-        borrow = 1
-      }
-      index += 1
-    }
-    let top = remainder[position + count] % half_base
-    let subtracted = carry % half_base + borrow
-    if top >= subtracted {
-      remainder[position + count] = top - subtracted
-      quotient[position] = estimate % half_base
-    } else {
-      var carried: UInt64 = 0
-      index = 0
-      while index < count
-        invariant index <= count
-        invariant carried <= 1
-        invariant remainder.length() == dividend.length() + 1
-        invariant scaled.length() == count
-        decreases count - index
-      {
-        let total = remainder[position + index] % half_base + scaled[index] % half_base + carried
-        remainder[position + index] = total % half_base
-        carried = total / half_base
-        index += 1
-      }
-      remainder[position + count] = (top + half_base - subtracted + carried) % half_base
-      quotient[position] = estimate.wrapping_subtract(1) % half_base
-    }
+    quotient[position] = subtract_multiple(mut remainder, scaled: scaled.slice(), position: position, estimate: estimate)
   }
   var unscaled: List[UInt64] = List.with_capacity(count)
   index = 0
@@ -793,6 +817,7 @@ public fn BigInteger.is_zero(self) -> Bool
 }
 
 public fn BigInteger.is_negative(self) -> Bool
+  ensures result == (self.negative)
   cost time O(1)
 {
   self.negative
@@ -1188,7 +1213,7 @@ impl Ordered for BigInteger {
 proof Ordered.agrees_with_equal for BigInteger {
   assert (first.magnitude == second.magnitude)
     == (first.magnitude.length() == second.magnitude.length()
-      && forall index in 0..first.magnitude.length() => first.magnitude.model()[index] == second.magnitude.model()[index])
+      && forall i in 0..first.magnitude.length() => first.magnitude.model()[i] == second.magnitude.model()[i])
   if first.magnitude.length() == second.magnitude.length() {
     limbs_order_agrees_with_equal(
       first.magnitude.model(),
@@ -1586,6 +1611,19 @@ fn Decimal.key(self) -> DecimalKey
 }
 
 fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
+  ensures identical(result, if first.sign != second.sign {
+      first.sign.compare(second.sign)
+    } else if first.exponent != second.exponent {
+      if first.sign < 0 {
+        second.exponent.compare(first.exponent)
+      } else {
+        first.exponent.compare(second.exponent)
+      }
+    } else if first.sign < 0 {
+      second.digits.compare(first.digits)
+    } else {
+      first.digits.compare(second.digits)
+    })
   cost time finite
 {
   if first.sign != second.sign {
@@ -1650,9 +1688,6 @@ theorem decimal_order_is_transitive(first: Decimal, second: Decimal, third: Deci
   ensures first <= third
   cost time finite
 {
-  assert first.compare(second) == key_order(first.key(), second: second.key())
-  assert second.compare(third) == key_order(second.key(), second: third.key())
-  assert first.compare(third) == key_order(first.key(), second: third.key())
   key_order_is_transitive(first.key(), second: second.key(), third: third.key())
 }
 
@@ -1718,6 +1753,7 @@ impl Display for Decimal {
 }
 
 fn is_decimal_digit(byte: UInt8) -> Bool
+  ensures result == (48 <= byte && byte <= 57)
   cost time O(1)
 {
   48 <= byte && byte <= 57

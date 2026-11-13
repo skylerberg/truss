@@ -32,13 +32,15 @@ val choose :
     published package that its record names, and not one that only its tests use, which the record
     leaves out. *)
 
-val holds : project:Manifest.dependency list -> package list -> (Path.package * string list) list
-(** The capabilities each package of a build holds: those its users in the build grant it, of the
-    ones each user holds itself. A project's own packages, whose entries [project] is, hold
-    everything. *)
-
 val lock : project:Manifest.dependency list -> package list -> Lock.t
 (** The lock file of a build: a line for each of its registry packages. *)
 
 val differences : written:Lock.t -> current:Lock.t -> string list
 (** Where a lock file as it is written differs from the one a build gives, each as a sentence. *)
+
+module For_testing : sig
+  val holds : project:Manifest.dependency list -> package list -> (Path.package * string list) list
+  (** The capabilities each package of a build holds: those its users in the build grant it, of the
+      ones each user holds itself. A project's own packages, whose entries [project] is, hold
+      everything. *)
+end

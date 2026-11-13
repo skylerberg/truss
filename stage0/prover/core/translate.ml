@@ -67,27 +67,17 @@ type obligation = {
           being proven: a callee's [requires]. *)
   fixes : span Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
   query : Logic.query;
-  contracts_alone : Logic.query option;
-      (** The query without the unfolded definitions of callees, where it has any: asked when the
-          query runs out of steps, since a callee's contract can be enough where its definition is
-          too much for the solver. *)
   values : (Logic.symbol * string) list;
       (** Each prover symbol a counterexample shows, with its name. *)
   locals : (Logic.symbol * string) list;
       (** The locals whose values are symbols where the obligation is made, with their names: asked
           for only once the query has a counterexample, so the query's key stays its own. *)
-  constants : Costs.constants list;
-      (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
   evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
   known_calls : known_call list;  (** The calls its query mentions that running code can give. *)
   decisions : (string * string option * Logic.term * Logic.term) list;
       (** Each [if] and [match] arm of the definition before it, in order: the message where its
           condition holds and, for an [if], where it does not, where it is reached, and its
           condition, whose values a counterexample tells. *)
-  hidden : (string * bool) list;
-      (** The callees its query mentions whose bodies would define them but are not visible in this
-          package, each with whether it can be marked [transparent], as a method of an [impl]
-          cannot. *)
 }
 
 type outcome = {
@@ -178,7 +168,7 @@ type changed = { changed_locals : Core.local list; changes_self : bool }
    iterations times a bound on one, and, where the values it changes hold
    potential, also with that potential, from its value on entry. *)
 type loop_rule =
-  | Clause_bound of Core.cost * Costs.constants option
+  | Clause_bound of Core.cost
   | Per_iteration of { per : Logic.term; per_held : (Logic.term * Logic.term) option }
 
 type loop_cost = {
@@ -255,9 +245,6 @@ type context = {
   datatypes : (string, unit) Hashtbl.t;  (** The sorts declared as datatypes, by name. *)
   stated : (stated, unit) Hashtbl.t;
   mutable facts : Logic.term list;  (** Reversed. *)
-  unfolded : (Logic.term, unit) Hashtbl.t;
-      (** The facts that come from unfolding a callee's definition, which a query that runs out of
-          steps is asked again without. *)
   mutable obligations : obligation list;  (** Reversed. *)
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;  (** For counterexamples. *)
@@ -282,12 +269,9 @@ type context = {
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;
       (** The counters of the cost clauses of the definition being proven. *)
-  mutable own_constants : (Costs.counter * Costs.constants) list;
-      (** By counter, the constants of the definition's own [O(...)] bounds, which a call back into
-          it assumes. *)
-  mutable groups : Costs.constants list;  (** Every bound's constants, made so far. *)
-  counter_numbers : (Costs.counter, int) Hashtbl.t;
-      (** Each counter's number, which names the constants of its bounds. *)
+  mutable own_bounds : Costs.counter list;
+      (** The counters of the definition's own [O(...)] bounds, which a call back into it assumes.
+      *)
   fresh_order : (Logic.symbol, int) Hashtbl.t;
       (** Each fresh symbol's number, to tell the symbols a loop made. *)
   mutable logs : (Logic.term * bool) list;
@@ -314,14 +298,8 @@ type context = {
   mutable iteration_returns : (Core.origin * Types.ty option) list;
       (** Each [return] from an iteration of a [concurrent for], by its loop, with the type of its
           value: taken where the loop ends. *)
-  reveal : bool;
-      (** Whether callees in other packages are read as their own package reads them, bodies
-          included, to tell whether seeing a hidden body would prove an obligation. *)
   mutable entry : Logic.symbol list;
       (** The symbols of the definition's parameters and [self] as they arrive. *)
-  mutable hidden_bodies : (Logic.symbol * (string * bool)) list;
-      (** Each callee in another package whose body would define it but is not [transparent]: its
-          symbol, with its name and whether it can be marked so. *)
   mutable cursors : (Logic.term * cursor) list;  (** Where each cursor value came from. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
@@ -353,9 +331,8 @@ type context = {
           through another's invariant is read once. *)
 }
 
-(* The package a callee is read from, for [source_at]: the definition's,
-   or none, which reads every callee as its own package does. *)
-let reading_package context = if context.reveal then None else Some (Path.package context.current)
+(* The package a callee is read from, for [source_at]: the definition's. *)
+let reading_package context = Some (Path.package context.current)
 
 (* Symbols and facts *)
 
@@ -598,6 +575,117 @@ let truss_of_goal context term =
   in
   if !named then printed else None
 
+(* Bitwise operations, exactly: each defined as the operation on its
+   operands' bits of their type's width, read back as an integer, which
+   the solver decides by bit-blasting. *)
+let bitwise_operations =
+  [
+    "and";
+    "or";
+    "xor";
+    "complement";
+    "shift_left";
+    "shift_right";
+    "rotate_left";
+    "rotate_right";
+    "swap_bytes";
+  ]
+
+let bitwise_of : Logic.symbol -> _ = function
+  | Opaque_operation { operation; integer = Some (bits, signed); _ }
+    when List.mem operation bitwise_operations ->
+      Some (operation, bits, signed)
+  | _ -> None
+
+let exactly (query : Logic.query) =
+  let bitwise_terms = ref [] in
+  let rec walk bound = function
+    | Logic.Apply (name, arguments) as term ->
+        (if bitwise_of name <> None && not (List.mem_assoc term !bitwise_terms) then
+           let named = List.filter (fun (symbol, _) -> Logic.mentions [ symbol ] term) bound in
+           bitwise_terms := (term, named) :: !bitwise_terms);
+        List.iter (walk bound) arguments
+    | Logic.Forall (symbols, body) | Logic.Exists (symbols, body) -> walk (symbols @ bound) body
+    | term -> List.iter (walk bound) (Logic.arguments term)
+  in
+  List.iter (walk []) (query.goal :: query.facts);
+  let definition term =
+    match term with
+    | Logic.Apply (name, arguments) -> (
+        match (bitwise_of name, arguments) with
+        | Some (operation, bits, signed), first :: rest ->
+            let bits_of value = Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
+            let operand_bits = bits_of first in
+            let result =
+              match (operation, rest) with
+              | "complement", _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
+              | "and", [ second_operand ] ->
+                  Some (Logic.Operation ("bvand", [ operand_bits; bits_of second_operand ]))
+              | "or", [ second_operand ] ->
+                  Some (Logic.Operation ("bvor", [ operand_bits; bits_of second_operand ]))
+              | "xor", [ second_operand ] ->
+                  Some (Logic.Operation ("bvxor", [ operand_bits; bits_of second_operand ]))
+              | "shift_left", [ second_operand ] ->
+                  Some (Logic.Operation ("bvshl", [ operand_bits; bits_of second_operand ]))
+              | "shift_right", [ second_operand ] ->
+                  Some
+                    (Logic.Operation
+                       ( (if signed then "bvashr" else "bvlshr"),
+                         [ operand_bits; bits_of second_operand ] ))
+              | ("rotate_left" | "rotate_right"), [ second_operand ] ->
+                  (* By the amount modulo the width, with what leaves one end
+                     coming in at the other. *)
+                  let by = bits_of (Logic.Operation ("mod", [ second_operand; Logic.int bits ])) in
+                  let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
+                  let towards, back =
+                    if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
+                  in
+                  Some
+                    (Logic.Operation
+                       ( "bvor",
+                         [
+                           Logic.Operation (towards, [ operand_bits; by ]);
+                           Logic.Operation (back, [ operand_bits; rest ]);
+                         ] ))
+              | "swap_bytes", _ ->
+                  let byte index =
+                    Logic.Operation
+                      ( Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index),
+                        [ operand_bits ] )
+                  in
+                  let bytes = List.init (bits / 8) byte in
+                  Some
+                    (List.fold_left
+                       (fun swapped next -> Logic.Operation ("concat", [ swapped; next ]))
+                       (List.hd bytes) (List.tl bytes))
+              | _ -> None
+            in
+            Option.map
+              (fun result ->
+                let unsigned = Logic.Operation ("bv2nat", [ result ]) in
+                let value =
+                  if signed then
+                    let half = Logic.Integer (Z.shift_left Z.one (bits - 1)) in
+                    Logic.ite
+                      (Logic.Operation (">=", [ unsigned; half ]))
+                      (Logic.Operation ("-", [ unsigned; Logic.Integer (Z.shift_left Z.one bits) ]))
+                      unsigned
+                  else unsigned
+                in
+                Logic.equal term value)
+              result
+        | _ -> None)
+    | _ -> None
+  in
+  (* A term under a quantifier that names its bound symbols is defined for
+     each of their values. *)
+  let defined (term, named) =
+    Option.map
+      (fun definition -> if named = [] then definition else Logic.Forall (named, definition))
+      (definition term)
+  in
+  { query with facts = query.facts @ List.filter_map defined (List.rev !bitwise_terms) }
+
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match
     obligation_at ?evaluation context frame code span message
@@ -655,23 +743,6 @@ and make_obligation ?evaluation context frame code span message goal =
         goal = Logic.( ==> ) frame.condition goal;
       }
   in
-  let contracts_alone =
-    if List.exists (Hashtbl.mem context.unfolded) query.facts then
-      Some
-        (Logic.prune
-           {
-             query with
-             facts = List.filter (fun fact -> not (Hashtbl.mem context.unfolded fact)) query.facts;
-           })
-    else None
-  in
-  let constants =
-    List.filter
-      (fun (group : Costs.constants) ->
-        let names = [ group.factor; group.addend ] in
-        Logic.mentions names query.goal || List.exists (Logic.mentions names) query.facts)
-      context.groups
-  in
   let known_calls =
     List.filter
       (fun (known : known_call) ->
@@ -679,26 +750,13 @@ and make_obligation ?evaluation context frame code span message goal =
         mentioned query.goal || List.exists mentioned query.facts)
       context.known_calls
   in
-  let hidden =
-    List.sort_uniq compare
-      (List.filter_map
-         (fun (symbol, name) ->
-           if
-             Logic.mentions [ symbol ] query.goal
-             || List.exists (Logic.mentions [ symbol ]) query.facts
-           then Some name
-           else None)
-         context.hidden_bodies)
-  in
   {
     code;
     span;
     message;
     cited = None;
     fixes = [];
-    hidden;
     query;
-    contracts_alone;
     values = context.values;
     decisions = List.rev context.decisions;
     locals =
@@ -714,7 +772,6 @@ and make_obligation ?evaluation context frame code span message goal =
         | Some (Logic.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
             [ (symbol, "result") ]
         | _ -> []);
-    constants;
     evaluation;
     known_calls;
   }
@@ -742,6 +799,20 @@ let quote source origin =
 
 (* Where a node of the form read here is. *)
 let at frame (node : expression) = span_of frame.source node.origin
+
+(* The base, the start, and the stop, if any, of a slice's call. *)
+let slice_parts (call : expression) =
+  match call.kind with
+  | Call
+      {
+        arguments = Passed { value = Place base; _ } :: Passed { value = Value start; _ } :: rest;
+        _;
+      } -> (
+      match rest with
+      | [] -> (base, start, None)
+      | [ Passed { value = Value stop; _ } ] -> (base, start, Some stop)
+      | _ -> bug "a slice whose call has more than three arguments")
+  | _ -> bug "a slice whose call does not take its base and its bounds"
 
 (* Types *)
 
@@ -982,14 +1053,6 @@ let in_range ty term =
                 (Operation ("<=", [ int 0xD800; term ]) &&& Operation ("<=", [ term; int 0xDFFF ])))
       else in_bounds
   | None -> Logic.Boolean true
-
-let counter_number context counter =
-  match Hashtbl.find_opt context.counter_numbers counter with
-  | Some number -> number
-  | None ->
-      let number = Hashtbl.length context.counter_numbers in
-      Hashtbl.replace context.counter_numbers counter number;
-      number
 
 (* Runs [make] the first time a fact is met in a definition's proof, for a
    fact that is stated once. *)
@@ -1253,7 +1316,7 @@ type form_origin = Written | Derived | Provided
    body is there only where the callee is a function in the logic, so
    editing another body proves no caller again; a caller in another
    package, [reading_package], reads the specification the callee's package
-   exports, whose body is there only for a [transparent] function. *)
+   exports. *)
 let source_at ?reading_package database (path : Path.t) =
   let specification =
     match reading_package with
@@ -1802,23 +1865,9 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
   | Collection_literal { elements; _ } -> Some (list_literal context frame node elements)
   | Map_literal { entries; _ } -> Some (map_literal context frame node entries)
   | Record_update { base; updates } -> Some (with_ context frame node base updates)
-  | Slice
-      {
-        base;
-        call =
-          {
-            kind =
-              Call
-                {
-                  arguments =
-                    [ _; Passed { value = Value start; _ }; Passed { value = Value stop; _ } ];
-                  _;
-                };
-            _;
-          };
-      } ->
-      Some (slice context frame node base ~start:(Some start) ~stop:(Some stop) ~inclusive:false)
-  | Slice _ -> unsupported (at frame node) "a slice whose call is not of `slice_range`"
+  | Slice { call } ->
+      let base, start, stop = slice_parts call in
+      Some (slice context frame node base ~start:(Some start) ~stop ~inclusive:false)
   | Call call_ -> (
       match resolved_call context frame node call_ with
       | Some _ when Types.equal (type_of context frame node) Types.Never ->
@@ -1913,7 +1962,7 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
             | (Time | Calls _), _ -> Costs.zero)
       in
       Some (frame, arrive context frame "any" (type_of context frame node))
-  | If { condition; then_; else_ } -> if_ context frame node condition then_ else_
+  | If { condition; then_; else_; _ } -> if_ context frame node condition then_ else_
   | Match { scrutinees; arms; _ } -> match_ context frame node scrutinees arms
   | Block block_ -> block_value context frame block_
   | Provide { implementations; body } ->
@@ -2278,10 +2327,18 @@ and primitive_operation context frame ~node (operation : Intrinsic.operation) ty
       let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
       let shifted = opaque_operation context frame ty name [ left; right ] in
       (* An unsigned shift multiplies or divides by a power of two: to the
-         left exactly, where the product fits. *)
-      (match bounds ty with
-      | Some (low, high) when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
+         left exactly, where the product fits. A shift by less than the
+         width scales by at most the top bit, so [1 << k] fits. *)
+      (match (bounds ty, width ty) with
+      | Some (low, high), Some bits
+        when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
           let scale = power_of context frame (Logic.int 2) right in
+          assume context frame
+            Logic.(
+              Operation ("<=", [ int 0; right ])
+              &&& Operation ("<", [ right; int bits ])
+              ==> (Operation ("<=", [ int 1; scale ])
+                  &&& Operation ("<=", [ scale; Integer (Z.shift_left Z.one (bits - 1)) ])));
           assume context frame
             (match operation with
             | Shift_left ->
@@ -2296,8 +2353,16 @@ and primitive_operation context frame ~node (operation : Intrinsic.operation) ty
       let term = opaque_operation context frame ty name [ left; right ] in
       (* Of unsigned values, [and] is at most each operand, [or] at
          least each, and [or] and [xor] at most their sum and below each
-         power of two both operands are below. *)
+         power of two both operands are below. Of signed values, [and]
+         with a nonnegative operand lies from zero to that operand. *)
       (match bounds ty with
+      | Some (low, _) when Z.sign low < 0 && operation = Bit_and ->
+          let masked_by operand =
+            Logic.(
+              Operation ("<=", [ int 0; operand ])
+              ==> (Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; operand ])))
+          in
+          assume context frame Logic.(masked_by left &&& masked_by right)
       | Some (low, _) when Z.equal low Z.zero -> (
           let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
           match operation with
@@ -2808,32 +2873,10 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
             let type_ = operand_type context frame operand in
             let frame, term, run =
               match operand with
-              | Value
-                  ({
-                     kind =
-                       Slice
-                         {
-                           base;
-                           call =
-                             {
-                               kind =
-                                 Call
-                                   {
-                                     arguments =
-                                       [
-                                         _;
-                                         Passed { value = Value start; _ };
-                                         Passed { value = Value stop; _ };
-                                       ];
-                                     _;
-                                   };
-                               _;
-                             };
-                         };
-                     _;
-                   } as slice_node) ->
+              | Value ({ kind = Slice { call }; _ } as slice_node) ->
+                  let base, start, stop = slice_parts call in
                   let frame, term, low, high =
-                    slice_run context frame slice_node base ~start:(Some start) ~stop:(Some stop)
+                    slice_run context frame slice_node base ~start:(Some start) ~stop
                       ~inclusive:false
                   in
                   (frame, term, Some (low, high))
@@ -2955,7 +2998,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             let changed = arrive context frame "changed" passed.type_ in
             try store context frame place changed
             with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame place)
-        | Types.Mut, Some (Value { kind = Slice { base; _ }; _ }) -> (
+        | Types.Mut, Some (Value { kind = Slice { call }; _ }) -> (
+            let base, _, _ = slice_parts call in
             (* The callee changes the elements of the run the slice views,
                and nothing else of its owner: the slice read again after the
                call is a view of the new run, which the callee's
@@ -3631,20 +3675,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
         match (resource, counting) with
         | Some resource, Some counting ->
             let counter = { Costs.resource; counting; amortized = cost.amortized } in
-            let constants =
-              if counting = Units then begin
-                let constants =
-                  Costs.constants
-                    (Lambda_bound { lambda = node.id; counter = counter_number context counter })
-                in
-                context.groups <- constants :: context.groups;
-                declare context (Logic.Constant (constants.factor, Logic.Int));
-                declare context (Logic.Constant (constants.addend, Logic.Int));
-                Some constants
-              end
-              else None
-            in
-            Some (counter, cost.bound, constants)
+            Some (counter, cost.bound)
         | _ -> None)
       function_type.costs
   in
@@ -3654,15 +3685,13 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
       (fun (counter : Costs.counter) -> counter.resource = Time && counter.counting = Units)
       context.counters
   in
-  let times_by_type = List.exists (fun (counter, _, _) -> counter = time_units) promised in
-  (* A call back into the definition around it still assumes its bound
-     with the definition's constants, which are kept. *)
+  let times_by_type = List.exists (fun (counter, _) -> counter = time_units) promised in
+  (* A call back into the definition around it still assumes its bound. *)
   let saved_counters = context.counters in
   context.counters <-
     distinct_counters
       ((if counts_time then [ time_units ] else [])
-      @ List.map (fun (counter, _, _) -> counter) promised
-      @ loop_counters inside.locals body);
+      @ List.map fst promised @ loop_counters inside.locals body);
   let inside =
     { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
@@ -3719,14 +3748,13 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
         List.iter
           (fun (exit_ : frame) ->
             List.iter
-              (fun (counter, (bound : Types.cost_bound), constants) ->
+              (fun (counter, (bound : Types.cost_bound)) ->
                 let spent = spent_of exit_ counter in
                 let goal =
-                  match (bound, constants) with
-                  | Order_of, Some constants ->
-                      Costs.at_most spent (Costs.bound constants (Logic.int 1))
-                  | No_more_than (Some limit), _ -> Costs.at_most spent (Logic.Integer limit)
-                  | Exactly_cost (Some limit), _ -> Logic.equal spent (Logic.Integer limit)
+                  match bound with
+                  | Order_of -> Costs.at_most spent (Costs.bound (Logic.int 1))
+                  | No_more_than (Some limit) -> Costs.at_most spent (Logic.Integer limit)
+                  | Exactly_cost (Some limit) -> Logic.equal spent (Logic.Integer limit)
                   | _ -> Logic.Boolean true
                 in
                 oblige context exit_ Cost span
@@ -4514,7 +4542,9 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
     | Some stop ->
         let frame, high = value context frame stop in
         (frame, if inclusive then Costs.plus high (Logic.int 1) else high)
-    | None -> (frame, length)
+    | None ->
+        assume context frame (Operation ("<=", [ Logic.int 0; length ]));
+        (frame, length)
   in
   oblige context frame Requires span
     (Printf.sprintf "`%s` may not be within the collection." (quote frame.source node.origin))
@@ -5204,10 +5234,12 @@ and contract_for_every_argument context frame (contract : contract) parameters v
         let required = if List.memq part requiring then required else requires_of [ part ] in
         List.iter
           (fun clause ->
-            let ensured = snd (clause_value context (read part) clause) in
-            match closed_over_binders over (Logic.( ==> ) required ensured) with
-            | Some closed -> context.facts <- closed :: context.facts
-            | None -> ())
+            match snd (clause_value context (read part) clause) with
+            | ensured -> (
+                match closed_over_binders over (Logic.( ==> ) required ensured) with
+                | Some closed -> context.facts <- closed :: context.facts
+                | None -> ())
+            | exception Foreign_unsupported _ -> ())
           part.ensures)
       contract.parts
   with Unsupported _ | Foreign_unsupported _ -> ()
@@ -6112,25 +6144,6 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             ~model:result_type symbol
       | _ -> ());
       applied_as := Some (symbol, sorts);
-      (if
-         Path.package path <> Path.package context.current
-         && (not (List.mem_assoc symbol context.hidden_bodies))
-         &&
-         match Interface.Impls.signature context.database path with
-         | Some signature -> (
-             Types.body_is_definition signature
-             && (not signature.transparent)
-             (* A body that is a [todo] would define nothing if it were seen. *)
-             &&
-             match
-               Option.bind (source_at context.database path) (fun (callee, _, _) -> body_of callee)
-             with
-             | Some body -> not (holds_todo body)
-             | None -> false)
-         | None -> false
-       then
-         let markable = match path with Method { owner = Impl _; _ } -> false | _ -> true in
-         context.hidden_bodies <- (symbol, (Path.show path, markable)) :: context.hidden_bodies);
       let term = Logic.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       (* Called on a quantifier's bound values, where that fact would name
@@ -6193,19 +6206,17 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     (* The definition, unfolded once, where the [requires] holds. A body
        the prover cannot read is simply not unfolded. *)
     (match contract.definition with
-    | Some (part, body) when not (List.exists (Logic.mentions after.bound) own_arguments) ->
+    | Some (part, body) when not (List.exists (Logic.mentions after.bound) own_arguments) -> (
         let unfolding =
           if in_quantifier then
             { (entry_frame part) with condition = Logic.Boolean true; bound = []; binders = [] }
           else { (entry_frame part) with condition = after.condition }
         in
-        let mark = List.length context.facts in
-        (try
-           match block_value context unfolding body with
-           | Some (_, defined) -> state (Logic.( ==> ) required (Logic.equal result defined))
-           | None -> ()
-         with Unsupported _ | Foreign_unsupported _ -> ());
-        List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
+        try
+          match block_value context unfolding body with
+          | Some (_, defined) -> state (Logic.( ==> ) required (Logic.equal result defined))
+          | None -> ()
+        with Unsupported _ | Foreign_unsupported _ -> ())
     | Some (part, body) when part.requires = [] -> (
         (* Called on a quantifier's bound values, the definition is stated
            once for every argument, so that it holds for each of them. *)
@@ -6319,11 +6330,19 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           in
           let entry_locals, types, entry_self = bind entry in
           let exit_locals, _, exit_self = bind exit_bindings in
+          (* Called inside a quantifier on no bound value, the call's
+             [ensures] is a fact outside the quantifier, as its definition
+             is: true whether or not the quantifier's body runs. *)
+          let is_unbound_in_quantifier =
+            in_quantifier && not (List.exists (Logic.mentions after.bound) own_arguments)
+          in
           let ensures_frame =
             {
               frame with
               source = part.callee;
-              condition = after.condition;
+              condition = (if is_unbound_in_quantifier then Logic.Boolean true else after.condition);
+              bound = (if is_unbound_in_quantifier then [] else frame.bound);
+              binders = (if is_unbound_in_quantifier then [] else frame.binders);
               locals = exit_locals;
               types;
               old_locals = entry_locals;
@@ -6364,12 +6383,16 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                     }
                   else ensures_frame
                 in
+                (* A clause that reads what this package cannot see, such
+                   as an opaque type's fields, is a fact only in the
+                   callee's own package, and leaving a fact out is sound. *)
                 match clause_value context frame_for_clause clause with
                 | _, term ->
                     (* A pure call's [ensures], where its [requires] holds, is a
                    fact of mathematics, true whether or not a quantifier's
                    body around it runs. *)
-                    state (Logic.( ==> ) (required_by part) term))
+                    state (Logic.( ==> ) (required_by part) term)
+                | exception Foreign_unsupported _ -> ())
             part.ensures)
         (* A yielding method's clauses are about each part it yields and
          how it ends, which each pull of the cursor it makes meets. *)
@@ -6477,12 +6500,11 @@ and note_known_call context (call_ : call) path term arguments =
   let values = List.filter_map literal arguments in
   match Interface.Impls.signature context.database path with
   | Some
-      ({ specification_only = false; generics = []; output = Returns result; _ } as signature :
-        Types.signature)
+      ({ specification_only = false; generics = []; output = Returns result; _ } : Types.signature)
     when direct
-         (* Running a callee reads its body, which a caller in another
-            package may read only when it is [transparent]. *)
-         && (Path.package path = Path.package context.current || signature.transparent)
+         (* Running a callee reads its body, so only a callee of the
+            definition's own package is run. *)
+         && Path.package path = Path.package context.current
          && List.length values = List.length arguments
          && (is_numeric result || is_bool result)
          && not (Types.equal result Types.Integer) ->
@@ -6607,21 +6629,21 @@ and same_resource (cost : Core.cost) ~locals (counter : Costs.counter) =
   | _ -> false
 
 (* A clause's bound on a counter, in the counter's way of counting:
-   [assumed] is the bound to assume for a call back into the definition
-   proven, which is the induction hypothesis, and [change] is the growth in
-   potential of the values an amortized clause's call changed, which it
+   [is_recursive_call] is whether the call is back into the definition
+   proven, which assumes the bound as the induction hypothesis, and
+   [change] is the growth in potential of the values an amortized clause's
+   call changed, which it
    paid for out of its bound. *)
-and promised_amount context frame (counter : Costs.counter) (bound : bound) ~evaluate ~assumed
-    ~exact_target ~change =
+and promised_amount context frame (counter : Costs.counter) (bound : bound) ~evaluate
+    ~is_recursive_call ~exact_target ~change =
   match (bound, counter.counting) with
   | Order_of amount, Units ->
       let amount = evaluate amount in
       let amount =
-        match assumed with
-        | Some constants ->
-            let hypothesis = Costs.at_least_zero (Costs.bound constants amount) in
-            if counter.resource = Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
-        | None -> Costs.units amount
+        if is_recursive_call then
+          let hypothesis = Costs.at_least_zero (Costs.bound amount) in
+          if counter.resource = Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
+        else Costs.units amount
       in
       Costs.minus amount change
   | (At_most amount | Exactly amount), Units ->
@@ -6640,23 +6662,14 @@ and growth change =
 (* The cost on a counter of a call to a callee whose clauses are read: its
    clause about the counter's resource, from its first part that has one.
    A call back into the definition proven, through a cycle, assumes its
-   [O(...)] bound with the definition's own constants; every function of a
-   cycle is then proven with the first pair, so that each assumes the
-   bounds the others prove. *)
+   [O(...)] bound. *)
 and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_frame : part -> frame)
     ~uses ~(values : passed list) ~change (counter : Costs.counter) =
-  let assumed =
-    if
-      counter.counting = Units
-      && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
-           ~target:context.current
-    then
-      match List.assoc_opt counter context.own_constants with
-      | Some constants ->
-          if not (Path.equal path context.current) then constants.pairs <- [ List.hd Costs.pairs ];
-          Some constants
-      | None -> None
-    else None
+  let is_recursive_call =
+    counter.counting = Units
+    && List.mem counter context.own_bounds
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+         ~target:context.current
   in
   let clauses_of (part : part) =
     let frame = bound_frame part in
@@ -6676,7 +6689,7 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
     | _ ->
         promised_amount context after counter cost.bound
           ~evaluate:(fun amount -> snd (value context frame amount))
-          ~assumed ~exact_target
+          ~is_recursive_call ~exact_target
           ~change:
             (match (cost.amortized, change) with true, Some change -> change () | _ -> Costs.zero)
   in
@@ -7511,18 +7524,7 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
       in
       let rule =
         match written with
-        | Some cost ->
-            let constants =
-              match counter.counting with
-              | Units ->
-                  let constants = Costs.constants (Loop_bound cost.origin) in
-                  context.groups <- constants :: context.groups;
-                  declare context (Logic.Constant (constants.factor, Logic.Int));
-                  declare context (Logic.Constant (constants.addend, Logic.Int));
-                  Some constants
-              | At_most | Exactly -> None
-            in
-            Clause_bound (cost, constants)
+        | Some cost -> Clause_bound cost
         | None ->
             Per_iteration
               {
@@ -7538,18 +7540,17 @@ and counting_of (cost : Core.cost) : Costs.counting =
   match cost.bound with Order_of _ | Finite -> Units | At_most _ -> At_most | Exactly _ -> Exactly
 
 (* That a loop's [cost] clause bounds the loop's cost so far, at [at]. *)
-and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Core.cost) constants
-    ~since =
+and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Core.cost) ~since =
   let amount =
     match cost.bound with
     | Order_of amount | At_most amount | Exactly amount ->
         snd (value context { at with checking = false } amount)
     | Finite -> Costs.zero
   in
-  match (counter.counting, constants) with
-  | Units, Some constants -> Costs.at_most since (Costs.bound constants amount)
-  | Exactly, _ -> Logic.equal since amount
-  | _ -> Costs.at_most since amount
+  match counter.counting with
+  | Units -> Costs.at_most since (Costs.bound amount)
+  | Exactly -> Logic.equal since amount
+  | At_most -> Costs.at_most since amount
 
 and spent_at (frame : frame) key =
   match List.assoc_opt key frame.spent with Some spent_term -> spent_term | None -> Costs.zero
@@ -7573,9 +7574,9 @@ and loop_head context head costs ~iterations =
     (fun cost ->
       let at_head = spent_at head cost.counter in
       match cost.rule with
-      | Clause_bound (written, constants) ->
+      | Clause_bound written ->
           assume context head
-            (loop_clause_holds context head cost.counter written constants
+            (loop_clause_holds context head cost.counter written
                ~since:(Costs.minus at_head cost.entry))
       | Per_iteration { per; per_held } -> (
           assume context head
@@ -7597,7 +7598,7 @@ and loop_entry context frame costs =
   List.iter
     (fun cost ->
       match cost.rule with
-      | Clause_bound (written, constants) ->
+      | Clause_bound written ->
           (* The bound is well defined, as every specification must be. *)
           (match written.bound with
           | Order_of amount | At_most amount | Exactly amount -> ignore (value context frame amount)
@@ -7606,7 +7607,7 @@ and loop_entry context frame costs =
             (span_of frame.source written.origin)
             (Printf.sprintf "The loop's `%s` may not hold on entry to the loop."
                (quote frame.source written.origin))
-            (loop_clause_holds context frame cost.counter written constants ~since:Costs.zero)
+            (loop_clause_holds context frame cost.counter written ~since:Costs.zero)
       | Per_iteration _ -> ())
     costs
 
@@ -7620,7 +7621,7 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
   List.iter
     (fun cost ->
       match cost.rule with
-      | Clause_bound (written_cost, constants) ->
+      | Clause_bound written_cost ->
           List.iter
             (fun (frame, when_) ->
               oblige context frame Cost
@@ -7628,7 +7629,7 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
                 (Printf.sprintf "The loop's `%s` may not hold %s."
                    (quote frame.source written_cost.origin)
                    when_)
-                (loop_clause_holds context frame cost.counter written_cost constants
+                (loop_clause_holds context frame cost.counter written_cost
                    ~since:(Costs.minus (spent_at frame cost.counter) cost.entry)))
             (List.map (fun exit_frame -> (exit_frame, "after an iteration")) ends
             @ List.map (fun exit_frame -> (exit_frame, "where the loop is left")) breaks)
@@ -7693,7 +7694,7 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
       (fun cost ->
         let at = spent_at exit_ cost.counter in
         match cost.rule with
-        | Clause_bound (written, _) ->
+        | Clause_bound written ->
             let amount =
               match written.bound with
               | Order_of amount | At_most amount | Exactly amount ->
@@ -8112,14 +8113,15 @@ and statement_kind context frame (node : statement) : frame option =
           let frame, current = place_value context frame target in
           let after, new_value = value context { frame with updating = Some current } updated in
           Some (store context { after with updating = frame.updating } target new_value))
-  | While { condition; clauses; body } -> while_ context frame node condition clauses body
+  | While { condition; clauses; body; _ } -> while_ context frame node condition clauses body
   | For { pattern; iteration; clauses; body; _ } ->
       (* A loop's iterations change disjoint places, so however they run, as
          tasks or at once, they can be read one after another. *)
       for_ context frame node pattern iteration clauses body
-  | Assert { value = asserted; _ } ->
+  | Assert { condition = { value = asserted; _ }; by_bit_vector } ->
+      if by_bit_vector && not (is_test context) then bit_vector_assertion context frame asserted;
       let frame, term = value context frame asserted in
-      if is_test context then assume context frame term
+      if is_test context || by_bit_vector then assume context frame term
       else
         oblige context frame Assertion (at frame asserted)
           (Printf.sprintf "`%s` may not hold." (quote frame.source asserted.origin))
@@ -8134,6 +8136,53 @@ and statement_kind context frame (node : statement) : frame option =
         (Some frame) branches
   | Concurrent branches -> concurrent context frame node branches
   | Yield { mode; part } -> yield_part context frame node mode part
+
+(* An [assert ... by bit_vector], proven in a query of its own: for every
+   value of the integers and booleans it names, with its bitwise
+   operations defined exactly. It holds of every value, so it holds of the
+   values it is asserted of, and the caller assumes it. *)
+and bit_vector_assertion context frame (asserted : expression) =
+  let named = ref [] in
+  Core_walk.expression
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         place =
+           (function
+           | Local { local; type_; _ } when not (List.mem_assoc local !named) ->
+               named := (local, type_) :: !named
+           | _ -> ());
+       })
+    asserted;
+  let saved_facts = context.facts and saved_decisions = context.decisions in
+  let saved_stated = Hashtbl.copy context.stated in
+  context.facts <- [];
+  context.decisions <- [];
+  let isolated =
+    { frame with condition = Logic.Boolean true; bound = []; binders = []; checking = false }
+  in
+  let isolated =
+    List.fold_left
+      (fun (inside : frame) (local, ty) ->
+        let symbol = fresh context inside "asserted" (sort_of context ty) in
+        assume context inside (in_range ty symbol);
+        match local with
+        | Core.Self -> { inside with self = Some symbol }
+        | _ -> { inside with locals = Locals.add local symbol inside.locals })
+      isolated !named
+  in
+  let _, term = value context isolated asserted in
+  let obligation =
+    make_obligation context { isolated with checking = true } Assertion (at frame asserted)
+      (Printf.sprintf "`%s` may not hold for every value of the variables it names."
+         (quote frame.source asserted.origin))
+      term
+  in
+  context.obligations <- { obligation with query = exactly obligation.query } :: context.obligations;
+  context.facts <- saved_facts;
+  context.decisions <- saved_decisions;
+  Hashtbl.reset context.stated;
+  Hashtbl.iter (Hashtbl.replace context.stated) saved_stated
 
 (* A [concurrent] block. Its branches change disjoint places, and a
    capability call gives a fresh value whoever calls in between, so they
@@ -8568,7 +8617,8 @@ and changed_places ?(condition : expression option) frame (body : block) : chang
               List.iter
                 (function
                   | Passed { mode = Types.Mut; value = Place place; _ } -> note place
-                  | Passed { mode = Types.Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
+                  | Passed { mode = Types.Mut; value = Value { kind = Slice { call }; _ }; _ } ->
+                      let base, _, _ = slice_parts call in
                       note base
                   | Passed _ | Default -> ())
                 arguments
@@ -9337,9 +9387,8 @@ and havoc_parts context frame =
 
 (* Definitions *)
 
-let new_context ?(reveal = false) database ~home ~current ~terminates ~measures =
+let new_context database ~home ~current ~terminates ~measures =
   {
-    reveal;
     home;
     laws_assumed = [];
     database;
@@ -9350,12 +9399,10 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     declared = Hashtbl.create 64;
     datatypes = Hashtbl.create 16;
     stated = Hashtbl.create 64;
-    counter_numbers = Hashtbl.create 4;
     facts = [];
     scopes = [];
     quantifier_facts = Hashtbl.create 16;
     quantifier_symbols = [];
-    unfolded = Hashtbl.create 64;
     obligations = [];
     fresh = 0;
     values = [];
@@ -9368,8 +9415,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     yield_ensures = None;
     parameters = [];
     counters = [];
-    own_constants = [];
-    groups = [];
+    own_bounds = [];
     fresh_order = Hashtbl.create 64;
     logs = [];
     powers = [];
@@ -9385,7 +9431,6 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     decisions = [];
     iteration_returns = [];
     entry = [];
-    hidden_bodies = [];
     cursors = [];
     proving = false;
     holes = [];
@@ -9443,7 +9488,6 @@ let definition_span (source : source) =
 type promise = {
   counter : Costs.counter;
   clause : Core.cost;
-  constants : Costs.constants option;
   written_in : source;
   inherited : bool;
 }
@@ -9464,22 +9508,9 @@ let promises context (source : source) locals (costs : Core.cost list) ~inherite
               | Calls (Function_parameter local), Calls (Through term) ->
                   context.call_targets <- (term, local) :: context.call_targets
               | _ -> ());
-              let constants =
-                match counter.counting with
-                | Units ->
-                    let constants =
-                      Costs.constants
-                        (Own_bound { counter = counter_number context counter; inherited })
-                    in
-                    context.groups <- constants :: context.groups;
-                    declare context (Logic.Constant (constants.factor, Logic.Int));
-                    declare context (Logic.Constant (constants.addend, Logic.Int));
-                    if not (List.mem_assoc counter context.own_constants) then
-                      context.own_constants <- (counter, constants) :: context.own_constants;
-                    Some constants
-                | At_most | Exactly -> None
-              in
-              Some { counter; clause = cost; constants; written_in = source; inherited }))
+              if counter.counting = Units && not (List.mem counter context.own_bounds) then
+                context.own_bounds <- counter :: context.own_bounds;
+              Some { counter; clause = cost; written_in = source; inherited }))
     costs
 
 (* The source of a method's inherited clauses, for messages: its trait,
@@ -9507,10 +9538,10 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
     | Finite -> Costs.zero
   in
   let goal =
-    match (promise.counter.counting, promise.constants) with
-    | Units, Some constants -> Costs.at_most spent (Costs.bound constants amount)
-    | Exactly, _ -> Logic.equal spent amount
-    | _ -> Costs.at_most spent amount
+    match promise.counter.counting with
+    | Units -> Costs.at_most spent (Costs.bound amount)
+    | Exactly -> Logic.equal spent amount
+    | At_most -> Costs.at_most spent amount
   in
   oblige context frame Cost span
     (if promise.inherited then
@@ -9527,8 +9558,8 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
    cost clauses are shown at each way it returns. [inherited] is, for an
    [impl]'s method, its trait's clauses, with the substitution they are
    read under and the body the trait provides, if any. *)
-let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(substitution = [])
-    database (source : source) ~path =
+let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitution = []) database
+    (source : source) ~path =
   let parameters, contract, body =
     match source.core.definition with
     | Function { parameters; contract; body = Some body } -> (parameters, contract, body)
@@ -9547,9 +9578,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(s
     | None -> false
   in
   let home = home source in
-  let context =
-    new_context ?reveal database ~home ~current:path ~terminates ~measures:contract.decreases
-  in
+  let context = new_context database ~home ~current:path ~terminates ~measures:contract.decreases in
   let returns_span = definition_span source in
   context.proving <- proof;
   context.parameters <- parameters;
@@ -9898,9 +9927,9 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(s
 (* The laws of a trait an [impl] writes by hand, each shown for fresh
    values of its parameters, after the bodies of the [proof]s written for
    it. *)
-let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
+let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
   let home = home source in
-  let context = new_context ?reveal database ~home ~current:impl ~terminates:false ~measures:[] in
+  let context = new_context database ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
   let substitution = trait_substitution database trait for_type in
   List.iter
@@ -9975,9 +10004,9 @@ let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
    it. The type's [cost potential] is well defined and never below zero
    for a value that meets its invariants, which makes each
    potential a fact about every valid value. *)
-let type_ ?reveal database (source : source) ~path =
+let type_ database (source : source) ~path =
   let home = home source in
-  let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
+  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Type { invariants; potential; _ } ->
       let ty =
@@ -10007,9 +10036,9 @@ let type_ ?reveal database (source : source) ~path =
   | _ -> ());
   outcome context
 
-let test ?reveal database (source : source) ~path =
+let test database (source : source) ~path =
   let home = home source in
-  let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
+  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Test body -> ignore (block_value context (empty_frame source) body)
   | _ -> ());
@@ -10017,12 +10046,12 @@ let test ?reveal database (source : source) ~path =
 
 (* A constant's value is well defined, as any expression is: its
    arithmetic stays in range, and its shifts and divisions are valid. *)
-let constant ?reveal database (source : source) ~path =
+let constant database (source : source) ~path =
   let home = home source in
-  let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
+  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Constant defined -> ignore (value context (empty_frame source) defined)
   | _ -> ());
   outcome context
 
-let theorem ?reveal database source ~path = function_ ?reveal ~proof:true database source ~path
+let theorem database source ~path = function_ ~proof:true database source ~path

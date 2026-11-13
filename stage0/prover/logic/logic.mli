@@ -16,14 +16,6 @@ type sort =
 
 (** The prover's symbols. A [type_key] names a type: the prover gives equal types equal keys. *)
 module Symbol : sig
-  (** The [O(...)] bound that a pair of cost constants belongs to. *)
-  type cost_group =
-    | Own_bound of { counter : int; inherited : bool }
-        (** The definition's own bound on a counter, by the counter's number in the definition, or
-            the bound it inherits from a trait's method. *)
-    | Lambda_bound of { lambda : int; counter : int }  (** A lambda's bound, by its node. *)
-    | Loop_bound of int  (** A loop's [cost] clause, by its origin. *)
-
   (** A symbol, over the terms it can hold. *)
   type 'term t =
     | Variable of { label : string; numbers : int list }
@@ -74,8 +66,6 @@ module Symbol : sig
     | Libc_number of string  (** A number the C library defines. *)
     | Handle_descriptor  (** The descriptor a handle holds. *)
     | Compare_bytes_order  (** The order [compare_bytes] gives. *)
-    | Cost_factor of cost_group
-    | Cost_addend of cost_group
     | Cost_most  (** The larger of two costs. *)
     | Cost_log  (** The base-2 logarithm, for cost bounds. *)
     | Cost_power  (** Exponentiation, for cost bounds. *)
@@ -196,9 +186,6 @@ val members : query -> (string * (symbol * symbol list)) list
 val hash : string -> string
 (** The hash of a query's text, in hexadecimal, with a prefix naming the format and the algorithm.
 *)
-
-val show_term : term -> string
-(** A term as SMT-LIB, with the prover's own names, for tests and debugging. *)
 
 val show_symbol : symbol -> string
 (** A symbol as readable text, for tests and debugging. *)
