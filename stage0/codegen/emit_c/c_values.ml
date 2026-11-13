@@ -47,7 +47,7 @@ let bytes_name context text =
   match List.assoc_opt text context.bytes with
   | Some name -> name
   | None ->
-      let name = Printf.sprintf "t_bytes_%d" (List.length context.bytes) in
+      let name = Printf.sprintf "%s_bytes_%d" context.prefix (List.length context.bytes) in
       context.bytes <- (text, name) :: context.bytes;
       name
 

@@ -200,7 +200,7 @@ module For_testing : sig
   val build_supplied_tests :
     t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
 
-  val compiled : t -> Instance.key -> Lir.compiled
+  val compiled : t -> Instance.key -> Emit_c.fragment
 
   val run_program :
     ?input:string ->

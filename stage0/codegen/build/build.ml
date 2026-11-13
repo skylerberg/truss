@@ -114,29 +114,24 @@ let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> [
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
-      (fun part_index units ->
-        let own =
-          List.filter_map (function Lir.Code instance -> Some instance | _ -> None) units
-        in
+      (fun part_index fragments ->
         (* Each copy once, and none of an instance the file defines itself. *)
         let copies =
           List.fold_left
-            (fun copies (copy : Lir.t) ->
+            (fun copies copy ->
               if
-                List.exists (fun (other : Lir.t) -> Instance.equal other.key copy.key) (own @ copies)
+                List.exists
+                  (fun other -> Instance.equal (Emit_c.key other) (Emit_c.key copy))
+                  (fragments @ copies)
               then copies
               else copies @ [ copy ])
-            [] (List.concat_map copied own)
+            []
+            (List.concat_map copied fragments)
         in
-        let code =
-          List.map (fun instance -> (instance, Emit_c.External)) own
-          @ List.map (fun instance -> (instance, Emit_c.Internal)) copies
-        in
-        let data = List.filter_map (function Lir.Data data -> Some data | _ -> None) units in
-        let tables =
-          List.filter_map (function Lir.Table instance -> Some instance | _ -> None) units
-        in
-        (Printf.sprintf "file %d" part_index, Emit_c.file env settings.build ~data ~tables code))
+        ( Printf.sprintf "file %d" part_index,
+          Emit_c.file env settings.build
+            (List.map (fun fragment -> (fragment, Emit_c.External)) fragments
+            @ List.map (fun fragment -> (fragment, Emit_c.Internal)) copies) ))
       files
   in
 

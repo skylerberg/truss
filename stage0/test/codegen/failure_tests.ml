@@ -13,14 +13,8 @@ let expect_bug ~saying work =
 
 let env = shape_env ()
 
-(* A callee that takes one [Int32] and returns it, and a caller's call of
-   it with these arguments under this signature. *)
-let callee =
-  instance "callee"
-    (function_ ~parameters:[ 0 ] ~result:(value int32)
-       [ local (value int32) ]
-       [ block [] (Return (Some (copy 0))) ])
-
+(* A caller's call of a callee that takes one [Int32] and returns it, with
+   these arguments under this signature. *)
 let caller ?(parameters = [ value int32 ]) arguments =
   entry
     [ local (value int32) ]
@@ -87,26 +81,7 @@ let () =
                [ local (value text) ]
                [ block [ Assign (at 0, Use (Move constant)) ] (Return (Some (constant_int32 0))) ])));
   test "an instance whose calls fit their targets passes" (fun () ->
-      Verify.instance env (caller [ constant_int32 1 ]));
-  let find units key =
-    List.find_opt
-      (fun unit -> Instance.equal (Reachable.compiled_key unit) key)
-      (List.map (fun instance -> Lir.Code instance) units)
-  in
-  test "a callee named with a signature it does not have is a bug" (fun () ->
-      let caller =
-        caller ~parameters:[ value int32; value int32 ] [ constant_int32 1; constant_int32 2 ]
-      in
-      Verify.instance env caller;
-      expect_bug ~saying:"callee is named with a signature it does not have" (fun () ->
-          Verify.links env ~find:(find [ caller; callee ]) (Code caller)));
-  test "a callee that is not built is a bug" (fun () ->
-      let caller = caller [ constant_int32 1 ] in
-      expect_bug ~saying:"callee is called, and is not built" (fun () ->
-          Verify.links env ~find:(find [ caller ]) (Code caller)));
-  test "a caller and a callee that agree pass" (fun () ->
-      let caller = caller [ constant_int32 1 ] in
-      Verify.links env ~find:(find [ caller; callee ]) (Code caller))
+      Verify.instance env (caller [ constant_int32 1 ]))
 
 (* A module's tests cannot be built, with a message that says this. *)
 let refused name ~saying source =

@@ -566,29 +566,16 @@ let () =
       expect_string ~expected:"150000\n5\n150000\n" output);
   test "the console a program is given is a value its start owns and drops" (fun () ->
       let _, compile = load Fixtures.Program.console_a_program_is_given_is_a_value_its_start in
-      match
+      let fragment =
         Compile.For_testing.compiled compile
           (Program_main (Top { module_ = example; name = "main" }))
-      with
-      | Code instance ->
-          let console local =
-            match instance.main.locals.(local).ty with
-            | Value (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
-            | _ -> false
-          in
-          let dropped =
-            Array.exists
-              (fun (block : Lir.basic_block) ->
-                List.exists
-                  (function
-                    | Lir.Drop { root = Local local; projections = [] } -> console local
-                    | _ -> false)
-                  block.statements)
-              instance.main.blocks
-          in
-          if not dropped then
-            fail "no drop of the console:\n%s" (Lir.For_testing.to_string instance)
-      | _ -> fail "expected code")
+      in
+      let is_console_drop : Instance.key -> bool = function
+        | Drop (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
+        | _ -> false
+      in
+      if not (List.exists is_console_drop (Emit_c.references fragment)) then
+        fail "no drop of the console:\n%s" (Emit_c.For_testing.c fragment))
 
 let () =
   test

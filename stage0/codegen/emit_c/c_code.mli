@@ -1,2 +1,2 @@
-val function_c :
-  C_types.context -> Instance.key -> string -> linkage:C_runtime.linkage -> Lir.function_ -> string
+(* A function's header, with no linkage, and its body. *)
+val function_c : C_types.context -> Instance.key -> string -> Lir.function_ -> string * string

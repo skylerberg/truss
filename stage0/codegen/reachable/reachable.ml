@@ -1,100 +1,3 @@
-let add key keys = if List.exists (Instance.equal key) keys then keys else key :: keys
-
-let rec place_keys (place : Lir.place) keys =
-  let keys = match place.root with Static { key; _ } -> add key keys | Local _ -> keys in
-  List.fold_left
-    (fun keys -> function Lir.Index lir_operand -> operand_keys lir_operand keys | _ -> keys)
-    keys place.projections
-
-and operand_keys (operand : Lir.operand) keys =
-  match operand with
-  | Copy place | Move place | Address { place; _ } | Moved_address place -> place_keys place keys
-  | Constant (Symbol_address key) -> add key keys
-  | Constant _ -> keys
-
-let function_ref_keys (function_ref : Lir.function_ref) keys =
-  match function_ref with Instance key -> add key keys | Nested _ -> keys
-
-let rvalue_keys (rvalue : Lir.rvalue) keys =
-  match rvalue with
-  | Use lir_operand | Unary (_, lir_operand) | Convert (lir_operand, _) ->
-      operand_keys lir_operand keys
-  | Binary (_, left, right) -> operand_keys right (operand_keys left keys)
-  | Build { fields; _ } ->
-      List.fold_left (fun keys (_, lir_operand) -> operand_keys lir_operand keys) keys fields
-  | Is_variant (place, _) -> place_keys place keys
-  | Function_value { code; environment } ->
-      Option.fold ~none:keys
-        ~some:(fun environment_operand -> operand_keys environment_operand keys)
-        environment
-      |> function_ref_keys code
-
-let references env (instance : Lir.t) =
-  let environment nested_index = instance.nested.(nested_index).environment in
-  let in_function keys (function_ref : Lir.function_) =
-    Array.fold_left
-      (fun keys (block : Lir.basic_block) ->
-        let keys =
-          List.fold_left
-            (fun keys (statement : Lir.statement) ->
-              match statement with
-              | Assign (place, rvalue) -> rvalue_keys rvalue (place_keys place keys)
-              | Call { target; arguments; result } -> (
-                  let keys =
-                    match target with
-                    | Direct { function_; _ } -> function_ref_keys function_ keys
-                    | _ ->
-                        List.fold_left
-                          (fun keys lir_operand -> operand_keys lir_operand keys)
-                          keys (Lir.target_operands target)
-                  in
-                  let keys =
-                    List.fold_left
-                      (fun keys lir_operand -> operand_keys lir_operand keys)
-                      keys arguments
-                  in
-                  match result with
-                  | Returned lir_place | Written lir_place -> place_keys lir_place keys
-                  | Discarded -> keys)
-              | Drop place -> (
-                  let keys = place_keys place keys in
-                  match Lir.place_type env ~environment function_ref place with
-                  | Some (Value ty) -> add (Drop ty) keys
-                  | _ -> keys)
-              | Free_block { place; _ } -> place_keys place keys
-              | Echo { text; length; _ } -> operand_keys length (operand_keys text keys)
-              | Region _ | Regions_end _ -> keys
-              | Fork { branches } ->
-                  List.fold_left
-                    (fun keys (_, lir_operand) -> operand_keys lir_operand keys)
-                    keys branches
-              | Fork_range { environment; first; last; _ } ->
-                  operand_keys last (operand_keys first (operand_keys environment keys)))
-            keys block.statements
-        in
-        match block.terminator with
-        | Switch { value; _ } -> operand_keys value keys
-        | Switch_variant { place; _ } -> place_keys place keys
-        | Return value ->
-            Option.fold ~none:keys ~some:(fun lir_operand -> operand_keys lir_operand keys) value
-        | Fail { message; length; _ } -> operand_keys length (operand_keys message keys)
-        | Yield { value; _ } -> operand_keys value keys
-        | Goto _ | Unreachable -> keys)
-      keys function_ref.blocks
-  in
-  let keys = Array.fold_left in_function (in_function [] instance.main) instance.nested in
-  List.filter (fun key -> not (Instance.equal key instance.key)) (List.rev keys)
-
-let compiled_key : Lir.compiled -> Instance.key = function
-  | Code lir -> lir.key
-  | Data data -> data.data_key
-  | Table lir -> lir.table_key
-
-let compiled_references env : Lir.compiled -> Instance.key list = function
-  | Code lir -> references env lir
-  | Data _ -> []
-  | Table lir -> List.map fst lir.entries
-
 module Table = Hashtbl.Make (struct
   type t = Instance.key
 
@@ -104,38 +7,21 @@ end)
 
 let bug format = Compiler_bug.bug ~stage:"Reachable" format
 
-(* The methods of capabilities an instance calls: each capability, with the
-   method's place among its methods. *)
-let methods_called (instance : Lir.t) =
-  let in_function calls (function_ref : Lir.function_) =
-    Array.fold_left
-      (fun calls (block : Lir.basic_block) ->
-        List.fold_left
-          (fun calls (statement : Lir.statement) ->
-            match statement with
-            | Call { target = Evidence_call { capability; slot; _ }; _ } ->
-                (capability, slot) :: calls
-            | _ -> calls)
-          calls block.statements)
-      calls function_ref.blocks
-  in
-  List.rev (Array.fold_left in_function (in_function [] instance.main) instance.nested)
-
 (* Breadth-first, so an instance's number depends only on the shape of the
    walk up to it. Each key in the queue carries the way it was reached,
    nearest first. With [by_call], an entry of a capability's table is
    reached by a call of its method, with the caller's way, and only once
    the table is reached too; without, a table reaches its every entry. *)
-let walk env ~lookup ~by_call roots =
+let walk ~lookup ~by_call roots =
   let seen = Table.create 256 in
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
   let reached = ref [] in
   let tables = Hashtbl.create 16 and called = Hashtbl.create 16 in
-  let entry (table : Lir.table) (slot, way) =
-    match List.nth_opt table.entries slot with
-    | Some (key, _) -> Queue.add (key, way) queue
-    | None -> bug "a call of method %d of %s" slot (Instance.to_string table.table_key)
+  let entry table (slot, way) =
+    match List.nth_opt (Emit_c.references table) slot with
+    | Some key -> Queue.add (key, way) queue
+    | None -> bug "a call of method %d of %s" slot (Instance.to_string (Emit_c.key table))
   in
   while not (Queue.is_empty queue) do
     let key, way = Queue.pop queue in
@@ -145,13 +31,13 @@ let walk env ~lookup ~by_call roots =
       let way = key :: way in
       reached := (compiled, List.rev way) :: !reached;
       let all () =
-        List.iter (fun next -> Queue.add (next, way) queue) (compiled_references env compiled)
+        List.iter (fun next -> Queue.add (next, way) queue) (Emit_c.references compiled)
       in
-      match compiled with
-      | Table ({ capability = Some capability; _ } as table) when by_call ->
-          Hashtbl.add tables capability table;
-          List.iter (entry table) (List.rev (Hashtbl.find_all called capability))
-      | Code instance when by_call ->
+      match Emit_c.table compiled with
+      | Some (Some capability) when by_call ->
+          Hashtbl.add tables capability compiled;
+          List.iter (entry compiled) (List.rev (Hashtbl.find_all called capability))
+      | _ when by_call ->
           List.iter
             (fun (capability, slot) ->
               if not (List.mem_assoc slot (Hashtbl.find_all called capability)) then begin
@@ -160,7 +46,7 @@ let walk env ~lookup ~by_call roots =
                   (fun table -> entry table (slot, way))
                   (List.rev (Hashtbl.find_all tables capability))
               end)
-            (methods_called instance);
+            (Emit_c.calls compiled);
           all ()
       | _ -> all ()
     end
@@ -169,41 +55,10 @@ let walk env ~lookup ~by_call roots =
 
 (* The same instances in the same order, each with the first way the walk
    reached it: the keys from a root to the instance, both included. *)
-let reached env ~lookup roots = walk env ~lookup ~by_call:false roots
-let running env ~lookup roots = walk env ~lookup ~by_call:true roots
-let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
+let running ~lookup roots = walk ~lookup ~by_call:true roots
+let reachable ~lookup roots = List.map fst (walk ~lookup ~by_call:false roots)
 let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own hash"
-
-let own_hash ~references compiled =
-  let self = compiled_key compiled in
-  let paths = ref [] in
-  let path lir_place =
-    let rec find position = function
-      | [] ->
-          paths := !paths @ [ lir_place ];
-          position
-      | known :: rest -> if Path.equal lir_place known then position else find (position + 1) rest
-    in
-    Cbor.int (find 0 !paths)
-  in
-  let instance key =
-    if Instance.equal key self then Cbor.Array [ Text "self" ]
-    else
-      let rec find position = function
-        | [] ->
-            Compiler_bug.bug ~stage:"Reachable" "a reference that was not collected, to %s"
-              (Instance.to_string key)
-        | other :: rest -> if Instance.equal other key then position else find (position + 1) rest
-      in
-      Cbor.Array [ Text "instance"; Cbor.int (find 0 references) ]
-  in
-  let encoded =
-    match compiled with
-    | Lir.Code position -> Lir.encode ~path ~instance (Lir.canonical_instance position)
-    | Data data -> Lir.encode_data ~path ~instance data
-    | Table lir -> Lir.encode_table ~path ~instance lir
-  in
-  derive_own_hash (Cbor.encode encoded)
+let own_hash compiled = derive_own_hash (Emit_c.text compiled)
 
 module Keys = Map.Make (struct
   type t = Instance.key
@@ -313,7 +168,3 @@ let group_key ~link ~deep ~members start =
                ])
            walked);
     ]
-
-module For_testing = struct
-  let references = references
-end

@@ -40,12 +40,18 @@ already needs the platform's C toolchain.
 
 A small IR, the LIR, between the MIR and C text gives one place for
 every transformation, since drop elaboration, the cursor state machine, and
-outlining `parallel` branches are passes over a control-flow graph. It is
-also what early cutoff compares: a definition whose LIR is unchanged
-compiles to the same C, so nothing after it runs again, and the LIR does not
-depend on the installed C compiler, so a new one invalidates no test result.
-The LIR is not SSA: locals are mutable slots, since the C compiler builds SSA
+outlining `parallel` branches are passes over a control-flow graph. The LIR
+is not SSA: locals are mutable slots, since the C compiler builds SSA
 itself, and slots make drops and state machines simpler.
+
+Each instance is kept as its C, a fragment that also lists the types,
+prototypes, and instances it names. The fragment is what early cutoff
+compares: an instance whose C is unchanged needs nothing after it run
+again. Its hash reads the C with each name written as a number, so renaming
+or moving a definition changes no hash, and the C does not depend on the
+installed C compiler, so a new one invalidates no test result. A build
+assembles the fragments into files, each declaring and defining what its
+fragments name.
 
 ### Generated code has no undefined behavior
 

@@ -1,12 +1,3 @@
 (library
  (name lir)
- (libraries
-  compiler_bug
-  path
-  ground
-  instance
-  memory_layout
-  libc
-  zarith
-  cbor
-  blake3))
+ (libraries compiler_bug path ground instance memory_layout libc zarith))

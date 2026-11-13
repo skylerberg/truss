@@ -20,19 +20,18 @@ let named_program ~entry_name ~helper_name returned =
   in
   [ main; helper ]
 
+(* An instance of a small program, as C. *)
 let lookup instances key =
-  List.find (fun (instance : Lir.t) -> Instance.equal instance.key key) instances
+  Emit_c.fragment (shape_env ())
+    (Lir.Code (List.find (fun (instance : Lir.t) -> Instance.equal instance.key key) instances))
 
 (* Each instance's references in a small program. *)
-let references program key =
-  Reachable.compiled_references (shape_env ()) (Lir.Code (lookup program key))
+let references program key = Emit_c.references (lookup program key)
 
 (* The key of everything an instance can reach, composed as the queries of
    [Compile] compose it. *)
 let reach_key program root =
-  let own key =
-    Reachable.own_hash ~references:(references program key) (Lir.Code (lookup program key))
-  in
+  let own key = Reachable.own_hash (lookup program key) in
   let groups = Reachable.groups ~edges:(references program) [ root ] in
   let rec reach key =
     match Reachable.Keys.find_opt key groups with
@@ -66,19 +65,10 @@ let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
 let () =
   test "a build reaches each called instance once, in order" (fun () ->
       let program = named_program ~entry_name:"start" ~helper_name:"helper" 1 in
-      let reached =
-        Reachable.reachable (shape_env ())
-          ~lookup:(fun key -> Lir.Code (lookup program key))
-          [ key "start" ]
-      in
+      let reached = Reachable.reachable ~lookup:(lookup program) [ key "start" ] in
       expect_string ~expected:"test::start test::helper"
         (String.concat " "
-           (List.map
-              (function
-                | Lir.Code instance -> Instance.to_string instance.key
-                | Data data -> Instance.to_string data.data_key
-                | Table table -> Instance.to_string table.table_key)
-              reached)));
+           (List.map (fun fragment -> Instance.to_string (Emit_c.key fragment)) reached)));
   test "a drop reaches the type's drop function" (fun () ->
       let dropping_instance =
         instance "f"
@@ -87,7 +77,8 @@ let () =
              [ block [ Drop (at 0) ] (Return None) ])
       in
       let references =
-        Reachable.For_testing.references (shape_env ~extra:drop_shapes ()) dropping_instance
+        Emit_c.references
+          (Emit_c.fragment (shape_env ~extra:drop_shapes ()) (Code dropping_instance))
       in
       expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
@@ -107,10 +98,7 @@ let () =
   test "changing a helper changes its own hash and not its caller's" (fun () ->
       let own returned name =
         let program = named_program ~entry_name:"start" ~helper_name:"helper" returned in
-        let compiled = Lir.Code (lookup program (key name)) in
-        Reachable.own_hash
-          ~references:(Reachable.compiled_references (shape_env ()) compiled)
-          compiled
+        Reachable.own_hash (lookup program (key name))
       in
       if own 1 "helper" = own 2 "helper" then fail "the helper's hash is the same";
       if own 1 "start" <> own 2 "start" then fail "the caller's hash changed");

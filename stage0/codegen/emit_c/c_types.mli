@@ -18,7 +18,7 @@ type defined = { definition : definition; references : key list }
 
 type context = {
   env : Memory_layout.env;
-  build : C_runtime.build;
+  prefix : string;
   mutable order : key list;
   mutable registered : unit Keys.t;
   mutable environments : (string * Lir.ty) list Keys.t;

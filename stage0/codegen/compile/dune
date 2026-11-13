@@ -23,6 +23,7 @@
   outline
   yields
   reachable
+  emit_c
   cbor
   blake3
   toolchain
