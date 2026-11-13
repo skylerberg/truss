@@ -424,7 +424,7 @@ let () =
       ("match value {\n  " ^ text ^ " => todo\n}")
       ("(match (value) (=> " ^ expected ^ " todo))")
   in
-  test "a binding or constant" (fun () -> pattern_of "name" "name");
+  test "a binding" (fun () -> pattern_of "name" "name");
   test "a wildcard" (fun () -> pattern_of "_" "_");
   test "a record pattern" (fun () ->
       pattern_of "(index, element: score, ..)" "(record index (element: score) ..)");
@@ -440,7 +440,7 @@ let () =
   test "alternatives" (fun () -> arm_of "301 | 302 | Low" "(| 301 302 Low)");
   test "ranges" (fun () ->
       arm_of "500..=599" "(..= 500 599)";
-      arm_of "0..=max_port" "(..= 0 max_port)";
+      arm_of "0..=network::max_port" "(..= 0 network::max_port)";
       arm_of "UInt16.minimum..=UInt16.maximum" "(..= UInt16.minimum UInt16.maximum)";
       arm_of "Character\"a\"..=Character\"z\"" "(..= Character\"a\" Character\"z\")");
   test "a guard" (fun () -> arm_of "code if code >= 400" "code (if (>= code 400))");
@@ -451,6 +451,9 @@ let () =
       body_error "let (.., x) = value" ~code:Unexpected_token ~at:"..");
   test "a float literal is not a pattern" (fun () ->
       body_error "match x {\n  0.0 => todo\n}" ~code:Float_pattern ~at:"0.0");
+  test "a range's end is a literal or a constant written with its module or type" (fun () ->
+      body_error "match x {\n  0..=max_port => todo\n}" ~code:Unexpected_token ~at:"max_port";
+      body_error "match x {\n  low..=9 => todo\n}" ~code:Unexpected_token ~at:"low");
   test "a range pattern needs both ends" (fun () ->
       body_error "match x {\n  0.. => todo\n}" ~code:Unexpected_token ~at:"=>");
   test "a string in a pattern cannot interpolate" (fun () ->

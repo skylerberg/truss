@@ -281,7 +281,7 @@ let spans (definition_ : definition) : span array =
   let rec pattern (written : pattern) =
     spans.(written.id) <- written.span;
     match written.kind with
-    | Wildcard | Binding_or_constant _ | Qualified_constant _ | Literal _ | Pattern_error -> ()
+    | Wildcard | Binding _ | Qualified_constant _ | Literal _ | Pattern_error -> ()
     | Pattern_range { start; stop; _ } ->
         spans.(start.id) <- start.span;
         spans.(stop.id) <- stop.span
@@ -461,7 +461,7 @@ let walk_names ~on_name:add (definition_ : definition) =
   and pattern (written : pattern) =
     match written.kind with
     | Wildcard | Pattern_error -> ()
-    | Binding_or_constant name -> add name
+    | Binding name -> add name
     | Qualified_constant constant -> constant_ constant
     | Literal literal -> literal_ literal
     | Pattern_range { start; stop; _ } ->
@@ -491,7 +491,6 @@ let walk_names ~on_name:add (definition_ : definition) =
     match written.kind with
     | End_literal literal -> literal_ literal
     | End_constant constant -> constant_ constant
-    | End_name name -> add name
   in
   let generic (written : generic_parameter) =
     match written.kind with

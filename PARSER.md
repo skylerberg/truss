@@ -8,8 +8,7 @@ tree, even for a file with errors, so later stages can check every
 definition that did parse.
 
 The parser does not resolve names. `name[...]` is one node whether it is an
-index or type arguments, and a bare name in a pattern is one node whether it
-is a constant or a binding. Name resolution decides without changing the
+index or type arguments. Name resolution decides without changing the
 tree's shape (see
 [SPECIFICATION.md](SPECIFICATION.md#constructs-resolved-after-parsing)).
 

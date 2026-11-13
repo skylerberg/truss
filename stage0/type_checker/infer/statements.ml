@@ -106,7 +106,7 @@ and statement state env (written : statement) ~last : unit =
           let pattern = build_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (build_block state) else_ });
       (match (annotation, written_pattern.kind) with
-      | None, Binding_or_constant name -> Hashtbl.replace state.annotatable name.id ()
+      | None, Binding name -> Hashtbl.replace state.annotatable name.id ()
       | _ -> ());
       binding_pattern state env written_pattern type_ ~is_var ~mode
   | Assignment { target; operator = Assign; value }
@@ -239,7 +239,7 @@ and statement state env (written : statement) ~last : unit =
                         (show state element) (show state annotated)))
           | None -> (
               match written_pattern.kind with
-              | Binding_or_constant name -> Hashtbl.replace state.annotatable name.id ()
+              | Binding name -> Hashtbl.replace state.annotatable name.id ()
               | _ -> ()));
           loop_element := Some element;
           (if inner != iterable then

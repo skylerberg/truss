@@ -5,7 +5,7 @@ let origin: Point = Point(x: 0, y: false)
 
 fn f(point: Point) -> Bool {
   match point {
-    origin => true
+    app::main::origin => true
     (x: 0, y: false) => false
     _ => false
   }

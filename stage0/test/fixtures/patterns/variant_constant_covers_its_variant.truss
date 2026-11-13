@@ -7,7 +7,7 @@ let favorite: Color = Color.Red
 
 fn f(color: Color) -> Int64 {
   match color {
-    favorite => 1
+    app::main::favorite => 1
     Green => 2
   }
 }

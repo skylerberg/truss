@@ -87,9 +87,6 @@ let () =
 
 let () =
   let codes_of text = codes (check (setup [ ("app::main", text) ]) (file_of "app::main")) in
-  test "a generic parameter that is a value covers nothing else" (fun () ->
-      one_diagnostic Fixtures.Patterns.generic_parameter_that_is_a_value_covers_nothing
-        "patterns.not_covered");
   test "a record constant covers the record it is" (fun () ->
       one_diagnostic Fixtures.Patterns.record_constant_covers_the_record_it_is
         "patterns.unreachable_arm");

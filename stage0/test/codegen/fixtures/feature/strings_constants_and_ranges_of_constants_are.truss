@@ -11,8 +11,8 @@ fn command(text: String) -> Int64 {
 
 fn sized(value: Int64) -> String {
   match value {
-    origin => "origin"
-    1..limit => "small"
+    example::origin => "origin"
+    1..example::limit => "small"
     _ => "large"
   }
 }
