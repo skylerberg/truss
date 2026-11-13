@@ -942,14 +942,11 @@ let () =
 (* The diagnostics of [app::main], in a package that depends on [lib], whose
    one module is [lib::numbers]. *)
 let across library program =
-  let database = Engine.context (Engine.create ()) in
-  Database.load_standard (Engine.of_context database);
-  Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
-    ~dependencies:[]
-    [ (Support.file_of "lib::numbers", library) ];
-  Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
-    ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
-    [ (Support.file_of "app::main", "use lib::numbers\n\n" ^ program) ];
+  let database =
+    Support.setup
+      ~dependencies:[ ("app", "lib") ]
+      [ ("lib::numbers", library); ("app::main", "use lib::numbers\n\n" ^ program) ]
+  in
   check database (Support.file_of "app::main")
 
 let public_doubling ensures =

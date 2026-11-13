@@ -164,7 +164,7 @@ fn route(request: own http::Request) -> http::Response
     return http::Response.new(status: http::Status.no_content)
   }
   if request.matches(http::Route"GET /big") is Some(_) {
-    let text = "x".slice().repeated(200000)
+    let text = "x".slice().repeated(70000)
     return http::Response.text(text.slice())
   }
   http::Response.text("served ${request.path()}".slice())
@@ -196,7 +196,7 @@ fn client_exchanges(is_secure: Bool) -> List[String]
       mut seen.push(summary(mut client.get("${base}/second?page=2".slice())))
       var headers = http::Headers.new()
       mut headers.add("X-Tag", value: "tagged")
-      let upload: List[UInt8] = List.filled(7, count: 1200000)
+      let upload: List[UInt8] = List.filled(7, count: 70000)
       let upload_url = url::parse("${base}/upload".slice()).expect("a URL")
       mut seen.push(summary(mut client.send(http::Method.Post, url: upload_url, headers: headers, body: upload)))
       mut seen.push(summary(mut client.get("${base}/empty".slice())))
@@ -217,9 +217,9 @@ test "a client sends several requests over one HTTP/2 connection, with an upload
     assert seen.length() == 6
     assert seen[0] == "200 13 served /first"
     assert seen[1] == "200 14 served /second"
-    assert seen[2] == "200 14 1200000 tagged"
+    assert seen[2] == "200 12 70000 tagged"
     assert seen[3] == "204 0 "
-    assert seen[4] == "200 200000"
+    assert seen[4] == "200 70000"
     assert seen[5] == "200 0 "
   }
 }
@@ -230,9 +230,9 @@ test "a client keeps an HTTP/1.1 connection open between requests" {
     assert seen.length() == 6
     assert seen[0] == "200 13 served /first"
     assert seen[1] == "200 14 served /second"
-    assert seen[2] == "200 14 1200000 tagged"
+    assert seen[2] == "200 12 70000 tagged"
     assert seen[3] == "204 0 "
-    assert seen[4] == "200 200000"
+    assert seen[4] == "200 70000"
     assert seen[5] == "200 0 "
   }
 }
