@@ -109,37 +109,25 @@ let record (project : Project.t) registry (package : Project.package) =
 
 (* The package's failing tests that have no [uses], each with its
    outcome. *)
-let failed_tests (project : Project.t) (package : Project.package) =
+let failed_tests (project : Project.t) =
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
-        test.module_.package = package.name
-        &&
         match Query.demand project.context Interface.Environment.interface test.path with
-        | Some (Test_interface uses) when uses = Types.no_capabilities -> true
+        | Some (Test_interface uses) -> uses = Types.no_capabilities
         | _ -> false)
       (Test_command.select project ~paths:[] ~match_:None)
   in
-  if tests = [] then []
-  else
-    let compile = Compiler.create project Development in
-    match
-      Compile.run_tests compile
-        ~time_limit:(Database.time_limit project.session * 1000)
-        (List.map (fun (test : Test_command.test) -> test.path) tests)
-    with
-    | Error message -> Project.cannot_run "%s" message
-    | Ok records ->
-        List.concat
-          (List.map2
-             (fun (test : Test_command.test) (record : Compile.record) ->
-               if record.outcome = Passed then []
-               else
-                 [
-                   Printf.sprintf "%s: %s" (Test_command.label test)
-                     (Compile.show_outcome record.outcome);
-                 ])
-             tests records)
+  List.concat
+    (List.map2
+       (fun (test : Test_command.test) (record : Compile.record) ->
+         if record.outcome = Passed then []
+         else
+           [
+             Printf.sprintf "%s: %s" (Test_command.label test) (Compile.show_outcome record.outcome);
+           ])
+       tests
+       (Test_command.run_tests project tests))
 
 (* The name to publish an incompatible release under: the name with the
    next number after [_v]. *)
@@ -260,7 +248,7 @@ let run () =
              Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
            unfinished_code
         @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
-  (match failed_tests project package with
+  (match failed_tests project with
   | [] -> ()
   | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
   match decide project registry package with

@@ -91,33 +91,30 @@ let refuse_unshippable project compile main =
           refusals;
       raise (Outcome.Stop 1)
 
-(* Builds the package's program to [output]. A release build requires
+(* Builds the package's program to [output], or else to a fresh path in
+   the store's directory of programs, and returns its path. A release build requires
    every obligation to be proven, so it omits the run-time checks that the
    proofs replace, and it refuses a program that can reach unfinished
    code. A development build skips the prover and keeps the checks; a
    [todo] it reaches stops the program, and an [echo] writes to standard
    error. *)
-let build_program (project : Project.t) (build : Compiler.build) ~output =
+let build_program ?output (project : Project.t) (build : Compiler.build) =
   let is_release = build = Release in
   let report = Report.gather ~proofs:is_release project in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = main project in
   let compile = Compiler.create ~checks:(not is_release) project build in
   if is_release then refuse_unshippable project compile main;
+  let output = Option.value output ~default:(Compile.fresh_program compile) in
   match Compile.build_program compile ~main ~output with
   | Error message -> Project.cannot_run "%s" message
-  | Ok () -> ()
+  | Ok () -> output
 
 (* [truss run]: builds the command's one package, and returns the program
    for the client to run on its terminal with the arguments, so it can
    prompt and read input. *)
 let run ~release ~arguments =
-  let project = Project.current () in
-  let program =
-    Filename.concat (Database.programs_directory ())
-      (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1e6)))
-  in
-  build_program project (if release then Release else Development) ~output:program;
+  let program = build_program (Project.current ()) (if release then Release else Development) in
   Outcome.Run_program { program; arguments }
 
 (* [truss build]: builds for release to [output], or else to a file named
@@ -126,7 +123,7 @@ let build ~output =
   let project = Project.current () in
   let package = Project.package project in
   let output = Project.normalize (Option.value output ~default:(Path.show_package package.name)) in
-  build_program project Release ~output;
+  ignore (build_program project Release ~output);
   if Output.json () then
     Json.print (Json.document ~diagnostics:[] [ ("output", Json.String (Project.shown output)) ])
   else Output.printf "Built %s.\n" (Project.shown output);

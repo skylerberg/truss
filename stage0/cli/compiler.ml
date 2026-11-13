@@ -59,7 +59,7 @@ let create ?(checks = true) (project : Project.t) build =
     | _ -> Path.show_file file
   in
   let own = List.map snd (Database.packages project.session) in
-  Compile.create ~checks ~file_name ~results:(results ())
+  Compile.create ~checks ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
     ~want:(want project.session project.context)
     ~worked_on:(fun package -> List.mem package own)
     project.context (target ()) toolchain
