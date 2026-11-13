@@ -1,1 +1,1 @@
-val run : directory:string -> position:string -> json:bool -> int
+val run : position:string -> int

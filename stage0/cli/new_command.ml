@@ -10,7 +10,7 @@ let main = {|fn main(arguments: List[String]) -> ExitCode {
 |}
 
 (* The directory is named after the package, without its owner. *)
-let run ~directory ~name =
+let run ~name =
   let directory_name =
     match Manifest.parse_name name with
     | Some package -> package.name
@@ -20,7 +20,7 @@ let run ~directory ~name =
            an owner and a name, such as `acme::weather`."
           name
   in
-  let path = Filename.concat directory directory_name in
+  let path = directory_name in
   if Sys.file_exists path then Project.cannot_run "%s already exists." (Project.shown path);
   (try Sys.mkdir path 0o755
    with Sys_error message ->

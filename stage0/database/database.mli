@@ -115,6 +115,9 @@ val results : kind:string -> (string -> string option) * (string -> string -> un
 val flush_store : unit -> unit
 (** Writes the store's in-memory contents to disk. *)
 
+val save_opened : unit -> unit
+(** Saves each session opened since the last call, and writes the store to disk. *)
+
 val store_directory : unit -> string
 (** Where the store is: [$TRUSS_CACHE], or else [$XDG_CACHE_HOME/truss], or else [~/.cache/truss].
 *)

@@ -104,7 +104,7 @@ let fresh = scratch
 
 (* The registry at a directory, as [TRUSS_REGISTRY] names one. *)
 let at root =
-  Index.configure (Some root);
+  Unix.putenv Index.variable root;
   Option.get (Index.current ())
 
 (* A version's files in a registry, at [owner/name/VERSION/]. *)

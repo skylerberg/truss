@@ -15,10 +15,10 @@ let parse_position text =
       | _ -> Project.cannot_run "`%s` is not FILE:LINE:COLUMN." text)
   | _ -> Project.cannot_run "`%s` is not FILE:LINE:COLUMN." text
 
-let run ~directory ~position ~json =
+let run ~position =
+  let json = Output.json () in
   let file, line, column = parse_position position in
-  let here = Project.load directory in
-  let project = Project.load (Database.root here.session) in
+  let project = Project.worktree () in
   let path = Project.real file in
   match List.find_opt (fun (_, file_path) -> file_path = path) project.files with
   | None -> Project.cannot_run "%s is not a file of a package in this worktree." file

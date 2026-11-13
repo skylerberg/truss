@@ -48,7 +48,7 @@ let compile_one toolchain cache settings (name, text) =
         Sys.rename partial output;
         (* [TRUSS_KEEP_C] keeps each C file beside its object, for reading
            the emitted code. *)
-        if Sys.getenv_opt "TRUSS_KEEP_C" = None then Sys.remove source
+        if Option.value (Sys.getenv_opt "TRUSS_KEEP_C") ~default:"" = "" then Sys.remove source
         else Sys.rename source (Filename.concat cache.directory (key ^ ".c"));
         Ok output
     | Error message ->

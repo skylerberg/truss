@@ -441,6 +441,9 @@ let diagnostics_of session packages =
         (package_files session name))
     packages
 
+(* The sessions opened since [save_opened] last saved them. *)
+let opened = ref []
+
 let open_session directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
   else
@@ -460,6 +463,7 @@ let open_session directory =
             (* The state is written when the command is done, with the
                command's results, so that a first write holds a whole state. *)
             ignore (Engine.stabilize (Session.engine session));
+            if not (List.memq session !opened) then opened := session :: !opened;
             Ok (session, target_packages session (relative_to root directory)))
 
 let refresh session =
@@ -474,6 +478,12 @@ let objects_directory () = Session.directory "objects"
 let programs_directory () = Session.directory "programs"
 let results = Session.results
 let flush_store = Session.flush
+
+let save_opened () =
+  List.iter Session.save !opened;
+  opened := [];
+  Session.flush ()
+
 let sessions = Session.sessions
 
 (* Graph questions. The worktree is checked first, so that every

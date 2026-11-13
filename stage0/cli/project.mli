@@ -16,9 +16,10 @@ type t = {
   mutable files : (Path.file * string) list;  (** Each file of [packages], with its absolute path *)
 }
 
-val opened : Database.session list ref
 val file_paths : Database.session -> package list -> (Path.file * string) list
 val load : string -> t
+val current : unit -> t
+val worktree : unit -> t
 val package : t -> package
 val is_own : t -> Path.module_ -> bool
 val manifest_problems : t -> (string * Path.package * Checks.manifest_problem) list

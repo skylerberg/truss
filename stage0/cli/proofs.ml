@@ -2,13 +2,12 @@
    to the pinned solver, and each tagged template's check is decided by
    running it. *)
 
-(* The solver, found once. Proving requires it, as building requires a C
-   compiler. Its answers are cached in the store. *)
-let solver =
-  lazy
-    (match Solver.find ~cache:(Filename.concat (Database.store_directory ()) "proofs") () with
-    | Ok solver -> solver
-    | Error message -> Project.cannot_run "%s" message)
+(* The solver that [TRUSS_Z3] names, or else [z3]. Proving requires it, as
+   building requires a C compiler. Its answers are cached in the store. *)
+let solver () =
+  match Solver.find ~cache:(Filename.concat (Database.store_directory ()) "proofs") () with
+  | Ok solver -> solver
+  | Error message -> Project.cannot_run "%s" message
 
 (* The evaluator runs code through the compiler that builds programs. The
    compiler is created only when a proof needs a run. *)
@@ -25,7 +24,7 @@ let checked (project : Project.t) files =
   match List.filter (fun file -> Database.diagnostics project.session file = []) files with
   | [] -> fun _ -> ([], [])
   | provable ->
-      let solver = Lazy.force solver and evaluator = evaluator project in
+      let solver = solver () and evaluator = evaluator project in
       let record responses =
         List.iter
           (fun (key, response) -> Database.set project.session Prover.oracle_response key response)

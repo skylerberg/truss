@@ -218,11 +218,11 @@ let edits_json (project : Project.t) plan =
 
 (* A rename edits every package of the worktree, regardless of the current
    directory, since any of them may refer to the renamed definition. *)
-let run ~directory ~from_ ~to_ ~json =
-  let here = Project.load directory in
-  let project = Project.load (Database.root here.session) in
+let run ~from_ ~to_ =
+  let json = Output.json () in
+  let project = Project.worktree () in
   let report = Report.gather project in
-  Report.stop_on_errors ~json report;
+  if not (Report.clean report) then raise (Report.Errors report);
   let plan =
     match target_of project from_ with
     | Definition path -> plan_definition project path (new_name ~from_ to_)

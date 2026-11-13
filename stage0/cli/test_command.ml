@@ -218,9 +218,10 @@ let run_all (project : Project.t) compile ~rerun ~progress tests =
             | Error message -> Error message))
     (Ok []) project.packages
 
-let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
+let run ~paths ~match_ ~timings:show_timings ~rerun =
+  let json = Output.json () in
   let started = now_microseconds () in
-  let project = Project.load directory in
+  let project = Project.current () in
   let report = Report.gather project in
   let checked = now_microseconds () in
   (* In package order, so each package's tests are contiguous. *)
@@ -231,9 +232,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
         List.filter (fun test -> test.module_.package = package.name) selected)
       project.packages
   in
-  Report.stop_on_errors ~json
-    ~fields:[ ("tests", Json.List (List.map (fun test -> test_json test None) tests)) ]
-    report;
+  if not (Report.clean report) then raise (Report.Errors report);
   let compile = Compiler.create project Development in
   let progress =
     {
@@ -250,7 +249,6 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
     run_all project compile ~rerun ~progress:(on_progress progress ~build_ended) tests
   in
   Status_line.clear progress.line;
-  Database.flush_store ();
   match outcome with
   | Error message -> Project.cannot_run "%s" message
   | Ok records ->

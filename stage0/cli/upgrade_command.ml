@@ -171,8 +171,8 @@ let consequences (project : Project.t) text =
   let now = diagnostics project.session in
   (signatures, List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial))
 
-let report ~json ~lock ~signatures ~broken =
-  if json then
+let report ~lock ~signatures ~broken =
+  if Output.json () then
     Json.print
       (Json.document ~diagnostics:[]
          [
@@ -219,15 +219,16 @@ let report ~json ~lock ~signatures ~broken =
 
 let lock_file (project : Project.t) = Filename.concat (Database.root project.session) "truss.lock"
 
-let run ~directory ~names ~json =
-  let project = Project.load directory in
+let run ~names =
+  let project = Project.current () in
   let set = List.map wanted names in
   match Database.plan_lock project.session ~set ~all:(names = []) with
   | Error message -> Project.cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
       if lock = [] then begin
-        if json then Json.print (Json.document ~diagnostics:[] [ ("changes", Json.List []) ])
+        if Output.json () then
+          Json.print (Json.document ~diagnostics:[] [ ("changes", Json.List []) ])
         else Output.print_line "Every package is at the version asked for.";
         0
       end
@@ -235,6 +236,6 @@ let run ~directory ~names ~json =
         let signatures, broken = consequences project plan.text in
         Project.write_file (lock_file project) plan.text;
         Project.reload project;
-        report ~json ~lock ~signatures ~broken;
+        report ~lock ~signatures ~broken;
         if broken = [] then 0 else 1
       end

@@ -57,14 +57,17 @@ A command acts on the packages of its project (see
 [PACKAGES.md](PACKAGES.md#projects)). Run in a package's directory, or below
 it, a command acts on that package; run at the root of a project of several
 packages, it acts on all of them. `run` and `build` need exactly one package.
-`-C DIRECTORY`, as in `git` and `make`, runs the command as if from that
-directory.
 
 A manifest or lock file that breaks a rule of [PACKAGES.md](PACKAGES.md) is
 an error in the code, reported with the diagnostics.
 
 ### Common options
 
+Every command takes these.
+
+- **`-C DIRECTORY`**, as in `git` and `make`, runs the command as if from
+  that directory: it finds the packages, resolves paths, and shows positions
+  from there.
 - **`--json`** writes one JSON document to standard output instead of the
   report for people. Every document has `"format": 1`, which changes only
   when a field is removed or changes meaning, and `"diagnostics"`. A command
@@ -93,7 +96,7 @@ Once the program starts, `truss run` exits with the program's status.
 ## Checking
 
 ```text
-truss check [--fix] [--no-proofs] [--json]
+truss check [--fix] [--no-proofs]
 ```
 
 `truss check` runs every stage that reports diagnostics, the prover
@@ -120,7 +123,7 @@ it does not change the exit status.
 ## Testing
 
 ```text
-truss test [--match TEXT] [--timings] [--rerun] [--json] [FILE_OR_DIRECTORY...]
+truss test [--match TEXT] [--timings] [--rerun] [FILE_OR_DIRECTORY...]
 ```
 
 `truss test` checks the packages, stops if there is any diagnostic, and runs
@@ -160,7 +163,7 @@ tests with `uses`, run every time.
 
 ```text
 truss run [--release] [--] [ARGUMENT...]
-truss build [--output PATH] [--json]
+truss build [--output PATH]
 ```
 
 **`truss build`** builds a release program. It rejects a program with an
@@ -203,7 +206,7 @@ and how to change a name everywhere at once.
 ### `truss holes`
 
 ```text
-truss holes [--json] [FILE_OR_DIRECTORY...]
+truss holes [FILE_OR_DIRECTORY...]
 ```
 
 Lists every `todo` with its position, its expected type, the bindings in
@@ -221,7 +224,7 @@ render.truss:12:14: hole of type String
 ### `truss show`
 
 ```text
-truss show [--body] [--json] PATH...
+truss show [--body] PATH...
 ```
 
 Prints the signatures at each path: a definition's signature with every
@@ -234,7 +237,7 @@ only what is visible from this one. `--body` prints whole definitions.
 ### `truss impact`
 
 ```text
-truss impact [--base REVISION] [--json]
+truss impact [--base REVISION]
 ```
 
 Compares the worktree, uncommitted changes included, with a base commit: the
@@ -259,8 +262,8 @@ Tests whose code changed: 1
 ### `truss references` and `truss dependencies`
 
 ```text
-truss references [--json] NAME
-truss dependencies [--json] NAME
+truss references NAME
+truss dependencies NAME
 ```
 
 List the dependents or the dependencies of a definition, by part, such as
@@ -273,7 +276,7 @@ as a use by name.
 ### `truss explain`
 
 ```text
-truss explain [--json] FILE:LINE:COLUMN
+truss explain FILE:LINE:COLUMN
 ```
 
 Describes the name or expression at a position: its referent, its type, and
@@ -283,7 +286,7 @@ reading the file around it.
 ### `truss overlap`
 
 ```text
-truss overlap [--with BRANCH] [--merge] [--json]
+truss overlap [--with BRANCH] [--merge]
 ```
 
 Lists where the worktree's changes overlap another worktree's, or a
@@ -296,7 +299,7 @@ the merge result has.
 ### `truss rename`
 
 ```text
-truss rename [--json] FROM TO
+truss rename FROM TO
 ```
 
 Renames a definition, a method with every version of it, or a module, and
@@ -317,7 +320,7 @@ package's files into the store if it lacks them.
 ### `truss add`
 
 ```text
-truss add [--json] PACKAGE...
+truss add PACKAGE...
 ```
 
 Adds each package as a dependency of the current package, with a manifest
@@ -329,7 +332,7 @@ that entered the build.
 ### `truss upgrade`
 
 ```text
-truss upgrade [--json] [PACKAGE...]
+truss upgrade [PACKAGE...]
 ```
 
 Changes every registry package of the build to its newest version, or only
@@ -359,7 +362,7 @@ With these versions the project has errors it does not have now:
 ### `truss publish`
 
 ```text
-truss publish [--json]
+truss publish
 ```
 
 Publishes the current package to the registry if it meets PACKAGES.md's
@@ -420,8 +423,13 @@ no code, so they always run in the client's process.
 that compiles or links C, for working on the compiler. Set to a sanitizer's,
 such as `-fsanitize=address,undefined`, it finds compiler bugs, since a
 memory error or undefined behavior in Truss code can come only from one.
-The flags are part of each object's key and each test result's key. The
-client sends its value to the background process with each command.
+The flags are part of each object's key and each test result's key.
+
+The client sends each command the variables a command reads, so the
+background process uses the client's values, not its own: `TRUSS_REGISTRY`,
+`TRUSS_CFLAGS`, `TRUSS_CC`, `TRUSS_KEEP_C`, `TRUSS_Z3`, `TRUSS_CACHE_SIZE`,
+and `TRUSS_WORKERS`. `TRUSS_CACHE` names the store, and each store has its
+own background process.
 
 ## Left out
 

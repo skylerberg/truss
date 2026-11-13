@@ -3,8 +3,8 @@
 
 type direction = References | Dependencies
 
-let run ~directory ~direction ~name ~json =
-  let project = Project.load directory in
+let run ~direction ~name =
+  let project = Project.current () in
   match Database.find_definitions project.session name with
   | [] -> Project.cannot_run "No definition named %s in this worktree." name
   | targets ->
@@ -13,7 +13,7 @@ let run ~directory ~direction ~name ~json =
         | References -> Database.dependents project.session targets
         | Dependencies -> Database.dependencies project.session targets
       in
-      if json then
+      if Output.json () then
         Json.print
           (Json.document ~diagnostics:[]
              [

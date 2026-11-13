@@ -130,7 +130,6 @@ let failed_tests (project : Project.t) (package : Project.package) =
     with
     | Error message -> Project.cannot_run "%s" message
     | Ok records ->
-        Database.flush_store ();
         List.concat
           (List.map2
              (fun (test : Test_command.test) (record : Compile.record) ->
@@ -226,8 +225,9 @@ let decide (project : Project.t) registry (package : Project.package) =
                     grows;
                   }))
 
-let run ~directory ~json =
-  let project = Project.load directory in
+let run () =
+  let json = Output.json () in
+  let project = Project.current () in
   let package = Project.package project in
   let name = package.name in
   if name.owner = None then
@@ -250,7 +250,7 @@ let run ~directory ~json =
     else List.iter Output.eprint_line sentences;
     raise (Outcome.Stop 1)
   in
-  Report.stop_on_errors ~json report;
+  if not (Report.clean report) then raise (Report.Errors report);
   (match unfinished project with
   | [] -> ()
   | unfinished_code ->

@@ -3,8 +3,8 @@
    a lock file line at the requested version or the newest, with lines for
    its own dependencies. *)
 
-let run ~directory ~names ~json =
-  let project = Project.load directory in
+let run ~names =
+  let project = Project.current () in
   let package = Project.package project in
   let wanted = List.map Upgrade_command.wanted names in
   let registry =
@@ -48,7 +48,7 @@ let run ~directory ~names ~json =
   | Ok plan ->
       Project.write_file (Upgrade_command.lock_file project) plan.text;
       Project.reload project;
-      Upgrade_command.report ~json
+      Upgrade_command.report
         ~lock:(Upgrade_command.lock_changes ~before:plan.before ~after:plan.after)
         ~signatures:[] ~broken:[];
       0

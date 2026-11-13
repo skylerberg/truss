@@ -2,18 +2,8 @@
 
 type build = Development | Release
 
-(* A process that answers for others, as the background process does, is
-   told each one's [TRUSS_CFLAGS], which is not its own environment's. *)
-let configured_c_flags : string option option ref = ref None
-let configure_c_flags flags = configured_c_flags := Some flags
-
 let c_flags () =
-  let value =
-    match !configured_c_flags with
-    | Some told -> told
-    | None -> Sys.getenv_opt Toolchain.added_flags_variable
-  in
-  Toolchain.split_flags (Option.value value ~default:"")
+  Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
 let toolchain () =
   match Toolchain.find () with

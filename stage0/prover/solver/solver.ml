@@ -8,7 +8,9 @@ let steps = 1_000_000
 type t = { program : string; cache : string option; mutable solved : int }
 
 let find ?cache () =
-  let program = Option.value (Sys.getenv_opt "TRUSS_Z3") ~default:"z3" in
+  let program =
+    match Sys.getenv_opt "TRUSS_Z3" with Some program when program <> "" -> program | _ -> "z3"
+  in
   match Process.run program [ "--version" ] with
   | exception Unix.Unix_error _ ->
       Error

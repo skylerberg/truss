@@ -1,1 +1,1 @@
-val run : directory:string -> names:string list -> json:bool -> int
+val run : names:string list -> int

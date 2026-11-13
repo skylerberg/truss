@@ -110,11 +110,11 @@ let find (project : Project.t) ~body text =
           Some { declaration; file; line; text = signature })
     (resolve project text)
 
-let run ~directory ~paths ~body ~json =
-  let project = Project.load directory in
+let run ~paths ~body =
+  let project = Project.current () in
   let results = List.map (fun path -> (path, find project ~body path)) paths in
   let missing = List.filter (fun (_, definitions) -> definitions = []) results in
-  if json then
+  if Output.json () then
     Json.print
       (Json.document ~diagnostics:[]
          [

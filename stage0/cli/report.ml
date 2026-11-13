@@ -82,10 +82,6 @@ let print report =
   | 0 -> ()
   | error_count -> Output.eprintf "%s\n" (plural error_count "error" "errors")
 
-(* Stops the command with status 1 when the code has errors, once it has
-   written the report, as [print] does or as JSON with [fields]. *)
-let stop_on_errors ~json ?(fields = []) report =
-  if not (clean report) then begin
-    if json then Json.print (document report fields) else print report;
-    raise (Outcome.Stop 1)
-  end
+(* The code has errors, so the command stops, and the command line writes
+   the report and exits with 1. *)
+exception Errors of t
