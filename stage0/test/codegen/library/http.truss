@@ -50,13 +50,15 @@ test "headers are found whatever the case of their names, and set replaces every
   assert !headers.contains("Content-Type")
 }
 
-fn application(request: http::Request) -> http::Response {
+fn answer(request: own http::Request) -> http::Response
+  uses Handles, Tasks
+{
   if request.matches(http::Route"GET /hello/{name}") is Some(found) {
     let name = found.get("name").unwrap_or("nobody".slice())
     return http::Response.json(Greeting(name: name.to_string(), count: 1))
   }
   if request.matches(http::Route"POST /echo") is Some(_) {
-    return match request.json[Greeting]() {
+    return match own request.json[Greeting]() {
       Ok(greeting) => http::Response.json(Greeting(name: own greeting.name, count: greeting.count + 1), status: http::Status.created)
       Err(_) => http::Response.text("not a greeting", status: http::Status.bad_request)
     }
@@ -70,6 +72,34 @@ fn application(request: http::Request) -> http::Response {
     return http::Response.html(html::Html"<h1>${own title}</h1>")
   }
   http::Response.text("no such page", status: http::Status.not_found)
+}
+
+fn application(request: own http::Request, responder: mut http::Responder)
+  uses Handles, Tasks
+{
+  if request.matches(http::Route"POST /count") is Some(_) {
+    var body = own request.body
+    var total: USize = 0
+    var pieces: USize = 0
+    var buffer: List[UInt8] = []
+    while mut body.read(mut buffer, limit: 1000) is Ok(count) && count > 0 {
+      total += count
+      pieces += 1
+      mut buffer.clear()
+    }
+    let _ = mut responder.send(http::Response.text("${total} in ${pieces}".slice()))
+    return
+  }
+  if request.matches(http::Route"GET /stream") is Some(_) {
+    let _ = mut responder.start(http::Status.ok)
+    let parts: USize = 3
+    for index in 0..parts {
+      let _ = mut responder.write("part ${index};".slice().bytes())
+    }
+    let _ = mut responder.finish()
+    return
+  }
+  let _ = mut responder.send(answer(own request))
 }
 
 fn loopback(port: UInt16) -> network::SocketAddress {
@@ -136,6 +166,29 @@ fn client_and_server() -> List[String]
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
         Err(error) => mut seen.push("failed: ${error}")
       }
+      let streamed = exchange("GET /stream HTTP/1.1\r\nConnection: close\r\n\r\n")
+      mut seen.push("${streamed.slice().contains("Transfer-Encoding: chunked")} ${streamed.slice().contains("part 1;")} ${streamed.slice().ends_with("0\r\n\r\n")}")
+      let upload: List[UInt8] = List.filled(65, count: 5000)
+      match http::send(http::Method.Post, url: url::Url"http://localhost:8080/count", body: upload) {
+        Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      var client = http::Client.new()
+      let pieces = mut client.stream(http::Method.Get, url: url::Url"http://localhost:8080/stream", receive: fn(status, _, streamed_body) {
+        var collected = ""
+        var buffer: List[UInt8] = []
+        while mut streamed_body.read(mut buffer, limit: 4) is Ok(count) && count > 0 {
+          mut collected.push("[")
+          mut collected.push(String.from_utf8_lossy(buffer.slice()).slice())
+          mut collected.push("]")
+          mut buffer.clear()
+        }
+        "${status.code} ${collected}"
+      })
+      match own pieces {
+        Ok(text) => mut seen.push(own text)
+        Err(error) => mut seen.push("failed: ${error}")
+      }
       return own seen
     }
   }
@@ -144,7 +197,7 @@ fn client_and_server() -> List[String]
 test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" {
   provide simulation::World.new() {
     let seen = client_and_server()
-    assert seen.length() == 11
+    assert seen.length() == 14
     assert seen[0] == "200 application/json"
     assert seen[1] == "{\"name\":\"ada\",\"count\":1}"
     assert seen[2] == "201 {\"name\":\"bo\",\"count\":5}"
@@ -156,5 +209,8 @@ test "a server answers a client in a world: JSON, a body, a missing page, keep-a
     assert seen[8] == "2500 false"
     assert seen[9] == "true true"
     assert seen[10] == "<h1>a&lt;b</h1>"
+    assert seen[11] == "true true true"
+    assert seen[12].slice().starts_with("5000 in ")
+    assert seen[13] == "200 [part][ 0;][part][ 1;][part][ 2;]"
   }
 }

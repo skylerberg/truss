@@ -1,7 +1,10 @@
+use standard::http::date
+use standard::http::flow
 use standard::http::hpack
 use standard::intrinsic
 use standard::map
 use standard::streams
+use standard::tasks
 
 internal let preface: String = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
@@ -49,7 +52,7 @@ let local_stream_window: USize = 1048576
 
 let local_connection_window: USize = 16777216
 
-let local_stream_limit: USize = 100
+let local_stream_limit: Int64 = 100
 
 internal type Failure =
   | Closed
@@ -82,39 +85,12 @@ fn violation(code: UInt32, message: StringSlice) -> Failure {
   Failure.Protocol(code: code, message: message.to_string())
 }
 
-internal type Message(stream: UInt32, fields: List[hpack::Field], body: List[UInt8], is_oversized: Bool)
-
-type Frame(kind: UInt8, flags: UInt8, stream: UInt32, payload: List[UInt8])
-
-type StreamState(
-  stream: UInt32,
-  block: List[UInt8],
-  fields: List[hpack::Field],
-  has_headers: Bool,
-  body: List[UInt8],
-  is_ended: Bool,
-  is_oversized: Bool,
-  is_delivered: Bool,
-  send_window: Int64,
-)
-
-internal type Session[Stream: streams::Reader + streams::Writer](
-  reader: streams::BufferedReader[Stream],
-  is_server: Bool,
-  decoder: hpack::Decoder,
-  encoder: hpack::Encoder,
-  peer_frame_size: USize,
-  peer_stream_window: Int64,
-  send_window: Int64,
-  streams: List[StreamState],
-  ready: List[Message],
-  last_stream: UInt32,
-  next_stream: UInt32,
-  continuation: Option[UInt32],
-  is_going_away: Bool,
-  header_limit: USize,
-  body_limit: USize,
-)
+internal fn failure_code(failure: Failure) -> UInt32 {
+  match failure {
+    Protocol(code, ..) => code
+    _ => 0
+  }
+}
 
 fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Failure] {
   match own outcome {
@@ -138,64 +114,69 @@ fn u32_at(bytes: Slice[UInt8], at: USize) -> UInt32 {
     | (intrinsic::convert[UInt8, UInt32](bytes[at + 2]) << 8) | intrinsic::convert[UInt8, UInt32](bytes[at + 3])
 }
 
-fn write_frame[Stream: streams::Reader + streams::Writer](
-  session: mut Session[Stream],
-  kind: UInt8,
-  flags: UInt8,
-  stream: UInt32,
-  payload: Slice[UInt8],
-) -> Result[Unit, Failure]
-  uses Handles
+type Frame(kind: UInt8, flags: UInt8, stream: UInt32, payload: List[UInt8])
+
+internal type Inbox(bytes: List[UInt8])
+
+fn fill[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Unit, Failure]
+  uses Handles, Tasks
 {
-  let length = payload.length()
-  var bytes: List[UInt8] = List.with_capacity(9)
-  mut bytes.push(intrinsic::convert((length >> 16) & 255))
-  mut bytes.push(intrinsic::convert((length >> 8) & 255))
-  mut bytes.push(intrinsic::convert(length & 255))
-  mut bytes.push(kind)
-  mut bytes.push(flags)
-  push_u32(mut bytes, value: stream & 2147483647)
-  mut bytes.append_slice(payload)
-  system(mut session.reader.source().write_all(bytes.slice()))?
-  system(mut session.reader.source().flush())
+  match stream.receive(mut inbox.bytes, limit: 65536) {
+    Ok(0) => Err(Failure.Closed)
+    Ok(_) => Ok(Unit)
+    Err(error) => Err(Failure.System(error: error))
+  }
 }
 
-fn read_frame[Stream: streams::Reader + streams::Writer](session: mut Session[Stream]) -> Result[Frame, Failure]
-  uses Handles
+fn take_bytes[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, count: USize) -> Result[List[UInt8], Failure]
+  uses Handles, Tasks
 {
-  var header: List[UInt8] = []
-  match mut session.reader.read_exactly(mut header, count: 9) {
-    Ok(_) => {}
-    Err(UnexpectedEnd) => return Err(Failure.Closed)
-    Err(error) => return Err(Failure.System(error: error))
+  while inbox.bytes.length() < count {
+    fill(stream, inbox: mut inbox)?
   }
-  if header.length() != 9 {
-    return Err(Failure.Closed)
+  let rest = mut inbox.bytes.split_off(count)
+  Ok(map::exchange(mut inbox.bytes, value: own rest))
+}
+
+fn read_frame[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Frame, Failure]
+  uses Handles, Tasks
+{
+  while inbox.bytes.length() < 9 {
+    fill(stream, inbox: mut inbox)?
   }
-  let length = intrinsic::convert[UInt8, USize](header[0]) * 65536 + intrinsic::convert[UInt8, USize](header[1]) * 256
-    + intrinsic::convert[UInt8, USize](header[2])
+  let length = intrinsic::convert[UInt8, USize](inbox.bytes[0]) * 65536 + intrinsic::convert[UInt8, USize](inbox.bytes[1]) * 256
+    + intrinsic::convert[UInt8, USize](inbox.bytes[2])
   if length > 16384 {
     return Err(violation(frame_size_error, message: "a frame larger than the advertised maximum"))
   }
-  var payload: List[UInt8] = List.with_capacity(length)
-  match mut session.reader.read_exactly(mut payload, count: length) {
-    Ok(_) => {}
-    Err(UnexpectedEnd) => return Err(violation(frame_size_error, message: "a frame that ends early"))
-    Err(error) => return Err(Failure.System(error: error))
+  while inbox.bytes.length() < 9 || inbox.bytes.length() - 9 < length {
+    fill(stream, inbox: mut inbox)?
   }
-  Ok(Frame(kind: header[3], flags: header[4], stream: u32_at(header.slice(), at: 5) & 2147483647, payload: own payload))
+  let rest = mut inbox.bytes.split_off(9 + length)
+  let whole = map::exchange(mut inbox.bytes, value: own rest)
+  if whole.length() < 9 {
+    return Err(Failure.Closed)
+  }
+  Ok(Frame(kind: whole[3], flags: whole[4], stream: u32_at(whole.slice(), at: 5) & 2147483647, payload: whole[9..].to_list()))
 }
 
-fn settings_payload(is_server: Bool, header_limit: USize) -> List[UInt8] {
-  var payload: List[UInt8] = []
-  if is_server {
-    push_setting(mut payload, identifier: 3, value: local_stream_limit)
-  } else {
-    push_setting(mut payload, identifier: 2, value: 0)
-  }
-  push_setting(mut payload, identifier: 4, value: local_stream_window)
-  push_setting(mut payload, identifier: 6, value: header_limit)
-  payload
+fn frame_bytes(output: mut List[UInt8], kind: UInt8, flags: UInt8, stream: UInt32, payload: Slice[UInt8]) {
+  let length = payload.length()
+  mut output.push(intrinsic::convert((length >> 16) & 255))
+  mut output.push(intrinsic::convert((length >> 8) & 255))
+  mut output.push(intrinsic::convert(length & 255))
+  mut output.push(kind)
+  mut output.push(flags)
+  push_u32(mut output, value: stream & 2147483647)
+  mut output.append_slice(payload)
+}
+
+fn send_frame[Stream: streams::Duplex](stream: Stream, kind: UInt8, flags: UInt8, id: UInt32, payload: Slice[UInt8]) -> Result[Unit, Failure]
+  uses Handles, Tasks
+{
+  var bytes: List[UInt8] = List.with_capacity(9 + payload.length())
+  frame_bytes(mut bytes, kind: kind, flags: flags, stream: id, payload: payload)
+  system(stream.send_all(bytes.slice()))
 }
 
 fn push_setting(payload: mut List[UInt8], identifier: UInt8, value: USize) {
@@ -210,83 +191,25 @@ fn window_increment(amount: USize) -> List[UInt8] {
   payload
 }
 
-fn open_session[Stream: streams::Reader + streams::Writer](
-  reader: own streams::BufferedReader[Stream],
-  is_server: Bool,
-  header_limit: USize,
-  body_limit: USize,
-) -> Result[Session[Stream], Failure]
-  uses Handles
+fn open_connection[Stream: streams::Duplex](stream: Stream, is_server: Bool, header_limit: USize) -> Result[Unit, Failure]
+  uses Handles, Tasks
 {
-  var session = Session(
-    reader: own reader,
-    is_server: is_server,
-    decoder: hpack::Decoder.new(),
-    encoder: hpack::Encoder.new(),
-    peer_frame_size: 16384,
-    peer_stream_window: 65535,
-    send_window: 65535,
-    streams: [],
-    ready: [],
-    last_stream: 0,
-    next_stream: 1,
-    continuation: None,
-    is_going_away: false,
-    header_limit: header_limit,
-    body_limit: body_limit,
-  )
+  var bytes: List[UInt8] = []
   if !is_server {
-    system(mut session.reader.source().write_all(preface.slice().bytes()))?
+    mut bytes.append_slice(preface.slice().bytes())
   }
-  let settings = settings_payload(is_server, header_limit: header_limit)
-  write_frame(mut session, kind: settings_frame, flags: 0, stream: 0, payload: settings.slice())?
+  var settings: List[UInt8] = []
+  if is_server {
+    push_setting(mut settings, identifier: 3, value: intrinsic::convert(local_stream_limit))
+  } else {
+    push_setting(mut settings, identifier: 2, value: 0)
+  }
+  push_setting(mut settings, identifier: 4, value: local_stream_window)
+  push_setting(mut settings, identifier: 6, value: header_limit)
+  frame_bytes(mut bytes, kind: settings_frame, flags: 0, stream: 0, payload: settings.slice())
   let increment = window_increment(local_connection_window - 65535)
-  write_frame(mut session, kind: window_frame, flags: 0, stream: 0, payload: increment.slice())?
-  Ok(own session)
-}
-
-internal fn accept[Stream: streams::Reader + streams::Writer](
-  reader: own streams::BufferedReader[Stream],
-  header_limit: USize,
-  body_limit: USize,
-) -> Result[Session[Stream], Failure]
-  uses Handles
-{
-  var opened = own reader
-  var opening: List[UInt8] = []
-  match mut opened.read_exactly(mut opening, count: 24) {
-    Ok(_) => {}
-    Err(error) => return Err(Failure.System(error: error))
-  }
-  if opening.slice() != preface.slice().bytes() {
-    return Err(violation(protocol_error, message: "a connection that does not start with the HTTP/2 preface"))
-  }
-  var session = open_session(own opened, is_server: true, header_limit: header_limit, body_limit: body_limit)?
-  let first = read_frame(mut session)?
-  if first.kind != settings_frame || (first.flags & 1) != 0 {
-    return Err(violation(protocol_error, message: "a connection whose first frame is not SETTINGS"))
-  }
-  process(mut session, frame: own first)?
-  Ok(own session)
-}
-
-internal fn connect[Stream: streams::Reader + streams::Writer](
-  stream: own Stream,
-  header_limit: USize,
-  body_limit: USize,
-) -> Result[Session[Stream], Failure]
-  uses Handles
-{
-  open_session(streams::BufferedReader.new(own stream, capacity: 16384), is_server: false, header_limit: header_limit, body_limit: body_limit)
-}
-
-fn stream_index(streams: Slice[StreamState], stream: UInt32) -> Option[USize] {
-  for index in 0..streams.length() {
-    if streams[index].stream == stream {
-      return Some(index)
-    }
-  }
-  None
+  frame_bytes(mut bytes, kind: window_frame, flags: 0, stream: 0, payload: increment.slice())
+  system(stream.send_all(bytes.slice()))
 }
 
 fn strip_padding(payload: Slice[UInt8], flags: UInt8, skip: USize) -> Result[List[UInt8], Failure] {
@@ -310,181 +233,9 @@ fn strip_padding(payload: Slice[UInt8], flags: UInt8, skip: USize) -> Result[Lis
   Ok(payload[start..stop].to_list())
 }
 
-fn decode_block[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], index: USize) -> Result[Unit, Failure] {
-  if index >= session.streams.length() {
-    return Ok(Unit)
-  }
-  let block = map::exchange(mut session.streams[index].block, value: [])
-  let fields = match mut session.decoder.decode(block.slice(), list_limit: session.header_limit) {
-    Ok(fields) => own fields
-    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
-  }
-  if session.streams[index].has_headers {
-    if !session.streams[index].is_ended {
-      return Err(violation(protocol_error, message: "trailers that do not end the stream"))
-    }
-    return Ok(Unit)
-  }
-  if !session.is_server && fields.length() > 0 && fields[0].name == ":status" && fields[0].value.slice().starts_with("1") {
-    return Ok(Unit)
-  }
-  session.streams[index].fields = own fields
-  session.streams[index].has_headers = true
-  Ok(Unit)
-}
+type PeerSettings(initial_window: Option[Int64], frame_size: Option[USize], table_size: Option[USize])
 
-fn deliver[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], index: USize) {
-  if index >= session.streams.length() {
-    return
-  }
-  if !session.streams[index].has_headers || !session.streams[index].is_ended || session.streams[index].is_delivered
-    || session.continuation == Some(session.streams[index].stream)
-  {
-    return
-  }
-  session.streams[index].is_delivered = true
-  let fields = map::exchange(mut session.streams[index].fields, value: [])
-  let body = map::exchange(mut session.streams[index].body, value: [])
-  mut session.ready.push(Message(
-    stream: session.streams[index].stream,
-    fields: own fields,
-    body: own body,
-    is_oversized: session.streams[index].is_oversized,
-  ))
-  if !session.is_server {
-    let _ = mut session.streams.remove_at(index)
-  }
-}
-
-fn new_stream_state(stream: UInt32, window: Int64) -> StreamState {
-  StreamState(
-    stream: stream,
-    block: [],
-    fields: [],
-    has_headers: false,
-    body: [],
-    is_ended: false,
-    is_oversized: false,
-    is_delivered: false,
-    send_window: window,
-  )
-}
-
-fn process_headers[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure]
-  uses Handles
-{
-  if frame.stream == 0 {
-    return Err(violation(protocol_error, message: "HEADERS on stream zero"))
-  }
-  let skip: USize = if (frame.flags & has_priority) != 0 { 5 } else { 0 }
-  let fragment = strip_padding(frame.payload.slice(), flags: frame.flags, skip: skip)?
-  var index = stream_index(session.streams.slice(), stream: frame.stream)
-  var is_refused = false
-  if index is None {
-    if !session.is_server || frame.stream % 2 == 0 || frame.stream <= session.last_stream {
-      return Err(violation(stream_closed, message: "HEADERS on a stream that is not open"))
-    }
-    session.last_stream = frame.stream
-    is_refused = session.is_going_away || session.streams.length() >= local_stream_limit
-    mut session.streams.push(new_stream_state(frame.stream, window: session.peer_stream_window))
-    index = Some(session.streams.length() - 1)
-  }
-  let position = match index {
-    Some(position) => position
-    None => return Ok(Unit)
-  }
-  if position >= session.streams.length() {
-    return Ok(Unit)
-  }
-  if session.streams[position].is_ended {
-    return Err(violation(stream_closed, message: "HEADERS on a stream that has ended"))
-  }
-  mut session.streams[position].block.append(own fragment)
-  if (frame.flags & end_stream) != 0 {
-    session.streams[position].is_ended = true
-  }
-  if (frame.flags & end_headers) == 0 {
-    session.continuation = Some(frame.stream)
-    return Ok(Unit)
-  }
-  decode_block(mut session, index: position)?
-  if is_refused {
-    if position < session.streams.length() {
-      let _ = mut session.streams.remove_at(position)
-    }
-    let code = window_increment(intrinsic::convert(refused_stream))
-    return write_frame(mut session, kind: reset_frame, flags: 0, stream: frame.stream, payload: code.slice())
-  }
-  deliver(mut session, index: position)
-  Ok(Unit)
-}
-
-fn process_continuation[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure] {
-  let position = match stream_index(session.streams.slice(), stream: frame.stream) {
-    Some(position) => position
-    None => return Err(violation(protocol_error, message: "CONTINUATION on a stream that is not open"))
-  }
-  if position >= session.streams.length() {
-    return Ok(Unit)
-  }
-  mut session.streams[position].block.append(own frame.payload)
-  if session.streams[position].block.length() > session.header_limit {
-    return Err(violation(protocol_error, message: "a header block larger than the limit"))
-  }
-  if (frame.flags & end_headers) != 0 {
-    session.continuation = None
-    decode_block(mut session, index: position)?
-    deliver(mut session, index: position)
-  }
-  Ok(Unit)
-}
-
-fn process_data[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure]
-  uses Handles
-{
-  if frame.stream == 0 {
-    return Err(violation(protocol_error, message: "DATA on stream zero"))
-  }
-  let length = frame.payload.length()
-  if length > 0 {
-    let increment = window_increment(length)
-    write_frame(mut session, kind: window_frame, flags: 0, stream: 0, payload: increment.slice())?
-  }
-  let position = match stream_index(session.streams.slice(), stream: frame.stream) {
-    Some(position) => position
-    None => {
-      if frame.stream <= session.last_stream || frame.stream < session.next_stream {
-        return Ok(Unit)
-      }
-      return Err(violation(protocol_error, message: "DATA on a stream that is not open"))
-    }
-  }
-  if position >= session.streams.length() {
-    return Ok(Unit)
-  }
-  if session.streams[position].is_ended || !session.streams[position].has_headers {
-    return Err(violation(stream_closed, message: "DATA on a stream that is not open"))
-  }
-  let data = strip_padding(frame.payload.slice(), flags: frame.flags, skip: 0)?
-  if session.streams[position].body.length() > session.body_limit || data.length() > session.body_limit - session.streams[position].body.length() {
-    session.streams[position].is_oversized = true
-    mut session.streams[position].body.clear()
-  } else if !session.streams[position].is_oversized {
-    mut session.streams[position].body.append(own data)
-  }
-  if (frame.flags & end_stream) != 0 {
-    session.streams[position].is_ended = true
-    deliver(mut session, index: position)
-  } else if length > 0 {
-    let increment = window_increment(length)
-    write_frame(mut session, kind: window_frame, flags: 0, stream: frame.stream, payload: increment.slice())?
-  }
-  Ok(Unit)
-}
-
-fn process_settings[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure]
-  uses Handles
-{
+fn parse_settings(frame: Frame) -> Result[Option[PeerSettings], Failure] {
   if frame.stream != 0 {
     return Err(violation(protocol_error, message: "SETTINGS on a stream"))
   }
@@ -492,47 +243,37 @@ fn process_settings[Stream: streams::Reader + streams::Writer](session: mut Sess
     if !frame.payload.is_empty() {
       return Err(violation(frame_size_error, message: "a SETTINGS acknowledgement with a payload"))
     }
-    return Ok(Unit)
+    return Ok(None)
   }
   if frame.payload.length() % 6 != 0 {
     return Err(violation(frame_size_error, message: "a SETTINGS frame whose length is not a multiple of six"))
   }
+  var settings = PeerSettings(initial_window: None, frame_size: None, table_size: None)
   var at: USize = 0
   while at < frame.payload.length() && frame.payload.length() - at >= 6 {
     let identifier = intrinsic::convert[UInt8, UInt16](frame.payload[at]) * 256 + intrinsic::convert[UInt8, UInt16](frame.payload[at + 1])
     let value = u32_at(frame.payload.slice(), at: at + 2)
     if identifier == 1 {
-      mut session.encoder.set_limit(intrinsic::convert(value))
+      settings.table_size = Some(intrinsic::convert(value))
     } else if identifier == 2 && value > 1 {
       return Err(violation(protocol_error, message: "SETTINGS_ENABLE_PUSH that is not zero or one"))
     } else if identifier == 4 {
       if value > 2147483647 {
         return Err(violation(flow_control_error, message: "an initial window larger than allowed"))
       }
-      let window: Int64 = intrinsic::convert(value)
-      let delta = window.saturating_subtract(session.peer_stream_window)
-      session.peer_stream_window = window
-      for index in 0..session.streams.length() {
-        if index < session.streams.length() {
-          let updated = session.streams[index].send_window.saturating_add(delta)
-          if updated > largest_window {
-            return Err(violation(flow_control_error, message: "a window larger than allowed"))
-          }
-          session.streams[index].send_window = updated
-        }
-      }
+      settings.initial_window = Some(intrinsic::convert(value))
     } else if identifier == 5 {
       if value < 16384 || value > 16777215 {
         return Err(violation(protocol_error, message: "a maximum frame size outside the allowed range"))
       }
-      session.peer_frame_size = intrinsic::convert(value)
+      settings.frame_size = Some(intrinsic::convert(value))
     }
     at += 6
   }
-  write_frame(mut session, kind: settings_frame, flags: 1, stream: 0, payload: [])
+  Ok(Some(settings))
 }
 
-fn process_window[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure] {
+fn window_of(frame: Frame) -> Result[Int64, Failure] {
   if frame.payload.length() != 4 {
     return Err(violation(frame_size_error, message: "a WINDOW_UPDATE that is not four bytes"))
   }
@@ -540,31 +281,669 @@ fn process_window[Stream: streams::Reader + streams::Writer](session: mut Sessio
   if increment == 0 {
     return Err(violation(protocol_error, message: "a WINDOW_UPDATE of zero"))
   }
-  if frame.stream == 0 {
-    let updated = session.send_window.saturating_add(increment)
-    if updated > largest_window {
-      return Err(violation(flow_control_error, message: "a connection window larger than allowed"))
+  Ok(increment)
+}
+
+fn block_of(frame: Frame) -> Result[List[UInt8], Failure] {
+  let skip: USize = if (frame.flags & has_priority) != 0 { 5 } else { 0 }
+  strip_padding(frame.payload.slice(), flags: frame.flags, skip: skip)
+}
+
+internal type Arrival(stream: UInt32, fields: List[hpack::Field], chunks: tasks::Channel[flow::Chunk], outbound: tasks::Channel[flow::Outbound])
+
+type Inflow(stream: UInt32, chunks: tasks::Channel[flow::Chunk], block: List[UInt8], has_headers: Bool, is_ending: Bool, is_refused: Bool)
+
+type Reading(
+  decoder: hpack::Decoder,
+  inflows: List[Inflow],
+  last_stream: UInt32,
+  continuation: Option[UInt32],
+  is_going_away: Bool,
+  header_limit: USize,
+  active: tasks::Counter,
+)
+
+fn inflow_index(inflows: Slice[Inflow], stream: UInt32) -> Option[USize] {
+  for index in 0..inflows.length() {
+    if inflows[index].stream == stream {
+      return Some(index)
     }
-    session.send_window = updated
+  }
+  None
+}
+
+fn close_inflow(reading: mut Reading, index: USize, chunk: own flow::Chunk)
+  uses Tasks
+{
+  if index < reading.inflows.length() {
+    let inflow = mut reading.inflows.remove_at(index)
+    let _ = inflow.chunks.send(own chunk)
+    inflow.chunks.close()
+  }
+}
+
+fn complete_headers(reading: mut Reading, index: USize, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
+  uses Tasks
+{
+  if index >= reading.inflows.length() {
     return Ok(Unit)
   }
-  match stream_index(session.streams.slice(), stream: frame.stream) {
-    Some(position) => {
-      if position < session.streams.length() {
-        let updated = session.streams[position].send_window.saturating_add(increment)
-        if updated > largest_window {
-          return Err(violation(flow_control_error, message: "a stream window larger than allowed"))
-        }
-        session.streams[position].send_window = updated
-      }
-    }
-    None => {}
+  let block = map::exchange(mut reading.inflows[index].block, value: [])
+  let fields = match mut reading.decoder.decode(block.slice(), list_limit: reading.header_limit) {
+    Ok(fields) => own fields
+    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
+  }
+  if index >= reading.inflows.length() {
+    return Ok(Unit)
+  }
+  let stream = reading.inflows[index].stream
+  if reading.inflows[index].is_refused {
+    let _ = mut reading.inflows.remove_at(index)
+    var frame: List[UInt8] = []
+    let code = window_increment(intrinsic::convert(refused_stream))
+    frame_bytes(mut frame, kind: reset_frame, flags: 0, stream: stream, payload: code.slice())
+    let _ = outbound.send(flow::Outbound.Frame(bytes: own frame))
+    return Ok(Unit)
+  }
+  if !reading.inflows[index].has_headers {
+    reading.inflows[index].has_headers = true
+    let _ = reading.active.add(1)
+    let chunks = reading.inflows[index].chunks
+    let _ = arrivals.send(Arrival(stream: stream, fields: own fields, chunks: chunks.copy(), outbound: outbound.copy()))
+  } else if !reading.inflows[index].is_ending {
+    return Err(violation(protocol_error, message: "trailers that do not end the stream"))
+  }
+  if index < reading.inflows.length() && reading.inflows[index].is_ending {
+    close_inflow(mut reading, index: index, chunk: flow::Chunk.End)
   }
   Ok(Unit)
 }
 
-fn process[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure]
-  uses Handles
+fn serve_headers(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
+  uses Tasks
+{
+  if frame.stream == 0 {
+    return Err(violation(protocol_error, message: "HEADERS on stream zero"))
+  }
+  let fragment = block_of(frame)?
+  let index = match inflow_index(reading.inflows.slice(), stream: frame.stream) {
+    Some(index) => index
+    None => {
+      if frame.stream % 2 == 0 || frame.stream <= reading.last_stream {
+        return Err(violation(stream_closed, message: "HEADERS on a stream that is not open"))
+      }
+      reading.last_stream = frame.stream
+      let is_refused = reading.is_going_away || reading.active.value() >= local_stream_limit
+      mut reading.inflows.push(Inflow(
+        stream: frame.stream,
+        chunks: tasks::Channel.new(capacity: 1024),
+        block: [],
+        has_headers: false,
+        is_ending: false,
+        is_refused: is_refused,
+      ))
+      reading.inflows.length() - 1
+    }
+  }
+  if index >= reading.inflows.length() {
+    return Ok(Unit)
+  }
+  mut reading.inflows[index].block.append(own fragment)
+  if (frame.flags & end_stream) != 0 {
+    reading.inflows[index].is_ending = true
+  }
+  if (frame.flags & end_headers) == 0 {
+    reading.continuation = Some(frame.stream)
+    return Ok(Unit)
+  }
+  complete_headers(mut reading, index: index, arrivals: arrivals, outbound: outbound)
+}
+
+fn serve_continuation(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
+  uses Tasks
+{
+  let index = match inflow_index(reading.inflows.slice(), stream: frame.stream) {
+    Some(index) => index
+    None => return Err(violation(protocol_error, message: "CONTINUATION on a stream that is not open"))
+  }
+  if index >= reading.inflows.length() {
+    return Ok(Unit)
+  }
+  mut reading.inflows[index].block.append(own frame.payload)
+  if reading.inflows[index].block.length() > reading.header_limit {
+    return Err(violation(protocol_error, message: "a header block larger than the limit"))
+  }
+  if (frame.flags & end_headers) != 0 {
+    reading.continuation = None
+    return complete_headers(mut reading, index: index, arrivals: arrivals, outbound: outbound)
+  }
+  Ok(Unit)
+}
+
+fn serve_data(reading: mut Reading, frame: own Frame, outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
+  uses Tasks
+{
+  if frame.stream == 0 {
+    return Err(violation(protocol_error, message: "DATA on stream zero"))
+  }
+  let length = frame.payload.length()
+  let index = match inflow_index(reading.inflows.slice(), stream: frame.stream) {
+    Some(index) => index
+    None => {
+      if frame.stream > reading.last_stream {
+        return Err(violation(protocol_error, message: "DATA on a stream that is not open"))
+      }
+      if length > 0 {
+        let _ = outbound.send(flow::Outbound.Credit(stream: 0, amount: length))
+      }
+      return Ok(Unit)
+    }
+  }
+  if index >= reading.inflows.length() || !reading.inflows[index].has_headers {
+    return Err(violation(protocol_error, message: "DATA before HEADERS"))
+  }
+  let data = strip_padding(frame.payload.slice(), flags: frame.flags, skip: 0)?
+  let padding = length.saturating_subtract(data.length())
+  if padding > 0 {
+    let _ = outbound.send(flow::Outbound.Credit(stream: frame.stream, amount: padding))
+  }
+  let size = data.length()
+  if size > 0 {
+    if reading.inflows[index].chunks.send(flow::Chunk.Data(bytes: own data)) is Err(_) {
+      let _ = outbound.send(flow::Outbound.Credit(stream: 0, amount: size))
+    }
+  }
+  if (frame.flags & end_stream) != 0 {
+    close_inflow(mut reading, index: index, chunk: flow::Chunk.End)
+  }
+  Ok(Unit)
+}
+
+fn serve_frame(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
+  uses Tasks
+{
+  match reading.continuation {
+    Some(stream) => {
+      if frame.kind != continuation_frame || frame.stream != stream {
+        return Err(violation(protocol_error, message: "a frame between HEADERS and its CONTINUATION"))
+      }
+    }
+    None => {
+      if frame.kind == continuation_frame {
+        return Err(violation(protocol_error, message: "a CONTINUATION that does not follow HEADERS"))
+      }
+    }
+  }
+  let kind = frame.kind
+  if kind == data_frame {
+    serve_data(mut reading, frame: own frame, outbound: outbound)
+  } else if kind == headers_frame {
+    serve_headers(mut reading, frame: own frame, arrivals: arrivals, outbound: outbound)
+  } else if kind == continuation_frame {
+    serve_continuation(mut reading, frame: own frame, arrivals: arrivals, outbound: outbound)
+  } else if kind == settings_frame {
+    match parse_settings(frame)? {
+      Some(settings) => {
+        let _ = outbound.send(flow::Outbound.Settings(
+          initial_window: settings.initial_window,
+          frame_size: settings.frame_size,
+          table_size: settings.table_size,
+        ))
+      }
+      None => {}
+    }
+    Ok(Unit)
+  } else if kind == window_frame {
+    let increment = window_of(frame)?
+    let _ = outbound.send(flow::Outbound.Window(stream: frame.stream, increment: increment))
+    Ok(Unit)
+  } else if kind == ping_frame {
+    if frame.payload.length() != 8 || frame.stream != 0 {
+      return Err(violation(frame_size_error, message: "a PING that is not eight bytes on stream zero"))
+    }
+    if (frame.flags & 1) == 0 {
+      var reply: List[UInt8] = []
+      frame_bytes(mut reply, kind: ping_frame, flags: 1, stream: 0, payload: frame.payload.slice())
+      let _ = outbound.send(flow::Outbound.Frame(bytes: own reply))
+    }
+    Ok(Unit)
+  } else if kind == reset_frame {
+    if frame.payload.length() != 4 || frame.stream == 0 {
+      return Err(violation(frame_size_error, message: "a RST_STREAM that is not four bytes on a stream"))
+    }
+    match inflow_index(reading.inflows.slice(), stream: frame.stream) {
+      Some(index) => close_inflow(mut reading, index: index, chunk: flow::Chunk.Failed(message: "the client reset the stream"))
+      None => {}
+    }
+    let _ = outbound.send(flow::Outbound.Reset(stream: frame.stream))
+    Ok(Unit)
+  } else if kind == goaway_frame {
+    reading.is_going_away = true
+    Ok(Unit)
+  } else if kind == push_frame {
+    Err(violation(protocol_error, message: "a PUSH_PROMISE sent to a server"))
+  } else {
+    Ok(Unit)
+  }
+}
+
+fn read_requests[Stream: streams::Duplex](
+  stream: Stream,
+  inbox: mut Inbox,
+  reading: mut Reading,
+  arrivals: tasks::Channel[Arrival],
+  outbound: tasks::Channel[flow::Outbound],
+) -> Failure
+  uses Handles, Tasks
+{
+  var has_settings = false
+  while true {
+    let frame = match read_frame(stream, inbox: mut inbox) {
+      Ok(frame) => own frame
+      Err(System(TimedOut)) => {
+        if reading.active.value() > 0 {
+          continue
+        }
+        return Failure.System(error: SystemError.TimedOut)
+      }
+      Err(failure) => return own failure
+    }
+    if !has_settings && (frame.kind != settings_frame || (frame.flags & 1) != 0) {
+      return violation(protocol_error, message: "a connection whose first frame is not SETTINGS")
+    }
+    has_settings = true
+    match serve_frame(mut reading, frame: own frame, arrivals: arrivals, outbound: outbound) {
+      Ok(_) => {}
+      Err(failure) => return own failure
+    }
+  }
+}
+
+type Pending(bytes: List[UInt8], is_end: Bool, ack: tasks::Channel[Bool])
+
+type Outflow(stream: UInt32, window: Int64, queue: List[Pending])
+
+type Writing(
+  encoder: hpack::Encoder,
+  frame_size: USize,
+  initial_window: Int64,
+  connection_window: Int64,
+  outflows: List[Outflow],
+  is_closing: Bool,
+)
+
+fn outflow_index(outflows: Slice[Outflow], stream: UInt32) -> Option[USize] {
+  for index in 0..outflows.length() {
+    if outflows[index].stream == stream {
+      return Some(index)
+    }
+  }
+  None
+}
+
+fn smaller(first: Int64, second: Int64) -> Int64 {
+  if first < second { first } else { second }
+}
+
+fn flush_outflow[Stream: streams::Duplex](stream: Stream, writing: mut Writing, index: USize) -> Result[Unit, Failure]
+  uses Handles, Tasks
+{
+  while index < writing.outflows.length() && !writing.outflows[index].queue.is_empty() {
+    let id = writing.outflows[index].stream
+    let window = smaller(writing.connection_window, second: writing.outflows[index].window)
+    let total = writing.outflows[index].queue[0].bytes.length()
+    let is_end = writing.outflows[index].queue[0].is_end
+    if total > 0 && window <= 0 {
+      return Ok(Unit)
+    }
+    var size = total
+    if size > writing.frame_size {
+      size = writing.frame_size
+    }
+    if total > 0 {
+      let room: USize = intrinsic::convert(window)
+      if size > room {
+        size = room
+      }
+    }
+    let is_whole = size == total
+    let rest = mut writing.outflows[index].queue[0].bytes.split_off(size)
+    let piece = map::exchange(mut writing.outflows[index].queue[0].bytes, value: own rest)
+    send_frame(stream, kind: data_frame, flags: if is_whole && is_end { end_stream } else { 0 }, id: id, payload: piece.slice())?
+    let used: Int64 = intrinsic::convert(piece.length())
+    writing.connection_window = writing.connection_window.saturating_subtract(used)
+    if index < writing.outflows.length() {
+      writing.outflows[index].window = writing.outflows[index].window.saturating_subtract(used)
+      if is_whole && !writing.outflows[index].queue.is_empty() {
+        let done = mut writing.outflows[index].queue.remove_at(0)
+        let _ = done.ack.send(true)
+        if is_end {
+          let _ = mut writing.outflows.remove_at(index)
+          return Ok(Unit)
+        }
+      }
+    }
+  }
+  Ok(Unit)
+}
+
+fn flush_all[Stream: streams::Duplex](stream: Stream, writing: mut Writing) -> Result[Unit, Failure]
+  uses Handles, Tasks
+{
+  var index: USize = 0
+  while index < writing.outflows.length() {
+    let before = writing.outflows.length()
+    flush_outflow(stream, writing: mut writing, index: index)?
+    if writing.outflows.length() == before {
+      index += 1
+    }
+  }
+  Ok(Unit)
+}
+
+fn abandon(outflow: own Outflow)
+  uses Tasks
+{
+  for pending in outflow.queue {
+    let _ = pending.ack.send(false)
+  }
+}
+
+fn write_message[Stream: streams::Duplex](connection: Stream, writing: mut Writing, message: own flow::Outbound) -> Result[Unit, Failure]
+  uses Handles, Tasks, Clock
+{
+  match own message {
+    Head(stream, status, fields, is_end, ack) => {
+      if writing.is_closing {
+        let _ = ack.send(false)
+        return Ok(Unit)
+      }
+      var all: List[hpack::Field] = [hpack::Field(name: ":status", value: "${status}")]
+      var has_date = false
+      for field in fields {
+        let name = field.name.slice().to_ascii_lowercase()
+        if name == "date" {
+          has_date = true
+        }
+        mut all.push(hpack::Field(name: own name, value: field.value.copy()))
+      }
+      if !has_date {
+        mut all.push(hpack::Field(name: "date", value: date::format(Clock.now())))
+      }
+      let block = mut writing.encoder.encode(all.slice())
+      var start: USize = 0
+      var is_first = true
+      while is_first || start < block.length()
+        invariant start <= block.length()
+      {
+        let stop = if block.length() - start > writing.frame_size { start + writing.frame_size } else { block.length() }
+        let flags: UInt8 = (if stop == block.length() { end_headers } else { 0 }) | (if is_first && is_end { end_stream } else { 0 })
+        send_frame(connection, kind: if is_first { headers_frame } else { continuation_frame }, flags: flags, id: stream, payload: block[start..stop])?
+        start = stop
+        is_first = false
+      }
+      if !is_end {
+        mut writing.outflows.push(Outflow(stream: stream, window: writing.initial_window, queue: []))
+      }
+      let _ = ack.send(true)
+    }
+    Data(stream, bytes, is_end, ack) => {
+      match outflow_index(writing.outflows.slice(), stream: stream) {
+        Some(index) => {
+          if writing.is_closing || index >= writing.outflows.length() {
+            let _ = ack.send(false)
+            return Ok(Unit)
+          }
+          mut writing.outflows[index].queue.push(Pending(bytes: own bytes, is_end: is_end, ack: ack.copy()))
+          flush_outflow(connection, writing: mut writing, index: index)?
+        }
+        None => {
+          let _ = ack.send(false)
+        }
+      }
+    }
+    Credit(stream, amount) => {
+      if amount > 0 && !writing.is_closing {
+        var frames: List[UInt8] = []
+        let increment = window_increment(amount)
+        if stream != 0 {
+          frame_bytes(mut frames, kind: window_frame, flags: 0, stream: stream, payload: increment.slice())
+        }
+        frame_bytes(mut frames, kind: window_frame, flags: 0, stream: 0, payload: increment.slice())
+        system(connection.send_all(frames.slice()))?
+      }
+    }
+    Frame(bytes) => {
+      if !writing.is_closing {
+        system(connection.send_all(bytes.slice()))?
+      }
+    }
+    Window(stream, increment) => {
+      if stream == 0 {
+        let updated = writing.connection_window.saturating_add(increment)
+        if updated > largest_window {
+          return Err(violation(flow_control_error, message: "a connection window larger than allowed"))
+        }
+        writing.connection_window = updated
+        flush_all(connection, writing: mut writing)?
+      } else {
+        match outflow_index(writing.outflows.slice(), stream: stream) {
+          Some(index) => {
+            if index < writing.outflows.length() {
+              writing.outflows[index].window = writing.outflows[index].window.saturating_add(increment)
+              flush_outflow(connection, writing: mut writing, index: index)?
+            }
+          }
+          None => {}
+        }
+      }
+    }
+    Settings(initial_window, frame_size, table_size) => {
+      match initial_window {
+        Some(window) => {
+          let delta = window.saturating_subtract(writing.initial_window)
+          writing.initial_window = window
+          for index in 0..writing.outflows.length() {
+            if index < writing.outflows.length() {
+              writing.outflows[index].window = writing.outflows[index].window.saturating_add(delta)
+            }
+          }
+        }
+        None => {}
+      }
+      match frame_size {
+        Some(size) => writing.frame_size = size
+        None => {}
+      }
+      match table_size {
+        Some(size) => mut writing.encoder.set_limit(size)
+        None => {}
+      }
+      send_frame(connection, kind: settings_frame, flags: 1, id: 0, payload: [])?
+      flush_all(connection, writing: mut writing)?
+    }
+    Reset(stream) => {
+      match outflow_index(writing.outflows.slice(), stream: stream) {
+        Some(index) => {
+          if index < writing.outflows.length() {
+            abandon(mut writing.outflows.remove_at(index))
+          }
+        }
+        None => {}
+      }
+    }
+    Goaway(last_stream, code) => {
+      if !writing.is_closing {
+        var payload: List[UInt8] = []
+        push_u32(mut payload, value: last_stream)
+        push_u32(mut payload, value: code)
+        let _ = send_frame(connection, kind: goaway_frame, flags: 0, id: 0, payload: payload.slice())
+      }
+      writing.is_closing = true
+      while !writing.outflows.is_empty() {
+        abandon(mut writing.outflows.remove_at(0))
+      }
+    }
+  }
+  Ok(Unit)
+}
+
+fn write_responses[Stream: streams::Duplex](stream: Stream, outbound: tasks::Channel[flow::Outbound])
+  uses Handles, Tasks, Clock
+{
+  var writing = Writing(
+    encoder: hpack::Encoder.new(),
+    frame_size: 16384,
+    initial_window: 65535,
+    connection_window: 65535,
+    outflows: [],
+    is_closing: false,
+  )
+  for message in outbound.messages() {
+    match write_message(stream, writing: mut writing, message: own message) {
+      Ok(_) => {}
+      Err(_) => {
+        writing.is_closing = true
+        while !writing.outflows.is_empty() {
+          abandon(mut writing.outflows.remove_at(0))
+        }
+      }
+    }
+  }
+}
+
+internal fn serve[Stream: streams::Duplex, capability Granted](
+  stream: Stream,
+  inbox: own Inbox,
+  header_limit: USize,
+  respond: (fn(own Arrival) uses Granted),
+)
+  uses Tasks, Handles, Clock, Granted
+{
+  var opened = own inbox
+  let opening = match take_bytes(stream, inbox: mut opened, count: 24) {
+    Ok(bytes) => own bytes
+    Err(_) => return
+  }
+  if opening.slice() != preface.slice().bytes() || open_connection(stream, is_server: true, header_limit: header_limit) is Err(_) {
+    return
+  }
+  let arrivals = tasks::Channel[Arrival].new(capacity: 128)
+  let outbound = tasks::Channel[flow::Outbound].new(capacity: 256)
+  let active = tasks::Counter.new()
+  var reading = Reading(
+    decoder: hpack::Decoder.new(),
+    inflows: [],
+    last_stream: 0,
+    continuation: None,
+    is_going_away: false,
+    header_limit: header_limit,
+    active: active.copy(),
+  )
+  concurrent {
+    {
+      let failure = read_requests(stream, inbox: mut opened, reading: mut reading, arrivals: arrivals, outbound: outbound)
+      while !reading.inflows.is_empty() {
+        close_inflow(mut reading, index: 0, chunk: flow::Chunk.Failed(message: "the connection closed"))
+      }
+      let _ = outbound.send(flow::Outbound.Goaway(last_stream: reading.last_stream, code: failure_code(failure)))
+      arrivals.close()
+    }
+    {
+      concurrent for arrival in arrivals.messages() {
+        respond(own arrival)
+        let _ = active.add(-1)
+      }
+      outbound.close()
+    }
+    write_responses(stream, outbound: outbound)
+  }
+}
+
+type Outstream(
+  stream: UInt32,
+  block: List[UInt8],
+  fields: List[hpack::Field],
+  has_headers: Bool,
+  data: List[UInt8],
+  is_ended: Bool,
+  is_ending: Bool,
+  reset: Option[UInt32],
+  send_window: Int64,
+)
+
+internal type Session[Stream: streams::Duplex](
+  stream: Stream,
+  inbox: Inbox,
+  decoder: hpack::Decoder,
+  encoder: hpack::Encoder,
+  frame_size: USize,
+  peer_window: Int64,
+  send_window: Int64,
+  outstreams: List[Outstream],
+  next_stream: UInt32,
+  continuation: Option[UInt32],
+  is_going_away: Bool,
+  header_limit: USize,
+)
+
+internal fn connect[Stream: streams::Duplex](stream: own Stream, header_limit: USize) -> Result[Session[Stream], Failure]
+  uses Handles, Tasks
+{
+  open_connection(stream, is_server: false, header_limit: header_limit)?
+  Ok(Session(
+    stream: own stream,
+    inbox: Inbox(bytes: []),
+    decoder: hpack::Decoder.new(),
+    encoder: hpack::Encoder.new(),
+    frame_size: 16384,
+    peer_window: 65535,
+    send_window: 65535,
+    outstreams: [],
+    next_stream: 1,
+    continuation: None,
+    is_going_away: false,
+    header_limit: header_limit,
+  ))
+}
+
+fn outstream_index(outstreams: Slice[Outstream], stream: UInt32) -> Option[USize] {
+  for index in 0..outstreams.length() {
+    if outstreams[index].stream == stream {
+      return Some(index)
+    }
+  }
+  None
+}
+
+fn decode_response[Stream: streams::Duplex](session: mut Session[Stream], index: USize) -> Result[Unit, Failure] {
+  if index >= session.outstreams.length() {
+    return Ok(Unit)
+  }
+  let block = map::exchange(mut session.outstreams[index].block, value: [])
+  let fields = match mut session.decoder.decode(block.slice(), list_limit: session.header_limit) {
+    Ok(fields) => own fields
+    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
+  }
+  if index >= session.outstreams.length() {
+    return Ok(Unit)
+  }
+  if session.outstreams[index].is_ending {
+    session.outstreams[index].is_ended = true
+  }
+  if session.outstreams[index].has_headers {
+    return Ok(Unit)
+  }
+  if fields.length() > 0 && fields[0].name == ":status" && fields[0].value.slice().starts_with("1") {
+    return Ok(Unit)
+  }
+  session.outstreams[index].fields = own fields
+  session.outstreams[index].has_headers = true
+  Ok(Unit)
+}
+
+fn client_frame[Stream: streams::Duplex](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure]
+  uses Handles, Tasks
 {
   match session.continuation {
     Some(stream) => {
@@ -580,209 +959,267 @@ fn process[Stream: streams::Reader + streams::Writer](session: mut Session[Strea
   }
   let kind = frame.kind
   if kind == data_frame {
-    process_data(mut session, frame: own frame)
-  } else if kind == headers_frame {
-    process_headers(mut session, frame: own frame)
-  } else if kind == continuation_frame {
-    process_continuation(mut session, frame: own frame)
+    let length = frame.payload.length()
+    match outstream_index(session.outstreams.slice(), stream: frame.stream) {
+      Some(index) => {
+        let data = strip_padding(frame.payload.slice(), flags: frame.flags, skip: 0)?
+        if index < session.outstreams.length() {
+          mut session.outstreams[index].data.append(own data)
+          if (frame.flags & end_stream) != 0 {
+            session.outstreams[index].is_ended = true
+          }
+        }
+      }
+      None => {
+        if length > 0 {
+          let increment = window_increment(length)
+          send_frame(session.stream, kind: window_frame, flags: 0, id: 0, payload: increment.slice())?
+        }
+      }
+    }
+  } else if kind == headers_frame || kind == continuation_frame {
+    let fragment = if kind == headers_frame { block_of(frame)? } else { frame.payload.copy() }
+    match outstream_index(session.outstreams.slice(), stream: frame.stream) {
+      Some(index) => {
+        if index < session.outstreams.length() {
+          mut session.outstreams[index].block.append(own fragment)
+          if kind == headers_frame && (frame.flags & end_stream) != 0 {
+            session.outstreams[index].is_ending = true
+          }
+          if session.outstreams[index].block.length() > session.header_limit {
+            return Err(violation(protocol_error, message: "a header block larger than the limit"))
+          }
+        }
+        if (frame.flags & end_headers) == 0 {
+          session.continuation = Some(frame.stream)
+        } else {
+          session.continuation = None
+          decode_response(mut session, index: index)?
+        }
+      }
+      None => return Err(violation(stream_closed, message: "HEADERS on a stream that is not open"))
+    }
   } else if kind == settings_frame {
-    process_settings(mut session, frame: own frame)
+    match parse_settings(frame)? {
+      Some(settings) => {
+        match settings.initial_window {
+          Some(window) => {
+            let delta = window.saturating_subtract(session.peer_window)
+            session.peer_window = window
+            for index in 0..session.outstreams.length() {
+              if index < session.outstreams.length() {
+                session.outstreams[index].send_window = session.outstreams[index].send_window.saturating_add(delta)
+              }
+            }
+          }
+          None => {}
+        }
+        match settings.frame_size {
+          Some(size) => session.frame_size = size
+          None => {}
+        }
+        match settings.table_size {
+          Some(size) => mut session.encoder.set_limit(size)
+          None => {}
+        }
+        send_frame(session.stream, kind: settings_frame, flags: 1, id: 0, payload: [])?
+      }
+      None => {}
+    }
   } else if kind == window_frame {
-    process_window(mut session, frame: own frame)
+    let increment = window_of(frame)?
+    if frame.stream == 0 {
+      session.send_window = session.send_window.saturating_add(increment)
+    } else {
+      match outstream_index(session.outstreams.slice(), stream: frame.stream) {
+        Some(index) => {
+          if index < session.outstreams.length() {
+            session.outstreams[index].send_window = session.outstreams[index].send_window.saturating_add(increment)
+          }
+        }
+        None => {}
+      }
+    }
   } else if kind == ping_frame {
     if frame.payload.length() != 8 || frame.stream != 0 {
       return Err(violation(frame_size_error, message: "a PING that is not eight bytes on stream zero"))
     }
     if (frame.flags & 1) == 0 {
-      write_frame(mut session, kind: ping_frame, flags: 1, stream: 0, payload: frame.payload.slice())?
+      send_frame(session.stream, kind: ping_frame, flags: 1, id: 0, payload: frame.payload.slice())?
     }
-    Ok(Unit)
   } else if kind == reset_frame {
-    if frame.payload.length() != 4 || frame.stream == 0 {
-      return Err(violation(frame_size_error, message: "a RST_STREAM that is not four bytes on a stream"))
-    }
-    match stream_index(session.streams.slice(), stream: frame.stream) {
-      Some(position) => {
-        if position < session.streams.length() {
-          let _ = mut session.streams.remove_at(position)
-        }
-        if !session.is_server {
-          return Err(Failure.Reset(code: u32_at(frame.payload.slice(), at: 0)))
+    match outstream_index(session.outstreams.slice(), stream: frame.stream) {
+      Some(index) => {
+        if index < session.outstreams.length() {
+          session.outstreams[index].reset = Some(u32_at(frame.payload.slice(), at: 0))
+          session.outstreams[index].is_ended = true
         }
       }
       None => {}
     }
-    Ok(Unit)
   } else if kind == goaway_frame {
     session.is_going_away = true
-    Ok(Unit)
   } else if kind == push_frame {
-    Err(violation(protocol_error, message: "a PUSH_PROMISE, which this endpoint disabled"))
-  } else {
-    Ok(Unit)
+    return Err(violation(protocol_error, message: "a PUSH_PROMISE, which this client disabled"))
   }
+  Ok(Unit)
 }
 
-fn pump[Stream: streams::Reader + streams::Writer](session: mut Session[Stream]) -> Result[Unit, Failure]
-  uses Handles
+fn pump[Stream: streams::Duplex](session: mut Session[Stream]) -> Result[Unit, Failure]
+  uses Handles, Tasks
 {
-  let frame = read_frame(mut session)?
-  process(mut session, frame: own frame)
+  let frame = read_frame(session.stream, inbox: mut session.inbox)?
+  client_frame(mut session, frame: own frame)
 }
 
-internal fn receive[Stream: streams::Reader + streams::Writer](session: mut Session[Stream]) -> Result[List[Message], Failure]
-  uses Handles
-{
-  while session.ready.is_empty() || session.reader.buffered() >= 9 {
-    if session.is_going_away && session.ready.is_empty() && session.streams.is_empty() {
-      return Err(Failure.Closed)
-    }
-    pump(mut session)?
-  }
-  Ok(map::exchange(mut session.ready, value: []))
-}
-
-fn send_headers[Stream: streams::Reader + streams::Writer](
+internal fn begin[Stream: streams::Duplex](
   session: mut Session[Stream],
-  stream: UInt32,
   fields: Slice[hpack::Field],
-  is_last: Bool,
-) -> Result[Unit, Failure]
-  uses Handles
+  body: Slice[UInt8],
+) -> Result[UInt32, Failure]
+  uses Handles, Tasks
 {
+  if session.is_going_away || session.next_stream > 2147483645 {
+    return Err(Failure.Closed)
+  }
+  let id = session.next_stream
+  session.next_stream += 2
+  mut session.outstreams.push(Outstream(
+    stream: id,
+    block: [],
+    fields: [],
+    has_headers: false,
+    data: [],
+    is_ended: false,
+    is_ending: false,
+    reset: None,
+    send_window: session.peer_window,
+  ))
   let block = mut session.encoder.encode(fields)
-  let size = session.peer_frame_size
   var start: USize = 0
   var is_first = true
   while is_first || start < block.length()
     invariant start <= block.length()
   {
-    let stop = if block.length() - start > size { start + size } else { block.length() }
-    let flags: UInt8 = (if stop == block.length() { end_headers } else { 0 }) | (if is_first && is_last { end_stream } else { 0 })
-    write_frame(mut session, kind: if is_first { headers_frame } else { continuation_frame }, flags: flags, stream: stream, payload: block[start..stop])?
+    let stop = if block.length() - start > session.frame_size { start + session.frame_size } else { block.length() }
+    let flags: UInt8 = (if stop == block.length() { end_headers } else { 0 }) | (if is_first && body.is_empty() { end_stream } else { 0 })
+    send_frame(session.stream, kind: if is_first { headers_frame } else { continuation_frame }, flags: flags, id: id, payload: block[start..stop])?
     start = stop
     is_first = false
   }
-  Ok(Unit)
-}
-
-fn send_body[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], stream: UInt32, body: Slice[UInt8]) -> Result[Unit, Failure]
-  uses Handles
-{
-  var start: USize = 0
-  while start < body.length() {
-    let position = match stream_index(session.streams.slice(), stream: stream) {
-      Some(position) => position
-      None => return Ok(Unit)
+  var sent: USize = 0
+  while sent < body.length() {
+    let index = match outstream_index(session.outstreams.slice(), stream: id) {
+      Some(index) => index
+      None => return Err(Failure.Closed)
     }
-    if position >= session.streams.length() {
-      return Ok(Unit)
+    if index >= session.outstreams.length() {
+      return Err(Failure.Closed)
     }
-    let window = if session.send_window < session.streams[position].send_window { session.send_window } else { session.streams[position].send_window }
+    match session.outstreams[index].reset {
+      Some(code) => return Err(Failure.Reset(code: code))
+      None => {}
+    }
+    let window = smaller(session.send_window, second: session.outstreams[index].send_window)
     if window <= 0 {
       pump(mut session)?
       continue
     }
-    var size = body.length() - start
-    if size > session.peer_frame_size {
-      size = session.peer_frame_size
+    var size = body.length() - sent
+    if size > session.frame_size {
+      size = session.frame_size
     }
     let room: USize = intrinsic::convert(window)
     if size > room {
       size = room
     }
-    let stop = start + size
+    let stop = sent + size
     let used: Int64 = intrinsic::convert(size)
-    session.send_window -= used
-    session.streams[position].send_window -= used
-    write_frame(mut session, kind: data_frame, flags: if stop == body.length() { end_stream } else { 0 }, stream: stream, payload: body[start..stop])?
-    start = stop
+    session.send_window = session.send_window.saturating_subtract(used)
+    session.outstreams[index].send_window = session.outstreams[index].send_window.saturating_subtract(used)
+    send_frame(session.stream, kind: data_frame, flags: if stop == body.length() { end_stream } else { 0 }, id: id, payload: body[sent..stop])?
+    sent = stop
   }
-  Ok(Unit)
+  Ok(id)
 }
 
-internal fn respond[Stream: streams::Reader + streams::Writer](
-  session: mut Session[Stream],
-  stream: UInt32,
-  fields: Slice[hpack::Field],
-  body: Slice[UInt8],
-) -> Result[Unit, Failure]
-  uses Handles
+internal fn head[Stream: streams::Duplex](session: mut Session[Stream], stream: UInt32) -> Result[List[hpack::Field], Failure]
+  uses Handles, Tasks
 {
-  if stream_index(session.streams.slice(), stream: stream) is None {
-    return Ok(Unit)
-  }
-  send_headers(mut session, stream: stream, fields: fields, is_last: body.is_empty())?
-  send_body(mut session, stream: stream, body: body)?
-  match stream_index(session.streams.slice(), stream: stream) {
-    Some(position) => {
-      if position < session.streams.length() {
-        let _ = mut session.streams.remove_at(position)
-      }
-    }
-    None => {}
-  }
-  Ok(Unit)
-}
-
-internal fn exchange[Stream: streams::Reader + streams::Writer](
-  session: mut Session[Stream],
-  fields: Slice[hpack::Field],
-  body: Slice[UInt8],
-) -> Result[Message, Failure]
-  uses Handles
-{
-  if session.is_going_away || session.next_stream > 2147483645 {
-    return Err(Failure.Closed)
-  }
-  let stream = session.next_stream
-  session.next_stream += 2
-  mut session.streams.push(new_stream_state(stream, window: session.peer_stream_window))
-  send_headers(mut session, stream: stream, fields: fields, is_last: body.is_empty())?
-  send_body(mut session, stream: stream, body: body)?
   while true {
-    var answer_at: Option[USize] = None
-    for index in 0..session.ready.length() {
-      if session.ready[index].stream == stream {
-        answer_at = Some(index)
-      }
+    let index = match outstream_index(session.outstreams.slice(), stream: stream) {
+      Some(index) => index
+      None => return Err(Failure.Closed)
     }
-    match answer_at {
-      Some(position) => {
-        if position < session.ready.length() {
-          let answer = mut session.ready.remove_at(position)
-          return Ok(own answer)
-        }
-      }
+    if index >= session.outstreams.length() {
+      return Err(Failure.Closed)
+    }
+    match session.outstreams[index].reset {
+      Some(code) => return Err(Failure.Reset(code: code))
       None => {}
     }
-    if session.is_going_away && stream_index(session.streams.slice(), stream: stream) is None {
-      return Err(Failure.Closed)
+    if session.outstreams[index].has_headers {
+      return Ok(map::exchange(mut session.outstreams[index].fields, value: []))
+    }
+    if session.outstreams[index].is_ended {
+      return Err(violation(protocol_error, message: "a response that ends before its headers"))
     }
     pump(mut session)?
   }
 }
 
-internal fn is_usable[Stream: streams::Reader + streams::Writer](session: Session[Stream]) -> Bool {
-  !session.is_going_away && session.next_stream <= 2147483645
-}
-
-internal fn close[Stream: streams::Reader + streams::Writer](session: mut Session[Stream], code: UInt32)
-  uses Handles
+internal fn next_data[Stream: streams::Duplex](session: mut Session[Stream], stream: UInt32) -> Result[Option[List[UInt8]], Failure]
+  uses Handles, Tasks
 {
-  var payload: List[UInt8] = []
-  push_u32(mut payload, value: session.last_stream)
-  push_u32(mut payload, value: code)
-  let _ = write_frame(mut session, kind: goaway_frame, flags: 0, stream: 0, payload: payload.slice())
-}
-
-internal fn failure_code(failure: Failure) -> UInt32 {
-  match failure {
-    Protocol(code, ..) => code
-    _ => 0
+  while true {
+    let index = match outstream_index(session.outstreams.slice(), stream: stream) {
+      Some(index) => index
+      None => return Ok(None)
+    }
+    if index >= session.outstreams.length() {
+      return Ok(None)
+    }
+    match session.outstreams[index].reset {
+      Some(code) => return Err(Failure.Reset(code: code))
+      None => {}
+    }
+    if !session.outstreams[index].data.is_empty() {
+      let data = map::exchange(mut session.outstreams[index].data, value: [])
+      let is_ended = session.outstreams[index].is_ended
+      var frames: List[UInt8] = []
+      let increment = window_increment(data.length())
+      if !is_ended {
+        frame_bytes(mut frames, kind: window_frame, flags: 0, stream: stream, payload: increment.slice())
+      }
+      frame_bytes(mut frames, kind: window_frame, flags: 0, stream: 0, payload: increment.slice())
+      system(session.stream.send_all(frames.slice()))?
+      return Ok(Some(own data))
+    }
+    if session.outstreams[index].is_ended {
+      let _ = mut session.outstreams.remove_at(index)
+      return Ok(None)
+    }
+    pump(mut session)?
   }
 }
 
-internal fn finish[Stream: streams::Reader + streams::Writer](session: own Session[Stream]) -> Stream {
-  own session.reader.finish()
+internal fn release[Stream: streams::Duplex](session: mut Session[Stream], stream: UInt32)
+  uses Handles, Tasks
+{
+  match outstream_index(session.outstreams.slice(), stream: stream) {
+    Some(index) => {
+      if index < session.outstreams.length() {
+        let finished = mut session.outstreams.remove_at(index)
+        if !finished.is_ended {
+          let code = window_increment(8)
+          let _ = send_frame(session.stream, kind: reset_frame, flags: 0, id: stream, payload: code.slice())
+        }
+      }
+    }
+    None => {}
+  }
+}
+
+internal fn is_usable[Stream: streams::Duplex](session: Session[Stream]) -> Bool {
+  !session.is_going_away && session.next_stream <= 2147483645
 }

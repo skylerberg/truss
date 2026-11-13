@@ -225,11 +225,10 @@ void t_runtime_install(void) {
   sigemptyset(&action.sa_mask);
   sigaction(SIGSEGV, &action, NULL);
   sigaction(SIGBUS, &action, NULL);
-#ifdef T_TESTS
-  /* The runner writes to workers that may have ended, which is an error for
-     it to see, not a signal to end it. */
+  /* A write to a socket or a pipe whose reader has gone is an error the
+     program sees, SystemError.BrokenPipe, not a signal that ends it: a
+     server must outlive a client that hangs up. */
   signal(SIGPIPE, SIG_IGN);
-#endif
 }
 |}
 
