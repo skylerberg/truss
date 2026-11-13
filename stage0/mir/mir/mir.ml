@@ -1449,9 +1449,11 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
       in
       List.iter
         (fun (current : Core.arm) ->
-          let next = new_block b and body = new_block b in
+          let next = new_block b and body = new_block b and failed = new_block b in
+          let arm_scope = ref None in
           in_scope b current.origin (fun () ->
-              match_patterns b current.patterns places ~fail:next ~matched:body current.origin;
+              arm_scope := Some (List.hd b.scopes);
+              match_patterns b current.patterns places ~fail:failed ~matched:body current.origin;
               start b body;
               if current.patterns <> [] then
                 emit b
@@ -1482,11 +1484,19 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
                   | scope :: _ when scope.bound <> [] ->
                       emit b (Dead (List.rev scope.bound)) current.origin
                   | _ -> ());
-                  goto b next current.origin;
+                  goto b failed current.origin;
                   start b passed;
                   end_loans b loans current.origin;
                   arm current);
           goto b joined current.origin;
+          (* Where a test or the guard fails, the arm ends the temporaries
+             of its tests, and the next arm tests the scrutinees. *)
+          start b failed;
+          (match !arm_scope with
+          | Some { temporaries = _ :: _ as temporaries; _ } ->
+              emit b (Dead (List.rev temporaries)) current.origin
+          | _ -> ());
+          goto b next current.origin;
           start b next)
         arms;
       terminate b Unreachable origin
@@ -1816,7 +1826,11 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
           assign b (at result)
             (Operand (Constant { value = Boolean deciding; type_ = Types.bool }))
             origin;
-          (match b.loops with loop :: _ -> goto b loop.break_ origin | [] -> goto b after origin);
+          (match b.loops with
+          | loop :: _ ->
+              leave_scopes b ~depth:loop.depth origin;
+              goto b loop.break_ origin
+          | [] -> goto b after origin);
           start b undecided));
   goto b after origin;
   start b after;
@@ -2142,195 +2156,6 @@ and of_definition (definition : Core.definition) =
           };
       })
     code
-
-(* Text *)
-
-let show_place (place : place) =
-  let root =
-    match place.root with
-    | Local local -> Printf.sprintf "_%d" local
-    | Constant path -> Path.show path
-  in
-  root
-  ^ String.concat ""
-      (List.map
-         (function
-           | Field field -> "." ^ field
-           | Variant_field { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
-         place.projections)
-
-let show_mode : Types.mode -> string = function Own -> "own" | Read -> "read" | Mut -> "mut"
-
-let show_operand = function
-  | Use { place; _ } -> show_place place
-  | Take { place; _ } -> "take " ^ show_place place
-  | Borrow { place; mode; _ } -> Printf.sprintf "%s %s" (show_mode mode) (show_place place)
-  | Constant { value = Unit; _ } -> "()"
-  | Constant { value = Integer value; _ } -> Z.to_string value
-  | Constant { value = Float value; _ } -> Printf.sprintf "%h" value
-  | Constant { value = Boolean value; _ } -> string_of_bool value
-  | Constant { value = String value; _ } -> Printf.sprintf "%S" value
-
-let show_operands operands = String.concat ", " (List.map show_operand operands)
-
-let show_callee = function
-  | Function { path; _ } -> Path.show path
-  | Trait_method { trait; name; _ } -> Printf.sprintf "%s.%s" (Path.show trait.trait) name
-  | Capability_method { capability; name } -> Printf.sprintf "%s.%s" (Path.show capability) name
-  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
-  | Indirect value -> show_operand value
-
-let show_call (call : call) =
-  Printf.sprintf "%s(%s)" (show_callee call.callee)
-    (String.concat ", "
-       (List.map
-          (function Passed { value; _ } -> show_operand value | Default -> "default")
-          call.arguments))
-
-let show_comparison : Core.comparison -> string = function
-  | Equal -> "=="
-  | Not_equal -> "!="
-  | Less -> "<"
-  | Less_equal -> "<="
-  | Greater -> ">"
-  | Greater_equal -> ">="
-
-let show_rvalue = function
-  | Operand value -> show_operand value
-  | Operation { operation; operands; _ } ->
-      Printf.sprintf "%s(%s)" (Intrinsic.operation_name operation) (show_operands operands)
-  | Compare { comparison; left; right } ->
-      Printf.sprintf "%s %s %s" (show_operand left) (show_comparison comparison)
-        (show_operand right)
-  | Not value -> "!" ^ show_operand value
-  | Construct { variant; fields } ->
-      Printf.sprintf "%s(%s)"
-        (match variant with Some variant -> variant | None -> "record")
-        (String.concat ", "
-           (List.map
-              (fun (name, field) ->
-                Printf.sprintf "%s: %s" name
-                  (match field with Some field -> show_operand field | None -> "default"))
-              fields))
-  | Array elements -> Printf.sprintf "[%s]" (show_operands elements)
-  | Is_variant { place; variant } -> Printf.sprintf "%s is %s" (show_place place) variant
-  | Convert { value; _ } -> Printf.sprintf "convert(%s)" (show_operand value)
-  | To_any { value; trait; _ } ->
-      Printf.sprintf "any %s(%s)" (Path.show trait.trait) (show_operand value)
-  | Copy value -> Printf.sprintf "copy(%s)" (show_operand value)
-  | Function_value { path; _ } -> Path.show path
-  | Lambda { body; _ } -> Printf.sprintf "lambda %d" body
-  | Value_parameter parameter -> parameter.name
-
-let show_locals locals = String.concat ", " (List.map (Printf.sprintf "_%d") locals)
-
-let show_statement (statement : statement) =
-  match statement.kind with
-  | Assign { target; value; _ } -> Printf.sprintf "%s = %s" (show_place target) (show_rvalue value)
-  | Call { destination = Some destination; call } ->
-      Printf.sprintf "%s = %s" (show_place destination) (show_call call)
-  | Call { destination = None; call } -> show_call call
-  | Lend { part; call } -> Printf.sprintf "_%d = lend %s" part (show_call call)
-  | Slice { destination; call; _ } ->
-      Printf.sprintf "%s = slice %s" (show_place destination) (show_call call)
-  | Template { destination; call; _ } ->
-      Printf.sprintf "%s = template %s" (show_place destination) (show_call call)
-  | Pull { destination; cursor } ->
-      Printf.sprintf "%s = pull %s" (show_place destination) (show_place cursor)
-  | Live locals -> Printf.sprintf "live %s" (show_locals locals)
-  | Dead locals -> Printf.sprintf "dead %s" (show_locals locals)
-  | Assert value -> "assert " ^ show_operand value
-  | Echo value -> "echo " ^ show_operand value
-  | Provide { provided; _ } ->
-      Printf.sprintf "provide %s"
-        (show_operands (List.map (fun (p : provided) -> p.value) provided))
-  | Provide_end -> "provide end"
-  | Loan_start { loan; borrowed; mode; duration } ->
-      Printf.sprintf "loan %d: %s %s for %s" loan (show_mode mode) (show_operand borrowed)
-        (match duration with
-        | Loop_body -> "the loop"
-        | Provide_body -> "the provide"
-        | Rest_of_statement -> "the statement"
-        | Operand_evaluation -> "the operation")
-  | Loan_end loans -> "end loans " ^ String.concat ", " (List.map string_of_int loans)
-  | Ghost_assert _ -> "ghost assert"
-  | Matched _ -> "matched"
-  | Proof _ -> "proof"
-
-let rec show_yielded = function
-  | Part operand -> show_operand operand
-  | Built { variant; fields; _ } ->
-      Printf.sprintf "%s(%s)"
-        (match variant with Some variant -> variant | None -> "record")
-        (String.concat ", "
-           (List.map
-              (fun (name, field) ->
-                Printf.sprintf "%s: %s" name
-                  (match field with Some field -> show_yielded field | None -> "default"))
-              fields))
-
-let show_terminator = function
-  | Goto block -> Printf.sprintf "goto %d" block
-  | Branch { condition; yes; no } ->
-      Printf.sprintf "branch %s %d %d" (show_operand condition) yes no
-  | Switch_variant { place; cases } ->
-      Printf.sprintf "switch %s %s" (show_place place)
-        (String.concat " "
-           (List.map (fun (variant, block) -> Printf.sprintf "%s: %d" variant block) cases))
-  | For { iteration; part; body; after; _ } ->
-      Printf.sprintf "for _%d in %s %d after %d" part
-        (match iteration with
-        | Yielding call -> show_call call
-        | Range { start; stop; inclusive } ->
-            Printf.sprintf "%s%s%s" (show_operand start)
-              (if inclusive then "..=" else "..")
-              (show_operand stop)
-        | Pull { cursor; _ } -> "pull " ^ show_place cursor)
-        body after
-  | Fork { fork; concurrent; branches; join } ->
-      Printf.sprintf "%s #%d %s%s"
-        (if concurrent then "concurrent" else "parallel")
-        fork
-        (String.concat " " (List.map (fun branch -> string_of_int branch.entry) branches))
-        (match join with Some join -> Printf.sprintf " join %d" join | None -> "")
-  | Join { fork; next } -> Printf.sprintf "join #%d then %d" fork next
-  | Iteration_end -> "next"
-  | Yield { mode; part; resume } ->
-      Printf.sprintf "yield %s %s %d" (show_mode mode) (show_yielded part) resume
-  | Return None -> "return"
-  | Return (Some value) -> "return " ^ show_operand value
-  | Exit_tasks { tasks; exit } ->
-      let show_task ({ task; _ } : left_task) =
-        match task with
-        | Branch { block; index } -> Printf.sprintf "branch %d of #%d" index block
-        | Iteration { loop } -> Printf.sprintf "iteration of #%d" loop
-      in
-      Printf.sprintf "exit %s, %s"
-        (String.concat ", " (List.map show_task tasks))
-        (match exit with
-        | Exit_return (Some value) -> "return " ^ show_operand value
-        | Exit_return None -> "return"
-        | Exit_iteration -> "next"
-        | Exit_to block -> Printf.sprintf "goto %d" block)
-  | Unreachable -> "unreachable"
-  | Todo -> "todo"
-
-let show_body (body : body) =
-  String.concat "\n"
-    (List.concat
-       (List.mapi
-          (fun index (block : basic_block) ->
-            Printf.sprintf "%d:%s" index (match block.header with Some _ -> " loop" | None -> "")
-            :: List.map (fun statement -> "  " ^ show_statement statement) block.statements
-            @ [ "  " ^ show_terminator block.terminator ])
-          (Array.to_list body.blocks)))
-
-let show (mir : t) =
-  String.concat "\n\n"
-    (show_body mir.body
-    :: List.mapi
-         (fun index body -> Printf.sprintf "lambda %d\n%s" index (show_body body))
-         (Array.to_list mir.lambdas))
 
 let of_path =
   Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->

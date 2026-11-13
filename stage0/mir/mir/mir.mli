@@ -298,6 +298,3 @@ val of_expression : ?parameters:Core.parameter list -> Core.expression -> t
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs. The body of a function for specifications only never
     runs, so it has none. *)
-
-val show : t -> string
-(** The MIR as text, for tests. *)
