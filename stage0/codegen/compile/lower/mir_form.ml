@@ -1104,9 +1104,12 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
 (* Lowering *)
 
 (* Makes the locals that the current frame's code owns, so that the scope
-   that owns them drops them on every way out: from the caller's code at a
-   [yield] of an inlined method, and at the [stop] of a [yield] of a pulled
-   one. *)
+   that owns them drops them on every way out: at a [return], from the
+   caller's code at a [yield] of an inlined method, and at the [stop] of a
+   [yield] of a pulled one. A local the MIR has ended holds nothing there,
+   and drop elaboration removes its drop. Where paths join, as they do where
+   the rest of a lending method runs, a local may hold a value on only some
+   of them, and the drop then takes a flag. *)
 let make_owned_locals st =
   let frame = mir st in
   let parts =
@@ -1617,7 +1620,12 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin
              captures)
         ~bind_capture:bind_core
         ~body:(fun inner parameter_places ->
-          inner.frame <- { inner.frame with mir = Some (frame_of_body ~lambdas lambda) };
+          inner.frame <-
+            {
+              inner.frame with
+              mir = Some (frame_of_body ~owner:(innermost_scope inner) ~lambdas lambda);
+            };
+          make_owned_locals inner;
           List.iter2
             (fun local (place, _, _) -> bind_local inner local place)
             lambda.parameters parameter_places;
@@ -2548,8 +2556,7 @@ let fill_defaults st mask (parameters : Core.parameter list) =
    parameters are bound. *)
 let lower_code st path =
   let code_mir = mir_of st.context path in
-  let owner = if st.pulling then Some (innermost_scope st) else None in
-  let frame = frame_of_body ?owner ~lambdas:code_mir.lambdas code_mir.body in
+  let frame = frame_of_body ~owner:(innermost_scope st) ~lambdas:code_mir.lambdas code_mir.body in
   st.frame <- { st.frame with mir = Some frame };
-  if st.pulling then make_owned_locals st;
+  make_owned_locals st;
   lower_body st frame

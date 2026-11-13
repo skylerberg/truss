@@ -1,0 +1,25 @@
+use standard::json
+
+fn first(value: json::Value) -> Result[String, String] {
+  let name = match value.get("alg") {
+    Some(member) => match member.as_text() {
+      Some(text) => text.to_string()
+      None => return Err("not text")
+    }
+    None => return Err("missing")
+  }
+  Ok(own name)
+}
+
+fn first_of(text: StringSlice) -> Result[String, String] {
+  match json::parse(text) {
+    Ok(value) => first(value)
+    Err(_) => Err("no json")
+  }
+}
+
+test "each way out of a match on a lent part drops what it holds" {
+  assert first_of("{\"alg\":\"x\"}".slice()) == Ok("x")
+  assert first_of("{\"alg\":1}".slice()) == Err("not text")
+  assert first_of("{}".slice()) == Err("missing")
+}
