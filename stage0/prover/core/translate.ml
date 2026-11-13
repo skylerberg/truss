@@ -9543,9 +9543,8 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
         match Hashtbl.find_opt index.statements statement.origin with
         | Some { kind = Assert _; _ } -> true
         | _ -> false)
-    | Lend _ | Slice _ | Template _ | Pull _ | Provide _ | Provide_end | Fork_start _ | Fork_end _
-      ->
-        false
+    | Lend { call; _ } -> core_call call
+    | Slice _ | Template _ | Pull _ | Provide _ | Provide_end | Fork_start _ | Fork_end _ -> false
   in
   let terminator (ending : Mir.terminator) =
     match ending with
@@ -9561,9 +9560,6 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
        (fun (parameter : Core.parameter) -> parameter.callback_contract = None)
        parameters
   && Array.for_all
-       (fun (local : Mir.local_info) -> match local.kind with Lent _ -> false | _ -> true)
-       mir.body.locals
-  && Array.for_all
        (fun (block : Mir.basic_block) ->
          (match block.Mir.header with
            | None -> true
@@ -9577,7 +9573,14 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
 
 (* Where a body's run is: the core form's nodes, the body, and the locals
    that are a place they were bound to, to be changed there. *)
-type run = { index : core_index; body : Mir.body; places : (Mir.local, Mir.place) Hashtbl.t }
+type run = {
+  index : core_index;
+  body : Mir.body;
+  places : (Mir.local, Mir.place) Hashtbl.t;
+  lends : (Mir.local, frame -> Logic.term -> frame) Hashtbl.t;
+      (** For each part lent to change, how its final value goes back where it was lent from, as the
+          lend ends *)
+}
 
 (* The key of a local of the MIR in a frame's locals: a parameter's or a
    binding's own core local, which specifications name, and for a
@@ -9841,6 +9844,76 @@ let mir_call context frame run (call : Mir.call) =
       | translated -> translated)
   | _ -> bug "a call of the MIR whose core call is not known"
 
+(* A lending call, whose part [part] holds. A part lent to change takes the
+   callee's contract at its end too, given its final value: a method lent
+   from is called again then, which writes the receiver back, and spends the
+   call's cost then, and the part of a storage, an array, or a view goes back
+   into it at its index. *)
+let mir_lend context frame run part (call : Mir.call) =
+  match Hashtbl.find_opt run.index.expressions call.node with
+  | Some ({ kind = Call called; _ } as node) -> (
+      let given = mir_arguments context frame run call.arguments in
+      let receiver =
+        match call.arguments with
+        | Passed { value = Borrow { place; _ }; _ } :: _ -> Some place
+        | _ -> None
+      in
+      let index_term () =
+        match given 1 with Some (term, _) -> term | None -> bug "a lend at an index with no index"
+      in
+      let lent =
+        match (called.lends, called.callee, receiver) with
+        | ( Some Types.Mut,
+            Intrinsic { operation = Storage_at_mut; type_arguments = Types.Type element :: _ },
+            Some receiver ) ->
+            let index = index_term () in
+            Hashtbl.replace run.lends part (fun frame final ->
+                let element = substituted context frame element in
+                let buffer = read_place context { frame with checking = false } run receiver in
+                write_place context frame run receiver
+                  (storage_updated context frame element buffer index final));
+            resolved_call ~given context frame node called
+        | Some Types.Mut, Intrinsic { operation = Array_at_mut; _ }, Some receiver ->
+            let index = index_term () in
+            Hashtbl.replace run.lends part (fun frame final ->
+                let array_type = mir_place_type context frame run receiver in
+                let before = read_place context { frame with checking = false } run receiver in
+                write_place context frame run receiver
+                  (array_updated context frame array_type before index final));
+            resolved_call ~given context frame node called
+        | ( Some Types.Mut,
+            Intrinsic { operation = View_at_mut; type_arguments = Types.Type element :: _ },
+            Some receiver ) ->
+            let index = index_term () in
+            Hashtbl.replace run.lends part (fun frame final ->
+                let element = substituted context frame element in
+                let before = read_place context { frame with checking = false } run receiver in
+                let updated =
+                  arrive context frame "changed" (mir_place_type context frame run receiver)
+                in
+                replaced context frame element
+                  ~before:(buffer_model context View element before)
+                  ~after:(buffer_model context View element updated)
+                  index final;
+                write_place context frame run receiver updated);
+            resolved_call ~given context frame node called
+        | Some Types.Mut, Intrinsic _, _ -> unsupported (at frame node) "this lend"
+        | Some Types.Mut, _, _ ->
+            Hashtbl.replace run.lends part (fun frame final ->
+                match
+                  resolved_call ~lent_final:(fun _ -> final) ~given context frame node called
+                with
+                | Some (after, _) -> after
+                | None -> frame);
+            without_costs context (fun () -> resolved_call ~given context frame node called)
+        | _ -> resolved_call ~given context frame node called
+      in
+      match lent with
+      | Some (after, term) ->
+          Some (write_place context after run { root = Local part; projections = [] } term)
+      | None -> None)
+  | _ -> bug "a lend of the MIR whose core call is not known"
+
 let mir_statement context frame run (statement : Mir.statement) =
   let span = span_of frame.source statement.origin in
   match statement.kind with
@@ -9874,6 +9947,20 @@ let mir_statement context frame run (statement : Mir.statement) =
       | None -> None)
   | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
   | Dead locals ->
+      (* A part lent to change goes back as its lend ends: a part lent from
+         another part first. *)
+      let frame =
+        List.fold_left
+          (fun frame local ->
+            match Hashtbl.find_opt run.lends local with
+            | Some finish ->
+                Hashtbl.remove run.lends local;
+                finish frame
+                  (read_place context { frame with checking = false } run
+                     { root = Local local; projections = [] })
+            | None -> frame)
+          frame (List.rev locals)
+      in
       Some
         {
           frame with
@@ -9882,6 +9969,7 @@ let mir_statement context frame run (statement : Mir.statement) =
               (fun locals local -> Locals.remove (mir_key run local) locals)
               frame.locals locals;
         }
+  | Lend { part; call } -> mir_lend context frame run part call
   | Assert asserted -> (
       match Hashtbl.find_opt run.index.statements statement.origin with
       | Some { kind = Assert { condition = { value = written; _ }; by_bit_vector }; _ } ->
@@ -9909,7 +9997,7 @@ let mir_statement context frame run (statement : Mir.statement) =
             Logic.Boolean true )
           :: context.decisions;
       Some frame
-  | Lend _ | Slice _ | Template _ | Pull _ | Provide _ | Provide_end | Fork_start _ | Fork_end _ ->
+  | Slice _ | Template _ | Pull _ | Provide _ | Provide_end | Fork_start _ | Fork_end _ ->
       bug "a form the MIR's reading does not cover"
 
 (* The MIR of the body of a function proven, with its core form's nodes,
@@ -9965,7 +10053,7 @@ let loop_blocks (body : Mir.body) header (natural : Mir.natural_loop) =
    a [while] loop runs as the core form's does, with its changes havocked
    at its head and its invariants checked at the end of each iteration. *)
 let mir_run context start index (body : Mir.body) =
-  let run = { index; body; places = Hashtbl.create 4 } in
+  let run = { index; body; places = Hashtbl.create 4; lends = Hashtbl.create 4 } in
   let count = Array.length body.blocks in
   let incoming = Array.make count [] in
   let ran = Array.make count false in
