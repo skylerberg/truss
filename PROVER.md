@@ -149,10 +149,29 @@ decides when a body is a definition. In the solver:
   term. Its termination makes this sound.
 - **Any other function is known by its contract,** never its body, and gives
   a fresh result at each call.
-- **A method of a trait or an `impl` is unfolded at each call,** since its
+- **A method of a trait or an `impl` is defined by its body,** since its
   contract is the trait's.
-- **Recursive definitions unfold once per use,** as fuel does in Dafny. A
-  proof that needs more calls a theorem or asserts the steps.
+- **Definitions and contracts are axioms.** A pure function's definition and
+  contract are each stated once in a query, for every argument, triggered by
+  the function applied: `forall x {f(x)} requires(x) ==> f(x) == body(x)`.
+  The solver instantiates them only for the calls its search meets, so a
+  query holds a callee's clauses once, and its callees' only where a call of
+  theirs is met.
+- **An axiom holds of values of its parameters' types.** Its hypotheses are
+  the parameters' ranges and invariants and the facts its translation
+  assumed of their parts, such as a field's range, which each call states of
+  its arguments. Over every term of the sort, `append`'s contract would
+  contradict the range of a list's elements at a negative value.
+- **A fact that needs a value,** not a bound name, such as a bit count's
+  bounds by powers of two, is stated at each call, of the argument.
+- **A theorem's contract is stated at each call,** since no trigger can
+  match an application of a function of the unit.
+- **Recursive definitions unfold once per use,** as fuel does in Dafny: in a
+  function's axioms its own calls are its *limited copy*, known only to equal
+  it where it is applied. A proof that needs more calls a theorem or asserts
+  the steps.
+- **A specification is a formula:** an `if` in a clause is the solver's `if`,
+  and a lending call whose clauses never read its yielded history has none.
 - **A lambda is proven where it is written,** and its assumptions hold only
   inside it, since it may run any number of times, including none. A lambda
   passed for a parameter whose type has a `requires` assumes that `requires`
@@ -215,13 +234,19 @@ Dafny's `--isolate-assertions` exists.
 
 **A query holds only the facts that can matter.** Starting from the
 obligation's symbols, each fact that mentions a kept symbol is kept, until
-nothing more is added. Dropping a fact is always sound, and a change to a
-function no kept fact mentions leaves the query's text, and its answer,
-unchanged.
+nothing more is added. A fact stated twice, such as a law two bounds both
+give, is kept once, since the solver would instantiate each copy. Dropping a
+fact is always sound, and a change to a function no kept fact mentions
+leaves the query's text, and its answer, unchanged.
 
 **The prover chooses triggers,** since Truss has no syntax for them: the
 smallest applications that name every bound name, leaving out those that
-would make a matching loop.
+would make a matching loop. A set of applications holds every other
+application of its functions, so an instance makes none: transitivity
+triggers on all three comparisons, since two would make the third, which
+matches again. A definition triggers on the term it defines, but an
+equation between two applications that both name every bound name, such as
+one sequence's elements equal to another's, triggers on either.
 
 **A query's text is canonical,** so its hash can be its key. Every symbol is
 named by its first appearance in a fixed walk, never by its Truss name, so
@@ -233,12 +258,15 @@ only names change.
 
 - **Z3, pinned.** Another version is refused, since its answers could
   differ, and the version is part of every answer's key.
-- **A fixed limit in steps.** Each query runs with the same `rlimit`, which
+- **A fixed limit in steps.** Each query runs with the same `rlimit`,
+  1,000,000, which
   counts work, not time, so a slow machine never fails a proof a fast one
   passes. The limit does not grow with a query's size, which would make an
   answer depend on facts unrelated to its goal.
 - **One process per query,** with a fixed random seed, since a solver that
   answered earlier queries carries state that can change later answers.
+- **A query the solver rejects is the prover's bug** and stops the run, so a
+  query built wrong cannot pass for one that ran out of steps.
 
 ## Termination
 
