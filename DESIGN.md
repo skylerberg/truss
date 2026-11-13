@@ -222,7 +222,6 @@ field, such as `type UserId(number: UInt64)`, rather than a wrapper syntax:
   `opaque` work as for any record.
 - **The author names the field.** `port.number` names its contents, which a
   built-in name such as `.value` would not.
-- **It costs nothing at run time.**
 - **Operations are not inherited,** because many would make no sense: adding
   two `UserId`s is meaningless.
 
@@ -369,10 +368,9 @@ collector and no runtime beyond libc.
 - **A field can be moved out on its own.** Otherwise taking one field from a
   record would mean copying it or moving the whole record.
 - **Recursive types say where they allocate.** A variant that holds its own
-  type would be infinitely large in place, so it is marked `indirect`, and
-  the allocation is written where the type is declared. Rust says the same
-  with `Box`, which every pattern then reaches through; the mark keeps
-  patterns unchanged.
+  type is marked `indirect`, so the allocation is written where the type is
+  declared. Rust says the same with `Box`, which every pattern then reaches
+  through; the mark keeps patterns unchanged.
 - **Implicit copies never allocate.** A `Plain` value copies as a plain
   memory copy. Every other type needs `copy()`, so the cost of copying shows
   in the code.
@@ -432,59 +430,39 @@ loops and cursors work.
 
 - **The signature says which.** A lending method is proven on the promise
   that it continues after its `yield`, while a loop may stop at any `yield`.
-  If the body decided, a body edit could change callers' meaning, and a
-  caller could break a lending method's proof by looping over it.
+  If the body decided, a body edit could change callers' meaning.
 - **User collections are not second-class.** `[]` and `for` work through
   `Index` and `each`, so a user's `Grid` gets the same syntax and proof rules
   as a `List`.
-- **A lent part need not be stored in `self`.** A collection that packs its
-  elements, such as a set of bits, can still be indexed: its `at` makes the
-  `Bool`, lends it, and writes it back. Rust's `Index` returns a reference,
-  so there such a collection cannot be indexed.
-- **A lending call lends its whole receiver.** The method waits to resume,
-  and was proven as if nothing else touches `self` until it does. So
-  `mut grid[a].swap(mut grid[b])` is an error for a user's `Grid`.
-  `List`, `Slice`, and `Array` can lend two parts because their `at` has
-  nothing left to do after its `yield`.
-- **A lend in a condition ends with the condition unless a name aliases the
-  part.** So `if counts.get(word) is Some(count) { counts[word] = count + 1 }`
-  compiles, as in Rust, whose borrow ends at the last use of the reference.
-  A name that aliases the part keeps it lent through the guarded block,
-  because the method may drop a part it made when it resumes.
+- **A lent part need not be stored in `self`.** A set of bits can still be
+  indexed: its `at` makes the `Bool`, lends it, and writes it back. Rust's
+  `Index` returns a reference, so there such a collection cannot be indexed.
+- **A lending call lends its whole receiver,** since the method was proven
+  as if nothing else touches `self` until it resumes. `List`, `Slice`, and
+  `Array` can lend two parts because their `at` has nothing left to do
+  after its `yield`.
 - **A lending method always continues afterward,** so a type can update
   values that depend on the part, such as a cached total.
 - **A loop can stop at any `yield`, and the method does not continue.**
   Continuing to the next `yield` would do unasked-for work, such as reading
-  one more line after `break`, and Truss has no `finally`. So invariants
-  hold at every `yield`, and a type whose invariant a changed element would
-  break offers read-only and owned loops, and changes single elements through
-  a lending method.
+  one more line after `break`, and Truss has no `finally`. So invariants hold
+  at every `yield`.
 - **The contract names the yielded parts and the history,** as Dafny's
   iterators do. A loop over a list then gets its facts from the list's
-  `each`, so a user's collection gets the same facts. In a range's clauses
-  the loop variable names the next index, because `kept <= index` reads
-  better than `kept <= yielded.length() + 1`.
+  `each`, so a user's collection gets the same facts.
 - **Read-only and owned yields can be pulled.** Internal iteration alone
   cannot advance two sequences together, so it cannot write `zip`, merge, or
-  `peek`. One rule covers both uses: a method may end at any `yield`.
-- **A pull yields an owned value,** so a read-only yield of a place is
-  pulled only where the element is `Plain`; anything else would be copied
-  unasked.
-- **`mut` yields cannot be pulled,** since a cursor would store `mut` access.
-- **Recursive yields can be looped over but not pulled.** A cursor would need
-  room for every level of the recursion, which C# and Python allocate behind
-  the scenes. A cursor over such a structure is a type with an explicit
-  stack, so its allocations are visible. Whether a method can be pulled is
-  derived from its body, one of two facts callers take from a body; the
-  tools show both with the signature.
+  `peek`. `mut` yields cannot be pulled, since a cursor would store `mut`
+  access.
+- **Recursive yields can be looped over but not pulled.** A cursor would
+  need room for every level of the recursion, which C# and Python allocate
+  behind the scenes. A cursor over such a structure is a type with an
+  explicit stack, so its allocations are visible.
 - **Cursor types have no name.** A cursor is a state machine the compiler
-  makes from one method, described by `Cursor`. Code that holds one is
-  generic over it, or uses `any Cursor` and allocates once. Returning a
-  cursor without allocating would need opaque result types, which can be
-  added later if needed.
-- **No coroutines at run time.** A loop or a lending call compiles to a call
-  that receives the caller's code as a function, which inlining makes as
-  cheap as a written-out loop. A pulled cursor compiles to a state machine.
+  makes from one method, described by `Cursor`. Returning one without
+  allocating would need opaque result types, which can be added later.
+- **No coroutines at run time.** A loop or a lending call compiles to a
+  plain loop, and a pulled cursor to a state machine.
 
 ### Closures
 
@@ -691,8 +669,6 @@ combination needs parentheses.
   assignment's target holds no value until the result is stored, so
   evaluating the operand first keeps all other code out of that window: a
   `?` in the operand cannot return with the target moved out.
-- **Integer division rounds toward zero, and `>>` copies the sign bit,** as
-  the hardware does.
 
 ## Integers
 
@@ -839,8 +815,6 @@ chooses the implementations.
   a test that wants a scratch directory narrows file access where a reader
   can see it. Failed tests are never retried, because a retry hides exactly
   the failures an external test exists to catch.
-- **Implementations are ordinary types,** and one with state is a type with
-  fields.
 - **A view never crosses into or out of an implementation.** A caller cannot
   see which implementation its call reaches, so it could not know a view it
   passed is still held, and a view of the implementation's storage would
@@ -940,7 +914,6 @@ network capabilities could not open a socket even through a compiler bug.
 
 ## Costs
 
-- **Costs are optional,** and checked where present.
 - **Bounds can be asymptotic or exact.** Countable resources take exact
   bounds, which can say that each item is processed exactly once. Concrete
   time bounds are not allowed, because they cannot be proven across
@@ -1124,8 +1097,6 @@ place of bodies and type definitions.
   tests that reach it, which run again and show the output. Tests are
   deterministic, so the run takes the same path as the one being
   investigated.
-- **Its output stays readable,** grouped by branch or task, never
-  interleaved.
 - **It is a whole word,** and `debug` and `trace` are common names.
 
 ## Loops
@@ -1152,8 +1123,6 @@ running its branches one after another.
   to run. Code whose parts use capabilities at once is concurrent.
 - **A function that uses `parallel` is still pure,** and tests that run it can
   be cached.
-- **Proofs and costs work as for sequential code.** Branches are disjoint, so
-  their order cannot matter. `time` measures total work.
 - **`span` is planned, for the work that cannot be done at once.** On `p`
   cores a function finishes in time proportional to `time / p + span`, the
   work-span model of Cilk, so `cost time O(n)` with `cost span O(log(n))`
@@ -1162,8 +1131,6 @@ running its branches one after another.
 - **The result does not depend on the machine.** Where a computation is
   split is decided by its input, never by the number of cores, so a parallel
   float sum gives the same bits everywhere.
-- **Branches run on a pool of threads that steal work,** one per core, started
-  the first time a program runs code at once.
 - **Tests run branches in order,** since the test runner already runs one test
   per core, and a failed check is then the same on every run.
 - **Early exit is not allowed.** A branch uses no capabilities, so it cannot
@@ -1182,17 +1149,9 @@ code that does it declares `uses Tasks`.
   data races in `parallel` rules them out here too.
 - **A task never outlives the block that started it,** as in structured
   concurrency, such as Trio's nurseries. So a branch can read the places
-  around it without lifetimes, and use the capabilities provided around it,
-  whose implementations are the enclosing code's variables. A task started
-  with Go's `go` can outlive everything it was given, so it could be given
-  neither.
-- **A task borrows only places that outlive the loop.** A `concurrent for`
-  iteration outlives the `yield` that started it, so a place that could
-  change when the method resumes cannot be yielded to a task.
-- **It is a construct, not a `spawn(work)` function.** `spawn` would have to
-  keep `work`, and only a function that captures nothing can be kept, so the
-  task could read nothing around it and would hand back its result through
-  a handle to join. A branch needs neither.
+  around it without lifetimes. A task started with Go's `go` can outlive
+  everything it was given, so it could be given neither places nor
+  capabilities.
 - **Blocking calls, no async.** Code waits by calling a capability method
   that returns when the result is ready. `uses` already separates code that
   can wait from code that cannot, and a second mark for the same fact, such
@@ -1201,57 +1160,37 @@ code that does it declares `uses Tasks`.
 - **How a task waits can change without any code changing.** Every call that
   waits is in the standard library's real implementations, since there is no
   foreign code, so they can give each task a thread or switch many tasks on
-  a few threads, and no caller can tell which. Go and Java cannot switch away
-  from a task that waits inside foreign code.
-- **Cancellation is an error value.** A cancelled task's calls that would wait
-  return the value that says they did not finish, and `?` carries it out, so
-  a cancelled task ends by returning, along a path written in its code. The
-  value comes from an implementation proven against its `ensures`, so a
-  caller's proof holds either way. Raising an exception at the call, or
-  dropping a computation at whichever `await` it had reached, would abandon
-  the computation partway, which Truss never does.
+  a few threads. Go and Java cannot switch away from a task that waits inside
+  foreign code.
+- **Cancellation is an error value.** A cancelled task's waits return a value
+  that says they did not finish, and `?` carries it out, so a cancelled task
+  ends by returning, along a path written in its code. Raising an exception
+  at the call, or dropping a computation at whichever `await` it had reached,
+  would abandon the computation partway, which Truss never does.
 - **A time limit and a race are ordinary code,** two branches each of which
   returns, so nothing like Go's `select` is needed.
-- **A channel's message is owned and `Storable`,** so sending copies nothing,
-  and the message never views an original that could be gone before it is
-  received. A task that waits for several kinds of message receives one sum
-  type from one channel.
-- **State that tasks share lives in a capability implementation.** Two tasks
-  cannot share a variable that either changes, so shared state, such as a
-  table of sessions, implements a capability, and `uses Sessions` marks every
-  function that can touch it.
+- **State that tasks share lives in a capability implementation,** since two
+  tasks cannot share a variable that either changes. `uses Sessions` then
+  marks every function that can touch a shared table of sessions.
 - **A `mut` implementation is a monitor.** Within a call nothing else changes
-  the state, between two calls anything may, and no task holds a view of the
-  state, since a method returns none.
-- **Proofs already allow for it.** The prover never models an
+  the state; between two calls anything may. The prover never models an
   implementation's state, so no proof assumed that it stays the same between
   calls.
-- **These mutexes cannot deadlock.** An implementation's methods call only
-  capabilities provided outside it, so every task acquires mutexes from the
+- **These monitors cannot deadlock.** An implementation's methods call only
+  capabilities provided outside it, so every task acquires locks from the
   innermost implementation outward. A callback that uses a capability could
-  acquire one out of order, which is why such a method takes none.
-- **Mutual exclusion costs nothing where there are no tasks,** since whether
-  a `provide mut` needs a mutex is known from signatures.
+  acquire one out of order, which is why such a method is not allowed.
 - **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change the
   value of a read-only place, which mutable value semantics rules out, and
-  two tasks that take two of them in different orders deadlock. A task that
-  owns the state and answers messages needs nothing new, but every use of the
-  state then switches tasks twice and waits behind every other use.
-- **A channel is built on a cell with a pure update.** The cell runs a pure
-  function on its value while it holds its mutex. A pure function cannot
-  wait, use another cell, or do I/O, so two updates cannot deadlock, and no
-  task holds the mutex across a call that can wait.
+  two tasks that take two of them in different orders deadlock.
 - **Data races cannot happen, and waiting forever can.** A task can wait for
   a message no task will send.
 - **Tests stay deterministic.** A test's `Tasks` runs one task at a time,
   chosen by a seed, and switches only at capability calls. Tasks share no
   memory that changes, so the orders of those calls are all the orders there
   are, and a race is a failure that one seed repeats, not a flaky one.
-  FoundationDB tests this way.
-- **A test's clock moves when every task waits,** so a test of a timeout takes
-  no real time and its result can be cached.
-- **Tasks and `parallel` branches run on one pool,** so code that computes
-  and code that waits do not compete with two pools for the same cores.
+  FoundationDB tests this way. A test's clock moves when every task waits,
+  so a test of a timeout takes no real time.
 
 ## Collections
 
@@ -1355,7 +1294,6 @@ not, because a package may want that name.
 - **Subdirectories hold files that no one imports:** the methods and `impl`s
   of types declared in the parent module, and the real capability
   implementations.
-- **Every module documents itself in a Markdown file beside it.**
 - **Every method of a view also exists on its owner,** so `mut names.sort()`
   works without `names[..]`. Truss converts an owner to its view only at a
   parameter, so the standard library declares the methods.
@@ -1382,8 +1320,6 @@ not, because a package may want that name.
   generic method two versions.
 - **A write reports at most the bytes it was given,** proven for every
   implementation, so `write_all` can find the bytes that are left.
-- **Each capability ships with its test fakes and its narrowing
-  implementations.**
 - **`files::MemoryFiles` is a file system, not a table of contents.** It
   returns the error the operating system returns for each misuse, because a
   test of error handling is only as good as the errors the fake can produce.
@@ -1404,7 +1340,6 @@ for three reasons:
 - **Control over where values come from.** Some types are safe only if
   outside code cannot build them, such as `SqlQuery`, whose text must come
   from source literals.
-- **Freedom to change a type's internals.**
 - **Protecting low-level internals,** such as the pointer and capacity inside
   `List`.
 
@@ -1429,35 +1364,19 @@ in [PACKAGES.md](PACKAGES.md).
 - **A package is not a unit of building.** Results are kept for each
   definition, so splitting a package makes no build faster, and a package is
   split only where someone wants a boundary checked.
-- **Every kind of package works one way.** A package is named by a path that
-  is the same in every file of every project, and where its code comes from
-  follows from the name.
-- **A package's program starts at its `main` module,** so finding it is one
-  lookup, and a package builds at most one program.
-
-### Projects
-
-- **Every package under the project's root belongs to it,** with no list of
-  members. A list is one more file that every agent adding a package must
-  edit, and so one more place for two agents to collide.
+- **A project lists no members.** A list is one more file that every agent
+  adding a package must edit, and so one more place for two agents to
+  collide.
 - **Packages find each other by name, never by a path.** Cargo's
   `path = "../geometry"` breaks when a directory moves.
 - **A project's package takes the place of the registry's package of the same
-  name,** which is how a dependency is fixed ahead of its owner, with nothing
-  more to write and the copy in the repository for a reviewer to see.
-- **A project's own packages have no versions,** because they are the code
-  being worked on.
-
-### Package names
-
+  name,** which is how a dependency is fixed ahead of its owner, with the
+  copy in the repository for a reviewer to see.
 - **A registry package is named `owner::name`.** On a registry with one flat
   list of names, a name one letter from a well-known one is how much malware
   arrives, and LLMs make this worse by making up names that attackers then
   publish under. With an owner in the name, who published the code is in
   every path that uses it.
-- **The name in code is the registry's name, with no other,** because a
-  rename would be an alias, and Truss has none.
-- **A name is one package for good,** never handed to someone else.
 
 ### Versions
 
@@ -1466,49 +1385,31 @@ in [PACKAGES.md](PACKAGES.md).
   "expected `Vector`, found `Vector`".
 - **So a release never breaks the API of an earlier one of the same name.**
   A change that would is published under a new name with `_v2`, as Go
-  requires `/v2` for a module's second major version. Both can be in one
-  build, and one file can use both while its code moves over. Where
-  compatibility is left to each author's care, breaking changes in releases
-  that claimed to be compatible are routine.
-- **The registry checks it, from the signatures,** since the signature says
-  everything important about a definition. Elm's registry checks releases
-  the same way, from types alone; Truss's signatures hold more, so the check
-  covers more.
-- **Bodies are not promised.** A release may change a function's result
-  within its contract, which is how a fix reaches its users. A proof in
-  another package that leaned on a body is checked again after an upgrade.
-  A guarantee users are meant to rely on goes in an `ensures`.
-- **The registry gives each release its number,** so a number is never wrong
-  about the changes.
+  requires `/v2` for a module's second major version. Where compatibility is
+  left to each author's care, breaking changes in releases that claimed to
+  be compatible are routine.
+- **The registry checks compatibility from the signatures, and numbers each
+  release,** so a number is never wrong about the changes. Elm's registry
+  checks releases the same way, from types alone; Truss's signatures hold
+  more, so the check covers more.
 - **There are no 0.x versions.** A version that may break at any release
   cannot be the one version of its name in a build.
-- **A compatible release can still surface an error,** such as a new name that
-  clashes with a user's, or a stronger contract the solver cannot answer
-  within its limits, but never a change in the code's behavior.
-
-### Choosing versions
-
+- **Bodies are not promised.** A release may change a function's result
+  within its contract, which is how a fix reaches its users. A guarantee
+  users are meant to rely on goes in an `ensures`.
 - **A build uses the newest version that any of its packages was checked
-  with,** and nothing newer, which is Go's minimal version selection.
-- **Nothing new enters a build until someone asks.** Choosing the newest
-  release a range allows puts a release published an hour ago into every
-  build, which is how a compromised release reaches thousands of machines
-  before anyone has read it.
-- **There are no ranges and no solver.** Every version under one name is
-  compatible with those before it, so "at least this one" is all a
-  requirement can say. Choosing among ranges is NP-complete, and its answer
-  changes as packages are published; this rule's answer depends only on the
-  lock file, so it is the same on every machine, every day.
+  with,** and nothing newer, which is Go's minimal version selection. Choosing
+  the newest release a range allows puts a release published an hour ago
+  into every build, which is how a compromised release reaches thousands of
+  machines before anyone has read it.
+- **There are no ranges and no solver.** Choosing among ranges is
+  NP-complete, and its answer changes as packages are published; this rule's
+  answer depends only on the lock file, so it is the same on every machine,
+  every day. Two changes to a lock file always merge, by taking the higher
+  version, where a solver's lock file cannot be merged without solving
+  again.
 - **Versions are written only in the lock file.** An LLM does not know which
   versions exist today, so no file written by hand holds one.
-- **The lock file names content,** so fetching changes no answer and needs no
-  command.
-- **Two changes to a lock file always merge,** by taking the higher version.
-  A solver's lock file is one of many valid answers, which cannot be merged
-  without solving again.
-- **An upgrade is tried before it is made,** and reports the signatures that
-  changed, the packages that enter the build, and each package that would
-  hold a new capability.
 
 ### The registry
 
@@ -1517,10 +1418,7 @@ in [PACKAGES.md](PACKAGES.md).
   differed from its repository is how the xz backdoor shipped.
 - **Content is checked against a public log,** as Go's checksum database
   does, so the registry cannot give two users different code under one
-  version, and a mirror needs no trust.
-- **A package is published only when it is finished,** and the registry
-  checks it again, which is safe with a stranger's code because nothing that
-  runs while checking has a capability.
+  version.
 - **Proofs are shared, signed.** Proving a whole dependency tree on a machine
   that starts with nothing, such as an agent's new container, is the cost
   GOALS.md sets out to remove. Every signed result is a function of its key,
