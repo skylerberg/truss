@@ -9523,7 +9523,12 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
        mir.body.locals
   && Array.for_all
        (fun (block : Mir.basic_block) ->
-         block.Mir.header = None
+         (match block.Mir.header with
+           | None -> true
+           | Some natural -> (
+               match Hashtbl.find_opt index.statements natural.loop.origin with
+               | Some { kind = While _; _ } -> true
+               | _ -> false))
          && List.for_all statement block.Mir.statements
          && terminator block.Mir.terminator)
        mir.body.blocks
@@ -9873,68 +9878,309 @@ let mir_of context (source : source) parameters ~runs =
     | None -> None
   else None
 
+(* The blocks a set of blocks reaches, the set included, without entering
+   [avoid]. *)
+let reached (body : Mir.body) ~from ~avoid =
+  let seen = Hashtbl.create 16 in
+  let rec visit block =
+    if (not (Hashtbl.mem seen block)) && not (avoid block) then begin
+      Hashtbl.replace seen block ();
+      List.iter visit (Mir.successors body.blocks.(block).terminator)
+    end
+  in
+  List.iter visit from;
+  seen
+
+(* The blocks of a [while] loop: those its header reaches without leaving
+   by its exit, and from which the header is reached again. *)
+let loop_blocks (body : Mir.body) header (natural : Mir.natural_loop) =
+  let forward = reached body ~from:[ header ] ~avoid:(fun block -> block = natural.after) in
+  let blocks = Hashtbl.create 16 in
+  Hashtbl.replace blocks header ();
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Hashtbl.iter
+      (fun block () ->
+        if
+          (not (Hashtbl.mem blocks block))
+          && List.exists (Hashtbl.mem blocks) (Mir.successors body.blocks.(block).terminator)
+        then begin
+          Hashtbl.replace blocks block ();
+          changed := true
+        end)
+      forward
+  done;
+  blocks
+
 (* Runs a body of the MIR forward from [start]. Each [return] joins
-   [context.returns]. Its blocks are in reverse postorder, and the reading
-   covers no loop, so each block runs once all the blocks that jump to it
-   have. *)
+   [context.returns]. Its blocks are in reverse postorder, so each block
+   runs once every block that jumps to it has, but for a loop's back edges:
+   a [while] loop runs as the core form's does, with its changes havocked
+   at its head and its invariants checked at the end of each iteration. *)
 let mir_run context start index (body : Mir.body) =
   let run = { index; body; places = Hashtbl.create 4 } in
-  let incoming = Array.make (Array.length body.blocks) [] in
+  let count = Array.length body.blocks in
+  let incoming = Array.make count [] in
+  let ran = Array.make count false in
+  let terminator frame position (block : Mir.basic_block) ~jump =
+    let span = span_of frame.source block.terminator_origin in
+    match block.terminator with
+    | Goto target -> jump target frame
+    | Branch { condition; yes; no } ->
+        let test = mir_operand context frame run condition in
+        if frame.checking && Hashtbl.mem index.conditions block.terminator_origin then begin
+          let text = quote frame.source block.terminator_origin in
+          context.decisions <-
+            ( Printf.sprintf "`%s` is true" text,
+              Some (Printf.sprintf "`%s` is false" text),
+              frame.condition,
+              test )
+            :: context.decisions
+        end;
+        jump yes (restrict frame test);
+        jump no (restrict frame (Logic.not_ test))
+    | Switch_variant { place; cases } ->
+        let ty = mir_place_type context frame run place in
+        let term = read_place context frame run place in
+        List.iter
+          (fun (variant, target) ->
+            jump target (restrict frame (Logic.Is (constructor_name ty (Some variant), term))))
+          cases
+    | Return returned ->
+        context.returns <-
+          (frame, Option.map (mir_operand context frame run) returned) :: context.returns
+    | Unreachable ->
+        if Hashtbl.mem index.unreachable block.terminator_origin then
+          oblige context frame Unreachable span "This `unreachable` may be reached."
+            (Logic.Boolean false)
+    | Todo ->
+        if context.proving then begin
+          context.holes <- (context.home, span) :: context.holes;
+          context.unfinished <- frame.condition :: context.unfinished
+        end
+    | For _ | Iteration_end | Yield _ | Exit_tasks _ ->
+        ignore position;
+        bug "a form the MIR's reading does not cover"
+  in
+  let run_block position frame ~jump =
+    let block = body.blocks.(position) in
+    let ended =
+      List.fold_left
+        (fun frame statement ->
+          Option.bind frame (fun frame -> mir_statement context frame run statement))
+        (Some frame) block.statements
+    in
+    Option.iter (fun frame -> terminator frame position block ~jump) ended
+  in
+  (* Runs the blocks of a region, each once, in order, from the frames that
+     reach them. A jump to a block outside the region leaves by [jump]. *)
+  let rec run_region ~inside ~jump =
+    for position = 0 to count - 1 do
+      if inside position && not ran.(position) then begin
+        ran.(position) <- true;
+        let frames = List.rev incoming.(position) in
+        incoming.(position) <- [];
+        match join_frames context frames with
+        | None -> ()
+        | Some entry -> (
+            let local_jump target frame =
+              if inside target && not ran.(target) then
+                incoming.(target) <- frame :: incoming.(target)
+              else jump target frame
+            in
+            match body.blocks.(position).header with
+            | Some natural -> run_loop position natural entry ~jump:local_jump
+            | None -> run_block position entry ~jump:local_jump)
+      end
+    done
+  (* A [while] loop, from the frame on entry to its header. *)
+  and run_loop header (natural : Mir.natural_loop) frame ~jump =
+    let node, condition, clauses, loop_body =
+      match Hashtbl.find_opt index.statements natural.loop.origin with
+      | Some ({ kind = While { condition; clauses; body; _ }; _ } as node) ->
+          (node, condition, clauses, body)
+      | _ -> bug "a loop of the MIR whose core loop is not known"
+    in
+    let span = span_of frame.source node.origin in
+    check_invariants context frame clauses ~when_:"on entry to the loop";
+    let { loop_costs = costs; fresh_mark = mark; facts_mark; preserved; havocked = head } =
+      enter_loop context frame ~entry:frame clauses
+        ~changed:(changed_places ~condition frame loop_body)
+        loop_body
+    in
+    let iterations = iterations_so_far context head costs in
+    let head = loop_head context head costs ~iterations in
+    assume_invariants context head clauses;
+    let top = head in
+    let blocks = loop_blocks body header natural in
+    let in_loop block = Hashtbl.mem blocks block in
+    (* The condition's blocks: those the header reaches before the body. *)
+    let tested =
+      reached body ~from:[ header ] ~avoid:(fun block ->
+          block = natural.body || not (in_loop block))
+    in
+    (* The blocks from which the loop's exit is reached, so that a jump to
+       one leaves the loop, as a [return] does not. *)
+    let toward_exit =
+      let reaching = Hashtbl.create 8 in
+      Hashtbl.replace reaching natural.after ();
+      let changed = ref true in
+      while !changed do
+        changed := false;
+        Array.iteri
+          (fun position (block : Mir.basic_block) ->
+            if
+              (not (in_loop position))
+              && (not (Hashtbl.mem reaching position))
+              && List.exists (Hashtbl.mem reaching) (Mir.successors block.terminator)
+            then begin
+              Hashtbl.replace reaching position ();
+              changed := true
+            end)
+          body.blocks
+      done;
+      reaching
+    in
+    let ends = ref [] and failed = ref [] and breaks = ref [] and inside = ref [] in
+    let leaving_from = ref header in
+    let loop_jump target frame =
+      if target = header then ends := frame :: !ends
+      else if target = natural.body then incoming.(target) <- frame :: incoming.(target)
+      else if in_loop target then incoming.(target) <- frame :: incoming.(target)
+      else if Hashtbl.mem toward_exit target then
+        if Hashtbl.mem tested !leaving_from then failed := (target, frame) :: !failed
+        else breaks := (target, frame) :: !breaks
+      else jump target frame
+    in
+    (* The body's entry takes one step, as each iteration does. *)
+    let enter_body () =
+      let frames = List.rev incoming.(natural.body) in
+      incoming.(natural.body) <-
+        (match join_frames context frames with
+        | Some entry ->
+            let entry = spend context entry one_step in
+            inside := [ entry ];
+            [ entry ]
+        | None -> [])
+    in
+    ran.(header) <- true;
+    leaving_from := header;
+    run_block header head ~jump:loop_jump;
+    for position = 0 to count - 1 do
+      if in_loop position && not ran.(position) then begin
+        if position = natural.body then enter_body ();
+        ran.(position) <- true;
+        leaving_from := position;
+        let frames = List.rev incoming.(position) in
+        incoming.(position) <- [];
+        match join_frames context frames with
+        | None -> ()
+        | Some entry -> (
+            match body.blocks.(position).header with
+            | Some inner ->
+                run_loop position inner entry ~jump:(fun target frame ->
+                    leaving_from := position;
+                    loop_jump target frame)
+            | None -> run_block position entry ~jump:loop_jump)
+      end
+    done;
+    let inside =
+      match !inside with [ entry ] -> entry | _ -> restrict head (Logic.Boolean false)
+    in
+    let measures =
+      match (measures_of clauses, condition.kind) with
+      | Some measures, _ -> `Written measures
+      | ( None,
+          Compare
+            { comparison = (Less | Less_equal | Greater | Greater_equal) as compared; left; right }
+        )
+        when is_functional_expression left && is_functional_expression right ->
+          `Guessed (left, right, compared)
+      | None, _ -> `None
+    in
+    let measure_terms (at : frame) =
+      match measures with
+      | `Written measures ->
+          Some
+            (List.map
+               (fun measure -> snd (value context { at with checking = false } measure))
+               measures)
+      | `Guessed (left, right, compared) -> (
+          let _, left_value = value context { at with checking = false } left in
+          let _, right_value = value context { at with checking = false } right in
+          match compared with
+          | Less -> Some [ Logic.Operation ("-", [ right_value; left_value ]) ]
+          | Less_equal ->
+              Some
+                [
+                  Logic.Operation
+                    ("+", [ Logic.Operation ("-", [ right_value; left_value ]); Logic.int 1 ]);
+                ]
+          | Greater -> Some [ Logic.Operation ("-", [ left_value; right_value ]) ]
+          | _ ->
+              Some
+                [
+                  Logic.Operation
+                    ("+", [ Logic.Operation ("-", [ left_value; right_value ]); Logic.int 1 ]);
+                ])
+      | `None -> None
+    in
+    let start_measures = if context.terminates then measure_terms inside else None in
+    if context.terminates && start_measures = None then
+      oblige context inside Termination span "This loop may not end: give it a `decreases` clause."
+        (Logic.Boolean false);
+    let most =
+      match (start_measures, measure_terms frame, iterations) with
+      | Some [ at_head ], Some [ on_entry ], Some iterations ->
+          let last = fresh context head "last" Logic.Int in
+          assume context head
+            Logic.(
+              equal iterations (int 0)
+              ==> Operation ("<=", [ at_head; on_entry ])
+              &&& (Operation (">=", [ iterations; int 1 ])
+                  ==> (Operation ("<=", [ int 0; last ])
+                      &&& Operation
+                            ( "<=",
+                              [
+                                Operation ("+", [ Operation ("-", [ iterations; int 1 ]); last ]);
+                                on_entry;
+                              ] )
+                      &&& Operation ("<", [ at_head; last ]))));
+          [ Costs.at_least_zero (Costs.plus on_entry (Logic.int 1)) ]
+      | _ -> []
+    in
+    let ends = List.rev !ends in
+    let breaks = List.rev !breaks in
+    loop_iterations context node top costs ~mark
+      ~facts:(facts_since context facts_mark @ [ inside.condition ])
+      ~ends ~breaks:(List.map snd breaks);
+    List.iter
+      (fun (end_ : frame) ->
+        check_invariants context end_ clauses ~when_:"after an iteration";
+        check_preserved_validity context end_ span preserved;
+        match (start_measures, measure_terms end_) with
+        | Some before, Some after ->
+            oblige context end_ Termination span "This loop's measure may not decrease."
+              (lexicographically_less before after)
+        | _ -> ())
+      ends;
+    List.iter
+      (fun (target, (failing : frame)) ->
+        jump target (loop_exit context failing costs ~iterations ~most))
+      (List.rev !failed);
+    List.iter
+      (fun (target, (leaving : frame)) ->
+        jump target
+          (loop_exit context leaving costs
+             ~iterations:(Option.map (fun count -> Costs.plus count (Logic.int 1)) iterations)
+             ~most))
+      breaks
+  in
   incoming.(0) <- [ start ];
-  let reach target frame = incoming.(target) <- frame :: incoming.(target) in
-  Array.iteri
-    (fun position (block : Mir.basic_block) ->
-      match join_frames context (List.rev incoming.(position)) with
-      | None -> ()
-      | Some entry -> (
-          let ended =
-            List.fold_left
-              (fun frame statement ->
-                Option.bind frame (fun frame -> mir_statement context frame run statement))
-              (Some entry) block.Mir.statements
-          in
-          match ended with
-          | None -> ()
-          | Some frame -> (
-              let span = span_of frame.source block.Mir.terminator_origin in
-              match block.Mir.terminator with
-              | Goto target -> reach target frame
-              | Branch { condition; yes; no } ->
-                  let test = mir_operand context frame run condition in
-                  if frame.checking && Hashtbl.mem index.conditions block.Mir.terminator_origin then begin
-                    let text = quote frame.source block.Mir.terminator_origin in
-                    context.decisions <-
-                      ( Printf.sprintf "`%s` is true" text,
-                        Some (Printf.sprintf "`%s` is false" text),
-                        frame.condition,
-                        test )
-                      :: context.decisions
-                  end;
-                  reach yes (restrict frame test);
-                  reach no (restrict frame (Logic.not_ test))
-              | Switch_variant { place; cases } ->
-                  let ty = mir_place_type context frame run place in
-                  let term = read_place context frame run place in
-                  List.iter
-                    (fun (variant, target) ->
-                      reach target
-                        (restrict frame (Logic.Is (constructor_name ty (Some variant), term))))
-                    cases
-              | Return returned ->
-                  context.returns <-
-                    (frame, Option.map (mir_operand context frame run) returned) :: context.returns
-              | Unreachable ->
-                  if Hashtbl.mem index.unreachable block.Mir.terminator_origin then
-                    oblige context frame Unreachable span "This `unreachable` may be reached."
-                      (Logic.Boolean false)
-              | Todo ->
-                  if context.proving then begin
-                    context.holes <- (context.home, span) :: context.holes;
-                    context.unfinished <- frame.condition :: context.unfinished
-                  end
-              | For _ | Iteration_end | Yield _ | Exit_tasks _ ->
-                  bug "a form the MIR's reading does not cover")))
-    body.blocks
+  run_region
+    ~inside:(fun _ -> true)
+    ~jump:(fun target frame -> incoming.(target) <- frame :: incoming.(target))
 
 (* Definitions *)
 

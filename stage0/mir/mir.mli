@@ -189,11 +189,16 @@ type terminator =
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
+type natural_loop = { loop : loop; body : block; after : block }
+(** A [while] loop, which its header block carries: its clauses, the first block of its body, which
+    the loop's condition goes to where it holds, and the block it exits to where the condition does
+    not hold or a [break] leaves. *)
+
 type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
-  header : loop option;  (** The clauses of the natural loop this block heads. *)
+  header : natural_loop option;  (** The [while] loop this block heads. *)
 }
 
 type body = {
