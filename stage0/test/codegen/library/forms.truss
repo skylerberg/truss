@@ -1,0 +1,102 @@
+use standard::http
+use standard::network
+use standard::simulation
+use standard::url
+
+test "a form reads repeated names and plus signs, and encodes back" {
+  match http::Form.parse("a=1&b=two+words&a=3%26") {
+    Ok(form) => {
+      assert form.get("a") == Some("1".slice())
+      assert form.all("a").length() == 2 && form.all("a")[1] == "3&".slice()
+      assert form.get("b") == Some("two words".slice())
+      assert form.get("c") is None
+      let encoded = form.encode()
+      assert http::Form.parse(encoded.slice()) == Ok(form.copy())
+    }
+    Err(_) => assert false
+  }
+}
+
+fn receive(request: own http::Request, responder: mut http::Responder)
+  uses Handles, Tasks
+{
+  if request.matches(http::Route"POST /form") is Some(_) {
+    let reply = match own request.form() {
+      Ok(form) => "${form.get("name").unwrap_or("none".slice())} ${form.all("tag").length()}"
+      Err(error) => "failed: ${error}"
+    }
+    let _ = mut responder.send(http::Response.text(reply.slice()))
+    return
+  }
+  var parts: List[String] = []
+  match own request.multipart() {
+    Ok(opened) => {
+      var multipart = own opened
+      while mut multipart.next_part() is Ok(Some(part)) {
+        let filename = match part.filename {
+          Some(name) => name.copy()
+          None => "-"
+        }
+        match mut multipart.read_all() {
+          Ok(bytes) => mut parts.push("${part.name}:${filename}:${bytes.length()}:${String.from_utf8_lossy(bytes[0..if bytes.length() < 5 { bytes.length() } else { 5 }])}")
+          Err(error) => mut parts.push("failed: ${error}")
+        }
+      }
+    }
+    Err(error) => mut parts.push("failed: ${error}")
+  }
+  var joined = ""
+  for part in parts {
+    mut joined.push(part.slice())
+    mut joined.push("|")
+  }
+  let _ = mut responder.send(http::Response.text(joined.slice()))
+}
+
+fn submit() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8091)).expect("the port is free")
+  concurrent {
+    http::serve(mut listener, handler: receive)
+    {
+      var seen: List[String] = []
+      var form = http::Form.new()
+      mut form.add("name", value: "Ada Lovelace")
+      mut form.add("tag", value: "a")
+      mut form.add("tag", value: "b&c")
+      var headers = http::Headers.new()
+      mut headers.add("Content-Type", value: "application/x-www-form-urlencoded")
+      let encoded = form.encode()
+      match http::send(http::Method.Post, url: url::Url"http://localhost:8091/form", headers: headers, body: encoded.slice().bytes().to_list()) {
+        Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      var fields = http::Form.new()
+      mut fields.add("title", value: "notes ✓")
+      let large: List[UInt8] = List.filled(120, count: 100000)
+      let tricky = "\r\n--truss-not-the-boundary\r\n--".slice().bytes().to_list()
+      let files: List[http::FilePart] = [
+        http::FilePart(name: "document", filename: "a \"quoted\" name.txt", content_type: "text/plain", bytes: own large),
+        http::FilePart(name: "tricky", filename: "tricky.bin", content_type: "application/octet-stream", bytes: own tricky),
+      ]
+      let multipart = http::encode_multipart(fields, files: files)
+      var multipart_headers = http::Headers.new()
+      mut multipart_headers.add("Content-Type", value: multipart.content_type.slice())
+      match http::send(http::Method.Post, url: url::Url"http://localhost:8091/upload", headers: multipart_headers, body: multipart.body.copy()) {
+        Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      return own seen
+    }
+  }
+}
+
+test "a server reads an urlencoded form and a multipart upload with a large file" {
+  provide simulation::World.new() {
+    let seen = submit()
+    assert seen.length() == 2
+    assert seen[0] == "Ada Lovelace 2"
+    assert seen[1] == "title:-:9:notes|document:a %22quoted%22 name.txt:100000:xxxxx|tricky:tricky.bin:30:\r\n--t|"
+  }
+}
