@@ -9557,20 +9557,11 @@ let core_index (definition : Core.definition) =
 let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mir.t) =
   let core_call (call : Mir.call) =
     match Hashtbl.find_opt index.expressions call.node with
-    | Some { kind = Call _ as called; _ } -> (
-        (match (called, call.callee) with
-          | Call { callee = Indirect _; _ }, Indirect _ -> true
-          | Call { callee = Indirect _; _ }, _ | _, Indirect _ -> false
-          | _ -> true)
-        &&
-        match called with
-        | Call called ->
-            List.for_all
-              (function
-                | Passed { value = Value { kind = Lambda _; _ }; _ } -> false
-                | Passed _ | Default -> true)
-              called.arguments
-        | _ -> false)
+    | Some { kind = Call { callee; _ }; _ } -> (
+        match (callee, call.callee) with
+        | Indirect _, Indirect _ -> true
+        | Indirect _, _ | _, Indirect _ -> false
+        | _ -> true)
     | _ -> false
   in
   let rvalue (value : Mir.rvalue) ~node =
@@ -9585,7 +9576,10 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
         match Option.bind node (Hashtbl.find_opt index.expressions) with
         | Some { kind = Collection_literal _; _ } -> true
         | _ -> false)
-    | Lambda _ -> false
+    | Lambda _ -> (
+        match Option.bind node (Hashtbl.find_opt index.expressions) with
+        | Some { kind = Lambda _; _ } -> true
+        | _ -> false)
   in
   let statement (statement : Mir.statement) =
     match statement.kind with
@@ -9599,7 +9593,8 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
     | Lend { call; _ } -> core_call call
     | Slice { call; _ } | Template { call; _ } -> Hashtbl.mem index.enclosing call.node
     | Pull _ | Provide _ | Provide_end -> true
-    | Fork_start _ | Fork_end _ -> false
+    | Fork_start { concurrent; _ } -> not concurrent
+    | Fork_end _ -> true
   in
   let terminator (ending : Mir.terminator) =
     match ending with
@@ -9612,18 +9607,17 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
     | Exit_tasks _ -> false
   in
   ignore parameters;
-  mir.lambdas = [||]
-  && Array.for_all
-       (fun (block : Mir.basic_block) ->
-         (match block.Mir.header with
-           | None -> true
-           | Some natural -> (
-               match Hashtbl.find_opt index.statements natural.loop.origin with
-               | Some { kind = While _; _ } -> true
-               | _ -> false))
-         && List.for_all statement block.Mir.statements
-         && terminator block.Mir.terminator)
-       mir.body.blocks
+  Array.for_all
+    (fun (block : Mir.basic_block) ->
+      (match block.Mir.header with
+        | None -> true
+        | Some natural -> (
+            match Hashtbl.find_opt index.statements natural.loop.origin with
+            | Some { kind = While _; _ } -> true
+            | _ -> false))
+      && List.for_all statement block.Mir.statements
+      && terminator block.Mir.terminator)
+    mir.body.blocks
 
 (* Where a body's run is: the core form's nodes, the body, and the locals
    that are a place they were bound to, to be changed there. *)
@@ -9636,6 +9630,9 @@ type run = {
           lend ends *)
   constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
       (** The constructor each temporary is built by, for a [yield] of places it holds *)
+  passed_lambdas : (Core.id, unit) Hashtbl.t;
+      (** The lambdas written as a call's arguments, which the call reads with its parameter's facts
+      *)
   slices : (Mir.local, expression * Mir.place * Logic.term * Logic.term) Hashtbl.t;
       (** Each temporary that holds a slice: its core node, the collection it views, and its run's
           start and stop, for a callee that changes the slice *)
@@ -9906,7 +9903,15 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~node ~span =
       | Collection_literal { elements = written; _ } ->
           list_literal ~given:(List.map operand elements) context frame node written
       | _ -> bug "an array whose core node is no literal")
-  | Lambda _ -> bug "a form the MIR's reading does not cover"
+  | Lambda _ -> (
+      let node = core_node () in
+      match node.kind with
+      | Lambda { parameters; captures; body; _ } ->
+          if Hashtbl.mem run.passed_lambdas node.id then
+            (* The call reads it, with its parameter's facts. *)
+            (frame, arrive context frame "lambda" (type_of context frame node))
+          else lambda context frame node parameters captures body ~facts:(fun _ -> [])
+      | _ -> bug "a lambda whose core node is no lambda")
 
 (* A place of the MIR as the place of a [mut] argument. *)
 let mir_passed_place context run place =
@@ -10227,7 +10232,10 @@ let mir_statement context frame run (statement : Mir.statement) =
                  | _ -> frame)
                frame provided)
       | None -> Some frame)
-  | Fork_start _ | Fork_end _ -> bug "a form the MIR's reading does not cover"
+  | Fork_start { concurrent = false; _ } | Fork_end _ ->
+      (* Branches are disjoint, so they can run in order. *)
+      Some frame
+  | Fork_start { concurrent = true; _ } -> bug "a form the MIR's reading does not cover"
 
 (* The MIR of the body of a function proven, with its core form's nodes,
    where the MIR's reading covers it. A function for specifications only,
@@ -10305,6 +10313,19 @@ let mir_run context start index (body : Mir.body) =
             called.arguments
       | _ -> ())
     index.expressions;
+  let passed_lambdas = Hashtbl.create 2 in
+  Hashtbl.iter
+    (fun _ (node : expression) ->
+      match node.kind with
+      | Call called ->
+          List.iter
+            (function
+              | Passed { value = Value { kind = Lambda _; id; _ }; _ } ->
+                  Hashtbl.replace passed_lambdas id ()
+              | Passed _ | Default -> ())
+            called.arguments
+      | _ -> ())
+    index.expressions;
   let constructs = Hashtbl.create 4 in
   Array.iter
     (fun (block : Mir.basic_block) ->
@@ -10330,6 +10351,7 @@ let mir_run context start index (body : Mir.body) =
       constructs;
       slices = Hashtbl.create 2;
       provides = Hashtbl.create 2;
+      passed_lambdas;
     }
   in
   let count = Array.length body.blocks in
