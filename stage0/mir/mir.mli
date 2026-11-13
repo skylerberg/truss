@@ -97,6 +97,19 @@ type rvalue =
           the order of its body's {!body.captures}. *)
   | Value_parameter of Types.parameter
 
+(** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
+    place: it is built where it is yielded, and is no value of its own. *)
+type yielded =
+  | Part of operand
+  | Built of {
+      variant : string option;
+      fields : (string * yielded option) list;
+      type_ : Types.ty;
+      node : Core.id;
+    }
+      (** A constructor of [type_], with every field in evaluation order. [None] takes the field's
+          default. [node] is its core node. *)
+
 type provided = {
   mode : Types.mode;
   value : operand;
@@ -190,7 +203,7 @@ type terminator =
           {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
           [loop]'s schedule says. *)
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
-  | Yield of { mode : Types.mode; part : operand; resume : block }
+  | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
       (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is

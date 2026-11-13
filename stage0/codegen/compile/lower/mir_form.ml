@@ -86,10 +86,11 @@ let site_of st (origin : Core.origin) =
 let failure_site st (origin : Core.origin) =
   match st.frame.reported with Some site -> site | None -> site_of st origin
 
-(* The MIR of one body, ready to lower: which locals alias a place, and
-   which temporaries hold a constructor that lends places. *)
+(* The MIR of one body, ready to lower: how many times each local that
+   names a place is bound to one, which is more than once where several
+   patterns bind it. *)
 let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
-  let aliases = Hashtbl.create 8 and built = Hashtbl.create 8 in
+  let aliases = Hashtbl.create 8 in
   Array.iter
     (fun (block : Mir.basic_block) ->
       List.iter
@@ -100,32 +101,9 @@ let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
             ->
               Hashtbl.replace aliases local
                 (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
-          | Assign
-              {
-                target = { root = Local local; projections = [] };
-                value = Construct { variant; fields };
-                _;
-              } ->
-              Hashtbl.replace built local (variant, fields)
           | _ -> ())
         block.statements)
     body.blocks;
-  let rec lends local =
-    match Hashtbl.find_opt built local with
-    | Some (_, fields) ->
-        List.exists
-          (fun (_, (field : Mir.operand option)) ->
-            match field with
-            | Some (Borrow _) -> true
-            | Some (Use { place = { root = Local inner; projections = [] }; _ }) -> lends inner
-            | _ -> false)
-          fields
-    | None -> false
-  in
-  let constructs = Hashtbl.create 2 in
-  Hashtbl.iter
-    (fun local construct -> if lends local then Hashtbl.replace constructs local construct)
-    built;
   {
     body;
     lambdas;
@@ -134,7 +112,6 @@ let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
     conditionally_lent = Mir.conditional_lends body;
     lent = Hashtbl.create 1;
     aliases;
-    constructs;
     owner;
     returns_into;
     forks = Hashtbl.create 1;
@@ -163,7 +140,6 @@ let core_local st local =
 let owns st local =
   let frame = mir st in
   (not (Hashtbl.mem frame.aliases local))
-  && (not (Hashtbl.mem frame.constructs local))
   &&
   match (info st local).kind with
   | Temporary | Source { mode = Own; _ } -> true
@@ -429,14 +405,6 @@ let write_operand st (operand : Mir.operand) (destination : Lir.place) =
   | Take { place = written; _ } -> take st (taken st written) ty ~destination
   | Borrow { place = written; _ } ->
       emit st.builder (Assign (destination, Use (Copy (whole st (place st written)))))
-
-(* The constructor that lends places, which a temporary holds, that an
-   operand reads. *)
-let construct_of st (operand : Mir.operand) =
-  match operand with
-  | Use { place = { root = Local local; projections = [] }; _ } ->
-      Hashtbl.find_opt (mir st).constructs local
-  | _ -> None
 
 let discarded st = temporary st (Monomorphic.builtin Unit)
 
@@ -1011,26 +979,27 @@ let rec lent_type st : Ground.lent option =
     | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
   in
   let parts = yielded_parts st in
-  if mode = Own || not (List.exists (fun part -> construct_of st part <> None) parts) then None
+  let is_built : Mir.yielded -> bool = function Built _ -> true | Part _ -> false in
+  if mode = Own || not (List.exists is_built parts) then None
   else Some (lent_type_of st ~writable:(mode = Mut) (yielded_type_of_frame st) parts)
 
-and lent_type_of st ~writable ty (parts : Mir.operand list) : Ground.lent =
-  let field_operands variant name =
+and lent_type_of st ~writable ty (parts : Mir.yielded list) : Ground.lent =
+  let field_parts variant name =
     List.concat_map
-      (fun part ->
-        match construct_of st part with
-        | Some (constructed, fields) when constructed = variant -> (
+      (fun (part : Mir.yielded) ->
+        match part with
+        | Built { variant = constructed; fields; _ } when constructed = variant -> (
             match List.assoc_opt name fields with Some (Some field) -> [ field ] | _ -> [])
         | _ -> [])
       parts
   in
   let lent_field_for variant (name, field_ty) : Ground.lent_field option =
-    let operands = field_operands variant name in
+    let fields = field_parts variant name in
     let holds : Ground.holds option =
-      if List.exists (fun operand -> construct_of st operand <> None) operands then
-        Some (Nested (lent_type_of st ~writable field_ty operands))
+      if List.exists (function Mir.Built _ -> true | Part _ -> false) fields then
+        Some (Nested (lent_type_of st ~writable field_ty fields))
       else if
-        List.exists (function Mir.Borrow _ -> true | _ -> false) operands
+        List.exists (function Mir.Part (Borrow _) -> true | _ -> false) fields
         || not (trivial st field_ty)
       then Some Address
       else None
@@ -1412,9 +1381,6 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ })
     when Hashtbl.mem frame.aliases local ->
       alias st local (place st source) ~writable:(mode = Mut)
-  | { root = Local local; projections = [] }, Construct _ when Hashtbl.mem frame.constructs local ->
-      (* The [yield] that yields it builds it. *)
-      ()
   | _ -> (
       let ty = target_type st target value in
       let types_ty =
@@ -1974,21 +1940,22 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
    [lent]. A field that holds an address is given the address of a place,
    or of a temporary that the [yield]'s statement owns, which the method
    drops once it resumes. *)
-and lend_into st (lent : Ground.lent) (part : Mir.operand) ~destination =
-  match construct_of st part with
-  | Some (variant, fields) ->
+and lend_into st (lent : Ground.lent) (part : Mir.yielded) ~destination =
+  match part with
+  | Built { variant; fields; _ } ->
       let fields =
         List.map
-          (fun (name, (field : Mir.operand option)) ->
+          (fun (name, (field : Mir.yielded option)) ->
             let holds = lent_field lent variant name in
             let evaluated () =
               match field with
-              | Some (Borrow { place = written; _ }) -> snapshot st (place st written)
-              | Some field -> operand_place st field
+              | Some (Part (Borrow { place = written; _ })) -> snapshot st (place st written)
+              | Some (Part field) -> operand_place st field
+              | Some (Built _) -> bug "a built field that holds no lent value"
               | None -> fst (field_default_place st lent.base ~variant ~field:name)
             in
             match (holds, field) with
-            | Some (Nested inner), Some nested when construct_of st nested <> None ->
+            | Some (Nested inner), Some (Built _ as nested) ->
                 let nested_lent = at (local st.builder ~borrowed:true (Value (Lent inner))) in
                 lend_into st inner nested ~destination:nested_lent;
                 (name, Lir.Copy nested_lent)
@@ -1999,32 +1966,30 @@ and lend_into st (lent : Ground.lent) (part : Mir.operand) ~destination =
           fields
       in
       emit st.builder (Assign (destination, Build { ty = Lent lent; variant; fields }))
-  | None ->
+  | Part part ->
       emit st.builder (Assign (destination, Use (Copy (lent_from st lent (operand_part st part)))))
 
 (* For a cursor, whose caller keeps [next]'s result: a constructor that
    lends places, with a copy of each place in place of the place, which it
    owns. *)
-and construct_copied st ty (variant, fields) ~destination =
+and construct_copied st ty ~variant ~fields ~destination =
   let fields =
     List.map
-      (fun (name, (field : Mir.operand option)) ->
+      (fun (name, (field : Mir.yielded option)) ->
         match field with
-        | Some (Borrow { place = written; type_; _ }) ->
+        | Some (Part (Borrow { place = written; type_; _ })) ->
             let field_ty = ground st type_ in
             let fresh_copy = temporary st field_ty in
             Glue.copy_into st.context.glue st.builder ~destination:fresh_copy
               ~source:(whole st (place st written))
               field_ty;
             (name, owned st fresh_copy field_ty)
-        | Some nested -> (
-            let nested_ty = operand_type st nested in
-            match construct_of st nested with
-            | Some construct ->
-                let inner = at (local st.builder (Value nested_ty)) in
-                construct_copied st nested_ty construct ~destination:inner;
-                (name, owned st inner nested_ty)
-            | None -> (name, value st nested))
+        | Some (Built { variant; fields; type_; _ }) ->
+            let nested_ty = ground st type_ in
+            let inner = at (local st.builder (Value nested_ty)) in
+            construct_copied st nested_ty ~variant ~fields ~destination:inner;
+            (name, owned st inner nested_ty)
+        | Some (Part nested) -> (name, value st nested)
         | None ->
             let default, default_ty = field_default_place st ty ~variant ~field:name in
             (name, owned st default default_ty))
@@ -2111,11 +2076,12 @@ and yield st region ~mode ~part ~resume ~origin =
         | Some (slot, lent), _, _ ->
             lend_into st lent part ~destination:slot;
             (slot, false)
-        | None, Borrow { place = written; _ }, _ -> (place st written, mode = Types.Own)
-        | None, _, Some slot ->
+        | None, Part (Borrow { place = written; _ }), _ -> (place st written, mode = Types.Own)
+        | None, Part part, Some slot ->
             write_operand st part slot;
             (slot, true)
-        | None, _, None -> (operand_place st part, true)
+        | None, Part part, None -> (operand_place st part, true)
+        | None, Built _, _ -> bug "a yielded constructor with no lent value to build it in"
       in
       on_yield place ~owned ~resume:(jump st region resume);
       start st.builder (block st.builder)
@@ -2126,22 +2092,22 @@ and yield st region ~mode ~part ~resume ~origin =
          place it yields. *)
       let ty = yielded_type_of_frame st in
       let yielded =
-        match (construct_of st part, part) with
-        | Some _, _ when mode = Mut ->
+        match part with
+        | Built _ when mode = Mut ->
             unsupported ~at:(site_of st origin)
               "a cursor over a method that lends places to be changed"
-        | Some construct, _ ->
+        | Built { variant; fields; _ } ->
             let copy = temporary st ty in
-            construct_copied st ty construct ~destination:copy;
+            construct_copied st ty ~variant ~fields ~destination:copy;
             copy
-        | None, Borrow { place = written; _ } when trivial st ty -> whole st (place st written)
-        | None, Borrow { place = written; _ } ->
+        | Part (Borrow { place = written; _ }) when trivial st ty -> whole st (place st written)
+        | Part (Borrow { place = written; _ }) ->
             let copy = temporary st ty in
             Glue.copy_into st.context.glue st.builder ~destination:copy
               ~source:(whole st (place st written))
               ty;
             copy
-        | None, _ -> operand_place st part
+        | Part part -> operand_place st part
       in
       let resume = jump st region resume and stop = block st.builder in
       finish st.builder (Yield { value = owned st yielded ty; resume; stop = Some stop });

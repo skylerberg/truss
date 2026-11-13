@@ -577,23 +577,11 @@ let rvalue builder (value : Mir.rvalue) origin : held =
       { nothing with views = views_of_operand builder operand; temporaries }
   | Construct { fields; _ } ->
       let given = List.filter_map snd fields in
-      List.iter
-        (fun field -> match field with Mir.Borrow _ -> () | _ -> evaluate builder field)
-        given;
+      List.iter (evaluate builder) given;
       {
         nothing with
-        views =
-          List.concat_map
-            (fun (field : Mir.operand) ->
-              match field with
-              | Borrow { place; type_; _ } -> views_of_borrow builder place type_
-              | _ -> views_of_part builder field)
-            given;
-        temporaries =
-          List.concat_map
-            (fun field ->
-              match field with Mir.Borrow _ -> [] | _ -> owned_temporaries builder Own field)
-            given;
+        views = List.concat_map (views_of_part builder) given;
+        temporaries = List.concat_map (owned_temporaries builder Own) given;
         lent = List.concat_map (lent_places builder) given;
       }
   | Array elements ->
@@ -975,12 +963,24 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
                 :: builder.fork_join_loops
           | Sequential -> ())
       | Yield { mode; part; _ } ->
+          (* A constructor built where it is yielded lends each place among
+             its leaves, and its other leaves are values. *)
+          let rec leaves : Mir.yielded -> Mir.operand list = function
+            | Part operand -> [ operand ]
+            | Built { fields; _ } ->
+                List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
+          in
           (match part with
-          | Use { place = { root = Local local; projections = [] }; _ }
+          | Part (Use { place = { root = Local local; projections = [] }; _ })
             when (local_info builder local).kind = Temporary ->
               ()
-          | _ -> evaluate builder part);
-          let lent = lent_places builder part in
+          | Part operand -> evaluate builder operand
+          | Built _ ->
+              List.iter
+                (fun (leaf : Mir.operand) ->
+                  match leaf with Borrow _ -> () | _ -> evaluate builder leaf)
+                (leaves part));
+          let lent = List.concat_map (lent_places builder) (leaves part) in
           if mode = Mut then begin
             List.iter
               (fun lent -> Option.iter (fun place -> emit_ builder (Mutate place) origin) lent)
@@ -998,9 +998,19 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
               emit_ builder (Arguments { places; views = []; yielded = true }) origin
           end;
           let views =
-            match operand_type part with
-            | Some type_ when builder.is_view type_ -> views_of_operand builder part
-            | _ -> []
+            match part with
+            | Part operand -> (
+                match operand_type operand with
+                | Some type_ when builder.is_view type_ -> views_of_operand builder operand
+                | _ -> [])
+            | Built { type_; _ } when builder.is_view type_ ->
+                List.concat_map
+                  (fun (leaf : Mir.operand) ->
+                    match leaf with
+                    | Borrow { place; type_; _ } -> views_of_borrow builder place type_
+                    | _ -> views_of_part builder leaf)
+                  (leaves part)
+            | Built _ -> []
           in
           emit_ builder (Yield_point { mode; lent; views }) origin
       | Return value | Exit_tasks { exit = Exit_return value; _ } ->

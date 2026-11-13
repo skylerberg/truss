@@ -89,9 +89,6 @@ and mir_frame = {
   aliases : (Mir.local, int) Hashtbl.t;
       (** The locals bound to a place they do not own, with the number of assignments that bind each
       *)
-  constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
-      (** The temporaries that hold a constructor that lends places, which the [yield] that yields
-          the temporary builds *)
   owner : scope option;
       (** In an inlined method, the scope that owns the method's locals, so that an exit from the
           caller's code at a [yield] drops them *)

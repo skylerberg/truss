@@ -47,7 +47,11 @@ let check_body definition (body : Mir.body) =
           block inside;
           block after
       | Yield { part; resume; _ } ->
-          operand part;
+          let rec yielded : Mir.yielded -> unit = function
+            | Part value -> operand value
+            | Built { fields; _ } -> List.iter (fun (_, field) -> Option.iter yielded field) fields
+          in
+          yielded part;
           block resume
       | Exit_tasks { exit = Exit_to target; _ } -> block target
       | Return (Some value) -> operand value
