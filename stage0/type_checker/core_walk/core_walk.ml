@@ -306,3 +306,11 @@ let storage_index (value : expression) : place option =
     when Well_known.is Index trait.trait && is_storage self_type ->
       Some collection
   | _ -> None
+
+let traverse_indirect (change : 'a -> 'b option) : 'a target -> 'b target option = function
+  | Function { path; type_arguments } -> Some (Function { path; type_arguments })
+  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
+      Some (Trait_method { trait; name; receiver; self_type; type_arguments; evidence })
+  | Capability_method { capability; name } -> Some (Capability_method { capability; name })
+  | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
+  | Indirect value -> Option.map (fun value -> Indirect value) (change value)

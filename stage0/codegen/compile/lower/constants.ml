@@ -106,32 +106,31 @@ let compared (comparison : Core.comparison) (left : Lir.static_value) (right : L
       | Less | Less_equal | Greater | Greater_equal -> None)
   | _ -> None
 
-(* How deep folding follows calls. A call that is deeper is left to be
-   run. *)
+(* How deep folding follows calls, and how many blocks it runs in all. A
+   constant that needs more is left to be run. *)
 let call_depth = 8
+let step_limit = 10_000
 
-(* A constant expression's value, where folding gives exactly the
-   result of running it. For anything else there is none, and the value is
-   computed by running the constant's evaluator. Running defines a
-   constant's value; folding only saves the run.
+(* The part of a folded value that projections name. *)
+let rec part (value : Lir.static_value) (projections : Mir.projection list) =
+  match (projections, value) with
+  | [], _ -> Some value
+  | Field name :: rest, Static_record fields ->
+      let* field = List.assoc_opt name fields in
+      part field rest
+  | Variant_field { variant; field } :: rest, Static_variant (built, fields) when built = variant ->
+      let* field = List.assoc_opt field fields in
+      part field rest
+  | _ -> None
 
-   The expressions that fold: literals, operators on numbers and on [Bool], other constants
-   that fold, records, variants, and arrays built from parts that fold, and
-   a list literal. A list literal is a block that makes a storage, pushes
-   each element, and calls [List.from_storage], so folding follows a block's
-   [let]s and pushes, and a call of a function whose body is one expression
-   and which has no [requires] clause. [locals] holds the values of the
-   locals bound so far. *)
-let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value ref) Hashtbl.t)
-    (value : Core.expression) : Lir.static_value option =
-  let ty = ground st value.type_ in
-  let fold_here = fold ~depth st locals in
+(* A literal of the MIR, as static data of its type. *)
+let literal st ty (constant : Mir.constant) =
   let number literal =
     match constant_of st ty literal with
     | Constant scalar -> Some (Lir.Static_scalar scalar)
     | _ -> None
   in
-  match value.kind with
+  match constant with
   | Integer integer -> number (Integer_value integer)
   | Float float -> number (Float_value float)
   | Boolean boolean -> truth boolean
@@ -150,144 +149,171 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
                      { element = Monomorphic.builtin UInt8; elements = bytes; owned = false } );
                ])
       | _ -> None)
-  | Use place -> fold_place st locals place
-  | Construct { variant; fields } ->
-      let* fields =
-        all
-          (List.map
-             (fun (name, field) ->
-               let* field = field in
-               let* field =
-                 match field with Core.Value field -> fold_here field | Place _ -> None
-               in
-               Some (name, field))
-             fields)
-      in
-      Some
-        (match variant with
-        | Some variant -> Lir.Static_variant (variant, fields)
-        | None -> Static_record fields)
-  | Collection_literal { elements; construction = Array } ->
-      let* elements = all (List.map fold_here elements) in
-      Some (Lir.Static_array elements)
-  | Operator { operation = Negate; arguments = [ inner ] } ->
-      let* inner = fold_here inner in
-      negated st inner
-  | Operator { operation; arguments = [ left; right ] } ->
-      let* left = fold_here left in
-      let* right = fold_here right in
-      arithmetic st ty operation left right
-  | Compare { comparison; left; right } ->
-      let* left = fold_here left in
-      let* right = fold_here right in
-      compared comparison left right
-  | Not inner -> (
-      let* inner = fold_here inner in
-      match inner with Static_scalar (Bool x) -> truth (not x) | _ -> None)
-  | And (left, right) | Or (left, right) -> (
-      let* left = fold_here left in
-      let* right = fold_here right in
-      match (value.kind, left, right) with
-      | And _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x && y)
-      | Or _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x || y)
-      | _ -> None)
-  | Block { statements; value = Some result; _ } ->
-      let* _ = all (List.map (fold_statement ~depth st locals) statements) in
-      fold_here result
-  | Call
-      {
-        callee = Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] };
-        _;
-      } ->
-      Some (Lir.Static_storage { element = ground st element; elements = []; owned = true })
-  | Call { callee = Function { path; type_arguments }; arguments; _ } when depth > 0 -> (
-      match demand st.context Infer.core_of_path path with
-      | Some
-          ( {
-              definition =
-                Function
-                  {
-                    parameters;
-                    contract = { requires = []; _ };
-                    body = Some { statements = []; value = Some result; _ };
-                  };
-              _;
-            },
-            _ ) ->
-          let* arguments =
-            all
-              (List.map
-                 (fun (argument : Core.argument) ->
-                   match argument with
-                   | Passed { value = Value value; _ } -> fold_here value
-                   | Passed { value = Place place; _ } -> fold_place st locals place
-                   | Default -> None)
-                 arguments)
-          in
-          let type_arguments =
-            List.map
-              (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
-              type_arguments
-          in
-          let callee =
-            enter st.context (frame_of (code_of st.context path type_arguments) ~inlined:[])
-          in
-          let bound = Hashtbl.create 4 in
-          List.iter2
-            (fun (parameter : Core.parameter) argument ->
-              Hashtbl.replace bound parameter.local (ref argument))
-            parameters arguments;
-          fold ~depth:(depth - 1) callee bound result
-      | _ -> None)
-  | _ -> None
+  | Unit -> None
 
-(* The folded value at a place: another constant's, or a local's. *)
-and fold_place st locals (place : Core.place) =
-  match place with
-  | Constant { path; _ } -> st.context.constant path
-  | Local { local; _ } -> Option.map ( ! ) (Hashtbl.find_opt locals local)
-  | Field _ | Lent _ | Temporary _ -> None
-
-(* Folds a statement of a block: a [let] of one name, or a push onto a
-   storage that a [let] bound. *)
-and fold_statement ~depth st locals (statement : Core.statement) : unit option =
-  match statement.kind with
-  | Let { pattern = { kind = Bind { local; _ }; _ }; value = Value value; else_ = None } ->
-      let* value = fold ~depth st locals value in
-      Hashtbl.replace locals local (ref value);
+(* A body's value, where running it from [arguments] gives exactly that
+   value and does nothing else: it reads only literals, other constants that
+   fold, and its parameters; it computes with operations on numbers and
+   [Bool]s that stay in range, constructors, arrays, and storages it pushes
+   onto; and it follows calls of functions whose bodies fold the same way.
+   Anything else, such as a sum that overflows, an [echo], a lending call, or
+   more steps than [steps] has left, leaves the value to be found by running
+   it. Running defines a constant's value; folding only saves the run. *)
+let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lir.static_value list) =
+  let body = mir.body in
+  let locals = Hashtbl.create 16 in
+  let* () =
+    if List.length arguments = List.length body.parameters then begin
+      List.iter2 (Hashtbl.replace locals) body.parameters arguments;
       Some ()
-  | Evaluate
-      {
-        kind =
-          Call
-            {
-              callee = Intrinsic { operation = Storage_push; _ };
-              arguments =
-                [
-                  Passed { value = Place (Local { local; _ }); _ };
-                  Passed { value = Value element; _ };
-                ];
-              _;
-            };
-        _;
-      } -> (
-      let* storage = Hashtbl.find_opt locals local in
-      let* element = fold ~depth st locals element in
-      match !storage with
-      | Static_storage contents ->
-          storage := Static_storage { contents with elements = contents.elements @ [ element ] };
-          Some ()
-      | _ -> None)
-  | _ -> None
+    end
+    else None
+  in
+  let type_of local = ground st body.locals.(local).type_ in
+  let read (place : Mir.place) =
+    let* whole =
+      match place.root with
+      | Local local -> Hashtbl.find_opt locals local
+      | Constant path -> st.context.constant path
+    in
+    part whole place.projections
+  in
+  let operand : Mir.operand -> Lir.static_value option = function
+    | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read place
+    | Constant { value; type_ } -> literal st (ground st type_) value
+  in
+  let rvalue target : Mir.rvalue -> Lir.static_value option = function
+    | Operand value | Copy value -> operand value
+    | Operation { operation = Negate; operands = [ inner ]; _ } ->
+        let* inner = operand inner in
+        negated st inner
+    | Operation { operation; operands = [ left; right ]; _ } ->
+        let* left = operand left in
+        let* right = operand right in
+        arithmetic st (type_of target) operation left right
+    | Compare { comparison; left; right } ->
+        let* left = operand left in
+        let* right = operand right in
+        compared comparison left right
+    | Not inner -> (
+        let* inner = operand inner in
+        match inner with Static_scalar (Bool x) -> truth (not x) | _ -> None)
+    | Construct { variant; fields } -> (
+        let* fields =
+          all
+            (List.map
+               (fun (name, field) ->
+                 let* field = field in
+                 let* value = operand field in
+                 Some (name, value))
+               fields)
+        in
+        match variant with
+        | Some variant -> Some (Lir.Static_variant (variant, fields))
+        | None -> Some (Static_record fields))
+    | Array elements ->
+        let* elements = all (List.map operand elements) in
+        Some (Lir.Static_array elements)
+    | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
+    | Value_parameter _ ->
+        None
+  in
+  let assign (destination : Mir.place option) value =
+    match destination with
+    | Some { root = Local local; projections = [] } ->
+        Hashtbl.replace locals local value;
+        Some ()
+    | Some _ -> None
+    | None -> Some ()
+  in
+  let call (destination : Mir.place option) (called : Mir.call) =
+    match (called.callee, called.arguments) with
+    | Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] }, _ ->
+        assign destination
+          (Lir.Static_storage { element = ground st element; elements = []; owned = true })
+    | ( Intrinsic { operation = Storage_push; _ },
+        [
+          Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
+          Passed { value = element; _ };
+        ] ) -> (
+        let* element = operand element in
+        match Hashtbl.find_opt locals storage with
+        | Some (Static_storage contents) ->
+            Hashtbl.replace locals storage
+              (Static_storage { contents with elements = contents.elements @ [ element ] });
+            Some ()
+        | _ -> None)
+    | Function { path; type_arguments }, arguments when depth > 0 ->
+        let* callee_mir = demand st.context Mir.of_path path |> Option.map fst in
+        let type_arguments =
+          List.map
+            (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
+            type_arguments
+        in
+        let callee =
+          enter st.context (frame_of (code_of st.context path type_arguments) ~inlined:[])
+        in
+        let* values =
+          all
+            (List.map2
+               (fun (argument : Mir.argument) parameter ->
+                 match argument with
+                 | Passed { value; _ } -> operand value
+                 | Default ->
+                     let* default = List.assoc_opt parameter callee_mir.body.defaults in
+                     fold_body ~depth:(depth - 1) ~steps callee default [])
+               arguments callee_mir.body.parameters)
+        in
+        let* value = fold_body ~depth:(depth - 1) ~steps callee callee_mir values in
+        assign destination value
+    | _ -> None
+  in
+  let statement (statement : Mir.statement) =
+    match statement.kind with
+    | Assign { target = { root = Local local; projections = [] } as target; value; _ } ->
+        let* value = rvalue local value in
+        assign (Some target) value
+    | Call { destination; call = called } -> call destination called
+    | Assert { condition; _ } -> (
+        match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
+    | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
+    | Assign _ | Lend _ | Slice _ | Template _ | Pull _ | Echo _ | Provide _ | Provide_end -> None
+  in
+  let rec run block =
+    if !steps <= 0 then None
+    else begin
+      decr steps;
+      let basic = body.blocks.(block) in
+      let* _ = all (List.map statement basic.statements) in
+      match basic.terminator with
+      | Goto target -> run target
+      | Branch { condition; yes; no; _ } -> (
+          match operand condition with
+          | Some (Static_scalar (Bool true)) -> run yes
+          | Some (Static_scalar (Bool false)) -> run no
+          | _ -> None)
+      | Switch_variant { place; cases } -> (
+          match read place with
+          | Some (Static_variant (variant, _)) ->
+              let* target = List.assoc_opt variant cases in
+              run target
+          | _ -> None)
+      | Return (Some value) -> operand value
+      | Return None
+      | For _ | Fork _ | Join _ | Iteration_end | Yield _ | Exit_tasks _ | Unreachable
+      | Written_unreachable | Todo ->
+          None
+    end
+  in
+  run 0
 
-(* The state to lower a constant's expression in, the expression, and its
-   type. *)
+(* The state to lower a constant's expression in, its MIR, and its type. *)
 let constant_state context path =
   let key = key_of context path in
-  let value =
-    match demand context Infer.core_of_path path with
-    | Some ({ definition = Constant value; _ }, _) -> value
-    | _ -> bug "%s is not a constant" (Path.show path)
+  let mir =
+    match demand context Mir.of_constant path with
+    | Some mir -> mir
+    | None -> bug "%s is not a constant" (Path.show path)
   in
   let ty =
     match demand context Environment.constant_type path with
@@ -301,15 +327,15 @@ let constant_state context path =
     }
   in
   let st = enter context (frame_of code ~inlined:[]) in
-  (st, value, ty)
+  (st, mir, ty)
 
 (* A constant's static data, where its value folds, and otherwise the type
    of the value its evaluator computes. *)
 type constant = Folded of Lir.data | Run of Ground.ty
 
 let constant context path =
-  let st, value, ty = constant_state context path in
-  match fold st (Hashtbl.create 4) value with
+  let st, mir, ty = constant_state context path in
+  match fold_body ~depth:call_depth ~steps:(ref step_limit) st mir [] with
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
 
@@ -350,11 +376,11 @@ let write_output st output =
 (* Code run while compiling: computes a constant's value and writes its
    binary form to standard output. *)
 let evaluator context path : Lir.t =
-  let st, value, ty = constant_state context path in
+  let st, mir, ty = constant_state context path in
   start st.builder (block st.builder);
   in_scope st (fun () ->
       let place = temporary st ty in
-      Mir_form.expression_into st value place;
+      Mir_form.mir_into st mir place;
       let output = begin_output st in
       Glue.encode_call context.glue st.builder
         ~output:(Address { place = output; writable = true })

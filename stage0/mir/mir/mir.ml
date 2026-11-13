@@ -37,20 +37,9 @@ type operand =
           statement assigns the target again before any other code runs. *)
   | Constant of { value : constant; type_ : Types.ty }
 
-type callee =
-  | Function of { path : Path.t; type_arguments : Types.argument list }
-  | Trait_method of {
-      trait : Types.trait_reference;
-      name : string;
-      receiver : Path.receiver;
-      self_type : Types.ty;
-      type_arguments : Types.argument list;
-      evidence : Core.evidence;
-    }
-  | Capability_method of { capability : Path.t; name : string }
-  | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-      (** An intrinsic that is not a primitive operation. Those are {!Operation}. *)
-  | Indirect of operand
+type callee = operand Core.target
+(** A call's callee. An intrinsic called is one that is not a primitive operation: those are
+    {!Operation}. *)
 
 type argument =
   | Passed of { mode : Types.mode; value : operand; mark : Core.mark option }
@@ -1017,15 +1006,7 @@ and place b (found : Core.place) : place option =
           Some (at local))
 
 and callee_of b (callee : Core.callee) : callee option =
-  match callee with
-  | Function { path; type_arguments } -> Some (Function { path; type_arguments })
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Some (Trait_method { trait; name; receiver; self_type; type_arguments; evidence })
-  | Capability_method { capability; name } -> Some (Capability_method { capability; name })
-  | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
-  | Indirect value ->
-      let* value = operand b Read value in
-      Some (Indirect value)
+  Core_walk.traverse_indirect (operand b Read) callee
 
 (* A call: its callee, then its arguments in order. *)
 and call_of b (called : Core.call) ~node ~origin : call option =
@@ -2217,4 +2198,10 @@ let mir =
             when signature.specification_only ->
               None
           | _ -> of_definition form.definition)
+      | _ -> None)
+
+let of_constant =
+  Query.query ~name:"mir_of_constant" ~phase:Phases.bodies ~show:Path.show (fun database path ->
+      match Query.demand database Infer.core_of_path path with
+      | Some ({ definition = Constant value; _ }, _) -> Some (of_expression value)
       | _ -> None)

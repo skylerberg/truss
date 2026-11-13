@@ -42,7 +42,10 @@ type evidence =
           known only after monomorphization. *)
   | Dynamic  (** Dynamic dispatch through the method table of an [any Trait] value. *)
 
-type callee =
+(** The callee of a call, as each form of code names it. ['indirect] is what a call through a
+    function value gives: the core form's operand, the MIR's, or nothing where the caller has the
+    value. *)
+type 'indirect target =
   | Function of { path : Path.t; type_arguments : Types.argument list }
       (** A function, or a method defined directly on a type. For a method, the type arguments of
           the type come first. *)
@@ -63,9 +66,11 @@ type callee =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
       (** A direct call of a [standard::intrinsic] operation. An integer operation such as [add] or
           [divide] has the obligations of its operator: no overflow and no division by zero. *)
-  | Indirect of operand
+  | Indirect of 'indirect
       (** A call through a function value. If the function value is stored in a place, the operand
           is that place: calling it does not move it. *)
+
+type callee = operand target
 
 and call = {
   callee : callee;

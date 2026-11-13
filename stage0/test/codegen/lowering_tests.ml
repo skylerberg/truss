@@ -187,9 +187,9 @@ let folds name ~folded ~run source =
       expect_output source "test 0 passed\n")
 
 let () =
-  folds "constants fold from their core forms, except a set, which is built by running"
+  folds "constants fold from their MIR, except a set, which is built by running"
     ~folded:[ "small"; "flag"; "names"; "rows"; "corner"; "primes" ]
-    ~run:[ "colors" ] Fixtures.Lowering.constants_fold_from_their_core_forms_except_a_set
+    ~run:[ "colors" ] Fixtures.Lowering.constants_fold_except_a_set_which_is_built_by
 
 let () =
   passes "a return in an arm of a match on a lent part drops only what it holds"

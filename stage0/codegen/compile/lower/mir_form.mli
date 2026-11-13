@@ -4,6 +4,9 @@ val mir_of : Definitions.context -> Path.t -> Mir.t
 val parameter_of : Mir.body -> Mir.local -> Types.mode * string * Types.ty
 (** A parameter's mode, name, and type, from its local. *)
 
+val mir_into : ?arguments:Lir.place list -> Lowering.state -> Mir.t -> Lir.place -> unit
+(** Lowers the MIR of one expression, with its parameters bound to [arguments], into a place. *)
+
 val expression_into :
   ?arguments:(Core.parameter * Lir.place) list ->
   Lowering.state ->

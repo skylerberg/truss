@@ -81,7 +81,7 @@ let impls_for impls traits ty =
 
 (* The [impl]s a call uses: for each of the callee's generic parameters
    with bounds, the [impl]s of those bounds for the type it is given. *)
-let impls_used database impls (callee : Core.callee) =
+let impls_used database impls (callee : _ Core.target) =
   match callee with
   | Function { path; type_arguments } -> (
       match Query.demand database Interface.Environment.signature path with
@@ -124,7 +124,7 @@ let integer_trait owner =
 let integer_types =
   List.filter (fun builtin -> Types.is_integer_type (Types.builtin builtin)) Intrinsic.builtins
 
-let dispatched (called : Core.callee) =
+let dispatched (called : _ Core.target) =
   match called with
   | Trait_method { evidence = Dynamic; _ } -> true
   | Trait_method { evidence = Bound; self_type = Parameter { name = "Self"; _ }; _ } -> true

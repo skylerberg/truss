@@ -2121,7 +2121,7 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
       Some (frame, Logic.equal first_value second_value)
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
-  | Method_time callee -> Some (frame, method_time context frame (Invocation.of_core_callee callee))
+  | Method_time callee -> Some (frame, method_time context frame (Invocation.unit_callee callee))
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -3130,7 +3130,7 @@ and apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           signature_terminates context (Path.Method { owner = trait.trait; name; receiver })
       | Capability_method { capability; name } ->
           signature_terminates context (Path.Method { owner = capability; name; receiver = Static })
-      | Indirect -> (
+      | Indirect () -> (
           match through with
           | Some (Types.Function function_type, _, _) -> Types.terminates function_type
           | _ -> false)
@@ -3161,9 +3161,7 @@ and apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
                 cannot be shown to end: write it as a direct call on a part."
                (Path.show impl))
             (Logic.Boolean false))
-      (match Invocation.core_callee invocation.callee with
-      | Some callee -> Call_graph.impls_used context.database impls callee
-      | None -> [])
+      (Call_graph.impls_used context.database impls invocation.callee)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function
     | Some contract ->
@@ -3256,7 +3254,7 @@ and apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             path
             (method_contract ?reading_package:(reading_package context) context.database trait name
                receiver evidence))
-  | Indirect ->
+  | Indirect () ->
       check_callback_requires context frame site through values;
       let frame = havoc_mut frame in
       let frame =
@@ -6068,8 +6066,8 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
      measure, at the call's arguments, is below the caller's on entry. *)
   if
     context.terminates && frame.checking
-    && (match (invocation.callee, Invocation.core_callee invocation.callee) with
-      | Trait_method _, Some callee -> Call_graph.dispatched callee
+    && (match invocation.callee with
+      | Trait_method _ -> Call_graph.dispatched invocation.callee
       | _ -> true)
     && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
          ~target:context.current
@@ -7595,7 +7593,7 @@ and step_amount context frame (invocation : Invocation.t) (values : passed list)
                 ~uses:(invocation.uses :> Types.capability list)
                 ~values ~change:None counter
           | None -> unknown_amount context frame counter))
-  | Function _ | Trait_method _ | Indirect -> (
+  | Function _ | Trait_method _ | Indirect () -> (
       match counter.resource with
       | Calls target ->
           spent_where
@@ -10565,7 +10563,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
                 {
                   cursor = mir_passed_place context run cursor;
                   cursor_type = mir_place_type context frame run cursor;
-                  next = Invocation.of_mir_callee next;
+                  next = Invocation.unit_callee next;
                 }
         in
         let driven =

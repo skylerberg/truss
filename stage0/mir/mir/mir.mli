@@ -42,20 +42,9 @@ type operand =
           statement assigns the target again before any other code runs. *)
   | Constant of { value : constant; type_ : Types.ty }
 
-type callee =
-  | Function of { path : Path.t; type_arguments : Types.argument list }
-  | Trait_method of {
-      trait : Types.trait_reference;
-      name : string;
-      receiver : Path.receiver;
-      self_type : Types.ty;
-      type_arguments : Types.argument list;
-      evidence : Core.evidence;
-    }
-  | Capability_method of { capability : Path.t; name : string }
-  | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-      (** An intrinsic that is not a primitive operation. Those are {!Operation}. *)
-  | Indirect of operand
+type callee = operand Core.target
+(** A call's callee. An intrinsic called is one that is not a primitive operation: those are
+    {!Operation}. *)
 
 type argument =
   | Passed of { mode : Types.mode; value : operand; mark : Core.mark option }
@@ -313,3 +302,6 @@ val of_expression : ?parameters:Core.parameter list -> Core.expression -> t
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs. The body of a function for specifications only never
     runs, so it has none. *)
+
+val of_constant : (Path.t, t option) Query.query
+(** The MIR of a constant's value: a body that returns it. *)
