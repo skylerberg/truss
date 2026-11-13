@@ -8,7 +8,8 @@ commands that read and write these files are in [CLI.md](CLI.md).
 ## Packages
 
 A package is a directory with a `truss.toml` manifest that has a `[package]`
-table. Every `.truss` file under it is one of its modules (see
+table. Every directory under it that holds a `.truss` file is one of its
+modules, and the files of a directory share one namespace (see
 [Module paths](SPECIFICATION.md#module-paths)).
 
 A package is the reach of `internal` and of `opaque`, where a type's methods
@@ -21,8 +22,9 @@ and the unit that is published and given a version.
 | A project's own | Its manifest's name | Under the project's directory | None |
 | From the registry | `owner::name` | Fetched, and kept by the hash of its content | In the project's lock file |
 
-A package's program starts at the `main` of its `main` module, the file
-`main.truss` beside the manifest. A package without that module is a library.
+A package's program starts at the `main` of its root module, the files
+beside the manifest, such as `main.truss`. A package whose root module has
+no `main` is a library.
 
 ### Package names
 

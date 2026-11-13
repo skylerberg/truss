@@ -8,7 +8,7 @@ module Names = Resolve.Names
 type target = Definition of Path.t | Module of Path.module_
 
 type occurrence = {
-  module_ : Path.module_;  (** The occurrence's file *)
+  file : Path.file;
   span : Source.span;  (** In offsets of the file *)
   target : target;
   in_definition : Names.key;  (** The enclosing definition *)
@@ -58,11 +58,11 @@ let of_definition database (key : Names.key) =
       Query.demand database Resolve.resolved key,
       Query.demand database Names.base key )
   with
-  | Some definition, Some resolved, Some (module_, base) ->
+  | Some definition, Some resolved, Some (file, base) ->
       let names = Syntax_walk.names definition in
       let absolute = Syntax.Span.to_source ~base in
       let occurrence ?(declares = false) span target =
-        { module_; span = absolute span; target; in_definition = key; declares }
+        { file; span = absolute span; target; in_definition = key; declares }
       in
       let resolved_names =
         List.concat
@@ -118,28 +118,26 @@ let of_definition database (key : Names.key) =
 (* Every occurrence in the package's code, in order of file and position. *)
 let all (project : Project.t) =
   List.concat_map
-    (fun module_ ->
+    (fun file ->
       List.concat_map
         (fun declaration -> of_definition project.context (Names.key_of declaration))
-        (Query.demand project.context Names.declarations module_))
-    (Project.modules project)
+        (Query.demand project.context Names.declarations_in file))
+    (Project.files project)
 
 (* The [use] declarations of each file that name a module, with the span of
    the path in offsets of the file. *)
 let uses (project : Project.t) (target_module : Path.module_) =
   List.concat_map
-    (fun module_ ->
-      let file = Project.parsed project module_ in
+    (fun (file : Path.file) ->
       List.filter_map
         (fun (item : Syntax.path Syntax.item) ->
           let path = item.value in
-          if Names.used_module project.context ~from:module_ path = target_module then
+          if Names.used_module project.context ~from:file.module_ path = target_module then
             let first = match path.modules with first :: _ -> first | [] -> path.last in
-            Some
-              (module_, Source.span (item.base + first.span.start) (item.base + path.last.span.stop))
+            Some (file, Source.span (item.base + first.span.start) (item.base + path.last.span.stop))
           else None)
-        file.uses)
-    (Project.modules project)
+        (Project.parsed project file).uses)
+    (Project.files project)
 
 (* Whether an occurrence refers to a definition or, for a method, to any
    version of it. *)

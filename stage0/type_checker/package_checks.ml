@@ -11,14 +11,14 @@ module Environment = Interface.Environment
 module Properties = Interface.Properties
 
 (* A diagnostic at a place inside a definition, moved to its file. *)
-type placed = { module_ : Path.module_; diagnostic : Diagnostic.t }
+type placed = { file : Path.file; diagnostic : Diagnostic.t }
 
 let diagnostic_at database (key : Names.key) ?(fixes = []) code (span : span) message =
   match Query.demand database Names.base key with
-  | Some (module_, base) ->
+  | Some (file, base) ->
       Some
         {
-          module_;
+          file;
           diagnostic =
             Diagnostic.map_spans (Span.to_source ~base)
               (Diagnostic.make ~fixes ~code:(Package code) span message);
@@ -48,7 +48,7 @@ let outer_packages (impl : Types.impl_interface) =
 let check_location database (declaration : Names.declaration) (definition : definition)
     (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
-  let package = declaration.module_.package in
+  let package = declaration.file.module_.package in
   if impl.impl_broken || List.mem package (outer_packages impl) then None
   else
     diagnostic_at database key Impl_location (header_span definition)
@@ -179,7 +179,7 @@ let check_method_names database (declaration : Names.declaration) (definition : 
                  (Types.show impl.for_type) method_.method_name
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
-          else if declaration.module_.package <> Path.package path then
+          else if declaration.file.module_.package <> Path.package path then
             clash
               (Printf.sprintf
                  "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
@@ -586,7 +586,7 @@ let check =
       let placed =
         List.filter
           (fun ((declaration : Names.declaration), _, impl) ->
-            List.mem declaration.module_.package (outer_packages impl))
+            List.mem declaration.file.module_.package (outer_packages impl))
           impls
       in
       let names =
@@ -760,9 +760,9 @@ let manifest_problems =
           else [])
         (Query.demand database Workspace.dependencies package))
 
-let diagnostics database (module_ : Path.module_) =
+let diagnostics database (file : Path.file) =
   List.filter_map
-    (fun placed -> if placed.module_ = module_ then Some placed.diagnostic else None)
-    (Query.demand database check module_.package)
+    (fun placed -> if placed.file = file then Some placed.diagnostic else None)
+    (Query.demand database check file.module_.package)
   |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare left.span right.span)

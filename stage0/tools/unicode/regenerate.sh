@@ -2,7 +2,7 @@
 # Downloads the Unicode data files listed in sources.txt, checks each against
 # its recorded SHA-256 hash, writes the compiler's tables in
 # stage0/unicode/unicode_tables.ml and the standard library's in
-# standard/text/unicode_data.truss from them, and then checks every table of
+# standard/text/unicode_data/unicode_data.truss from them, and then checks every table of
 # the compiler against the file it came from.
 #
 # Building the compiler never runs this. Run it only to regenerate the tables.
@@ -30,7 +30,7 @@ dune build stage0/tools/unicode/generate.exe
 ./_build/default/stage0/tools/unicode/generate.exe "$data" > stage0/unicode/unicode_tables.ml.new
 mv stage0/unicode/unicode_tables.ml.new stage0/unicode/unicode_tables.ml
 dune build stage0/tools/unicode/library_tables.exe
-./_build/default/stage0/tools/unicode/library_tables.exe "$data" > standard/text/unicode_data.truss.new
-mv standard/text/unicode_data.truss.new standard/text/unicode_data.truss
+./_build/default/stage0/tools/unicode/library_tables.exe "$data" > standard/text/unicode_data/unicode_data.truss.new
+mv standard/text/unicode_data/unicode_data.truss.new standard/text/unicode_data/unicode_data.truss
 dune build stage0/tools/unicode/conformance.exe
 ./_build/default/stage0/tools/unicode/conformance.exe "$data"

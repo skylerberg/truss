@@ -28,5 +28,5 @@ type pulling =
 
 val pullable : (Path.t, pulling) Query.query
 
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list
 (** Every ownership error of a file, in its offsets and in order. *)

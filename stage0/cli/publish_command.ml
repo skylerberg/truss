@@ -11,9 +11,9 @@ module Lock = Registry.Lock
    keyword token is a real [todo] or [echo]. *)
 let unfinished (project : Project.t) =
   List.concat_map
-    (fun module_ ->
-      let file = Project.parsed project module_ in
-      let source = Project.source project module_ in
+    (fun file ->
+      let parsed = Project.parsed project file in
+      let source = Project.source project file in
       List.filter_map
         (fun (token : Token.t) ->
           match token.kind with
@@ -25,8 +25,8 @@ let unfinished (project : Project.t) =
                   line,
                   column )
           | _ -> None)
-        (Array.to_list file.tokens))
-    (Project.modules project)
+        (Array.to_list parsed.tokens))
+    (Project.files project)
 
 (* The files to publish: the package's own, with its published lock file
    in place of the project's. *)

@@ -58,9 +58,9 @@ let () =
   let database = setup [] in
   let built = ref 0 in
   List.iter
-    (fun ((module_ : Path.module_), _) ->
+    (fun ((file : Path.file), _) ->
       test
-        (Printf.sprintf "%s's MIR is well formed" (Path.show_module module_))
+        (Printf.sprintf "%s's MIR is well formed" (Path.show_file file))
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
@@ -77,8 +77,8 @@ let () =
                   check_body definition mir.body;
                   Array.iter (check_body definition) mir.lambdas
               | None -> ())
-            (Query.demand database Resolve.Names.declarations module_)))
-    Standard_library.modules;
+            (Query.demand database Resolve.Names.declarations_in file)))
+    Standard_library.files;
   test "the standard library has MIR" (fun () ->
       if !built < 500 then fail "only %d of its definitions have MIR" !built)
 

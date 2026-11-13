@@ -54,7 +54,7 @@ type type_check_result = Body.type_check_result = {
 
 val type_check_result : (Resolve.Names.key, type_check_result option) Query.query
 
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list
 (** The diagnostics of every body in a file, in file offsets and in order. *)
 
 val derived : (Path.t, Core.t option) Query.query

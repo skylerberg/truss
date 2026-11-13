@@ -23,9 +23,9 @@ val parse_package : string -> package option
     check that the names are [lower_snake_case]. *)
 
 type module_ = { package : package; modules : string list }
-(** [weather::forecast::hourly] is the package [weather] and the modules [forecast; hourly]. A
-    package's root module has no modules. [acme::geometry::vector] is the package [acme::geometry]
-    and the module [vector]. *)
+(** [weather::forecast::hourly] is the package [weather] and the modules [forecast; hourly]: the
+    directory [forecast/hourly] of the package. A package's root module, its top directory, has no
+    modules. [acme::geometry::vector] is the package [acme::geometry] and the module [vector]. *)
 
 val split_module : is_package:(package -> bool) -> string list -> module_ option
 (** The module a full path's names start with: the package of the first two names, where
@@ -36,6 +36,17 @@ val module_parts : module_ -> string list
 (** The names a module's full path is written with: its package's, then its modules'. *)
 
 val show_module : module_ -> string
+
+type file = { module_ : module_; name : string }
+(** A file of a module, by its name without [.truss]: [weather/forecast/hourly.truss] is the file
+    [hourly] of the module [weather::forecast]. A module is a directory, and all its files share one
+    namespace. *)
+
+val file_names : file -> string list
+(** The file's path under its package's directory, by name: [forecast] and [hourly.truss]. *)
+
+val show_file : file -> string
+(** As in messages: [weather/forecast/hourly.truss]. *)
 
 type type_head = { type_name : string; generics : string list }
 (** A type as an [impl] or a law's proof writes it after [for]: [List[T]] is the name [List], as

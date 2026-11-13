@@ -47,7 +47,7 @@ type scope = {
 
 type state = {
   database : Query.context;
-  module_ : Path.module_;
+  file : Path.file;  (** The file the definition is written in, whose imports it reads *)
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;

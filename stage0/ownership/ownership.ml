@@ -161,8 +161,8 @@ let ownership =
       Some { Query.path = key.path; part = Some "ownership" })
     check
 
-let diagnostics database module_ =
-  Resolve.Names.per_definition database module_ (fun key ->
+let diagnostics database file =
+  Resolve.Names.per_definition database file (fun key ->
       match Query.demand database ownership key with
       | Some result -> result.diagnostics
       | None -> [])

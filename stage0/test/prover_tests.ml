@@ -15,7 +15,7 @@ let not_proven text code = Support.one_diagnostic ~check text code
 
 let codes text =
   let database = Support.setup [ ("app::main", text) ] in
-  Support.codes (check database (Support.module_of "app::main"))
+  Support.codes (check database (Support.file_of "app::main"))
 
 (* A file with diagnostics, all of one code, as a cycle of the call graph
    gives at each call in it. *)
@@ -28,7 +28,7 @@ let only_code text code =
 (* The message of a file's one diagnostic. *)
 let message text =
   let database = Support.setup [ ("app::main", text) ] in
-  match check database (Support.module_of "app::main") with
+  match check database (Support.file_of "app::main") with
   | [ diagnostic ] -> diagnostic.message
   | actual ->
       Printf.sprintf "%d diagnostics: %s" (List.length actual)
@@ -103,7 +103,7 @@ let () =
         Support.setup
           [ ("app::main", Fixtures.Prover.mutual_recursion_without_measures_cannot_be_shown) ]
       in
-      match Support.codes (check database (Support.module_of "app::main")) with
+      match Support.codes (check database (Support.file_of "app::main")) with
       | [ "prover.termination"; "prover.termination" ] -> ()
       | codes -> fail "codes %s" (String.concat ", " codes));
   test "mutual recursion that decreases" (fun () ->
@@ -957,11 +957,11 @@ let across library program =
   Database.load_standard (Engine.of_context database);
   Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
     ~dependencies:[]
-    [ (Support.module_of "lib::numbers", library) ];
+    [ (Support.file_of "lib::numbers", library) ];
   Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
     ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
-    [ (Support.module_of "app::main", "use lib::numbers\n\n" ^ program) ];
-  check database (Support.module_of "app::main")
+    [ (Support.file_of "app::main", "use lib::numbers\n\n" ^ program) ];
+  check database (Support.file_of "app::main")
 
 let public_doubling ensures =
   Printf.sprintf
@@ -1006,7 +1006,7 @@ let () =
 let () =
   test "a callee's clause in another file is named by its file and line" (fun () ->
       let actual = message Fixtures.Prover.callees_clause_in_another_file_is_named_by_its in
-      if not (contains actual "The clause that must hold is at `standard/list.truss:") then
+      if not (contains actual "The clause that must hold is at `standard/list/list.truss:") then
         fail "message %S" actual)
 (* Collections from another package *)
 
@@ -1026,7 +1026,7 @@ let () =
         Support.setup
           [ ("app::main", Fixtures.Prover.callees_requires_about_the_callers_parameters_is) ]
       in
-      match check database (Support.module_of "app::main") with
+      match check database (Support.file_of "app::main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count < 100`" -> ()
       | actual ->
           fail "%s"
@@ -1069,7 +1069,7 @@ let () =
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
         List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
-      (check database (Support.module_of "app::main"))
+      (check database (Support.file_of "app::main"))
   in
   test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.divisor_that_may_be_zero_offers_a_requires_that_it with
@@ -1084,7 +1084,7 @@ let () =
         Support.setup
           [ ("app::main", Fixtures.Prover.overflow_with_a_literal_offers_the_bound_as_a) ]
       in
-      match check database (Support.module_of "app::main") with
+      match check database (Support.file_of "app::main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= 254`" -> ()
       | actual ->
           fail "%s"
@@ -1119,7 +1119,7 @@ let () =
         Support.setup
           [ ("app::main", Fixtures.Prover.failed_assert_about_a_calls_result_offers_no) ]
       in
-      match check database (Support.module_of "app::main") with
+      match check database (Support.file_of "app::main") with
       | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
       | actual -> fail "%d diagnostics" (List.length actual));
   test "an overflow names the fixes that change the code's semantics" (fun () ->
@@ -1229,7 +1229,7 @@ let () =
       in
       let states =
         Prover.states ~record:(Support.record database) database solver
-          (Support.module_of "app::main")
+          (Support.file_of "app::main")
       in
       let failed =
         List.filter (fun (state : Diagnostic.span Prover.state) -> state.failure <> None) states
@@ -1239,7 +1239,7 @@ let () =
   test "a call's requires that may not hold has a note at the clause" (fun () ->
       let text = Fixtures.Prover.calls_requires_that_may_not_hold_has_a_note_at_the in
       let database = Support.setup [ ("app::main", text) ] in
-      match check database (Support.module_of "app::main") with
+      match check database (Support.file_of "app::main") with
       | [ { notes = [ (span, _) ]; _ } ] ->
           let noted = String.sub text span.start (span.stop - span.start) in
           if noted <> "count > 0" then fail "the note is at `%s`" noted
@@ -1594,17 +1594,17 @@ let () =
 let again before after =
   let solver = Lazy.force Support.solver in
   let database = Support.setup [ ("app::main", before) ] in
-  let module_ = Support.module_of "app::main" in
+  let file = Support.file_of "app::main" in
   let engine = Engine.of_context database in
   let prove () =
-    match Type_checker.diagnostics database module_ with
-    | [] -> Prover.diagnostics ~record:(Support.record database) database solver module_
+    match Type_checker.diagnostics database file with
+    | [] -> Prover.diagnostics ~record:(Support.record database) database solver file
     | errors -> errors
   in
   (match prove () with
   | [] -> ()
   | actual -> fail "before the edit: %s" (String.concat "; " (Support.codes actual)));
-  Database.For_testing.set_text engine module_ after;
+  Database.For_testing.set_text engine file after;
   Engine.For_testing.clear_log engine;
   let solved = Solver.solved solver in
   (match prove () with
@@ -1613,7 +1613,7 @@ let again before after =
   let proven =
     List.filter_map
       (fun (key : Resolve.Names.key) ->
-        if key.module_ = module_ then
+        if key.module_ = file.module_ then
           match key.path with Top { name; _ } -> Some name | path -> Some (Path.show path)
         else None)
       (Engine.For_testing.computed engine Prover.proof)
@@ -1685,8 +1685,8 @@ let in_standard text =
   Database.load_package (Engine.of_context database)
     ~name:{ owner = None; name = "standard" }
     ~dependencies:[]
-    [ (Support.module_of "standard::probe", text) ];
-  check database (Support.module_of "standard::probe")
+    [ (Support.file_of "standard::probe", text) ];
+  check database (Support.file_of "standard::probe")
 
 let proven_in_standard text =
   match in_standard text with

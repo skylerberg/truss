@@ -40,12 +40,12 @@ let of_definition (project : Project.t) source (declaration : Names.declaration)
 
 let gather (project : Project.t) paths =
   List.concat_map
-    (fun module_ ->
-      let source = Project.source project module_ in
+    (fun file ->
+      let source = Project.source project file in
       List.concat_map
         (fun (declaration : Names.declaration) ->
           if declaration.ordinal = 0 then of_definition project source declaration else [])
-        (Query.demand project.context Names.declarations module_))
+        (Query.demand project.context Names.declarations_in file))
     (Project.selected project paths)
 
 (* The blocked roots of each hole: [main] and every test that reaches the

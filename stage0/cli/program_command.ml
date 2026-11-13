@@ -4,9 +4,10 @@
 exception Stop of int
 (** The command has reported why it stopped, and exits with this status. *)
 
-(* A package's program starts at the [main] of its [main] module. *)
+(* A package's program starts at the [main] of its root module, the
+   package's top directory. *)
 let main_of (project : Project.t) (package : Project.package) =
-  let module_ : Path.module_ = { package = package.name; modules = [ "main" ] } in
+  let module_ : Path.module_ = { package = package.name; modules = [] } in
   if not (List.mem module_ (Project.modules project)) then None
   else
     List.find_map
@@ -26,7 +27,9 @@ let main (project : Project.t) =
   match main_of project package with
   | Some main -> main
   | None ->
-      Project.cannot_run "The package %s has no `main` in a `main` module, so it has no program."
+      Project.cannot_run
+        "The package %s has no `main` in its root module, a file in its top directory, so it has \
+         no program."
         (Path.show_package package.name)
 
 let stop_at_diagnostics ?proofs ~json project =

@@ -805,8 +805,8 @@ let type_check_result =
       Compiler_bug.while_doing ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
 (* The diagnostics of every body in a file, in file offsets and in order. *)
-let diagnostics database module_ =
-  Names.per_definition database module_ (fun key ->
+let diagnostics database file =
+  Names.per_definition database file (fun key ->
       match Query.demand database type_check_result key with
       | Some result -> result.diagnostics
       | None -> [])

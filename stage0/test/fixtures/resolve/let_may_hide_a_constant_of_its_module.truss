@@ -1,0 +1,6 @@
+let limit: Int64 = 3
+
+fn f(value: Int64) -> Int64 {
+  let limit = value + 1
+  limit
+}

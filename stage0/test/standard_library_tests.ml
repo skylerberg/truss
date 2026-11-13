@@ -31,10 +31,23 @@ let letters source =
       match character with 'a' .. 'z' | 'A' .. 'Z' -> letters + 1 | _ -> letters)
     0 source
 
-let weight ((module_ : Path.module_), source) =
+(* Each module of the library, with its files' texts. A module is the unit
+   that a test checks and proves. *)
+let library =
+  List.map
+    (fun module_ ->
+      ( module_,
+        List.filter (fun ((file : Path.file), _) -> file.module_ = module_) Standard_library.files
+      ))
+    (List.sort_uniq compare
+       (List.map (fun ((file : Path.file), _) -> file.module_) Standard_library.files))
+
+let module_letters files = List.fold_left (fun total (_, text) -> total + letters text) 0 files
+
+let weight ((module_ : Path.module_), files) =
   match List.assoc_opt (Path.show_module module_) Proof_weights.weights with
   | Some measured -> measured
-  | None -> max 1 (letters source / Proof_weights.letters_for_one)
+  | None -> max 1 (module_letters files / Proof_weights.letters_for_one)
 
 let test_name (module_ : Path.module_) =
   Printf.sprintf "%s checks cleanly and proves" (Path.show_module module_)
@@ -43,10 +56,10 @@ let test_name (module_ : Path.module_) =
    and proven. *)
 let modules =
   match share with
-  | None -> List.filter (fun (module_, _) -> wanted (test_name module_)) Standard_library.modules
+  | None -> List.filter (fun (module_, _) -> wanted (test_name module_)) library
   | Some (index, count) ->
       let totals = Array.make count 0 in
-      let weighed = List.map (fun entry -> (weight entry, entry)) Standard_library.modules in
+      let weighed = List.map (fun entry -> (weight entry, entry)) library in
       let mine =
         List.fold_left
           (fun mine (weight, entry) ->
@@ -57,7 +70,7 @@ let modules =
           []
           (List.stable_sort (fun (first, _) (second, _) -> compare second first) weighed)
       in
-      List.filter (fun entry -> List.memq entry mine) Standard_library.modules
+      List.filter (fun entry -> List.memq entry mine) library
 
 (* Solver answers are kept by the text of the query, the solver's version
    and its limit, so with a directory to keep them in, a run solves only
@@ -84,9 +97,7 @@ let measured_modules =
   | Some "all" -> Some (fun _ -> true)
   | Some names ->
       let names = String.split_on_char ',' names in
-      let known =
-        List.map (fun (module_, _) -> Path.show_module module_) Standard_library.modules
-      in
+      let known = List.map (fun (module_, _) -> Path.show_module module_) library in
       List.iter
         (fun name ->
           if not (List.mem name known) then begin
@@ -104,17 +115,20 @@ let processor_time () =
 let measure database ~record ~is_measured =
   let measured =
     List.map
-      (fun (((module_ : Path.module_), source) as entry) ->
+      (fun (((module_ : Path.module_), files) as entry) ->
         let name = Path.show_module module_ in
         if is_measured name then begin
           let start = processor_time () in
-          if Type_checker.diagnostics database module_ = [] then
-            ignore (Prover.diagnostics ~record database solver module_);
+          List.iter
+            (fun (file, _) ->
+              if Type_checker.diagnostics database file = [] then
+                ignore (Prover.diagnostics ~record database solver file))
+            files;
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
-          (name, max 1 spent, letters source)
+          (name, max 1 spent, module_letters files)
         end
-        else (name, weight entry, letters source))
-      Standard_library.modules
+        else (name, weight entry, module_letters files))
+      library
   in
   let total_weight = List.fold_left (fun total (_, weight, _) -> total + weight) 0 measured in
   let total_letters = List.fold_left (fun total (_, _, letters) -> total + letters) 0 measured in
@@ -185,8 +199,9 @@ let () =
   let checked =
     timed "type checking" (fun () ->
         List.map
-          (fun ((module_ : Path.module_), _) ->
-            (module_, Type_checker.diagnostics database module_))
+          (fun (module_, files) ->
+            ( module_,
+              List.map (fun (file, _) -> (file, Type_checker.diagnostics database file)) files ))
           modules)
   in
   test "the code database kept every result of checking the standard library current" (fun () ->
@@ -195,21 +210,22 @@ let () =
           List.iter (fun problem -> fail "%s" problem) (Engine.audit ?before engine)));
   timed "solving ahead" (fun () ->
       Prover.solve_ahead ~record database solver
-        (List.filter_map
-           (fun (module_, errors) -> if errors = [] then Some module_ else None)
+        (List.concat_map
+           (fun (_, files) ->
+             List.filter_map (fun (file, errors) -> if errors = [] then Some file else None) files)
            checked));
   List.iter
-    (fun ((module_ : Path.module_), errors) ->
+    (fun ((module_ : Path.module_), files) ->
       test (test_name module_) (fun () ->
-          let source = (Query.demand database Workspace.file module_).source in
-          let report =
-            List.iter (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
-          in
-          match errors with
-          | [] ->
-              report
-                (timed (Path.show_module module_) (fun () ->
-                     Prover.diagnostics ~record database solver module_))
-          | errors -> report errors))
+          timed (Path.show_module module_) (fun () ->
+              List.iter
+                (fun (file, errors) ->
+                  let source = (Query.demand database Workspace.file file).source in
+                  List.iter
+                    (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
+                    (match errors with
+                    | [] -> Prover.diagnostics ~record database solver file
+                    | errors -> errors))
+                files)))
     checked;
   timed "saving the state" (fun () -> Option.iter Database.save_session session)

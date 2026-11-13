@@ -161,12 +161,12 @@ let consequences (project : Project.t) text =
   let diagnostics (session : Database.session) =
     Database.problems session
     @ List.concat_map
-        (fun module_ ->
+        (fun file ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
-              Printf.sprintf "%s: %s" (Database.module_file session module_) diagnostic.message)
-            (Database.diagnostics session module_))
-        (List.concat_map (Database.package_modules session) own)
+              Printf.sprintf "%s: %s" (Database.file_path session file) diagnostic.message)
+            (Database.diagnostics session file))
+        (List.concat_map (Database.package_files session) own)
   in
   let now = diagnostics project.session in
   (signatures, List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial))

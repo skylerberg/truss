@@ -10,7 +10,7 @@ let priority = Fixtures.Patterns.priority
 
 let message text =
   let database = setup [ ("app::main", text) ] in
-  match check database (module_of "app::main") with
+  match check database (file_of "app::main") with
   | [ diagnostic ] -> diagnostic.message
   | actual -> failwith (Printf.sprintf "%d diagnostics" (List.length actual))
 
@@ -58,10 +58,10 @@ let () =
 let () =
   let codes_of text =
     let database = setup [ ("app::main", text) ] in
-    (match parse_errors database (module_of "app::main") with
+    (match parse_errors database (file_of "app::main") with
     | [] -> ()
     | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-    codes (check database (module_of "app::main"))
+    codes (check database (file_of "app::main"))
   in
   let expect text expected =
     match codes_of text with
@@ -86,7 +86,7 @@ let () =
 (* Errors reported once *)
 
 let () =
-  let codes_of text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
+  let codes_of text = codes (check (setup [ ("app::main", text) ]) (file_of "app::main")) in
   test "a generic parameter that is a value covers nothing else" (fun () ->
       one_diagnostic Fixtures.Patterns.generic_parameter_that_is_a_value_covers_nothing
         "patterns.not_covered");

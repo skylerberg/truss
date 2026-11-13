@@ -765,14 +765,14 @@ let () =
 (* How many [Disjoint] obligations a definition leaves to the prover. *)
 let disjoint_obligations text =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
+  let file = file_of "app::main" in
   List.fold_left
     (fun total declaration ->
       match Query.demand database Ownership.ownership (Resolve.Names.key_of declaration) with
       | Some result -> total + List.length result.Ownership.disjoint
       | None -> total)
     0
-    (Query.demand database Resolve.Names.declarations module_)
+    (Query.demand database Resolve.Names.declarations_in file)
 
 let () =
   test "two slices of one list borrowed by one call produce a `Disjoint` obligation" (fun () ->

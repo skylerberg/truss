@@ -61,11 +61,11 @@ let () =
       Database.load_package (Engine.of_context database)
         ~name:{ owner = None; name = "example" }
         ~dependencies:[]
-        [ (example, "let big: Int8 = 100\nlet bigger: Int8 = big + big\n") ];
+        [ (example_file, "let big: Int8 = 100\nlet bigger: Int8 = big + big\n") ];
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (Type_checker.diagnostics database example)
+          (Type_checker.diagnostics database example_file)
       with
       | [ "types.constant_overflow" ] -> ()
       | actual -> fail "got [%s]" (String.concat "; " actual))

@@ -15,20 +15,20 @@ let stages =
     (Package_checks, Package_checks.diagnostics);
   ]
 
-let through last database module_ =
+let through last database file =
   let rec stage_diagnostics = function
     | [] -> []
     | (stage, diagnostics) :: rest ->
-        diagnostics database module_ @ if stage = last then [] else stage_diagnostics rest
+        diagnostics database file @ if stage = last then [] else stage_diagnostics rest
   in
   stage_diagnostics stages
 
-let diagnostics database module_ =
-  let file = Query.demand database Workspace.file module_ in
+let diagnostics database file =
+  let parsed = Query.demand database Workspace.file file in
   List.sort_uniq
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-    (file.diagnostics @ through Package_checks database module_)
+    (parsed.diagnostics @ through Package_checks database file)
 
 (* The same, as a query, which the database keeps current for each file of
    a worktree and saves, so that a check after a restart finds it done. *)
@@ -41,7 +41,7 @@ let manifest_sentence = Package_checks.manifest_sentence
 let code_packages = Package_checks.code_packages
 
 let file_diagnostics =
-  Query.query ~name:"all_diagnostics" ~phase:Phases.diagnostics ~show:Path.show_module ~saved:true
+  Query.query ~name:"all_diagnostics" ~phase:Phases.diagnostics ~show:Path.show_file ~saved:true
     diagnostics
 
 module For_testing = struct

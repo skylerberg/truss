@@ -54,8 +54,10 @@ to one method of an `impl` re-checks only that method.
 - **Names are in four namespaces,** told apart by the case rules and by `::`
   and `.`: modules, types, values, and members.
 - **An unqualified name** is looked up among the locals, the generic
-  parameters, the file's definitions, then the prelude. At most one matches,
-  because shadowing is an error.
+  parameters, the module's definitions, then the prelude. The first that
+  matches is the referent: a local may hide a definition of the module, and
+  no other hiding is allowed. A module is a directory, and its names are one
+  index built from its files' names.
 - **A member is resolved during type checking,** since its meaning depends on
   the receiver's type.
 - **The referent of a name is one closed sum type,** matched exhaustively by
@@ -334,7 +336,7 @@ A result depends on exactly the queries it demanded:
 | An interface | The interface of `List.push` |
 | A type's shape, or a fact of its definition | The shape of `Point`; whether `Option` is `Plain` |
 | A constant's value | `digest_size` |
-| The definitions of one name in a file | Those named `count` in `report.truss` |
+| The definitions of one name in a module | Those named `count` in `weather::report` |
 | A module | Whether `standard::json` exists, and its names `parse` |
 | The members of a type with one name | `List`'s members named `length` |
 | The `impl`s of a trait for a type constructor, in one package | `Add` for `Instant`, in `Duration`'s package |

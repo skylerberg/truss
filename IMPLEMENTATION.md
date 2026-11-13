@@ -30,10 +30,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **The Unicode tables are generated** from the Unicode character database
   files that `stage0/tools/unicode/sources.txt` lists with their hashes:
   the compiler's into `stage0/unicode/unicode_tables.ml`, and the standard
-  library's into `standard/text/unicode_data.truss`. To move to a new
+  library's into `standard/text/unicode_data/unicode_data.truss`. To move to a new
   version of Unicode, change that list and run
   `stage0/tools/unicode/regenerate.sh`. Each function of
-  `standard/text/unicode_tables.truss` that names a table assigns its
+  `standard/text/unicode_tables/unicode_tables.truss` that names a table assigns its
   result to a `var`, so that callers know it by its contract: with a
   functional body the prover would copy the table into every caller's
   queries.

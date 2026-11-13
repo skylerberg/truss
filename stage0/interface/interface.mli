@@ -9,5 +9,5 @@ module Impls = Impls
 module Grants = Grants
 module Check = Check
 
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list
 (** Every interface error of a file, in its offsets and in order. *)

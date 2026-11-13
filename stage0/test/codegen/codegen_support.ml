@@ -233,28 +233,29 @@ let expect_status ?extra ?anchors expected instances =
 
 (* Programs from source *)
 
-let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [ "main" ] }
+let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
+let example_file : Path.file = { module_ = example; name = "main" }
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is read and checked once and not for each test. *)
 let checked_standard = lazy (Database.For_testing.standard_base ())
 
-(* The modules of a package named [example], of Truss source, with the
+(* The files of a package named [example], of Truss source, with the
    standard library, ready to compile. Each must check cleanly. *)
-let load_modules modules =
+let load_files files =
   let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
   Database.load_package (Engine.of_context database)
     ~name:{ owner = None; name = "example" }
-    ~dependencies:[] modules;
+    ~dependencies:[] files;
   List.iter
-    (fun (module_, _) ->
-      let source = (Query.demand database Workspace.file module_).source in
-      match Type_checker.diagnostics database module_ with
+    (fun (file, _) ->
+      let source = (Query.demand database Workspace.file file).source in
+      match Type_checker.diagnostics database file with
       | [] -> ()
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
-    modules;
+    files;
   ( database,
     Compile.create
       ~want:(fun lowering wanted ->
@@ -262,7 +263,7 @@ let load_modules modules =
           (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
       database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
 
-let load text = load_modules [ (example, text) ]
+let load text = load_files [ (example_file, text) ]
 
 (* The paths of a module's tests, in order. *)
 let tests_in database module_ =

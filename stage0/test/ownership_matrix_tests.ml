@@ -287,11 +287,11 @@ let () =
         (fun () ->
           let text, functions = generate maker in
           let database = setup [ ("app::main", text) ] in
-          let module_ = module_of "app::main" in
-          (match parse_errors database module_ with
+          let file = file_of "app::main" in
+          (match parse_errors database file with
           | [] -> ()
           | errors -> fail "the generated module does not parse: %s" (String.concat " " errors));
-          let diagnostics = check database module_ in
+          let diagnostics = check database file in
           let verdict_of (generated : generated) =
             List.filter
               (fun (diagnostic : Diagnostic.t) ->

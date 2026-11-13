@@ -75,14 +75,16 @@ let resolved =
   Query.query ~name:"resolved" ~phase:Phases.resolution ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { path = key.path; part = Some "resolved" })
     (fun database (key : Names.key) ->
-      match Query.demand database Names.definition key with
-      | Some definition ->
+      match
+        (Query.demand database Names.definition key, Query.demand database Names.file_of key)
+      with
+      | Some definition, Some file ->
           let module_ = key.module_ in
           let size = definition.id + 1 in
           let state : Walk.state =
             {
               database;
-              module_;
+              file;
               names = Array.make size None;
               brackets = Array.make size None;
               diagnostics = [];
@@ -124,10 +126,14 @@ let resolved =
               | Some name -> name.span
               | None -> Syntax.Span.make definition.span.start definition.span.start
             in
+            let first =
+              match Query.demand database Names.file_of { key with ordinal = 0 } with
+              | Some first when first <> file -> Path.show_file first
+              | _ -> "this file"
+            in
             Walk.report state Duplicate_definition span
-              (Printf.sprintf
-                 "%s is already defined in this file, so this definition is never used."
-                 (Path.show key.path))
+              (Printf.sprintf "%s is already defined in %s, so this definition is never used."
+                 (Path.show key.path) first)
           end;
           Some
             {
@@ -140,16 +146,17 @@ let resolved =
                     compare left.span right.span)
                   state.diagnostics;
             }
-      | None -> None)
+      | _ -> None)
 
 (* The errors of a file's [use] lines, in the file's offsets: a module that
    does not exist, two imports with one last name, [standard::intrinsic]
    outside the standard library, and an import nothing uses, with a fix that
    deletes it. *)
 let file_diagnostics =
-  Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_module ~saved:true
-    (fun database module_ ->
-      let file = Query.demand database Workspace.file module_ in
+  Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_file ~saved:true
+    (fun database (path : Path.file) ->
+      let module_ = path.module_ in
+      let file = Query.demand database Workspace.file path in
       (* An import is used when a name followed by [::] spells it anywhere
          outside the [use] lines, read from the tokens, so a use inside a part
          the parser could not read counts too, as does one in an
@@ -219,12 +226,12 @@ let file_diagnostics =
            [] file.uses);
       List.rev !diagnostics)
 
-let diagnostics database module_ =
+let diagnostics database file =
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
-    (Query.demand database file_diagnostics module_
-    @ Names.per_definition database module_ (fun key ->
+    (Query.demand database file_diagnostics file
+    @ Names.per_definition database file (fun key ->
         match Query.demand database resolved key with
         | Some resolved -> resolved.diagnostics
         | None -> []))

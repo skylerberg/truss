@@ -5,7 +5,7 @@
      dune exec stage0/tools/database_timing/database_timing.exe -- [MODULES]
 
    The package has a module [core] with one function, [leaf], and MODULES
-   modules, forty unless given, of twenty-five functions each, every one of
+   modules, each a directory with one file, forty unless given, of twenty-five functions each, every one of
    which calls [leaf] and the function before it. It is made in a temporary
    directory with a store of its own, and both are deleted at the end. *)
 
@@ -40,10 +40,15 @@ let () =
   let directory = Filename.concat root "demo" in
   Unix.mkdir directory 0o755;
   let file name = Filename.concat directory name in
+  let module_file name = Printf.sprintf "%s/%s.truss" name name in
   File_system.write (file "truss.toml") "[package]\nname = \"demo\"\ntruss = \"0.1\"\n";
-  File_system.write (file "core.truss") (core_text "value");
+  let write_module name text =
+    File_system.make_directory (file name);
+    File_system.write (file (module_file name)) text
+  in
+  write_module "core" (core_text "value");
   for index = 0 to modules - 1 do
-    File_system.write (file (Printf.sprintf "m%d.truss" index)) (module_text index)
+    write_module (Printf.sprintf "m%d" index) (module_text index)
   done;
   Printf.printf "%d modules, %d functions\n" (modules + 1) ((modules * functions) + 1);
   let opened label =
@@ -60,8 +65,8 @@ let () =
     List.iter
       (fun (_, package) ->
         List.iter
-          (fun module_ -> ignore (Database.diagnostics session module_))
-          (Database.package_modules session package))
+          (fun file -> ignore (Database.diagnostics session file))
+          (Database.package_files session package))
       (Database.packages session)
   in
   let step session label run =
@@ -86,9 +91,10 @@ let () =
   Database.reset ();
   let session = opened "open again, as a new process does" in
   step session "check every module" (fun () -> check session);
-  edit session "check and save after editing one body" "m0.truss"
+  edit session "check and save after editing one body" (module_file "m0")
     (module_text ~first:"core::leaf(value) + 0" 0);
-  edit session "check and save after editing the body all call" "core.truss" (core_text "value + 0");
-  edit session "check and save after adding a function" "m0.truss"
+  edit session "check and save after editing the body all call" (module_file "core")
+    (core_text "value + 0");
+  edit session "check and save after adding a function" (module_file "m0")
     (module_text ~more:"internal fn added() -> Int64 {\n  1\n}\n" 0);
   Database.reset ()

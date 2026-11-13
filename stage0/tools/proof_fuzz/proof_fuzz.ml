@@ -26,7 +26,8 @@ let record database responses =
   let engine = Engine.of_context database in
   List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
 
-let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [ "main" ] }
+let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
+let example_file : Path.file = { module_ = example; name = "main" }
 let standard = lazy (Database.For_testing.standard_base ())
 
 let solver =
@@ -49,9 +50,9 @@ let load text =
   Database.load_package engine
     ~name:{ owner = None; name = "example" }
     ~dependencies:[]
-    [ (example, text) ];
+    [ (example_file, text) ];
   let database = Engine.context engine in
-  if Type_checker.diagnostics database example <> [] then None
+  if Type_checker.diagnostics database example_file <> [] then None
   else
     Some
       ( database,
@@ -157,7 +158,9 @@ let run_mutant ~samples text =
   | None -> ()
   | Some (database, _) -> (
       incr checked;
-      let states = Prover.states ~record:(record database) database (Lazy.force solver) example in
+      let states =
+        Prover.states ~record:(record database) database (Lazy.force solver) example_file
+      in
       let candidates =
         List.filter (fun candidate -> proven database candidate.key states) (runnable database)
       in
@@ -270,7 +273,8 @@ let () =
             match load text with
             | Some (database, _) ->
                 let unproven =
-                  Prover.diagnostics ~record:(record database) database (Lazy.force solver) example
+                  Prover.diagnostics ~record:(record database) database (Lazy.force solver)
+                    example_file
                 in
                 shown unproven;
                 unproven = []
@@ -279,8 +283,8 @@ let () =
                 Database.load_package engine
                   ~name:{ owner = None; name = "example" }
                   ~dependencies:[]
-                  [ (example, text) ];
-                shown (Type_checker.diagnostics (Engine.context engine) example);
+                  [ (example_file, text) ];
+                shown (Type_checker.diagnostics (Engine.context engine) example_file);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (Documents.read file)
            else [ Documents.read file ]))

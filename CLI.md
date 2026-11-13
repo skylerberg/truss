@@ -287,7 +287,9 @@ truss rename [--json] FROM TO
 ```
 
 Renames a definition, a method with every version of it, or a module, and
-rewrites every reference to it in the project. The rename is checked in a
+rewrites every reference to it in the project. Renaming a module moves the
+files of its directory; a subdirectory is a module of its own and stays.
+The rename is checked in a
 trial first, and is rejected with no file changed if the result has any
 diagnostic, such as a name that is taken. Solver answers and test results
 are keyed without names, so a rename proves and tests nothing again.
