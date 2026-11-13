@@ -1,0 +1,41 @@
+use standard::http
+
+fn asking(name: StringSlice, value: StringSlice) -> http::Request {
+  var headers = http::Headers.new()
+  mut headers.set(name, value: value)
+  http::Request(method: http::Method.Get, target: "/", headers: own headers)
+}
+
+test "Accept picks the offered type with the highest quality, preferring the most specific range" {
+  let offered: List[String] = ["application/json", "text/html; charset=utf-8", "text/plain"]
+  assert asking("Accept", value: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").preferred_type(offered.slice()) == Some("text/html; charset=utf-8")
+  assert asking("Accept", value: "application/json").preferred_type(offered.slice()) == Some("application/json")
+  assert asking("Accept", value: "text/*;q=0.5, text/plain;q=0.9, application/json;q=0.1").preferred_type(offered.slice()) == Some("text/plain")
+  assert asking("Accept", value: "*/*").preferred_type(offered.slice()) == Some("application/json")
+  assert asking("Accept", value: "image/png").preferred_type(offered.slice()) == None
+  assert asking("Accept", value: "text/*, text/html;q=0").preferred_type(offered.slice()) == Some("text/plain")
+  assert asking("Accept", value: "TEXT/PLAIN;Q=1.000").preferred_type(offered.slice()) == Some("text/plain")
+  assert asking("Accept", value: "text/plain;q=2, application/json;q=0.5").preferred_type(offered.slice()) == Some("application/json")
+  assert http::Request(method: http::Method.Get, target: "/").preferred_type(offered.slice()) == Some("application/json")
+}
+
+test "Accept-Language matches a range to its subtags and picks the highest quality" {
+  let offered: List[String] = ["en-US", "fr", "de-CH"]
+  assert asking("Accept-Language", value: "fr-CH, fr;q=0.9, en;q=0.8, de;q=0.7, *;q=0.5").preferred_language(offered.slice()) == Some("fr")
+  assert asking("Accept-Language", value: "de, en;q=0.5").preferred_language(offered.slice()) == Some("de-CH")
+  assert asking("Accept-Language", value: "en-us").preferred_language(offered.slice()) == Some("en-US")
+  assert asking("Accept-Language", value: "ja").preferred_language(offered.slice()) == None
+  assert asking("Accept-Language", value: "*;q=0.1, ja").preferred_language(offered.slice()) == Some("en-US")
+  assert asking("Accept-Language", value: "e").preferred_language(offered.slice()) == None
+}
+
+test "Accept-Encoding refuses a coding with q=0 and keeps identity unless it is refused" {
+  let offered: List[String] = ["br", "gzip", "identity"]
+  assert asking("Accept-Encoding", value: "gzip, deflate, br").preferred_encoding(offered.slice()) == Some("br")
+  assert asking("Accept-Encoding", value: "gzip;q=1.0, br;q=0.5").preferred_encoding(offered.slice()) == Some("gzip")
+  assert asking("Accept-Encoding", value: "gzip;q=0, br;q=0.0").preferred_encoding(offered.slice()) == Some("identity")
+  assert asking("Accept-Encoding", value: "*;q=0").preferred_encoding(offered.slice()) == None
+  assert asking("Accept-Encoding", value: "identity;q=0, gzip").preferred_encoding(offered.slice()) == Some("gzip")
+  assert asking("Accept-Encoding", value: "deflate").preferred_encoding(offered.slice()) == Some("identity")
+  assert http::Request(method: http::Method.Get, target: "/").preferred_encoding(offered.slice()) == Some("identity")
+}

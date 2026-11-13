@@ -1,0 +1,70 @@
+use standard::http
+use standard::network
+use standard::simulation
+
+test "a token bucket allows its burst, refills over time, and says how long to wait" {
+  provide simulation::World.new() {
+    let limiter = http::RateLimiter.new(http::RateLimit(requests: 2, per_seconds: 1))
+    assert limiter.take("a") == http::Decision.Allowed(remaining: 1)
+    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
+    assert limiter.take("a") == http::Decision.Limited(retry_after_seconds: 1)
+    assert limiter.take("b") == http::Decision.Allowed(remaining: 1)
+    Clock.sleep(Duration.milliseconds(500))
+    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
+    assert limiter.take("a") == http::Decision.Limited(retry_after_seconds: 1)
+    Clock.sleep(Duration.seconds(5))
+    assert limiter.take("a") == http::Decision.Allowed(remaining: 1)
+    let slow = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, burst: 3))
+    assert slow.take("x") == http::Decision.Allowed(remaining: 2)
+    assert slow.take("x") == http::Decision.Allowed(remaining: 1)
+    assert slow.take("x") == http::Decision.Allowed(remaining: 0)
+    assert slow.take("x") == http::Decision.Limited(retry_after_seconds: 60)
+  }
+}
+
+test "a rate limiter forgets the least recently seen key when it holds too many" {
+  provide simulation::World.new() {
+    let limiter = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, keys: 2))
+    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
+    assert limiter.take("b") == http::Decision.Allowed(remaining: 0)
+    assert limiter.take("c") == http::Decision.Allowed(remaining: 0)
+    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
+    assert limiter.take("c") is Limited(_)
+  }
+}
+
+fn limited_statuses() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8098)).expect("the port is free")
+  let limiter = http::RateLimiter.new(http::RateLimit(requests: 2, per_seconds: 10))
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut listener, handler: fn(request, responder) {
+      http::rate_limit(own request, mut responder, limiter: limiter, key: http::peer_key, next: fn(inner, answering) {
+        let _ = mut answering.send(http::Response.text("from ${http::peer_key(inner)}"))
+      })
+    })
+    {
+      var client = http::Client.new()
+      let count: USize = 3
+      for _ in 0..count {
+        mut seen.push(match mut client.get("http://localhost:8098/") {
+          Ok(response) => "${response.status.code} ${response.headers.get("Retry-After").unwrap_or("-")} ${response.text_body().unwrap_or("")}"
+          Err(error) => "failed: ${error}"
+        })
+      }
+      return seen
+    }
+  }
+}
+
+test "the rate_limit middleware answers 429 with Retry-After once a peer spends its burst" {
+  provide simulation::World.new() {
+    let seen = limited_statuses()
+    assert seen.length() == 3
+    assert seen[0].slice().starts_with("200 - from ") && seen[0] != "200 - from "
+    assert seen[1].slice().starts_with("200 - from ")
+    assert seen[2] == "429 5 Too Many Requests"
+  }
+}

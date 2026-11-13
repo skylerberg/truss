@@ -1,0 +1,176 @@
+use standard::http
+use standard::network
+use standard::processes
+use standard::simulation
+
+fn patient(request: own http::Request, responder: mut http::Responder)
+  uses Tasks, Clock
+{
+  if request.target == "/slow" {
+    Clock.sleep(Duration.milliseconds(400))
+    let _ = mut responder.send(http::Response.text("done"))
+  } else if request.target == "/forever" {
+    Clock.sleep(Duration.seconds(60))
+    let _ = mut responder.send(http::Response.text("late"))
+  } else {
+    let _ = mut responder.send(http::Response.text("ok"))
+  }
+}
+
+fn loopback(port: UInt16) -> network::SocketAddress {
+  network::SocketAddress(address: network::IpAddress.loopback, port: port)
+}
+
+fn exchange(port: UInt16, raw: StringSlice) -> String
+  uses NetworkClient, Handles, Panic
+{
+  var connection = network::connect("localhost", port: port).expect("the server accepts")
+  let _ = mut connection.write_all(raw.bytes())
+  var reply: List[UInt8] = []
+  let _ = mut connection.read_to_end(mut reply)
+  String.from_utf8_lossy(reply.slice())
+}
+
+fn drained_over_http_one() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8094)).expect("the port is free")
+  let shutdown = http::Shutdown.new()
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut listener, handler: patient, options: http::ServerOptions(grace_seconds: 10), shutdown: Some(shutdown.copy()))
+    {
+      var idle = network::connect("localhost", port: 8094).expect("the server accepts")
+      let _ = mut idle.write_all("GET /fast HTTP/1.1\r\nHost: x\r\n\r\n".bytes())
+      concurrent {
+        mut seen.push(exchange(8094, raw: "GET /slow HTTP/1.1\r\nHost: x\r\n\r\n"))
+        {
+          Clock.sleep(Duration.milliseconds(150))
+          shutdown.begin()
+        }
+      }
+      var reply: List[UInt8] = []
+      let _ = mut idle.read_to_end(mut reply)
+      mut seen.push(String.from_utf8_lossy(reply.slice()))
+    }
+  }
+  seen
+}
+
+test "a shutdown over HTTP/1.1 finishes the request in flight, closes an idle connection, and ends serve" {
+  provide simulation::World.new() {
+    let seen = drained_over_http_one()
+    assert seen.length() == 2
+    assert seen[0].slice().starts_with("HTTP/1.1 200 OK") && seen[0].slice().ends_with("done")
+    assert seen[0].slice().contains("Connection: close")
+    assert seen[1].slice().occurrences("HTTP/1.1 200 OK") == 1 && seen[1].slice().ends_with("ok")
+  }
+}
+
+fn cut_short() -> String
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8095)).expect("the port is free")
+  let shutdown = http::Shutdown.new()
+  var reply = ""
+  concurrent {
+    http::serve(mut listener, handler: patient, options: http::ServerOptions(grace_seconds: 1), shutdown: Some(shutdown.copy()))
+    {
+      concurrent {
+        reply = exchange(8095, raw: "GET /forever HTTP/1.1\r\nHost: x\r\n\r\n")
+        {
+          Clock.sleep(Duration.milliseconds(100))
+          shutdown.begin()
+        }
+      }
+    }
+  }
+  reply
+}
+
+test "a shutdown cancels a request that outlasts the grace period" {
+  provide simulation::World.new() {
+    let started = Clock.monotonic()
+    assert cut_short() == ""
+    assert Clock.monotonic() - started < Duration.seconds(30)
+  }
+}
+
+fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> List[UInt8] {
+  var bytes: List[UInt8] = [0, 0, UInt8.try_from(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
+  mut bytes.append(payload.to_list())
+  bytes
+}
+
+fn frame_kinds(bytes: Slice[UInt8]) -> List[String] {
+  var kinds: List[String] = []
+  var at: USize = 0
+  while at + 9 <= bytes.length() {
+    let length = USize.from(bytes[at]) * 65536 + USize.from(bytes[at + 1]) * 256 + USize.from(bytes[at + 2])
+    let kind = bytes[at + 3]
+    let start = at + 9
+    if start + length > bytes.length() {
+      return kinds
+    }
+    let payload = bytes[start..start + length]
+    if kind == 7 && length >= 8 {
+      mut kinds.push("GOAWAY ${payload[3]} ${payload[7]}")
+    } else if kind == 1 {
+      mut kinds.push("HEADERS ${bytes[at + 8]}")
+    } else if kind == 0 {
+      mut kinds.push("DATA ${String.from_utf8_lossy(payload)}")
+    }
+    at = start + length
+  }
+  kinds
+}
+
+fn drained_over_http_two() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8096)).expect("the port is free")
+  let shutdown = http::Shutdown.new()
+  var reply: List[UInt8] = []
+  concurrent {
+    http::serve(mut listener, handler: patient, options: http::ServerOptions(grace_seconds: 10), shutdown: Some(shutdown.copy()))
+    {
+      var connection = network::connect("localhost", port: 8096).expect("the server accepts")
+      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().to_list()
+      mut opening.append(frame(4, flags: 0, stream: 0, payload: []))
+      let block: List[UInt8] = [130, 134, 65, 1, 120, 68, 5, 47, 115, 108, 111, 119]
+      mut opening.append(frame(1, flags: 5, stream: 1, payload: block.slice()))
+      let _ = mut connection.write_all(opening.slice())
+      concurrent {
+        let _ = mut connection.read_to_end(mut reply)
+        {
+          Clock.sleep(Duration.milliseconds(150))
+          shutdown.begin()
+        }
+      }
+    }
+  }
+  frame_kinds(reply.slice())
+}
+
+test "a shutdown over HTTP/2 sends GOAWAY naming the stream in flight, finishes it, and closes" {
+  provide simulation::World.new() {
+    let kinds = drained_over_http_two()
+    assert kinds == ["GOAWAY 1 0", "HEADERS 1", "DATA done"]
+  }
+}
+
+test "begin_on_signal begins the shutdown when SIGTERM arrives" {
+  let world = simulation::World.new()
+  provide world {
+    let shutdown = http::Shutdown.new()
+    concurrent {
+      shutdown.begin_on_signal()
+      {
+        Clock.sleep(Duration.seconds(1))
+        assert !shutdown.is_begun()
+        world.deliver(processes::Signal.Terminate)
+      }
+    }
+    assert shutdown.is_begun()
+  }
+}

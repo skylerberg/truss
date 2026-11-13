@@ -182,7 +182,7 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
     }
     Whole => {}
   }
-  let is_wanted = options.compress && is_compressible_type(media_type) && accepts_gzip(request.headers.get("Accept-Encoding"))
+  let is_wanted = options.compress && is_compressible_type(media_type) && accepts_coding(request.headers.get("Accept-Encoding"), coding: "gzip")
   if is_wanted {
     mut headers.add("Vary", value: "Accept-Encoding")
     let sibling = Path.new("${file}.gz".slice())

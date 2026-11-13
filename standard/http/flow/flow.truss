@@ -15,3 +15,4 @@ internal type Outbound =
   | Settings(initial_window: Option[Int64], frame_size: Option[USize], table_size: Option[USize])
   | Reset(stream: UInt32)
   | Goaway(last_stream: UInt32, code: UInt32)
+  | Drain(last_stream: UInt32, ack: tasks::Channel[Bool])
