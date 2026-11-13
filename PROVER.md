@@ -1,6 +1,7 @@
 # Truss Prover
 
-The stage0 prover takes the core form of each definition
+The stage0 prover takes the MIR of each body that runs ([MIR.md](MIR.md)), the
+core form of its specifications and ghost code
 ([TYPECHECKER.md](TYPECHECKER.md)), its callees' interfaces and contracts,
 and the bodies it reads as definitions. For each definition it finds every
 *obligation*, a fact that must hold for the program's promises to be kept,
@@ -166,7 +167,12 @@ Callers' proofs depend on a function's contract, not its body, so editing
 **A body is run forward in passive form** (Flanagan and Saxe, 2001): every
 fact is guarded by its path's condition, and where paths join, each local
 that differs gets a fresh symbol, so a body's queries grow with the body, not
-with its number of paths.
+with its number of paths. A body that runs is run from its MIR, block by
+block in reverse postorder, so its order of evaluation and its scopes are the
+ones code generation compiles. Each computation it names, such as a call or
+a constructor, is read through the same functions as in a specification,
+given its operands' values, so code and specification give the same term.
+Ghost code, a proof and a `proof` block, is read from its core form.
 
 - **A call** asserts each `requires`, gives each `mut` argument a fresh
   value, keeping its old one for `old`, and assumes each `ensures` and the
@@ -363,7 +369,6 @@ proof the prover should not have made.
 
 ## Not built
 
-- Reading the MIR; the prover walks the core form.
 - Contracts for the intrinsic module's system calls.
 - Proofs for a 32-bit `USize`. The prover reads `USize` and `ISize` as 64
   bits in every package, and code generation builds only for 64-bit targets.

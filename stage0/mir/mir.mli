@@ -164,6 +164,18 @@ type task_exit =
   | Exit_to of block
   | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
+type left_task = {
+  task : Core.task;
+  ends : statement list;
+      (** The ends of the scopes between it and the next task, or the exit's target, which run in
+          the code around the task once it has ended *)
+  task_end : block option;
+      (** Where the task's code ends, which the other tasks of its group go on from: the start of
+          the next branch of a [concurrent] block, or the block's end. An iteration of a
+          [concurrent for] has none. *)
+}
+(** A task an early exit leaves. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
@@ -175,17 +187,9 @@ type terminator =
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : operand; resume : block }
   | Return of operand option
-  | Exit_tasks of {
-      tasks : (Core.task * statement list) list;
-      exit : task_exit;
-      task_end : block option;
-    }
+  | Exit_tasks of { tasks : left_task list; exit : task_exit }
       (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
-          taken. The exit ends the scopes inside the innermost task before it. With each task are
-          the ends of the scopes between it and the next task, or the exit's target, which run in
-          the code around the task once it has ended. [task_end] is where the innermost task's code
-          ends, which the other tasks of its group go on from: the start of the next branch of a
-          [concurrent] block, or the block's end. An iteration of a [concurrent for] has none. *)
+          taken. The exit ends the scopes inside the innermost task before it. *)
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 

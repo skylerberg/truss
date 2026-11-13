@@ -931,13 +931,15 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
          with the scopes around the task still open. The exit then ends those
          scopes once each task has ended, before it is taken. *)
       (match block.terminator with
-      | Exit_tasks { task_end = Some target; _ } ->
+      | Exit_tasks { tasks = { task_end = Some target; _ } :: _; _ } ->
           Hashtbl.replace task_ends index
             ((match builder.last with Some last -> last | None -> first), target)
       | _ -> ());
       (match block.terminator with
       | Exit_tasks { tasks; _ } ->
-          List.iter (fun (_, ends) -> List.iter (statement builder forks ~is_var) ends) tasks
+          List.iter
+            (fun (left : Mir.left_task) -> List.iter (statement builder forks ~is_var) left.ends)
+            tasks
       | _ -> ());
       let origin = block.terminator_origin in
       (match block.terminator with

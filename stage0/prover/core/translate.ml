@@ -238,6 +238,12 @@ type driven = {
   arguments :
     (int -> (Logic.term * passed_place option * (Logic.term * Logic.term) option) option) option;
   cursor : passed_place option;
+  places : changed -> changed;
+      (** The values the loop's body may change, as the MIR holds them: a binding of a part to
+          change is the part, so the local or [self] it is part of changes *)
+  bindings : frame -> frame;
+      (** The frame with each binding of a part to change holding the part's value, for the core
+          form's clauses *)
 }
 
 (* A fact stated once in a definition's proof, by its subject. *)
@@ -348,6 +354,10 @@ type context = {
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
           through another's invariant is read once. *)
+  mutable lambda_bodies : (Core.id * (frame -> Logic.term list -> unit)) list;
+      (** For each lambda of the body read from the MIR, by its core node, how its own body runs
+          from its MIR: from the frame inside it, given its arguments, with each return in
+          [returns]. *)
 }
 
 (* The package a callee is read from, for [source_at]: the definition's. *)
@@ -1178,6 +1188,19 @@ let join context ?value_type frames =
         | (_, Some term) :: rest when List.for_all (fun (_, other) -> other = Some term) rest ->
             Some term
         | _ when List.exists (fun (_, term) -> term = None) values -> None
+        | _
+          when List.for_all
+                 (fun (_, term) -> match term with Some (Logic.Boolean _) -> true | _ -> false)
+                 values ->
+            (* A [Bool] each path gives as a constant, such as a short-circuit
+               operator's value, holds where a path that gives [true] was
+               taken: the paths are exclusive. *)
+            Some
+              (Logic.disjunction
+                 (List.filter_map
+                    (fun ((frame : frame), term) ->
+                      if term = Some (Logic.Boolean true) then Some frame.condition else None)
+                    values))
         | _
           when List.exists
                  (fun ((frame : frame), term) ->
@@ -3759,7 +3782,13 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
         context.terminates <- saved_terminates;
         context.counters <- saved_counters)
       (fun () ->
-        let finished = block_value context inside body in
+        let finished =
+          match List.assoc_opt node.id context.lambda_bodies with
+          | Some run_body ->
+              run_body inside arguments;
+              None
+          | None -> block_value context inside body
+        in
         let exits =
           (match finished with Some (frame, _) -> [ frame ] | None -> [])
           @ List.map fst context.returns
@@ -8684,6 +8713,17 @@ and store_lent context frame (place : place) leave =
 (* The values a loop's body may change, which are havocked at its head: the local
    or [self] that each place it assigns to, lends to change, or pulls is
    part of. *)
+(* A [for] loop's head after its changes are havocked, with each binding of a
+   part to change holding the part's value where the MIR reads the loop. *)
+and loop_bindings ?driven head =
+  match driven with Some (driven : driven) -> driven.bindings head | None -> head
+
+(* The values a [for] loop's body may change: its core form's, as the MIR
+   holds them where the MIR reads the loop. *)
+and loop_changed ?driven frame body =
+  let changed = changed_places frame body in
+  match driven with Some (driven : driven) -> driven.places changed | None -> changed
+
 and changed_places ?(condition : expression option) frame (body : block) : changed =
   let locals = ref [] and self = ref false in
   let note (place : place) =
@@ -9042,9 +9082,9 @@ and loop_over ?driven context frame (node : statement) (pattern : pattern) (iter
       let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
       check_invariants context entry clauses ~when_:"on entry to the loop";
       let start =
-        enter_loop context frame ~entry clauses ~changed:(changed_places frame body) body
+        enter_loop context frame ~entry clauses ~changed:(loop_changed ?driven frame body) body
       in
-      let costs = start.loop_costs and head = start.havocked in
+      let costs = start.loop_costs and head = loop_bindings ?driven start.havocked in
       (* The [n]th iteration, from 0, has the index [low + n]. *)
       let count =
         Costs.normalize
@@ -9225,7 +9265,7 @@ and each_loop ?driven context frame (node : statement) (pattern : pattern) (yiel
   in
   (* A loop over a collection [mut] changes the collection too. *)
   let changed =
-    let in_body = changed_places frame body in
+    let in_body = loop_changed ?driven frame body in
     List.fold_left
       (fun (changed : changed) (passed : passed) ->
         match (passed.mode, passed.operand) with
@@ -9287,7 +9327,7 @@ and pulled_loop ?driven context frame (node : statement) pattern (cursor_place :
     oblige context frame Termination span
       "This loop may not end: the method its cursor comes from has no `time` clause."
       (Logic.Boolean false);
-  let changed = with_cursor frame node (changed_places frame body) cursor_place in
+  let changed = with_cursor frame node (loop_changed ?driven frame body) cursor_place in
   let at_head = ref cursor in
   receiving_loop ?driven context frame node pattern clauses body ~element_type:cursor_method.element
     ~changed
@@ -9374,7 +9414,7 @@ and own_cursor_loop ?driven context frame (node : statement) (pattern : pattern)
       (List.map (fun measure -> snd (value context { at with checking = false } measure)))
       measures
   in
-  let changed = with_cursor frame node (changed_places frame body) cursor_place in
+  let changed = with_cursor frame node (loop_changed ?driven frame body) cursor_place in
   receiving_loop ?driven context frame node pattern clauses body ~element_type ~changed
     ~each_iteration:(fun ~head ~ends ->
       (* The pull is part of the iteration, so the measure is compared from
@@ -9438,7 +9478,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?driven context
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
   let loop = enter_loop context frame ~entry clauses ~changed body in
-  let costs = loop.loop_costs and head = loop.havocked in
+  let costs = loop.loop_costs and head = loop_bindings ?driven loop.havocked in
   let before = start head in
   let iterations = sequence_length context element_type before in
   let head =
@@ -9498,15 +9538,15 @@ and havoc_parts context frame =
 
 (* The MIR
 
-   The body of the definition proven runs forward from its MIR, which has
-   decided the order of evaluation, the scope of each temporary and
-   binding, and the flow of patterns and early exits, as code generation
-   and the ownership check read them. Each computation that the core form
-   names, such as a call, an operator, or a constructor, is read through
-   the same functions as in a specification, given the values of its
-   operands, so code and specification give the same term. A body that
-   uses a form the MIR's reading does not cover yet is read from its core
-   form. *)
+   A body that runs, a function's, a test's, or a lambda's, runs forward
+   from its MIR, which has decided the order of evaluation, the scope of
+   each temporary and binding, and the flow of patterns and early exits, as
+   code generation and the ownership check read them. Each computation that
+   the core form names, such as a call, an operator, or a constructor, is
+   read through the same functions as in a specification, given the values
+   of its operands, so code and specification give the same term. Ghost
+   code, a proof's body and a [proof] block, is read from its core form, as
+   a specification is. *)
 
 (* The core form's nodes of the definition proven, by what the MIR names
    them by. *)
@@ -9515,9 +9555,10 @@ type core_index = {
   statements : (Core.origin, statement) Hashtbl.t;
   conditions : (Core.origin, unit) Hashtbl.t;  (** The condition of each [if], by its origin *)
   unreachable : (Core.origin, unit) Hashtbl.t;  (** Each [unreachable] written *)
-  enclosing : (Core.id, expression) Hashtbl.t;
-      (** The slice or the tagged template around each call that is one's *)
   names : (Core.local, string) Hashtbl.t;  (** Each binding's name *)
+  patterns : (Core.id, pattern) Hashtbl.t;  (** Each pattern, whose [equal] a call of the MIR is *)
+  quantifiers : (Core.origin, expression) Hashtbl.t;
+      (** Each quantifier, which the MIR runs as a loop, by its origin *)
 }
 
 let core_index (definition : Core.definition) =
@@ -9527,8 +9568,9 @@ let core_index (definition : Core.definition) =
       statements = Hashtbl.create 16;
       conditions = Hashtbl.create 8;
       unreachable = Hashtbl.create 2;
-      enclosing = Hashtbl.create 4;
       names = Hashtbl.create 16;
+      patterns = Hashtbl.create 8;
+      quantifiers = Hashtbl.create 2;
     }
   in
   Core_walk.definition
@@ -9541,83 +9583,18 @@ let core_index (definition : Core.definition) =
              match node.kind with
              | If { condition; _ } -> Hashtbl.replace index.conditions condition.origin ()
              | Unreachable -> Hashtbl.replace index.unreachable node.origin ()
-             | Slice { call } | Template { call; _ } -> Hashtbl.replace index.enclosing call.id node
+             | Quantified _ -> Hashtbl.replace index.quantifiers node.origin node
              | _ -> ());
          statement = (fun (node : statement) -> Hashtbl.replace index.statements node.origin node);
          pattern =
            (fun (pattern : pattern) ->
+             Hashtbl.replace index.patterns pattern.id pattern;
              match pattern.kind with
              | Bind { local; name; _ } -> Hashtbl.replace index.names local name
              | _ -> ());
        })
     definition;
   index
-
-(* Whether the MIR's reading covers every form of a body. *)
-let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mir.t) =
-  let core_call (call : Mir.call) =
-    match Hashtbl.find_opt index.expressions call.node with
-    | Some { kind = Call { callee; _ }; _ } -> (
-        match (callee, call.callee) with
-        | Indirect _, Indirect _ -> true
-        | Indirect _, _ | _, Indirect _ -> false
-        | _ -> true)
-    | _ -> false
-  in
-  let rvalue (value : Mir.rvalue) ~node =
-    match value with
-    | Operand _ | Compare _ | Not _ | Is_variant _ | Copy _ | Value_parameter _ -> true
-    | Operation _ | Construct _ | Convert _ | Function_value _ | To_any _ -> (
-        match Option.bind node (Hashtbl.find_opt index.expressions) with
-        | Some { kind = Operator _ | Construct _ | Convert _ | Function_value _ | To_any _; _ } ->
-            true
-        | _ -> false)
-    | Array _ -> (
-        match Option.bind node (Hashtbl.find_opt index.expressions) with
-        | Some { kind = Collection_literal _; _ } -> true
-        | _ -> false)
-    | Lambda _ -> (
-        match Option.bind node (Hashtbl.find_opt index.expressions) with
-        | Some { kind = Lambda _; _ } -> true
-        | _ -> false)
-  in
-  let statement (statement : Mir.statement) =
-    match statement.kind with
-    | Assign { value; node; _ } -> rvalue value ~node
-    | Call { call; _ } -> core_call call
-    | Live _ | Dead _ | Loan_start _ | Loan_end _ | Echo _ | Proof _ | Matched _ -> true
-    | Assert _ | Ghost_assert _ -> (
-        match Hashtbl.find_opt index.statements statement.origin with
-        | Some { kind = Assert _; _ } -> true
-        | _ -> false)
-    | Lend { call; _ } -> core_call call
-    | Slice { call; _ } | Template { call; _ } -> Hashtbl.mem index.enclosing call.node
-    | Pull _ | Provide _ | Provide_end -> true
-    | Fork_start { concurrent; _ } -> not concurrent
-    | Fork_end _ -> true
-  in
-  let terminator (ending : Mir.terminator) =
-    match ending with
-    | Goto _ | Branch _ | Switch_variant _ | Return _ | Unreachable | Todo | Iteration_end -> true
-    | For { loop; _ } -> (
-        match Hashtbl.find_opt index.statements loop.origin with
-        | Some { kind = For _; _ } -> true
-        | _ -> false)
-    | Yield _ -> true
-    | Exit_tasks _ -> false
-  in
-  ignore parameters;
-  Array.for_all
-    (fun (block : Mir.basic_block) ->
-      (match block.Mir.header with
-        | None -> true
-        | Some natural -> (
-            match Hashtbl.find_opt index.statements natural.loop.origin with
-            | Some { kind = While _; _ } -> true
-            | _ -> false))
-      && List.for_all statement block.Mir.statements
-      && terminator block.Mir.terminator)
-    mir.body.blocks
 
 (* Where a body's run is: the core form's nodes, the body, and the locals
    that are a place they were bound to, to be changed there. *)
@@ -9773,6 +9750,41 @@ let write_place context frame run (place : Mir.place) new_value =
       | Self -> { frame with self = Some whole }
       | key -> bind frame key (substituted context frame run.body.locals.(local).type_) whole)
 
+(* The values a loop's body may change, as the MIR holds them: a binding of
+   a part to change is the part, so the local or [self] the part is in
+   changes instead. *)
+let mir_changed run (changed : changed) =
+  List.fold_left
+    (fun (changed : changed) local ->
+      let bound =
+        Hashtbl.fold
+          (fun mir_local place found ->
+            match run.body.locals.(mir_local).kind with
+            | Source { local = core; _ } when core = local -> Some place
+            | _ -> found)
+          run.places None
+      in
+      match bound with
+      | None -> changed
+      | Some place -> (
+          let changed =
+            {
+              changed with
+              changed_locals = List.filter (fun other -> other <> local) changed.changed_locals;
+            }
+          in
+          match (expanded run place).root with
+          | Local root -> (
+              match mir_key run root with
+              | Self -> { changed with changes_self = true }
+              | key ->
+                  {
+                    changed with
+                    changed_locals = List.sort_uniq compare (key :: changed.changed_locals);
+                  })
+          | Constant _ -> changed))
+    changed changed.changed_locals
+
 let mir_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
@@ -9885,6 +9897,16 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~node ~span =
               ~arguments:(List.map Option.some arguments) ~fallback:(fun () ->
                 if float_format ty <> None then arrive context frame "operator" ty
                 else unsupported (at frame node) "this operator") )
+      | Call called -> (
+          (* A call of the intrinsic, which the MIR reads as the same
+             operation as the operator, through the same reading as the core
+             form's call. *)
+          let given position =
+            Option.map (fun value -> (operand value, None, None)) (List.nth_opt operands position)
+          in
+          match resolved_call ~given context frame node called with
+          | Some (frame, term) -> (frame, term)
+          | None -> (frame, arrive context frame "result" (type_of context frame node)))
       | _ -> bug "a primitive operation whose core node is no operator")
   | Construct { variant; fields } -> (
       let node = core_node () in
@@ -9936,14 +9958,29 @@ let mir_arguments context frame run (arguments : Mir.argument list) position =
   | Some (Passed { value; mode; _ }) -> (
       let term = reading_callback context (fun () -> mir_operand context frame run value) in
       match (mode, value) with
-      | Types.Mut, Borrow { place = { root = Local local; projections = [] }; _ }
+      | ( Types.Mut,
+          ( Borrow { place = { root = Local local; projections = [] }; _ }
+          | Use { place = { root = Local local; projections = [] }; _ } ) )
         when Hashtbl.mem run.slices local ->
-          let node, base, low, high = Hashtbl.find run.slices local in
+          let node, _, low, high = Hashtbl.find run.slices local in
+          (* The collection the slice views, read where the code names it,
+             since the callee's changes reach it there. *)
           let reread frame =
-            let _, viewed, _, _ =
-              mir_slice context { frame with checking = false } run node base low (Some high)
-            in
-            viewed
+            match node.kind with
+            | Slice { call } ->
+                let base, _, _ = slice_parts call in
+                let frame = { frame with checking = false } in
+                let _, viewed, _, _ =
+                  slice_run
+                    ~given:
+                      ( place_type context frame base,
+                        snd (place_value context frame base),
+                        low,
+                        Some high )
+                    context frame node base ~start:None ~stop:None ~inclusive:false
+                in
+                viewed
+            | _ -> bug "a slice whose core node is no slice"
           in
           Some (term, Some { read = reread; write = (fun frame _ -> frame) }, Some (low, high))
       | Types.Mut, Borrow { place; _ } ->
@@ -9966,7 +10003,23 @@ let mir_call context frame run (call : Mir.call) =
       match resolved_call ~given ?callee context frame node called with
       | Some _ when Types.equal (type_of context frame node) Types.Never -> None
       | translated -> translated)
-  | _ -> bug "a call of the MIR whose core call is not known"
+  | _ -> (
+      (* The [equal] of a pattern that tests a value for equality, which
+         the MIR calls: a string pattern matches the text's bytes, and any
+         other is the type's equality, as the core form's reading has
+         them. *)
+      match (Hashtbl.find_opt run.index.patterns call.node, call.arguments) with
+      | ( Some ({ kind = Equal_to { value = written; _ }; _ } as pattern),
+          [ Passed { value = tested; _ }; Passed { value = expected; _ } ] ) ->
+          let ty = mir_operand_type context frame tested in
+          let tested = mir_operand context frame run tested in
+          let matched =
+            match written.kind with
+            | String _ -> fst (pattern_match context frame pattern tested ty)
+            | _ -> equal_of context frame ty tested (mir_operand context frame run expected)
+          in
+          Some (frame, matched)
+      | _ -> bug "a call of the MIR whose core call is not known")
 
 (* A lending call, whose part [part] holds. A part lent to change takes the
    callee's contract at its end too, given its final value: a method lent
@@ -10088,6 +10141,23 @@ let rec mir_written_back context run ty (operand : Mir.operand) frame after =
       | None, _ -> frame)
   | Use _ | Take _ | Constant _ -> frame
 
+(* The frame with each binding of a part to change holding the part's
+   value, for the core form's expressions that name the binding: a loop's
+   clauses and measure, and the specifications read here. A change through
+   the binding goes to the part. *)
+let mir_bindings context frame run =
+  Hashtbl.fold
+    (fun local place frame ->
+      match run.body.locals.(local).kind with
+      | Source { local = core; _ } -> (
+          try
+            bind frame core
+              (substituted context frame run.body.locals.(local).type_)
+              (read_place context { frame with checking = false } run place)
+          with Unsupported _ | Foreign_unsupported _ -> frame)
+      | Temporary | Lent _ -> frame)
+    run.places frame
+
 let mir_statement context frame run (statement : Mir.statement) =
   let span = span_of frame.source statement.origin in
   match statement.kind with
@@ -10135,6 +10205,7 @@ let mir_statement context frame run (statement : Mir.statement) =
             | None -> frame)
           frame (List.rev locals)
       in
+      List.iter (Hashtbl.remove run.places) locals;
       Some
         {
           frame with
@@ -10172,7 +10243,7 @@ let mir_statement context frame run (statement : Mir.statement) =
           :: context.decisions;
       Some frame
   | Slice { destination; base; call } -> (
-      match Hashtbl.find_opt run.index.enclosing call.node with
+      match Hashtbl.find_opt run.index.expressions call.node with
       | Some node ->
           let given = mir_arguments context frame run call.arguments in
           let low = match given 1 with Some (term, _, _) -> term | None -> Logic.int 0 in
@@ -10185,7 +10256,7 @@ let mir_statement context frame run (statement : Mir.statement) =
           Some (write_place context frame run destination viewed)
       | None -> bug "a slice of the MIR whose core slice is not known")
   | Template { destination; literals; call } -> (
-      match Hashtbl.find_opt run.index.enclosing call.node with
+      match Hashtbl.find_opt run.index.expressions call.node with
       | Some ({ kind = Template { call = template_call; _ }; _ } as node) ->
           let template =
             match mir_arguments context frame run call.arguments 0 with
@@ -10235,18 +10306,16 @@ let mir_statement context frame run (statement : Mir.statement) =
   | Fork_start { concurrent = false; _ } | Fork_end _ ->
       (* Branches are disjoint, so they can run in order. *)
       Some frame
-  | Fork_start { concurrent = true; _ } -> bug "a form the MIR's reading does not cover"
+  | Fork_start { concurrent = true; _ } -> Some frame
 
-(* The MIR of the body of a function proven, with its core form's nodes,
-   where the MIR's reading covers it. A function for specifications only,
-   and a proof, never runs, so it has no MIR. *)
-let mir_of context (source : source) parameters ~runs =
-  if runs && source.key = Some context.home then
-    match Mir.of_definition source.core.definition with
-    | Some mir ->
-        let index = core_index source.core.definition in
-        if mir_covers index parameters mir then Some (index, mir) else None
-    | None -> None
+(* The MIR of a body that runs, with its core form's nodes. A function for
+   specifications only, and a proof, never runs, so it has no MIR, and is
+   read from its core form, as ghost code is. *)
+let mir_of (source : source) ~runs =
+  if runs then
+    Option.map
+      (fun mir -> (core_index source.core.definition, mir))
+      (Mir.of_definition source.core.definition)
   else None
 
 (* The blocks a set of blocks reaches, the set included, without entering
@@ -10289,7 +10358,7 @@ let loop_blocks (body : Mir.body) header (natural : Mir.natural_loop) =
    runs once every block that jumps to it has, but for a loop's back edges:
    a [while] loop runs as the core form's does, with its changes havocked
    at its head and its invariants checked at the end of each iteration. *)
-let mir_run context start index (body : Mir.body) =
+let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body) =
   (* A named function passed directly as an argument is checked against the
      parameter's function type at the call, as the core form's reading does,
      and not as a value used on its own. *)
@@ -10313,6 +10382,54 @@ let mir_run context start index (body : Mir.body) =
             called.arguments
       | _ -> ())
     index.expressions;
+  (* Each lambda the body makes runs its own body from its MIR, with its
+     parameters given the arguments. *)
+  Array.iter
+    (fun (block : Mir.basic_block) ->
+      List.iter
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Assign { value = Lambda { body = lambda; _ }; node = Some id; _ } ->
+              let lambda_body = lambdas.(lambda) in
+              let run_body inside arguments =
+                (* The enclosing body's temporaries are not the lambda's:
+                   its own are numbered from zero too. *)
+                let inside =
+                  {
+                    inside with
+                    locals =
+                      Locals.filter
+                        (fun key _ ->
+                          match key with Core.Synthetic number -> number >= 0 | _ -> true)
+                        inside.locals;
+                  }
+                in
+                let run =
+                  {
+                    index;
+                    body = lambda_body;
+                    places = Hashtbl.create 1;
+                    lends = Hashtbl.create 1;
+                    constructs = Hashtbl.create 1;
+                    slices = Hashtbl.create 1;
+                    provides = Hashtbl.create 1;
+                    passed_lambdas = Hashtbl.create 1;
+                  }
+                in
+                let inside =
+                  List.fold_left2
+                    (fun inside parameter argument ->
+                      bind inside (mir_key run parameter)
+                        (substituted context inside lambda_body.locals.(parameter).type_)
+                        argument)
+                    inside lambda_body.parameters arguments
+                in
+                mir_run context inside index ~lambdas lambda_body
+              in
+              context.lambda_bodies <- (id, run_body) :: context.lambda_bodies
+          | _ -> ())
+        block.statements)
+    body.blocks;
   let passed_lambdas = Hashtbl.create 2 in
   Hashtbl.iter
     (fun _ (node : expression) ->
@@ -10356,6 +10473,70 @@ let mir_run context start index (body : Mir.body) =
   in
   let count = Array.length body.blocks in
   let incoming = Array.make count [] in
+  (* Each early exit from a branch of a [concurrent] block, by its block: the
+     tasks it leaves and the exit. A path that takes one has its flag set
+     and, for a [return] with a value, the value, which it carries through
+     the later branches to where its block ends. *)
+  let task_exits =
+    List.filter_map
+      (fun (position, (block : Mir.basic_block)) ->
+        match block.terminator with
+        | Exit_tasks { tasks = { task = Branch _; _ } :: _ as tasks; exit } ->
+            Some (block.terminator_origin, (position, tasks, exit))
+        | _ -> None)
+      (List.mapi (fun position block -> (position, block)) (Array.to_list body.blocks))
+  in
+  let flagged_position origin =
+    match List.assoc_opt origin task_exits with
+    | Some (position, _, _) -> position
+    | None -> bug "an early exit of the MIR that is not known"
+  in
+  let exit_flag position = Core.Synthetic (-1_000_000 - position)
+  and exit_value position = Core.Synthetic (-2_000_000 - position) in
+  let start =
+    List.fold_left
+      (fun frame (_, (position, _, (exit : Mir.task_exit))) ->
+        let frame = bind frame (exit_flag position) Types.bool (Logic.Boolean false) in
+        match exit with
+        | Exit_return (Some returned) ->
+            let ty = mir_operand_type context frame returned in
+            bind frame (exit_value position) ty (arrive context frame "returned" ty)
+        | _ -> frame)
+      start task_exits
+  in
+  (* Where a [concurrent] block ends, each path that took an early exit from
+     one of its branches takes the exit, or, if it leaves tasks around the
+     block too, goes on from where the next of them ends. *)
+  let concurrent_end frame fork ~jump ~iteration_end =
+    List.fold_left
+      (fun frame (_, (position, (tasks : Mir.left_task list), (exit : Mir.task_exit))) ->
+        let rec from = function
+          | (left : Mir.left_task) :: outer -> (
+              match left.task with
+              | Branch { block; _ } when block = fork -> Some outer
+              | _ -> from outer)
+          | [] -> None
+        in
+        match from tasks with
+        | None -> frame
+        | Some outer ->
+            let flag = Locals.find (exit_flag position) frame.locals in
+            let exiting = restrict frame flag in
+            (match (outer, exit) with
+            | { task_end = Some target; _ } :: _, _ -> jump target exiting
+            | _ :: _, _ -> bug "an early exit to a task with no end"
+            | [], Exit_return returned ->
+                let value =
+                  match returned with
+                  | Some _ -> Locals.find_opt (exit_value position) exiting.locals
+                  | None -> None
+                in
+                context.returns <- (exiting, value) :: context.returns
+            | [], Exit_to target -> jump target exiting
+            | [], Exit_iteration -> iteration_end exiting);
+            restrict frame (Logic.not_ flag))
+      frame task_exits
+  in
   let ran = Array.make count false in
   let rec terminator frame (block : Mir.basic_block) ~jump ~iteration_end =
     let span = span_of frame.source block.terminator_origin in
@@ -10432,12 +10613,43 @@ let mir_run context start index (body : Mir.body) =
                   (match iteration with
                   | Pull { cursor; _ } -> Some (mir_passed_place context run cursor)
                   | Range _ | Yielding _ -> None);
+                places = mir_changed run;
+                bindings = (fun frame -> mir_bindings context frame run);
               }
             in
             match for_ ~driven context frame node pattern written clauses written_body with
             | Some ended -> jump after ended
             | None -> ())
-        | _ -> bug "a loop of the MIR whose core loop is not known")
+        | _ -> (
+            (* A quantifier in code, which the MIR runs as a loop and the
+               logic reads as the quantifier: its value goes to the local the
+               loop decides, and the loop's body is not run. *)
+            match Hashtbl.find_opt index.quantifiers loop.origin with
+            | Some { kind = Quantified { quantifier; binder; body = predicate }; _ } -> (
+                let decided =
+                  List.find_map
+                    (fun (statement : Mir.statement) ->
+                      match statement.kind with
+                      | Assign
+                          {
+                            target = { root = Local local; projections = [] };
+                            value = Operand (Constant { value = Boolean _; _ });
+                            _;
+                          }
+                        when statement.origin = loop.origin ->
+                          Some local
+                      | _ -> None)
+                    (List.rev block.statements)
+                in
+                match (decided, quantified context frame quantifier binder predicate) with
+                | Some local, Some (after_frame, term) ->
+                    jump after
+                      (write_place context after_frame run
+                         { root = Local local; projections = [] }
+                         term)
+                | None, _ -> bug "a quantifier of the MIR with no local it decides"
+                | _, None -> ())
+            | _ -> bug "a loop of the MIR whose core loop is not known"))
     | Yield { mode; part; resume } -> (
         match Hashtbl.find_opt index.statements block.terminator_origin with
         | Some ({ kind = Yield { part = written; _ }; _ } as node) -> (
@@ -10454,13 +10666,48 @@ let mir_run context start index (body : Mir.body) =
             | Some after -> jump resume after
             | None -> ())
         | _ -> bug "a yield of the MIR whose core yield is not known")
-    | Exit_tasks _ -> bug "a form the MIR's reading does not cover"
+    | Exit_tasks { tasks = [ { task = Iteration { loop }; _ } ]; exit } ->
+        (* The iterations after it are cancelled and run to their ends, so
+           this one ends here, and the loop ends when they all have: a
+           [break] is then where the loop ends, and a [return] is taken
+           there, with a value known by its type. *)
+        (match exit with
+        | Exit_return returned ->
+            context.iteration_returns <-
+              (loop, Option.map (mir_operand_type context frame) returned)
+              :: context.iteration_returns
+        | Exit_to _ | Exit_iteration -> ());
+        iteration_end frame
+    | Exit_tasks { tasks = { task_end = Some target; _ } :: _; exit } ->
+        (* The exit is taken where the block it leaves ends, after the other
+           branches, which are cancelled and run to their own ends: the path
+           goes on from the task's end, with its flag set. *)
+        let position = flagged_position block.terminator_origin in
+        let frame = bind frame (exit_flag position) Types.bool (Logic.Boolean true) in
+        let frame =
+          match exit with
+          | Exit_return (Some returned) ->
+              bind frame (exit_value position)
+                (mir_operand_type context frame returned)
+                (mir_operand context frame run returned)
+          | _ -> frame
+        in
+        jump target frame
+    | Exit_tasks _ ->
+        unsupported span
+          "an early exit from an iteration of a `concurrent for` loop to tasks around it"
   and run_block position frame ~jump ~iteration_end =
     let block = body.blocks.(position) in
     let ended =
       List.fold_left
-        (fun frame statement ->
-          Option.bind frame (fun frame -> mir_statement context frame run statement))
+        (fun frame (statement : Mir.statement) ->
+          Option.bind frame (fun frame ->
+              match statement.kind with
+              | Fork_end { fork } -> Some (concurrent_end frame fork ~jump ~iteration_end)
+              | _ ->
+                  Option.map
+                    (fun frame -> mir_bindings context frame run)
+                    (mir_statement context frame run statement)))
         (Some frame) block.statements
     in
     Option.iter (fun frame -> terminator frame block ~jump ~iteration_end) ended
@@ -10498,9 +10745,10 @@ let mir_run context start index (body : Mir.body) =
     check_invariants context frame clauses ~when_:"on entry to the loop";
     let { loop_costs = costs; fresh_mark = mark; facts_mark; preserved; havocked = head } =
       enter_loop context frame ~entry:frame clauses
-        ~changed:(changed_places ~condition frame loop_body)
+        ~changed:(mir_changed run (changed_places ~condition frame loop_body))
         loop_body
     in
+    let head = mir_bindings context head run in
     let iterations = iterations_so_far context head costs in
     let head = loop_head context head costs ~iterations in
     assume_invariants context head clauses;
@@ -10729,6 +10977,7 @@ let new_context database ~home ~current ~terminates ~measures =
     passed_values = [];
     reading_callback = false;
     validating = [];
+    lambda_bodies = [];
     ranking =
       terminates && measures = []
       && Call_graph.recursive database ~package:(Path.package current) current;
@@ -11062,7 +11311,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
     promised;
   let finished =
     match
-      mir_of context source parameters
+      mir_of source
         ~runs:
           ((not proof)
           &&
@@ -11071,7 +11320,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
           | None -> false)
     with
     | Some (index, mir) ->
-        mir_run context start index mir.body;
+        mir_run context start index ~lambdas:mir.lambdas mir.body;
         None
     | None -> block_value context start body
   in
@@ -11344,7 +11593,11 @@ let test database (source : source) ~path =
   let home = home source in
   let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
-  | Test body -> ignore (block_value context (empty_frame source) body)
+  | Test body -> (
+      match mir_of source ~runs:true with
+      | Some (index, mir) ->
+          mir_run context (empty_frame source) index ~lambdas:mir.lambdas mir.body
+      | None -> ignore (block_value context (empty_frame source) body))
   | _ -> ());
   outcome context
 

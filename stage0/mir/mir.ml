@@ -152,6 +152,18 @@ type task_exit =
   | Exit_to of block
   | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
+type left_task = {
+  task : Core.task;
+  ends : statement list;
+      (** The ends of the scopes between it and the next task, or the exit's target, which run in
+          the code around the task once it has ended *)
+  task_end : block option;
+      (** Where the task's code ends, which the other tasks of its group go on from: the start of
+          the next branch of a [concurrent] block, or the block's end. An iteration of a
+          [concurrent for] has none. *)
+}
+(** A task an early exit leaves. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
@@ -163,11 +175,7 @@ type terminator =
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : operand; resume : block }
   | Return of operand option
-  | Exit_tasks of {
-      tasks : (Core.task * statement list) list;
-      exit : task_exit;
-      task_end : block option;
-    }  (** An early exit from [concurrent] code: these tasks end, then the exit is taken. *)
+  | Exit_tasks of { tasks : left_task list; exit : task_exit }
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
@@ -703,13 +711,20 @@ let rec expression b (node : Core.expression) : operand option =
                 (fun block ->
                   Hashtbl.replace b.task_exits block (List.combine tasks (around starts)))
                 b.current;
-              let task_end =
-                match tasks with
-                | innermost :: _ -> Option.bind (List.assoc_opt innermost b.tasks) snd
-                | [] -> None
-              in
               terminate b
-                (Exit_tasks { tasks = List.map (fun task -> (task, [])) tasks; exit; task_end })
+                (Exit_tasks
+                   {
+                     tasks =
+                       List.map
+                         (fun task ->
+                           {
+                             task;
+                             ends = [];
+                             task_end = Option.bind (List.assoc_opt task b.tasks) snd;
+                           })
+                         tasks;
+                     exit;
+                   })
                 origin)
             task_exit;
           None
@@ -1673,19 +1688,21 @@ and finish b ~parameters : body =
         in
         let terminator =
           match (terminator, Hashtbl.find_opt b.task_exits index) with
-          | Exit_tasks { exit; task_end; _ }, Some tasks ->
+          | Exit_tasks { exit; tasks = left }, Some tasks ->
               Exit_tasks
                 {
-                  task_end;
                   tasks =
-                    List.map
-                      (fun (task, scopes) ->
-                        ( task,
-                          List.concat_map
-                            (fun (scope, loans) ->
-                              scope_ends { scope with loans } terminator_origin)
-                            scopes ))
-                      tasks;
+                    List.map2
+                      (fun (left : left_task) (_, scopes) ->
+                        {
+                          left with
+                          ends =
+                            List.concat_map
+                              (fun (scope, loans) ->
+                                scope_ends { scope with loans } terminator_origin)
+                              scopes;
+                        })
+                      left tasks;
                   exit;
                 }
           | _ -> terminator
@@ -1725,12 +1742,14 @@ and canonical (blocks : basic_block array) =
           { place; cases = List.map (fun (variant, block) -> (variant, target block)) cases }
     | For loop -> For { loop with body = target loop.body; after = target loop.after }
     | Yield yielded -> Yield { yielded with resume = target yielded.resume }
-    | Exit_tasks { tasks; exit; task_end } ->
+    | Exit_tasks { tasks; exit } ->
         Exit_tasks
           {
-            tasks;
+            tasks =
+              List.map
+                (fun (left : left_task) -> { left with task_end = Option.map target left.task_end })
+                tasks;
             exit = (match exit with Exit_to block -> Exit_to (target block) | other -> other);
-            task_end = Option.map target task_end;
           }
     | (Iteration_end | Return _ | Unreachable | Todo) as other -> other
   in
@@ -1754,9 +1773,9 @@ and successors = function
   | Switch_variant { cases; _ } -> List.map snd cases
   | For { body; after; _ } -> [ body; after ]
   | Yield { resume; _ } -> [ resume ]
-  | Exit_tasks { exit; task_end; _ } ->
+  | Exit_tasks { exit; tasks } -> (
       (match exit with Exit_to block -> [ block ] | Exit_return _ | Exit_iteration -> [])
-      @ Option.to_list task_end
+      @ match tasks with innermost :: _ -> Option.to_list innermost.task_end | [] -> [])
   | Iteration_end | Return _ | Unreachable | Todo -> []
 
 let of_definition (definition : Core.definition) =
