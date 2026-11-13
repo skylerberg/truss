@@ -53,9 +53,6 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
    method inlined into it, each with its own tables and names. *)
 type frame = {
   code : code;
-  bindings : (Syntax.id, Lir.place) Hashtbl.t;
-  synthetic : (int, Lir.place) Hashtbl.t;
-      (** The places of the core form's synthetic locals, by number *)
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
       (** In an inlined lending or yielding method, the action of a [yield] of a place. [owned] is
@@ -196,8 +193,6 @@ type state = {
 let frame_of code ~inlined =
   {
     code;
-    bindings = Hashtbl.create 16;
-    synthetic = Hashtbl.create 4;
     self_place = None;
     on_yield = None;
     yield_into = None;

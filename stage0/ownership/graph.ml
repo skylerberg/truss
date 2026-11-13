@@ -604,7 +604,7 @@ let rvalue builder (value : Mir.rvalue) origin : held =
       nothing
   | Lambda { captures; _ } -> (
       List.iter
-        (fun (capture : Core.capture) ->
+        (fun (capture : Mir.capture) ->
           emit_ builder (Read { root = Local capture.local; steps = [] }) origin)
         captures;
       match captures with
@@ -616,7 +616,7 @@ let rvalue builder (value : Mir.rvalue) origin : held =
             views =
               { place = { root = Environment; steps = [] }; copied_out = false }
               :: List.map
-                   (fun (capture : Core.capture) ->
+                   (fun (capture : Mir.capture) ->
                      { place = { root = Local capture.local; steps = [] }; copied_out = false })
                    captures;
           })

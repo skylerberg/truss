@@ -62,6 +62,10 @@ type call = {
   node : Core.id;  (** The core form's [Call]. *)
 }
 
+type capture = { local : Core.local; type_ : Types.ty; place : place }
+(** A local that a lambda captures: its core local, its type, and its place in the enclosing body.
+*)
+
 type rvalue =
   | Operand of operand
   | Operation of {
@@ -83,8 +87,9 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand  (** A [copy()] that the compiler implements. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : Core.capture list }
-      (** A function value made from a lambda. [body] indexes {!t.lambdas}. *)
+  | Lambda of { body : int; captures : capture list }
+      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
+          the order of its body's {!body.captures}. *)
   | Value_parameter of Types.parameter
 
 type provided = {
@@ -193,6 +198,7 @@ type basic_block = {
 
 type body = {
   parameters : local list;
+  captures : local list;
   locals : local_info array;
   blocks : basic_block array;  (** The entry is block 0. *)
 }
@@ -521,7 +527,20 @@ let rec expression b (node : Core.expression) : operand option =
       | Value_parameter parameter -> hold (Value_parameter parameter)
       | Lambda { parameters; captures; body; _ } ->
           let index = lambda b parameters captures body in
-          hold (Lambda { body = index; captures })
+          hold
+            (Lambda
+               {
+                 body = index;
+                 captures =
+                   List.map
+                     (fun (capture : Core.capture) ->
+                       {
+                         local = capture.local;
+                         type_ = capture.type_;
+                         place = at (source b capture.local);
+                       })
+                     captures;
+               })
       | Construct { variant; fields } ->
           let* fields = construct_fields b fields in
           hold (Construct { variant; fields })
@@ -1670,11 +1689,16 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
 
 and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (body : Core.block) =
   let inner = create ~lambdas:b.lambdas in
-  List.iter
-    (fun (capture : Core.capture) ->
-      Hashtbl.replace inner.sources capture.local
-        (new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0))
-    captures;
+  let capture_locals =
+    List.map
+      (fun (capture : Core.capture) ->
+        let local =
+          new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0
+        in
+        Hashtbl.replace inner.sources capture.local local;
+        local)
+      captures
+  in
   let entry = new_block inner in
   start inner entry;
   let parameter_locals =
@@ -1694,11 +1718,11 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
         Option.iter (fun value -> return_ inner (Some value) 0) (block inner body);
         locals)
   in
-  let body = finish inner ~parameters:parameter_locals in
+  let body = finish inner ~parameters:parameter_locals ~captures:capture_locals in
   b.lambdas := body :: !(b.lambdas);
   List.length !(b.lambdas) - 1
 
-and finish b ~parameters : body =
+and finish ?(captures = []) b ~parameters : body =
   let blocks =
     Array.init b.block_count (fun index ->
         let pending = Hashtbl.find b.pending index in
@@ -1735,6 +1759,7 @@ and finish b ~parameters : body =
   in
   {
     parameters;
+    captures;
     locals = Array.init b.local_count (Hashtbl.find b.infos);
     blocks = canonical blocks;
   }
@@ -1820,6 +1845,52 @@ let iteration_loops (body : body) =
       | _ -> ())
     body.blocks;
   loops
+
+(* The parts of lending calls whose [Dead] some path from the entry reaches
+   without passing the [Lend]: a temporary lives to its statement's end, so
+   a lend in one arm of a [match], or on one side of [&&], leaves a path to
+   the part's end that never lent it. Its lend's end then runs only where the
+   lend did. *)
+let conditional_lends (body : body) =
+  let ends_of part (statement : statement) =
+    match statement.kind with Dead locals -> List.mem part locals | _ -> false
+  in
+  let ends_in part (block : basic_block) =
+    List.exists (ends_of part) block.statements
+    ||
+    match block.terminator with
+    | Exit_tasks { tasks; _ } ->
+        List.exists (fun (left : left_task) -> List.exists (ends_of part) left.ends) tasks
+    | _ -> false
+  in
+  let lends = ref [] in
+  Array.iteri
+    (fun index (block : basic_block) ->
+      List.iteri
+        (fun position (statement : statement) ->
+          match statement.kind with
+          | Lend { part; _ } -> lends := (part, index, position) :: !lends
+          | _ -> ())
+        block.statements)
+    body.blocks;
+  List.filter_map
+    (fun (part, lending, position) ->
+      let ended_before =
+        List.exists (ends_of part)
+          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
+      in
+      let visited = Array.make (Array.length body.blocks) false in
+      let rec reaches block =
+        block <> lending
+        && (not visited.(block))
+        && begin
+          visited.(block) <- true;
+          ends_in part body.blocks.(block)
+          || List.exists reaches (successors body.blocks.(block).terminator)
+        end
+      in
+      if ended_before || reaches 0 then Some part else None)
+    !lends
 
 let of_definition (definition : Core.definition) =
   let code =

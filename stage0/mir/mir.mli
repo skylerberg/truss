@@ -67,6 +67,10 @@ type call = {
   node : Core.id;  (** The core form's [Call]. *)
 }
 
+type capture = { local : Core.local; type_ : Types.ty; place : place }
+(** A local that a lambda captures: its core local, its type, and its place in the enclosing body.
+*)
+
 type rvalue =
   | Operand of operand
   | Operation of {
@@ -88,8 +92,9 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand  (** A [copy()] that the compiler implements. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : Core.capture list }
-      (** A function value made from a lambda. [body] indexes {!t.lambdas}. *)
+  | Lambda of { body : int; captures : capture list }
+      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
+          the order of its body's {!body.captures}. *)
   | Value_parameter of Types.parameter
 
 type provided = {
@@ -207,6 +212,9 @@ type basic_block = {
 
 type body = {
   parameters : local list;
+  captures : local list;
+      (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
+          order. *)
   locals : local_info array;
   blocks : basic_block array;  (** The entry is block 0. *)
 }
@@ -215,6 +223,11 @@ type t = { body : body; lambdas : body array }
 
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)
+
+val conditional_lends : body -> local list
+(** The parts of lending calls whose {!Dead} some path from the entry reaches without passing the
+    {!Lend}, as a lend in one arm of a [match] does. A consumer runs the lend's end only where the
+    lend ran. *)
 
 val iteration_loops : body -> (block, block) Hashtbl.t
 (** For each block whose terminator ends an iteration, an {!Iteration_end} or an {!Exit_tasks} to

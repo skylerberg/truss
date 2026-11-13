@@ -20,8 +20,6 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 
 type frame = {
   code : Definitions.code;
-  bindings : (Syntax.id, Lir.place) Hashtbl.t;
-  synthetic : (int, Lir.place) Hashtbl.t;
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
   yield_into : Lir.place option;
