@@ -307,9 +307,6 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
     enter st.context ~pulling:st.pulling ~nested:st.nested
       {
         st.frame with
-        on_yield = None;
-        yield_into = None;
-        lent_into = None;
         exit = None;
         code =
           (match output with
@@ -653,15 +650,6 @@ let template_value st template_ty texts ~site ~parts =
   list_of st parts_ty (built / Field "parts") ~site parts;
   built
 
-(* The type that a lending or yielding method gives at its [yield], for the
-   method's type arguments. *)
-let yielded_type st path type_arguments =
-  let signature = signature_of st.context path in
-  match signature.output with
-  | Yields (_, ty) | Lends (_, ty) ->
-      Monomorphic.ground st.context.monomorphic (bind signature.generics type_arguments) ty
-  | Returns _ -> bug "%s does not yield" (Path.show path)
-
 (* A yielding method's yield type, in an instance. *)
 let cursor_element context (yielding : Ground.yielding) =
   let signature = signature_of context yielding.method_ in
@@ -735,5 +723,4 @@ let boxed_cursor st (yielding : Ground.yielding) : Lir.place =
          arguments = [ Constant (Size_of cursor_ty); Constant (Alignment_of cursor_ty) ];
          result = Returned (at boxed);
        });
-  free_in_scope st (at boxed);
-  { root = Local boxed; projections = [ Deref ] }
+  at boxed

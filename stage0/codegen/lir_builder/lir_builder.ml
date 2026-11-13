@@ -32,8 +32,6 @@ let block builder =
   builder.block_count <- builder.block_count + 1;
   builder.block_count - 1
 
-let current builder = builder.current
-
 let start builder block =
   builder.current <- block;
   builder.statements <- []

@@ -234,17 +234,28 @@ type terminator =
       (** An [unreachable] written in code, which the prover shows no path reaches. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
-type natural_loop = { loop : loop; body : block; after : block }
+type natural_loop = { loop : loop; body : block; after : block option }
 (** A [while] loop, which its header block carries: its clauses, the first block of its body, which
     the loop's condition goes to where it holds, and the block it exits to where the condition does
-    not hold or a [break] leaves. *)
+    not hold or a [break] leaves, [None] where no path exits, as from [while true] with no [break].
+*)
 
 type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
   header : natural_loop option;  (** The [while] loop this block heads. *)
+  inlined : inlined list;
+      (** For a block of a method inlined into the body, the methods it was inlined from, innermost
+          first. The block's origins are the innermost method's. Empty for the body's own blocks. *)
 }
+
+and inlined = {
+  method_ : Path.t;
+  type_arguments : Types.argument list;  (** The method's, as the instance has them. *)
+  call : Core.origin;  (** Where the call is, in the code around it. *)
+}
+(** A method inlined at a call. *)
 
 type body = {
   parameters : local list;
@@ -273,6 +284,10 @@ and yielding = {
           than a temporary. *)
 }
 (** Facts of a body about its [yield]s, which a caller of a yielding method reads. *)
+
+val canonical : basic_block array -> basic_block array
+(** The blocks control can reach from the entry, block 0, in reverse postorder, numbered in that
+    order, as the builder leaves a body. *)
 
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)

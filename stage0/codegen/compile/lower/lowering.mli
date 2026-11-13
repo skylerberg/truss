@@ -3,16 +3,7 @@ type cleanup =
   | Free_pointed of Lir.place
   | Free_blocks of { place : Lir.place; variants : string list }
   | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
-  | Finish_lend of lend
   | Join_group of Lir.statement
-
-and lend = {
-  resume : Lir.block;
-  finished : Lir.block;
-  selector : Lir.local;
-  mutable ways : Lir.block list;
-  owned : Lir.place list;
-}
 
 type scope_kind = Bindings | Statement
 type scope = { kind : scope_kind; mutable owned : cleanup list }
@@ -21,9 +12,6 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 type frame = {
   code : Definitions.code;
   mutable self_place : Lir.place option;
-  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
-  yield_into : Lir.place option;
-  lent_into : (Lir.place * Ground.lent) option;
   inlined : Path.t list;
   reported : Lir.site option;
   exit : (Lir.block * int) option;
@@ -34,10 +22,10 @@ and mir_frame = {
   body : Mir.body;
   lambdas : Mir.body array;
   places : (Mir.local, Lir.place) Hashtbl.t;
-  ends : (Mir.local, cleanup list) Hashtbl.t;
-  conditionally_lent : Mir.local list;
-  mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
+  built : (Mir.local, Mir.rvalue list) Hashtbl.t;
+      (** The locals that hold no value of their own that some assignment constructs around places,
+          with each value assigned to them *)
   owner : scope option;
   returns_into : Lir.place option;
   forks : (int, int) Hashtbl.t;
@@ -45,8 +33,6 @@ and mir_frame = {
   returned : Mir.local list;
   mutable taken : Mir.place list;
 }
-
-and conditional_lend = { ran : Lir.local; mutable skipped : Lir.place list }
 
 type early_exits = {
   winner : Lir.place;
@@ -92,8 +78,6 @@ type state = {
   pulling : bool;
   mutable forks : int;
   mutable tasks : task list;
-  mutable next_range : schedule;
-  mutable inlined_owned : Lir.place list;
 }
 
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
@@ -116,8 +100,6 @@ exception Unsupported of unsupported
 val unsupported : ?at:Lir.site -> ('a, unit, string, 'b) format4 -> 'a
 val source : state -> Syntax.span -> string
 val innermost_scope : state -> scope
-val own_in_scope : state -> Lir.place -> unit
-val free_in_scope : state -> Lir.place -> unit
 val owned_local : state -> ?name:string -> scope -> Ground.ty -> Lir.place
 val temporary : state -> ?name:string -> Ground.ty -> Lir.place
 val binding : state -> ?name:string -> Ground.ty -> Lir.place
@@ -136,10 +118,8 @@ val result_place : state -> Lir.place option
 val returned_type : state -> Ground.ty option
 val clear_result : state -> unit
 val return_result : state -> Lir.terminator
-val drop_scope : state -> scope -> unit
 val leave_to : state -> int -> unit
 val open_scope : state -> scope_kind -> scope
-val pop_scope : state -> scope -> unit
 val close_scope : state -> scope -> unit
 val in_scope : state -> (unit -> 'a) -> 'a
 val in_statement : state -> (unit -> 'a) -> 'a
