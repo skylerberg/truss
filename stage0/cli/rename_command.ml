@@ -222,13 +222,9 @@ let run ~directory ~from_ ~to_ ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
   let report = Report.gather project in
-  (* References are found through type-checked code, which a package with
-     diagnostics lacks in part. *)
-  if
-    Report.refused ~json
-      ~reasons:[ "Fix these first: a rename finds references through checked code." ]
-      report
-  then 1
+  (* A rename finds references in the type checker's results, which are
+     incomplete while the code has errors, so it could miss one. *)
+  if Report.refused ~json ~reasons:[ "Cannot rename in code with errors." ] report then 1
   else
     let plan =
       match target_of project from_ with

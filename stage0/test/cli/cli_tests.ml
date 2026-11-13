@@ -1299,7 +1299,7 @@ let () =
       let _ = registry () in
       expect_refused
         (angles Fixtures.package_with_an_error_is_not_published)
-        "A package is published only when it has no errors");
+        "Cannot publish a package with errors");
   test "a package with a todo or an echo is not published, and each is listed" (fun () ->
       let registry = registry () in
       let root = angles Fixtures.package_with_a_todo_or_an_echo_is_not_published in
@@ -1311,7 +1311,7 @@ let () =
   test "a package whose test fails is not published" (fun () ->
       let registry = registry () in
       let root = angles (turn ^ Fixtures.package_whose_test_fails_is_not_published) in
-      expect_refused root "A package is published only when its tests pass";
+      expect_refused root "Cannot publish a package whose tests fail";
       expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose tests pass is published" (fun () ->
       let registry = registry () in

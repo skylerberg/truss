@@ -246,8 +246,7 @@ let run ~directory ~json =
     Report.refuse ~json report reasons;
     1
   in
-  if Report.refused ~json ~reasons:[ "A package is published only when it has no errors." ] report
-  then 1
+  if Report.refused ~json ~reasons:[ "Cannot publish a package with errors." ] report then 1
   else
     match unfinished project with
     | _ :: _ as unfinished_code ->
@@ -256,11 +255,10 @@ let run ~directory ~json =
              (fun (keyword, file, line, column) ->
                Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
              unfinished_code
-          @ [ "A package is published only when it has no `todo` and no `echo`." ])
+          @ [ "Cannot publish a package with a `todo` or an `echo`." ])
     | [] -> (
         match failed_tests project package with
-        | _ :: _ as failed ->
-            refuse (failed @ [ "A package is published only when its tests pass." ])
+        | _ :: _ as failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ])
         | [] -> (
             match decide project registry package with
             | Refused sentences -> refuse sentences
