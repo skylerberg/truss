@@ -171,11 +171,16 @@ type terminator =
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
+type natural_loop = { loop : loop; body : block; after : block }
+(** A [while] loop, which its header block carries: its clauses, the first block of its body, which
+    the loop's condition goes to where it holds, and the block it exits to where the condition does
+    not hold or a [break] leaves. *)
+
 type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
-  header : loop option;  (** The clauses of the natural loop this block heads. *)
+  header : natural_loop option;  (** The [while] loop this block heads. *)
 }
 
 type body = {
@@ -193,7 +198,7 @@ let bug format = Compiler_bug.bug ~stage:"MIR" format
 type pending = {
   mutable statements : statement list;  (** In reverse. *)
   mutable ending : (terminator * Core.origin) option;
-  mutable heading : loop option;
+  mutable heading : natural_loop option;
 }
 
 (* A scope that a jump out of must end: a block's bindings, or a statement.
@@ -1487,7 +1492,8 @@ and statement b (node : Core.statement) =
       | While { condition = tested; clauses; body; binds_lent_part } ->
           let header = new_block b and inside = new_block b and after = new_block b in
           goto b header origin;
-          (Hashtbl.find b.pending header).heading <- Some { clauses; schedule = Sequential; origin };
+          (Hashtbl.find b.pending header).heading <-
+            Some { loop = { clauses; schedule = Sequential; origin }; body = inside; after };
           start b header;
           let held =
             scoped_condition b tested ~yes:inside ~no:after
@@ -1730,7 +1736,16 @@ and canonical (blocks : basic_block array) =
   in
   Array.of_list
     (List.map
-       (fun block -> { (blocks.(block)) with terminator = renumber blocks.(block).terminator })
+       (fun block ->
+         {
+           (blocks.(block)) with
+           terminator = renumber blocks.(block).terminator;
+           header =
+             Option.map
+               (fun (natural : natural_loop) ->
+                 { natural with body = target natural.body; after = target natural.after })
+               blocks.(block).header;
+         })
        !order)
 
 and successors = function
