@@ -102,7 +102,8 @@ let check_method_location state (head : type_head) =
           else if visibility = Private && owner_module <> state.key.module_ then
             report state Method_outside_package head.span
               (Printf.sprintf
-                 "`%s` is private to its file, so its methods and constants must be in that file."
+                 "`%s` is private to its module, so its methods and constants must be in that \
+                  module."
                  (Path.show owner))
       | _ -> ())
   | _ -> ()
@@ -451,21 +452,10 @@ let check state =
             | _ -> ())
         | Some _, _, _ -> ()
         | None, Function { signature; _ }, Function_interface lowered ->
-            (* The proofs of callers in other packages read a [transparent]
-               function's body as its definition, which only the body of a
-               function in the logic is. *)
-            (if lowered.transparent && not (Types.body_is_definition lowered) then
-               let span =
-                 match signature.name with Plain_name name | Member_name (_, name) -> name.span
-               in
-               report state Not_a_definition span
-                 "A `transparent` function's body is its definition in callers' proofs, so the \
-                  function needs a `time` clause, no `uses` clause, no `mut` parameter, and a \
-                  result that it returns.");
             (match signature.name with
             | Member_name (head, _) -> check_method_location state head
             | Plain_name name ->
-                if name.text = "main" && state.key.module_.modules = [ "main" ] then
+                if name.text = "main" && state.key.module_.modules = [] then
                   check_main state lowered name.span);
             let span =
               match signature.name with Plain_name name | Member_name (_, name) -> name.span

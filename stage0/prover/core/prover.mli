@@ -43,15 +43,15 @@ val solve_ahead :
   record:((string * oracle_response) list -> unit) ->
   Query.context ->
   Solver.t ->
-  Path.module_ list ->
+  Path.file list ->
   unit
-(** Decides every definition of the modules. Each run whose code key changed since it ran, or that
+(** Decides every definition of the files. Each run whose code key changed since it ran, or that
     timed out, is run again, so that no proof keeps a value the current code would not give. Then
     the requests the outcomes are pending on are sent together, the solver's queries several at
     once, one for each core, and [record] sets {!oracle_response} to the responses, which the driver
-    does, since only the database sets a session's inputs. A caller that will ask for many modules'
-    proofs calls it once with all of them, which keeps every core busy where one module's queries
-    are few. *)
+    does, since only the database sets a session's inputs. A caller that will ask for many files'
+    proofs calls it once with all of them, which keeps every core busy where one file's queries are
+    few. *)
 
 type 'span state = {
   code : Diagnostic.Code.prover;
@@ -69,7 +69,7 @@ val states :
   record:((string * oracle_response) list -> unit) ->
   Query.context ->
   Solver.t ->
-  Path.module_ ->
+  Path.file ->
   Diagnostic.span state list
 (** Every obligation of a file's definitions, shown or not, and every definition the prover could
     not read, in the file's offsets and in order. *)
@@ -79,7 +79,7 @@ val diagnostics :
   record:((string * oracle_response) list -> unit) ->
   Query.context ->
   Solver.t ->
-  Path.module_ ->
+  Path.file ->
   Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
     the prover could not read, in the file's offsets and in order. [evaluator] runs compiled code

@@ -122,7 +122,8 @@ let () =
             ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
             ("one/main.truss", Fixtures.package_under_a_projects_root_is_in_the_project);
             ("two/truss.toml", manifest_of "two");
-            ("two/numbers.truss", Fixtures.package_under_a_projects_root_is_in_the_project_numbers);
+            ( "two/numbers/numbers.truss",
+              Fixtures.package_under_a_projects_root_is_in_the_project_numbers );
           ]
       in
       let project = Project.load (Filename.concat root "one") in
@@ -136,7 +137,7 @@ let () =
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
             ("app/main.truss", Fixtures.dependencys_failed_proof_is_the_programs);
             ("lib/truss.toml", manifest_of "lib");
-            ("lib/arith.truss", Fixtures.dependencys_failed_proof_is_the_programs_arith);
+            ("lib/arith/arith.truss", Fixtures.dependencys_failed_proof_is_the_programs_arith);
           ]
       in
       let status, output =
@@ -144,7 +145,7 @@ let () =
             Check_command.run ~directory:(Filename.concat root "app") ~fix:false ~proofs:true
               ~json:false)
       in
-      if status <> 1 || not (contains output "lib/arith.truss") then
+      if status <> 1 || not (contains output "lib/arith/arith.truss") then
         fail "the dependency's overflow is not reported: %s" output);
   test "a dependency's type error is reported without proofs" (fun () ->
       let root =
@@ -154,7 +155,8 @@ let () =
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
             ("app/main.truss", Fixtures.dependencys_type_error_is_reported_without_proofs);
             ("lib/truss.toml", manifest_of "lib");
-            ("lib/arith.truss", Fixtures.dependencys_type_error_is_reported_without_proofs_arith);
+            ( "lib/arith/arith.truss",
+              Fixtures.dependencys_type_error_is_reported_without_proofs_arith );
           ]
       in
       let status, output =
@@ -162,7 +164,8 @@ let () =
             Program_command.run ~directory:(Filename.concat root "app") ~release:false
               ~sanitize:false ~arguments:[])
       in
-      if status <> Outcome.Exit 1 || not (contains output "lib/arith.truss") then fail "%s" output);
+      if status <> Outcome.Exit 1 || not (contains output "lib/arith/arith.truss") then
+        fail "%s" output);
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
         directory
@@ -193,7 +196,7 @@ let () =
           ]
       in
       let project = Project.load root in
-      expect_strings ~expected:[ "demo::main"; "other::x" ]
+      expect_strings ~expected:[ "demo"; "other" ]
         (List.sort compare (List.map Path.show_module (Project.modules project))));
   test "a directory with its own [project] is another project's, and so is all under it" (fun () ->
       let root =
@@ -206,7 +209,7 @@ let () =
             ("examples/hello/main.truss", "");
           ]
       in
-      expect_strings ~expected:[ "demo::main" ]
+      expect_strings ~expected:[ "demo" ]
         (List.map Path.show_module (Project.modules (Project.load root)));
       expect_strings ~expected:[ "hello" ] (names (Project.load (Filename.concat root "examples"))));
   test "under a package that is a project by itself, a directory with a manifest is no part of it"
@@ -215,12 +218,12 @@ let () =
         package
           [ ("main.truss", ""); ("vendor/truss.toml", manifest_of "other"); ("vendor/x.truss", "") ]
       in
-      expect_strings ~expected:[ "demo::main" ]
+      expect_strings ~expected:[ "demo" ]
         (List.map Path.show_module (Project.modules (Project.load root)));
       expect_strings ~expected:[ "other" ] (names (Project.load (Filename.concat root "vendor"))));
   test "a directory whose name starts with a dot is not read" (fun () ->
       let root = package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
-      expect_strings ~expected:[ "demo::main" ]
+      expect_strings ~expected:[ "demo" ]
         (List.map Path.show_module (Project.modules (Project.load root))));
   test "a path is shown relative to the directory it is read from" (fun () ->
       expect_string ~expected:"../weather/forecast.truss"
@@ -302,10 +305,10 @@ let () =
               manifest_of "app" ^ "[dependencies]\nlibrary = []\nother = [\n  \"Clock\",\n]\n" );
             ("app/main.truss", Fixtures.dependency_nothing_uses_is_a_problem_which_check);
             ("library/truss.toml", manifest_of "library");
-            ( "library/numbers.truss",
+            ( "library/numbers/numbers.truss",
               Fixtures.dependency_nothing_uses_is_a_problem_which_check_numbers );
             ("other/truss.toml", manifest_of "other");
-            ( "other/nothing.truss",
+            ( "other/nothing/nothing.truss",
               Fixtures.dependency_nothing_uses_is_a_problem_which_check_nothing );
           ]
       in
@@ -332,7 +335,7 @@ let owned =
   [
     ("truss.toml", "[project]\n");
     ("geometry/truss.toml", manifest_of "acme::geometry");
-    ("geometry/vector.truss", Fixtures.owned_vector);
+    ("geometry/vector/vector.truss", Fixtures.owned_vector);
     ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
     ("app/main.truss", Fixtures.owned);
   ]
@@ -509,7 +512,7 @@ let () =
       let root =
         package [ ("main.truss", Fixtures.functions_signature_is_its_text_without_its_body) ]
       in
-      match shown root "demo::main::double" with
+      match shown root "demo::double" with
       | [ text ] ->
           expect_string ~expected:"public fn double(value: Int64) -> Int64\n  requires value < 100"
             text
@@ -518,7 +521,7 @@ let () =
       let root = package [ ("main.truss", Fixtures.type_is_shown_with_its_methods) ] in
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
-        (shown root "demo::main::Point"))
+        (shown root "demo::Point"))
 
 (* Holes *)
 
@@ -538,8 +541,7 @@ let () =
   test "a hole blocks the tests that can reach it, and only those" (fun () ->
       match holes (package [ ("main.truss", unfinished) ]) with
       | [ hole ] ->
-          expect_strings ~expected:[ "test demo::main \"renders\"" ]
-            (strings (Json.field "blocks" hole))
+          expect_strings ~expected:[ "test demo \"renders\"" ] (strings (Json.field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
       match
@@ -570,9 +572,7 @@ let () =
           ~echo:false
       with
       | Ok [ { failure = `Todo; line = 6; way; _ } ] ->
-          expect_strings
-            ~expected:[ "demo::main::main"; "demo::main::helper" ]
-            (List.map Path.show way)
+          expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
       | Ok reached -> fail "found %d" (List.length reached)
       | Error message -> fail "%s" message);
   test "a todo in a capability's method counts only where the method is called" (fun () ->
@@ -623,21 +623,23 @@ let () =
       match reached_from "shout" with
       | [ { failure = `Todo; line = 12; way; _ } ] -> (
           match List.map Path.show way with
-          | "demo::main::main" :: "demo::main::speak" :: _ -> ()
+          | "demo::main" :: "demo::speak" :: _ -> ()
           | way -> fail "reached by %s" (String.concat ", " way))
       | unshippable -> fail "found %d" (List.length unshippable));
-  test "a package's program is the main of its main module, and of no other" (fun () ->
+  test "a package's program is the main of its root module, and of no other" (fun () ->
       let main_text = Fixtures.main_text in
       let with_main = Project.load (package [ ("main.truss", main_text) ]) in
-      expect_strings ~expected:[ "demo::main::main" ]
+      expect_strings ~expected:[ "demo::main" ]
         (List.map Path.show (Program_command.mains with_main));
-      let elsewhere = Project.load (package [ ("start.truss", main_text) ]) in
+      let elsewhere = Project.load (package [ ("start/start.truss", main_text) ]) in
       if Program_command.mains elsewhere <> [] then fail "took a main from another module");
-  test "a function named main outside the main module is an ordinary function" (fun () ->
+  test "a function named main outside the root module is an ordinary function" (fun () ->
       let project =
         Project.load
           (package
-             [ ("menu.truss", Fixtures.function_named_main_outside_the_main_module_is_an_menu) ])
+             [
+               ("menu/menu.truss", Fixtures.function_named_main_outside_the_root_module_is_an_menu);
+             ])
       in
       if not (Report.clean (Report.gather project)) then fail "has diagnostics");
   test "an echo is refused only by a build that ships" (fun () ->
@@ -656,7 +658,7 @@ let () =
 (* Renaming *)
 
 let two_files =
-  [ ("weather.truss", Fixtures.two_files_weather); ("main.truss", Fixtures.two_files) ]
+  [ ("weather/weather.truss", Fixtures.two_files_weather); ("main.truss", Fixtures.two_files) ]
 
 let rename root from_ to_ =
   quietly (fun () -> Rename_command.run ~directory:root ~from_ ~to_ ~json:false)
@@ -668,19 +670,20 @@ let () =
       if
         not
           (contains (read root "main.truss") "weather::sum([1]) + demo::weather::sum([2])"
-          && contains (read root "weather.truss") "public fn sum(")
+          && contains (read root "weather/weather.truss") "public fn sum(")
       then fail "wrote %s" (read root "main.truss"));
   test "a rename that would cause a diagnostic changes nothing" (fun () ->
       let root =
         package [ ("main.truss", Fixtures.rename_that_would_cause_a_diagnostic_changes) ]
       in
       let before = read root "main.truss" in
-      if rename root "demo::main::first" "second" <> 1 then fail "not refused";
+      if rename root "demo::first" "second" <> 1 then fail "not refused";
       expect_string ~expected:before (read root "main.truss"));
-  test "renaming a module moves its file and rewrites its uses and full paths" (fun () ->
+  test "renaming a module moves its files and rewrites its uses and full paths" (fun () ->
       let root = package two_files in
       if rename root "demo::weather" "demo::outlook" <> 0 then fail "refused";
-      if Sys.file_exists (Filename.concat root "weather.truss") then fail "kept the old file";
+      if Sys.file_exists (Filename.concat root "weather/weather.truss") then
+        fail "kept the old file";
       let main = read root "main.truss" in
       if
         not
@@ -699,7 +702,7 @@ let () =
   test "renaming a module of a package with an owner rewrites its uses and full paths" (fun () ->
       let root = directory owned in
       if rename root "acme::geometry::vector" "acme::geometry::arrow" <> 0 then fail "refused";
-      if not (Sys.file_exists (Filename.concat root "geometry/arrow.truss")) then
+      if not (Sys.file_exists (Filename.concat root "geometry/arrow/vector.truss")) then
         fail "did not move the file";
       let main = read root "app/main.truss" in
       if
@@ -710,7 +713,7 @@ let () =
       then fail "wrote %s" main);
   test "renaming a method rewrites its calls" (fun () ->
       let root = package [ ("main.truss", Fixtures.renaming_a_method_rewrites_its_calls) ] in
-      if rename root "demo::main::Point.get" "value" <> 0 then fail "refused";
+      if rename root "demo::Point.get" "value" <> 0 then fail "refused";
       let text = read root "main.truss" in
       if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
         fail "wrote %s" text)
@@ -769,7 +772,7 @@ let () =
       rewrite root "main.truss" (replace doubling "value * 2" "value + value");
       match impact root with
       | [ change ] ->
-          expect_string ~expected:"demo::main::double" (text_field "path" change);
+          expect_string ~expected:"demo::double" (text_field "path" change);
           if not (List.mem "body" (strings (Json.field "parts" change))) then
             fail "%s" (Json.to_string change)
       | changes -> fail "found %d changes" (List.length changes));
@@ -789,7 +792,7 @@ let () =
         (replace doubling "fn double(value: Int64) -> Int64"
            "fn double(value: Int64, by: Int64 = 2) -> Int64");
       match
-        List.find_opt (fun change -> text_field "path" change = "demo::main::double") (impact root)
+        List.find_opt (fun change -> text_field "path" change = "demo::double") (impact root)
       with
       | Some change ->
           let before = text_field "before" change and after = text_field "after" change in
@@ -798,7 +801,7 @@ let () =
           if
             not
               (List.exists
-                 (fun edge -> text_field "reader" edge = "demo::main::four")
+                 (fun edge -> text_field "reader" edge = "demo::four")
                  (objects (Json.field "read_by" change)))
           then fail "four does not read it"
       | None -> fail "double did not change");
@@ -826,9 +829,8 @@ let () =
             Graph_command.run ~directory:root ~direction:References ~name:"double" ~json:false)
       in
       if status <> 0 then fail "status %d" status;
-      if
-        not (contains output "demo::main::four: its body reads the signature of demo::main::double")
-      then fail "wrote %s" output);
+      if not (contains output "demo::four: its body reads the signature of demo::double") then
+        fail "wrote %s" output);
   test "references to a mut self method are found by its name without the receiver" (fun () ->
       let root = package [ ("main.truss", Fixtures.counter) ] in
       let status, output =
@@ -839,8 +841,7 @@ let () =
       if
         not
           (contains output
-             "demo::main::bumped: its body reads the signature of demo::main::Counter.bump(mut \
-              self)")
+             "demo::bumped: its body reads the signature of demo::Counter.bump(mut self)")
       then fail "wrote %s" output);
   test "a position's line and column count characters, as diagnostics do" (fun () ->
       let source = Source.create ~path:"" "ab\ncé x" in
@@ -856,7 +857,7 @@ let () =
       if status <> 0 then fail "status %d" status;
       if
         not
-          (contains output "means the definition demo::main::double"
+          (contains output "means the definition demo::double"
           && contains output "internal fn double(value: Int64) -> Int64")
       then fail "wrote %s" output);
   let explain root position =
@@ -874,13 +875,13 @@ let () =
       let output = explain root "3:13" in
       if
         not
-          (contains output "means the definition demo::main::Counter.bump(mut self)"
+          (contains output "means the definition demo::Counter.bump(mut self)"
           && contains output "fn Counter.bump(mut self)")
       then fail "wrote %s" output);
   test "explaining a method call's callee gives the method" (fun () ->
       let root = package [ ("main.truss", Fixtures.counter) ] in
       let output = explain root "9:16" in
-      if not (contains output "means the definition demo::main::Counter.bump(mut self)") then
+      if not (contains output "means the definition demo::Counter.bump(mut self)") then
         fail "wrote %s" output);
   test "explaining a variable where it is bound gives its type" (fun () ->
       let root = package [ ("main.truss", Fixtures.counter) ] in
@@ -894,8 +895,7 @@ let () =
             Some
               (Path.Top
                  {
-                   module_ =
-                     { package = { Path.owner = None; name = "demo" }; modules = [ "main" ] };
+                   module_ = { package = { Path.owner = None; name = "demo" }; modules = [] };
                    name = path;
                  });
           part = Some part;
@@ -904,8 +904,8 @@ let () =
       in
       expect_string
         ~expected:
-          "this worktree's change to the body of demo::main::four reads the signature of \
-           demo::main::double, which the other changes"
+          "this worktree's change to the body of demo::four reads the signature of demo::double, \
+           which the other changes"
         (Overlap_command.For_testing.sentence
            (Reads
               {
@@ -961,9 +961,9 @@ let publish registry name version ?(dependencies = []) ?(record = []) modules =
     ((("truss.toml", manifest) :: (if record = [] then [] else [ ("truss.lock", lock) ])) @ modules)
 
 let units text =
-  [ ("lengths.truss", Printf.sprintf "public fn meter() -> Int64 {\n  %s\n}\n" text) ]
+  [ ("lengths/lengths.truss", Printf.sprintf "public fn meter() -> Int64 {\n  %s\n}\n" text) ]
 
-let geometry = [ ("vector.truss", Fixtures.geometry_vector) ]
+let geometry = [ ("vector/vector.truss", Fixtures.geometry_vector) ]
 
 (* A registry with [acme::units] at 1.0.0 and 1.1.0, and [acme::geometry]
    1.0.0, published with the first. *)
@@ -1014,7 +1014,9 @@ let () =
       publish registry "acme::shapes" (1, 0, 0)
         ~dependencies:[ ("acme::units", []) ]
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 1, 0)) ]
-        [ ("square.truss", Fixtures.package_is_added_at_the_version_it_was_published_square) ];
+        [
+          ("square/square.truss", Fixtures.package_is_added_at_the_version_it_was_published_square);
+        ];
       rewrite root "main.truss"
         (snd uses_geometry ^ Fixtures.package_is_added_at_the_version_it_was_published);
       if add root [ "acme::shapes" ] <> 0 then fail "not added";
@@ -1078,7 +1080,7 @@ let () =
       expect_versions root []);
   test "files in the registry that do not have the lock file's hash are not used" (fun () ->
       let registry = stocked () in
-      publish registry "acme::angles" (1, 0, 0) [ ("degrees.truss", "") ];
+      publish registry "acme::angles" (1, 0, 0) [ ("degrees/degrees.truss", "") ];
       let root = package [ ("main.truss", "") ] in
       let hash =
         Option.get
@@ -1089,12 +1091,12 @@ let () =
       Out_channel.with_open_bin
         (Filename.concat
            (version_directory { Path.owner = Some "acme"; name = "angles" } (1, 0, 0))
-           "degrees.truss")
+           "degrees/degrees.truss")
         (fun channel -> output_string channel "fn stolen() {}\n");
       expect_problem_in root "do not have the hash the lock file names");
   test "a package that is not in the store cannot be had without a registry" (fun () ->
       let registry = stocked () in
-      publish registry "acme::tides" (1, 0, 0) [ ("moon.truss", "") ];
+      publish registry "acme::tides" (1, 0, 0) [ ("moon/moon.truss", "") ];
       let root = package [ ("main.truss", "") ] in
       let hash =
         Option.get
@@ -1113,7 +1115,7 @@ let () =
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
             ("app/main.truss", snd uses_geometry);
             ("units/truss.toml", manifest_of "acme::units");
-            ( "units/lengths.truss",
+            ( "units/lengths/lengths.truss",
               Fixtures.projects_package_takes_the_place_of_the_registrys_lengths );
           ]
       in
@@ -1124,8 +1126,8 @@ let () =
       let project = Project.load root in
       if
         not
-          (List.mem "units/lengths.truss"
-             (List.map (Database.module_file project.session) (Project.modules project)))
+          (List.mem "units/lengths/lengths.truss"
+             (List.map (Database.file_path project.session) (Project.files project)))
       then fail "the project's package is not the one in the build")
 
 (* Upgrading *)
@@ -1157,7 +1159,9 @@ let () =
       in
       ignore (add root [ "acme::units" ]);
       publish registry "acme::units" (1, 2, 0)
-        [ ("lengths.truss", Fixtures.upgrade_says_which_signatures_the_project_reads_lengths) ];
+        [
+          ("lengths/lengths.truss", Fixtures.upgrade_says_which_signatures_the_project_reads_lengths);
+        ];
       let status, output = upgrade root [ "acme::units" ] in
       if status <> 1 then fail "status %d: %s" status output;
       List.iter
@@ -1167,7 +1171,7 @@ let () =
           "acme::units::lengths::meter";
           "was: public fn meter() -> Int64";
           "now: public fn meter(scale: Int64) -> Int64";
-          "read by: demo::main::meter";
+          "read by: demo::meter";
           "errors it does not have now";
         ]);
   test "an upgrade says which packages would hold a capability they did not" (fun () ->
@@ -1191,7 +1195,9 @@ let () =
 let publish_from root = captured (fun () -> Publish_command.run ~directory:root ~json:false)
 
 (* A package of its own project, named [acme::angles], with one module. *)
-let angles text = directory [ ("truss.toml", manifest_of "acme::angles"); ("degrees.truss", text) ]
+let angles text =
+  directory [ ("truss.toml", manifest_of "acme::angles"); ("degrees/degrees.truss", text) ]
+
 let turn = Fixtures.turn
 
 let published registry name =
@@ -1219,11 +1225,11 @@ let () =
         Registry.Content.files ~all:true
           (version_directory { Path.owner = Some "acme"; name = "angles" } (1, 0, 0))
       in
-      expect_strings ~expected:[ "degrees.truss"; "truss.toml" ] (List.map fst files));
+      expect_strings ~expected:[ "degrees/degrees.truss"; "truss.toml" ] (List.map fst files));
   test "a package whose name ends in _v2 starts at 2.0.0" (fun () ->
       let registry = registry () in
       let root =
-        directory [ ("truss.toml", manifest_of "acme::angles_v2"); ("degrees.truss", turn) ]
+        directory [ ("truss.toml", manifest_of "acme::angles_v2"); ("degrees/degrees.truss", turn) ]
       in
       ignore (publish_from root);
       expect_published registry { Path.owner = Some "acme"; name = "angles_v2" } [ "2.0.0" ]);
@@ -1231,7 +1237,7 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees.truss" Fixtures.release_that_changes_only_a_body_gets_the_next;
+      rewrite root "degrees/degrees.truss" Fixtures.release_that_changes_only_a_body_gets_the_next;
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
@@ -1240,7 +1246,8 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees.truss" (turn ^ Fixtures.release_that_adds_a_public_definition_gets_the);
+      rewrite root "degrees/degrees.truss"
+        (turn ^ Fixtures.release_that_adds_a_public_definition_gets_the);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       if not (contains output "acme::angles::degrees::half is new") then fail "said %s" output;
@@ -1258,7 +1265,8 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees.truss" Fixtures.release_that_changes_a_public_signature_is_refused;
+      rewrite root "degrees/degrees.truss"
+        Fixtures.release_that_changes_a_public_signature_is_refused;
       expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
       let _, output = publish_from root in
       List.iter
@@ -1273,19 +1281,19 @@ let () =
       let _ = registry () in
       let root = angles (turn ^ Fixtures.release_that_takes_a_public_definition_away_is) in
       ignore (publish_from root);
-      rewrite root "degrees.truss" turn;
+      rewrite root "degrees/degrees.truss" turn;
       expect_refused root "acme::angles::degrees::half was removed or is no longer public");
   test "a private definition can change freely" (fun () ->
       let registry = registry () in
       let root = angles (turn ^ Fixtures.private_definition_can_change_freely) in
       ignore (publish_from root);
-      rewrite root "degrees.truss" (turn ^ Fixtures.private_definition_can_change_freely_2);
+      rewrite root "degrees/degrees.truss" (turn ^ Fixtures.private_definition_can_change_freely_2);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
   test "a package with no owner in its name is not published" (fun () ->
       let _ = registry () in
-      match publish_from (package [ ("degrees.truss", turn) ]) with
+      match publish_from (package [ ("degrees/degrees.truss", turn) ]) with
       | exception Project.Cannot_run message ->
           if not (contains message "has no owner in its name") then fail "said %s" message
       | _ -> fail "published");
@@ -1321,7 +1329,7 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ("height.truss", Fixtures.package_is_published_with_the_versions_of_the_height);
+            ("height/height.truss", Fixtures.package_is_published_with_the_versions_of_the_height);
           ]
       in
       ignore (add root [ "acme::geometry" ]);
@@ -1349,7 +1357,8 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ("height.truss", Fixtures.published_package_is_used_by_another_project_with_height);
+            ( "height/height.truss",
+              Fixtures.published_package_is_used_by_another_project_with_height );
           ]
       in
       ignore (add walls [ "acme::geometry" ]);
@@ -1368,7 +1377,7 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ("height.truss", Fixtures.dependency_that_only_a_packages_tests_use_is_not_height);
+            ("height/height.truss", Fixtures.dependency_that_only_a_packages_tests_use_is_not_height);
           ]
       in
       ignore (add root [ "acme::units@1.0.0" ]);
@@ -1394,7 +1403,7 @@ let () =
           [
             ("truss.toml", "[project]\n");
             ("angles/truss.toml", manifest_of "acme::angles");
-            ("angles/degrees.truss", turn);
+            ("angles/degrees/degrees.truss", turn);
             ( "walls/truss.toml",
               manifest_of "acme::walls" ^ "[dependencies]\n\"acme::angles\" = []\n" );
             ("walls/corner.truss", Fixtures.package_that_depends_on_one_of_its_projects_that_corner);

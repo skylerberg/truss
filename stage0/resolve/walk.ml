@@ -80,7 +80,7 @@ let in_specification = { no_specification with active = true }
 
 type state = {
   database : Query.context;
-  module_ : Path.module_;
+  file : Path.file;  (** The file the definition is written in, whose imports it reads *)
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;
@@ -112,7 +112,8 @@ let unknown state (name : name) ~expected candidates =
        (reported state ~fixes Unknown_name name.span
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
-let file_item state text = Query.demand state.database Names.find (state.module_, text)
+(* A definition of the module, by its name. *)
+let module_item state text = Query.demand state.database Names.find (state.file.module_, text)
 
 let module_of_names state (first : name) (rest : name list) =
   let failed report =
@@ -120,13 +121,13 @@ let module_of_names state (first : name) (rest : name list) =
     Error report
   in
   begin match
-    Names.lookup_module state.database ~from:state.module_
+    Names.lookup_module state.database ~from:state.file
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
   with
   (* For a name through an import, the [use] line has the error, and the
      names after it resolve as usual. *)
   | Found_module (module_, `Package)
-    when module_ = Intrinsic.module_ && state.module_.package <> Path.standard_package ->
+    when module_ = Intrinsic.module_ && state.file.module_.package <> Path.standard_package ->
       failed
         (reported state Intrinsic_import first.span
            "Only the `standard` package can use `standard::intrinsic`.")
@@ -151,7 +152,7 @@ let module_of_names state (first : name) (rest : name list) =
 let in_module state module_ (name : name) ~types =
   match Query.demand state.database Names.find (module_, name.text) with
   | Some item when if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind ->
-      if Names.visible ~from:state.module_ module_ item.visibility then begin
+      if Names.visible ~from:state.file.module_ module_ item.visibility then begin
         let path : Path.t = Top { module_; name = name.text } in
         set state name (Definition (item.kind, path));
         Some (path, item)
@@ -162,7 +163,7 @@ let in_module state module_ (name : name) ~types =
              (reported state Not_visible name.span
                 (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
                    (match item.visibility with
-                   | Private -> "private to its file, so it cannot be used here"
+                   | Private -> "private to its module, so it cannot be used here"
                    | _ -> "internal to its package, so it cannot be used here"))));
         None
       end
@@ -172,7 +173,7 @@ let in_module state module_ (name : name) ~types =
           (fun (item : Names.entry) ->
             if
               (if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind)
-              && Names.visible ~from:state.module_ module_ item.visibility
+              && Names.visible ~from:state.file.module_ module_ item.visibility
             then Some item.name
             else None)
           (Query.demand state.database Names.entries module_)
@@ -192,7 +193,7 @@ let type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
       (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
-      (Query.demand state.database Names.entries state.module_)
+      (Query.demand state.database Names.entries state.file.module_)
   @ List.map fst Prelude.types
 
 (* An UpperCamelCase name in the types namespace. With [variants], a prelude
@@ -208,10 +209,10 @@ let type_name state scope ?(variants = false) (path : path) =
       match String_map.find_opt text scope.types with
       | Some parameter -> set state path.last parameter
       | None -> (
-          match file_item state text with
+          match module_item state text with
           | Some item when Names.is_type_kind item.kind ->
               set state path.last
-                (Definition (item.kind, Top { module_ = state.module_; name = text }))
+                (Definition (item.kind, Top { module_ = state.file.module_; name = text }))
           | _ -> (
               match prelude_type state text with
               | Some (path_, item) -> set state path.last (Definition (item.kind, path_))
@@ -273,10 +274,11 @@ and type_argument state scope = function
 and count_name state scope (name : name) =
   match String_map.find_opt name.text scope.values with
   | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
-  | _ -> (
-      match file_item state name.text with
-      | Some item when item.kind = Constant ->
-          set state name (Definition (Constant, Top { module_ = state.module_; name = name.text }))
+  | hiding -> (
+      match module_item state name.text with
+      | Some item when item.kind = Constant && hiding = None ->
+          set state name
+            (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
       | _ ->
           set state name
             (Unknown
@@ -346,9 +348,10 @@ and local_value state scope (name : name) =
                     far with `yielded`."
                    text)))
       else
-        begin match file_item state text with
+        begin match module_item state text with
         | Some item when Names.is_value_kind item.kind ->
-            set state name (Definition (item.kind, Top { module_ = state.module_; name = text }))
+            set state name
+              (Definition (item.kind, Top { module_ = state.file.module_; name = text }))
         | _ ->
             if text = "null" || text = "nil" then begin
               set state name
@@ -367,7 +370,7 @@ and local_value state scope (name : name) =
                 @ List.filter_map
                     (fun (item : Names.entry) ->
                       if Names.is_value_kind item.kind then Some item.name else None)
-                    (Query.demand state.database Names.entries state.module_))
+                    (Query.demand state.database Names.entries state.file.module_))
         end
 
 and name_expression state scope (path : path) =
@@ -488,7 +491,7 @@ and expression state scope (value : expression) =
             && List.mem last.text [ "log"; "power" ]
             && (not (String_map.mem last.text scope.values))
             &&
-            match file_item state last.text with
+            match module_item state last.text with
             | Some item -> not (Names.is_value_kind item.kind)
             | None -> true ->
       set state last
@@ -524,7 +527,7 @@ and expression state scope (value : expression) =
         match binder with
         | Binder_in (pattern_, collection) ->
             expression state scope collection;
-            bind_pattern state scope pattern_
+            bind_pattern ~irrefutable:true state scope pattern_
         | Binder_type (name, type_) ->
             type_expression state scope type_;
             declare_value state scope name
@@ -540,7 +543,9 @@ and expression state scope (value : expression) =
         entries
   | Lambda { parameters; body } ->
       let inner =
-        List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope parameters
+        List.fold_left
+          (fun scope pattern_ -> bind_pattern ~irrefutable:true state scope pattern_)
+          scope parameters
       in
       block state inner body
   | If { condition = test; then_; else_ } ->
@@ -593,13 +598,11 @@ and declare_value state scope (name : name) =
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
          name.text existing)
   in
+  (* A local may hide a definition of the module, so adding a definition
+     to one file breaks no local of another. *)
   (match String_map.find_opt name.text scope.values with
   | Some (_, existing) -> hides existing
-  | None -> (
-      match file_item state name.text with
-      | Some item when Names.is_value_kind item.kind ->
-          hides (Names.kind_name (Names.kind_of_named item.kind) ^ " in this file")
-      | _ -> ()));
+  | None -> ());
   set state name Binding;
   {
     scope with
@@ -612,22 +615,31 @@ and declare_parameter state scope (name : name) =
 
 (* The names a pattern binds, in the order written, with alternatives
    checked to bind the same names. *)
-and bind_pattern state scope (pattern_ : pattern) =
+(* Binds a pattern's names. A pattern that must match every value, as a
+   [let]'s without [else], a [for]'s, a lambda's parameters, or a
+   quantifier's binder, is [irrefutable]: a constant could only make it
+   fail, so every bare name in it binds, and may hide a constant. *)
+and bind_pattern ?(irrefutable = false) state scope (pattern_ : pattern) =
   let bound = ref [] in
-  pattern state scope bound pattern_;
+  pattern ~irrefutable state scope bound pattern_;
   List.fold_left (fun scope (name : name) -> declare_value state scope name) scope (List.rev !bound)
 
-and pattern state scope bound (pattern_ : pattern) =
+and pattern ~irrefutable state scope bound (pattern_ : pattern) =
+  let pattern = pattern ~irrefutable and pattern_field = pattern_field ~irrefutable in
   match pattern_.kind with
   | Wildcard | Pattern_error -> ()
+  | Binding_or_constant name when irrefutable -> bound := name :: !bound
   | Binding_or_constant name -> (
       match String_map.find_opt name.text scope.values with
       | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
-      | _ -> (
-          match file_item state name.text with
+      (* A local hides a constant of its name, so the name binds, and the
+         binding is reported as hiding the local. *)
+      | Some _ -> bound := name :: !bound
+      | None -> (
+          match module_item state name.text with
           | Some item when item.kind = Constant ->
               set state name
-                (Definition (Constant, Top { module_ = state.module_; name = name.text }))
+                (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
           | _ -> bound := name :: !bound))
   | Qualified_constant constant_ -> qualified_constant state scope constant_
   | Literal literal -> literal_pattern state scope literal
@@ -672,9 +684,9 @@ and pattern state scope bound (pattern_ : pattern) =
                   names)
             rest)
 
-and pattern_field state scope bound (field : pattern_field) =
+and pattern_field ~irrefutable state scope bound (field : pattern_field) =
   match field.kind with
-  | Named_field (_, inner) | Field inner -> pattern state scope bound inner
+  | Named_field (_, inner) | Field inner -> pattern ~irrefutable state scope bound inner
   | Rest -> ()
 
 and literal_pattern state scope = function
@@ -696,10 +708,11 @@ and range_end state scope (end_ : range_end) =
   | End_literal literal -> literal_pattern state scope literal
   | End_constant constant_ -> qualified_constant state scope constant_
   | End_name name -> (
-      match (String_map.find_opt name.text scope.values, file_item state name.text) with
+      match (String_map.find_opt name.text scope.values, module_item state name.text) with
       | Some (Value_generic parameter, _), _ -> set state name (Value_parameter parameter)
-      | _, Some item when item.kind = Constant ->
-          set state name (Definition (Constant, Top { module_ = state.module_; name = name.text }))
+      | None, Some item when item.kind = Constant ->
+          set state name
+            (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
       | _ ->
           set state name
             (Unknown
@@ -722,7 +735,7 @@ and statement state scope (statement_ : statement) =
       Option.iter (type_expression state scope) annotation;
       expression state scope value;
       Option.iter (block state scope) else_;
-      bind_pattern state scope pattern_
+      bind_pattern ~irrefutable:(else_ = None) state scope pattern_
   | Expression value ->
       expression state scope value;
       scope
@@ -733,7 +746,7 @@ and statement state scope (statement_ : statement) =
   | For { pattern = pattern_; annotation; iterable; clauses; body; _ } ->
       Option.iter (type_expression state scope) annotation;
       expression state scope iterable;
-      let inner = bind_pattern state scope pattern_ in
+      let inner = bind_pattern ~irrefutable:true state scope pattern_ in
       (* A range's index names the next index in the loop's clauses. Any
          other loop's element is bound only in its body. *)
       let elements, clause_scope =
@@ -781,7 +794,7 @@ and statement state scope (statement_ : statement) =
   | Proof body ->
       block state { scope with specification = in_specification } body;
       scope
-  | Assert value | Yield value ->
+  | Assert { value; _ } | Yield value ->
       expression state scope value;
       scope
   | Statement_error -> scope
@@ -813,11 +826,15 @@ let declare_type state scope (name : name) target =
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
          name.text existing)
   in
+  (* A generic parameter cannot hide a type of its module, unlike a local
+     a function: an [impl]'s head declares its arguments' names, so
+     [impl Shown for Box[Marker]] would otherwise be an [impl] for every
+     [Box] where a type [Marker] was meant. *)
   (if String_map.mem name.text scope.types then hides "a generic parameter here"
    else
-     match file_item state name.text with
+     match module_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
-         hides (Names.kind_name (Names.kind_of_named item.kind) ^ " in this file")
+         hides (Names.kind_name (Names.kind_of_named item.kind) ^ " of this module")
      | _ -> if List.mem name.text Prelude.names then hides "a name in the prelude");
   set state name Binding;
   { scope with types = String_map.add name.text target scope.types }

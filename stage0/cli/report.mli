@@ -1,4 +1,4 @@
-type file = { module_ : Path.module_; source : Source.t; diagnostics : Diagnostic.t list }
+type file = { file : Path.file; source : Source.t; diagnostics : Diagnostic.t list }
 type t
 
 val gather : ?proofs:bool -> Project.t -> t

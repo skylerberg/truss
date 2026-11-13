@@ -25,7 +25,7 @@ let package_modules database package = Query.demand database Workspace.modules p
 (* Whether a definition is visible from the command's packages: every
    definition in them, and only public definitions elsewhere. *)
 let visible (project : Project.t) (declaration : Names.declaration) =
-  Project.is_own project declaration.module_ || Names.is_public declaration.visibility
+  Project.is_own project declaration.file.module_ || Names.is_public declaration.visibility
 
 let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
@@ -94,15 +94,16 @@ let find (project : Project.t) ~body text =
     (fun (declaration : Names.declaration) ->
       let key = Names.key_of declaration in
       let opaque =
-        declaration.visibility = Public_opaque && not (Project.is_own project declaration.module_)
+        declaration.visibility = Public_opaque
+        && not (Project.is_own project declaration.file.module_)
       in
       match Signatures.text project.context ~body ~opaque key with
       | None -> None
       | Some signature ->
           let file, line =
             match Query.demand project.context Names.base key with
-            | Some (module_, base) ->
-                let source = Project.source project module_ in
+            | Some (written, base) ->
+                let source = Project.source project written in
                 (Source.path source, fst (Source.position source base))
             | None -> ("", 0)
           in

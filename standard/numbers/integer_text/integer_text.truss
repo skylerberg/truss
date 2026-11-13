@@ -1,0 +1,214 @@
+use standard::core
+use standard::intrinsic
+use standard::text
+
+internal fn UInt8.digit_value(self) -> UInt8
+  ensures result <= 36
+  cost time O(1)
+  cost allocations == 0
+{
+  if self >= 48 && self <= 57 {
+    self - 48
+  } else if self >= 97 && self <= 122 {
+    self - 87
+  } else if self >= 65 && self <= 90 {
+    self - 55
+  } else {
+    36
+  }
+}
+
+internal fn UInt8.digit_byte(self, uppercase: Bool) -> UInt8
+  requires self < 36
+  cost time O(1)
+  cost allocations == 0
+{
+  if self < 10 {
+    self + 48
+  } else if uppercase {
+    self + 55
+  } else {
+    self + 87
+  }
+}
+
+internal fn digit_count(value: UInt64, base: UInt64) -> USize
+  requires base >= 2
+  ensures result >= 1
+  ensures result <= log(value) + 1
+  ensures result <= 65
+  ensures value < base ==> result == 1
+  ensures value >= base ==> result == 1 + digit_count(value / base, base: base)
+  decreases value
+  cost time O(log(value))
+{
+  if value < base {
+    1
+  } else {
+    1 + digit_count(value / base, base: base)
+  }
+}
+
+internal fn write_digits(output: mut intrinsic::Storage[UInt8], value: UInt64, base: UInt64, uppercase: Bool)
+  requires 2 <= base && base <= 36
+  requires intrinsic::storage_length(output) + digit_count(value, base: base) <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + digit_count(value, base: base)
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  decreases value
+  cost time O(log(value))
+{
+  if value >= base {
+    write_digits(mut output, value: value / base, base: base, uppercase: uppercase)
+  }
+  let digit: UInt8 = intrinsic::convert(value % base)
+  intrinsic::storage_push(mut output, value: digit.digit_byte(uppercase: uppercase))
+}
+
+internal fn format_magnitude(
+  magnitude: UInt64,
+  negative: Bool,
+  radix: UInt32,
+  minimum_digits: USize,
+  uppercase: Bool,
+) -> String
+  requires 2 <= radix && radix <= 36
+  ensures result.length() >= 1
+  ensures result.length() <= minimum_digits + 66
+  cost time O(minimum_digits + 64)
+{
+  if minimum_digits > USize.maximum / 2 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  let base: UInt64 = intrinsic::convert(radix)
+  let digits = digit_count(magnitude, base: base)
+  let padding = if minimum_digits > digits { minimum_digits - digits } else { 0 }
+  let sign: USize = if negative { 1 } else { 0 }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(sign + padding + digits)
+  if negative {
+    intrinsic::storage_push(mut output, value: 45)
+  }
+  for index in 0..padding
+    invariant intrinsic::storage_length(output) == sign + index
+    invariant intrinsic::storage_capacity(output) == sign + padding + digits
+  {
+    intrinsic::storage_push(mut output, value: 48)
+  }
+  write_digits(mut output, value: magnitude, base: base, uppercase: uppercase)
+  String(storage: own output)
+}
+
+internal fn parse_magnitude(
+  text: StringSlice,
+  start: USize,
+  radix: UInt32,
+  limit: UInt64,
+) -> Result[UInt64, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  requires start <= text.length()
+  ensures !(result is Ok(value) && value > limit)
+  cost time O(text.length())
+{
+  if start == text.length() {
+    return Err(core::ParseIntegerError.Empty)
+  }
+  let base: UInt64 = intrinsic::convert(radix)
+  var value: UInt64 = 0
+  var index = start
+  while index < text.length()
+    invariant index <= text.length()
+    invariant value <= limit
+    decreases text.length() - index
+  {
+    let digit: UInt64 = intrinsic::convert(text.byte(index).digit_value())
+    if digit >= base {
+      return Err(core::ParseIntegerError.InvalidDigit(offset: index))
+    }
+    if digit > limit || value > (limit - digit) / base {
+      return Err(core::ParseIntegerError.OutOfRange)
+    }
+    value = value * base + digit
+    index += 1
+  }
+  Ok(value)
+}
+
+
+impl text::Parse for Int8 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int8, core::ParseIntegerError] {
+    Int8.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for Int16 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int16, core::ParseIntegerError] {
+    Int16.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for Int32 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int32, core::ParseIntegerError] {
+    Int32.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for Int64 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int64, core::ParseIntegerError] {
+    Int64.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for ISize {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[ISize, core::ParseIntegerError] {
+    ISize.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for UInt8 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt8, core::ParseIntegerError] {
+    UInt8.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for UInt16 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt16, core::ParseIntegerError] {
+    UInt16.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for UInt32 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt32, core::ParseIntegerError] {
+    UInt32.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for UInt64 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt64, core::ParseIntegerError] {
+    UInt64.parse_radix(text, radix: 10)
+  }
+}
+
+impl text::Parse for USize {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[USize, core::ParseIntegerError] {
+    USize.parse_radix(text, radix: 10)
+  }
+}

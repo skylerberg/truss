@@ -1400,9 +1400,10 @@ and statement b (node : Core.statement) =
             branches;
           emit b (Fork_end { fork }) origin
       | Proof proof -> emit b (Proof proof) origin
-      | Assert { value; executable = true } -> (
+      | Assert { condition = { value; executable = true }; _ } -> (
           match expression b value with Some value -> emit b (Assert value) origin | None -> ())
-      | Assert { value; executable = false } -> emit b (Ghost_assert value) origin
+      | Assert { condition = { value; executable = false }; _ } ->
+          emit b (Ghost_assert value) origin
       | Yield { mode; part } -> (
           let enclosing = b.yield_mode in
           b.yield_mode <- mode;

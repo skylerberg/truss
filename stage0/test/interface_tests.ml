@@ -18,15 +18,15 @@ let int64 = Types.builtin Int64
 let () =
   let database = setup [] in
   List.iter
-    (fun ((module_ : Path.module_), _) ->
+    (fun ((file : Path.file), _) ->
       test
-        (Printf.sprintf "%s has no interface errors" (Path.show_module module_))
+        (Printf.sprintf "%s has no interface errors" (Path.show_file file))
         (fun () ->
-          let file = Query.demand database Workspace.file module_ in
+          let parsed = Query.demand database Workspace.file file in
           List.iter
-            (fun diagnostic -> fail "%s" (Diagnostic.render file.source diagnostic))
-            (Interface.diagnostics database module_)))
-    Standard_library.modules
+            (fun diagnostic -> fail "%s" (Diagnostic.render parsed.source diagnostic))
+            (Interface.diagnostics database file)))
+    Standard_library.files
 
 (* Signatures *)
 
@@ -70,9 +70,11 @@ let () =
   test "a method must be in its type's package" (fun () ->
       one_diagnostic "fn Int64.double(self) -> Int64 { todo }\n" "types.method_outside_package");
   test "main must have its fixed signature" (fun () ->
-      one_diagnostic "fn main() -> ExitCode { todo }\n" "types.main_signature");
+      one_diagnostic ~file:"app" "fn main() -> ExitCode { todo }\n" "types.main_signature");
   test "main with its fixed signature is accepted" (fun () ->
-      no_diagnostics [ ("app::main", Fixtures.Interface.main_with_its_fixed_signature_is_accepted) ]);
+      no_diagnostics [ ("app", Fixtures.Interface.main_with_its_fixed_signature_is_accepted) ]);
+  test "a main outside the root module may have any signature" (fun () ->
+      no_diagnostics [ ("app::menu", "fn main() -> ExitCode { todo }\n") ]);
   test "a default may build a record from constants" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Interface.default_may_build_a_record_from_constants) ]);
   test "an associated type no bound declares is an error" (fun () ->
@@ -155,7 +157,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Interface.traits_cannot_require_each_other_in_a_cycle) ]
       in
-      match codes (check database (module_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
@@ -406,19 +408,6 @@ let () =
       | [ Capability _ ] -> ()
       | uses -> fail "%d uses" (List.length uses))
 
-(* Transparent functions *)
-
-let () =
-  test "a transparent function is one whose body is its definition" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.transparent_function_is_one_whose_body_is_its) ];
-      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_2
-        "types.not_a_definition";
-      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_3
-        "types.not_a_definition";
-      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_4
-        "types.not_a_definition")
-
 (* Law proofs *)
 
 let () =
@@ -459,7 +448,7 @@ let () =
       expect_not_recomputed engine
         ~first:(fun () -> if not (Query.demand database asker ()) then fail "no impl of Equal")
         ~again:(fun () ->
-          Database.For_testing.set_text engine (module_of "app::main")
+          Database.For_testing.set_text engine (file_of "app::main")
             (base ^ Fixtures.Interface.adding_an_impl_of_one_trait_re_checks_nothing_that);
           ignore (Query.demand database asker ()))
         asker [ () ])
@@ -495,7 +484,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
       in
-      match Interface.diagnostics database (module_of "app::main") with
+      match Interface.diagnostics database (file_of "app::main") with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an opaque generic type is Copyable by its declaration and its arguments" (fun () ->
@@ -525,9 +514,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Interface.constant_in_a_type_argument_must_have_a_value) ]
       in
-      if
-        not
-          (List.mem "types.arity" (codes (Interface.diagnostics database (module_of "app::main"))))
+      if not (List.mem "types.arity" (codes (Interface.diagnostics database (file_of "app::main"))))
       then fail "accepted");
   test "any must fix every associated type" (fun () ->
       one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");

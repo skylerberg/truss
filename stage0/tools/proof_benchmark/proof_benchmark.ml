@@ -30,21 +30,21 @@ let () =
   Database.load_standard engine;
   let timed =
     List.filter_map
-      (fun ((module_ : Path.module_), _) ->
-        match Type_checker.diagnostics database module_ with
+      (fun ((file : Path.file), _) ->
+        match Type_checker.diagnostics database file with
         | _ :: _ -> None
         | [] ->
             let solved = Solver.solved solver in
             let start = Unix.gettimeofday () in
             let failed =
-              List.length (Prover.diagnostics ~record:(record database) database solver module_)
+              List.length (Prover.diagnostics ~record:(record database) database solver file)
             in
             Some
-              ( Path.show_module module_,
+              ( Path.show_file file,
                 Solver.solved solver - solved,
                 Unix.gettimeofday () -. start,
                 failed ))
-      Standard_library.modules
+      Standard_library.files
   in
   List.iter
     (fun (name, queries, seconds, failed) ->
@@ -53,4 +53,4 @@ let () =
     (List.sort (fun (_, _, first, _) (_, _, second, _) -> compare second first) timed);
   let queries = List.fold_left (fun total (_, queries, _, _) -> total + queries) 0 timed in
   let seconds = List.fold_left (fun total (_, _, seconds, _) -> total +. seconds) 0. timed in
-  Printf.printf "%8.2f s %6d queries  in %d modules\n" seconds queries (List.length timed)
+  Printf.printf "%8.2f s %6d queries  in %d files\n" seconds queries (List.length timed)

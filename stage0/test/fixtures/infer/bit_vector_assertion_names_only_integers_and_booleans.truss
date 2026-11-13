@@ -1,0 +1,8 @@
+fn f(items: List[UInt8]) -> Bool
+  cost time O(1)
+{
+  proof {
+    assert items.length() >= 0 by bit_vector
+  }
+  true
+}

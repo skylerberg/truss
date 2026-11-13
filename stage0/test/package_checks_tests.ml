@@ -16,7 +16,7 @@ let () =
         setup
           [ ("app::main", Fixtures.Package_checks.only_the_built_in_integer_types_implement_the) ]
       in
-      let found = codes (check database (module_of "app::main")) in
+      let found = codes (check database (file_of "app::main")) in
       if not (List.mem "package.sealed_trait_impl" found) then
         fail "found [%s]" (String.concat "; " found));
   test "an impl may live with a type its trait's arguments name" (fun () ->
@@ -26,7 +26,7 @@ let () =
         setup
           [ ("app::main", Fixtures.Package_checks.two_impls_of_a_trait_for_one_type_constructor) ]
       in
-      if not (List.mem "package.overlapping_impls" (codes (check database (module_of "app::main"))))
+      if not (List.mem "package.overlapping_impls" (codes (check database (file_of "app::main"))))
       then fail "no overlap");
   test "a type's own method cannot share a name with a trait's" (fun () ->
       one_diagnostic Fixtures.Package_checks.types_own_method_cannot_share_a_name_with_a_traits
@@ -59,15 +59,13 @@ let () =
             ("app::main", Fixtures.Package_checks.generic_code_that_instantiates_itself_with_growing);
           ]
       in
-      if
-        not
-          (List.mem "package.instantiation_cycle" (codes (check database (module_of "app::main"))))
+      if not (List.mem "package.instantiation_cycle" (codes (check database (file_of "app::main"))))
       then fail "no cycle");
   test "two tests of a package cannot share a name" (fun () ->
       let database =
         setup [ ("app::main", "test \"adds\" {\n}\n"); ("app::other", "test \"adds\" {\n}\n") ]
       in
-      match codes (check database (module_of "app::other")) with
+      match codes (check database (file_of "app::other")) with
       | [ "package.duplicate_test" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual))
 
@@ -107,7 +105,7 @@ let () =
         setup
           [ ("app::main", Fixtures.Package_checks.generic_types_whose_arguments_grow_through_each) ]
       in
-      match codes (check database (module_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "package.growing_type"; "package.growing_type" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a generic type that swaps its arguments is not growing" (fun () ->
@@ -119,7 +117,7 @@ let shown = Fixtures.Package_checks.shown
 let holder = "type Kept[Source: Shown](part: Source.Part)\n\n"
 
 let () =
-  let actual text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
+  let actual text = codes (check (setup [ ("app::main", text) ]) (file_of "app::main")) in
   let expect expected text =
     match actual text with
     | actual when actual = expected -> ()
@@ -207,16 +205,16 @@ let () =
       Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
         ~dependencies:[]
         [
-          ( module_of "lib::vector",
+          ( file_of "lib::vector",
             Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on );
         ];
       Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
         ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
         [
-          ( module_of "app::main",
+          ( file_of "app::main",
             Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on_2 );
         ];
-      match codes (Type_checker.diagnostics database (module_of "app::main")) with
+      match codes (Type_checker.diagnostics database (file_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "an impl in another package cannot give a type another version of its method" (fun () ->
@@ -225,16 +223,16 @@ let () =
       Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
         ~dependencies:[]
         [
-          ( module_of "lib::counter",
+          ( file_of "lib::counter",
             Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another );
         ];
       Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
         ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
         [
-          ( module_of "app::main",
+          ( file_of "app::main",
             Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another_2 );
         ];
-      match codes (Type_checker.diagnostics database (module_of "app::main")) with
+      match codes (Type_checker.diagnostics database (file_of "app::main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "impls whose heads unify only through an infinite type do not overlap" (fun () ->

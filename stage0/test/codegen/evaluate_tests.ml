@@ -18,7 +18,7 @@ let proven_with_running text =
   let database, compile = load text in
   Prover.diagnostics
     ~evaluator:(Evaluator.of_compiler (lazy compile))
-    ~record:(record database) database (Lazy.force solver) example
+    ~record:(record database) database (Lazy.force solver) example_file
 
 let shout = Fixtures.Evaluate.shout
 
@@ -75,7 +75,9 @@ let () =
       let database, _ =
         load (counting ^ Fixtures.Evaluate.without_running_it_such_a_call_is_known_only_by)
       in
-      match Prover.diagnostics ~record:(record database) database (Lazy.force solver) example with
+      match
+        Prover.diagnostics ~record:(record database) database (Lazy.force solver) example_file
+      with
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics" (List.length actual));
   test "running a call gives its real result, not the hoped one" (fun () ->
@@ -140,7 +142,7 @@ let () =
       let proven () =
         Prover.diagnostics
           ~evaluator:(Evaluator.of_compiler (lazy compile))
-          ~record:(record database) database (Lazy.force solver) example
+          ~record:(record database) database (Lazy.force solver) example_file
       in
       (match proven () with
       | [] -> ()
@@ -148,7 +150,7 @@ let () =
           fail "%s"
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-      Database.For_testing.set_text (Engine.of_context database) example (source "0");
+      Database.For_testing.set_text (Engine.of_context database) example_file (source "0");
       match proven () with
       | [ _ ] -> ()
       | actual ->
@@ -173,7 +175,8 @@ let () =
         }
       in
       let proven () =
-        Prover.diagnostics ~evaluator ~record:(record database) database (Lazy.force solver) example
+        Prover.diagnostics ~evaluator ~record:(record database) database (Lazy.force solver)
+          example_file
       in
       (match proven () with
       | [ _ ] -> ()
@@ -196,7 +199,7 @@ let () =
       let states =
         Prover.states
           ~evaluator:(Evaluator.of_compiler (lazy compile))
-          ~record:(record database) database (Lazy.force solver) example
+          ~record:(record database) database (Lazy.force solver) example_file
       in
       let ensures =
         List.filter

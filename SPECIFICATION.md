@@ -101,8 +101,8 @@ Reserved everywhere:
 any assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait transparent true type unreachable use uses var while
-with yield yields
+Self test theorem todo trait true type unreachable use uses var while with yield
+yields
 ```
 
 Reserved for later use, and an error if written:
@@ -118,7 +118,7 @@ name resolution gives the rest their meaning:
 
 ```text
 amortized time allocations allocated_bytes calls O finite potential
-log power result old
+log power result old by bit_vector
 ```
 
 | Words | Meaning |
@@ -130,6 +130,7 @@ log power result old
 | `old(e)` | The value of `e` when the function was called, inside a specification |
 | `identical(a, b)` | Whether two values of one type are the same value, inside a specification |
 | `yielded`, `finished` | The history of a lending or yielding method, inside its `ensures`, and `yielded` in a `for` loop's clauses |
+| `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 
 A parameter cannot be named `result`, and no function can be named `old` or
 `identical`. Elsewhere the words are ordinary names: in
@@ -306,17 +307,25 @@ module_path = LOWER_NAME { "::" LOWER_NAME } ;
 definition = [ visibility ] ( function | type_definition | trait
                             | capability | constant | theorem )
            | impl | test | law_proof ;
-visibility = "public" [ "opaque" | "transparent" ] | "internal" ;
+visibility = "public" [ "opaque" ] | "internal" ;
 ```
 
-Each file is a module. Nothing about a definition depends on its position in
-the file.
+Each directory of a package is a module, and its files share one namespace
+(see [Module paths](#module-paths)). Nothing about a definition depends on
+its file or its position in the file.
 
 ### Scope
 
-- No name can hide another in scope: not a prelude name, not a definition in
-  the same file, and not a variable of an enclosing scope.
-  `let name = name.trim()` is an error.
+- A name in a body is looked up in its scope, then among the definitions of
+  its module, then in the prelude.
+- A local, a parameter, or a generic parameter cannot hide another of an
+  enclosing scope, or a prelude name. `let name = name.trim()` is an error.
+- A local or a parameter may hide a function, a constant, or a theorem of
+  its module, so adding a definition to one file breaks no local in another.
+- A generic parameter cannot hide a type, a trait, or a capability of its
+  module. An `impl`'s head declares the names in its brackets, so
+  `impl Shown for Box[Marker]` would otherwise mean every `Box` where the
+  type `Marker` was meant.
 - Module names are a namespace of their own, written only before `::`. A
   variable can be named `url` in a file that imports the `url` module.
 - `::` reaches into a module, and `.` into a type or a value.
@@ -946,7 +955,7 @@ fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Out
   method needs, and the method exists only where those bounds hold. The
   method's own go after its name.
 - A method is defined in its type's package, in a file where the type is
-  visible. From another file, the type is named with its module:
+  visible. From another module, the type is named with its module:
   `fn hourly::Forecast.summary(self) -> String`.
 
 ### Versions by receiver mode
@@ -1133,7 +1142,7 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "concurrent" block
           | "concurrent" "for" pattern [ ":" type ] "in" expression { loop_clause } block
           | "proof" block
-          | "assert" expression
+          | "assert" expression [ "by" "bit_vector" ]
           | "yield" expression ;
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -1169,6 +1178,11 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   and `continue` appear only in loops.
 - `assert` appears only in tests, theorems, and proofs. In a proof it is
   proven, and in a test it is checked when the test runs.
+- `assert condition by bit_vector` is proven alone, for every value of the
+  integers and booleans it names, with its bitwise operations exact, and then
+  holds where it is written. It names only integers and booleans. A fact it
+  needs from the proof around it is a hypothesis it states:
+  `assert used < 64 ==> (word >> used) == 0 by bit_vector`.
 
 ### Patterns
 
@@ -1212,14 +1226,16 @@ match status_code {
   exactly one field, a bare pattern matches that field.
 - Fields can be written in any order, and `..`, the remaining fields, comes
   last.
-- A bare name that names a constant in scope means that constant; any other
-  binds. A constant in a pattern has a type with structural equality (see
+- In a `match` arm, an `is` test, or a `let ... else`, a bare name that names
+  a constant in scope, and no local, means that constant; any other binds. A
+  constant in a pattern has a type with structural equality (see
   [Equality](#equality)).
 - Range patterns match integers and characters.
 - Every alternative of an or-pattern binds the same names, with the same
   types.
 - A pattern in `let`, `var`, `for`, or a lambda's parameters matches every
-  value of its type.
+  value of its type. Every bare name in it binds, and may hide a constant of
+  the module, since a constant could only make the pattern fail.
 
 ### `match`
 
@@ -1680,7 +1696,8 @@ defines code that runs when its value is released.
 
 ### main
 
-A program starts at the `main` of its package's `main` module:
+A program starts at the `main` of its package's root module, the files in the
+directory of its manifest:
 
 ```truss
 fn main(arguments: List[String]) -> ExitCode
@@ -2081,14 +2098,16 @@ proof Ordered.transitive for Box[Item: Ordered] {
 
 ### Bodies and contracts in proofs
 
-- A pure function with a `time` clause and a functional body is known to the
-  prover by its body. A functional body uses `let`, `if`, `match`, `is`,
-  calls, fields, building values, `with`, operators, and quantifiers, and
-  has no `var`, assignment, or loop, and passes nothing `mut` or `own`.
-- Every other function is known by its `requires` and `ensures`.
-- A body is read only where everything it reads is visible, and in another
-  package only when the function is `transparent`. A trait's provided method
-  is read everywhere.
+- A function or a method of a type is known to its callers' proofs by its
+  `requires` and `ensures`, in every package. A function whose body is its
+  meaning states it in its `ensures`:
+  `ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])`.
+- A method of a trait or an `impl` is known by its body, where the body is
+  functional: `let`, `if`, `match`, `is`, calls, fields, building values,
+  `with`, operators, and quantifiers, with no `var`, assignment, or loop, and
+  nothing passed `mut` or `own`. A trait's provided method is read in every
+  package, and a method an `impl` writes in the `impl`'s package.
+- A clause is read only where everything it reads is visible.
 - A function with a `requires` is defined only where it holds.
 
 ### Writing specifications
@@ -2186,22 +2205,34 @@ use standard::json
 let settings = json::parse(text)?
 ```
 
-- `use` imports a module, never names. Every name that is not local or from
-  the prelude is written with its module.
+- `use` imports a module, never names. Every name that is not local, not a
+  definition of the module, and not from the prelude is written with its
+  module.
+- A `use` belongs to its file. Each file of a module imports the modules it
+  names.
 - There are no import aliases. A full path works without a `use`, and
   importing two modules with the same last name is an error.
 - An unused `use` is an error.
 
 ### Module paths
 
-Each `.truss` file of a package is a module, whose path is the package's
-name, then its directories, then its file name: `forecast/hourly.truss` in
-the `weather` package is `weather::forecast::hourly`.
+Each directory of a package that holds a `.truss` file is a module, whose
+path is the package's name, then the directory's names. The files of
+`forecast/` in the `weather` package, such as `forecast/hourly.truss` and
+`forecast/daily.truss`, are the module `weather::forecast`, and the files
+beside the package's manifest are its root module, `weather`.
 
+- The files of a module share one namespace: each names the others'
+  definitions without a module, private ones included. Two files of a
+  module cannot define one name.
+- A file's name says nothing about its definitions. Moving a definition to
+  another file of its module changes no path.
+- A module's subdirectory is a module of its own: `forecast/hourly/` is
+  `weather::forecast::hourly`, which names `weather::forecast` with `::`
+  like any other module.
 - Every path starts with a package name, including inside the package.
 - There are no relative paths, and a path holds no version.
-- A directory is not a module. File and directory names are
-  `lower_snake_case`.
+- File and directory names are `lower_snake_case`.
 - The modules of a package may use each other in a cycle.
 
 ### The prelude
@@ -2225,7 +2256,7 @@ and the prelude changes only with a language version.
 
 | Keyword | Visible to |
 |---|---|
-| *(none)* | The same file |
+| *(none)* | The same module: every file of its directory |
 | `internal` | The whole package |
 | `public` | Every package |
 
@@ -2235,15 +2266,11 @@ and the prelude changes only with a language version.
   set for a type as a whole.
 - A public signature cannot mention a private or `internal` type, and
   neither can a public type's fields unless the type is opaque.
-- The contracts of a public function, of a method of a public trait or
-  capability, and of a method of an `impl` that other packages can use call
-  no private or `internal` function and name no such constant.
-- `transparent` shows a public function's body to the proofs of other
-  packages, which makes the body part of the package's interface. It applies
-  only to a function or a method of a type whose body is a definition: it
-  has a `time` clause, no `uses`, and no `mut` parameter, and returns its
-  result. The body calls only public functions and names only public
-  constants.
+- The `requires` and `cost` of a public function, of a method of a public
+  trait or capability, and of a method of an `impl` that other packages can
+  use call no private or `internal` function and name no such constant. An
+  `ensures` may name any function the definition can, so that callers in its
+  package can know its result in terms of private helpers.
 
 ## No foreign code
 

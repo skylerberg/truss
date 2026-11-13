@@ -1,0 +1,227 @@
+use standard::core
+
+public type Option[Value] =
+  | Some(value: Value)
+  | None
+  derives Equal, Hash, Ordered
+
+public fn Option[Value].is_some(self) -> Bool
+  ensures result == (self is Some(_))
+  cost time O(1)
+{
+  self is Some(_)
+}
+
+public fn Option[Value].is_none(self) -> Bool
+  ensures result == (self is None)
+  cost time O(1)
+{
+  self is None
+}
+
+public fn Option[Value: Equal].contains(self, value: Value) -> Bool
+  ensures result == (match self {
+      Some(held) => held == value
+      None => false
+    })
+  cost time finite
+{
+  match self {
+    Some(held) => held == value
+    None => false
+  }
+}
+
+public fn Option[Value].unwrap_or(own self, default: own Value) -> Value
+  ensures !(self is Some(held) && !identical(result, held))
+  ensures !(self is None && !identical(result, default))
+  cost time O(1)
+{
+  match own self {
+    Some(value) => value
+    None => default
+  }
+}
+
+public fn Option[Value].unwrap_or_else[capability Granted](
+  own self,
+  make: (fn() -> Value uses Granted cost time finite),
+) -> Value
+  uses Granted
+  cost time O(time(make))
+{
+  match own self {
+    Some(value) => value
+    None => make()
+  }
+}
+
+public fn Option[Value].map[Output, capability Granted](
+  own self,
+  transform: (fn(own Value) -> Output uses Granted cost time finite),
+) -> Option[Output]
+  uses Granted
+  cost time O(time(transform))
+{
+  match own self {
+    Some(value) => Some(transform(own value))
+    None => None
+  }
+}
+
+public fn Option[Value].map[Output, capability Granted](
+  self,
+  transform: (fn(Value) -> Output uses Granted cost time finite),
+) -> Option[Output]
+  uses Granted
+  cost time O(time(transform))
+{
+  match self {
+    Some(value) => Some(transform(value))
+    None => None
+  }
+}
+
+public fn Option[Value].and_then[Output, capability Granted](
+  own self,
+  next: (fn(own Value) -> Option[Output] uses Granted cost time finite),
+) -> Option[Output]
+  uses Granted
+  cost time O(time(next))
+{
+  match own self {
+    Some(value) => next(own value)
+    None => None
+  }
+}
+
+public fn Option[Value].and_then[Output, capability Granted](
+  self,
+  next: (fn(Value) -> Option[Output] uses Granted cost time finite),
+) -> Option[Output]
+  uses Granted
+  cost time O(time(next))
+{
+  match self {
+    Some(value) => next(value)
+    None => None
+  }
+}
+
+public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool cost time finite)) -> Option[Value]
+  cost time O(time(keep))
+{
+  match own self {
+    Some(value) => if keep(value) { Some(own value) } else { None }
+    None => None
+  }
+}
+
+public fn Option[Value].or(own self, other: own Option[Value]) -> Option[Value]
+  cost time O(1)
+{
+  match own self {
+    Some(value) => Some(own value)
+    None => other
+  }
+}
+
+public fn Option[Value].or_else[capability Granted](
+  own self,
+  make: (fn() -> Option[Value] uses Granted cost time finite),
+) -> Option[Value]
+  uses Granted
+  cost time O(time(make))
+{
+  match own self {
+    Some(value) => Some(own value)
+    None => make()
+  }
+}
+
+public fn Option[Value].zip[Other](own self, other: own Option[Other]) -> Option[core::Pair[Value, Other]]
+  cost time O(1)
+{
+  match own self, own other {
+    Some(first), Some(second) => Some(core::Pair(first: own first, second: own second))
+    _, _ => None
+  }
+}
+
+public fn Option[Value].ok_or[Error](own self, error: own Error) -> Result[Value, Error]
+  cost time O(1)
+{
+  match own self {
+    Some(value) => Ok(own value)
+    None => Err(own error)
+  }
+}
+
+public fn Option[Value].ok_or_else[Error, capability Granted](
+  own self,
+  make: (fn() -> Error uses Granted cost time finite),
+) -> Result[Value, Error]
+  uses Granted
+  cost time O(time(make))
+{
+  match own self {
+    Some(value) => Ok(own value)
+    None => Err(make())
+  }
+}
+
+public fn Option[Value].take(mut self) -> Option[Value]
+  ensures self is None
+  ensures identical(result, old(self))
+  cost time O(1)
+{
+  let previous = own self
+  self = None
+  previous
+}
+
+public fn Option[Value].replace(mut self, value: own Value) -> Option[Value]
+  ensures self is Some(_)
+  ensures identical(result, old(self))
+  cost time O(1)
+{
+  let previous = own self
+  self = Some(own value)
+  previous
+}
+
+public fn Option[Value].get_or_insert(mut self, value: own Value) lends mut Value
+  cost time O(1)
+{
+  if self is None {
+    self = Some(own value)
+  }
+  match mut self {
+    Some(inner) => yield mut inner
+    None => unreachable
+  }
+}
+
+public fn Option[Value].unwrap(own self) -> Value
+  uses Panic
+{
+  match own self {
+    Some(value) => value
+    None => Panic.crash("unwrap of None")
+  }
+}
+
+public fn Option[Value].expect(own self, message: StringSlice) -> Value
+  uses Panic
+{
+  match own self {
+    Some(value) => value
+    None => Panic.crash(message)
+  }
+}
+
+impl Default for Option[Value] {
+  fn default() -> Option[Value] {
+    None
+  }
+}

@@ -52,21 +52,21 @@ type t = {
   session : Database.session;
   context : Query.context;
   packages : package list;  (** The packages the command acts on *)
-  mutable files : (Path.module_ * string) list;
-      (** Each of their modules with its absolute file path, in order *)
+  mutable files : (Path.file * string) list;
+      (** Each of their files with its absolute path, in order *)
 }
 
 (* The sessions that commands opened, which the command line saves when
    the command ends. *)
 let opened : Database.session list ref = ref []
 
-let module_files session packages =
+let file_paths session packages =
   let root = Database.root session in
   List.concat_map
     (fun package ->
       List.map
-        (fun module_ -> (module_, Filename.concat root (Database.module_file session module_)))
-        (Database.package_modules session package.name))
+        (fun file -> (file, Filename.concat root (Database.file_path session file)))
+        (Database.package_files session package.name))
     packages
 
 let load directory =
@@ -84,12 +84,7 @@ let load directory =
       in
       if packages = [] && Database.problems session = [] then
         cannot_run "No package in %s or any directory below it." (shown directory);
-      {
-        session;
-        context = Database.context session;
-        packages;
-        files = module_files session packages;
-      }
+      { session; context = Database.context session; packages; files = file_paths session packages }
 
 (* The package of a command that acts on exactly one. *)
 let package project =
@@ -115,9 +110,12 @@ let manifest_problems project =
    are checked again. *)
 let reload project =
   Database.refresh project.session;
-  project.files <- module_files project.session project.packages
+  project.files <- file_paths project.session project.packages
 
-let modules project = List.map fst project.files
+let files project = List.map fst project.files
+
+let modules project =
+  List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) (files project))
 
 (* The project's packages that the command's packages depend on,
    transitively, in the project's order. A registry package and the
@@ -144,26 +142,25 @@ let project_dependencies project =
       && not (List.exists (fun (package : package) -> package.name = name) project.packages))
     project_packages
 
-(* The modules that a command checks for a program built from its
-   packages: the packages' own, and those of the project's packages they
-   depend on. *)
-let program_modules project =
-  modules project
+(* The files that a command checks for a program built from its packages:
+   the packages' own, and those of the project's packages they depend on. *)
+let program_files project =
+  files project
   @ List.concat_map
-      (fun name -> Database.package_modules project.session name)
+      (fun name -> Database.package_files project.session name)
       (project_dependencies project)
 
-let file project module_ =
-  match List.assoc_opt module_ project.files with
+let path project file =
+  match List.assoc_opt file project.files with
   | Some path -> path
   | None ->
-      Filename.concat (Database.root project.session) (Database.module_file project.session module_)
+      Filename.concat (Database.root project.session) (Database.file_path project.session file)
 
-(* The modules in [paths], each a file or a directory, or every module when
+(* The files in [paths], each a file or a directory, or every file when
    [paths] is empty. *)
 let selected project paths =
   match paths with
-  | [] -> modules project
+  | [] -> files project
   | paths ->
       let wanted =
         List.map
@@ -174,35 +171,33 @@ let selected project paths =
           paths
       in
       List.filter_map
-        (fun (module_, file) ->
+        (fun (file, written) ->
           if
             List.exists
-              (fun path -> file = path || String.starts_with ~prefix:(path ^ "/") file)
+              (fun path -> written = path || String.starts_with ~prefix:(path ^ "/") written)
               wanted
-          then Some module_
+          then Some file
           else None)
         project.files
 
-let parsed project module_ = Query.demand project.context Workspace.file module_
+let parsed project file = Query.demand project.context Workspace.file file
 
-(* A module's text as a source named by its path relative to the current
+(* A file's text as a source named by its path relative to the current
    directory, which every command uses for positions. Offsets match the
-   database's source. A module of a package outside the project, such as
+   database's source. A file of a package outside the project, such as
    the standard library, keeps its database name. *)
-let source project module_ =
-  let text = Source.text (parsed project module_).source in
-  if is_own project module_ || List.mem_assoc module_ project.files then
-    Source.create ~path:(shown (file project module_)) text
-  else (parsed project module_).source
+let source project (file : Path.file) =
+  let text = Source.text (parsed project file).source in
+  if is_own project file.module_ || List.mem_assoc file project.files then
+    Source.create ~path:(shown (path project file)) text
+  else (parsed project file).source
 
 (* A file that the compiled program names in a position, such as
    [weather/forecast.truss], as a path relative to the current directory
    when the file belongs to one of the command's packages, and unchanged
    otherwise. *)
 let shown_workspace_path project workspace_path =
-  match
-    List.find_opt (fun (module_, _) -> Workspace.file_path module_ = workspace_path) project.files
-  with
+  match List.find_opt (fun (file, _) -> Path.show_file file = workspace_path) project.files with
   | Some (_, file) -> shown file
   | None -> workspace_path
 

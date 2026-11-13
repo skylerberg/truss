@@ -1,0 +1,314 @@
+use standard::core
+use standard::intrinsic
+use standard::text::unicode_tables
+
+public let Character.replacement: Character = Character"\u{FFFD}"
+
+public let Character.maximum: Character = Character"\u{10FFFF}"
+
+public fn Character.code(self) -> UInt32
+  ensures result <= 1114111
+  ensures result < 55296 || result > 57343
+  ensures result == (intrinsic::convert(self))
+  cost time O(1)
+  cost allocations == 0
+{
+  intrinsic::convert(self)
+}
+
+internal fn Character.scalar_index(self) -> UInt32
+  ensures result < 1112064
+  ensures self.code() < 55296 ==> result == self.code()
+  ensures self.code() >= 55296 ==> result == self.code() - 2048
+  cost time O(1)
+{
+  if self.code() < 55296 { self.code() } else { self.code() - 2048 }
+}
+
+internal fn Character.at_scalar_index(index: UInt32) -> Character
+  requires index < 1112064
+  ensures result.scalar_index() == index
+  cost time O(1)
+{
+  if index < 55296 { intrinsic::convert(index) } else { intrinsic::convert(index + 2048) }
+}
+
+internal fn Character.encode_onto(self, output: mut intrinsic::Storage[UInt8])
+  requires intrinsic::storage_length(output) + self.utf8_length() <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + self.utf8_length()
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  cost time O(1)
+  cost allocations == 0
+{
+  let code = self.code()
+  if code < 128 {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(code))
+  } else if code < 2048 {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(192 + code / 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+  } else if code < 65536 {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(224 + code / 4096))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 64 % 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+  } else {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(240 + code / 262144))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 4096 % 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 64 % 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+  }
+}
+
+public fn Character.utf8_length(self) -> USize
+  ensures 1 <= result && result <= 4
+  ensures (result == 1) == (self.code() < 128)
+  ensures (result == 2) == (128 <= self.code() && self.code() < 2048)
+  ensures (result == 3) == (2048 <= self.code() && self.code() < 65536)
+  cost time O(1)
+  cost allocations == 0
+{
+  let code = self.code()
+  if code < 128 {
+    1
+  } else if code < 2048 {
+    2
+  } else if code < 65536 {
+    3
+  } else {
+    4
+  }
+}
+
+public fn Character.utf16_length(self) -> USize
+  ensures 1 <= result && result <= 2
+  cost time O(1)
+{
+  if self.code() < 65536 { 1 } else { 2 }
+}
+
+public fn Character.is_ascii(self) -> Bool
+  ensures result == (self.code() < 128)
+  cost time O(1)
+{
+  self.code() < 128
+}
+
+public fn Character.is_alphabetic(self) -> Bool
+  cost time O(1)
+{
+  if self.code() < 128 { self.is_ascii_alphabetic() } else { unicode_tables::is_alphabetic(self.code()) }
+}
+
+public fn Character.is_numeric(self) -> Bool
+  cost time O(1)
+{
+  if self.code() < 128 { self.is_ascii_digit() } else { unicode_tables::is_numeric(self.code()) }
+}
+
+public fn Character.is_alphanumeric(self) -> Bool
+  cost time O(1)
+{
+  self.is_alphabetic() || self.is_numeric()
+}
+
+public fn Character.is_whitespace(self) -> Bool
+  ensures result == ((self.code() >= 9 && self.code() <= 13) || self.code() == 32 || self.code() == 133 || self.code() == 160 || self.code() == 5760
+      || (self.code() >= 8192 && self.code() <= 8202) || self.code() == 8232 || self.code() == 8233 || self.code() == 8239 || self.code() == 8287
+      || self.code() == 12288)
+  cost time O(1)
+{
+  (self.code() >= 9 && self.code() <= 13) || self.code() == 32 || self.code() == 133 || self.code() == 160 || self.code() == 5760
+    || (self.code() >= 8192 && self.code() <= 8202) || self.code() == 8232 || self.code() == 8233 || self.code() == 8239 || self.code() == 8287
+    || self.code() == 12288
+}
+
+public fn Character.is_uppercase(self) -> Bool
+  cost time O(1)
+{
+  let code = self.code()
+  if code < 128 { code >= 65 && code <= 90 } else { unicode_tables::is_uppercase(code) }
+}
+
+public fn Character.is_lowercase(self) -> Bool
+  cost time O(1)
+{
+  let code = self.code()
+  if code < 128 { code >= 97 && code <= 122 } else { unicode_tables::is_lowercase(code) }
+}
+
+public fn Character.is_control(self) -> Bool
+  ensures result == (self.code() < 32 || (self.code() >= 127 && self.code() < 160))
+  cost time O(1)
+{
+  self.code() < 32 || (self.code() >= 127 && self.code() < 160)
+}
+
+public fn Character.is_ascii_digit(self) -> Bool
+  ensures result == (self.code() >= 48 && self.code() <= 57)
+  cost time O(1)
+{
+  self.code() >= 48 && self.code() <= 57
+}
+
+public fn Character.is_ascii_alphabetic(self) -> Bool
+  ensures result == ((self.code() >= 97 && self.code() <= 122) || (self.code() >= 65 && self.code() <= 90))
+  cost time O(1)
+{
+  (self.code() >= 97 && self.code() <= 122) || (self.code() >= 65 && self.code() <= 90)
+}
+
+public fn Character.is_ascii_alphanumeric(self) -> Bool
+  ensures result == (self.is_ascii_digit() || self.is_ascii_alphabetic())
+  cost time O(1)
+{
+  self.is_ascii_digit() || self.is_ascii_alphabetic()
+}
+
+public fn Character.is_ascii_punctuation(self) -> Bool
+  ensures result == ((self.code() >= 33 && self.code() <= 47) || (self.code() >= 58 && self.code() <= 64) || (self.code() >= 91 && self.code() <= 96)
+      || (self.code() >= 123 && self.code() <= 126))
+  cost time O(1)
+{
+  (self.code() >= 33 && self.code() <= 47) || (self.code() >= 58 && self.code() <= 64) || (self.code() >= 91 && self.code() <= 96)
+    || (self.code() >= 123 && self.code() <= 126)
+}
+
+public fn Character.is_ascii_hexadecimal_digit(self) -> Bool
+  ensures result == ((self.code() >= 48 && self.code() <= 57) || (self.code() >= 97 && self.code() <= 102) || (self.code() >= 65 && self.code() <= 70))
+  cost time O(1)
+{
+  (self.code() >= 48 && self.code() <= 57) || (self.code() >= 97 && self.code() <= 102) || (self.code() >= 65 && self.code() <= 70)
+}
+
+internal fn Character.or_scalar(self, code: UInt32) -> Character
+  cost time O(1)
+{
+  if code <= 1114111 && (code < 55296 || code > 57343) { intrinsic::convert(code) } else { self }
+}
+
+public fn Character.to_uppercase(self) -> Character
+  cost time O(1)
+{
+  if self.code() < 128 { self.to_ascii_uppercase() } else { self.or_scalar(unicode_tables::uppercase_of(self.code())) }
+}
+
+public fn Character.to_lowercase(self) -> Character
+  cost time O(1)
+{
+  if self.code() < 128 { self.to_ascii_lowercase() } else { self.or_scalar(unicode_tables::lowercase_of(self.code())) }
+}
+
+public fn Character.to_ascii_uppercase(self) -> Character
+  cost time O(1)
+{
+  let code = self.code()
+  if code >= 97 && code <= 122 { intrinsic::convert(code - 32) } else { self }
+}
+
+public fn Character.to_ascii_lowercase(self) -> Character
+  cost time O(1)
+{
+  let code = self.code()
+  if code >= 65 && code <= 90 { intrinsic::convert(code + 32) } else { self }
+}
+
+public fn Character.to_digit(self, radix: UInt32 = 10) -> Option[UInt32]
+  requires 2 <= radix && radix <= 36
+  ensures match result {
+    Some(value) => value < radix
+    None => true
+  }
+  cost time O(1)
+{
+  let code = self.code()
+  let value: UInt32 = if code < 128 {
+    let byte: UInt8 = intrinsic::convert(code)
+    intrinsic::convert(byte.digit_value())
+  } else {
+    36
+  }
+  if value < radix { Some(value) } else { None }
+}
+
+public fn Character.from_digit(value: UInt32, radix: UInt32 = 10) -> Option[Character]
+  requires 2 <= radix && radix <= 36
+  ensures (result is Some(_)) == (value < radix)
+  cost time O(1)
+{
+  if value >= radix {
+    None
+  } else {
+    let digit: UInt8 = intrinsic::convert(value)
+    Some(intrinsic::convert(digit.digit_byte(uppercase: false)))
+  }
+}
+
+impl From[Character] for UInt32 {
+  fn from(value: own Character) -> UInt32 {
+    value.code()
+  }
+}
+
+impl From[UInt8] for Character {
+  fn from(value: own UInt8) -> Character {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt32] for Character {
+  type Error = core::ConversionError
+
+  fn try_from(value: own UInt32) -> Result[Character, core::ConversionError] {
+    if value > 1114111 || (value >= 55296 && value <= 57343) {
+      Err(core::ConversionError())
+    } else {
+      Ok(intrinsic::convert(value))
+    }
+  }
+}
+
+impl TryFrom[Character] for UInt8 {
+  type Error = core::ConversionError
+
+  fn try_from(value: own Character) -> Result[UInt8, core::ConversionError] {
+    let code = value.code()
+    if code > 255 { Err(core::ConversionError()) } else { Ok(intrinsic::convert(code)) }
+  }
+}
+
+impl core::Countable for Character {
+  fn successor(self) -> Option[Character]
+    cost time O(1)
+  {
+    let index = self.scalar_index()
+    if index == 1112063 { None } else { Some(Character.at_scalar_index(index + 1)) }
+  }
+
+  fn predecessor(self) -> Option[Character]
+    cost time O(1)
+  {
+    let index = self.scalar_index()
+    if index == 0 { None } else { Some(Character.at_scalar_index(index - 1)) }
+  }
+
+  fn advanced(self, by: USize) -> Option[Character]
+    cost time O(1)
+  {
+    let index: USize = intrinsic::convert(self.scalar_index())
+    if by > 1112063 - index { None } else { Some(Character.at_scalar_index(intrinsic::convert(index + by))) }
+  }
+
+  fn retreated(self, by: USize) -> Option[Character]
+    cost time O(1)
+  {
+    let index: USize = intrinsic::convert(self.scalar_index())
+    if by > index { None } else { Some(Character.at_scalar_index(intrinsic::convert(index - by))) }
+  }
+
+  fn steps_to(self, other: Character) -> Option[USize]
+    cost time O(1)
+  {
+    let from = self.scalar_index()
+    let to = other.scalar_index()
+    if to < from { None } else { Some(intrinsic::convert(to - from)) }
+  }
+}

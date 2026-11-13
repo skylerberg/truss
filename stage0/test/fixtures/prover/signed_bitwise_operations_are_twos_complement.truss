@@ -1,5 +1,8 @@
 fn f(value: Int8) -> Int8
   ensures result == -1
 {
+  proof {
+    assert (value | -1) == -1 by bit_vector
+  }
   value | -1
 }

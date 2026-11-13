@@ -1,5 +1,6 @@
 (* [truss rename]: renames a definition, a method, or a module, and every
-   reference to it in the project.
+   reference to it in the project. Renaming a module moves its directory's
+   files.
 
    The rename is made in a trial session and checked there first. If the
    result has any diagnostic, such as a name that is taken, a name that
@@ -14,12 +15,29 @@ type target =
   | Module of Path.module_
 
 type plan = {
-  edits : (Path.module_ * Diagnostic.span Diagnostic.edit list) list;
+  edits : (Path.file * Diagnostic.span Diagnostic.edit list) list;
   moved : (Path.module_ * Path.module_) option;  (** A renamed module's old and new paths *)
 }
 
 let module_exists (project : Project.t) (module_ : Path.module_) =
-  List.mem_assoc module_ project.files
+  List.mem module_ (Project.modules project)
+
+(* The file after the rename: a file of a renamed module moves with it. *)
+let moved_file plan (file : Path.file) =
+  match plan.moved with
+  | Some (old_module, new_module) when file.module_ = old_module ->
+      { file with module_ = new_module }
+  | _ -> file
+
+(* The edits grouped by file, in order of file. *)
+let by_file edits =
+  List.map
+    (fun file ->
+      ( file,
+        List.filter_map
+          (fun (edit_file, edit) -> if edit_file = file then Some edit else None)
+          edits ))
+    (List.sort_uniq compare (List.map fst edits))
 
 (* The module of a project package that [from_] names, and the member
    after it. [from_] must start with the package's name. *)
@@ -93,19 +111,9 @@ let plan_definition (project : Project.t) path name =
   let edits =
     List.filter (References.names_definition path) occurrences
     |> List.map (fun (occurrence : References.occurrence) ->
-        (occurrence.module_, Diagnostic.replace occurrence.span name))
+        (occurrence.file, Diagnostic.replace occurrence.span name))
   in
-  {
-    edits =
-      List.map
-        (fun module_ ->
-          ( module_,
-            List.filter_map
-              (fun (edit_module, edit) -> if edit_module = module_ then Some edit else None)
-              edits ))
-        (List.sort_uniq compare (List.map fst edits));
-    moved = None;
-  }
+  { edits = by_file edits; moved = None }
 
 let plan_module (project : Project.t) (old_module : Path.module_) to_ =
   let package = old_module.package in
@@ -132,80 +140,70 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
         match occurrence.target with
         | Module edit_module when edit_module = old_module ->
             (* Written as its import's name, one segment, or as a full path. *)
-            let text = Source.text (Project.parsed project occurrence.module_).source in
+            let text = Source.text (Project.parsed project occurrence.file).source in
             let written =
               String.sub text occurrence.span.start (occurrence.span.stop - occurrence.span.start)
             in
             Some
-              ( occurrence.module_,
+              ( occurrence.file,
                 Diagnostic.replace occurrence.span
                   (if String.contains written ':' then full else last) )
         | _ -> None)
       (References.all project)
     @ List.map
-        (fun (module_, span) -> (module_, Diagnostic.replace span full))
+        (fun (file, span) -> (file, Diagnostic.replace span full))
         (References.uses project old_module)
   in
-  let files = List.sort_uniq compare (old_module :: List.map fst edits) in
-  {
-    edits =
-      List.map
-        (fun module_ ->
-          ( module_,
-            List.filter_map
-              (fun (edit_module, edit) -> if edit_module = module_ then Some edit else None)
-              edits ))
-        files;
-    moved = Some (old_module, new_module);
-  }
+  { edits = by_file edits; moved = Some (old_module, new_module) }
 
-let text_of (project : Project.t) module_ = Source.text (Project.parsed project module_).source
+let text_of (project : Project.t) file = Source.text (Project.parsed project file).source
 
-(* Each module and its text after the rename, under its new path. *)
+(* Each file, the file it becomes, and its text after the rename. *)
 let applied (project : Project.t) plan =
   List.map
-    (fun module_ ->
+    (fun file ->
       let text =
-        match List.assoc_opt module_ plan.edits with
-        | Some edits -> Check_command.apply (text_of project module_) edits
-        | None -> text_of project module_
+        match List.assoc_opt file plan.edits with
+        | Some edits -> Check_command.apply (text_of project file) edits
+        | None -> text_of project file
       in
-      let module_ =
-        match plan.moved with Some (old_m, new_m) when old_m = module_ -> new_m | _ -> module_
-      in
-      (module_, text))
-    (Project.modules project)
+      (file, moved_file plan file, text))
+    (Project.files project)
 
-(* A trial session of the worktree with the rename applied, for checking
-   it. It starts from the worktree's session, so only the edited modules
-   and their dependents are checked, and it is discarded afterward. Each
-   module's text is placed at its file path after the rename, and a moved
-   module's old file is removed. *)
-let trial (project : Project.t) after =
-  let file module_ = Database.module_file project.session module_ in
-  let written = List.map (fun (module_, text) -> (file module_, Some text)) after in
-  let removed =
-    List.filter_map
-      (fun module_ ->
-        let file = file module_ in
-        if List.mem_assoc file written then None else Some (file, None))
-      (Project.modules project)
-  in
-  Database.trial project.session (written @ removed)
-
-let file_of (project : Project.t) (module_ : Path.module_) =
+(* A module's directory, which a rename creates for a module it moves. *)
+let directory_of (project : Project.t) (module_ : Path.module_) =
   match
     List.find_opt
       (fun (candidate : Project.package) -> candidate.name = module_.package)
       project.packages
   with
-  | Some package -> Filename.concat package.directory (String.concat "/" module_.modules ^ ".truss")
-  | None -> Project.file project module_
+  | Some package -> List.fold_left Filename.concat package.directory module_.modules
+  | None -> Project.cannot_run "%s is not in this project." (Path.show_module module_)
+
+let path_of (project : Project.t) (file : Path.file) =
+  Filename.concat (directory_of project file.module_) (file.name ^ ".truss")
+
+(* A trial session of the worktree with the rename applied, for checking
+   it. It starts from the worktree's session, so only the edited files and
+   their dependents are checked, and it is discarded afterward. Each file's
+   text is placed at its path after the rename, and a moved file's old path
+   is removed. *)
+let trial (project : Project.t) after =
+  let path file = Database.file_path project.session file in
+  let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
+  let removed =
+    List.filter_map
+      (fun (old_file, _, _) ->
+        let old_path = path old_file in
+        if List.mem_assoc old_path written then None else Some (old_path, None))
+      after
+  in
+  Database.trial project.session (written @ removed)
 
 let edits_json (project : Project.t) plan =
   List.concat_map
-    (fun (module_, edits) ->
-      let source = Project.source project module_ in
+    (fun (file, edits) ->
+      let source = Project.source project file in
       List.map
         (fun (edit : Diagnostic.span Diagnostic.edit) ->
           Json.Object
@@ -244,19 +242,14 @@ let run ~directory ~from_ ~to_ ~json =
     let checked = Database.context (trial project after) in
     let caused =
       List.filter_map
-        (fun (module_, text) ->
-          match Diagnostic.shown (Type_checker.diagnostics checked module_) with
+        (fun (_, file, text) ->
+          match Diagnostic.shown (Type_checker.diagnostics checked file) with
           | [] -> None
           | diagnostics ->
-              let path =
-                match plan.moved with
-                | Some (_, new_m) when new_m = module_ -> file_of project module_
-                | _ -> Project.file project module_
-              in
               Some
                 {
-                  Report.module_;
-                  source = Source.create ~path:(Project.shown path) text;
+                  Report.file;
+                  source = Source.create ~path:(Project.shown (path_of project file)) text;
                   diagnostics;
                 })
         after
@@ -273,17 +266,12 @@ let run ~directory ~from_ ~to_ ~json =
     | [] ->
         let edits = edits_json project plan in
         List.iter
-          (fun (module_, text) ->
-            let old_module =
-              match plan.moved with
-              | Some (old_m, new_m) when new_m = module_ -> old_m
-              | _ -> module_
-            in
-            if List.mem_assoc old_module plan.edits || old_module <> module_ then begin
-              let path = file_of project module_ in
+          (fun (old_file, file, text) ->
+            if List.mem_assoc old_file plan.edits || old_file <> file then begin
+              let path = path_of project file in
               File_system.make_directory (Filename.dirname path);
               Project.write_file path text;
-              if old_module <> module_ then Sys.remove (Project.file project old_module)
+              if old_file <> file then Sys.remove (Project.path project old_file)
             end)
           after;
         Project.reload project;
@@ -296,11 +284,10 @@ let run ~directory ~from_ ~to_ ~json =
                  ( "moved",
                    match plan.moved with
                    | Some (old_m, new_m) ->
-                       Json.Object
-                         [
-                           ("from", Json.String (Project.shown (Project.file project old_m)));
-                           ("to", Json.String (Project.shown (file_of project new_m)));
-                         ]
+                       let directory module_ =
+                         Json.String (Project.shown (directory_of project module_))
+                       in
+                       Json.Object [ ("from", directory old_m); ("to", directory new_m) ]
                    | None -> Json.Null );
                ])
         else

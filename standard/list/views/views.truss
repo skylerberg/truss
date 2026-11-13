@@ -1,0 +1,438 @@
+use standard::core
+use standard::list
+
+public fn List[Element].get(self, index: USize) lends Option[Element]
+
+  ensures (result is Some(_)) == (index < self.length())
+  ensures !(result is Some(element) && !identical(element, self.model()[index]))
+  cost time O(1)
+{
+  match self.slice().get(index) {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element].first(self) lends Option[Element]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures !(result is Some(element) && !identical(element, self.model()[0]))
+  cost time O(1)
+{
+  match self.slice().first() {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element].last(self) lends Option[Element]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures !(result is Some(element) && !identical(element, self.model()[self.length() - 1]))
+  cost time O(1)
+{
+  match self.slice().last() {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element].split_first(self) lends Option[list::SplitFirst[Element]]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(1)
+{
+  yield self.slice().split_first()
+}
+
+public fn List[Element].split_last(self) lends Option[list::SplitLast[Element]]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(1)
+{
+  yield self.slice().split_last()
+}
+
+public fn List[Element].split_at(self, index: USize) -> core::Pair[Slice[Element], Slice[Element]]
+  requires index <= self.length()
+  ensures result.first.length() == index
+  ensures result.second.length() == self.length() - index
+  cost time O(1)
+{
+  self.slice().split_at(index)
+}
+
+public fn List[Element: Equal].contains(self, item: Element) -> Bool
+
+  ensures result == (exists i in 0..self.length() => self.model()[i] == item)
+  cost time O(self.length() * time(Element.equal))
+{
+  self.slice().contains(item)
+}
+
+public fn List[Element: Equal].index_of(self, item: Element) -> Option[USize]
+
+  ensures match result {
+    Some(index) => index < self.length() && self.model()[index] == item
+      && (forall i in 0..index => !(self.model()[i] == item))
+    None => !self.contains(item)
+  }
+  cost time O(self.length() * time(Element.equal))
+{
+  self.slice().index_of(item)
+}
+
+public fn List[Element: Equal].last_index_of(self, item: Element) -> Option[USize]
+
+  ensures match result {
+    Some(index) => index < self.length() && self.model()[index] == item
+      && (forall i: USize => index < i && i < self.length() ==> !(self.model()[i] == item))
+    None => !self.contains(item)
+  }
+  cost time O(self.length() * time(Element.equal))
+{
+  self.slice().last_index_of(item)
+}
+
+public fn List[Element].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
+
+  ensures match result {
+    Some(index) => index < self.length() && matching(self.model()[index])
+      && (forall i in 0..index => !matching(self.model()[i]))
+    None => forall i in 0..self.length() => !matching(self.model()[i])
+  }
+  cost time O(self.length() * time(matching))
+{
+  self.slice().find_index(matching)
+}
+
+public fn List[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
+
+  ensures result == (prefix.length() <= self.length()
+    && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
+  cost time O(prefix.length() * time(Element.equal))
+{
+  self.slice().starts_with(prefix)
+}
+
+public fn List[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
+
+  ensures result == (suffix.length() <= self.length()
+    && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
+  cost time O(suffix.length() * time(Element.equal))
+{
+  self.slice().ends_with(suffix)
+}
+
+public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Option[USize]
+  ensures match result {
+    Some(index) => index + needle.length() <= self.length()
+    None => true
+  }
+  cost time O(self.length() * time(Element.equal) + needle.length() * time(Element.equal))
+{
+  self.slice().find_slice(needle)
+}
+
+public fn List[Element: Ordered].is_sorted(self) -> Bool
+  ensures result == (self.slice().is_sorted())
+  cost time finite
+{
+  self.slice().is_sorted()
+}
+
+public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
+  requires forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == target
+    None => !self.contains(target)
+  }
+  cost time O(log(self.length()) * time(Element.compare))
+{
+  self.slice().binary_search(target)
+}
+
+public fn List[Element: Ordered].minimum(self) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
+{
+  match self.slice().minimum() {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element: Ordered].maximum(self) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
+{
+  match self.slice().maximum() {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element: Copyable].to_list(self) -> List[Element]
+  ensures identical(result.model(), self.model())
+  cost time O(self.length() * time(Element.copy))
+{
+  self.slice().to_list()
+}
+
+public fn List[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+  ensures result.length() <= self.length()
+  ensures forall i in 0..result.length() => keep(result.model()[i])
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
+{
+  self.slice().filter(keep)
+}
+
+public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
+  ensures result.length() == self.length()
+  ensures result.is_sorted()
+  cost time O(self.length() * time(Element.copy) + self.length() * log(self.length()) * time(Element.compare))
+{
+  self.slice().sorted()
+}
+
+public fn List[Element: Copyable].repeated(self, times: USize) -> List[Element]
+  ensures result.length() == self.length() * times
+  cost time O(self.length() * times * time(Element.copy))
+{
+  self.slice().repeated(times)
+}
+
+public fn List[Element: Display].join(self, separator: StringSlice) -> String
+  cost time finite
+{
+  self.slice().join(separator)
+}
+
+public fn List[Element].enumerate(self) yields core::Indexed[Element]
+
+  ensures result.index == yielded.length()
+  ensures identical(result.element, self.model()[yielded.length()])
+  ensures yielded.length() <= self.length()
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant yielded.length() == index
+    decreases self.length() - index
+  {
+    yield core::Indexed(index: index, element: self[index])
+    index += 1
+  }
+}
+
+public fn List[Element].enumerate(mut self) yields mut core::Indexed[Element]
+
+  cost time O(self.length())
+{
+  var index: USize = 0
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    yield core::Indexed(index: index, element: mut self[index])
+    index += 1
+  }
+}
+
+public fn List[Element].reversed(self) yields Element
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  var index = self.length()
+  while index > 0
+    invariant index <= self.length()
+    invariant yielded.length() == self.length() - index
+    decreases index
+  {
+    index -= 1
+    yield self[index]
+  }
+}
+
+public fn List[Element].reversed(mut self) yields mut Element
+
+  cost time O(self.length())
+{
+  var index = self.length()
+  while index > 0
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+    decreases index
+  {
+    index -= 1
+    yield mut self[index]
+  }
+}
+
+public fn List[Element].windows(self, size: USize) yields Slice[Element]
+  requires size > 0
+  ensures result.length() == size
+  cost time O(self.length())
+{
+  for window in self.slice().windows(size) {
+    yield window
+  }
+}
+
+public fn List[Element].chunks(self, size: USize) yields Slice[Element]
+  requires size > 0
+  ensures result.length() <= size
+  cost time O(self.length())
+{
+  for chunk in self.slice().chunks(size) {
+    yield chunk
+  }
+}
+
+public fn List[Element: Equal].split(self, separator: Element) yields Slice[Element]
+  cost time O(self.length() * time(Element.equal))
+{
+  for part in self.slice().split(separator) {
+    yield part
+  }
+}
+
+public fn List[Element].zip[Other](self, other: Slice[Other]) yields core::Pair[Element, Other]
+
+  ensures identical(result.first, self.model()[yielded.length()])
+  ensures identical(result.second, other.model()[yielded.length()])
+  ensures yielded.length() <= self.length()
+  ensures yielded.length() <= other.length()
+  cost time O(self.length())
+{
+  var index: USize = 0
+  while index < self.length() && index < other.length()
+    invariant index <= self.length()
+    invariant index <= other.length()
+    invariant yielded.length() == index
+    decreases self.length() - index
+  {
+    yield core::Pair(first: self[index], second: other[index])
+    index += 1
+  }
+}
+
+public fn List[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut core::Pair[Element, Other]
+
+  cost time O(self.length())
+{
+  var index: USize = 0
+  while index < self.length() && index < other.length()
+    invariant self.length() == old(self.length())
+    invariant other.length() == old(other.length())
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    yield core::Pair(first: mut self[index], second: mut other[index])
+    index += 1
+  }
+}
+
+public fn List[Element].rotate_left(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  ensures forall i: Integer =>
+    0 <= i && i < self.length() - by ==> identical(self.model()[i], old(self.model())[i + by])
+  ensures forall i: Integer =>
+    self.length() - by <= i && i < self.length() ==>
+      identical(self.model()[i], old(self.model())[i + by - self.length()])
+  cost time O(self.length())
+{
+  mut self[..].rotate_left(by)
+}
+
+public fn List[Element].rotate_right(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
+  ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
+  cost time O(self.length())
+{
+  mut self[..].rotate_right(by)
+}
+
+public fn List[Element: Copyable].fill(mut self, value: Element)
+  ensures self.length() == old(self.length())
+  ensures forall i in 0..self.length() => identical(self.model()[i], value)
+  cost time O(self.length() * time(Element.copy))
+{
+  mut self[..].fill(value)
+}
+
+public fn List[Element: Copyable].copy_from(mut self, source: Slice[Element])
+  requires source.length() == self.length()
+  ensures self.length() == old(self.length())
+  ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
+  cost time O(self.length() * time(Element.copy))
+{
+  mut self[..].copy_from(source)
+}
+
+public fn List[Element].update_each[capability Granted](
+  mut self,
+  change: (fn(mut Element) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.length() == old(self.length())
+  cost calls(change) == self.length()
+  cost time O(self.length() * time(change))
+{
+  mut self[..].update_each(change)
+}
+
+public fn List[Element: Ordered].sort(mut self)
+  ensures self.length() == old(self.length())
+  ensures self.is_sorted()
+  ensures forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
+{
+  mut self[..].sort()
+}
+
+public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+  ensures self.length() == old(self.length())
+  cost time O(self.length() * log(self.length()) * time(compare))
+{
+  mut self[..].sort_by(compare)
+}
+
+public fn List[Element].min_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(compare))
+{
+  match self.slice().min_by(compare) {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element].max_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(compare))
+{
+  match self.slice().max_by(compare) {
+    Some(found) => yield Some(found)
+    None => yield None
+  }
+}
+
+public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+  ensures self.length() == old(self.length())
+  cost time finite
+{
+  mut self[..].sort_by_key(key)
+}

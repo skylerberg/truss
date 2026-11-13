@@ -695,7 +695,7 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      Exported_parts.check state lowered;
+      Exported_parts.check state;
       (* Whether a recorded type contains a type that [unwanted] accepts. *)
       let any_type unwanted =
         let contains table =
@@ -805,8 +805,8 @@ let type_check_result =
       Compiler_bug.while_doing ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
 (* The diagnostics of every body in a file, in file offsets and in order. *)
-let diagnostics database module_ =
-  Names.per_definition database module_ (fun key ->
+let diagnostics database file =
+  Names.per_definition database file (fun key ->
       match Query.demand database type_check_result key with
       | Some result -> result.diagnostics
       | None -> [])

@@ -14,6 +14,27 @@ open Lookups
 open Pattern_typing
 open Operators
 
+(* An assertion [by bit_vector] is decided over fixed-width bits, so each
+   variable it names is an integer or a boolean. *)
+let bit_vector_names state (value : Core.expression) =
+  let spans = Syntax_walk.spans state.definition in
+  Core_walk.expression
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         place =
+           (function
+           | Local { type_; origin; _ }
+             when not (Types.is_builtin Bool type_ || Types.integer_range type_ <> None) ->
+               report state Not_bit_vector spans.(origin)
+                 (Printf.sprintf
+                    "An assertion `by bit_vector` can name only integers and booleans, and this is \
+                     a `%s`."
+                    (Types.show type_))
+           | _ -> ());
+       })
+    value
+
 (* A block used as a value. Its last expression is checked against the
    expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
@@ -282,10 +303,12 @@ and statement state env (written : statement) ~last : unit =
   | Proof body ->
       register_statement state written (fun () -> Proof (build_block state body));
       loop_body state { env with specification = true } body
-  | Assert value ->
+  | Assert { value; by_bit_vector } ->
       register_statement state written (fun () ->
           let value = build_expression state value in
-          Assert { value; executable = Form.is_executable state value });
+          if by_bit_vector then bit_vector_names state value;
+          Assert
+            { condition = { value; executable = Form.is_executable state value }; by_bit_vector });
       check state env value Types.bool
   | Yield value -> (
       match env.output with

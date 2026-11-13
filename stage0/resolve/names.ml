@@ -1,7 +1,8 @@
-(* The declarations of each file, and looking a definition up by name. Every
-   lookup across definitions is a query keyed by location and name, so a
-   change re-runs only the lookups that it can affect: adding a definition
-   named [count] to a file re-runs the lookups of [count] in that file. *)
+(* The declarations of each module, and looking a definition up by name. A
+   module is a directory, and its files share one namespace. Every lookup
+   across definitions is a query keyed by location and name, so a change
+   re-runs only the lookups that it can affect: adding a definition named
+   [count] to a file re-runs the lookups of [count] in its module. *)
 
 open Syntax
 
@@ -45,13 +46,14 @@ let kind_name : kind -> string = function
   | Law_proof -> "a law's proof"
 
 (* A definition, as its file declares it. [ordinal] counts the earlier
-   definitions in the file with the same path. Only the first, with ordinal
-   0, is the referent of the path; the others are reported as duplicates.
-   [index] is its position among the file's definitions. [container] is the
+   definitions in the module with the same path, in the order of its files.
+   Only the first, with ordinal 0, is the referent of the path; the others
+   are reported as duplicates. [index] is its position among its file's
+   definitions, which no other file's edit changes. [container] is the
    position of the enclosing trait, [impl], or capability, when the
    definition is a method of one. *)
 type declaration = {
-  module_ : Path.module_;  (** Where it is written. *)
+  file : Path.file;  (** Where it is written. *)
   path : Path.t;
   ordinal : int;
   index : int;
@@ -62,12 +64,13 @@ type declaration = {
 }
 
 (* The key of a definition: its path, its module, and its ordinal. The path
-   alone does not determine the file of a method, because a method can be in
-   any file of its type's package. *)
+   alone does not determine the module of a method, because a method can be
+   in any module of its type's package. The key does not name the file, so
+   moving a definition to another file of its module keeps its key. *)
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
 
 let key_of (declaration : declaration) =
-  { module_ = declaration.module_; path = declaration.path; ordinal = declaration.ordinal }
+  { module_ = declaration.file.module_; path = declaration.path; ordinal = declaration.ordinal }
 
 let show_key key =
   if key.ordinal = 0 then Path.show key.path
@@ -127,7 +130,7 @@ let receiver (parameters : parameter list) : Path.receiver =
   | { kind = Self_parameter (Some Own); _ } :: _ -> Own
   | _ -> Static
 
-(* The packages a file can name at the start of a path: its own, the
+(* The packages a module can name at the start of a path: its own, the
    standard library, and its dependencies. *)
 let packages database (module_ : Path.module_) =
   let dependencies =
@@ -157,16 +160,16 @@ let used_module database ~from (path : path) =
 let last_name (module_ : Path.module_) =
   match List.rev (Path.module_parts module_) with last :: _ -> last | [] -> ""
 
-(* The modules a file imports, by the name code writes them with. *)
+(* The modules a file imports, by the name code writes them with. Each file
+   has its own imports. *)
 let imports =
-  Query.query ~name:"imports" ~phase:Phases.syntax ~saved:true ~show:Path.show_module
-    (fun database module_ ->
-      let file = Query.demand database Workspace.file module_ in
+  Query.query ~name:"imports" ~phase:Phases.syntax ~saved:true ~show:Path.show_file
+    (fun database (file : Path.file) ->
       List.map
         (fun (item : path Syntax.item) ->
-          let used = used_module database ~from:module_ item.value in
+          let used = used_module database ~from:file.module_ item.value in
           (last_name used, used))
-        file.uses)
+        (Query.demand database Workspace.file file).uses)
 
 let module_exists database (module_ : Path.module_) =
   module_ = Intrinsic.module_ || Query.demand database Workspace.module_exists module_
@@ -174,9 +177,9 @@ let module_exists database (module_ : Path.module_) =
 let top module_ name : Path.t = Top { module_; name }
 
 (* The plain names a file defines, before any type head is resolved, so
-   that resolving a method's head can read them. *)
-(* An entry carries nothing about where in the file its definition is, so
-   that moving a definition changes no lookup of it. *)
+   that resolving a method's head can read them. An entry carries nothing
+   about where its definition is, so that moving a definition within its
+   module changes no lookup of it. *)
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
 (* The kind of definition that a definition whose header did not parse was
@@ -235,10 +238,19 @@ let builtin_items () =
         })
       Intrinsic.operations
 
+let file_entries =
+  Query.query ~name:"file_entries" ~phase:Phases.syntax ~show:Path.show_file (fun database file ->
+      plain_items (Query.demand database Workspace.file file).definitions)
+
+(* A module's entries, file by file. An edit to a body leaves its file's
+   entries as they were, so it reaches no lookup. *)
 let entries =
   Query.query ~name:"entries" ~phase:Phases.syntax ~show:Path.show_module (fun database module_ ->
       if module_ = Intrinsic.module_ then builtin_items ()
-      else plain_items (Query.demand database Workspace.file module_).definitions)
+      else
+        List.concat_map
+          (Query.demand database file_entries)
+          (Query.demand database Workspace.files module_))
 
 module String_map = Map.Make (String)
 
@@ -267,13 +279,10 @@ let is_type_kind : named -> bool = function
   | Function | Constant | Theorem -> false
 
 let is_value_kind kind = not (is_type_kind kind)
-
-let is_public = function
-  | Public | Public_opaque | Public_transparent -> true
-  | Private | Internal -> false
+let is_public = function Public | Public_opaque -> true | Private | Internal -> false
 
 (* Whether code in [from] can see a definition of [module_] with this
-   visibility. *)
+   visibility. A private definition is visible to every file of its module. *)
 let visible ~(from : Path.module_) (module_ : Path.module_) visibility =
   module_ = from || is_public visibility || (visibility = Internal && module_.package = from.package)
 
@@ -282,10 +291,10 @@ type module_lookup =
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
-(* The module that the segments before [::] denote, from a file in [from]:
+(* The module that the segments before [::] denote, from the file [from]:
    the first segment is the last name of a module that the file imports, or
    a package. *)
-let lookup_module database ~(from : Path.module_) (names : string list) =
+let lookup_module database ~(from : Path.file) (names : string list) =
   match names with
   | [] -> No_module ""
   | first :: rest -> (
@@ -296,8 +305,8 @@ let lookup_module database ~(from : Path.module_) (names : string list) =
           (List.assoc_opt first (Query.demand database imports from))
       in
       let package =
-        let module_ = full_module database ~from names in
-        if List.mem module_.package (packages database from) then Some module_ else None
+        let module_ = full_module database ~from:from.module_ names in
+        if List.mem module_.package (packages database from.module_) then Some module_ else None
       in
       let exists module_ = module_exists database module_ in
       match (imported, package) with
@@ -309,16 +318,16 @@ let lookup_module database ~(from : Path.module_) (names : string list) =
 
 (* The type a method's or constant's head names, from the file it is
    written in, or [None]. *)
-let head_type database ~(from : Path.module_) (path : path) =
+let head_type database ~(from : Path.file) (path : path) =
   let visible_type module_ name =
     match Query.demand database find (module_, name) with
-    | Some item when is_type_kind item.kind && visible ~from module_ item.visibility ->
+    | Some item when is_type_kind item.kind && visible ~from:from.module_ module_ item.visibility ->
         Some (top module_ name)
     | _ -> None
   in
   match path.modules with
   | [] -> (
-      match visible_type from path.last.text with
+      match visible_type from.module_ path.last.text with
       | Some path -> Some path
       | None -> (
           match Prelude.find_type path.last.text with
@@ -334,10 +343,10 @@ let head_type database ~(from : Path.module_) (path : path) =
 (* A head that names no type still gets a path, so the definition is
    checked and its error reported once; no other code can name it, since a
    real type of that name in this module would have been found. *)
-let owner database ~from (head : type_head) =
+let owner database ~(from : Path.file) (head : type_head) =
   match head_type database ~from head.path with
   | Some path -> path
-  | None -> top from (spell_path head.path)
+  | None -> top from.module_ (spell_path head.path)
 
 (* Each [impl] of a module, with the type its head names, from the head as
    written: what an [impl]'s interface resolves its type to, read without
@@ -345,38 +354,40 @@ let owner database ~from (head : type_head) =
 let impl_types =
   Query.query ~name:"impl_types" ~phase:Phases.declarations ~saved:true ~show:Path.show_module
     (fun database module_ ->
-      List.filter_map
-        (fun (item : definition Syntax.item) ->
-          match item.value.kind with
-          | Impl { trait_; type_; _ } ->
-              Some
-                ( head_type database ~from:module_ type_.path,
-                  (Impl { module_; trait = spell_path_type trait_; for_type = spell_head type_ }
-                    : Path.t) )
-          | _ -> None)
-        (Query.demand database Workspace.file module_).definitions)
+      List.concat_map
+        (fun (file : Path.file) ->
+          List.filter_map
+            (fun (item : definition Syntax.item) ->
+              match item.value.kind with
+              | Impl { trait_; type_; _ } ->
+                  Some
+                    ( head_type database ~from:file type_.path,
+                      (Impl { module_; trait = spell_path_type trait_; for_type = spell_head type_ }
+                        : Path.t) )
+              | _ -> None)
+            (Query.demand database Workspace.file file).definitions)
+        (Query.demand database Workspace.files module_))
 
-let declarations =
-  Query.query ~name:"declarations" ~phase:Phases.declarations ~show:Path.show_module ~saved:true
-    (fun database module_ ->
-      let file = Query.demand database Workspace.file module_ in
-      let counts = Hashtbl.create 16 in
+(* A file's declarations, each with ordinal 0; [declarations] numbers them
+   across the module. *)
+let file_declarations =
+  Query.query ~name:"file_declarations" ~phase:Phases.declarations ~show:Path.show_file
+    (fun database (file : Path.file) ->
+      let module_ = file.module_ in
       (* The traits, [impl]s, and capabilities so far, by index: the path of
          each, and whether its methods take no [self], as a capability's do
          not. *)
       let containers = Hashtbl.create 8 in
       let declare index (item : definition Syntax.item) path kind generic =
-        let ordinal = Option.value ~default:0 (Hashtbl.find_opt counts path) in
-        Hashtbl.replace counts path (ordinal + 1);
         (match item.value.kind with
         | Trait _ | Impl _ -> Hashtbl.replace containers index (path, false)
         | Capability _ -> Hashtbl.replace containers index (path, true)
         | _ -> ());
         Some
           {
-            module_;
+            file;
             path;
-            ordinal;
+            ordinal = 0;
             index;
             container = item.container;
             kind;
@@ -415,7 +426,7 @@ let declarations =
                      declare
                        (Method
                           {
-                            owner = owner database ~from:module_ head;
+                            owner = owner database ~from:file head;
                             name = name.text;
                             receiver = receiver parameters;
                           })
@@ -429,8 +440,7 @@ let declarations =
                      declare (top module_ name.text) Constant false
                  | Constant { name = Member_name (head, name); _ } ->
                      declare
-                       (Member_constant
-                          { owner = owner database ~from:module_ head; name = name.text })
+                       (Member_constant { owner = owner database ~from:file head; name = name.text })
                        Member_constant false
                  | Theorem { name; generics; _ } ->
                      declare (top module_ name.text) Theorem (generics <> [])
@@ -461,7 +471,7 @@ let declarations =
                      | Some kind -> declare (top module_ name.text) (kind_of_named kind) false
                      | None -> None)
                  | Definition_error { name = Some (Member_name (head, name)); keyword } ->
-                     let owner = owner database ~from:module_ head in
+                     let owner = owner database ~from:file head in
                      if keyword = Some Let then
                        declare (Member_constant { owner; name = name.text }) Member_constant false
                      else
@@ -469,7 +479,32 @@ let declarations =
                  (* A method without a body is written only inside a trait or a
                 capability. *)
                  | Method_declaration _ | Definition_error { name = None; _ } -> None))
-           file.definitions))
+           (Query.demand database Workspace.file file).definitions))
+
+(* A module's declarations, file by file, each numbered among the earlier
+   ones with its path. *)
+let declarations =
+  Query.query ~name:"declarations" ~phase:Phases.declarations ~show:Path.show_module ~saved:true
+    (fun database module_ ->
+      let counts = Hashtbl.create 16 in
+      List.concat_map
+        (fun file ->
+          List.map
+            (fun (declaration : declaration) ->
+              let ordinal = Option.value ~default:0 (Hashtbl.find_opt counts declaration.path) in
+              Hashtbl.replace counts declaration.path (ordinal + 1);
+              { declaration with ordinal })
+            (Query.demand database file_declarations file))
+        (Query.demand database Workspace.files module_))
+
+(* The declarations written in one file, numbered as [declarations]
+   numbers them. *)
+let declarations_in =
+  Query.query ~name:"declarations_in" ~phase:Phases.declarations ~show:Path.show_file
+    (fun database (file : Path.file) ->
+      List.filter
+        (fun (declaration : declaration) -> declaration.file = file)
+        (Query.demand database declarations file.module_))
 
 module Member_map = Map.Make (struct
   type t = Path.t * string
@@ -517,7 +552,7 @@ let trait_index =
         List.filter_map
           (fun (declaration : declaration) ->
             if declaration.kind = Trait && declaration.ordinal = 0 then
-              Some ((declaration.module_, declaration.index), declaration.path)
+              Some ((declaration.file, declaration.index), declaration.path)
             else None)
           declared
       in
@@ -525,7 +560,7 @@ let trait_index =
         (fun index (declaration : declaration) ->
           match (declaration.path, declaration.container) with
           | Method { name; _ }, Some container -> (
-              match List.assoc_opt (declaration.module_, container) traits with
+              match List.assoc_opt (declaration.file, container) traits with
               | Some trait ->
                   String_map.update name
                     (fun traits ->
@@ -576,29 +611,35 @@ let declaration_index =
         Declaration_map.empty
         (Query.demand database declarations module_))
 
-(* A module's definitions, by their index in the file. *)
+(* A file's definitions, by their index in the file. *)
 let items =
-  Query.query ~name:"items" ~phase:Phases.syntax ~show:Path.show_module (fun database module_ ->
-      Array.of_list (Query.demand database Workspace.file module_).definitions)
+  Query.query ~name:"items" ~phase:Phases.syntax ~show:Path.show_file (fun database file ->
+      Array.of_list (Query.demand database Workspace.file file).definitions)
 
-(* Where a definition is: its module, its declaration, and its place in its
-   file. *)
+(* Where a definition is: its declaration, which names its file and its
+   place in it. *)
 let locate =
   Query.query ~name:"locate" ~phase:Phases.declarations ~show:show_key (fun database key ->
+      Declaration_map.find_opt (key.path, key.ordinal)
+        (Query.demand database declaration_index key.module_))
+
+(* The file a definition is written in. A definition that moves within its
+   file keeps it, so reading it depends on nothing about the position. *)
+let file_of =
+  Query.query ~name:"file_of" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map
-        (fun declaration -> (key.module_, declaration))
-        (Declaration_map.find_opt (key.path, key.ordinal)
-           (Query.demand database declaration_index key.module_)))
+        (fun (declaration : declaration) -> declaration.file)
+        (Query.demand database locate key))
 
 (* The trait, the [impl], or the capability a method is written inside. *)
 let container =
   Query.query ~name:"container" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
-      | Some (module_, { container = Some index; _ }) ->
+      | Some { file; container = Some index; _ } ->
           Option.map key_of
             (List.find_opt
                (fun (declaration : declaration) -> declaration.index = index)
-               (Query.demand database declarations module_))
+               (Query.demand database declarations_in file))
       | _ -> None)
 
 (* The methods written inside a trait, an [impl], or a capability, in the
@@ -606,11 +647,11 @@ let container =
 let contained =
   Query.query ~name:"contained" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
-      | Some (module_, { index; _ }) ->
+      | Some { file; index; _ } ->
           List.filter_map
             (fun (declaration : declaration) ->
               if declaration.container = Some index then Some (key_of declaration) else None)
-            (Query.demand database declarations module_)
+            (Query.demand database declarations_in file)
       | None -> [])
 
 (* A definition's tree, with positions relative to the definition. A
@@ -622,8 +663,8 @@ let definition =
     (fun database key ->
       match Query.demand database locate key with
       | None -> None
-      | Some (module_, declaration) ->
-          Some (Query.demand database items module_).(declaration.index).value)
+      | Some declaration ->
+          Some (Query.demand database items declaration.file).(declaration.index).value)
 
 (* The names of the parameters of a trait's law, in order. The body of a
    proof of the law names them. *)
@@ -665,19 +706,22 @@ let spans =
   Query.query ~name:"spans" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map Syntax_walk.spans (Query.demand database definition key))
 
-(* Where a definition starts in its file, for showing its diagnostics. *)
+(* The file a definition is written in, and where it starts in it, for
+   showing its diagnostics. *)
 let base =
   Query.query ~name:"base" ~phase:Phases.declarations ~show:show_key ~saved:true
     (fun database key ->
       match Query.demand database locate key with
       | None -> None
-      | Some (module_, declaration) ->
-          Some (module_, (Query.demand database items module_).(declaration.index).base))
+      | Some declaration ->
+          Some
+            ( declaration.file,
+              (Query.demand database items declaration.file).(declaration.index).base ))
 
 (* A stage's diagnostics for a file, in order. [of_definition] returns the
    diagnostics of each definition in the definition's own offsets, and this
    converts them to the file's offsets. *)
-let per_definition database module_ of_definition =
+let per_definition database file of_definition =
   List.concat_map
     (fun declaration ->
       let key = key_of declaration in
@@ -685,7 +729,7 @@ let per_definition database module_ of_definition =
       | Some (_, base) ->
           List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base)) (of_definition key)
       | None -> [])
-    (Query.demand database declarations module_)
+    (Query.demand database declarations_in file)
   |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
 
@@ -696,8 +740,8 @@ let text =
   Query.query ~name:"text" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
       | None -> None
-      | Some (module_, declaration) ->
-          Some (Query.demand database items module_).(declaration.index).text)
+      | Some declaration ->
+          Some (Query.demand database items declaration.file).(declaration.index).text)
 
 module For_testing = struct
   let imports = imports

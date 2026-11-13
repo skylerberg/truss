@@ -1,5 +1,0 @@
-public transparent fn double(value: Int64) -> Int64
-  cost time O(1)
-{
-  value + value
-}

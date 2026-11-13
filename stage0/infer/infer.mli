@@ -54,7 +54,7 @@ type type_check_result = Body.type_check_result = {
 
 val type_check_result : (Resolve.Names.key, type_check_result option) Query.query
 
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list
 (** The diagnostics of every body in a file, in file offsets and in order. *)
 
 val derived : (Path.t, Core.t option) Query.query
@@ -96,15 +96,14 @@ module For_testing : sig
       so their nodes are numbered the same whatever the body is. Editing such a body leaves this
       result equal, and no caller is proven again.
 
-      In the function's own package, a caller's proof reads the body of a function in the logic,
-      which the body defines. In another package, it reads that body only if the function is
-      [transparent]: a body that other packages' proofs read is part of the package's interface, and
-      only a marked one is. In every package, it reads the body that a trait provides for a method,
-      which an [impl] inherits or must agree with. It never reads the body of a theorem: a call of a
+      A caller's proof never reads the body of a function or of a method of a type: it reads the
+      contract. In every package, it reads the body that a trait provides for a method, which an
+      [impl] inherits or must agree with, and in the [impl]'s own package the body of an [impl]'s
+      method, whose contract is the trait's. It never reads the body of a theorem: a call of a
       theorem asserts the [requires] and assumes the [ensures]. *)
 
   val exported_specification : (Resolve.Names.key, Core.t option) Query.query
   (** The part of a definition a caller's proof in another package reads. Editing the body of a
-      function that is not [transparent] leaves this result equal, so no proof in a package that
-      depends on this one runs again. *)
+      function leaves this result equal, so no proof in a package that depends on this one runs
+      again. *)
 end

@@ -1,0 +1,1402 @@
+use standard::intrinsic
+use standard::numbers::float_math
+use standard::serialization
+use standard::streams
+use standard::text
+use standard::writing
+
+public type Value =
+  | Null
+  | Bool(value: Bool)
+  | Number(value: Number)
+  | String(value: String)
+  | Array(items: List[Value])
+  | Object(members: Map[String, Value])
+  derives Equal
+
+public opaque type Number(whole: Bool, integer: Int64, fraction: Float64)
+  derives Plain, Equal
+
+public fn Number.from_float64(value: Float64) -> Option[Number]
+  ensures (result is Some(_)) == value.is_finite()
+  cost time O(1)
+{
+  if !value.is_finite() {
+    return None
+  }
+  let fits = value >= -9223372036854775808.0 && value < 9223372036854775808.0
+  if fits && value == value.truncate() && !(value == 0.0 && value.is_negative()) {
+    return Some(Number(whole: true, integer: Int64.saturating_from(value), fraction: 0.0))
+  }
+  Some(Number(whole: false, integer: 0, fraction: value))
+}
+
+public fn Number.is_whole(self) -> Bool
+  cost time O(1)
+{
+  self.whole
+}
+
+public fn Number.to_int64(self) -> Option[Int64]
+  cost time O(1)
+{
+  if self.whole { Some(self.integer) } else { None }
+}
+
+public fn Number.to_float64(self) -> Float64
+  cost time O(1)
+{
+  if self.whole { self.integer.to_float64() } else { self.fraction }
+}
+
+impl From[Int64] for Number {
+  fn from(value: own Int64) -> Number {
+    Number(whole: true, integer: value, fraction: 0.0)
+  }
+}
+
+impl Display for Number {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write(format_number(self).slice())
+  }
+}
+
+public type ParseErrorKind =
+  | UnexpectedEnd
+  | UnexpectedCharacter
+  | InvalidNumber
+  | InvalidEscape
+  | InvalidUnicode
+  | TooDeep
+  | TrailingCharacters
+  derives Equal
+
+public type ParseError(kind: ParseErrorKind, offset: USize, line: USize, column: USize)
+  derives Equal
+
+impl Display for ParseError {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self.kind {
+      UnexpectedEnd => mut output.write("the text ends before the value does")
+      UnexpectedCharacter => mut output.write("a character that cannot be here")
+      InvalidNumber => mut output.write("a number that is not written as JSON writes one")
+      InvalidEscape => mut output.write("an escape that JSON does not have")
+      InvalidUnicode => mut output.write("text that is not Unicode")
+      TooDeep => mut output.write("values nested too deeply")
+      TrailingCharacters => mut output.write("text after the value")
+    }
+    mut output.write(" at line ")
+    self.line.display(mut output)
+    mut output.write(", column ")
+    self.column.display(mut output)
+  }
+}
+
+type Failure(kind: ParseErrorKind, offset: USize)
+
+type ParsedValue(value: Value, end: USize)
+
+type ParsedString(text: String, end: USize)
+
+let part_marker: UInt8 = 1
+
+let no_parts: List[Value] = []
+
+fn with_position(text: StringSlice, failure: Failure) -> ParseError
+  cost time finite
+{
+  var line: USize = 1
+  var column: USize = 1
+  var index: USize = 0
+  while index < text.length() && index < failure.offset
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let byte = text.byte(index)
+    if byte == 10 {
+      line = line.saturating_add(1)
+      column = 1
+    } else if byte < 128 || byte >= 192 {
+      column = column.saturating_add(1)
+    }
+    index += 1
+  }
+  ParseError(kind: failure.kind, offset: failure.offset, line: line, column: column)
+}
+
+fn is_whitespace(byte: UInt8) -> Bool
+  cost time O(1)
+{
+  byte == 32 || byte == 9 || byte == 10 || byte == 13
+}
+
+fn skip_whitespace(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time finite
+{
+  var index = from
+  while index < text.length() && is_whitespace(text.byte(index))
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn skip_digits(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time finite
+{
+  var index = from
+  while index < text.length() && 48 <= text.byte(index) && text.byte(index) <= 57
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn parse_hex4(text: StringSlice, from: USize) -> Option[UInt32]
+  requires from <= text.length()
+  ensures !(result is Some(code) && code > 65535)
+  ensures (result is Some(_)) ==> text.length() - from >= 4
+  cost time O(1)
+{
+  if text.length() - from < 4 {
+    return None
+  }
+  let first: UInt32 = intrinsic::convert(text.byte(from).digit_value())
+  let second: UInt32 = intrinsic::convert(text.byte(from + 1).digit_value())
+  let third: UInt32 = intrinsic::convert(text.byte(from + 2).digit_value())
+  let fourth: UInt32 = intrinsic::convert(text.byte(from + 3).digit_value())
+  if first >= 16 || second >= 16 || third >= 16 || fourth >= 16 {
+    return None
+  }
+  Some(first * 4096 + second * 256 + third * 16 + fourth)
+}
+
+fn parse_escape(text: StringSlice, from: USize, output: mut String) -> Result[USize, Failure]
+  requires from < text.length()
+  ensures !(result is Ok(end) && (end <= from || end > text.length()))
+  cost time finite
+{
+  if text.length() - from < 2 {
+    return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+  }
+  let byte = text.byte(from + 1)
+  if byte == 117 {
+    return parse_unicode_escape(text, from: from, output: mut output)
+  }
+  if byte == 34 {
+    mut output.push("\"")
+  } else if byte == 92 {
+    mut output.push("\\")
+  } else if byte == 47 {
+    mut output.push("/")
+  } else if byte == 98 {
+    mut output.push("\u{8}")
+  } else if byte == 102 {
+    mut output.push("\u{c}")
+  } else if byte == 110 {
+    mut output.push("\n")
+  } else if byte == 114 {
+    mut output.push("\r")
+  } else if byte == 116 {
+    mut output.push("\t")
+  } else {
+    return Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from))
+  }
+  Ok(from + 2)
+}
+
+fn parse_unicode_escape(text: StringSlice, from: USize, output: mut String) -> Result[USize, Failure]
+  requires from < text.length()
+  requires text.length() - from >= 2
+  ensures !(result is Ok(end) && (end <= from || end > text.length()))
+  cost time finite
+{
+  match parse_hex4(text, from: from + 2) {
+    None => Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from))
+    Some(code) => {
+      if 56320 <= code && code <= 57343 {
+        return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
+      }
+      if code < 55296 || code > 56319 {
+        writing::code_point(mut output.storage, code: code)
+        return Ok(from + 6)
+      }
+      let pair = text.length() - from >= 8 && text.byte(from + 6) == 92 && text.byte(from + 7) == 117
+      if !pair {
+        return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
+      }
+      match parse_hex4(text, from: from + 8) {
+        None => Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from + 6))
+        Some(low) => {
+          if low < 56320 || low > 57343 {
+            return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
+          }
+          writing::code_point(mut output.storage, code: 65536 + (code - 55296) * 1024 + (low - 56320))
+          Ok(from + 12)
+        }
+      }
+    }
+  }
+}
+
+fn parse_string(text: StringSlice, from: USize) -> Result[ParsedString, Failure]
+  requires from < text.length()
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  cost time finite
+{
+  var output = ""
+  var run = from + 1
+  var index = from + 1
+  while index < text.length()
+    invariant from < run
+    invariant run <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let byte = text.byte(index)
+    if byte == 34 {
+      mut output.push(text.part(run, to: index))
+      return Ok(ParsedString(text: own output, end: index + 1))
+    }
+    if byte < 32 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: index))
+    }
+    if byte == 92 {
+      mut output.push(text.part(run, to: index))
+      index = parse_escape(text, from: index, output: mut output)?
+      run = index
+    } else {
+      index += 1
+    }
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+}
+
+fn parse_number(text: StringSlice, from: USize) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  cost time finite
+{
+  let negative = text.byte(from) == 45
+  let start: USize = if negative { from + 1 } else { from }
+  if start == text.length() {
+    return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: start))
+  }
+  var end = start + 1
+  if 49 <= text.byte(start) && text.byte(start) <= 57 {
+    end = skip_digits(text, from: start + 1)
+  } else if text.byte(start) != 48 {
+    return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: start))
+  } else if end < text.length() && 48 <= text.byte(end) && text.byte(end) <= 57 {
+    return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: end))
+  }
+  var whole = true
+  if end < text.length() && text.byte(end) == 46 {
+    let fraction = skip_digits(text, from: end + 1)
+    if fraction == end + 1 {
+      return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: fraction))
+    }
+    end = fraction
+    whole = false
+  }
+  if end < text.length() && (text.byte(end) == 101 || text.byte(end) == 69) {
+    var exponent = end + 1
+    if exponent < text.length() && (text.byte(exponent) == 43 || text.byte(exponent) == 45) {
+      exponent += 1
+    }
+    let last = skip_digits(text, from: exponent)
+    if last == exponent {
+      return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: last))
+    }
+    end = last
+    whole = false
+  }
+  let written = text.part(from, to: end)
+  if whole && Int64.parse_radix(written, radix: 10) is Ok(integer) && !(negative && integer == 0) {
+    return Ok(ParsedValue(value: Value.Number(value: Number(whole: true, integer: integer, fraction: 0.0)), end: end))
+  }
+  if float_math::parse_float64(written) is Ok(read) && Number.from_float64(read) is Some(number) {
+    return Ok(ParsedValue(value: Value.Number(value: number), end: end))
+  }
+  Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: from))
+}
+
+fn parse_literal(text: StringSlice, from: USize, word: StringSlice, value: own Value) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  requires word.length() > 0
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  cost time finite
+{
+  var index: USize = 0
+  while index < word.length()
+    invariant index <= word.length()
+    invariant index <= text.length() - from
+    decreases word.length() - index
+  {
+    if index >= text.length() - from {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+    }
+    if text.byte(from + index) != word.byte(index) {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: from + index))
+    }
+    index += 1
+  }
+  Ok(ParsedValue(value: own value, end: from + word.length()))
+}
+
+fn parse_array(
+  text: StringSlice,
+  from: USize,
+  depth: USize,
+  parts: Slice[Value],
+  next_part: mut USize,
+  in_template: Bool,
+) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  requires depth > 0
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  decreases depth, 0
+  cost time finite
+{
+  var items: List[Value] = []
+  var index = skip_whitespace(text, from: from + 1)
+  if index < text.length() && text.byte(index) == 93 {
+    return Ok(ParsedValue(value: Value.Array(items: own items), end: index + 1))
+  }
+  while index < text.length()
+    invariant from < index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let item = parse_value(
+      text,
+      from: index,
+      depth: depth - 1,
+      parts: parts,
+      next_part: mut next_part,
+      in_template: in_template,
+    )?
+    let next = skip_whitespace(text, from: item.end)
+    mut items.push(own item.value)
+    if next == text.length() {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: next))
+    }
+    if text.byte(next) == 93 {
+      return Ok(ParsedValue(value: Value.Array(items: own items), end: next + 1))
+    }
+    if text.byte(next) != 44 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: next))
+    }
+    index = skip_whitespace(text, from: next + 1)
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+}
+
+fn parse_object(
+  text: StringSlice,
+  from: USize,
+  depth: USize,
+  parts: Slice[Value],
+  next_part: mut USize,
+  in_template: Bool,
+) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  requires depth > 0
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  decreases depth, 0
+  cost time finite
+{
+  var members: Map[String, Value] = [:]
+  var index = skip_whitespace(text, from: from + 1)
+  if index < text.length() && text.byte(index) == 125 {
+    return Ok(ParsedValue(value: Value.Object(members: own members), end: index + 1))
+  }
+  while index < text.length()
+    invariant from < index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    if text.byte(index) != 34 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: index))
+    }
+    let name = parse_string(text, from: index)?
+    let colon = skip_whitespace(text, from: name.end)
+    if colon == text.length() {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: colon))
+    }
+    if text.byte(colon) != 58 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: colon))
+    }
+    let member = parse_value(
+      text,
+      from: skip_whitespace(text, from: colon + 1),
+      depth: depth - 1,
+      parts: parts,
+      next_part: mut next_part,
+      in_template: in_template,
+    )?
+    let next = skip_whitespace(text, from: member.end)
+    mut members.insert(own name.text, value: own member.value)
+    if next == text.length() {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: next))
+    }
+    if text.byte(next) == 125 {
+      return Ok(ParsedValue(value: Value.Object(members: own members), end: next + 1))
+    }
+    if text.byte(next) != 44 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: next))
+    }
+    index = skip_whitespace(text, from: next + 1)
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+}
+
+fn parse_value(
+  text: StringSlice,
+  from: USize,
+  depth: USize,
+  parts: Slice[Value],
+  next_part: mut USize,
+  in_template: Bool,
+) -> Result[ParsedValue, Failure]
+  requires from <= text.length()
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  decreases depth, 1
+  cost time finite
+{
+  if from == text.length() {
+    return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: from))
+  }
+  let byte = text.byte(from)
+  if byte == 123 || byte == 91 {
+    if depth == 0 {
+      return Err(Failure(kind: ParseErrorKind.TooDeep, offset: from))
+    }
+    return if byte == 123 {
+      parse_object(text, from: from, depth: depth, parts: parts, next_part: mut next_part, in_template: in_template)
+    } else {
+      parse_array(text, from: from, depth: depth, parts: parts, next_part: mut next_part, in_template: in_template)
+    }
+  }
+  if byte == 34 {
+    let read = parse_string(text, from: from)?
+    return Ok(ParsedValue(value: Value.String(value: own read.text), end: read.end))
+  }
+  if byte == 116 {
+    return parse_literal(text, from: from, word: "true", value: Value.Bool(value: true))
+  }
+  if byte == 102 {
+    return parse_literal(text, from: from, word: "false", value: Value.Bool(value: false))
+  }
+  if byte == 110 {
+    return parse_literal(text, from: from, word: "null", value: Value.Null)
+  }
+  if byte == 45 || (48 <= byte && byte <= 57) {
+    return parse_number(text, from: from)
+  }
+  if byte == part_marker && in_template {
+    let value = if next_part < parts.length() { parts[next_part].copy() } else { Value.Null }
+    next_part = next_part.saturating_add(1)
+    return Ok(ParsedValue(value: own value, end: from + 1))
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: from))
+}
+
+fn parse_document(
+  text: StringSlice,
+  maximum_depth: USize,
+  parts: Slice[Value],
+  in_template: Bool,
+) -> Result[Value, Failure]
+  cost time finite
+{
+  var next_part: USize = 0
+  let start = skip_whitespace(text, from: 0)
+  let step = parse_value(
+    text,
+    from: start,
+    depth: maximum_depth,
+    parts: parts,
+    next_part: mut next_part,
+    in_template: in_template,
+  )?
+  let end = skip_whitespace(text, from: step.end)
+  if end < text.length() {
+    return Err(Failure(kind: ParseErrorKind.TrailingCharacters, offset: end))
+  }
+  Ok(own step.value)
+}
+
+public fn parse(text: StringSlice, maximum_depth: USize = 128) -> Result[Value, ParseError]
+  cost time finite
+{
+  match parse_document(text, maximum_depth: maximum_depth, parts: no_parts.slice(), in_template: false) {
+    Ok(value) => Ok(own value)
+    Err(failure) => Err(with_position(text, failure: failure))
+  }
+}
+
+public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: USize = 128) -> Result[Value, ParseError]
+  cost time finite
+{
+  match String.from_utf8(bytes.to_list()) {
+    Ok(text) => parse(text.slice(), maximum_depth: maximum_depth)
+    Err(error) => Err(with_position(
+      StringSlice(bytes: bytes.elements),
+      failure: Failure(kind: ParseErrorKind.InvalidUnicode, offset: error.valid_up_to),
+    ))
+  }
+}
+
+fn escape_overhead(byte: UInt8) -> USize
+  ensures result <= 5
+  ensures result == (if byte == 34 || byte == 92 || byte == 8 || byte == 9 || byte == 10 || byte == 12 || byte == 13 {
+      1
+    } else if byte < 32 {
+      5
+    } else {
+      0
+    })
+  cost time O(1)
+  cost allocations == 0
+{
+  if byte == 34 || byte == 92 || byte == 8 || byte == 9 || byte == 10 || byte == 12 || byte == 13 {
+    1
+  } else if byte < 32 {
+    5
+  } else {
+    0
+  }
+}
+
+fn format_number(number: Number) -> String
+  cost time finite
+{
+  if number.whole {
+    return number.integer.format()
+  }
+  var storage: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(0)
+  writing::float64(mut storage, value: number.fraction)
+  String(storage: own storage)
+}
+
+public fn quote(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  if text.length() > USize.maximum / 8 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var extra: USize = 0
+  for index in 0..text.length()
+    invariant extra <= 5 * index
+  {
+    extra += escape_overhead(text.byte(index))
+  }
+  let capacity = text.length() + extra + 2
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  intrinsic::storage_push(mut output, value: 34)
+  var budget = extra
+  for index in 0..text.length()
+    invariant intrinsic::storage_length(output) + (text.length() - index) + budget + 1 <= capacity
+    invariant intrinsic::storage_capacity(output) == capacity
+  {
+    let byte = text.byte(index)
+    let needed = escape_overhead(byte)
+    if needed == 0 || budget < needed {
+      intrinsic::storage_push(mut output, value: byte)
+    } else if needed == 1 {
+      intrinsic::storage_push(mut output, value: 92)
+      let letter: UInt8 = if byte == 8 {
+        98
+      } else if byte == 9 {
+        116
+      } else if byte == 10 {
+        110
+      } else if byte == 12 {
+        102
+      } else if byte == 13 {
+        114
+      } else {
+        byte
+      }
+      intrinsic::storage_push(mut output, value: letter)
+      budget -= 1
+    } else {
+      intrinsic::storage_push(mut output, value: 92)
+      intrinsic::storage_push(mut output, value: 117)
+      intrinsic::storage_push(mut output, value: 48)
+      intrinsic::storage_push(mut output, value: 48)
+      intrinsic::storage_push(mut output, value: (byte / 16).digit_byte(uppercase: false))
+      intrinsic::storage_push(mut output, value: (byte % 16).digit_byte(uppercase: false))
+      budget -= 5
+    }
+  }
+  intrinsic::storage_push(mut output, value: 34)
+  String(storage: own output)
+}
+
+public fn Value.from_float64(value: Float64) -> Option[Value]
+  ensures (result is Some(_)) == value.is_finite()
+  cost time O(1)
+{
+  match Number.from_float64(value) {
+    Some(number) => Some(Value.Number(value: number))
+    None => None
+  }
+}
+
+public fn Value.is_null(self) -> Bool
+  ensures result == (self is Null)
+  cost time O(1)
+{
+  self is Null
+}
+
+public fn Value.as_bool(self) -> Option[Bool]
+  ensures identical(result, match self {
+      Bool(value) => Some(value)
+      _ => None
+    })
+  cost time O(1)
+{
+  match self {
+    Bool(value) => Some(value)
+    _ => None
+  }
+}
+
+public fn Value.as_int64(self) -> Option[Int64]
+  ensures identical(result, match self {
+      Number(value) => value.to_int64()
+      _ => None
+    })
+  cost time O(1)
+{
+  match self {
+    Number(value) => value.to_int64()
+    _ => None
+  }
+}
+
+public fn Value.as_float64(self) -> Option[Float64]
+  ensures identical(result, match self {
+      Number(value) => Some(value.to_float64())
+      _ => None
+    })
+  cost time O(1)
+{
+  match self {
+    Number(value) => Some(value.to_float64())
+    _ => None
+  }
+}
+
+public fn Value.as_text(self) -> Option[StringSlice]
+  ensures identical(result, match self {
+      String(value) => Some(value.slice())
+      _ => None
+    })
+  cost time O(1)
+{
+  match self {
+    String(value) => Some(value.slice())
+    _ => None
+  }
+}
+
+public fn Value.as_items(self) -> Option[Slice[Value]]
+  ensures identical(result, match self {
+      Array(items) => Some(items.slice())
+      _ => None
+    })
+  cost time O(1)
+{
+  match self {
+    Array(items) => Some(items.slice())
+    _ => None
+  }
+}
+
+public fn Value.as_members(self) lends Option[Map[String, Value]]
+  cost time O(1)
+{
+  match self {
+    Object(members) => yield Some(members)
+    _ => yield None
+  }
+}
+
+public fn Value.get(self, name: StringSlice) lends Option[Value]
+  cost time finite
+{
+  let key = name.to_string()
+  match self {
+    Object(members) => {
+      if members.contains(key) {
+        yield Some(members[key])
+      } else {
+        yield None
+      }
+    }
+    _ => yield None
+  }
+}
+
+public fn Value.get_index(self, index: USize) lends Option[Value]
+  cost time O(1)
+{
+  match self {
+    Array(items) => {
+      if index < items.length() {
+        yield Some(items[index])
+      } else {
+        yield None
+      }
+    }
+    _ => yield None
+  }
+}
+
+fn pointer_token_end(path: StringSlice) -> USize
+  requires path.length() > 0
+  ensures 1 <= result
+  ensures result <= path.length()
+  cost time finite
+{
+  var index: USize = 1
+  while index < path.length() && path.byte(index) != 47
+    invariant 1 <= index
+    invariant index <= path.length()
+    decreases path.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn unescaped_pointer_token(token: StringSlice) -> Option[String]
+  cost time finite
+{
+  var name = ""
+  var run: USize = 0
+  var index: USize = 0
+  while index < token.length()
+    invariant run <= index
+    invariant index <= token.length()
+    decreases token.length() - index
+  {
+    if token.byte(index) != 126 {
+      index += 1
+    } else {
+      if index + 1 == token.length() {
+        return None
+      }
+      let escaped = token.byte(index + 1)
+      if escaped != 48 && escaped != 49 {
+        return None
+      }
+      mut name.push(token.part(run, to: index))
+      if escaped == 48 {
+        mut name.push("~")
+      } else {
+        mut name.push("/")
+      }
+      index += 2
+      run = index
+    }
+  }
+  mut name.push(token.part(run, to: token.length()))
+  Some(own name)
+}
+
+fn pointer_array_index(token: StringSlice) -> Option[USize]
+  cost time finite
+{
+  if token.length() == 0 || (token.length() > 1 && token.byte(0) == 48) {
+    return None
+  }
+  var index: USize = 0
+  while index < token.length()
+    invariant index <= token.length()
+    decreases token.length() - index
+  {
+    if token.byte(index) < 48 || token.byte(index) > 57 {
+      return None
+    }
+    index += 1
+  }
+  match USize.parse_radix(token, radix: 10) {
+    Ok(position) => Some(position)
+    Err(_) => None
+  }
+}
+
+fn Value.pointer_targets(self, path: StringSlice) yields Value
+  decreases path.length()
+  cost time finite
+{
+  if path.length() == 0 {
+    yield self
+    return
+  }
+  if path.byte(0) != 47 {
+    return
+  }
+  let end = pointer_token_end(path)
+  let token = path.part(1, to: end)
+  let rest = path.part(end, to: path.length())
+  match self {
+    Object(members) => {
+      match unescaped_pointer_token(token) {
+        Some(name) => {
+          if members.contains(name) {
+            for target in members[name].pointer_targets(rest) {
+              yield target
+            }
+          }
+        }
+        None => {}
+      }
+    }
+    Array(items) => {
+      match pointer_array_index(token) {
+        Some(index) => {
+          if index < items.length() {
+            for target in items[index].pointer_targets(rest) {
+              yield target
+            }
+          }
+        }
+        None => {}
+      }
+    }
+    _ => {}
+  }
+}
+
+public fn Value.pointer(self, path: StringSlice) lends Option[Value]
+  cost time finite
+{
+  for target in self.pointer_targets(path) {
+    yield Some(target)
+    return
+  }
+  yield None
+}
+
+fn push_newline(output: mut String, indent: USize, level: USize)
+  cost time finite
+{
+  mut output.push("\n")
+  var left = indent.saturating_multiply(level)
+  while left > 0
+    decreases left
+  {
+    mut output.push(" ")
+    left -= 1
+  }
+}
+
+fn write_value(value: Value, output: mut String)
+  cost time finite
+{
+  match value {
+    Null => mut output.push("null")
+    Bool(flag) => {
+      if flag {
+        mut output.push("true")
+      } else {
+        mut output.push("false")
+      }
+    }
+    Number(number) => mut output.push(format_number(number).slice())
+    String(text) => mut output.push(quote(text.slice()).slice())
+    Array(items) => {
+      mut output.push("[")
+      for index in 0..items.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        write_value(items[index], output: mut output)
+      }
+      mut output.push("]")
+    }
+    Object(members) => {
+      mut output.push("{")
+      for index in 0..members.entries.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(":")
+        write_value(members.entries[index].value, output: mut output)
+      }
+      mut output.push("}")
+    }
+  }
+}
+
+fn write_pretty_value(value: Value, output: mut String, indent: USize, level: USize)
+  cost time finite
+{
+  match value {
+    Array(items) => {
+      if items.length() == 0 {
+        mut output.push("[]")
+        return
+      }
+      mut output.push("[")
+      for index in 0..items.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        push_newline(mut output, indent: indent, level: level.saturating_add(1))
+        write_pretty_value(items[index], output: mut output, indent: indent, level: level.saturating_add(1))
+      }
+      push_newline(mut output, indent: indent, level: level)
+      mut output.push("]")
+    }
+    Object(members) => {
+      if members.entries.length() == 0 {
+        mut output.push("{}")
+        return
+      }
+      mut output.push("{")
+      for index in 0..members.entries.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        push_newline(mut output, indent: indent, level: level.saturating_add(1))
+        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(": ")
+        write_pretty_value(
+          members.entries[index].value,
+          output: mut output,
+          indent: indent,
+          level: level.saturating_add(1),
+        )
+      }
+      push_newline(mut output, indent: indent, level: level)
+      mut output.push("}")
+    }
+    _ => write_value(value, output: mut output)
+  }
+}
+
+public fn Value.write(self, output: mut TextBuilder)
+  cost time finite
+{
+  mut output.write(self.to_text().slice())
+}
+
+public fn Value.write_pretty(self, output: mut TextBuilder, indent: USize = 2)
+  cost time finite
+{
+  mut output.write(self.to_pretty_text(indent: indent).slice())
+}
+
+public fn Value.to_text(self) -> String
+  cost time finite
+{
+  var text = ""
+  write_value(self, output: mut text)
+  text
+}
+
+public fn Value.to_pretty_text(self, indent: USize = 2) -> String
+  cost time finite
+{
+  var text = ""
+  write_pretty_value(self, output: mut text, indent: indent, level: 0)
+  text
+}
+
+impl Display for Value {
+  fn display(self, output: mut TextBuilder) {
+    self.write(mut output)
+  }
+}
+
+impl text::Parse for Value {
+  type Error = ParseError
+
+  fn parse(text: StringSlice) -> Result[Value, ParseError]
+  {
+    parse(text)
+  }
+}
+
+impl FromTemplate for Value {
+  type Part = Value
+
+  fn from_template(template: Template[Value]) -> Value
+    requires is_valid_template(template.literals)
+  {
+    match template_text(template.literals) {
+      Some(text) => {
+        match parse_document(
+          text.slice(),
+          maximum_depth: text.length(),
+          parts: template.parts.slice(),
+          in_template: true,
+        ) {
+          Ok(value) => value
+          Err(_) => Value.Null
+        }
+      }
+      None => Value.Null
+    }
+  }
+}
+
+fn template_text(literals: Slice[text::Literal]) -> Option[String]
+  cost time finite
+{
+  var joined = ""
+  var index: USize = 0
+  while index < literals.length()
+    invariant index <= literals.length()
+    decreases literals.length() - index
+  {
+    let literal = literals[index].text()
+    if literal.contains("\u{1}") {
+      return None
+    }
+    if index > 0 {
+      mut joined.push("\u{1}")
+    }
+    mut joined.push(literal)
+    index += 1
+  }
+  Some(own joined)
+}
+
+public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  match template_text(literals) {
+    Some(text) => {
+      parse_document(text.slice(), maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
+    }
+    None => false
+  }
+}
+
+impl From[Bool] for Value {
+  fn from(value: own Bool) -> Value {
+    Value.Bool(value)
+  }
+}
+
+impl From[Int64] for Value {
+  fn from(value: own Int64) -> Value {
+    Value.Number(Number.from(value))
+  }
+}
+
+impl From[String] for Value {
+  fn from(value: own String) -> Value {
+    Value.String(own value)
+  }
+}
+
+impl From[StringSlice] for Value {
+  fn from(value: own StringSlice) -> Value {
+    Value.String(value.to_string())
+  }
+}
+
+impl From[List[Value]] for Value {
+  fn from(value: own List[Value]) -> Value {
+    Value.Array(own value)
+  }
+}
+
+impl From[Map[String, Value]] for Value {
+  fn from(value: own Map[String, Value]) -> Value {
+    Value.Object(own value)
+  }
+}
+
+public type Error =
+  | Parse(error: ParseError)
+  | Deserialize(error: serialization::Error)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Parse(error) => error.display(mut output)
+      Deserialize(error) => error.display(mut output)
+    }
+  }
+}
+
+public type ReadError =
+  | System(error: SystemError)
+  | Parse(error: ParseError)
+  derives Equal
+
+impl Display for ReadError {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      System(error) => error.display(mut output)
+      Parse(error) => error.display(mut output)
+    }
+  }
+}
+
+public fn read_from[Source: streams::Reader](source: mut Source, maximum_depth: USize = 128) -> Result[Value, ReadError]
+  uses Handles
+{
+  var bytes: List[UInt8] = []
+  match mut source.read_to_end(mut bytes) {
+    Ok(_) => match parse_bytes(bytes.slice(), maximum_depth: maximum_depth) {
+      Ok(value) => Ok(own value)
+      Err(error) => Err(ReadError.Parse(error: error))
+    }
+    Err(error) => Err(ReadError.System(error: error))
+  }
+}
+
+public fn write_to[Sink: streams::Writer](value: Value, sink: mut Sink) -> Result[Unit, SystemError]
+  uses Handles
+{
+  let text = value.to_text()
+  mut sink.write_all(text.bytes())
+}
+
+impl serialization::Tree for Value {
+  fn kind(self) -> serialization::Kind {
+    match self {
+      Null => serialization::Kind.Null
+      Bool(_) => serialization::Kind.Bool
+      Number(number) => if number.is_whole() { serialization::Kind.Integer } else { serialization::Kind.Float }
+      String(_) => serialization::Kind.Text
+      Array(_) => serialization::Kind.List
+      Object(_) => serialization::Kind.Record
+    }
+  }
+
+  fn boolean(self) -> Option[Bool] {
+    match self {
+      Bool(value) => Some(value)
+      _ => None
+    }
+  }
+
+  fn integer(self) -> Option[Int64] {
+    match self {
+      Number(number) => number.to_int64()
+      _ => None
+    }
+  }
+
+  fn float(self) -> Option[Float64] {
+    match self {
+      Number(number) => Some(number.to_float64())
+      _ => None
+    }
+  }
+
+  fn into_text(own self) -> Option[String] {
+    match own self {
+      String(text) => Some(own text)
+      _ => None
+    }
+  }
+
+  fn into_items(own self) -> Option[List[Value]] {
+    match own self {
+      Array(items) => Some(own items)
+      _ => None
+    }
+  }
+
+  fn into_members(own self) -> Option[Map[String, Value]] {
+    match own self {
+      Object(members) => Some(own members)
+      _ => None
+    }
+  }
+
+  fn null() -> Option[Value] {
+    Some(Value.Null)
+  }
+
+  fn from_bool(value: Bool) -> Value {
+    Value.Bool(value: value)
+  }
+
+  fn from_integer(value: Int64) -> Value {
+    Value.Number(value: Number.from(value))
+  }
+
+  fn from_unsigned(value: UInt64) -> Option[Value] {
+    match Int64.try_from(value) {
+      Ok(integer) => Some(Value.Number(value: Number.from(integer)))
+      Err(_) => match Number.from_float64(value.to_float64()) {
+        Some(number) => Some(Value.Number(value: number))
+        None => None
+      }
+    }
+  }
+
+  fn from_float(value: Float64) -> Value {
+    match Number.from_float64(value) {
+      Some(number) => Value.Number(value: number)
+      None => Value.Null
+    }
+  }
+
+  fn from_text(value: own String) -> Value {
+    Value.String(value: own value)
+  }
+
+  fn from_items(items: own List[Value]) -> Value {
+    Value.Array(items: own items)
+  }
+
+  fn from_members(members: own Map[String, Value]) -> Value {
+    Value.Object(members: own members)
+  }
+}
+
+public fn to_value[Item: serialization::Serialize](
+  item: Item,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Value {
+  var writer: serialization::TreeWriter[Value] = serialization::TreeWriter.new(names: names)
+  item.serialize(mut writer)
+  match own writer.finish() {
+    Ok(value) => own value
+    Err(_) => Value.Null
+  }
+}
+
+public fn from_value[Item: serialization::Deserialize](
+  value: own Value,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Result[Item, serialization::Error] {
+  var reader = serialization::TreeReader.new(own value, names: names)
+  Item.deserialize(mut reader)
+}
+
+public fn encode[Item: serialization::Serialize](
+  item: Item,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> String {
+  to_value(item, names: names).to_text()
+}
+
+public fn encode_pretty[Item: serialization::Serialize](
+  item: Item,
+  indent: USize = 2,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> String {
+  to_value(item, names: names).to_pretty_text(indent: indent)
+}
+
+public fn decode[Item: serialization::Deserialize](
+  text: StringSlice,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Result[Item, Error] {
+  match parse(text) {
+    Ok(value) => match from_value[Item](own value, names: names) {
+      Ok(item) => Ok(own item)
+      Err(error) => Err(Error.Deserialize(error: own error))
+    }
+    Err(error) => Err(Error.Parse(error: error))
+  }
+}
+
+impl serialization::Serialize for Value {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    match self {
+      Null => mut sink.null()
+      Bool(value) => mut sink.bool(value)
+      Number(number) => match number.to_int64() {
+        Some(integer) => mut sink.integer(integer)
+        None => mut sink.float(number.to_float64())
+      }
+      String(text) => mut sink.text(text.slice())
+      Array(items) => {
+        mut sink.begin_list(items.length())
+        for item in items {
+          item.serialize(mut sink)
+        }
+        mut sink.end_list()
+      }
+      Object(members) => {
+        mut sink.begin_map(members.length())
+        for entry in members {
+          mut sink.key(entry.key.slice())
+          entry.value.serialize(mut sink)
+        }
+        mut sink.end_map()
+      }
+    }
+  }
+}
+
+impl serialization::Deserialize for Value {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Value, serialization::Error] {
+    match source.kind() {
+      Absent => {
+        mut source.skip()
+        Ok(Value.Null)
+      }
+      Null => {
+        mut source.skip()
+        Ok(Value.Null)
+      }
+      Bool => Ok(Value.Bool(value: mut source.bool()?))
+      Integer => Ok(Value.Number(value: Number.from(mut source.integer()?)))
+      Float => {
+        let float = mut source.float()?
+        match Number.from_float64(float) {
+          Some(number) => Ok(Value.Number(value: number))
+          None => Ok(Value.Null)
+        }
+      }
+      Text => Ok(Value.String(value: mut source.text()?))
+      List => {
+        mut source.begin_list()?
+        var items: List[Value] = []
+        while mut source.next_element() {
+          mut items.push(Value.deserialize(mut source)?)
+        }
+        mut source.end_list()
+        Ok(Value.Array(items: own items))
+      }
+      Record => {
+        mut source.begin_map()?
+        var members: Map[String, Value] = [:]
+        while true {
+          match mut source.next_key() {
+            Some(key) => mut members.insert(own key, value: Value.deserialize(mut source)?)
+            None => break
+          }
+        }
+        mut source.end_map()
+        Ok(Value.Object(members: own members))
+      }
+    }
+  }
+}

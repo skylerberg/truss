@@ -75,5 +75,5 @@ val head : resolved -> Syntax.expression -> head option
 val resolved : (Names.key, resolved option) Query.query
 (** A definition's resolved form, or [None] if there is no such definition. *)
 
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list
 (** Every resolution error of a file, in its offsets and in order, including each definition's. *)

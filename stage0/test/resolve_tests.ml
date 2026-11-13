@@ -5,6 +5,7 @@
 open Harness
 
 let module_of = Support.module_of
+let file_of = Support.file_of
 
 (* A small standard library, enough for the prelude names these tests use. *)
 let standard =
@@ -21,23 +22,24 @@ let setup files =
   let by_package = Hashtbl.create 4 in
   List.iter
     (fun (name, text) ->
-      let module_ = module_of name in
-      Hashtbl.replace by_package module_.package
-        ((module_, text) :: Option.value ~default:[] (Hashtbl.find_opt by_package module_.package)))
+      let file = file_of name in
+      let package = file.module_.package in
+      Hashtbl.replace by_package package
+        ((file, text) :: Option.value ~default:[] (Hashtbl.find_opt by_package package)))
     all;
   Hashtbl.iter
-    (fun package modules ->
+    (fun package files ->
       Database.load_package (Engine.of_context database) ~name:package ~dependencies:[]
-        (List.rev modules))
+        (List.rev files))
     by_package;
   database
 
 let diagnostics database name =
-  let module_ = module_of name in
-  (match Support.parse_errors database module_ with
+  let file = file_of name in
+  (match Support.parse_errors database file with
   | [] -> ()
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-  Resolve.diagnostics database module_
+  Resolve.diagnostics database file
 
 let codes = Support.codes
 
@@ -62,9 +64,9 @@ let one_diagnostic = Support.one_diagnostic ~setup ~check:Resolve.diagnostics
 
 (* The name at the [occurrence]th appearance of [text] in the file, with the
    resolved form of the definition it is in. *)
-let name_at database file text occurrence =
-  let module_ = module_of file in
-  let source = Workspace.(Source.text (Query.demand database file module_).source) in
+let name_at database name text occurrence =
+  let file = file_of name in
+  let source = Source.text (Query.demand database Workspace.file file).source in
   let offset = Option.get (Substring.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let located =
@@ -82,7 +84,7 @@ let name_at database file text occurrence =
               (fun (name : Syntax.name) -> (name, names, base, resolved))
               (List.find_opt (fun (name : Syntax.name) -> base + name.span.start = offset) names)
         | _ -> None)
-      (Query.demand database Resolve.Names.declarations module_)
+      (Query.demand database Resolve.Names.declarations_in file)
   in
   match located with
   | Some located -> located
@@ -187,13 +189,49 @@ let () =
         "resolve.hides_name");
   test "a local cannot hide a parameter" (fun () ->
       one_diagnostic Fixtures.Resolve.local_cannot_hide_a_parameter "resolve.hides_name");
-  test "a local cannot share a name with a function in the same file" (fun () ->
-      one_diagnostic Fixtures.Resolve.local_cannot_share_a_name_with_a_function_in_the
+  test "a local may hide a function of its module, and its uses are the local" (fun () ->
+      refers_to_binding Fixtures.Resolve.local_may_hide_a_function_of_its_module ~use:("total", 3)
+        ~binding:("total", 2));
+  test "a local may hide a definition in another file of its module" (fun () ->
+      no_diagnostics
+        [
+          ("app::main", "fn f() -> Int64 {\n  let total = 2\n  total\n}\n");
+          ("app::main/sums", "fn total() -> Int64 { 0 }\n");
+        ]);
+  test "a let binds the name of a constant of its module, which its uses then name" (fun () ->
+      refers_to_binding Fixtures.Resolve.let_may_hide_a_constant_of_its_module ~use:("limit", 3)
+        ~binding:("limit", 2));
+  test "a bare name in a pattern binds when a local hides the constant, and hides the local"
+    (fun () ->
+      one_diagnostic Fixtures.Resolve.pattern_binds_a_name_whose_constant_a_local_hides
         "resolve.hides_name");
+  test "a generic parameter cannot hide a type of its module" (fun () ->
+      one_diagnostic Fixtures.Resolve.generic_parameter_cannot_hide_a_type_of_its_module
+        ~says:"a type of this module" "resolve.hides_name");
   test "a generic parameter cannot hide a prelude type" (fun () ->
       one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.hides_name");
   test "locals in sibling blocks may share a name" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Resolve.locals_in_sibling_blocks_may_share_a_name) ])
+
+(* Modules of several files *)
+
+let () =
+  test "a file names a private definition of another file of its module without a module" (fun () ->
+      refers "fn f() -> Int64 {\n  size()\n}\n"
+        ~others:[ ("app::main/grid", "fn size() -> Int64 { 9 }\n") ]
+        ~name:("size", 1) "app::main::size");
+  test "two files of a module that define one name make a duplicate" (fun () ->
+      one_diagnostic "fn size() -> Int64 { 9 }\n"
+        ~others:[ ("app::main/grid", "fn size() -> Int64 { 3 }\n") ]
+        ~says:"already defined in app/main/grid.truss" "resolve.duplicate_definition");
+  test "a file names a module only through its own imports" (fun () ->
+      one_diagnostic Fixtures.Resolve.file_without_the_use_cannot_name_the_module
+        ~others:
+          [
+            ("app::shapes", "internal fn area() -> Int64 { 0 }\n");
+            ("app::main/other", Fixtures.Resolve.file_without_the_use_cannot_name_the_module_2);
+          ]
+        "resolve.unknown_module")
 
 (* Patterns *)
 
@@ -241,9 +279,8 @@ let () =
 
 let bracket_of text written occurrence =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
   let offset = Option.get (Substring.find ~occurrence text written) in
-  let declarations = Query.demand database Resolve.Names.declarations module_ in
+  let declarations = Query.demand database Resolve.Names.declarations (module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
@@ -379,9 +416,9 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Resolve.body_the_parser_could_not_read_is_not_resolved) ]
       in
-      let module_ = module_of "app::main" in
-      if (Query.demand database Workspace.file module_).diagnostics = [] then fail "parsed";
-      match Resolve.diagnostics database module_ with
+      let file = file_of "app::main" in
+      if (Query.demand database Workspace.file file).diagnostics = [] then fail "parsed";
+      match Resolve.diagnostics database file with
       | [] -> ()
       | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))
 
@@ -391,24 +428,24 @@ let () =
   test "editing one body resolves only that definition again" (fun () ->
       let text body = "fn first() -> Int64 { 1 }\n\nfn second() -> Int64 { " ^ body ^ " }\n" in
       let database = setup [ ("app::main", text "2") ] in
-      let module_ = module_of "app::main" in
-      ignore (Resolve.diagnostics database module_);
-      Database.For_testing.set_text (Engine.of_context database) module_ (text "3");
+      let file = file_of "app::main" in
+      ignore (Resolve.diagnostics database file);
+      Database.For_testing.set_text (Engine.of_context database) file (text "3");
       Engine.For_testing.clear_log (Engine.of_context database);
-      ignore (Resolve.diagnostics database module_);
+      ignore (Resolve.diagnostics database file);
       let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "second" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "moving a definition down resolves nothing again" (fun () ->
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
       let engine = Engine.of_context database in
-      let module_ = module_of "app::main" in
+      let file = file_of "app::main" in
       expect_not_recomputed engine
-        ~first:(fun () -> ignore (Resolve.diagnostics database module_))
+        ~first:(fun () -> ignore (Resolve.diagnostics database file))
         ~again:(fun () ->
-          Database.For_testing.set_text engine module_
+          Database.For_testing.set_text engine file
             Fixtures.Resolve.moving_a_definition_down_resolves_nothing_again;
-          ignore (Resolve.diagnostics database module_))
+          ignore (Resolve.diagnostics database file))
         Resolve.resolved
         [ Support.top_key "app::main" "first" ])
 
@@ -429,15 +466,56 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Resolve.definition_added_above_another_resolves_nothing) ]
       in
-      let module_ = module_of "app::main" in
-      ignore (Resolve.diagnostics database module_);
-      Database.For_testing.set_text (Engine.of_context database) module_
+      let file = file_of "app::main" in
+      ignore (Resolve.diagnostics database file);
+      Database.For_testing.set_text (Engine.of_context database) file
         Fixtures.Resolve.definition_added_above_another_resolves_nothing_2;
       Engine.For_testing.clear_log (Engine.of_context database);
-      ignore (Resolve.diagnostics database module_);
+      ignore (Resolve.diagnostics database file);
       let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "z" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
+  test "a definition added to one file of a module resolves only its own file's definitions again"
+    (fun () ->
+      let database =
+        setup
+          [
+            ("app::main", "fn f() -> Int64 { g() }\n");
+            ("app::main/helpers", "fn g() -> Int64 { 1 }\n");
+          ]
+      in
+      let main = file_of "app::main" and helpers = file_of "app::main/helpers" in
+      let resolve_all () =
+        ignore (Resolve.diagnostics database main);
+        ignore (Resolve.diagnostics database helpers)
+      in
+      resolve_all ();
+      Database.For_testing.set_text (Engine.of_context database) helpers
+        "fn z() {}\n\nfn g() -> Int64 { 1 }\n";
+      Engine.For_testing.clear_log (Engine.of_context database);
+      resolve_all ();
+      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
+      if resolved <> [ Support.top_key "app::main" "z" ] then
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
+  test "moving a definition to another file of its module keeps its key" (fun () ->
+      let database =
+        setup
+          [
+            ("app::main", "fn f() -> Int64 { g() }\n\nfn g() -> Int64 { 1 }\n");
+            ("app::main/helpers", "fn h() {}\n");
+          ]
+      in
+      let main = file_of "app::main" and helpers = file_of "app::main/helpers" in
+      ignore (Resolve.diagnostics database main);
+      let engine = Engine.of_context database in
+      Database.For_testing.set_text engine main "fn f() -> Int64 { g() }\n";
+      Database.For_testing.set_text engine helpers "fn h() {}\n\nfn g() -> Int64 { 1 }\n";
+      (match Resolve.diagnostics database main @ Resolve.diagnostics database helpers with
+      | [] -> ()
+      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
+      match Query.demand database Resolve.Names.file_of (Support.top_key "app::main" "g") with
+      | Some file when file = helpers -> ()
+      | _ -> fail "the key does not find the moved definition");
   test "an import used only in a part the parser could not read is not unused" (fun () ->
       let database =
         setup
@@ -446,7 +524,7 @@ let () =
             ("app::main", Fixtures.Resolve.import_used_only_in_a_part_the_parser_could_not);
           ]
       in
-      match Resolve.diagnostics database (module_of "app::main") with
+      match Resolve.diagnostics database (file_of "app::main") with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an element of a field is a place" (fun () ->
@@ -465,7 +543,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]
       in
-      match Resolve.diagnostics database (module_of "app::main") with
+      match Resolve.diagnostics database (file_of "app::main") with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "a value generic parameter can end a range pattern" (fun () ->
@@ -484,7 +562,7 @@ let () =
     Database.load_package engine
       ~name:{ Path.owner = Some "acme"; name = "geometry" }
       ~dependencies:[]
-      [ (geometry, Fixtures.Resolve.geometry_length) ];
+      [ ({ module_ = geometry; name = "vector" }, Fixtures.Resolve.geometry_length) ];
     Database.For_testing.set_manifest engine
       ~name:{ Path.owner = None; name = "app" }
       ~dependencies:(List.map (fun package -> { Manifest.package; capabilities = [] }) dependencies);
@@ -498,7 +576,7 @@ let () =
       (match diagnostics database "app::main" with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-      match Query.demand database Resolve.Names.For_testing.imports (module_of "app::main") with
+      match Query.demand database Resolve.Names.For_testing.imports (file_of "app::main") with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
   test "a package with an owner that the manifest does not list cannot be named" (fun () ->

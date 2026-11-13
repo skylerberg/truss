@@ -1,5 +1,5 @@
 # The Unicode 18.0.0 data files that the tables in stage0/unicode and in
-# standard/text/unicode_data.truss are generated from, with their SHA-256
+# standard/text/unicode_data/unicode_data.truss are generated from, with their SHA-256
 # hashes. regenerate.sh downloads each file and checks its hash before using
 # it. Changing the Unicode version means changing every line here, which comes
 # with a new language version.

@@ -24,7 +24,9 @@ val registry_root : string -> string
 val package_root : Path.package -> string
 val lock_file : string
 val manifest_file : string -> string
-val module_path : directory:string -> Path.module_ -> string
+
+val file_path : directory:string -> Path.file -> string
+(** A file's path in its root, under its package's [directory]. *)
 
 val parent : string -> string
 (** The directory a relative path is in, [""] for the root. *)
@@ -40,19 +42,19 @@ val package_directory : is_package:(string -> bool) -> string -> string option
 
 type layout = {
   packages : (string * Manifest.package) list;  (** Each package's directory and manifest *)
-  modules : (string * string * Path.module_) list;
-      (** Each module's file, its package's directory, and the module *)
+  files : (string * string * Path.file) list;
+      (** Each [.truss] file's path, its package's directory, and the file of a module it is *)
   problems : string list;
   time_limit : int;
 }
 
 val layout : (string, layout) Query.query
-(** A root's layout from its manifests and paths: its packages, each module file's module, and the
-    errors in a manifest by itself. It reads the tree and the manifests, and no module's text, so an
-    edit to a module leaves it as it was. Manifests of another project are left out: under a root
-    whose own manifest has a [[project]] table, a directory whose manifest has one too, with
-    everything below it, and under a root without one, which is a project of one package, every
-    other directory with a manifest. *)
+(** A root's layout from its manifests and paths: its packages, each file's module, and the errors
+    in a manifest by itself. It reads the tree and the manifests, and no module's text, so an edit
+    to a module leaves it as it was. Manifests of another project are left out: under a root whose
+    own manifest has a [[project]] table, a directory whose manifest has one too, with everything
+    below it, and under a root without one, which is a project of one package, every other directory
+    with a manifest. *)
 
 (** {1 The build} *)
 
@@ -81,15 +83,16 @@ val place : (Path.package, place option) Query.query
 type package = {
   name : Path.package;
   dependencies : Manifest.dependency list;
-  modules : Path.module_ list;
+  modules : Path.module_ list;  (** Each directory with a [.truss] file, in order *)
+  files : Path.file list;
   usize_bits : int;
 }
 
 val package : (Path.package, package option) Query.query
-(** A package: its manifest's contents, and its modules. *)
+(** A package: its manifest's contents, its modules, and their files. *)
 
-val module_text : (Path.module_, string option) Query.query
-(** A module's text, [None] for a module that no package has. *)
+val file_text : (Path.file, string option) Query.query
+(** A file's text, [None] for a file that no package has. *)
 
 val problems : (unit, string list) Query.query
 (** The errors in the project's manifests and lock file, each as its file and sentences. *)

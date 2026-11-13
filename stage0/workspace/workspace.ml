@@ -1,5 +1,3 @@
-let file_path (module_ : Path.module_) = String.concat "/" (Path.module_parts module_) ^ ".truss"
-
 type file = {
   source : Source.t;
   tokens : Token.t array;
@@ -11,13 +9,13 @@ type file = {
 (* A file's [Source.t] holds a table of lines, which equality compares as
    it would anything else; two parses of the same text give equal files. *)
 let file =
-  Query.query ~name:"file" ~phase:Phases.syntax ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"file" ~phase:Phases.syntax ~show:Path.show_file (fun database file ->
       let text =
-        match Query.demand database Project.module_text module_ with
+        match Query.demand database Project.file_text file with
         | Some text -> text
         | None -> raise Not_found
       in
-      let source = Source.create ~path:(file_path module_) text in
+      let source = Source.create ~path:(Path.show_file file) text in
       let tokens, lexer_diagnostics = Lexer.lex source in
       let parsed, parser_diagnostics = Parser.parse source tokens in
       {
@@ -37,6 +35,20 @@ let modules =
   Query.query ~name:"package_modules" ~phase:Phases.syntax ~show:Path.show_package
     (fun database name ->
       match package database name with Some package -> package.modules | None -> [])
+
+(* A module's files, in order. Every file of a package is in a module, so a
+   module that has no file is not one. *)
+let package_files =
+  Query.query ~name:"package_files" ~phase:Phases.syntax ~show:Path.show_package
+    (fun database name ->
+      match package database name with Some package -> package.files | None -> [])
+
+let files =
+  Query.query ~name:"module_files" ~phase:Phases.syntax ~show:Path.show_module
+    (fun database (module_ : Path.module_) ->
+      List.filter
+        (fun (file : Path.file) -> file.module_ = module_)
+        (Query.demand database package_files module_.package))
 
 let dependencies =
   Query.query ~name:"package_dependencies" ~phase:Phases.syntax ~show:Path.show_package

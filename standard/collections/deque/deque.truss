@@ -1,0 +1,346 @@
+use standard::collections
+use standard::intrinsic
+use standard::map
+
+public fn collections::Deque[Element].new() -> collections::Deque[Element]
+  ensures result.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  collections::Deque(front: [], back: [])
+}
+
+public fn collections::Deque[Element].with_capacity(capacity: USize) -> collections::Deque[Element]
+  ensures result.length() == 0
+{
+  collections::Deque(front: [], back: List.with_capacity(capacity))
+}
+
+public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]](
+  source: own Source,
+) -> collections::Deque[Element]
+  uses Source.Uses
+{
+  collections::Deque(front: [], back: List.collect(own source))
+}
+
+public fn collections::Deque[Element].length(self) -> USize
+  ensures result == (self.front.length() + self.back.length())
+  cost time O(1)
+{
+  self.front.length() + self.back.length()
+}
+
+public fn collections::Deque[Element].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn collections::Deque[Element].push_front(mut self, item: own Element)
+  ensures self.length() == old(self.length()) + 1
+  cost amortized time O(1)
+{
+  if self.back.length() == USize.maximum - self.front.length() {
+    intrinsic::crash("a deque cannot hold that many items".slice())
+  }
+  mut self.front.push(own item)
+}
+
+public fn collections::Deque[Element].push_back(mut self, item: own Element)
+  ensures self.length() == old(self.length()) + 1
+  cost amortized time O(1)
+{
+  if self.back.length() == USize.maximum - self.front.length() {
+    intrinsic::crash("a deque cannot hold that many items".slice())
+  }
+  mut self.back.push(own item)
+}
+
+public fn collections::Deque[Element].pop_front(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  ensures self.length() + (if old(self.length()) > 0 { 1 } else { 0 }) == old(self.length())
+  cost amortized time O(1)
+{
+  if self.front.is_empty() && !self.back.is_empty() {
+    let half = self.back.length() - self.back.length() / 2
+    var later = mut self.back.split_off(half)
+    mut self.back.reverse()
+    let earlier = map::exchange(mut self.back, value: own later)
+    mut self.front.append(own earlier)
+  }
+  mut self.front.pop()
+}
+
+public fn collections::Deque[Element].pop_back(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  ensures self.length() + (if old(self.length()) > 0 { 1 } else { 0 }) == old(self.length())
+  cost amortized time O(1)
+{
+  if self.back.is_empty() && !self.front.is_empty() {
+    let half = self.front.length() - self.front.length() / 2
+    var earlier = mut self.front.split_off(half)
+    mut self.front.reverse()
+    let later = map::exchange(mut self.front, value: own earlier)
+    mut self.back.append(own later)
+  }
+  mut self.back.pop()
+}
+
+public fn collections::Deque[Element].front(self) lends Option[Element]
+  cost time O(1)
+{
+  if self.front.length() > 0 {
+    yield Some(self.front[self.front.length() - 1])
+  } else if self.back.length() > 0 {
+    yield Some(self.back[0])
+  } else {
+    yield None
+  }
+}
+
+public fn collections::Deque[Element].back(self) lends Option[Element]
+  cost time O(1)
+{
+  if self.back.length() > 0 {
+    yield Some(self.back[self.back.length() - 1])
+  } else if self.front.length() > 0 {
+    yield Some(self.front[0])
+  } else {
+    yield None
+  }
+}
+
+public fn collections::Deque[Element].get(self, index: USize) lends Option[Element]
+  cost time O(1)
+{
+  if index < self.front.length() {
+    yield Some(self.front[self.front.length() - 1 - index])
+  } else if index - self.front.length() < self.back.length() {
+    yield Some(self.back[index - self.front.length()])
+  } else {
+    yield None
+  }
+}
+
+public fn collections::Deque[Element].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  mut self.front.clear()
+  mut self.back.clear()
+}
+
+public fn collections::Deque[Element].reserve(mut self, additional: USize)
+  ensures self.length() == old(self.length())
+{
+  mut self.back.reserve(additional)
+}
+
+public fn collections::Deque[Element].rotate_left(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time finite
+{
+  for _ in 0..by
+    invariant self.length() == old(self.length())
+  {
+    match mut self.pop_front() {
+      Some(item) => mut self.push_back(own item)
+      None => {}
+    }
+  }
+}
+
+public fn collections::Deque[Element].rotate_right(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time finite
+{
+  for _ in 0..by
+    invariant self.length() == old(self.length())
+  {
+    match mut self.pop_back() {
+      Some(item) => mut self.push_front(own item)
+      None => {}
+    }
+  }
+}
+
+public fn collections::Deque[Element].to_list(own self) -> List[Element]
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  var items = own self.front
+  mut items.reverse()
+  mut items.append(own self.back)
+  items
+}
+
+public fn collections::Deque[Element: Equal].contains(self, item: Element) -> Bool
+  cost time O(self.length() * time(Element.equal))
+{
+  for index in 0..self.front.length() {
+    if self.front[index] == item {
+      return true
+    }
+  }
+  for index in 0..self.back.length() {
+    if self.back[index] == item {
+      return true
+    }
+  }
+  false
+}
+
+public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
+  uses Source.Uses
+{
+  var cursor = own items
+  while mut cursor.next() is Some(item) {
+    mut self.push_back(own item)
+  }
+}
+
+impl Index for collections::Deque[Element] {
+  type Key = USize
+  type Output = Element
+
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
+
+  fn at(self, key: USize) lends Element
+    requires key < self.length()
+    cost time O(1)
+  {
+    if key < self.front.length() {
+      yield self.front[self.front.length() - 1 - key]
+    } else {
+      yield self.back[key - self.front.length()]
+    }
+  }
+
+  fn at(mut self, key: USize) lends mut Element
+    requires key < self.length()
+    cost time O(1)
+  {
+    if key < self.front.length() {
+      yield mut self.front[self.front.length() - 1 - key]
+    } else {
+      yield mut self.back[key - self.front.length()]
+    }
+  }
+}
+
+impl Iterable for collections::Deque[Element] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    var index = self.front.length()
+    while index > 0
+      invariant index <= self.front.length()
+      invariant yielded.length() == self.front.length() - index
+      decreases index
+      cost time O(self.front.length() - index)
+    {
+      index -= 1
+      yield self.front[index]
+    }
+    var position: USize = 0
+    while position < self.back.length()
+      invariant position <= self.back.length()
+      invariant yielded.length() == self.front.length() + position
+      decreases self.back.length() - position
+      cost time O(self.front.length() + position)
+    {
+      yield self.back[position]
+      position += 1
+    }
+  }
+}
+
+public fn collections::Deque[Element].each(mut self) yields mut Element
+  cost time O(self.length())
+{
+  var index = self.front.length()
+  while index > 0
+    invariant index <= self.front.length()
+    invariant self.front.length() == old(self.front.length())
+    invariant self.back.length() == old(self.back.length())
+    decreases index
+    cost time O(self.front.length() - index)
+  {
+    index -= 1
+    yield mut self.front[index]
+  }
+  for position in 0..self.back.length()
+    invariant self.back.length() == old(self.back.length())
+  {
+    yield mut self.back[position]
+  }
+}
+
+public fn collections::Deque[Element].each(own self) yields own Element
+  cost time O(self.length())
+{
+  var earlier = own self.front
+  mut earlier.reverse()
+  for item in own earlier {
+    yield own item
+  }
+  for item in own self.back {
+    yield own item
+  }
+}
+
+impl Equal for collections::Deque[Element: Equal] {
+  fn equal(self, other: collections::Deque[Element]) -> Bool
+    ensures result == (self.length() == other.length()
+      && forall i in 0..self.length() => self[i] == other[i])
+  {
+    if self.length() != other.length() {
+      return false
+    }
+    var index: USize = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant forall i in 0..index => self[i] == other[i]
+      decreases self.length() - index
+    {
+      if self[index] != other[index] {
+        return false
+      }
+      index += 1
+    }
+    true
+  }
+}
+
+impl Hash for collections::Deque[Element: Hash] {
+  fn hash(self, hasher: mut Hasher) {
+    self.length().hash(mut hasher)
+    for index in 0..self.length() {
+      self[index].hash(mut hasher)
+    }
+  }
+}
+
+impl Default for collections::Deque[Element] {
+  fn default() -> collections::Deque[Element] {
+    collections::Deque.new()
+  }
+}
+
+impl From[List[Element]] for collections::Deque[Element] {
+  fn from(value: own List[Element]) -> collections::Deque[Element] {
+    collections::Deque(front: [], back: own value)
+  }
+}

@@ -90,21 +90,21 @@ let fix (project : Project.t) =
   let rec round number fixed =
     let applied =
       List.concat_map
-        (fun module_ ->
-          let diagnostics = Database.diagnostics project.session module_ in
+        (fun file ->
+          let diagnostics = Database.diagnostics project.session file in
           match chosen diagnostics with
           | [] -> []
           | chosen ->
-              let source = Project.source project module_ in
+              let source = Project.source project file in
               let edits =
                 List.concat_map
                   (fun (diagnostic : Diagnostic.t) ->
                     match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
                   chosen
               in
-              Project.write_file (Project.file project module_) (apply (Source.text source) edits);
+              Project.write_file (Project.path project file) (apply (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
-        (Project.modules project)
+        (Project.files project)
       @ unused_dependencies project @ lock_file project
     in
     if applied = [] || number = rounds then List.rev fixed

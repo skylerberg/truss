@@ -14,7 +14,7 @@ let fine text = no_diagnostics [ ("app::main", text) ]
    appearance of [written], and the innermost expression that starts there. *)
 let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
+  let file = file_of "app::main" in
   let offset = Option.get (Substring.find ~occurrence text written) in
   let actual =
     List.find_map
@@ -47,7 +47,7 @@ let expression_at text written occurrence =
             Syntax_walk.definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      (Query.demand database Resolve.Names.declarations module_)
+      (Query.demand database Resolve.Names.declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -144,8 +144,8 @@ let () =
       let engine = Engine.create ~bases:[ Lazy.force Support.standard ] () in
       Database.load_package ~usize_bits:64 engine ~name:{ owner = None; name = "app" }
         ~dependencies:[]
-        [ (module_of "app::main", Fixtures.Infer.package_that_runs_only_on_64_bit_targets_may_use) ];
-      match check (Engine.context engine) (module_of "app::main") with
+        [ (file_of "app::main", Fixtures.Infer.package_that_runs_only_on_64_bit_targets_may_use) ];
+      match check (Engine.context engine) (file_of "app::main") with
       | [] -> ()
       | actual -> fail "%s" (String.concat "; " (codes actual)));
   test "a negated literal is checked after the negation" (fun () ->
@@ -538,12 +538,12 @@ let () =
       in
       let database = setup [ ("app::main", text "1") ] in
       let engine = Engine.of_context database in
-      let module_ = module_of "app::main" in
+      let file = file_of "app::main" in
       expect_not_recomputed engine
-        ~first:(fun () -> ignore (Infer.diagnostics database module_))
+        ~first:(fun () -> ignore (Infer.diagnostics database file))
         ~again:(fun () ->
-          Database.For_testing.set_text engine module_ (text "2");
-          ignore (Infer.diagnostics database module_))
+          Database.For_testing.set_text engine file (text "2");
+          ignore (Infer.diagnostics database file))
         Infer.type_check_result
         [ top_key "app::main" "caller" ]);
   test "checking twice gives the same result" (fun () ->
@@ -562,7 +562,7 @@ let () =
   test "no table of the standard library holds a type inference left unsolved" (fun () ->
       let database = setup [] in
       List.iter
-        (fun ((module_ : Path.module_), _) ->
+        (fun ((file : Path.file), _) ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
@@ -579,8 +579,8 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            (Query.demand database Resolve.Names.declarations module_))
-        Standard_library.modules)
+            (Query.demand database Resolve.Names.declarations_in file))
+        Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
 
@@ -593,7 +593,7 @@ let () =
       let database =
         setup [ ("app::main", point ^ Fixtures.Infer.type_written_in_a_body_must_meet_its_bounds) ]
       in
-      match codes (check database (module_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a type written in a body that is not a type is an error" (fun () ->
@@ -654,7 +654,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Infer.mistake_is_not_reported_again_as_a_type_that) ]
       in
-      if List.mem "types.cannot_infer" (codes (check database (module_of "app::main"))) then
+      if List.mem "types.cannot_infer" (codes (check database (file_of "app::main"))) then
         fail "cascaded");
   test "a Float32 literal too large is an error" (fun () ->
       one_diagnostic Fixtures.Infer.float32_literal_too_large_is_an_error
@@ -715,7 +715,7 @@ let () =
       in
       List.iter
         (fun (diagnostic : Diagnostic.t) -> if diagnostic.fixes <> [] then fail "offered a fix")
-        (check database (module_of "app::main")));
+        (check database (file_of "app::main")));
   test "the string + fix keeps escapes" (fun () ->
       one_diagnostic Fixtures.Infer.string_fix_keeps_escapes "types.string_addition"
         ~fixed:Fixtures.Infer.string_fix_keeps_escapes_fixed);
@@ -767,7 +767,7 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Infer.traits_written_arguments_are_the_ones_its_call) ]
       in
-      if not (List.mem "types.no_impl" (codes (check database (module_of "app::main")))) then
+      if not (List.mem "types.no_impl" (codes (check database (file_of "app::main")))) then
         fail "the written argument was ignored");
   test "a literal is the receiver of a trait method written in full" (fun () ->
       fine Fixtures.Infer.literal_is_the_receiver_of_a_trait_method_written);
@@ -948,45 +948,13 @@ let () =
   test "a field's default's arithmetic must stay within its type" (fun () ->
       one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
 
-(* The body of a transparent function *)
+(* What other packages' proofs read *)
 
 let () =
-  let transparent body =
-    Printf.sprintf
-      "public transparent fn shown(value: Int64) -> Int64\n  cost time O(1)\n{\n  %s\n}\n" body
-  in
   let helper visibility =
     Printf.sprintf "%sfn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value - 1\n}\n\n"
       visibility
   in
-  test "a transparent body calls only functions that other packages can call" (fun () ->
-      one_diagnostic (helper "internal " ^ transparent "half(value)") "types.private_in_public";
-      one_diagnostic (helper "" ^ transparent "half(value)") "types.private_in_public";
-      fine (helper "public " ^ transparent "half(value)");
-      fine (helper "public transparent " ^ transparent "half(value) + value"));
-  test "a transparent body names only constants that other packages can name" (fun () ->
-      one_diagnostic
-        ("internal let limit: Int64 = 10\n\n" ^ transparent "value + limit")
-        "types.private_in_public";
-      fine ("public let limit: Int64 = 10\n\n" ^ transparent "value + limit"));
-  test "a transparent body calls only public methods, and can read a hidden field" (fun () ->
-      let meter visibility =
-        Printf.sprintf
-          "public opaque type Meter(reading: Int64)\n\n\
-          \           %sfn Meter.raw(self) -> Int64\n\
-          \            cost time O(1)\n\
-          \           {\n\
-          \            self.reading\n\
-          \           }\n\n\
-          \           public transparent fn Meter.shown(self) -> Int64\n\
-          \            cost time O(1)\n\
-          \           {\n\
-          \            self.raw() + self.reading\n\
-          \           }\n"
-          visibility
-      in
-      one_diagnostic (meter "internal ") "types.private_in_public";
-      fine (meter "public "));
   test "a public contract names only functions that other packages can call" (fun () ->
       let sorted visibility =
         Printf.sprintf
@@ -1001,20 +969,28 @@ let () =
         Printf.sprintf "%sfn sort(items: mut Slice[Int64])\n  %s\n{\n  todo\n}\n" visibility clause
       in
       one_diagnostic
-        (sorted "internal " ^ sort "public " "ensures in_order(items)")
+        (sorted "internal " ^ sort "public " "requires in_order(items)")
         "types.private_in_public";
       one_diagnostic
         (sorted "" ^ sort "public " "requires in_order(items)")
         "types.private_in_public";
-      fine (sorted "public " ^ sort "public " "ensures in_order(items)");
-      fine (sorted "internal " ^ sort "internal " "ensures in_order(items)");
-      fine (sorted "" ^ sort "" "ensures in_order(items)"));
+      fine (sorted "public " ^ sort "public " "requires in_order(items)");
+      fine (sorted "internal " ^ sort "internal " "requires in_order(items)");
+      fine (sorted "" ^ sort "" "requires in_order(items)"));
+  test "a public ensures may name a private function" (fun () ->
+      fine
+        ("fn in_order(items: Slice[Int64]) -> Bool\n\
+         \  cost time O(1)\n\
+          {\n\
+         \  items.length() < 2\n\
+          }\n\n"
+       ^ "public fn sort(items: mut Slice[Int64])\n  ensures in_order(items)\n{\n  todo\n}\n"));
   test "a public contract names only constants that other packages can name" (fun () ->
       let capped visibility =
         Printf.sprintf
           "%slet limit: Int64 = 10\n\n\
            public fn capped(value: Int64) -> Int64\n\
-          \  ensures result <= limit\n\
+          \  requires value <= limit\n\
            {\n\
           \  todo\n\
            }\n"
@@ -1022,9 +998,7 @@ let () =
       in
       one_diagnostic (capped "internal ") "types.private_in_public";
       fine (capped "public "));
-  test
-    "the contract of a public trait's method and of its impl's method names only public functions"
-    (fun () ->
+  test "a public trait's method names only public functions in its requires" (fun () ->
       let helper = Fixtures.Infer.helper in
       one_diagnostic
         (helper ^ Fixtures.Infer.contract_of_a_public_traits_method_and_of_its)
@@ -1046,8 +1020,14 @@ let () =
              }\n"
             visibility
       in
-      one_diagnostic (implemented "public ") "types.private_in_public";
+      fine (implemented "public ");
       fine (implemented "internal "));
-  test "a function that is not transparent can call a function that other packages cannot"
-    (fun () ->
-      fine (helper "internal " ^ Fixtures.Infer.function_that_is_not_transparent_can_call_a))
+  test "a function's body can call a function that other packages cannot" (fun () ->
+      fine (helper "internal " ^ Fixtures.Infer.functions_body_can_call_a_function_that_other))
+
+(* Bit-vector assertions *)
+
+let () =
+  test "a bit-vector assertion names only integers and booleans" (fun () ->
+      one_diagnostic Fixtures.Infer.bit_vector_assertion_names_only_integers_and_booleans
+        "types.not_bit_vector")
