@@ -8,12 +8,7 @@ val variable : string
 (** [TRUSS_REGISTRY], which names the registry's directory. *)
 
 val current : unit -> t option
-(** The registry in use: the one {!configure} was last told, or else the one the environment names.
-*)
-
-val configure : string option -> unit
-(** Tells the process which registry to use, in place of the one its own environment names. The
-    background process is told each client's. *)
+(** The registry the environment names. *)
 
 val versions : t -> Path.package -> (Version.t * string) list
 (** A package's versions, each with its hash, in the order they were published. A package the

@@ -81,3 +81,7 @@ let print report =
   match count report with
   | 0 -> ()
   | error_count -> Output.eprintf "%s\n" (plural error_count "error" "errors")
+
+(* The code has errors, so the command stops, and the command line writes
+   the report and exits with 1. *)
+exception Errors of t

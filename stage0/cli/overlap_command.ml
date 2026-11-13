@@ -103,8 +103,8 @@ let with_other_worktrees session =
       | _ -> None)
     (Database.other_worktrees session)
 
-let run ~directory ~with_ ~merge ~json =
-  let project = Project.load directory in
+let run ~with_ ~merge =
+  let project = Project.current () in
   let session = project.session in
   let others =
     match with_ with
@@ -121,7 +121,8 @@ let run ~directory ~with_ ~merge ~json =
           (Database.other_worktrees session)
   in
   let comparisons = List.map (compare_with ~merge session) others in
-  if json then Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json comparisons) ])
+  if Output.json () then
+    Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json comparisons) ])
   else if others = [] then
     Output.print_line "No other worktree of this repository is open, and no branch was named."
   else if

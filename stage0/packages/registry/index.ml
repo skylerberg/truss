@@ -2,15 +2,8 @@ type t = { root : string }
 
 let variable = "TRUSS_REGISTRY"
 
-(* A process that answers for others, as the background process does, is
-   told each one's registry, which is not its own environment's. *)
-let configured : string option option ref = ref None
-let configure directory = configured := Some directory
-
 let current () =
-  match match !configured with Some told -> told | None -> Sys.getenv_opt variable with
-  | Some root when root <> "" -> Some { root }
-  | _ -> None
+  match Sys.getenv_opt variable with Some root when root <> "" -> Some { root } | _ -> None
 
 let package_directory registry name =
   List.fold_left Filename.concat registry.root (Path.package_parts name)

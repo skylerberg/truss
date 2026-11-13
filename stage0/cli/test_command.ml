@@ -218,9 +218,10 @@ let run_all (project : Project.t) compile ~rerun ~progress tests =
             | Error message -> Error message))
     (Ok []) project.packages
 
-let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
+let run ~paths ~match_ ~timings:show_timings ~rerun =
+  let json = Output.json () in
   let started = now_microseconds () in
-  let project = Project.load directory in
+  let project = Project.current () in
   let report = Report.gather project in
   let checked = now_microseconds () in
   (* In package order, so each package's tests are contiguous. *)
@@ -231,57 +232,48 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
         List.filter (fun test -> test.module_.package = package.name) selected)
       project.packages
   in
-  if not (Report.clean report) then begin
-    if json then
-      Json.print
-        (Report.document report
-           [ ("tests", Json.List (List.map (fun test -> test_json test None) tests)) ])
-    else Report.print report;
-    1
-  end
-  else
-    let compile = Compiler.create project Development in
-    let progress =
-      {
-        line = Status_line.create ~enabled:(not json);
-        tests = Array.of_list tests;
-        ended = 0;
-        not_passed = 0;
-        running_since = None;
-        running = Hashtbl.create 16;
-      }
-    in
-    let build_ended = ref None in
-    let outcome =
-      run_all project compile ~rerun ~progress:(on_progress progress ~build_ended) tests
-    in
-    Status_line.clear progress.line;
-    Database.flush_store ();
-    match outcome with
-    | Error message -> Project.cannot_run "%s" message
-    | Ok records ->
-        let ended = now_microseconds () in
-        let build_end = Option.value !build_ended ~default:ended in
-        let timings =
-          {
-            check = checked - started;
-            build = build_end - checked;
-            tests = ended - build_end;
-            total = ended - started;
-          }
-        in
-        if json then
-          Json.print
-            (Json.document ~diagnostics:[]
-               [
-                 ( "tests",
-                   Json.List
-                     (List.map2 (fun test record -> test_json test (Some record)) tests records) );
-                 ("timings", timings_json timings);
-               ])
-        else print_report tests records ~timings:show_timings timings;
-        if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0
-        else 1
+  if not (Report.clean report) then raise (Report.Errors report);
+  let compile = Compiler.create project Development in
+  let progress =
+    {
+      line = Status_line.create ~enabled:(not json);
+      tests = Array.of_list tests;
+      ended = 0;
+      not_passed = 0;
+      running_since = None;
+      running = Hashtbl.create 16;
+    }
+  in
+  let build_ended = ref None in
+  let outcome =
+    run_all project compile ~rerun ~progress:(on_progress progress ~build_ended) tests
+  in
+  Status_line.clear progress.line;
+  match outcome with
+  | Error message -> Project.cannot_run "%s" message
+  | Ok records ->
+      let ended = now_microseconds () in
+      let build_end = Option.value !build_ended ~default:ended in
+      let timings =
+        {
+          check = checked - started;
+          build = build_end - checked;
+          tests = ended - build_end;
+          total = ended - started;
+        }
+      in
+      if json then
+        Json.print
+          (Json.document ~diagnostics:[]
+             [
+               ( "tests",
+                 Json.List
+                   (List.map2 (fun test record -> test_json test (Some record)) tests records) );
+               ("timings", timings_json timings);
+             ])
+      else print_report tests records ~timings:show_timings timings;
+      if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0
+      else 1
 
 module For_testing = struct
   let duration = duration

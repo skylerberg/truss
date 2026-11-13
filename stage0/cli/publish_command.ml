@@ -130,7 +130,6 @@ let failed_tests (project : Project.t) (package : Project.package) =
     with
     | Error message -> Project.cannot_run "%s" message
     | Ok records ->
-        Database.flush_store ();
         List.concat
           (List.map2
              (fun (test : Test_command.test) (record : Compile.record) ->
@@ -226,8 +225,9 @@ let decide (project : Project.t) registry (package : Project.package) =
                     grows;
                   }))
 
-let run ~directory ~json =
-  let project = Project.load directory in
+let run () =
+  let json = Output.json () in
+  let project = Project.current () in
   let package = Project.package project in
   let name = package.name in
   if name.owner = None then
@@ -247,64 +247,56 @@ let run ~directory ~json =
       Json.print
         (Report.document report
            [ ("refused", Json.List (List.map (fun sentence -> Json.String sentence) sentences)) ])
-    else begin
-      Report.print report;
-      List.iter Output.eprint_line sentences
-    end;
-    1
+    else List.iter Output.eprint_line sentences;
+    raise (Outcome.Stop 1)
   in
-  if not (Report.clean report) then refuse [ "A package is published only when it has no errors." ]
-  else
-    match unfinished project with
-    | _ :: _ as unfinished_code ->
-        refuse
-          (List.map
-             (fun (keyword, file, line, column) ->
-               Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
-             unfinished_code
-          @ [ "A package is published only when it has no `todo` and no `echo`." ])
-    | [] -> (
-        match failed_tests project package with
-        | _ :: _ as failed ->
-            refuse (failed @ [ "A package is published only when its tests pass." ])
-        | [] -> (
-            match decide project registry package with
-            | Refused sentences -> refuse sentences
-            | Unchanged version ->
-                if json then
-                  Json.print
-                    (Report.document report [ ("version", Json.String (Version.show version)) ])
-                else
-                  Output.printf "`%s` %s already has these files.\n" (Path.show_package name)
-                    (Version.show version);
-                0
-            | Published { version; files; grows } ->
-                Registry.Index.add registry name version files;
-                let hash = Registry.Content.hash files in
-                if json then
-                  Json.print
-                    (Report.document report
-                       [
-                         ("package", Json.String (Path.show_package name));
-                         ("version", Json.String (Version.show version));
-                         ("hash", Json.String hash);
-                         ( "grows",
-                           Json.List
-                             (List.map
-                                (fun (path, description) ->
-                                  Json.Object
-                                    [
-                                      ("path", Json.String (Path.show path));
-                                      ("addition", Json.String description);
-                                    ])
-                                grows) );
-                       ])
-                else begin
-                  Output.printf "Published `%s` %s.\n" (Path.show_package name)
-                    (Version.show version);
-                  List.iter
-                    (fun (path, description) ->
-                      Output.printf "  %s %s.\n" (Path.show path) description)
-                    grows
-                end;
-                0))
+  if not (Report.clean report) then raise (Report.Errors report);
+  (match unfinished project with
+  | [] -> ()
+  | unfinished_code ->
+      refuse
+        (List.map
+           (fun (keyword, file, line, column) ->
+             Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
+           unfinished_code
+        @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
+  (match failed_tests project package with
+  | [] -> ()
+  | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
+  match decide project registry package with
+  | Refused sentences -> refuse sentences
+  | Unchanged version ->
+      if json then
+        Json.print (Report.document report [ ("version", Json.String (Version.show version)) ])
+      else
+        Output.printf "`%s` %s already has these files.\n" (Path.show_package name)
+          (Version.show version);
+      0
+  | Published { version; files; grows } ->
+      Registry.Index.add registry name version files;
+      let hash = Registry.Content.hash files in
+      if json then
+        Json.print
+          (Report.document report
+             [
+               ("package", Json.String (Path.show_package name));
+               ("version", Json.String (Version.show version));
+               ("hash", Json.String hash);
+               ( "grows",
+                 Json.List
+                   (List.map
+                      (fun (path, description) ->
+                        Json.Object
+                          [
+                            ("path", Json.String (Path.show path));
+                            ("addition", Json.String description);
+                          ])
+                      grows) );
+             ])
+      else begin
+        Output.printf "Published `%s` %s.\n" (Path.show_package name) (Version.show version);
+        List.iter
+          (fun (path, description) -> Output.printf "  %s %s.\n" (Path.show path) description)
+          grows
+      end;
+      0

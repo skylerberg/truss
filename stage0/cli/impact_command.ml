@@ -165,8 +165,8 @@ let print_change change =
          (List.sort_uniq compare
             (List.map (fun (edge : Graph_types.edge) -> Path.show edge.dependent) change.dependents)))
 
-let run ~directory ~base ~json =
-  let project = Project.load directory in
+let run ~base =
+  let project = Project.current () in
   let report = Report.gather project in
   let session = project.session in
   match Database.base_commit session base with
@@ -180,7 +180,7 @@ let run ~directory ~base ~json =
           let changes = changes project base_session in
           (* Lowering requires code without diagnostics. *)
           let tests = if Report.clean report then tests_changed project base_session else [] in
-          if json then
+          if Output.json () then
             Json.print
               (Report.document report
                  [

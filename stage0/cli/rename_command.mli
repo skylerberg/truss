@@ -1,1 +1,1 @@
-val run : directory:string -> from_:string -> to_:string -> json:bool -> int
+val run : from_:string -> to_:string -> int

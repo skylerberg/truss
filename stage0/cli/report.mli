@@ -7,3 +7,5 @@ val clean : t -> bool
 val document : t -> (string * Json.t) list -> Json.t
 val plural : int -> string -> string -> string
 val print : t -> unit
+
+exception Errors of t

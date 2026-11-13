@@ -18,8 +18,6 @@ type signature = {
   dependents : Path.t list;
 }
 
-val report :
-  json:bool -> lock:change list -> signatures:signature list -> broken:string list -> unit
-
+val report : lock:change list -> signatures:signature list -> broken:string list -> unit
 val lock_file : Project.t -> string
-val run : directory:string -> names:string list -> json:bool -> int
+val run : names:string list -> int

@@ -3,9 +3,6 @@
    except that it builds for development unless told to build for
    release. *)
 
-exception Stop of int
-(** The command has reported why it stopped, and exits with this status. *)
-
 (* A package's program starts at the [main] of its root module, the
    package's top directory. *)
 let main_of (project : Project.t) (package : Project.package) =
@@ -34,17 +31,10 @@ let main (project : Project.t) =
          no program."
         (Path.show_package package.name)
 
-let stop_at_diagnostics ~proofs ~json project =
-  let report = Report.gather ~proofs project in
-  if not (Report.clean report) then begin
-    if json then Json.print (Report.document report []) else Report.print report;
-    raise (Stop 1)
-  end
-
 (* Rejects a program whose [main] can reach a [todo] or an [echo] in code,
    or a hole in a proof, and lists each in order of position with the
    definitions from [main] to the one that holds it. *)
-let refuse_unshippable ~json project compile main =
+let refuse_unshippable project compile main =
   let in_code =
     match Compile.unshippable compile ~main with
     | Error message -> Project.cannot_run "%s" message
@@ -72,7 +62,7 @@ let refuse_unshippable ~json project compile main =
         | `Echo -> "`echo`"
         | `Proof_hole -> "`todo` in a proof"
       in
-      if json then
+      if Output.json () then
         Json.print
           (Json.document ~diagnostics:[]
              [
@@ -99,7 +89,7 @@ let refuse_unshippable ~json project compile main =
               file line column (shown failure)
               (String.concat " -> " (List.map Path.show way)))
           refusals;
-      raise (Stop 1)
+      raise (Outcome.Stop 1)
 
 (* Builds the package's program to [output]. A release build requires
    every obligation to be proven, so it omits the run-time checks that the
@@ -107,45 +97,37 @@ let refuse_unshippable ~json project compile main =
    code. A development build skips the prover and keeps the checks; a
    [todo] it reaches stops the program, and an [echo] writes to standard
    error. *)
-let build_program ~json (project : Project.t) (build : Compiler.build) ~output =
+let build_program (project : Project.t) (build : Compiler.build) ~output =
   let is_release = build = Release in
-  stop_at_diagnostics ~proofs:is_release ~json project;
+  let report = Report.gather ~proofs:is_release project in
+  if not (Report.clean report) then raise (Report.Errors report);
   let main = main project in
   let compile = Compiler.create ~checks:(not is_release) project build in
-  if is_release then refuse_unshippable ~json project compile main;
+  if is_release then refuse_unshippable project compile main;
   match Compile.build_program compile ~main ~output with
   | Error message -> Project.cannot_run "%s" message
   | Ok () -> ()
 
-let catching work = try work () with Stop status -> Outcome.Exit status
-
 (* [truss run]: builds the command's one package, and returns the program
    for the client to run on its terminal with the arguments, so it can
    prompt and read input. *)
-let run ~directory ~release ~arguments =
-  catching (fun () ->
-      let project = Project.load directory in
-      ignore (Project.package project);
-      let program =
-        Filename.concat (Database.programs_directory ())
-          (Printf.sprintf "program-%d-%d" (Unix.getpid ())
-             (int_of_float (Unix.gettimeofday () *. 1e6)))
-      in
-      build_program ~json:false project (if release then Release else Development) ~output:program;
-      Outcome.Run_program { program; arguments })
+let run ~release ~arguments =
+  let project = Project.current () in
+  let program =
+    Filename.concat (Database.programs_directory ())
+      (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1e6)))
+  in
+  build_program project (if release then Release else Development) ~output:program;
+  Outcome.Run_program { program; arguments }
 
 (* [truss build]: builds for release to [output], or else to a file named
    after the package in the current directory. *)
-let build ~directory ~output ~json =
-  catching (fun () ->
-      let project = Project.load directory in
-      let package = Project.package project in
-      let output =
-        Project.normalize (Option.value output ~default:(Path.show_package package.name))
-      in
-      build_program ~json project Release ~output;
-      if json then
-        Json.print
-          (Json.document ~diagnostics:[] [ ("output", Json.String (Project.shown output)) ])
-      else Output.printf "Built %s.\n" (Project.shown output);
-      Outcome.Exit 0)
+let build ~output =
+  let project = Project.current () in
+  let package = Project.package project in
+  let output = Project.normalize (Option.value output ~default:(Path.show_package package.name)) in
+  build_program project Release ~output;
+  if Output.json () then
+    Json.print (Json.document ~diagnostics:[] [ ("output", Json.String (Project.shown output)) ])
+  else Output.printf "Built %s.\n" (Project.shown output);
+  Outcome.Exit 0

@@ -9,6 +9,7 @@ type t = {
   err : string -> unit;
   terminal : bool;  (** Whether the client's standard error is a terminal *)
   columns : int option;  (** The client's terminal width, when its shell exports [COLUMNS] *)
+  mutable json : bool;  (** Whether the command writes JSON, which [--json] selects *)
 }
 
 let local () =
@@ -20,6 +21,7 @@ let local () =
         flush stderr);
     terminal = Unix.isatty Unix.stderr && Sys.getenv_opt "TERM" <> Some "dumb";
     columns = Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt;
+    json = false;
   }
 
 let current = ref (local ())
@@ -39,3 +41,5 @@ let eprint_line text = eprint (text ^ "\n")
 let eprintf format = Printf.ksprintf eprint format
 let terminal () = !current.terminal
 let columns () = !current.columns
+let json () = !current.json
+let set_json json = !current.json <- json

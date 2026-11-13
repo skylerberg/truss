@@ -1,1 +1,1 @@
-val run : directory:string -> name:string -> int
+val run : name:string -> int

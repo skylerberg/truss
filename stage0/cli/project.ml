@@ -56,10 +56,6 @@ type t = {
       (** Each of their files with its absolute path, in order *)
 }
 
-(* The sessions that commands opened, which the command line saves when
-   the command ends. *)
-let opened : Database.session list ref = ref []
-
 let file_paths session packages =
   let root = Database.root session in
   List.concat_map
@@ -74,7 +70,6 @@ let load directory =
   match Database.open_session directory with
   | Error message -> raise (Cannot_run message)
   | Ok (session, targets) ->
-      if not (List.memq session !opened) then opened := session :: !opened;
       let root = Database.root session in
       let packages =
         List.map
@@ -85,6 +80,12 @@ let load directory =
       if packages = [] && Database.problems session = [] then
         cannot_run "No package in %s or any directory below it." (shown directory);
       { session; context = Database.context session; packages; files = file_paths session packages }
+
+(* The project of the current directory's packages. *)
+let current () = load "."
+
+(* The project of every package of the current directory's worktree. *)
+let worktree () = load (Database.root (current ()).session)
 
 (* The package of a command that acts on exactly one. *)
 let package project =

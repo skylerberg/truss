@@ -97,12 +97,13 @@ let print hole =
       (String.concat ", " (List.map (fun (name, ty) -> name ^ ": " ^ ty) hole.in_scope));
   if hole.blocks <> [] then Output.printf "    blocks: %s\n" (String.concat "; " hole.blocks)
 
-let run ~directory ~paths ~json =
-  let project = Project.load directory in
+let run ~paths =
+  let project = Project.current () in
   let report = Report.gather project in
   let holes = gather project paths in
   fill_blocks project holes;
-  if json then Json.print (Report.document report [ ("holes", Json.List (List.map to_json holes)) ])
+  if Output.json () then
+    Json.print (Report.document report [ ("holes", Json.List (List.map to_json holes)) ])
   else begin
     Report.print report;
     List.iter print holes;

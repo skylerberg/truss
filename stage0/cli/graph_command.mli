@@ -1,3 +1,3 @@
 type direction = References | Dependencies
 
-val run : directory:string -> direction:direction -> name:string -> json:bool -> int
+val run : direction:direction -> name:string -> int
