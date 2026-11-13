@@ -45,12 +45,15 @@ type 'a ran = Ran of 'a | Ran_too_long
    another's file; without it, every package but the standard library is.
    [results] keeps the results of runs between compilers.
    [evaluation_time_limit], in milliseconds, stops each run of code while
-   compiling, and is 10 seconds by default. *)
+   compiling, and is 10 seconds by default. [programs] is the directory each
+   built program is written to, and is the system's temporary directory by
+   default. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.file -> string) ->
   ?results:results ->
   ?evaluation_time_limit:int ->
+  ?programs:string ->
   want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
   Query.context ->
@@ -135,6 +138,10 @@ type unshippable = {
 (* Every [todo] and [echo] the program whose [main] is at that path can
    reach, once each, in order of position. *)
 val unshippable : t -> main:Path.t -> (unshippable list, string) result
+
+(* A path in the compiler's directory of programs that no other program
+   has, for a program to build. *)
+val fresh_program : t -> string
 
 (* Builds the program whose [main] is at that path into an executable at
    [output]. *)

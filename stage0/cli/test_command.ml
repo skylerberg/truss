@@ -3,8 +3,8 @@
 
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
-(* The tests defined in the selected files, in the package's order, whose
-   names contain [match_]. *)
+(* The tests defined in the selected files whose names contain [match_],
+   in package order, so each package's tests are contiguous. *)
 let select (project : Project.t) ~paths ~match_ =
   List.concat_map
     (fun (file : Path.file) ->
@@ -187,36 +187,35 @@ let on_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-(* Runs each package's tests in one test program per package, with the
-   package's time limit, and reports each test by its index among all the
-   selected tests. *)
-let run_all (project : Project.t) compile ~rerun ~progress tests =
+(* Runs the tests, which are in package order, as [select] gives them, each
+   package's in one test program with the package's time limit, and returns
+   each test's record in the same order. [progress] is told of each step,
+   with each test by its index among all of them. *)
+let run_tests ?(rerun = false) ?(progress = ignore) (project : Project.t) tests =
+  let compile = lazy (Compiler.create project Development) in
   let offset = ref 0 in
-  List.fold_left
-    (fun outcome (package : Project.package) ->
-      match outcome with
-      | Error _ -> outcome
-      | Ok done_ -> (
-          let own = List.filter (fun test -> test.module_.package = package.name) tests in
-          let base = !offset in
-          offset := base + List.length own;
-          let shifted : Compile.progress -> Compile.progress = function
-            | Started { test } -> Started { test = test + base }
-            | Ended { test; record } -> Ended { test = test + base; record }
-            | other -> other
-          in
-          if own = [] then outcome
-          else
-            match
-              Compile.run_tests ~rerun
-                ~progress:(fun event -> progress (shifted event))
-                compile
-                ~time_limit:(Database.time_limit project.session * 1000)
-                (List.map (fun test -> test.path) own)
-            with
-            | Ok records -> Ok (done_ @ records)
-            | Error message -> Error message))
-    (Ok []) project.packages
+  List.concat_map
+    (fun (package : Project.package) ->
+      let own = List.filter (fun test -> test.module_.package = package.name) tests in
+      let base = !offset in
+      offset := base + List.length own;
+      let shifted : Compile.progress -> Compile.progress = function
+        | Started { test } -> Started { test = test + base }
+        | Ended { test; record } -> Ended { test = test + base; record }
+        | other -> other
+      in
+      if own = [] then []
+      else
+        match
+          Compile.run_tests ~rerun
+            ~progress:(fun event -> progress (shifted event))
+            (Lazy.force compile)
+            ~time_limit:(Database.time_limit project.session * 1000)
+            (List.map (fun test -> test.path) own)
+        with
+        | Ok records -> records
+        | Error message -> Project.cannot_run "%s" message)
+    project.packages
 
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in
@@ -224,16 +223,8 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let project = Project.current () in
   let report = Report.gather project in
   let checked = now_microseconds () in
-  (* In package order, so each package's tests are contiguous. *)
-  let tests =
-    let selected = select project ~paths ~match_ in
-    List.concat_map
-      (fun (package : Project.package) ->
-        List.filter (fun test -> test.module_.package = package.name) selected)
-      project.packages
-  in
+  let tests = select project ~paths ~match_ in
   if not (Report.clean report) then raise (Report.Errors report);
-  let compile = Compiler.create project Development in
   let progress =
     {
       line = Status_line.create ~enabled:(not json);
@@ -245,35 +236,32 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
     }
   in
   let build_ended = ref None in
-  let outcome =
-    run_all project compile ~rerun ~progress:(on_progress progress ~build_ended) tests
+  let records =
+    Fun.protect
+      ~finally:(fun () -> Status_line.clear progress.line)
+      (fun () -> run_tests ~rerun ~progress:(on_progress progress ~build_ended) project tests)
   in
-  Status_line.clear progress.line;
-  match outcome with
-  | Error message -> Project.cannot_run "%s" message
-  | Ok records ->
-      let ended = now_microseconds () in
-      let build_end = Option.value !build_ended ~default:ended in
-      let timings =
-        {
-          check = checked - started;
-          build = build_end - checked;
-          tests = ended - build_end;
-          total = ended - started;
-        }
-      in
-      if json then
-        Json.print
-          (Json.document ~diagnostics:[]
-             [
-               ( "tests",
-                 Json.List
-                   (List.map2 (fun test record -> test_json test (Some record)) tests records) );
-               ("timings", timings_json timings);
-             ])
-      else print_report tests records ~timings:show_timings timings;
-      if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0
-      else 1
+  let ended = now_microseconds () in
+  let build_end = Option.value !build_ended ~default:ended in
+  let timings =
+    {
+      check = checked - started;
+      build = build_end - checked;
+      tests = ended - build_end;
+      total = ended - started;
+    }
+  in
+  if json then
+    Json.print
+      (Json.document ~diagnostics:[]
+         [
+           ( "tests",
+             Json.List (List.map2 (fun test record -> test_json test (Some record)) tests records)
+           );
+           ("timings", timings_json timings);
+         ])
+  else print_report tests records ~timings:show_timings timings;
+  if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0 else 1
 
 module For_testing = struct
   let duration = duration

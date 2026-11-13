@@ -261,12 +261,20 @@ type t = {
   results : results option;
       (** Where the results of runs are kept, by the key of the code that ran *)
   evaluation_time_limit : int;  (** In milliseconds, for each run of code while compiling *)
+  programs : string;  (** The directory each built program is written to *)
   runs : (string, string ran) Hashtbl.t;
       (** The output of each run of code while compiling, in this build, by the key of the code that
           ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
+let programs_built = Atomic.make 0
+
+(* A path in the compiler's directory of programs that no other program of
+   any process has. *)
+let fresh_program compiler =
+  Filename.concat compiler.programs
+    (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
 
 (* A build that failed for a reason that is not the compiler's: the C
    compiler or the linker refused, or a program run while compiling did not
@@ -505,13 +513,10 @@ and build_test_program ?progress ?supplied compiler ~time_limit ~roots ~output =
          (List.map Instance.symbol roots))
     ~output
 
-(* Builds the instances the roots reach into a temporary program and runs it with
+(* Builds the instances the roots reach into a program and runs it with
    [arguments], then removes it. *)
 and build_and_run ?input ?time_limit ?(in_order = true) compiler ~roots ~startup ~arguments =
-  let output =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
-  in
+  let output = fresh_program compiler in
   (* Code run while compiling starts no threads, so it is linked with the
      in-order runtime unless the caller asks for the threaded one. *)
   build compiler ~in_order ~roots ~startup ~output;
@@ -770,10 +775,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
   let fresh = Array.make (Array.length missing) None in
   if Array.length missing > 0 then begin
     let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
-    let output =
-      Filename.concat (Filename.get_temp_dir_name ())
-        (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
-    in
+    let output = fresh_program compiler in
     build_test_program compiler ~time_limit ~roots ~output ~progress:(fun compiled total ->
         progress (Compiling { compiled; total }));
     progress (Running { tests = Array.length missing });
@@ -954,8 +956,9 @@ let evaluate_call compiler ~function_ ~arguments =
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
 
 let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_time_limit = 10_000)
-    ~want ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain
-    cache settings =
+    ?(programs = Filename.get_temp_dir_name ()) ~want
+    ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
+    settings =
   let lowering = { target; checks } in
   {
     database;
@@ -969,6 +972,7 @@ let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_
     worked_on;
     results;
     evaluation_time_limit;
+    programs;
     runs = Hashtbl.create 8;
   }
 
