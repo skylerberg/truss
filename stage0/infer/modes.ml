@@ -126,6 +126,12 @@ let mutate state env ~(by : mutation) (value : expression) =
     match by with Assignment -> Not_assignable | Mut_mark -> Wrong_mark
   in
   (match (immutable state env value, by) with
+  | _ when is_formula env ->
+      report state Not_in_specification value.span
+        (Printf.sprintf
+           "Nothing in a specification, a proof, or a quantifier's body can be %s: the prover \
+            reads them as formulas, which change nothing."
+           (match by with Assignment -> "assigned" | Mut_mark -> "marked `mut`"))
   | None, _ -> ()
   | Some (Captured name), _ ->
       report state code value.span

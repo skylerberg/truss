@@ -241,13 +241,6 @@ and kind =
   | Return of expression option
   | Break
   | Continue
-  | Task_exit of { tasks : task list; exit : expression }
-      (** An early exit from [concurrent] code. [exit] is the {!Return}, {!Break}, or {!Continue},
-          and [tasks] are the tasks that it ends early, innermost first. The other tasks of each
-          block or loop that it leaves are cancelled and run to their ends, and then the exit takes
-          effect. A [?] in a task is the {!Match} that it always is, with its [Return] inside this
-          node. A [continue] of a [concurrent for] itself only ends its own iteration, so it is not
-          inside this node. An exit inside a lambda leaves no task. *)
   | Todo
       (** [todo]: stops the program. A [todo] with no expected type has the type [Never]. The type
           checker does not resolve an operation on such a [todo], or on a local bound to one, so the
@@ -370,7 +363,7 @@ and statement_kind =
   | Concurrent of statement list
       (** A [concurrent] block. Each statement is a branch, which runs as a task with the
           capabilities that are available around the block. The block ends when every branch has
-          ended. A branch is named by the block's id and its index, from 0 (see {!Task_exit}). *)
+          ended. A branch is named by the block's id and its index, from 0 (see {!task}). *)
   | Proof of block
   | Assert of { condition : condition; by_bit_vector : bool }
       (** [by_bit_vector]: proven alone, for every value of the variables it names. *)
@@ -381,7 +374,8 @@ and statement_kind =
     but [Panic], or as tasks. *)
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
-(** A task that an early exit ends (see {!Task_exit}). The block or the loop is named by its
+(** A task of [concurrent] code, which an early exit may end before the others of its block or loop.
+    The MIR builder finds the tasks each exit ends. The block or the loop is named by its
     statement's origin, which no other statement of the definition has. *)
 and task =
   | Branch of { block : origin; index : int }

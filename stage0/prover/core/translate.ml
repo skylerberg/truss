@@ -122,17 +122,9 @@ type contract = {
   definition : (part * block) option;  (** A functional body, which is the callee's definition. *)
 }
 
-type loop_exits = { mutable breaks : frame list; mutable continues : frame list }
-
-(* An early exit from [concurrent] code, which takes effect only where the
-   tasks it leaves end: the tasks, innermost first, where it was, and its
-   action then. *)
-and leaving = { tasks : Core.task list; at : frame; exit : exit_ }
-and exit_ = Returning of Logic.term option | Breaking | Continuing
-
 (* Where a path is: the value of each local, the values on entry for
    [old], the path's condition, and the values of [self] and [result]. *)
-and frame = {
+type frame = {
   source : source;
   locals : Logic.term Locals.t;
   types : Types.ty Locals.t;  (** Each local's type, as it was bound. *)
@@ -146,7 +138,6 @@ and frame = {
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
       (** The quantifiers around this point, innermost first: each bound symbol, its sort, and the
           premise it ranges over. *)
-  loop : loop_exits option;
   substitution : Types.substitution;
       (** The type arguments of the callee whose clauses are read here, for its generic types. *)
   self_type : Types.ty option;  (** The type of [self], whose fields an invariant names. *)
@@ -156,7 +147,6 @@ and frame = {
   finished : Logic.term option;  (** The value of [finished] here. *)
   yielded_so_far : Logic.term option;
       (** In a lending or yielding method's own body, the parts it has yielded so far. *)
-  updating : Logic.term option;  (** The update target's value before the update. *)
   spent : (Costs.counter * Logic.term) list;
       (** Each counter's cost so far in the definition being proven. *)
 }
@@ -275,7 +265,6 @@ type context = {
   mutable values : (Logic.symbol * string) list;  (** For counterexamples. *)
   local_names : (Core.local, string) Hashtbl.t;  (** Each local's name, as its pattern binds it. *)
   mutable returns : (frame * Logic.term option) list;
-  mutable leaving : leaving list;  (** The early exits of the [concurrent] code being read. *)
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
       (** Each part a lending method lends [mut]: its type, as it was lent, and as it came back. *)
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
@@ -2044,14 +2033,10 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
           in
           (after, result))
         (block_value context frame body)
-  | Return returned ->
-      (match returned with
-      | Some returned -> (
-          match expression context frame returned with
-          | Some (after, term) -> context.returns <- (after, Some term) :: context.returns
-          | None -> ())
-      | None -> context.returns <- (frame, None) :: context.returns);
-      None
+  | Return _ | Break | Continue | Current_target ->
+      (* The type checker keeps these out of formulas, and code that runs is
+         read from the MIR. *)
+      bug "code that runs, in the core form the prover reads"
   | Unreachable ->
       oblige context frame Unreachable (at frame node) "This `unreachable` may be reached."
         (Logic.Boolean false);
@@ -2066,18 +2051,6 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
       Some
         ( { frame with condition = Logic.Boolean false },
           arrive context frame "todo" (type_of context frame node) )
-  | Break -> (
-      match frame.loop with
-      | Some exits ->
-          exits.breaks <- frame :: exits.breaks;
-          None
-      | None -> unsupported (at frame node) "`break` outside a loop")
-  | Continue -> (
-      match frame.loop with
-      | Some exits ->
-          exits.continues <- frame :: exits.continues;
-          None
-      | None -> unsupported (at frame node) "`continue` outside a loop")
   | Echo inner -> expression context frame inner
   | Result -> (
       match frame.result with
@@ -2087,10 +2060,6 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
       let entry = { frame with locals = frame.old_locals; self = frame.old_self } in
       let _, term = value context entry inner in
       Some (frame, term)
-  | Current_target -> (
-      match frame.updating with
-      | Some term -> Some (frame, term)
-      | None -> unsupported (at frame node) "an update's target outside an update")
   | Quantified { quantifier; binder; body } -> quantified context frame quantifier binder body
   | Yielded -> (
       (* The parts the innermost loop has received, or else, in a lending or
@@ -2112,63 +2081,6 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
-  | Task_exit { tasks; exit } -> (
-      (* The exit is where the block it leaves ends, after the other
-         branches, so here it is only recorded. *)
-      match tasks with
-      | [ Iteration { loop } ] -> (
-          (* The iterations after it are cancelled and run to their ends, so
-             this one ends here, and the loop ends when they all have: a
-             [break] is then where the loop ends, and a [return] is taken
-             there, with a value known by its type. *)
-          match frame.loop with
-          | Some exits ->
-              let ended =
-                match exit.kind with
-                | Return (Some returned) -> (
-                    match expression context frame returned with
-                    | Some (after, _) ->
-                        context.iteration_returns <-
-                          (loop, Some (type_of context frame returned)) :: context.iteration_returns;
-                        Some after
-                    | None -> None)
-                | Return None ->
-                    context.iteration_returns <- (loop, None) :: context.iteration_returns;
-                    Some frame
-                | Break | Continue -> Some frame
-                | _ ->
-                    unsupported (at frame node)
-                      "an early exit that is not a `return`, `break`, or `continue`"
-              in
-              (match ended with
-              | Some ended -> exits.continues <- ended :: exits.continues
-              | None -> ());
-              None
-          | None -> unsupported (at frame node) "an early exit outside its loop")
-      | Iteration _ :: _ ->
-          unsupported (at frame node)
-            "an early exit from an iteration of a `concurrent for` loop to tasks around it"
-      | _ -> (
-          let record at exit_ = context.leaving <- { tasks; at; exit = exit_ } :: context.leaving in
-          match exit.kind with
-          | Return (Some returned) -> (
-              match expression context frame returned with
-              | Some (after, term) ->
-                  record after (Returning (Some term));
-                  None
-              | None -> None)
-          | Return None ->
-              record frame (Returning None);
-              None
-          | Break ->
-              record frame Breaking;
-              None
-          | Continue ->
-              record frame Continuing;
-              None
-          | _ ->
-              unsupported (at frame node)
-                "an early exit that is not a `return`, `break`, or `continue`"))
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -3706,7 +3618,7 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
      proven under a fresh path condition: its assumptions about its
      arguments and callees hold on no other path. *)
   let called = fresh context frame "called" Logic.Bool in
-  let inside = { (restrict frame called) with result = None; loop = None; updating = None } in
+  let inside = { (restrict frame called) with result = None } in
   let start_fresh = context.fresh
   and start_facts = List.length context.facts
   and start_declarations = List.length context.declarations in
@@ -4024,7 +3936,17 @@ and lambda_definition context frame (function_type : Types.function_type) parame
             inside parameters
             (List.combine bound function_type.inputs))
     in
+    (* The parameters of the lambdas around this one whose definitions are
+       being read, which, unlike a quantifier's bound symbols, are no
+       binders. A lambda that captures one is a different function for each
+       argument of that lambda, which a symbol named by its body is not, so
+       it gives no definition, and that lambda then gives none either. *)
+    let quantified = List.map (fun (name, _, _) -> name) frame.binders in
+    let enclosing_parameters =
+      List.filter (fun name -> not (List.mem name quantified)) frame.bound
+    in
     match defined with
+    | Some defined when Logic.mentions enclosing_parameters defined -> None
     | Some defined ->
         let defined = canonical_binders defined in
         (* The same body is the same function wherever it is written, so its
@@ -4091,13 +4013,7 @@ and body_over context frame bound body bind =
       try
         let inside =
           bind
-            {
-              frame with
-              bound = List.map fst bound @ frame.bound;
-              checking = false;
-              result = None;
-              loop = None;
-            }
+            { frame with bound = List.map fst bound @ frame.bound; checking = false; result = None }
         in
         match block_value context inside body with
         | Some (_, defined) when not (mentions_fresh_after context mark defined) -> Some defined
@@ -4146,8 +4062,6 @@ and part_frame frame (part : part) ~arguments ~substitution =
     self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
     result = None;
     checking = false;
-    loop = None;
-    updating = None;
     substitution;
   }
 
@@ -4358,8 +4272,6 @@ and law_frame frame source ~substitution (law : law) terms =
     old_self = None;
     result = None;
     checking = false;
-    loop = None;
-    updating = None;
     substitution;
     self_type = None;
   }
@@ -5177,8 +5089,6 @@ and type_frame context frame source (ty : Types.ty) ~self =
     self_type = Some ty;
     result = None;
     checking = false;
-    loop = None;
-    updating = None;
     substitution;
   }
 
@@ -5461,7 +5371,6 @@ and constant_value context frame path =
           types = Locals.empty;
           checking = false;
           self = None;
-          updating = None;
           condition = Logic.Boolean true;
           bound = [];
           binders = [];
@@ -5622,51 +5531,6 @@ and fields_match context frame span type_ variant term (fields : (string * patte
       | None -> unsupported span "the field `%s`" name)
     (Logic.Boolean true, frame) fields
 
-(* Each binding a pattern lends [mut] from the value it matches, with how
-   the value is rebuilt from the binding's final value when the lend ends:
-   through the variants and fields that lead to it, each other field kept. *)
-and lent_bindings context frame (pattern : pattern) ty :
-    (Core.local * (Logic.term -> Logic.term -> Logic.term)) list =
-  match pattern.kind with
-  | Bind { local; mode = Types.Mut; _ } -> [ (local, fun _ part -> part) ]
-  | Variant { variant; fields } -> fields_lent context frame ty (Some variant) fields
-  | Record fields -> fields_lent context frame ty None fields
-  | Alternatives alternatives ->
-      if
-        List.exists
-          (fun alternative -> lent_bindings context frame alternative ty <> [])
-          alternatives
-      then
-        unsupported
-          (span_of frame.source pattern.origin)
-          "a `mut` binding in one of several alternatives";
-      []
-  | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> []
-
-and fields_lent context frame ty variant (fields : (string * pattern) list) =
-  match constructors context ty with
-  | Some shape ->
-      let shaped = match List.assoc_opt variant shape with Some fields -> fields | None -> [] in
-      List.concat_map
-        (fun (name, subpattern) ->
-          match List.assoc_opt name shaped with
-          | Some field_type ->
-              List.map
-                (fun (local, rebuild) ->
-                  ( local,
-                    fun whole part ->
-                      Logic.Apply
-                        ( constructor_name ty variant,
-                          List.map
-                            (fun (other, _) ->
-                              let current = selected context ty variant other whole in
-                              if other = name then rebuild current part else current)
-                            shaped ) ))
-                (lent_bindings context frame subpattern field_type)
-          | None -> [])
-        fields
-  | None -> []
-
 and match_ context frame (node : expression) scrutinees (arms : arm list) =
   let frame, scrutinee_values =
     List.fold_left
@@ -5723,55 +5587,9 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
               | None -> (entered, [])
             in
             untaken := join_frames context (restrict current (Logic.not_ condition) :: passed_over);
-            (* The final value of each binding an arm lends [mut] goes back into
-               the scrutinee where the arm ends, however it ends. *)
-            let lent =
-              List.concat
-                (List.map2
-                   (fun pattern (scrutinee, (_, ty)) ->
-                     match scrutinee with
-                     | Place place ->
-                         List.map
-                           (fun binding -> (place, ty, binding))
-                           (lent_bindings context frame pattern ty)
-                     | Value _ -> [])
-                   arm_.patterns
-                   (List.combine scrutinees scrutinee_values))
-            in
-            let write_back (at : frame) =
-              List.fold_left
-                (fun (at : frame) (place, _, (local, rebuild)) ->
-                  match Locals.find_opt local at.locals with
-                  | Some part ->
-                      let _, whole = place_value context { at with checking = false } place in
-                      store context at place (rebuild whole part)
-                  | None -> at)
-                at lent
-            in
-            if lent = [] then block_value context entered arm_.body
-            else begin
-              let returns = List.length context.returns in
-              let exits =
-                Option.map
-                  (fun (exits : loop_exits) ->
-                    (List.length exits.breaks, List.length exits.continues))
-                  frame.loop
-              in
-              let ended = block_value context entered arm_.body in
-              (* Exits are added at the front, so the arm's are the first. *)
-              let rewrite count list exit_frame =
-                let added = List.length list - count in
-                List.mapi (fun index item -> if index < added then exit_frame item else item) list
-              in
-              context.returns <-
-                rewrite returns context.returns (fun (at, value) -> (write_back at, value));
-              (match (frame.loop, exits) with
-              | Some exits_, Some (breaks, continues) ->
-                  exits_.breaks <- rewrite breaks exits_.breaks write_back;
-                  exits_.continues <- rewrite continues exits_.continues write_back
-              | _ -> ());
-              Option.map (fun (at, term) -> (write_back at, term)) ended
-            end)
+            (* A formula changes nothing, so a binding an arm lends [mut] ends
+               with the value it began with, and the scrutinee keeps its own. *)
+            block_value context entered arm_.body)
       arms
   in
   if carries_value then
@@ -6060,7 +5878,6 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                       locals = Locals.empty;
                       types = Locals.empty;
                       checking = false;
-                      updating = None;
                       substitution = substitution_of part;
                     }
                   in
@@ -6098,8 +5915,6 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       self_type = self_type_of part self;
       result = None;
       checking = false;
-      loop = None;
-      updating = None;
       substitution = substitution_of part;
     }
   in
@@ -6454,8 +6269,6 @@ and contract_call context frame (node : expression) (call_ : call) path contract
               self_type = self_type_of part entry_self;
               result = Some result;
               checking = false;
-              loop = None;
-              updating = None;
               substitution = substitution_of part;
             }
           in
@@ -8160,25 +7973,19 @@ and statement context frame (node : statement) : frame option =
   else statement_kind context frame node
 
 (* A proof is ghost code, which a build leaves out: its facts are known
-   after it, but the program continues from where it was, with nothing the
-   proof changed, whichever way the proof ends, or if it never ends. A
-   [todo] in it stands for the proof still to write, so the code after it is
-   not proven on the paths that reach one, which this returns. *)
+   after it, and, being a formula, it changes nothing. A [todo] in it stands
+   for the proof still to write, so the code after it is not proven on the
+   paths that reach one, which this returns. *)
 and ghost context frame body =
-  let proving = context.proving
-  and returns = context.returns
-  and leaving = context.leaving
-  and unfinished = context.unfinished in
+  let proving = context.proving and unfinished = context.unfinished in
   context.proving <- true;
   context.unfinished <- [];
   Fun.protect
     ~finally:(fun () ->
       context.proving <- proving;
-      context.returns <- returns;
-      context.leaving <- leaving;
       context.unfinished <- unfinished)
     (fun () ->
-      ignore (block_value context { frame with loop = None } body);
+      ignore (block_value context frame body);
       Logic.disjunction context.unfinished)
 
 and statement_kind context frame (node : statement) : frame option =
@@ -8205,22 +8012,6 @@ and statement_kind context frame (node : statement) : frame option =
             (Logic.Boolean false);
           Some (restrict bound matched)
       | None -> Some (restrict bound matched))
-  | Assign { target; value = assigned } ->
-      let frame, new_value = value context frame assigned in
-      with_target_keys context frame target (fun frame ->
-          Some (store context frame target new_value))
-  | Compound_assign { target; operand; bound; value = updated } ->
-      let frame, right = operand_value context frame operand in
-      let frame = { frame with locals = Locals.add bound right frame.locals } in
-      with_target_keys context frame target (fun frame ->
-          let frame, current = place_value context frame target in
-          let after, new_value = value context { frame with updating = Some current } updated in
-          Some (store context { after with updating = frame.updating } target new_value))
-  | While { condition; clauses; body; _ } -> while_ context frame node condition clauses body
-  | For { pattern; iteration; clauses; body; _ } ->
-      (* A loop's iterations change disjoint places, so however they run, as
-         tasks or at once, they can be read one after another. *)
-      for_ context frame node pattern iteration clauses body
   | Assert { condition = { value = asserted; _ }; by_bit_vector } ->
       if by_bit_vector && not (is_test context) then bit_vector_assertion context frame asserted;
       let frame, term = value context frame asserted in
@@ -8231,14 +8022,10 @@ and statement_kind context frame (node : statement) : frame option =
           term;
       Some frame
   | Proof block_ -> Some (restrict frame (Logic.not_ (ghost context frame block_)))
-  | Parallel branches ->
-      (* Branches are disjoint, so they can run in order. *)
-      List.fold_left
-        (fun frame branch ->
-          match frame with Some frame -> statement context frame branch | None -> None)
-        (Some frame) branches
-  | Concurrent branches -> concurrent context frame node branches
-  | Yield { mode; part } -> yield_part context frame node mode part
+  | Assign _ | Compound_assign _ | While _ | For _ | Parallel _ | Concurrent _ | Yield _ ->
+      (* The type checker keeps these out of formulas, and code that runs is
+         read from the MIR. *)
+      bug "code that runs, in the core form the prover reads"
 
 (* An [assert ... by bit_vector], proven in a query of its own: for every
    value of the integers and booleans it names, with its bitwise
@@ -8287,95 +8074,18 @@ and bit_vector_assertion context frame (asserted : expression) =
   Hashtbl.reset context.stated;
   Hashtbl.iter (Hashtbl.replace context.stated) saved_stated
 
-(* A [concurrent] block. Its branches change disjoint places, and a
-   capability call gives a fresh value whoever calls in between, so they
-   are read one after another, as [parallel]'s are. An early exit from a
-   branch takes effect where the block ends, after the other branches,
-   which are cancelled and run to their own ends: each later branch runs
-   from where the exit was as well as from where the branches before it
-   ended, and each exit is then taken with its path's changes, or, if
-   it leaves tasks around this block too, left to them. *)
-and concurrent context frame (node : statement) branches =
-  let outer = context.leaving in
-  let from_here (left : leaving) =
-    match left.tasks with Branch { block; _ } :: _ -> block = node.origin | _ -> false
-  in
-  let run start branch =
-    context.leaving <- [];
-    let ended = statement context start branch in
-    let left = context.leaving in
-    (ended, left)
-  in
-  let normal, pending =
-    List.fold_left
-      (fun (normal, pending) branch ->
-        let normal, left =
-          match normal with Some start -> run start branch | None -> (None, [])
-        in
-        let pending =
-          List.concat_map
-            (fun (waiting : leaving) ->
-              match run waiting.at branch with
-              | Some ended, _ -> [ { waiting with at = ended } ]
-              | None, stopped ->
-                  (* The branch exited too, so either exit may be the one
-                     taken, with the branch's effects before it exited. *)
-                  List.map (fun (stop : leaving) -> { waiting with at = stop.at }) stopped @ stopped)
-            pending
-        in
-        (normal, pending @ left))
-      (Some frame, []) branches
-  in
-  let passed_on =
-    List.filter_map
-      (fun (left : leaving) ->
-        if not (from_here left) then Some left
-        else
-          match List.tl left.tasks with
-          | _ :: _ as outer_tasks -> Some { left with tasks = outer_tasks }
-          | [] -> (
-              match left.exit with
-              | Returning value ->
-                  context.returns <- (left.at, value) :: context.returns;
-                  None
-              | Breaking -> (
-                  match left.at.loop with
-                  | Some exits ->
-                      exits.breaks <- left.at :: exits.breaks;
-                      None
-                  | None -> unsupported (span_of frame.source node.origin) "`break` outside a loop")
-              | Continuing -> (
-                  match left.at.loop with
-                  | Some exits ->
-                      exits.continues <- left.at :: exits.continues;
-                      None
-                  | None ->
-                      unsupported (span_of frame.source node.origin) "`continue` outside a loop")))
-      pending
-  in
-  context.leaving <- outer @ passed_on;
-  normal
-
 (* A [yield] in a lending or yielding method's own body: the part meets
    the clauses about each part; a [mut] part comes back as the caller left
    it, which is any value of its type; and a yielding method may end here,
    if a loop stops it, so its other clauses and [self]'s invariant hold. *)
 (* [given], where the MIR gives the part: its value, whether it lends places,
    and how the caller's changes to it are written back to them. *)
-and yield_part ?given context frame (node : statement) (mode : Types.mode) (part : operand) =
+(* A [yield] of the part [handed], which the MIR reads: [lends] is whether
+   it lends places, and [write_back] writes the caller's changes to them. *)
+and yield_part context frame (node : statement) (mode : Types.mode) ~handed ~lends ~write_back =
   let span = span_of frame.source node.origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
   | Some (part_type, kind), Some (each, at_end), Some before ->
-      let frame, handed, lends, write_back =
-        match given with
-        | Some (handed, lends, write_back) -> (frame, handed, lends, write_back)
-        | None ->
-            let frame, handed = operand_value context frame part in
-            ( frame,
-              handed,
-              Core_walk.lent_places part <> [],
-              fun frame after -> written_back context frame part part_type after )
-      in
       let show clauses ~at ~result ~yielded ~finished ~when_ =
         List.iter
           (fun (clause : expression) ->
@@ -8413,37 +8123,6 @@ and yield_part ?given context frame (node : statement) (mode : Types.mode) (part
       end;
       Some frame
   | _ -> unsupported span "`yield` outside a lending or yielding method's body"
-
-(* The frame after a [mut] lend of [part] ends with the value [after]: a
-   lent place has its part of [after], and a field built from a value is
-   discarded. A variant's field is its part only where [after] is still
-   that variant, and is otherwise a value nothing more is known about. *)
-and written_back context frame (part : operand) ty after =
-  match part with
-  | Place place -> store context frame place after
-  | Value { kind = Construct { variant; fields }; _ } -> (
-      match constructors context ty with
-      | Some shape ->
-          let shaped = Option.value (List.assoc_opt variant shape) ~default:[] in
-          List.fold_left
-            (fun frame (name, field) ->
-              match (field, List.assoc_opt name shaped) with
-              | Some field, Some field_type when Core_walk.lent_places field <> [] ->
-                  let selected = field_of context frame ty variant name field_type after in
-                  let value =
-                    match variant with
-                    | None -> selected
-                    | Some _ ->
-                        Logic.ite
-                          (Logic.Is (constructor_name ty variant, after))
-                          selected
-                          (arrive context frame "lent" field_type)
-                  in
-                  written_back context frame field field_type value
-              | _ -> frame)
-            frame fields
-      | None -> raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty))))
-  | Value _ -> frame
 
 (* A storage whose element at [index] is [part], and which is otherwise the
    one it was. *)
@@ -8639,39 +8318,6 @@ and store context frame (place : place) new_value =
       store_lent context frame place (fun _ -> new_value)
   | Lent _ | Temporary _ -> raise (Foreign_unsupported "assigning to this place")
 
-(* Evaluates the index keys of an assignment's target, in order, and runs
-   [f] with each key's term recorded, so that reading or storing the target
-   in [f] evaluates no key again. A key evaluated twice would run its
-   effects twice. *)
-and with_target_keys context frame target work =
-  let rec keys frame (place : place) =
-    match place with
-    | Local _ | Constant _ | Temporary _ -> (frame, [])
-    | Field { base; _ } -> keys frame base
-    | Lent { kind = Call { arguments = receiver :: indexes; _ }; _ } ->
-        let frame, outer =
-          match receiver with
-          | Passed { value = Place base; _ } -> keys frame base
-          | _ -> (frame, [])
-        in
-        List.fold_left
-          (fun (frame, evaluated) (index : argument) ->
-            match index with
-            | Passed { value = Value key; _ } ->
-                let frame, term = value context frame key in
-                (frame, (key.id, term) :: evaluated)
-            | Passed { value = Place key; _ } ->
-                let frame, inner = keys frame key in
-                (frame, inner @ evaluated)
-            | Default -> (frame, evaluated))
-          (frame, outer) indexes
-    | Lent _ -> (frame, [])
-  in
-  let frame, evaluated = keys frame target in
-  let outer = context.evaluated_keys in
-  context.evaluated_keys <- evaluated @ outer;
-  Fun.protect ~finally:(fun () -> context.evaluated_keys <- outer) (fun () -> work frame)
-
 (* Whether a place is a part, through fields, of a call's [mut] lent
    result. *)
 and lent_root (place : place) =
@@ -8710,20 +8356,13 @@ and store_lent context frame (place : place) leave =
                (Printf.sprintf "assigning to a field of `%s`" (Types.show base_type))))
   | _ -> store context frame place (leave (snd (place_value context frame place)))
 
+(* The values a [for] loop's body may change: its core form's, as the MIR
+   holds them. *)
+and loop_changed (driven : driven) frame body = driven.places (changed_places frame body)
+
 (* The values a loop's body may change, which are havocked at its head: the local
    or [self] that each place it assigns to, lends to change, or pulls is
    part of. *)
-(* A [for] loop's head after its changes are havocked, with each binding of a
-   part to change holding the part's value where the MIR reads the loop. *)
-and loop_bindings ?driven head =
-  match driven with Some (driven : driven) -> driven.bindings head | None -> head
-
-(* The values a [for] loop's body may change: its core form's, as the MIR
-   holds them where the MIR reads the loop. *)
-and loop_changed ?driven frame body =
-  let changed = changed_places frame body in
-  match driven with Some (driven : driven) -> driven.places changed | None -> changed
-
 and changed_places ?(condition : expression option) frame (body : block) : changed =
   let locals = ref [] and self = ref false in
   let note (place : place) =
@@ -8872,123 +8511,6 @@ and assume_invariants context frame clauses =
 and measures_of clauses =
   List.find_map (function Decreases measures -> Some measures | _ -> None) clauses
 
-and while_ context frame (node : statement) condition clauses body =
-  let span = span_of frame.source node.origin in
-  check_invariants context frame clauses ~when_:"on entry to the loop";
-  (* The condition runs at the head of each iteration, so its changes and
-     its cost are the iteration's. *)
-  let { loop_costs = costs; fresh_mark = mark; facts_mark; preserved; havocked = head } =
-    enter_loop context frame ~entry:frame clauses
-      ~changed:(changed_places ~condition frame body)
-      body
-  in
-  let iterations = iterations_so_far context head costs in
-  let head = loop_head context head costs ~iterations in
-  assume_invariants context head clauses;
-  let top = head in
-  let head, test = value context head condition in
-  let exits = { breaks = []; continues = [] } in
-  let inside = { (restrict head test) with loop = Some exits } in
-  let inside = spend context inside one_step in
-  let measures =
-    match (measures_of clauses, condition.kind) with
-    | Some measures, _ -> `Written measures
-    | ( None,
-        Compare
-          { comparison = (Less | Less_equal | Greater | Greater_equal) as compared; left; right } )
-    (* A guessed measure is read again at the end of each iteration, so its
-       operands must be functional: evaluating one again must not repeat
-       its changes. *)
-      when is_functional_expression left && is_functional_expression right ->
-        `Guessed (left, right, compared)
-    | None, _ -> `None
-  in
-  let measure_terms (at : frame) =
-    match measures with
-    | `Written measures ->
-        Some
-          (List.map
-             (fun measure -> snd (value context { at with checking = false } measure))
-             measures)
-    | `Guessed (left, right, compared) -> (
-        let _, left_value = value context { at with checking = false } left in
-        let _, right_value = value context { at with checking = false } right in
-        match compared with
-        | Less -> Some [ Logic.Operation ("-", [ right_value; left_value ]) ]
-        | Less_equal ->
-            Some
-              [
-                Logic.Operation
-                  ("+", [ Logic.Operation ("-", [ right_value; left_value ]); Logic.int 1 ]);
-              ]
-        | Greater -> Some [ Logic.Operation ("-", [ left_value; right_value ]) ]
-        | _ ->
-            Some
-              [
-                Logic.Operation
-                  ("+", [ Logic.Operation ("-", [ left_value; right_value ]); Logic.int 1 ]);
-              ])
-    | `None -> None
-  in
-  let start_measures = if context.terminates then measure_terms inside else None in
-  if context.terminates && start_measures = None then
-    oblige context inside Termination span "This loop may not end: give it a `decreases` clause."
-      (Logic.Boolean false);
-  (* With one measure, which every iteration shows to start at or above
-     zero and to decrease, the loop runs at most one more time than the
-     measure on entry. A ghost [last] is the measure at the start of the
-     latest iteration. *)
-  let most =
-    match (start_measures, measure_terms frame, iterations) with
-    | Some [ at_head ], Some [ on_entry ], Some iterations ->
-        let last = fresh context head "last" Logic.Int in
-        assume context head
-          Logic.(
-            equal iterations (int 0)
-            ==> Operation ("<=", [ at_head; on_entry ])
-            &&& (Operation (">=", [ iterations; int 1 ])
-                ==> (Operation ("<=", [ int 0; last ])
-                    &&& Operation
-                          ( "<=",
-                            [
-                              Operation ("+", [ Operation ("-", [ iterations; int 1 ]); last ]);
-                              on_entry;
-                            ] )
-                    &&& Operation ("<", [ at_head; last ]))));
-        [ Costs.at_least_zero (Costs.plus on_entry (Logic.int 1)) ]
-    | _ -> []
-  in
-  let finished = block_value context inside body in
-  let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
-  loop_iterations context node top costs ~mark
-    ~facts:(facts_since context facts_mark @ [ inside.condition ])
-    ~ends ~breaks:exits.breaks;
-  List.iter
-    (fun (end_ : frame) ->
-      let end_ = { end_ with loop = frame.loop } in
-      check_invariants context end_ clauses ~when_:"after an iteration";
-      check_preserved_validity context end_ span preserved;
-      match (start_measures, measure_terms end_) with
-      | Some before, Some after ->
-          oblige context end_ Termination span "This loop's measure may not decrease."
-            (lexicographically_less before after)
-      | _ -> ())
-    ends;
-  let exit_ =
-    loop_exit context
-      { (restrict head (Logic.not_ test)) with loop = frame.loop }
-      costs ~iterations ~most
-  in
-  let left =
-    List.map
-      (fun (frame' : frame) ->
-        loop_exit context { frame' with loop = frame.loop } costs
-          ~iterations:(Option.map (fun count -> Costs.plus count (Logic.int 1)) iterations)
-          ~most)
-      exits.breaks
-  in
-  leave_loop context frame (exit_ :: left)
-
 (* The start of a loop, from the frame before it and [entry], the frame its
    invariants are checked in on entry. *)
 and enter_loop context frame ~entry clauses ~changed body =
@@ -9040,11 +8562,11 @@ and iterations_so_far context head costs =
 and one_step (counter : Costs.counter) =
   match counter.resource with Time -> Logic.int 1 | _ -> Costs.zero
 
-and for_ ?driven context frame (node : statement) (pattern : pattern) (iteration : iteration)
-    clauses body =
+and for_ ~(driven : driven) context frame (node : statement) (pattern : pattern)
+    (iteration : iteration) clauses body =
   let outer = context.iteration_returns in
   context.iteration_returns <- [];
-  let ended = loop_over ?driven context frame node pattern iteration clauses body in
+  let ended = loop_over ~driven context frame node pattern iteration clauses body in
   let returning, others =
     List.partition (fun (loop, _) -> loop = node.origin) context.iteration_returns
   in
@@ -9059,19 +8581,16 @@ and for_ ?driven context frame (node : statement) (pattern : pattern) (iteration
       Some (restrict ended (Logic.not_ returned))
   | _ -> ended
 
-and loop_over ?driven context frame (node : statement) (pattern : pattern) (iteration : iteration)
-    clauses body =
+and loop_over ~(driven : driven) context frame (node : statement) (pattern : pattern)
+    (iteration : iteration) clauses body =
   let span = span_of frame.source node.origin in
   match iteration with
-  | Integer_range { start; stop; inclusive } ->
+  | Integer_range { inclusive; _ } ->
       let element = substituted context frame pattern.type_ in
-      let frame, low, high =
-        match driven with
-        | Some { range = Some (low, high); _ } -> (frame, low, high)
-        | _ ->
-            let frame, low = value context frame start in
-            let frame, high = value context frame stop in
-            (frame, low, high)
+      let low, high =
+        match driven.range with
+        | Some range -> range
+        | None -> bug "a range loop whose bounds the MIR does not give"
       in
       let outer_yielded = frame.yielded in
       (* In the loop's clauses, the pattern names the next index: [low] plus
@@ -9082,9 +8601,9 @@ and loop_over ?driven context frame (node : statement) (pattern : pattern) (iter
       let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
       check_invariants context entry clauses ~when_:"on entry to the loop";
       let start =
-        enter_loop context frame ~entry clauses ~changed:(loop_changed ?driven frame body) body
+        enter_loop context frame ~entry clauses ~changed:(loop_changed driven frame body) body
       in
-      let costs = start.loop_costs and head = loop_bindings ?driven start.havocked in
+      let costs = start.loop_costs and head = driven.bindings start.havocked in
       (* The [n]th iteration, from 0, has the index [low + n]. *)
       let count =
         Costs.normalize
@@ -9121,22 +8640,15 @@ and loop_over ?driven context frame (node : statement) (pattern : pattern) (iter
       let through = appended context inside element before index in
       let inside = { inside with yielded = outer_yielded } in
       let inside = spend context inside one_step in
-      let run_body =
-        match driven with
-        | Some driven -> driven.run_body
-        | None -> core_loop_body context pattern element body
-      in
-      let ends, breaks = run_body inside index in
+      let ends, breaks = driven.run_body inside index in
       let with_through (exit_frame : frame) =
-        at_index
-          { exit_frame with loop = frame.loop; yielded = Some through }
-          (Costs.plus index (Logic.int 1))
+        at_index { exit_frame with yielded = Some through } (Costs.plus index (Logic.int 1))
       in
       end_iterations context frame node clauses start ~head ~inside ~ends ~breaks ~with_through;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
         loop_exit context
-          { (restrict head (Logic.Operation (">=", [ iterations; count ]))) with loop = frame.loop }
+          (restrict head (Logic.Operation (">=", [ iterations; count ])))
           costs ~iterations:(Some iterations) ~most
       in
       let left =
@@ -9152,38 +8664,25 @@ and loop_over ?driven context frame (node : statement) (pattern : pattern) (iter
            (fun (exit_frame : frame) -> { exit_frame with yielded = outer_yielded })
            (exit_ :: left))
   | Yielding_call ({ kind = Call call_; _ } as yielding) ->
-      each_loop ?driven context frame node pattern yielding call_ clauses body
+      each_loop ~driven context frame node pattern yielding call_ clauses body
   | Yielding_call _ -> unsupported span "this `for` loop"
   | Cursor { cursor; next = None } -> (
       match place_type context frame cursor with
       | Types.Cursor { method_; _ } as cursor_type ->
-          pulled_loop ?driven context frame node pattern cursor clauses body ~cursor_type ~method_
+          pulled_loop ~driven context frame node cursor clauses body ~cursor_type ~method_
       | _ -> unsupported span "this `for` loop")
   | Cursor { cursor; next = Some next } ->
-      own_cursor_loop ?driven context frame node pattern cursor next clauses body
+      own_cursor_loop ~driven context frame node pattern cursor next clauses body
         ~cursor_type:(place_type context frame cursor)
-
-(* A loop's body, read from its core form: the pattern binds the element,
-   and the body runs. *)
-and core_loop_body context (pattern : pattern) element_type body inside element =
-  let exits = { breaks = []; continues = [] } in
-  let _, inside =
-    pattern_match context { inside with loop = Some exits } pattern element element_type
-  in
-  let finished = block_value context inside body in
-  ((match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues, exits.breaks)
 
 (* A [for] loop over a yielding method: each element is a fresh value
    that meets the method's clauses for each part, and the loop ends when
    the method has a [time] clause. *)
-and each_loop ?driven context frame (node : statement) (pattern : pattern) (yielding : expression)
-    (call_ : call) clauses body =
+and each_loop ~(driven : driven) context frame (node : statement) (pattern : pattern)
+    (yielding : expression) (call_ : call) clauses body =
   let span = span_of frame.source node.origin in
   let frame, values =
-    call_arguments
-      ?given:(Option.bind driven (fun (driven : driven) -> driven.arguments))
-      context frame yielding call_
-      ~facts_for:(fun _ _ _ -> [])
+    call_arguments ?given:driven.arguments context frame yielding call_ ~facts_for:(fun _ _ _ -> [])
   in
   let arguments = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
   let path, terminates, contract, substitution =
@@ -9265,7 +8764,7 @@ and each_loop ?driven context frame (node : statement) (pattern : pattern) (yiel
   in
   (* A loop over a collection [mut] changes the collection too. *)
   let changed =
-    let in_body = loop_changed ?driven frame body in
+    let in_body = loop_changed driven frame body in
     List.fold_left
       (fun (changed : changed) (passed : passed) ->
         match (passed.mode, passed.operand) with
@@ -9281,7 +8780,7 @@ and each_loop ?driven context frame (node : statement) (pattern : pattern) (yiel
         | _ -> changed)
       in_body values
   in
-  receiving_loop ?driven context frame node pattern clauses body ~element_type ~changed
+  receiving_loop ~driven context frame node clauses body ~element_type ~changed
     ~start:(fun head -> some_parts context head element_type)
     ~receive:(fun head before ->
       (* Each time round, the method either yields another part or ends. *)
@@ -9313,10 +8812,10 @@ and with_cursor frame (node : statement) (changed : changed) (cursor : place) =
 (* A [for] loop over a cursor pulls it until it ends, putting the cursor
    that is left back where it was. Its [yielded] is everything the cursor
    has yielded, before the loop too. *)
-and pulled_loop ?driven context frame (node : statement) pattern (cursor_place : place) clauses body
-    ~cursor_type ~method_ =
+and pulled_loop ~(driven : driven) context frame (node : statement) (cursor_place : place) clauses
+    body ~cursor_type ~method_ =
   let span = span_of frame.source node.origin in
-  let cursor_access = cursor_access context driven cursor_place in
+  let cursor_access = cursor_access driven in
   let cursor = cursor_access.read frame in
   let cursor_method =
     match List.assoc_opt cursor context.cursors with
@@ -9327,9 +8826,9 @@ and pulled_loop ?driven context frame (node : statement) pattern (cursor_place :
     oblige context frame Termination span
       "This loop may not end: the method its cursor comes from has no `time` clause."
       (Logic.Boolean false);
-  let changed = with_cursor frame node (loop_changed ?driven frame body) cursor_place in
+  let changed = with_cursor frame node (loop_changed driven frame body) cursor_place in
   let at_head = ref cursor in
-  receiving_loop ?driven context frame node pattern clauses body ~element_type:cursor_method.element
+  receiving_loop ~driven context frame node clauses body ~element_type:cursor_method.element
     ~changed
     ~start:(fun head ->
       let cursor = cursor_access.read head in
@@ -9348,21 +8847,20 @@ and pulled_loop ?driven context frame (node : statement) pattern (cursor_place :
         advance = (fun (frame : frame) -> cursor_access.write frame later);
       })
 
-(* The place of a cursor a loop pulls: where the MIR gives it, or its core
-   place. *)
-and cursor_access context driven cursor_place =
-  match driven with
-  | Some { cursor = Some access; _ } -> access
-  | _ -> core_place context cursor_place
+(* The place of a cursor a loop pulls, where the MIR gives it. *)
+and cursor_access (driven : driven) =
+  match driven.cursor with
+  | Some access -> access
+  | None -> bug "a loop over a cursor whose place the MIR does not give"
 
 (* A [for] loop over a value of a type's own [Cursor]: each iteration
    calls its [next] by the [impl]'s contract, and the loop ends at [None].
    Such a cursor promises no end, so in a function that must end, the loop
    needs a [decreases] clause, which each iteration decreases. *)
-and own_cursor_loop ?driven context frame (node : statement) (pattern : pattern)
+and own_cursor_loop ~(driven : driven) context frame (node : statement) (pattern : pattern)
     (cursor_place : place) (next : callee) clauses body ~cursor_type =
   let span = span_of frame.source node.origin in
-  let cursor_access = cursor_access context driven cursor_place in
+  let cursor_access = cursor_access driven in
   ignore (cursor_access.read frame);
   let element_type = substituted context frame pattern.type_ in
   let trait, evidence =
@@ -9414,8 +8912,8 @@ and own_cursor_loop ?driven context frame (node : statement) (pattern : pattern)
       (List.map (fun measure -> snd (value context { at with checking = false } measure)))
       measures
   in
-  let changed = with_cursor frame node (loop_changed ?driven frame body) cursor_place in
-  receiving_loop ?driven context frame node pattern clauses body ~element_type ~changed
+  let changed = with_cursor frame node (loop_changed driven frame body) cursor_place in
+  receiving_loop ~driven context frame node clauses body ~element_type ~changed
     ~each_iteration:(fun ~head ~ends ->
       (* The pull is part of the iteration, so the measure is compared from
          the head, before it. *)
@@ -9473,12 +8971,12 @@ and own_cursor_loop ?driven context frame (node : statement) (pattern : pattern)
    it calls, or from a cursor it pulls. [start] is the parts received before
    an iteration, at the head, and [receive] is the part an iteration
    receives, with the method's [ensures] for it assumed. *)
-and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?driven context frame
-    (node : statement) (pattern : pattern) clauses body ~element_type ~changed ~start ~receive =
+and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ~(driven : driven) context frame
+    (node : statement) clauses body ~element_type ~changed ~start ~receive =
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
   let loop = enter_loop context frame ~entry clauses ~changed body in
-  let costs = loop.loop_costs and head = loop_bindings ?driven loop.havocked in
+  let costs = loop.loop_costs and head = driven.bindings loop.havocked in
   let before = start head in
   let iterations = sequence_length context element_type before in
   let head =
@@ -9490,23 +8988,16 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?driven context
   let through = received.through in
   let inside = received.advance (restrict head received.has_another) in
   let inside = { (spend context inside one_step) with yielded = frame.yielded } in
-  let run_body =
-    match driven with
-    | Some (driven : driven) -> driven.run_body
-    | None -> core_loop_body context pattern element_type body
-  in
-  let ends, breaks = run_body inside received.element in
+  let ends, breaks = driven.run_body inside received.element in
   each_iteration ~head ~ends;
-  let with_through (exit_frame : frame) =
-    { exit_frame with loop = frame.loop; yielded = Some through }
-  in
+  let with_through (exit_frame : frame) = { exit_frame with yielded = Some through } in
   end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks ~with_through;
   let ended = received.advance (restrict head (Logic.not_ received.has_another)) in
   let varies = mentions_fresh_after context loop.fresh_mark in
   let ended_facts = facts_since context ended_mark @ facts_since context loop.facts_mark in
   let exit_ =
     loop_exit context
-      { ended with loop = frame.loop; yielded = Some before }
+      { ended with yielded = Some before }
       costs ~iterations:(Some iterations)
       ~most:(Costs.upper_bounds ~varies ~facts:ended_facts iterations)
   in
@@ -10652,16 +10143,13 @@ let rec mir_run context start index ~(lambdas : Mir.body array) (body : Mir.body
             | _ -> bug "a loop of the MIR whose core loop is not known"))
     | Yield { mode; part; resume } -> (
         match Hashtbl.find_opt index.statements block.terminator_origin with
-        | Some ({ kind = Yield { part = written; _ }; _ } as node) -> (
+        | Some ({ kind = Yield _; _ } as node) -> (
             let handed = mir_operand context frame run part in
             let part_type = mir_operand_type context frame part in
             match
-              yield_part
-                ~given:
-                  ( handed,
-                    mir_lends_places run part,
-                    fun frame after -> mir_written_back context run part_type part frame after )
-                context frame node mode written
+              yield_part context frame node mode ~handed ~lends:(mir_lends_places run part)
+                ~write_back:(fun frame after ->
+                  mir_written_back context run part_type part frame after)
             with
             | Some after -> jump resume after
             | None -> ())
@@ -10946,7 +10434,6 @@ let new_context database ~home ~current ~terminates ~measures =
     values = [];
     local_names = Hashtbl.create 16;
     returns = [];
-    leaving = [];
     lent_back = [];
     instantiating = [];
     yielded_part = None;
@@ -11005,13 +10492,11 @@ let empty_frame source =
     checking = true;
     bound = [];
     binders = [];
-    loop = None;
     substitution = [];
     self_type = None;
     yielded = None;
     finished = None;
     yielded_so_far = None;
-    updating = None;
     spent = [];
   }
 
@@ -11226,8 +10711,6 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
               self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
               result;
               checking = false;
-              loop = None;
-              updating = None;
               substitution;
             } )
     | _ -> None

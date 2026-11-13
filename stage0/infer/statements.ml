@@ -84,7 +84,10 @@ and statement state env (written : statement) ~last : unit =
             annotated
         | None -> expression state env value
       in
-      if is_var then check_owned state env value type_;
+      if is_var then begin
+        reject_in_formula state env written.span "A `var`";
+        check_owned state env value type_
+      end;
       (match else_ with
       | Some block -> (
           let else_type = block_value state env block in
@@ -209,6 +212,7 @@ and statement state env (written : statement) ~last : unit =
                              (Types.show resolved));
                       true)))
   | For { mode = running; pattern = written_pattern; annotation; iterable; clauses; body } ->
+      reject_in_formula state env written.span "A `for` loop";
       let mode, inner =
         match iterable.kind with
         | Mode (Mut, inner) when Option.is_none (marked_call state inner) -> (Types.Mut, inner)
@@ -263,14 +267,9 @@ and statement state env (written : statement) ~last : unit =
                 | Parallel_loop -> Parallel_loop
                 | Concurrent_loop -> Concurrent_loop);
             });
-      (* Each iteration of a [concurrent for] is a task. *)
-      let loop : enclosing =
-        match running with
-        | Concurrent_loop -> Task (Iteration { loop = written.id })
-        | Sequential | Parallel_loop -> Loop
-      in
-      loop_body state { env with enclosing = loop :: env.enclosing } body
+      loop_body state env body
   | While { condition = test; clauses; body } ->
+      reject_in_formula state env written.span "A `while` loop";
       in_statement state env test.span (fun () -> check state env test Types.bool);
       List.iter (loop_clause state env) clauses;
       register_statement state written (fun () ->
@@ -283,21 +282,16 @@ and statement state env (written : statement) ~last : unit =
               body = build_block state body;
               binds_lent_part = Form.binds_lent_part state condition;
             });
-      loop_body state { env with enclosing = Loop :: env.enclosing } body
+      loop_body state env body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
+      reject_in_formula state env written.span
+        (if concurrent then "A `concurrent` block" else "A `parallel` block");
       register_statement state written (fun () ->
           let branches = List.map (build_statement state) body.statements in
           if concurrent then Concurrent branches else Parallel branches);
-      (* Each branch of a [concurrent] block is a task. No exit leaves a
-         branch of a [parallel] block, which the parser refuses. *)
-      List.iteri
-        (fun index (branch : statement) ->
-          let env =
-            if concurrent then
-              { env with enclosing = Task (Branch { block = written.id; index }) :: env.enclosing }
-            else env
-          in
+      List.iter
+        (fun (branch : statement) ->
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))
         body.statements
   | Proof body ->
@@ -311,6 +305,7 @@ and statement state env (written : statement) ~last : unit =
             { condition = { value; executable = Form.is_executable state value }; by_bit_vector });
       check state env value Types.bool
   | Yield value -> (
+      reject_in_formula state env written.span "`yield`";
       match env.output with
       | Some (Yields (_, element) | Lends (_, element)) ->
           let inner =

@@ -788,13 +788,6 @@ let () =
 let () =
   test "a lambda's result is in range only for arguments in range" (fun () ->
       not_proven Fixtures.Prover.lambdas_result_is_in_range_only_for_arguments_in "prover.ensures");
-  test "a proof block's assignments do not reach the program" (fun () ->
-      not_proven Fixtures.Prover.proof_blocks_assignments_do_not_reach_the_program "prover.ensures");
-  test "a proof block's return does not end the program's path" (fun () ->
-      not_proven Fixtures.Prover.proof_blocks_return_does_not_end_the_programs_path
-        "prover.division");
-  test "a proof block that never ends shows nothing" (fun () ->
-      not_proven Fixtures.Prover.proof_block_that_never_ends_shows_nothing "prover.ensures");
   test "an uncalled lambda's calls show nothing of the path" (fun () ->
       not_proven Fixtures.Prover.uncalled_lambdas_calls_show_nothing_of_the_path "prover.ensures");
   test "a lambda whose arguments cannot meet its requires shows nothing of the path" (fun () ->
@@ -803,10 +796,6 @@ let () =
       not_proven Fixtures.Prover.quantifier_over_an_empty_range_shows_nothing_of "prover.ensures");
   test "a lambda over a type no value has shows nothing of the path" (fun () ->
       not_proven Fixtures.Prover.lambda_over_a_type_no_value_has_shows_nothing_of "prover.ensures");
-  test "a law's proof that never ends shows nothing" (fun () ->
-      not_proven
-        (monoid ^ flag_impl "true" ^ "\nproof Monoid.left_identity for Flag {\n  while true {}\n}\n")
-        "prover.law");
   test "a todo in a law's proof is a hole that stands for the law" (fun () ->
       let text =
         monoid ^ flag_impl "true" ^ "\nproof Monoid.left_identity for Flag {\n  todo\n}\n"

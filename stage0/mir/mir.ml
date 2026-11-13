@@ -230,7 +230,13 @@ type scope = {
    alone. *)
 type condition_lends = For_statement | For_block | For_condition
 type target = Jump of block | Next_iteration
-type enclosing_loop = { break_ : block; continue_ : target; depth : int }
+
+type enclosing_loop = {
+  break_ : block;
+  continue_ : target;
+  depth : int;
+  tasks_around : int;  (** The number of tasks around the loop. *)
+}
 
 type builder = {
   infos : (local, local_info) Hashtbl.t;
@@ -634,100 +640,49 @@ let rec expression b (node : Core.expression) : operand option =
                            Provide_body provided.origin)
                   | _ -> ())
                 provided)
-      | Return None ->
-          return_ b None origin;
-          None
-      | Return (Some returned) ->
-          Option.iter (fun value -> return_ b (Some value) origin) (expression b returned);
-          None
+      | Return returned -> (
+          match tasks_left b `Return with
+          | [] ->
+              (match returned with
+              | None -> return_ b None origin
+              | Some returned ->
+                  Option.iter (fun value -> return_ b (Some value) origin) (expression b returned));
+              None
+          | tasks ->
+              let exit =
+                match returned with
+                | Some returned ->
+                    Option.map (fun value -> Exit_return (Some value)) (expression b returned)
+                | None -> Some (Exit_return None)
+              in
+              Option.iter (fun exit -> leave_tasks b tasks exit origin) exit;
+              None)
       | Break -> (
-          match b.loops with
-          | loop :: _ ->
+          match (b.loops, tasks_left b `Break) with
+          | loop :: _, [] ->
               leave_scopes b ~depth:loop.depth origin;
               goto b loop.break_ origin;
               None
-          | [] -> bug "a `break` outside a loop")
+          | loop :: _, tasks ->
+              leave_tasks b tasks (Exit_to loop.break_) origin;
+              None
+          | [], _ -> bug "a `break` outside a loop")
       | Continue -> (
-          match b.loops with
-          | loop :: _ ->
+          match (b.loops, tasks_left b `Continue) with
+          | loop :: _, [] ->
               leave_scopes b ~depth:loop.depth origin;
               (match loop.continue_ with
               | Jump block -> goto b block origin
               | Next_iteration -> terminate b Iteration_end origin);
               None
-          | [] -> bug "a `continue` outside a loop")
-      | Task_exit { tasks; exit } ->
-          let task_exit =
-            match exit.kind with
-            | Return returned -> (
-                match returned with
-                | Some returned ->
-                    Option.map (fun value -> Exit_return (Some value)) (expression b returned)
-                | None -> Some (Exit_return None))
-            | Break -> (
-                match b.loops with
-                | loop :: _ -> Some (Exit_to loop.break_)
-                | [] -> bug "a `break` outside a loop")
-            | Continue -> (
-                match b.loops with
-                | { continue_ = Jump block; _ } :: _ -> Some (Exit_to block)
-                | { continue_ = Next_iteration; _ } :: _ -> Some Exit_iteration
-                | [] -> bug "a `continue` outside a loop")
-            | _ -> bug "a task's exit that is not a `return`, `break`, or `continue`"
-          in
-          Option.iter
-            (fun exit ->
-              let exit =
-                match exit with
-                | Exit_return value -> Exit_return (Option.map (held_past_scopes b origin) value)
-                | Exit_to _ | Exit_iteration -> exit
-              in
-              (* The task ends the scopes inside it. The scopes outside it
-                 are the enclosing code's, which ends them once the task has
-                 ended. *)
-              let starts =
-                List.map
-                  (fun task ->
-                    match List.assoc_opt task b.tasks with
-                    | Some (start, _) -> start
-                    | None -> bug "an exit from a task that does not enclose it")
-                  tasks
-              in
-              let target_depth =
-                match (exit_depth b exit, List.rev starts) with
-                | Some depth, _ -> depth
-                | None, outermost :: _ -> outermost
-                | None, [] -> List.length b.scopes
-              in
-              let rec around = function
-                | inner :: (outer :: _ as rest) -> scopes_between b ~outer ~inner :: around rest
-                | [ inner ] -> [ scopes_between b ~outer:target_depth ~inner ]
-                | [] -> []
-              in
-              (match starts with
-              | innermost :: _ -> leave_scopes b ~depth:innermost origin
-              | [] -> leave_scopes b ~depth:target_depth origin);
-              Option.iter
-                (fun block ->
-                  Hashtbl.replace b.task_exits block (List.combine tasks (around starts)))
-                b.current;
-              terminate b
-                (Exit_tasks
-                   {
-                     tasks =
-                       List.map
-                         (fun task ->
-                           {
-                             task;
-                             ends = [];
-                             task_end = Option.bind (List.assoc_opt task b.tasks) snd;
-                           })
-                         tasks;
-                     exit;
-                   })
-                origin)
-            task_exit;
-          None
+          | loop :: _, tasks ->
+              leave_tasks b tasks
+                (match loop.continue_ with
+                | Jump block -> Exit_to block
+                | Next_iteration -> Exit_iteration)
+                origin;
+              None
+          | [], _ -> bug "a `continue` outside a loop")
       | Todo ->
           terminate b Todo origin;
           None
@@ -1557,9 +1512,73 @@ and statement b (node : Core.statement) =
           | None -> ()))
 
 and looping b ~break_ ~continue_ f =
-  b.loops <- { break_; continue_; depth = List.length b.scopes } :: b.loops;
+  b.loops <-
+    { break_; continue_; depth = List.length b.scopes; tasks_around = List.length b.tasks }
+    :: b.loops;
   f ();
   b.loops <- List.tl b.loops
+
+(* The tasks an early exit ends, innermost first. A [return] ends every
+   enclosing task. A [break] or [continue] ends the tasks inside its loop,
+   and a [break] of a [concurrent for] also ends the iteration, which a
+   [continue] of it only finishes. *)
+and tasks_left b exit =
+  match exit with
+  | `Return -> List.map fst b.tasks
+  | (`Break | `Continue) as exit -> (
+      match b.loops with
+      | loop :: _ ->
+          List.filteri (fun index _ -> index < List.length b.tasks - loop.tasks_around) b.tasks
+          |> List.filter_map (fun (task, _) ->
+              match (task, exit) with Core.Iteration _, `Continue -> None | _ -> Some task)
+      | [] -> bug "a loop exit outside a loop")
+
+(* An early exit from [tasks], which takes effect once they have ended. *)
+and leave_tasks b tasks exit origin =
+  let exit =
+    match exit with
+    | Exit_return value -> Exit_return (Option.map (held_past_scopes b origin) value)
+    | Exit_to _ | Exit_iteration -> exit
+  in
+  (* The task ends the scopes inside it. The scopes outside it
+       are the enclosing code's, which ends them once the task has
+       ended. *)
+  let starts =
+    List.map
+      (fun task ->
+        match List.assoc_opt task b.tasks with
+        | Some (start, _) -> start
+        | None -> bug "an exit from a task that does not enclose it")
+      tasks
+  in
+  let target_depth =
+    match (exit_depth b exit, List.rev starts) with
+    | Some depth, _ -> depth
+    | None, outermost :: _ -> outermost
+    | None, [] -> List.length b.scopes
+  in
+  let rec around = function
+    | inner :: (outer :: _ as rest) -> scopes_between b ~outer ~inner :: around rest
+    | [ inner ] -> [ scopes_between b ~outer:target_depth ~inner ]
+    | [] -> []
+  in
+  (match starts with
+  | innermost :: _ -> leave_scopes b ~depth:innermost origin
+  | [] -> leave_scopes b ~depth:target_depth origin);
+  Option.iter
+    (fun block -> Hashtbl.replace b.task_exits block (List.combine tasks (around starts)))
+    b.current;
+  terminate b
+    (Exit_tasks
+       {
+         tasks =
+           List.map
+             (fun task ->
+               { task; ends = []; task_end = Option.bind (List.assoc_opt task b.tasks) snd })
+             tasks;
+         exit;
+       })
+    origin
 
 (* A loop over an integer range: a counter from the start, tested at the
    header against the stop, and stepped at the end of each iteration. An
@@ -1944,10 +1963,19 @@ let show_terminator = function
       Printf.sprintf "yield %s %s %d" (show_mode mode) (show_operand part) resume
   | Return None -> "return"
   | Return (Some value) -> "return " ^ show_operand value
-  | Exit_tasks { exit = Exit_return value; _ } -> (
-      "exit tasks, return" ^ match value with Some value -> " " ^ show_operand value | None -> "")
-  | Exit_tasks { exit = Exit_iteration; _ } -> "exit tasks, next"
-  | Exit_tasks { exit = Exit_to block; _ } -> Printf.sprintf "exit tasks, goto %d" block
+  | Exit_tasks { tasks; exit } ->
+      let show_task ({ task; _ } : left_task) =
+        match task with
+        | Branch { block; index } -> Printf.sprintf "branch %d of #%d" index block
+        | Iteration { loop } -> Printf.sprintf "iteration of #%d" loop
+      in
+      Printf.sprintf "exit %s, %s"
+        (String.concat ", " (List.map show_task tasks))
+        (match exit with
+        | Exit_return (Some value) -> "return " ^ show_operand value
+        | Exit_return None -> "return"
+        | Exit_iteration -> "next"
+        | Exit_to block -> Printf.sprintf "goto %d" block)
   | Unreachable -> "unreachable"
   | Todo -> "todo"
 

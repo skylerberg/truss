@@ -305,17 +305,6 @@ let () =
      Cursor.skip for the cursor of standard::list::impl Iterable for List[Element].each by derived \
      standard::core::Cursor for standard::list::impl Iterable for List[Element].each(own \
      standard::list::impl Iterable for List[Element].each[Int64](place items), 1)) }";
-  expect_body "an early exit from concurrent code names the tasks that it ends"
-    Fixtures.Core.early_exit_from_concurrent_code_names_the_tasks
-    "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
-     items) { concurrent #1 { let own first = match app::main::fetch(place item) { Ok(value: own \
-     value) => { value } Err(error: own error) => { task_exit branch 0 of #1 { return \
-     Result[Int64, Int64].Err(error: error) } } }; if (item > 3) { task_exit branch 1 of #1 { \
-     break } } }; let _ = place first }; concurrent #2 for item in yielding_call \
-     standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
-     task_exit an iteration of #2 { break } }; if (item > 4) { continue }; if (item > 3) { \
-     task_exit an iteration of #2 { return Result[Int64, Int64].Err(error: item) } } }; \
-     Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
     Fixtures.Core.assignment_through_an_index_calls_assign_where_the
     "{ let var own ports = { let var own map = standard::map::Map.with_capacity[String, Int64](1); \

@@ -305,12 +305,6 @@ let () =
 (* Quantifiers in code that runs *)
 
 let () =
-  let grow = Fixtures.Ownership.grow in
-  test "the body of an executable quantifier cannot mutate the collection that it iterates over"
-    (fun () ->
-      one_diagnostic
-        (grow ^ Fixtures.Ownership.body_of_an_executable_quantifier_cannot_mutate_the)
-        "ownership.changed_while_viewed");
   test "an executable quantifier reads the collection that it iterates over" (fun () ->
       fine Fixtures.Ownership.executable_quantifier_reads_the_collection_that_it)
 
