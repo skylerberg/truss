@@ -1,5 +1,7 @@
+use standard::collections
 use standard::intrinsic
 use standard::log
+use standard::tasks
 
 public type CorsPolicy(
   origins: List[String] = ["*"],
@@ -193,4 +195,107 @@ public fn Request.with_body_limit(own self, bytes: USize) -> Request {
     limited.body.limit = bytes
   }
   limited
+}
+
+public type RateLimit(requests: UInt64 = 60, per_seconds: Int64 = 60, burst: UInt64 = 0, keys: USize = 10000)
+  derives Equal
+
+type Rates(milli_capacity: Int64, requests: Int64, per_seconds: Int64)
+
+fn rates_of(policy: RateLimit) -> Rates
+  ensures result.requests >= 1 && result.requests <= 1000000000
+  ensures result.per_seconds >= 1 && result.per_seconds <= 31536000
+  ensures result.milli_capacity >= 1000 && result.milli_capacity <= 1000000000000
+{
+  let requests: Int64 = if policy.requests < 1 { 1 } else if policy.requests > 1000000000 { 1000000000 } else { intrinsic::convert(policy.requests) }
+  let per_seconds: Int64 = if policy.per_seconds < 1 { 1 } else if policy.per_seconds > 31536000 { 31536000 } else { policy.per_seconds }
+  let burst: Int64 = if policy.burst < 1 { requests } else if policy.burst > 1000000000 { 1000000000 } else { intrinsic::convert(policy.burst) }
+  Rates(milli_capacity: burst * 1000, requests: requests, per_seconds: per_seconds)
+}
+
+type Bucket(milli_tokens: Int64, updated_milliseconds: Int64)
+  derives Equal
+
+public type Decision =
+  | Allowed(remaining: UInt64)
+  | Limited(retry_after_seconds: Int64)
+  derives Equal
+
+public opaque type RateLimiter(policy: RateLimit, buckets: tasks::Cell[collections::LruCache[String, Bucket]])
+
+public fn RateLimiter.new(policy: RateLimit = RateLimit()) -> RateLimiter {
+  let keys = if policy.keys < 1 { 1 } else { policy.keys }
+  RateLimiter(policy: policy, buckets: tasks::Cell.new(collections::LruCache[String, Bucket].new(keys)))
+}
+
+public fn RateLimiter.copy(self) -> RateLimiter {
+  RateLimiter(policy: self.policy, buckets: self.buckets.copy())
+}
+
+fn refilled(bucket: Bucket, policy: RateLimit, now: Int64) -> Bucket {
+  let rates = rates_of(policy)
+  let elapsed = if now > bucket.updated_milliseconds { now.saturating_subtract(bucket.updated_milliseconds) } else { 0 }
+  let gained = elapsed.saturating_multiply(rates.requests) / rates.per_seconds
+  let tokens = bucket.milli_tokens.saturating_add(gained)
+  Bucket(milli_tokens: if tokens > rates.milli_capacity { rates.milli_capacity } else { tokens }, updated_milliseconds: now)
+}
+
+fn full(policy: RateLimit, now: Int64) -> Bucket {
+  Bucket(milli_tokens: rates_of(policy).milli_capacity, updated_milliseconds: now)
+}
+
+fn wait_seconds(milli_tokens: Int64, policy: RateLimit) -> Int64 {
+  let rates = rates_of(policy)
+  let missing = if milli_tokens >= 1000 { 0 } else if milli_tokens <= 0 { 1000 } else { 1000 - milli_tokens }
+  let wait_milliseconds = (missing * rates.per_seconds + rates.requests - 1) / rates.requests
+  (wait_milliseconds + 999) / 1000
+}
+
+public fn RateLimiter.take(self, key: StringSlice) -> Decision
+  uses Tasks, Clock
+{
+  let now = Clock.monotonic().total_milliseconds()
+  let policy = self.policy
+  let name = key.to_string()
+  self.buckets.update(fn(buckets) {
+    let current = match mut buckets.get(name.copy()) {
+      Some(bucket) => refilled(bucket, policy: policy, now: now)
+      None => full(policy, now: now)
+    }
+    if current.milli_tokens >= 1000 {
+      let left = current.milli_tokens - 1000
+      let _ = mut buckets.insert(name.copy(), value: Bucket(milli_tokens: left, updated_milliseconds: now))
+      let whole: UInt64 = intrinsic::convert(left / 1000)
+      Decision.Allowed(remaining: whole)
+    } else {
+      let _ = mut buckets.insert(name.copy(), value: current)
+      Decision.Limited(retry_after_seconds: wait_seconds(current.milli_tokens, policy: policy))
+    }
+  })
+}
+
+public fn peer_key(request: Request) -> String {
+  match request.peer {
+    Some(peer) => "${peer.address}"
+    None => ""
+  }
+}
+
+public fn rate_limit[capability Granted](
+  request: own Request,
+  responder: mut Responder,
+  limiter: RateLimiter,
+  key: fn(Request) -> String,
+  next: (fn(own Request, mut Responder) uses Granted),
+)
+  uses Tasks, Clock, Granted
+{
+  match limiter.take(key(request).slice()) {
+    Allowed(_) => next(own request, mut responder)
+    Limited(retry_after_seconds) => {
+      var response = Response.text(Status.too_many_requests.reason(), status: Status.too_many_requests)
+      mut response.headers.set("Retry-After", value: "${retry_after_seconds}".slice())
+      let _ = mut responder.send(own response)
+    }
+  }
 }
