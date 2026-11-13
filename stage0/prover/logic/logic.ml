@@ -6,6 +6,7 @@ module Symbol = struct
   type 'term t =
     | Variable of { label : string; numbers : int list }
     | Function of { callee : Path.t; instance : string list }
+    | Limited of { callee : Path.t; instance : string list }
     | Function_value of { callee : Path.t; instance : string list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
@@ -51,7 +52,7 @@ type term =
   | Apply of symbol * term list
   | Is of symbol * term
   | Operation of string * term list
-  | Forall of (symbol * sort) list * term
+  | Forall of (symbol * sort) list * term list * term
   | Exists of (symbol * sort) list * term
 
 and symbol = term Symbol.t
@@ -83,6 +84,7 @@ let variant_text = Option.value ~default:"record"
 let rec show_symbol : symbol -> string = function
   | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
   | Function { callee; instance } -> "function." ^ Path.show callee ^ instance_text instance
+  | Limited { callee; instance } -> "limited." ^ Path.show callee ^ instance_text instance
   | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
@@ -132,7 +134,7 @@ and show_term term =
     | Operation (name, arguments) -> applied name arguments
     | Is (constructor, argument) ->
         applied (Printf.sprintf "(_ is %s)" (show_symbol constructor)) [ argument ]
-    | Forall (bound, body) -> binder "forall" bound body
+    | Forall (bound, _, body) -> binder "forall" bound body
     | Exists (bound, body) -> binder "exists" bound body
   and applied head = function
     | [] -> head
@@ -223,7 +225,7 @@ let rec mentions symbols = function
   | Apply (name, arguments) -> List.mem name symbols || List.exists (mentions symbols) arguments
   | Operation (_, arguments) -> List.exists (mentions symbols) arguments
   | Is (_, argument) -> mentions symbols argument
-  | Forall (bound, body) | Exists (bound, body) ->
+  | Forall (bound, _, body) | Exists (bound, body) ->
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
 
@@ -232,7 +234,7 @@ let rec free_symbols = function
   | Integer _ | Boolean _ | Bits _ -> []
   | Apply (_, arguments) | Operation (_, arguments) -> List.concat_map free_symbols arguments
   | Is (_, argument) -> free_symbols argument
-  | Forall (bound, body) | Exists (bound, body) ->
+  | Forall (bound, _, body) | Exists (bound, body) ->
       List.filter (fun name -> not (List.mem_assoc name bound)) (free_symbols body)
 
 let rec quantified = function
@@ -251,10 +253,29 @@ let rec replace ~from ~into term =
     | Apply (name, arguments) -> Apply (name, List.map (replace ~from ~into) arguments)
     | Operation (name, arguments) -> Operation (name, List.map (replace ~from ~into) arguments)
     | Is (constructor, argument) -> Is (constructor, replace ~from ~into argument)
-    | Forall (bound, body) ->
-        if mentions (List.map fst bound) from then term else Forall (bound, replace ~from ~into body)
+    | Forall (bound, trigger, body) ->
+        if mentions (List.map fst bound) from then term
+        else Forall (bound, List.map (replace ~from ~into) trigger, replace ~from ~into body)
     | Exists (bound, body) ->
         if mentions (List.map fst bound) from then term else Exists (bound, replace ~from ~into body)
+
+(* Each symbol of [substitution] replaced by its term at once, so a term
+   put in for one symbol is not rewritten for another, except under a
+   quantifier that binds the symbol. *)
+let rec substitute substitution term =
+  match term with
+  | Symbol name -> ( match List.assoc_opt name substitution with Some into -> into | None -> term)
+  | Integer _ | Boolean _ | Bits _ -> term
+  | Apply (name, arguments) -> Apply (name, List.map (substitute substitution) arguments)
+  | Operation (name, arguments) -> Operation (name, List.map (substitute substitution) arguments)
+  | Is (constructor, argument) -> Is (constructor, substitute substitution argument)
+  | Forall (bound, trigger, body) ->
+      let inner = unbound bound substitution in
+      Forall (bound, List.map (substitute inner) trigger, substitute inner body)
+  | Exists (bound, body) -> Exists (bound, substitute (unbound bound substitution) body)
+
+and unbound bound substitution =
+  List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
 (* The terms that make the solver use a quantified statement, as Dafny
    chooses them: sets of applications of the query's own functions that
@@ -329,9 +350,13 @@ let triggers ~triggering variables body =
     | Operation ("=>", [ _; inner ]) -> conclusion inner
     | term -> term
   in
+  (* An equation between two applications that both name every bound
+     name, such as one sequence's elements equal to another's, defines
+     neither, and either triggers it. *)
+  let is_whole term = candidate term && bound_names_in term = names in
   match conclusion body with
-  | Operation ("=", [ (Apply _ as defined); _ ])
-    when candidate defined && bound_names_in defined = names ->
+  | Operation ("=", [ (Apply _ as defined); other ]) when is_whole defined && not (is_whole other)
+    ->
       [ [ defined ] ]
   | _ -> (
       let candidates = List.filter candidate applications in
@@ -344,6 +369,20 @@ let triggers ~triggering variables body =
                    is_proper_subterm inner term && bound_names_in inner = bound_names_in term)
                  candidates))
           candidates
+      in
+      (* A set of applications triggers with every other candidate of the
+         same functions, so an instance makes no new application of them:
+         transitivity triggered by two of its three comparisons would make
+         the third, which would match again with every other, without end
+         on a long enough chain of terms. *)
+      let with_same_functions trigger =
+        let function_of = function Apply (name, _) -> Some name | _ -> None in
+        let functions = List.map function_of trigger in
+        trigger
+        @ List.filter
+            (fun term -> (not (List.mem term trigger)) && List.mem (function_of term) functions)
+            candidates
+        |> List.sort compare
       in
       let covering_triggers candidates =
         match List.filter (fun term -> bound_names_in term = names) candidates with
@@ -359,14 +398,24 @@ let triggers ~triggering variables body =
                            (fun name ->
                              List.mem name (bound_names_in first @ bound_names_in second))
                            names
-                    then Some [ first; second ]
+                    then Some (with_same_functions [ first; second ])
                     else None)
                   candidates)
               candidates
+            |> List.sort_uniq compare
       in
       match covering_triggers (List.filter (fun term -> not (loops term)) candidates) with
       | [] -> covering_triggers candidates
       | triggers -> triggers)
+
+(* A quantified fact whose triggers {!triggers} chooses. *)
+let forall ?(trigger = []) (variables, body) =
+  match variables with [] -> body | _ -> Forall (variables, trigger, body)
+
+(* A quantified fact's triggers: the one it names, or else those
+   [triggers] chooses. *)
+let chosen_triggers ~triggering variables trigger body =
+  match trigger with [] -> triggers ~triggering variables body | terms -> [ terms ]
 
 (* The functions a trigger may apply: a declared function or a datatype's
    constructor or selector. *)
@@ -392,7 +441,7 @@ let untriggered query =
   let triggering = triggering_in query.declarations in
   let rec without = function
     | Operation ("=>", [ _; inner ]) -> without inner
-    | Forall (variables, body) -> triggers ~triggering variables body = []
+    | Forall (variables, trigger, body) -> chosen_triggers ~triggering variables trigger body = []
     | _ -> false
   in
   List.exists without query.facts
@@ -411,7 +460,7 @@ let declared_symbols declared term =
         List.iter (walk bound) arguments
     | Operation (_, arguments) -> List.iter (walk bound) arguments
     | Is (_, argument) -> walk bound argument
-    | Forall (variables, body) | Exists (variables, body) ->
+    | Forall (variables, _, body) | Exists (variables, body) ->
         walk (List.map fst variables @ bound) body
   in
   walk [] term;
@@ -434,8 +483,8 @@ let prune query =
   let rec needs fact symbols =
     match fact with
     | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
-    | Forall (variables, body) -> (
-        match triggers ~triggering variables body with
+    | Forall (variables, trigger, body) -> (
+        match chosen_triggers ~triggering variables trigger body with
         | [] -> fun () -> List.exists (Hashtbl.mem reached) symbols
         | triggers ->
             let triggers = List.map (List.concat_map (declared_symbols declared)) triggers in
@@ -443,6 +492,18 @@ let prune query =
               List.exists (fun trigger -> List.for_all (Hashtbl.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Hashtbl.mem reached) symbols
   in
+  (* A fact stated twice, such as a law that two bounds both give, is kept
+     once, since the solver would instantiate each copy. *)
+  let distinct =
+    let seen = Hashtbl.create 64 in
+    List.filter
+      (fun fact ->
+        let is_new = not (Hashtbl.mem seen fact) in
+        Hashtbl.replace seen fact ();
+        is_new)
+      query.facts
+  in
+  let query = { query with facts = distinct } in
   let facts =
     Array.of_list
       (List.map
@@ -555,8 +616,9 @@ let rec print numbering bound buffer term =
       application numbering bound buffer
         (Printf.sprintf "(_ is %s)" (function_name numbering constructor))
         [ argument ]
-  | Forall (variables, body) -> quantifier numbering bound buffer "forall" variables body
-  | Exists (variables, body) -> quantifier numbering bound buffer "exists" variables body
+  | Forall (variables, trigger, body) ->
+      quantifier numbering bound buffer "forall" variables trigger body
+  | Exists (variables, body) -> quantifier numbering bound buffer "exists" variables [] body
 
 and application numbering bound buffer head = function
   | [] -> Buffer.add_string buffer head
@@ -570,7 +632,7 @@ and application numbering bound buffer head = function
         arguments;
       Buffer.add_string buffer ")"
 
-and quantifier numbering bound buffer word variables body =
+and quantifier numbering bound buffer word variables trigger body =
   let add = Buffer.add_string buffer in
   let depth = List.length bound in
   let named =
@@ -588,7 +650,7 @@ and quantifier numbering bound buffer word variables body =
     named;
   add ") ";
   let bound = List.map (fun (name, canonical, _) -> (name, canonical)) named @ bound in
-  match triggers ~triggering:numbering.triggering variables body with
+  match chosen_triggers ~triggering:numbering.triggering variables trigger body with
   | [] ->
       print numbering bound buffer body;
       add ")"

@@ -1653,6 +1653,16 @@ impl Ordered for Decimal {
   }
 }
 
+theorem key_order_agrees_with_equal(first: DecimalKey, second: DecimalKey)
+  ensures (key_order(first, second: second) == Ordering.Equal) == (first == second)
+  cost time finite
+{
+}
+
+proof Ordered.agrees_with_equal for Decimal {
+  key_order_agrees_with_equal(first.key(), second: second.key())
+}
+
 theorem key_order_is_transitive(first: DecimalKey, second: DecimalKey, third: DecimalKey)
   requires key_order(first, second: second) != Ordering.Greater
   requires key_order(first: second, second: third) != Ordering.Greater

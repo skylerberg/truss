@@ -23,6 +23,10 @@ module Symbol : sig
             tell it from others with the same label. *)
     | Function of { callee : Path.t; instance : string list }
         (** A pure callee as a function in the logic, at the keys of its type arguments. *)
+    | Limited of { callee : Path.t; instance : string list }
+        (** A pure callee's copy of which no axiom is stated, for a call to it inside its own
+            definition or contract: equal to the callee wherever the callee is applied, so each use
+            unfolds the callee once. *)
     | Function_value of { callee : Path.t; instance : string list }
         (** A named function used as a value. *)
     | Constant of Path.t  (** A [const] definition's value. *)
@@ -83,7 +87,9 @@ type term =
   | Is of symbol * term  (** SMT-LIB's [(_ is C)]: whether constructor [C] built the value. *)
   | Operation of string * term list
       (** A built-in operation of SMT-LIB, such as ["+"] or ["ite"], by its SMT-LIB name. *)
-  | Forall of (symbol * sort) list * term
+  | Forall of (symbol * sort) list * term list * term
+      (** A quantified fact, with the terms that trigger it, or none for the triggers {!prune} and
+          {!text} choose. *)
   | Exists of (symbol * sort) list * term
 
 and symbol = term Symbol.t
@@ -137,6 +143,14 @@ val free_symbols : term -> symbol list
 
 val quantified : term -> bool
 (** Whether a term has a quantifier in it. *)
+
+val forall : ?trigger:term list -> (symbol * sort) list * term -> term
+(** A quantified fact, with the given trigger or else triggers chosen from its body. Over no
+    variables it is its body. *)
+
+val substitute : (symbol * term) list -> term -> term
+(** Each symbol of the substitution replaced by its term, all at once, except under a quantifier
+    that binds it. *)
 
 val replace : from:term -> into:term -> term -> term
 (** Each occurrence of [from] in a term replaced by [into], except under a quantifier that binds one

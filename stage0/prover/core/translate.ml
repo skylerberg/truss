@@ -227,6 +227,7 @@ type stated =
   | Value_of of Logic.symbol  (** A constant's value. *)
   | Definition_of of Logic.symbol  (** A pure function's definition, for every argument. *)
   | Contract_of of Logic.symbol  (** A pure function's [ensures], for every valid argument. *)
+  | Limited_link of Logic.symbol  (** That a function equals its limited copy where applied. *)
   | Exclusive of Logic.symbol  (** That at most one of a symbol's kind holds. *)
   | Array_length of Logic.symbol  (** The length of an array's model, by the model's function. *)
   | Ranked_model of Logic.symbol  (** That a model is below its value, by the model's function. *)
@@ -254,6 +255,17 @@ type context = {
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
       (** Each part a lending method lends [mut]: its type, as it was lent, and as it came back. *)
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
+  mutable axiomatizing : Logic.symbol list;
+      (** The pure functions whose definition or contract is being stated over their parameters: a
+          call to one of them inside is its limited copy. *)
+  axiom_clauses : (Logic.symbol * string * Core.origin, unit) Hashtbl.t;
+      (** Each [ensures] clause, by its function, its part's callee, and its origin, that the
+          function's contract axiom states, so a call states it no more. *)
+  defined_by_axiom : (Logic.symbol, bool) Hashtbl.t;
+      (** Whether each pure function's definition is stated as an axiom, once it is decided. *)
+  mutable open_axioms : open_axiom list;  (** The axioms being stated, innermost first. *)
+  axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
+      (** The axioms stated of each function, for what its calls state of their arguments. *)
   disjoint : (int * int) list;
       (** The ownership check's pairs of indexes, by the origin of each, that must differ. *)
   mutable indexes : (int * (place_value * span)) list;
@@ -331,6 +343,18 @@ type context = {
           through another's invariant is read once. *)
 }
 
+(* An axiom of a function being stated over its parameters, with what a
+   call of the function states of its arguments: the facts the axiom's
+   translation assumed of the parameters' types, which are its
+   hypotheses, and the facts that can be stated only of a value, not of
+   a bound symbol, such as a bit count's, which involve a power of two
+   only the value's exponent gives. *)
+and open_axiom = {
+  parameters : Logic.symbol list;
+  mutable hypotheses : Logic.term list;
+  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
+}
+
 (* The package a callee is read from, for [source_at]: the definition's. *)
 let reading_package context = Some (Path.package context.current)
 
@@ -348,6 +372,12 @@ let declare context (declaration : Logic.declaration) =
 (* A symbol for a value made at this point. Inside quantifiers it is a
    function of their bound symbols, since the value can differ for each of
    theirs. *)
+(* Adds a fact. The fact is an argument, made before the list is read,
+   since making it can add facts of its own: in
+   [context.facts <- fact :: context.facts] the list is read first, and
+   those facts are lost. *)
+let add_fact context fact = context.facts <- fact :: context.facts
+
 let value_symbol context frame name sort =
   match List.rev frame.binders with
   | [] ->
@@ -382,7 +412,7 @@ let mentions_fresh_after context mark term =
     | Logic.Apply (name, arguments) -> is_fresh_after name || List.exists walk arguments
     | Logic.Operation (_, arguments) -> List.exists walk arguments
     | Logic.Is (_, argument) -> walk argument
-    | Logic.Forall (_, body) | Logic.Exists (_, body) -> walk body
+    | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
   in
   walk term
 
@@ -397,7 +427,7 @@ let closed_over_binders frame term =
   else
     let outermost_first = List.rev frame.binders in
     Some
-      (Logic.Forall
+      (Logic.forall
          ( List.map (fun (name, sort, _) -> (name, sort)) outermost_first,
            Logic.( ==> )
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
@@ -442,11 +472,12 @@ let with_quantifier_facts ?(binders = []) context term =
           (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term)) )
     in
     match term with
-    | Logic.Forall (symbols, body) when positive ->
+    | Logic.Forall (symbols, trigger, body) when positive ->
         let bound, facts = facts symbols in
         let body = walk positive bound body in
         Logic.Forall
           ( symbols,
+            trigger,
             match facts with [] -> body | facts -> Logic.( ==> ) (Logic.conjunction facts) body )
     | Logic.Exists (symbols, body) when not positive ->
         let bound, facts = facts symbols in
@@ -469,7 +500,7 @@ let with_quantifier_facts ?(binders = []) context term =
    many such facts and the solver spends its steps on them, but kept with
    its quantifier. *)
 let fact context frame term =
-  if not (Logic.mentions frame.bound term) then context.facts <- term :: context.facts
+  if not (Logic.mentions frame.bound term) then add_fact context term
   else in_scope context frame term
 
 (* A fact is guarded by its path's condition, and kept with its
@@ -480,7 +511,7 @@ let assume context frame term =
   | _ ->
       let guarded = Logic.( ==> ) frame.condition term in
       if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
-        context.facts <- guarded :: context.facts
+        add_fact context guarded
       else in_scope context frame guarded
 
 (* An obligation is shown by its own query, and is a fact for the code
@@ -605,7 +636,7 @@ let exactly (query : Logic.query) =
            let named = List.filter (fun (symbol, _) -> Logic.mentions [ symbol ] term) bound in
            bitwise_terms := (term, named) :: !bitwise_terms);
         List.iter (walk bound) arguments
-    | Logic.Forall (symbols, body) | Logic.Exists (symbols, body) -> walk (symbols @ bound) body
+    | Logic.Forall (symbols, _, body) | Logic.Exists (symbols, body) -> walk (symbols @ bound) body
     | term -> List.iter (walk bound) (Logic.arguments term)
   in
   List.iter (walk []) (query.goal :: query.facts);
@@ -681,7 +712,7 @@ let exactly (query : Logic.query) =
      each of their values. *)
   let defined (term, named) =
     Option.map
-      (fun definition -> if named = [] then definition else Logic.Forall (named, definition))
+      (fun definition -> if named = [] then definition else Logic.forall (named, definition))
       (definition term)
   in
   { query with facts = query.facts @ List.filter_map defined (List.rev !bitwise_terms) }
@@ -781,7 +812,7 @@ and occurs part term =
   term = part
   ||
   match term with
-  | Logic.Forall (_, body) | Logic.Exists (_, body) -> occurs part body
+  | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> occurs part body
   | term -> List.exists (occurs part) (Logic.arguments term)
 
 (* Where a node came from in its form's text, by its origin. *)
@@ -1074,9 +1105,9 @@ let canonical_binders term =
     | ( Logic.Integer _ | Logic.Boolean _ | Logic.Bits _ | Logic.Apply _ | Logic.Operation _
       | Logic.Is _ ) as term ->
         Logic.map_arguments (walk renamed) term
-    | Logic.Forall (bound, body) ->
+    | Logic.Forall (bound, trigger, body) ->
         let bound, renamed = rename renamed bound in
-        Logic.Forall (bound, walk renamed body)
+        Logic.Forall (bound, List.map (walk renamed) trigger, walk renamed body)
     | Logic.Exists (bound, body) ->
         let bound, renamed = rename renamed bound in
         Logic.Exists (bound, walk renamed body)
@@ -1123,7 +1154,7 @@ let local_type context frame local =
 let mentions_potential term =
   let rec walk = function
     | Logic.Apply ((Symbol.Potential _ | Symbol.Slack _), _) -> true
-    | Logic.Forall (_, body) | Logic.Exists (_, body) -> walk body
+    | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
     | term -> List.exists walk (Logic.arguments term)
   in
   walk term
@@ -1142,11 +1173,14 @@ let join context ?value_type frames =
       let condition = Logic.disjunction (List.map (fun (frame, _) -> frame.condition) frames) in
       (* The joined condition is named, so that each later fact on the path
          names it rather than repeating every branch's condition, which
-         would grow with each join. *)
+         would grow with each join. A callee's clause or body, read where
+         nothing is checked, is an expression, whose few facts after a join
+         repeat it less than a name and its definition cost. *)
+      let is_expression = not first.checking in
       let condition =
         match condition with
         | Logic.Boolean _ | Logic.Symbol _ -> condition
-        | _ when Logic.mentions first.bound condition -> condition
+        | _ when is_expression || Logic.mentions first.bound condition -> condition
         | _ ->
             let path = fresh context first "path" Logic.Bool in
             fact context first (Logic.equal path condition);
@@ -1160,13 +1194,18 @@ let join context ?value_type frames =
             Some term
         | _ when List.exists (fun (_, term) -> term = None) values -> None
         | _
-          when List.exists
-                 (fun ((frame : frame), term) ->
-                   Logic.mentions first.bound frame.condition
-                   || match term with Some term -> Logic.mentions first.bound term | None -> false)
-                 values -> (
+          when is_expression
+               || List.exists
+                    (fun ((frame : frame), term) ->
+                      Logic.mentions first.bound frame.condition
+                      ||
+                      match term with
+                      | Some term -> Logic.mentions first.bound term
+                      | None -> false)
+                    values -> (
             (* Inside a quantifier, a fact about a fresh symbol could not
-               mention the bound variable, so the value is an [ite]. *)
+               mention the bound variable, and an expression's value needs
+               no name, so the value is an [ite]. *)
             match List.rev values with
             | (_, Some last) :: earlier ->
                 Some
@@ -2381,7 +2420,7 @@ and primitive_operation context frame ~node (operation : Intrinsic.operation) ty
                   ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
               in
               assume context frame
-                (Logic.Forall
+                (Logic.forall
                    ( [ (variable "exponent", Logic.Int) ],
                      Logic.(
                        Operation ("<=", [ int 0; exponent ])
@@ -2417,9 +2456,10 @@ and primitive_operation context frame ~node (operation : Intrinsic.operation) ty
   | Convert, [ source; target ], [ value ]
     when bounds source <> None && bounds target <> None && not (Types.is_builtin Character target)
     ->
-      let known = fallback () in
-      assume context frame Logic.(in_range target value ==> equal known value);
-      known
+      (* The value where it fits, and otherwise a function of it: a term,
+         not a fresh symbol, so that an axiom can state it. *)
+      Logic.ite (in_range target value) value
+        (opaque_operation context frame target "convert" [ value ])
   | (Leading_zeros | Trailing_zeros | Count_ones), ty :: _, [ value ] when bounds ty <> None -> (
       let low, _ = Option.get (bounds ty) in
       (* Each count of bits is a function of the value, at most the width,
@@ -2430,20 +2470,26 @@ and primitive_operation context frame ~node (operation : Intrinsic.operation) ty
          highest; zero has no ones and is all zeros. *)
       match width ty with
       | Some bits ->
-          let count name =
+          let count name value =
             let symbol = Symbol.Bit_count { count = name; width = bits } in
             declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
             Logic.Apply (symbol, [ value ])
           in
-          let leading = count "leading_zeros"
-          and trailing = count "trailing_zeros"
-          and ones = count "count_ones" in
           let term =
-            match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
+            count
+              (match operation with
+              | Leading_zeros -> "leading_zeros"
+              | Trailing_zeros -> "trailing_zeros"
+              | _ -> "count_ones")
+              value
           in
           assume context frame
             Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
-          (if Z.equal low Z.zero && not (Logic.mentions frame.bound value) then
+          (if Z.equal low Z.zero then
+             of_each_value context frame value @@ fun frame value ->
+             let leading = count "leading_zeros" value
+             and trailing = count "trailing_zeros" value
+             and ones = count "count_ones" value in
              let power exponent = power_of context frame (Logic.int 2) exponent in
              let width = Logic.int bits in
              let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
@@ -2705,7 +2751,7 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
     in
     let term =
       match quantifier with
-      | Forall -> Logic.Forall (bound, Logic.( ==> ) premise body_value)
+      | Forall -> Logic.forall (bound, Logic.( ==> ) premise body_value)
       | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
     if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
@@ -2823,7 +2869,7 @@ and substituted_value_term context (value : Types.value) =
       let symbol = Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
       once context (In_range symbol) (fun () ->
           declare context (Logic.Constant (symbol, Int));
-          context.facts <- in_range (Types.builtin USize) (Logic.Symbol symbol) :: context.facts);
+          add_fact context (in_range (Types.builtin USize) (Logic.Symbol symbol)));
       Logic.Symbol symbol
   | Value_variable _ -> raise (Foreign_unsupported "an unsolved size")
 
@@ -3409,9 +3455,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
               List.iteri
                 (fun later second ->
                   if later > index then
-                    context.facts <-
-                      Logic.(not_ (Symbol (symbol first) &&& Symbol (symbol second)))
-                      :: context.facts)
+                    add_fact context Logic.(not_ (Symbol (symbol first) &&& Symbol (symbol second))))
                 kind)
             kind);
       Logic.Symbol (symbol operation)
@@ -3441,7 +3485,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       (match sequence_at context byte model (Logic.Symbol (variable "entry.index")) with
       | Some at ->
           assume context frame
-            (Logic.Forall
+            (Logic.forall
                ( [ (variable "entry.index", Logic.Int) ],
                  Logic.(
                    Operation ("<=", [ int 0; Symbol (variable "entry.index") ])
@@ -3888,7 +3932,7 @@ and add_lambda_facts context frame ~capture_free function_type term ~called ~arg
       | Logic.Apply (name, arguments) when Hashtbl.mem functions name ->
           Logic.Apply (Hashtbl.find functions name, List.map over arguments @ variables)
       | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments over term
-      | Logic.Forall (bound, body) -> Logic.Forall (bound, over body)
+      | Logic.Forall (bound, trigger, body) -> Logic.Forall (bound, List.map over trigger, over body)
       | Logic.Exists (bound, body) -> Logic.Exists (bound, over body)
     in
     let premise = over (Logic.conjunction premises) in
@@ -3907,11 +3951,11 @@ and add_lambda_facts context frame ~capture_free function_type term ~called ~arg
        for each of them, closed over the quantifier. *)
     List.iter
       (fun statement ->
-        let stated = Logic.Forall (parameters, Logic.( ==> ) premise statement) in
-        if frame.bound = [] || capture_free then context.facts <- stated :: context.facts
+        let stated = Logic.forall (parameters, Logic.( ==> ) premise statement) in
+        if frame.bound = [] || capture_free then add_fact context stated
         else
           match closed_over_binders frame stated with
-          | Some closed -> context.facts <- closed :: context.facts
+          | Some closed -> add_fact context closed
           | None -> ())
       statements
   end
@@ -3974,7 +4018,7 @@ and lambda_definition context frame (function_type : Types.function_type) parame
           applied context function_type term (List.map (fun (name, _) -> Logic.Symbol name) bound)
         in
         Hashtbl.replace context.lambda_definitions symbol defined;
-        fact context frame (Logic.Forall (bound, Logic.equal application defined));
+        fact context frame (Logic.forall (bound, Logic.equal application defined));
         (* Its body's value is in the range of the body's type, which may be
            narrower than the function type's [Integer]. *)
         let rec unconverted (node : expression) =
@@ -3996,7 +4040,7 @@ and lambda_definition context frame (function_type : Types.function_type) parame
                          in_range (substituted context frame input) (Logic.Symbol name))
                        bound function_type.inputs)
                 in
-                fact context frame (Logic.Forall (bound, Logic.( ==> ) arguments_in_range range)))
+                fact context frame (Logic.forall (bound, Logic.( ==> ) arguments_in_range range)))
         | None -> ());
         Some term
     | _ -> None
@@ -4032,8 +4076,8 @@ and body_over context frame bound body bind =
    equal to it. *)
 and named_term context ty term =
   let rec holds_call = function
-    | Logic.Apply (Symbol.Function _, _) -> true
-    | Logic.Forall (_, body) | Logic.Exists (_, body) -> holds_call body
+    | Logic.Apply ((Symbol.Function _ | Symbol.Limited _), _) -> true
+    | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> holds_call body
     | term -> List.exists holds_call (Logic.arguments term)
   in
   if not (holds_call term) then term
@@ -4042,7 +4086,7 @@ and named_term context ty term =
     let named = Logic.Symbol symbol in
     once context (Value_of symbol) (fun () ->
         declare context (Logic.Constant (symbol, sort_of context ty));
-        context.facts <- Logic.equal named term :: context.facts);
+        add_fact context (Logic.equal named term));
     named
 
 (* A part's frame, for reading its clauses, with its parameters bound to
@@ -4321,7 +4365,7 @@ and law_fact context frame source ~substitution (law : law) =
       match without_costs context (fun () -> block_value context inside law.body) with
       | Some (_, holds) ->
           Some
-            (Logic.Forall
+            (Logic.forall
                ( List.map2 (fun symbol ty -> (symbol, sort_of context ty)) symbols types,
                  Logic.( ==> ) (Logic.( &&& ) range premise) holds ))
       | None -> None
@@ -4393,15 +4437,16 @@ and sequence_at context element term index =
             and index = Symbol.Variable { label = "ranked.index"; numbers = [] } in
             let ranked = Logic.Symbol each and position = Logic.Symbol index in
             let below = rank context element (at ranked position) in
-            context.facts <-
-              Logic.Forall
+            let fact =
+              Logic.forall
                 ( [ (each, sort_of context sequence); (index, Logic.Int) ],
                   Logic.(
                     Operation ("<=", [ int 0; position ])
                     &&& Operation ("<", [ position; sequence_length context element ranked ])
                     ==> (Operation ("<=", [ int 0; below ])
                         &&& Operation ("<", [ below; rank context sequence ranked ]))) )
-              :: context.facts);
+            in
+            add_fact context fact);
       Some (at term index)
   | [] -> None
 
@@ -4422,7 +4467,7 @@ and extensional context frame (ty : Types.ty) left right =
           fact context frame
             Logic.(
               equal (length left) (length right)
-              &&& Forall
+              &&& forall
                     ( [ (index, Int) ],
                       Operation ("<=", [ int 0; Symbol index ])
                       &&& Operation ("<", [ Symbol index; length left ])
@@ -4458,7 +4503,7 @@ and extensional context frame (ty : Types.ty) left right =
           in
           fact context frame
             Logic.(
-              Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same)
+              forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same)
               ==> equal left right)
       | _ -> ())
   | _ -> ()
@@ -4566,7 +4611,7 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
       with
       | Some inside, Some outside ->
           assume context frame
-            (Logic.Forall
+            (Logic.forall
                ( [ (position, Logic.Int) ],
                  Logic.(
                    Operation ("<=", [ int 0; Symbol position ])
@@ -4716,7 +4761,7 @@ and set_of context frame (ty : Types.ty) ~element values =
 and only_members context frame label sort contains members =
   let each = fresh_name context label in
   assume context frame
-    (Logic.Forall
+    (Logic.forall
        ( [ (each, sort) ],
          Logic.( ==> ) (contains (Logic.Symbol each))
            (Logic.disjunction (List.map (Logic.equal (Logic.Symbol each)) members)) ))
@@ -4790,14 +4835,12 @@ and text_value context frame (ty : Types.ty) text =
         ty literal;
       let byte = Types.builtin UInt8 in
       let holds model =
-        context.facts <-
-          Logic.equal (sequence_length context byte model) (Logic.int (String.length text))
-          :: context.facts;
+        add_fact context
+          (Logic.equal (sequence_length context byte model) (Logic.int (String.length text)));
         String.iteri
           (fun index character ->
             match sequence_at context byte model (Logic.int index) with
-            | Some at ->
-                context.facts <- Logic.equal at (Logic.int (Char.code character)) :: context.facts
+            | Some at -> add_fact context (Logic.equal at (Logic.int (Char.code character)))
             | None -> ())
           text
       in
@@ -4853,13 +4896,12 @@ and find_model_function context (ty : Types.ty) ~(model : Types.ty) =
           once context (Array_length symbol) (fun () ->
               let each = Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
-              context.facts <-
-                Logic.Forall
-                  ( [ (each, sort_of context ty) ],
-                    Logic.equal
-                      (sequence_length context element elements)
-                      (substituted_value_term context count) )
-                :: context.facts)
+              add_fact context
+                (Logic.forall
+                   ( [ (each, sort_of context ty) ],
+                     Logic.equal
+                       (sequence_length context element elements)
+                       (substituted_value_term context count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
   | [] -> None
@@ -4871,8 +4913,10 @@ and model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
   if context.ranking then
     once context (Ranked_model symbol) (fun () ->
         let each = Symbol.Variable { label = "ranked.value"; numbers = [] } in
-        context.facts <-
-          Logic.Forall
+        (* Ranking the model can state facts of its own, which the fact is
+           added after. *)
+        let fact =
+          Logic.forall
             ( [ (each, sort_of context ty) ],
               Logic.Operation
                 ( "<=",
@@ -4880,7 +4924,8 @@ and model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
                     rank context model (Logic.Apply (symbol, [ Logic.Symbol each ]));
                     rank context ty (Logic.Symbol each);
                   ] ) )
-          :: context.facts)
+        in
+        add_fact context fact)
 
 (* Cursors. A cursor carries its yielded parts and whether it has
    ended as ghost parts of its value. *)
@@ -4979,7 +5024,7 @@ and appended context frame element parts part =
    with
   | Some after, Some before ->
       assume context frame
-        (Logic.Forall
+        (Logic.forall
            ( [ (index, Logic.Int) ],
              Logic.(
                Operation ("<=", [ int 0; Symbol index ])
@@ -4990,7 +5035,7 @@ and appended context frame element parts part =
      [Sequence.append]'s contract says. *)
   let measure = fresh_name context "measure" in
   assume context frame
-    (Logic.Forall
+    (Logic.forall
        ( [ (measure, sort_of context (Types.Function (measure_type element))) ],
          Logic.equal
            (sequence_sum context element longer (Logic.Symbol measure))
@@ -5009,6 +5054,14 @@ and mentions_result clause =
     ~expression:(fun (node : expression) -> match node.kind with Result -> true | _ -> false)
     clause
 
+(* Whether a clause reads a lending or yielding method's history, the parts
+   yielded so far and whether it ended. *)
+and mentions_history clause =
+  Core_walk.expression_exists
+    ~expression:(fun (node : expression) ->
+      match node.kind with Yielded | Finished -> true | _ -> false)
+    clause
+
 and signature_terminates context path =
   match Interface.Impls.signature context.database path with
   | Some (signature : Types.signature) -> signature.terminates
@@ -5019,7 +5072,7 @@ and signature_terminates context path =
 (* A field of a value, which is in its type's range like every value. *)
 and field_of context frame ty variant field field_type term =
   let part = selected context ty variant field term in
-  assume context frame (in_range field_type part);
+  assume_typed context frame (in_range field_type part);
   (* A part of a value is below it, whatever its type, which is how
      structural recursion is shown to end. *)
   if context.ranking then begin
@@ -5045,6 +5098,13 @@ and selected context ty variant field term =
 and rank context ty term =
   let symbol = Symbol.Rank (type_key ty) in
   declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
+  (* A sequence ranked has its elements below it, which [sequence_at]
+     states once, whichever way the query reaches its elements. *)
+  (match ty with
+  | Named { path; arguments = [ Types.Type element ] }
+    when context.ranking && Path.equal path sequence_path ->
+      ignore (sequence_at context element term (Logic.int 0))
+  | _ -> ());
   Logic.Apply (symbol, [ term ])
 
 (* The form of a type, which holds its fields' defaults, its invariants,
@@ -5172,7 +5232,7 @@ and named_function context frame (node : expression) path type_arguments contrac
             value
       in
       fact context frame
-        (Logic.Forall (parameters, Logic.equal (applied context function_type term inputs) value))
+        (Logic.forall (parameters, Logic.equal (applied context function_type term inputs) value))
   | _ -> ());
   let constant_time =
     List.exists
@@ -5237,7 +5297,7 @@ and contract_for_every_argument context frame (contract : contract) parameters v
             match snd (clause_value context (read part) clause) with
             | ensured -> (
                 match closed_over_binders over (Logic.( ==> ) required ensured) with
-                | Some closed -> context.facts <- closed :: context.facts
+                | Some closed -> add_fact context closed
                 | None -> ())
             | exception Foreign_unsupported _ -> ())
           part.ensures)
@@ -5369,7 +5429,7 @@ and constant_value context frame path =
           let ty = type_of context empty defined in
           declare context (Logic.Constant (symbol, sort_of context ty));
           let _, defined_value = without_costs context (fun () -> value context empty defined) in
-          context.facts <- Logic.equal (Logic.Symbol symbol) defined_value :: context.facts);
+          add_fact context (Logic.equal (Logic.Symbol symbol) defined_value));
       Logic.Symbol symbol
   | _ -> raise (Foreign_unsupported "a constant with errors")
 
@@ -5777,6 +5837,40 @@ and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) t
 and assume_valid context frame ty term =
   assume context frame (validity context frame ~assuming:true ty term)
 
+(* A fact that holds of a value because it is of its type, such as the
+   range of its field. Of an axiom's parameters, which range over every
+   term of their sort, it holds only of the values of their types, so it
+   is a hypothesis of the axiom: the logic's datatype has values whose
+   fields are out of every range, of which a conclusion that the field is
+   in range would be false. *)
+and assume_typed context frame term =
+  match innermost_axiom context frame term with
+  | Some axiom -> axiom.hypotheses <- Logic.( ==> ) frame.condition term :: axiom.hypotheses
+  | None -> assume context frame term
+
+(* The axiom being stated whose parameters are all the bound symbols a
+   term names, if it names some and no quantifier's. *)
+and innermost_axiom context frame term =
+  match context.open_axioms with
+  | axiom :: _
+    when let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
+         named <> [] && List.for_all (fun name -> List.mem name axiom.parameters) named ->
+      Some axiom
+  | _ -> None
+
+(* Runs [make] on a value, to state facts that hold of every value but
+   need it to be one, not a bound symbol. Of an axiom's parameter it runs
+   at each call, on the argument. *)
+and of_each_value context frame value make =
+  if not (Logic.mentions frame.bound value) then make frame value
+  else
+    match innermost_axiom context frame value with
+    | Some axiom ->
+        axiom.at_calls <-
+          (fun frame substitute -> of_each_value context frame (substitute value) make)
+          :: axiom.at_calls
+    | None -> ()
+
 and check_valid context frame span ty term ~deep ~when_ =
   match validity context frame ~assuming:false ~deep ty term with
   | Logic.Boolean true -> ()
@@ -6116,12 +6210,13 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   let own_arguments = List.filter_map snd own_bound in
   let result_type = type_of context frame node in
   let applied_as = ref None in
+  let is_limited_call = ref false in
   let result =
     if
       contract.pure && contract.result_kind <> `Yields
       && List.length own_arguments = List.length own_bound
     then begin
-      let symbol = Symbol.Function { callee = path; instance } in
+      let function_symbol = Symbol.Function { callee = path; instance } in
       let sorts =
         List.mapi
           (fun index ((parameter : Core.parameter), _) ->
@@ -6134,15 +6229,40 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                      (Types.substitute (substitution_of own) parameter.type_)))
           own_bound
       in
-      declare context (Logic.Function (symbol, sorts, sort_of context result_type));
+      let result_sort = sort_of context result_type in
+      declare context (Logic.Function (function_symbol, sorts, result_sort));
       (match (path, own_bound) with
       | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
           model_ranked context
             (Interface.Impls.normalize context.database
                ~bounds:(fun _ -> [])
                (Types.substitute (substitution_of own) self.type_))
-            ~model:result_type symbol
+            ~model:result_type function_symbol
       | _ -> ());
+      (* Inside the axioms being stated of a function, a call to it is its
+         limited copy, of which nothing is stated, so that the solver
+         unfolds each use once rather than without end. *)
+      let symbol =
+        if List.mem function_symbol context.axiomatizing then begin
+          is_limited_call := true;
+          let limited = Symbol.Limited { callee = path; instance } in
+          declare context (Logic.Function (limited, sorts, result_sort));
+          once context (Limited_link function_symbol) (fun () ->
+              let parameters =
+                List.mapi
+                  (fun index sort ->
+                    (Symbol.Variable { label = "linked"; numbers = [ index ] }, sort))
+                  sorts
+              in
+              let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+              let applied = Logic.Apply (function_symbol, inputs) in
+              add_fact context
+                (Logic.forall ~trigger:[ applied ]
+                   (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
+          limited
+        end
+        else function_symbol
+      in
       applied_as := Some (symbol, sorts);
       let term = Logic.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
@@ -6158,13 +6278,12 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                   (Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
                 sorts
             in
-            context.facts <-
-              Logic.Forall
-                ( parameters,
-                  in_range result_type
-                    (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters))
-                )
-              :: context.facts);
+            add_fact context
+              (Logic.forall
+                 ( parameters,
+                   in_range result_type
+                     (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters))
+                 )));
       note_known_call context call_ path term own_arguments;
       term
     end
@@ -6205,118 +6324,335 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     context.instantiating <- path :: context.instantiating;
     (* The definition, unfolded once, where the [requires] holds. A body
        the prover cannot read is simply not unfolded. *)
-    (match contract.definition with
-    | Some (part, body) when not (List.exists (Logic.mentions after.bound) own_arguments) -> (
-        let unfolding =
-          if in_quantifier then
-            { (entry_frame part) with condition = Logic.Boolean true; bound = []; binders = [] }
-          else { (entry_frame part) with condition = after.condition }
-        in
-        try
-          match block_value context unfolding body with
-          | Some (_, defined) -> state (Logic.( ==> ) required (Logic.equal result defined))
-          | None -> ()
-        with Unsupported _ | Foreign_unsupported _ -> ())
-    | Some (part, body) when part.requires = [] -> (
-        (* Called on a quantifier's bound values, the definition is stated
-           once for every argument, so that it holds for each of them. *)
-        match !applied_as with
-        | Some (symbol, sorts) ->
-            once context (Definition_of symbol) (fun () ->
-                let parameters =
-                  List.mapi
-                    (fun index sort ->
-                      (Symbol.Variable { label = "defined"; numbers = [ index ] }, sort))
-                    sorts
+    (* A pure function that returns has its definition and its contract
+       stated once, as axioms over its parameters triggered by the function
+       applied, so that the solver unfolds them only for the calls its
+       search meets, and a call states neither again. A function of the
+       unit, such as a theorem, is applied in no term a trigger could
+       match, so its calls state its contract themselves. *)
+    let axiom_symbol =
+      match !applied_as with
+      | Some (symbol, sorts)
+        when contract.result_kind = `Returns && (not !is_limited_call)
+             && not (Types.equal result_type Types.unit) ->
+          Some (symbol, sorts)
+      | _ -> None
+    in
+    (* Each axiom's parameters are its own, since one axiom is stated while
+       another is open, and a fact of one must not be taken for the
+       other's. *)
+    let parameters_of label sorts =
+      context.fresh <- context.fresh + 1;
+      let axiom = context.fresh in
+      List.mapi
+        (fun index sort -> (Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
+        sorts
+    in
+    let readable mark clause inside =
+      match snd (clause_value context inside clause) with
+      | term when not (mentions_fresh_after context mark term) -> Some term
+      | _ -> None
+      | exception (Unsupported _ | Foreign_unsupported _) -> None
+    in
+    (* An axiom holds only of arguments of the parameters' types: in their
+       range and valid. Over every integer, a contract such as [append]'s,
+       which says the appended value is the last element, contradicts the
+       range of the elements. *)
+    let parameters_valid outside inputs =
+      Logic.conjunction
+        (List.map2
+           (fun ((parameter : Core.parameter), _) input ->
+             let ty = Types.substitute (substitution_of own) parameter.type_ in
+             Logic.( &&& ) (in_range ty input) (validity context outside ~assuming:true ty input))
+           own_bound inputs)
+    in
+    (* The axioms of [symbol] over [parameters], made by [make], with the
+       facts their translation makes of the parameters, such as a callee's
+       [ensures] and the range of an intrinsic's result. Those facts hold of
+       every argument the axiom holds of, so they are stated in it; facts
+       naming a symbol made for one use are dropped. *)
+    let axiomatizing symbol parameters make =
+      let mark = context.fresh in
+      let facts = ref [] in
+      let axiom = { parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
+      let scopes = context.scopes and open_axioms = context.open_axioms in
+      context.axiomatizing <- symbol :: context.axiomatizing;
+      context.scopes <- List.map (fun (name, _) -> (name, facts)) parameters @ scopes;
+      context.open_axioms <- axiom :: open_axioms;
+      Fun.protect
+        ~finally:(fun () ->
+          context.axiomatizing <- List.tl context.axiomatizing;
+          context.scopes <- scopes;
+          context.open_axioms <- open_axioms)
+        (fun () ->
+          let stated = make () in
+          let kept terms =
+            List.filter (fun term -> not (mentions_fresh_after context mark term)) (List.rev terms)
+          in
+          axiom.hypotheses <- kept axiom.hypotheses;
+          (stated, Logic.conjunction (kept !facts), axiom))
+    in
+    (* An axiom stated of [symbol], whose calls then state what it needs of
+       their arguments. *)
+    let record_axiom symbol axiom = Hashtbl.add context.axioms_of symbol axiom in
+    let definition_axiom symbol sorts (part : part) body =
+      match Hashtbl.find_opt context.defined_by_axiom symbol with
+      | Some is_defined -> is_defined
+      | None -> (
+          Hashtbl.replace context.defined_by_axiom symbol false;
+          let parameters = parameters_of "defined" sorts in
+          let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+          let arguments = List.mapi (fun index input -> (index, input)) inputs in
+          let outside = { after with bound = []; binders = []; condition = Logic.Boolean true } in
+          let mark = context.fresh in
+          let stated, facts, axiom =
+            axiomatizing symbol parameters (fun () ->
+                let inside =
+                  part_frame
+                    { outside with bound = List.map fst parameters; checking = false }
+                    part ~arguments ~substitution:(substitution_of part)
                 in
-                let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-                let outside =
-                  { after with bound = []; binders = []; condition = Logic.Boolean true }
-                in
-                match
-                  body_over context outside parameters body (fun inside ->
-                      part_frame inside part
-                        ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-                        ~substitution:(substitution_of part))
-                with
-                | Some defined ->
-                    context.facts <-
-                      Logic.Forall (parameters, Logic.equal (Logic.Apply (symbol, inputs)) defined)
-                      :: context.facts
-                | None -> ())
-        | None -> ())
-    | (None | Some _) when List.exists (Logic.mentions after.bound) own_arguments -> (
-        (* Called on a quantifier's bound values, a callee known by its
-           contract alone, or with a [requires], has its [ensures] stated
-           once, for every valid argument where its [requires] holds. *)
-        match !applied_as with
-        | Some (symbol, sorts) ->
-            once context (Contract_of symbol) (fun () ->
-                let parameters =
-                  List.mapi
-                    (fun index sort ->
-                      (Symbol.Variable { label = "ensured"; numbers = [ index ] }, sort))
-                    sorts
-                in
-                let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-                let outside =
-                  {
-                    after with
-                    bound = List.map fst parameters;
-                    binders = [];
-                    condition = Logic.Boolean true;
-                    checking = false;
-                  }
-                in
-                let mark = context.fresh in
-                let valid =
-                  Logic.conjunction
-                    (List.map2
-                       (fun ((parameter : Core.parameter), _) input ->
-                         validity context outside ~assuming:true
-                           (Types.substitute (substitution_of own) parameter.type_)
-                           input)
-                       own_bound inputs)
-                in
-                let readable clause inside =
-                  match snd (clause_value context inside clause) with
-                  | term when not (mentions_fresh_after context mark term) -> Some term
-                  | _ -> None
-                  | exception (Unsupported _ | Foreign_unsupported _) -> None
-                in
-                let ensured =
+                let guard = List.map (fun clause -> readable mark clause inside) part.requires in
+                let valid = parameters_valid inside inputs in
+                if List.mem None guard || mentions_fresh_after context mark valid then None
+                else
+                  Option.map
+                    (fun defined ->
+                      (Logic.conjunction (valid :: List.filter_map Fun.id guard), defined))
+                    (body_over context outside parameters body (fun inside ->
+                         part_frame inside part ~arguments ~substitution:(substitution_of part))))
+          in
+          match stated with
+          | Some (guard, defined) ->
+              let applied = Logic.Apply (symbol, inputs) in
+              record_axiom symbol axiom;
+              add_fact context
+                (Logic.forall ~trigger:[ applied ]
+                   ( parameters,
+                     Logic.(
+                       guard &&& conjunction axiom.hypotheses ==> (facts &&& equal applied defined))
+                   ));
+              Hashtbl.replace context.defined_by_axiom symbol true;
+              true
+          | None -> false)
+    in
+    let contract_axiom symbol sorts =
+      once context (Contract_of symbol) (fun () ->
+          let parameters = parameters_of "ensured" sorts in
+          let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+          let arguments = List.mapi (fun index input -> (index, input)) inputs in
+          let applied = Logic.Apply (symbol, inputs) in
+          let outside =
+            {
+              after with
+              bound = List.map fst parameters;
+              binders = [];
+              condition = Logic.Boolean true;
+              checking = false;
+            }
+          in
+          let mark = context.fresh in
+          let stated, facts, axiom =
+            axiomatizing symbol parameters (fun () ->
+                let valid = parameters_valid outside inputs in
+                let parts =
                   List.filter_map
                     (fun (part : part) ->
                       let inside =
                         {
-                          (part_frame outside part
-                             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-                             ~substitution:(substitution_of part))
-                          with
-                          result = Some (Logic.Apply (symbol, inputs));
+                          (part_frame outside part ~arguments ~substitution:(substitution_of part)) with
+                          result = Some applied;
                           checking = false;
                         }
                       in
                       let required =
-                        List.map (fun clause -> readable clause inside) part.requires
+                        List.map (fun clause -> readable mark clause inside) part.requires
                       in
-                      match List.filter_map (fun clause -> readable clause inside) part.ensures with
-                      | [] -> None
-                      | _ when List.mem None required -> None
-                      | ensures ->
-                          Some
-                            Logic.(
-                              conjunction (List.filter_map Fun.id required) ==> conjunction ensures))
+                      if List.mem None required then None
+                      else
+                        match
+                          List.filter_map
+                            (fun (clause : expression) ->
+                              Option.map (fun term -> (clause, term)) (readable mark clause inside))
+                            part.ensures
+                        with
+                        | [] -> None
+                        | ensures -> Some (part, List.filter_map Fun.id required, ensures))
                     contract.parts
                 in
-                if ensured <> [] && not (mentions_fresh_after context mark valid) then
-                  context.facts <-
-                    Logic.Forall (parameters, Logic.( ==> ) valid (Logic.conjunction ensured))
-                    :: context.facts)
-        | None -> ())
-    | _ -> ());
+                if parts = [] || mentions_fresh_after context mark valid then None
+                else Some (valid, parts))
+          in
+          match stated with
+          | None -> ()
+          | Some (valid, parts) ->
+              List.iter
+                (fun ((part : part), _, ensures) ->
+                  List.iter
+                    (fun ((clause : expression), _) ->
+                      Hashtbl.replace context.axiom_clauses
+                        (symbol, part.callee.name, clause.origin)
+                        ())
+                    ensures)
+                parts;
+              record_axiom symbol axiom;
+              add_fact context
+                (Logic.forall ~trigger:[ applied ]
+                   ( parameters,
+                     Logic.( ==> )
+                       (Logic.conjunction (valid :: axiom.hypotheses))
+                       (Logic.conjunction
+                          (facts
+                          :: List.map
+                               (fun (_, required, ensures) ->
+                                 Logic.( ==> ) (Logic.conjunction required)
+                                   (Logic.conjunction (List.map snd ensures)))
+                               parts)) )))
+    in
+    (match (!is_limited_call, axiom_symbol) with
+    | true, _ -> ()
+    | false, Some (symbol, sorts) ->
+        let is_defined =
+          match contract.definition with
+          | Some (part, body) -> definition_axiom symbol sorts part body
+          | None -> false
+        in
+        (match contract.definition with
+        | Some (part, body)
+          when (not is_defined) && not (List.exists (Logic.mentions after.bound) own_arguments) -> (
+            let unfolding =
+              if in_quantifier then
+                { (entry_frame part) with condition = Logic.Boolean true; bound = []; binders = [] }
+              else { (entry_frame part) with condition = after.condition }
+            in
+            try
+              match block_value context unfolding body with
+              | Some (_, defined) -> state (Logic.( ==> ) required (Logic.equal result defined))
+              | None -> ()
+            with Unsupported _ | Foreign_unsupported _ -> ())
+        | _ -> ());
+        contract_axiom symbol sorts
+    | false, None -> (
+        match contract.definition with
+        | Some (part, body) when not (List.exists (Logic.mentions after.bound) own_arguments) -> (
+            let unfolding =
+              if in_quantifier then
+                { (entry_frame part) with condition = Logic.Boolean true; bound = []; binders = [] }
+              else { (entry_frame part) with condition = after.condition }
+            in
+            try
+              match block_value context unfolding body with
+              | Some (_, defined) -> state (Logic.( ==> ) required (Logic.equal result defined))
+              | None -> ()
+            with Unsupported _ | Foreign_unsupported _ -> ())
+        | Some (part, body) when part.requires = [] -> (
+            (* Called on a quantifier's bound values, the definition is stated
+               once for every argument, so that it holds for each of them. *)
+            match !applied_as with
+            | Some (symbol, sorts) ->
+                once context (Definition_of symbol) (fun () ->
+                    let parameters =
+                      List.mapi
+                        (fun index sort ->
+                          (Symbol.Variable { label = "defined"; numbers = [ index ] }, sort))
+                        sorts
+                    in
+                    let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+                    let outside =
+                      { after with bound = []; binders = []; condition = Logic.Boolean true }
+                    in
+                    match
+                      body_over context outside parameters body (fun inside ->
+                          part_frame inside part
+                            ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+                            ~substitution:(substitution_of part))
+                    with
+                    | Some defined ->
+                        add_fact context
+                          (Logic.forall
+                             (parameters, Logic.equal (Logic.Apply (symbol, inputs)) defined))
+                    | None -> ())
+            | None -> ())
+        | (None | Some _) when List.exists (Logic.mentions after.bound) own_arguments -> (
+            (* Called on a quantifier's bound values, a callee known by its
+               contract alone, or with a [requires], has its [ensures] stated
+               once, for every valid argument where its [requires] holds. *)
+            match !applied_as with
+            | Some (symbol, sorts) ->
+                once context (Contract_of symbol) (fun () ->
+                    let parameters =
+                      List.mapi
+                        (fun index sort ->
+                          (Symbol.Variable { label = "ensured"; numbers = [ index ] }, sort))
+                        sorts
+                    in
+                    let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+                    let outside =
+                      {
+                        after with
+                        bound = List.map fst parameters;
+                        binders = [];
+                        condition = Logic.Boolean true;
+                        checking = false;
+                      }
+                    in
+                    let mark = context.fresh in
+                    let valid =
+                      Logic.conjunction
+                        (List.map2
+                           (fun ((parameter : Core.parameter), _) input ->
+                             validity context outside ~assuming:true
+                               (Types.substitute (substitution_of own) parameter.type_)
+                               input)
+                           own_bound inputs)
+                    in
+                    let readable clause inside =
+                      match snd (clause_value context inside clause) with
+                      | term when not (mentions_fresh_after context mark term) -> Some term
+                      | _ -> None
+                      | exception (Unsupported _ | Foreign_unsupported _) -> None
+                    in
+                    let ensured =
+                      List.filter_map
+                        (fun (part : part) ->
+                          let inside =
+                            {
+                              (part_frame outside part
+                                 ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+                                 ~substitution:(substitution_of part))
+                              with
+                              result = Some (Logic.Apply (symbol, inputs));
+                              checking = false;
+                            }
+                          in
+                          let required =
+                            List.map (fun clause -> readable clause inside) part.requires
+                          in
+                          match
+                            List.filter_map (fun clause -> readable clause inside) part.ensures
+                          with
+                          | [] -> None
+                          | _ when List.mem None required -> None
+                          | ensures ->
+                              Some
+                                Logic.(
+                                  conjunction (List.filter_map Fun.id required)
+                                  ==> conjunction ensures))
+                        contract.parts
+                    in
+                    if ensured <> [] && not (mentions_fresh_after context mark valid) then
+                      add_fact context
+                        (Logic.forall (parameters, Logic.( ==> ) valid (Logic.conjunction ensured))))
+            | None -> ())
+        | _ -> ()));
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)
+    let in_axiom (part : part) (clause : expression) =
+      match axiom_symbol with
+      | Some (symbol, _) ->
+          Hashtbl.mem context.axiom_clauses (symbol, part.callee.name, clause.origin)
+      | None -> false
+    in
     let assume_ensures keep =
       List.iter
         (fun (part : part) ->
@@ -6358,7 +6694,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           in
           let ensures_frame =
             match contract.result_kind with
-            | `Lends ->
+            | `Lends when List.exists mentions_history part.ensures ->
                 (* The part as lent, and the parts yielded: the one part, as
                  the caller's statement left it. *)
                 let left = match lent_final with Some leave -> leave result | None -> result in
@@ -6368,11 +6704,11 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                   yielded = Some (appended context after result_type none left);
                   finished = Some (Logic.Boolean true);
                 }
-            | `Returns | `Yields -> ensures_frame
+            | `Lends | `Returns | `Yields -> ensures_frame
           in
           List.iter
             (fun (clause : expression) ->
-              if keep clause then
+              if keep clause && not (!is_limited_call || in_axiom part clause) then
                 let frame_for_clause =
                   if contract.result_kind = `Lends && mentions_result clause then
                     {
@@ -6408,6 +6744,19 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     context.instantiating <- List.tl context.instantiating
   end
   else check_left ();
+  (* What the callee's axioms need of their parameters holds of the
+     arguments, which are values of the parameters' types. *)
+  (match !applied_as with
+  | Some (symbol, _) when not !is_limited_call ->
+      List.iter
+        (fun (axiom : open_axiom) ->
+          let substitute = Logic.substitute (List.combine axiom.parameters own_arguments) in
+          List.iter
+            (fun hypothesis -> assume_typed context after (substitute hypothesis))
+            axiom.hypotheses;
+          List.iter (fun at_call -> at_call after substitute) axiom.at_calls)
+        (Hashtbl.find_all context.axioms_of symbol)
+  | _ -> ());
   (if contract.result_kind = `Yields then
      match result_type with
      | Types.Cursor _ as cursor_type -> (
@@ -6880,12 +7229,12 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
     Logic.(Operation ("<=", [ low; index ]) &&& Operation ("<", [ index; high ]))
   in
   let all name low high body =
-    Logic.Forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
+    Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
   let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
   let each_sum relation =
     let measure = fresh_name context "measure" in
-    Logic.Forall
+    Logic.forall
       ( [ (measure, sort_of context (Types.Function (measure_type element))) ],
         relation
           (fun sequence -> sequence_sum context element sequence (Logic.Symbol measure))
@@ -7095,24 +7444,26 @@ and byte_order context left right =
     let first_term = Logic.Symbol (variable "bytes.first")
     and second_term = Logic.Symbol (variable "bytes.second")
     and third_term = Logic.Symbol (variable "bytes.third") in
-    let over names body = Logic.Forall (List.map (fun name -> (name, sequence)) names, body) in
-    context.facts <-
-      over
-        [ variable "bytes.first"; variable "bytes.second" ]
-        Logic.(
-          Operation ("<=", [ int (-1); order first_term second_term ])
-          &&& Operation ("<=", [ order first_term second_term; int 1 ])
-          &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
-          &&& equal (order second_term first_term)
-                (Operation ("-", [ order first_term second_term ])))
-      :: over [ variable "bytes.first" ] (Logic.equal (order first_term first_term) (Logic.int 0))
-      :: over
-           [ variable "bytes.first"; variable "bytes.second"; variable "bytes.third" ]
-           Logic.(
-             Operation ("<", [ order first_term second_term; int 0 ])
-             &&& Operation ("<", [ order second_term third_term; int 0 ])
-             ==> Operation ("<", [ order first_term third_term; int 0 ]))
-      :: context.facts
+    let over names body = Logic.forall (List.map (fun name -> (name, sequence)) names, body) in
+    List.iter (add_fact context)
+      (List.rev
+         [
+           over
+             [ variable "bytes.first"; variable "bytes.second" ]
+             Logic.(
+               Operation ("<=", [ int (-1); order first_term second_term ])
+               &&& Operation ("<=", [ order first_term second_term; int 1 ])
+               &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
+               &&& equal (order second_term first_term)
+                     (Operation ("-", [ order first_term second_term ])));
+           over [ variable "bytes.first" ] (Logic.equal (order first_term first_term) (Logic.int 0));
+           over
+             [ variable "bytes.first"; variable "bytes.second"; variable "bytes.third" ]
+             Logic.(
+               Operation ("<", [ order first_term second_term; int 0 ])
+               &&& Operation ("<", [ order second_term third_term; int 0 ])
+               ==> Operation ("<", [ order first_term third_term; int 0 ]));
+         ])
   end;
   order left right
 
@@ -8007,13 +8358,12 @@ and potential_measure context element =
   if not (List.mem term context.potentials) then begin
     context.potentials <- term :: context.potentials;
     let each = Symbol.Variable { label = "potential.element"; numbers = [] } in
-    context.facts <-
-      Logic.Forall
-        ( [ (each, sort_of context element) ],
-          Logic.equal
-            (applied context measure term [ Logic.Symbol each ])
-            (held_symbol context element (Logic.Symbol each)) )
-      :: context.facts
+    add_fact context
+      (Logic.forall
+         ( [ (each, sort_of context element) ],
+           Logic.equal
+             (applied context measure term [ Logic.Symbol each ])
+             (held_symbol context element (Logic.Symbol each)) ))
   end;
   term
 
@@ -8396,7 +8746,7 @@ and run_replaced context frame element ~before ~after ~start ~stop ~run =
   in
   assume context frame (Logic.equal (length after) (length before));
   assume context frame
-    (Logic.Forall
+    (Logic.forall
        ( [ (limit, Logic.Int) ],
          Logic.(
            Operation ("<=", [ int 0; index ])
@@ -8416,7 +8766,7 @@ and replaced context frame element ~before ~after index part =
     (Logic.conjunction
        [ Logic.equal (length after) (length before); Logic.equal (at after index) part ]);
   assume context frame
-    (Logic.Forall
+    (Logic.forall
        ( [ (limit, Logic.Int) ],
          Logic.(
            Operation ("<=", [ int 0; Symbol limit ])
@@ -8971,7 +9321,7 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
        match sequence_at context element before (Logic.Symbol position) with
        | Some yielded_index ->
            assume context head
-             (Logic.Forall
+             (Logic.forall
                 ( [ (position, Logic.Int) ],
                   Logic.(
                     Operation ("<=", [ int 0; Symbol position ])
@@ -9411,6 +9761,11 @@ let new_context database ~home ~current ~terminates ~measures =
     leaving = [];
     lent_back = [];
     instantiating = [];
+    axiomatizing = [];
+    open_axioms = [];
+    axioms_of = Hashtbl.create 16;
+    axiom_clauses = Hashtbl.create 16;
+    defined_by_axiom = Hashtbl.create 16;
     yielded_part = None;
     yield_ensures = None;
     parameters = [];

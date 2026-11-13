@@ -1447,6 +1447,7 @@ let triggered fact =
         [
           Function (variable "f", [ Int ], Int);
           Function (variable "g", [ Int ], Int);
+          Function (variable "h", [ Int; Int ], Int);
           Constant (variable "n", Int);
         ];
       facts = [ fact ];
@@ -1465,20 +1466,20 @@ let () =
   in
   test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
-        (Forall
+        (forall
            ( [ (variable "i", Int) ],
              Operation (">=", [ i_term; int 0 ]) ==> positive (applied_f i_term) ))
         ":pattern ((x0 b0))");
   test "a trigger has no arithmetic on a bound variable" (fun () ->
       let text =
         triggered
-          (Forall
+          (forall
              ([ (variable "i", Int) ], positive (applied_f (Operation ("+", [ i_term; int 1 ])))))
       in
       if contains text ":pattern" then fail "%s" text);
   test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
-        (Forall
+        (forall
            ( [ (variable "i", Int) ],
              Operation ("<", [ applied_f i_term; applied_f (Operation ("+", [ i_term; int 1 ])) ])
              &&& positive (applied_g i_term) ))
@@ -1486,7 +1487,7 @@ let () =
   test "a definition triggers on the term it defines" (fun () ->
       let text =
         triggered
-          (Forall
+          (forall
              ( [ (variable "i", Int) ],
                equal (applied_f i_term) (Operation ("+", [ applied_g i_term; int 1 ])) ))
       in
@@ -1509,18 +1510,44 @@ let () =
         not
           (untriggered
              (query
-                (Forall
+                (forall
                    ( [ (variable "i", Int) ],
                      positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))))
       then fail "a fact on f(i + 1) alone has no trigger";
-      if untriggered (query (Forall ([ (variable "i", Int) ], positive (applied_f i_term)))) then
+      if untriggered (query (forall ([ (variable "i", Int) ], positive (applied_f i_term)))) then
         fail "a fact on f(i) has one");
   test "variables named by no one application share a trigger" (fun () ->
       expect
-        (Forall
+        (forall
            ( [ (variable "i", Int); (variable "j", Int) ],
              Operation ("<", [ applied_f i_term; applied_g j_term ]) ))
-        ":pattern ((x0 b0) (x2 b1))")
+        ":pattern ((x0 b0) (x2 b1))");
+  let patterns text =
+    let rec count occurrence =
+      match Substring.find ~occurrence text ":pattern" with
+      | Some _ -> count (occurrence + 1)
+      | None -> occurrence - 1
+    in
+    count 1
+  in
+  test "transitivity triggers on all three of its applications" (fun () ->
+      let k_term = Symbol (variable "k") in
+      let at_most first second =
+        Operation ("<=", [ Apply (variable "h", [ first; second ]); int 0 ])
+      in
+      let text =
+        triggered
+          (forall
+             ( [ (variable "i", Int); (variable "j", Int); (variable "k", Int) ],
+               at_most i_term j_term &&& at_most j_term k_term ==> at_most i_term k_term ))
+      in
+      if patterns text <> 1 || not (contains text ":pattern ((x2 b0 b1) (x2 b0 b2) (x2 b1 b2))")
+      then fail "%s" text);
+  test "an equation between two applications triggers on either" (fun () ->
+      let text =
+        triggered (forall ([ (variable "i", Int) ], equal (applied_f i_term) (applied_g i_term)))
+      in
+      if patterns text <> 2 then fail "%s" text)
 
 (* Short-circuit operators *)
 

@@ -3,7 +3,7 @@
 let version = "5.3.3"
 
 (* The limit in steps every query runs with. *)
-let steps = 2_000_000
+let steps = 1_000_000
 
 type t = { program : string; cache : string option; mutable solved : int }
 
@@ -205,7 +205,11 @@ let ask solver (request, query) =
                        pairs)
                   |> List.filter_map Fun.id
               | _ -> [])
-        | _ -> Out_of_steps_canonical
+        | Atom "unknown" :: _ -> Out_of_steps_canonical
+        | _ ->
+            (* An error is a query the prover built wrong, not one the
+               solver could not answer, and is never kept as an answer. *)
+            failwith ("Solver.ask: the solver rejected a query: " ^ String.trim output)
       in
       locked (fun () -> Hashtbl.replace cache request.key answer);
       (match file with

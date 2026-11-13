@@ -123,6 +123,7 @@ type stated =
   | Value_of of Logic.symbol
   | Definition_of of Logic.symbol
   | Contract_of of Logic.symbol
+  | Limited_link of Logic.symbol
   | Exclusive of Logic.symbol
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
@@ -147,6 +148,11 @@ type context = {
   mutable leaving : leaving list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
+  mutable axiomatizing : Logic.symbol list;
+  axiom_clauses : (Logic.symbol * string * Core.origin, unit) Hashtbl.t;
+  defined_by_axiom : (Logic.symbol, bool) Hashtbl.t;
+  mutable open_axioms : open_axiom list;
+  axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
   disjoint : (int * int) list;
   mutable indexes : (int * (place_value * span)) list;
   mutable evaluated_keys : (Core.id * Logic.term) list;
@@ -183,6 +189,12 @@ type context = {
   quantifier_facts : (Logic.term, Logic.term list) Hashtbl.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
+}
+
+and open_axiom = {
+  parameters : Logic.symbol list;
+  mutable hypotheses : Logic.term list;
+  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
 }
 
 val quote : source -> int -> string

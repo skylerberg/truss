@@ -221,17 +221,38 @@ decides when a body is a definition. In the solver:
   gives callers what unfolding the body would. An `ensures` clause that reads
   what the caller's package cannot see, such as an opaque type's fields, is
   no fact there.
-- **A method of a trait or an `impl` is unfolded at each call,** since its
+- **A method of a trait or an `impl` is defined by its body,** since its
   contract is the trait's: a trait's provided method and a derived method in
   every package, and a method an `impl` writes in the `impl`'s own package,
   unless it reads something the prover cannot see from there.
-- **On a quantifier's bound values,** a definition with no `requires` is
-  stated once for every argument, since a fact about one call would name the
-  bound values. A contract, with its `requires`, and a pure function's range
-  are stated once the same way. A call on no bound value has its `ensures`
-  stated outside the quantifier, as a fact whether or not the body runs.
-- **Recursive definitions unfold once per use,** as fuel does in Dafny. A
-  proof that needs more calls a theorem or asserts the steps.
+- **Definitions and contracts are axioms.** A pure function that returns a
+  value has its definition, where it has one, and its contract each stated
+  once in a query, as a fact for every argument triggered by the function
+  applied: `forall x {f(x)} requires(x) ==> f(x) == body(x)`. The solver
+  instantiates them only for the calls its search meets, so a query holds
+  each callee's clauses once, not once for each call, and not those of a
+  callee's callees unless a call of theirs is met.
+- **An axiom holds of values of the parameters' types.** Its hypotheses are
+  the parameters' ranges and invariants, and the facts its translation
+  assumed of their parts' types, such as a field's range, which each call
+  states of its arguments. Without them the axiom would speak of terms that
+  are no value, such as a record whose field is out of range, and `append`'s
+  contract, that the appended value is the last element, would contradict
+  the range of a list's elements at a negative value.
+- **A fact that needs a value,** not a bound name, such as a bit count's
+  bounds between the powers of two its exponent gives, is stated at each
+  call, of the argument.
+- **A function of the unit, such as a theorem,** is applied in no term a
+  trigger could match, so each call states its contract.
+- **A call on no bound value has its `ensures` stated outside the
+  quantifier,** as a fact whether or not the body runs.
+- **Recursive definitions unfold once per use,** as fuel does in Dafny: in
+  the axioms of a function, a call of the function is its *limited copy*, of
+  which nothing is stated but that it equals the function where the function
+  is applied. A proof that needs more calls a theorem or asserts the steps.
+- **A specification is a formula,** not code that runs: an `if` in a clause is
+  the solver's `if`, with no path condition, and a lending call whose
+  callee's clauses never read its yielded history has none.
 - **An argument that holds a call is named once,** by a symbol equal to its
   term, so a query grows only with the calls in it, not by a factor at each
   level of nesting.
@@ -422,7 +443,9 @@ A query holds only the facts that can matter: starting from the obligation's
 symbols, each fact that mentions a kept symbol is kept, with its symbols,
 until nothing more is added. A quantified fact waits until every symbol of one
 of its triggers is kept, which also keeps quantifiers out of queries that do
-not need them. Dropping a fact is always sound, and a change to a function no
+not need them. A fact stated twice, such as a law two bounds both give, is
+kept once, since the solver would instantiate each copy. Dropping a fact is
+always sound, and a change to a function no
 kept fact mentions leaves the query's text, and its answer, alone.
 
 ### Triggers
@@ -437,7 +460,14 @@ Truss has no syntax for triggers, so the prover chooses them:
 - **Matching loops are avoided:** an application the fact's own body would
   match with a larger term, as `f(i)` matches `f(i + 1)`, is left out when
   anything else is left.
-- **A definition triggers on the term it defines.**
+- **A set of applications holds every application of its functions** that
+  could be a trigger, so an instance makes no new application of them:
+  transitivity is triggered by all three of its comparisons, since one
+  triggered by two would make the third, which matches again with every
+  other.
+- **A definition triggers on the term it defines.** An equation between two
+  applications that both name every bound name, such as one sequence's
+  elements equal to another's, defines neither, and either triggers it.
 
 When no trigger is found, the solver chooses its own, and a query that then
 runs out of steps says so, since an `assert` that names the term can supply
@@ -462,7 +492,8 @@ positions are kept beside the query, for its diagnostic.
 
 - **Z3, pinned.** Another version is refused, since its answers could differ,
   and the version is part of every answer's key.
-- **A fixed limit in steps.** Each query runs with the same `rlimit`, which
+- **A fixed limit in steps.** Each query runs with the same `rlimit`,
+  1,000,000, which
   counts work, not time, so a slow machine never fails a proof a fast one
   passes. The prover's version sets it, not the project. It does not grow with
   a query's size, which would make an answer depend on facts unrelated to its
@@ -477,6 +508,9 @@ positions are kept beside the query, for its diagnostic.
   an obligation is never asked again with other facts, and a failure costs one
   step limit. The one query asked after another's answer is a
   counterexample's, with the same facts, for the values of the locals.
+- **A query the solver rejects is the prover's bug,** and stops the run,
+  never read as an answer, so a query built wrong cannot pass for one that
+  ran out of steps.
 - **An answer is a fact about the text,** keyed by the text, the solver's
   version, its options, and its limit, and kept in the store.
 

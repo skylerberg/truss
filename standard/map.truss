@@ -563,10 +563,27 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
   true
 }
 
+internal theorem entries_inclusion_is_transitive[Key: Hash + Ordered, Value: Equal](
+  first: Map[Key, Value],
+  second: Map[Key, Value],
+  third: Map[Key, Value],
+)
+  requires first.entries_included_in(second)
+  requires second.entries_included_in(third)
+  ensures first.entries_included_in(third)
+  cost time finite
+{
+}
+
 impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
   fn equal(self, other: Map[Key, Value]) -> Bool {
     self.entries.length() == other.entries.length() && self.entries_included_in(other) && other.entries_included_in(self)
   }
+}
+
+proof Equal.transitive for Map[Key: Hash + Ordered, Value: Equal] {
+  entries_inclusion_is_transitive(first, second: second, third: third)
+  entries_inclusion_is_transitive(first: third, second: second, third: first)
 }
 
 impl Default for Map[Key: Hash + Ordered, Value] {
