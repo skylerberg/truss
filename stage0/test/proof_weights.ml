@@ -5,6 +5,7 @@
 let weights =
   [
     ("standard::arguments", 167);
+    ("standard::base32", 109);
     ("standard::base64", 102);
     ("standard::binary", 68);
     ("standard::capabilities", 5);
@@ -20,7 +21,7 @@ let weights =
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 1470);
+    ("standard::cryptography", 1602);
     ("standard::cryptography::elliptic", 247);
     ("standard::cryptography::keccak", 41);
     ("standard::cryptography::mlkem", 63);
@@ -40,6 +41,8 @@ let weights =
     ("standard::http::two", 300);
     ("standard::http::websocket", 21);
     ("standard::json", 1513);
+    ("standard::jwk", 492);
+    ("standard::jwt", 1004);
     ("standard::list", 104);
     ("standard::list::array", 43);
     ("standard::list::array_views", 42);
@@ -58,6 +61,8 @@ let weights =
     ("standard::numbers::signed", 38);
     ("standard::numbers::unsigned", 40);
     ("standard::option", 1);
+    ("standard::otp", 10);
+    ("standard::password", 9);
     ("standard::processes", 12);
     ("standard::random", 61);
     ("standard::regex", 197);

@@ -190,3 +190,7 @@ let () =
   folds "constants fold from their core forms, except a set, which is built by running"
     ~folded:[ "small"; "flag"; "names"; "rows"; "corner"; "primes" ]
     ~run:[ "colors" ] Fixtures.Lowering.constants_fold_from_their_core_forms_except_a_set
+
+let () =
+  passes "a return in an arm of a match on a lent part drops only what it holds"
+    Fixtures.Lowering.return_in_an_arm_of_a_match_on_a_lent_part_drops
