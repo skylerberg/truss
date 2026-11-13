@@ -45,7 +45,7 @@ written.
 
 | The MIR leaves out | Where it is |
 |---|---|
-| Drops | Code generation elaborates them from the MIR's moves. |
+| Drops | Code generation drops each place where its local ends, by what the move analysis of the MIR says it holds there. |
 | Instances, layout, the calling convention | The LIR |
 | Unwinding | Nothing unwinds, so a call is a statement, not a terminator. |
 | Patterns as written | The core form |

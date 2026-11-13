@@ -19,10 +19,10 @@
   libc
   lir
   glue
-  drops
   outline
   yields
   reachable
+  moves
   emit_c
   cbor
   blake3

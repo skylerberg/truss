@@ -75,7 +75,9 @@ let trait_method_key st ~(trait : Types.trait_reference) ~name ~receiver ~self_t
 let operand_as st (mode : Types.mode) ty (place : Lir.place) (lir_ty : Lir.ty option) =
   match lir_ty with
   | None -> None
-  | Some (Pointer _) when mode = Types.Own -> Some (Lir.Moved_address place)
+  | Some (Pointer _) when mode = Types.Own ->
+      ignore (moved st place);
+      Some (Lir.Moved_address place)
   | Some (Pointer { writable; _ }) -> Some (Lir.Address { place; writable })
   | Some _ -> ( match mode with Own -> Some (owned st place ty) | Read | Mut -> Some (Copy place))
 
@@ -322,7 +324,8 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
   result_slot inner (Convention.result st.context.env result_ty);
   let parameter_places =
     List.map
-      (fun ((mode : Ground.mode), ty) -> (parameter inner ~owned:(mode = Own) mode ty, mode, ty))
+      (fun ((mode : Ground.mode), ty) ->
+        (parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
       function_type.parameters
   in
   let evidence = evidence_parameters inner function_type.uses in
@@ -471,11 +474,7 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) des
            arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
            result = Returned (at block);
          });
-    (* The pointer is [borrowed] so that drop elaboration does not track
-       the block's contents, which the [any] value owns. *)
-    let typed =
-      local st.builder ~borrowed:true (Pointer { target = Value inner_ty; writable = true })
-    in
+    let typed = local st.builder (Pointer { target = Value inner_ty; writable = true }) in
     emit st.builder (Assign (at typed, Use (Copy (at block))));
     emit st.builder
       (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
@@ -579,7 +578,7 @@ let string_literal st (ty : Ground.ty) text ~(destination : Lir.place) =
       let bytes = temporary st storage in
       emit st.builder
         (Assign (bytes, Storage.static storage ~elements:(Constant (Bytes text)) ~length));
-      build field (Move bytes)
+      build field (moved st bytes)
   | _, Record [ (field, Typed view) ] ->
       let bytes = temporary st view in
       emit st.builder (Assign (bytes, Storage.view view ~elements:(Constant (Bytes text)) ~length));
@@ -685,18 +684,16 @@ let call_next st (yielding : Ground.yielding) cursor destination =
 
 (* Pulls a cursor until it ends, running [body] with the place of each
    value. [call_next] calls the cursor's [next], which writes an [Option] of
-   type [option] to the place it is given. The loop owns the value that
-   [next] gave, so whatever the body did not take is dropped before the
-   next value is asked for, and on every way out. *)
+   type [option] to the place it is given. The loop's part, the value, ends
+   where the MIR ends it, so the [Option] holds nothing else to drop. *)
 let pull_loop st ~(option : Ground.ty) ~(call_next : Lir.place -> unit) ~(body : Lir.place -> unit)
     =
   in_scope st (fun () ->
-      let next = binding st option in
+      let next = at (local st.builder (Value option)) in
       let depth = List.length st.scopes in
       let test = block st.builder and inside = block st.builder and after = block st.builder in
       finish st.builder (Goto test);
       start st.builder test;
-      if not (trivial st option) then emit st.builder (Drop next);
       call_next next;
       let more = local st.builder (Raw Bool) in
       emit st.builder (Assign (at more, Is_variant (next, "Some")));

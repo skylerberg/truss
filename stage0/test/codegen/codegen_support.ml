@@ -105,7 +105,7 @@ let describe ?target ?extra ty = Memory_layout.For_testing.to_string (layout ?ta
 
 let int32 = named "Int32"
 let usize = named "USize"
-let local ?name ?(borrowed = false) ty : Lir.local_info = { ty; name; borrowed }
+let local ?name ty : Lir.local_info = { ty; name }
 let value ty = Lir.Value ty
 let at ?(projections = []) local : Lir.place = { root = Local local; projections }
 let copy ?projections local = Lir.Copy (at ?projections local)

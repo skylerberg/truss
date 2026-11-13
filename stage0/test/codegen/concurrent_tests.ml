@@ -115,6 +115,10 @@ let () =
   passes_in_order "a value returned through two nested tasks is neither leaked nor dropped twice"
     ~count:1 Fixtures.Concurrent.value_returned_through_two_nested_tasks_is_neither
 
+let () =
+  passes "a return value that loses the cancel is dropped"
+    Fixtures.Concurrent.return_value_that_loses_the_cancel_is_dropped
+
 (* Tasks on threads *)
 
 let expect_threaded ~expected text =

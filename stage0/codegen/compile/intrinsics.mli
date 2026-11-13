@@ -17,6 +17,10 @@ type argument = Place of Lir.place | Value of Lir.operand
 (* The ground types the lowering needs. *)
 type types = { usize : Ground.ty; string_slice : Ground.ty }
 
+(* The positions of the arguments an operation passed by place takes as its
+   own, moving their values out of their places. *)
+val consumed_places : Intrinsic.operation -> int list
+
 (* Writes the operation, with its type arguments in the order the intrinsic
    module declares them, into the builder. [value_arguments] are its generic
    value arguments, such as an array's length, in the same order. The

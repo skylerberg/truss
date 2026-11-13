@@ -685,3 +685,101 @@ let () =
           if not (List.mem expected exits) then
             fail "no exit from a %s that is a %s" (fst expected) (snd expected))
         [ ("branch", "return"); ("branch", "jump"); ("iteration", "return"); ("iteration", "jump") ])
+
+(* The move analysis *)
+
+(* The analysis of [g]'s MIR, with each temporary and [own] binding owning
+   its value, and each value that is not a number or a [Bool] having
+   something to drop. *)
+let moves_of_g text =
+  let mir = mir_of_g text in
+  let body = mir.body in
+  let owns local =
+    match body.locals.(local).kind with
+    | Temporary | Source { mode = Own; _ } -> true
+    | Source _ | Lent _ -> false
+  in
+  let needs_drop (path : Moves.path) =
+    path.steps <> []
+    ||
+    match body.locals.(path.local).type_ with
+    | Named { path = Path.Top { name = "Int64" | "Bool" | "USize"; _ }; _ } -> false
+    | Named { path = Path.Top { module_; _ }; _ } -> not (List.mem "intrinsic" module_.modules)
+    | _ -> true
+  in
+  (body, Moves.analyse ~owns ~lent_mut:(fun _ -> false) ~needs_drop body)
+
+(* What a path holds where its local is first ended. *)
+let status_where_ended (body : Mir.body) moves (path : Moves.path) =
+  let found = ref None in
+  Array.iteri
+    (fun block (basic : Mir.basic_block) ->
+      if !found = None then begin
+        let state = Moves.entry moves block in
+        List.iter
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Dead locals when !found = None && List.mem path.local locals ->
+                found := Some (Moves.status moves state path)
+            | _ -> if !found = None then Moves.apply moves state statement)
+          basic.statements
+      end)
+    body.blocks;
+  match !found with Some status -> status | None -> failwith "the local is never ended"
+
+let show_status : Moves.status option -> string = function
+  | Some Holds -> "holds"
+  | Some Empty -> "empty"
+  | Some Maybe -> "maybe"
+  | None -> "untracked"
+
+let moves_program =
+  {|type Pair(first: String, second: String)
+
+fn text() -> String {
+  "text"
+}
+
+fn take(value: own String) {
+}
+
+fn pair() -> Pair {
+  Pair(first: text(), second: text())
+}
+|}
+
+let () =
+  test "a value moved out on every path holds nothing where its local ends" (fun () ->
+      let body, moves =
+        moves_of_g (moves_program ^ "fn g() {\n  let kept = text()\n  take(own kept)\n}\n")
+      in
+      expect_string ~expected:"empty"
+        (show_status (status_where_ended body moves { local = named body "kept"; steps = [] })));
+  test "a value moved out on one path may hold a value where its local ends, under a flag"
+    (fun () ->
+      let body, moves =
+        moves_of_g
+          (moves_program
+         ^ "fn g(moved: Bool) {\n  let kept = text()\n  if moved {\n    take(own kept)\n  }\n}\n")
+      in
+      let path : Moves.path = { local = named body "kept"; steps = [] } in
+      expect_string ~expected:"maybe" (show_status (status_where_ended body moves path));
+      if not (List.mem path (Moves.flagged moves)) then fail "the local has no flag");
+  test "a record a field of which was moved out still holds its other fields" (fun () ->
+      let body, moves =
+        moves_of_g (moves_program ^ "fn g() {\n  let both = pair()\n  take(own both.first)\n}\n")
+      in
+      let both = named body "both" in
+      expect_string ~expected:"holds"
+        (show_status (status_where_ended body moves { local = both; steps = [] }));
+      expect_string ~expected:"empty"
+        (show_status (status_where_ended body moves { local = both; steps = [ Field "first" ] })));
+  test "a field given a value again holds one" (fun () ->
+      let body, moves =
+        moves_of_g
+          (moves_program
+         ^ "fn g() {\n  var both = pair()\n  take(own both.first)\n  both.first = text()\n}\n")
+      in
+      expect_string ~expected:"holds"
+        (show_status
+           (status_where_ended body moves { local = named body "both"; steps = [ Field "first" ] })))

@@ -34,10 +34,10 @@ let locked_table = Generated.locked_table
 let any_table = Generated.any_table
 
 (* Binds the parameters of the code being lowered, each as [how] passes it.
-   The function owns each [own] one, apart from one with a default, which
-   may arrive holding nothing: [fill_defaults] gives that one an owner.
-   Gives each one's local, if it has one, with its mode, its type, and for
-   one with a default, its bit in the mask of defaults passed. *)
+   The function owns each [own] one, which the move analysis of its MIR
+   drops where it returns. Gives each one's local, if it has one, with its
+   mode, its type, and for one with a default, its bit in the mask of
+   defaults passed. *)
 let bind_parameters ?how st (body : Mir.body) =
   let defaults = ref 0 in
   List.map
@@ -52,7 +52,9 @@ let bind_parameters ?how st (body : Mir.body) =
           (List.assoc_opt local body.defaults)
       in
       let arrives, place =
-        Lowering.parameter st ?how ~owned:(mode = Own && bit = None) (Monomorphic.mode mode) ty
+        Lowering.parameter st ?how ~in_scope:false
+          ~owned:(mode = Own && bit = None)
+          (Monomorphic.mode mode) ty
       in
       (arrives, mode, ty, bit, place))
     body.parameters

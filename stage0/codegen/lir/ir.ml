@@ -347,7 +347,7 @@ let canonical (function_ : function_) =
         statements;
       ignore (map_terminator ~place:(rename number) ~block:identity terminator))
     order;
-  let locals = Array.make !next { ty = Raw Bool; name = None; borrowed = false } in
+  let locals = Array.make !next { ty = Raw Bool; name = None } in
   Array.iteri
     (fun old index -> if index >= 0 then locals.(index) <- function_.locals.(old))
     local_number;

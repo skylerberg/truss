@@ -1,0 +1,63 @@
+type SpawnsWhenCancelled(opened: UInt64, cancelled: List[UInt64])
+
+impl Tasks for SpawnsWhenCancelled {
+  fn open(mut self) -> UInt64 {
+    self.opened += 1
+    self.opened
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    work(item)
+    true
+  }
+
+  fn join(self, task_group: UInt64) {}
+
+  fn cancel(mut self, task_group: UInt64) -> Bool {
+    for other in self.cancelled {
+      if other == task_group {
+        return false
+      }
+    }
+    mut self.cancelled.push(task_group)
+    true
+  }
+
+  fn cancelled(self) -> Bool {
+    false
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    0
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}
+
+  fn wake(self, key: UInt64) {}
+
+  fn lock(self, mutex: UInt64) {}
+
+  fn unlock(self, mutex: UInt64) {}
+
+  fn yield_now(self) {}
+}
+
+fn first_of_two() -> List[String]
+  uses Tasks
+{
+  concurrent {
+    return ["first"]
+    {
+      return ["second"]
+    }
+  }
+}
+
+test "the first branch's list is the result, and the second's is dropped" {
+  var tasks = SpawnsWhenCancelled(opened: 0, cancelled: [])
+  let result = provide mut tasks {
+    first_of_two()
+  }
+  assert result.length() == 1
+  assert result[0] == "first"
+}

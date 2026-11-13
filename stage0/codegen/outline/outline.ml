@@ -234,7 +234,7 @@ let outline_fork env ~first_number (function_ : Lir.function_) =
               locals := info :: !locals;
               List.length !locals - 1
             in
-            let plain ty : Lir.local_info = { ty; name = None; borrowed = false } in
+            let plain ty : Lir.local_info = { ty; name = None } in
             let arrives =
               local { (plain (Lir.Raw (Nullable_pointer Opaque))) with name = Some "environment" }
             in

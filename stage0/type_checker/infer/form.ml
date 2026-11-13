@@ -628,7 +628,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
           (Call
              {
                callee = callee from_template.callee;
-               arguments = [ Passed { mode = Own; value = Value template; mark = None } ];
+               arguments = [ Passed { mode = Read; value = Value template; mark = None } ];
                lends = None;
                uses = from_template.uses;
              });

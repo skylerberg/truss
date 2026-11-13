@@ -38,7 +38,10 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
             }
     | None -> ()
   in
-  let trait_call trait name receiver self_type evidence arguments result : Tables.call =
+  (* A call of a trait's method with [arguments], each passed with [mode], the
+     mode of the method's parameter. *)
+  let trait_call ?(mode = Types.Read) trait name receiver self_type evidence arguments result :
+      Tables.call =
     {
       callee =
         Trait_method
@@ -46,12 +49,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       arguments =
         List.mapi
           (fun index (written : expression) ->
-            {
-              Tables.expression = written.id;
-              parameter_index = index;
-              mode = Types.Read;
-              mark = None;
-            })
+            { Tables.expression = written.id; parameter_index = index; mode; mark = None })
           arguments;
       omitted_defaults = [];
       uses = Types.no_capabilities;
@@ -136,7 +134,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                           match implements state part from with
                           | Some evidence ->
                               set_part index
-                                (trait_call from "from" Path.Static part evidence
+                                (trait_call ~mode:Own from "from" Path.Static part evidence
                                    [ part_expression ] part)
                           | None ->
                               report state No_impl part_expression.span

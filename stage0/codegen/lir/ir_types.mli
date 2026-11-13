@@ -157,7 +157,7 @@ type terminator =
   | Yield of { value : operand; resume : block; stop : block option }
 
 type basic_block = { statements : statement list; terminator : terminator }
-type local_info = { ty : ty; name : string option; borrowed : bool }
+type local_info = { ty : ty; name : string option }
 
 type function_ = {
   parameters : local list;

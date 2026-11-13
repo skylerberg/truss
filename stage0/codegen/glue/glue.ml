@@ -109,9 +109,8 @@ let drop glue ty =
              result = Discarded;
            })
   | _, Shared inner ->
-      (* The last reference drops the value and frees the block. The value
-         is dropped by a call of its type's drop function: drop elaboration
-         would remove a [Drop] of a place behind a local pointer. *)
+      (* The last reference drops the value, by a call of its type's drop
+         function, and frees the block. *)
       let pointer = Lir.Copy (value / Field "value") in
       let last = local builder (Raw Bool) in
       emit builder
@@ -198,9 +197,7 @@ let drop glue ty =
   instance (Drop ty) (build builder ~parameters:[ pointer ] ~result:None)
 
 (* The drop in slot 0 of an [any] table, which takes the value's pointer
-   untyped, as the slot is called. It calls the type's drop function. A
-   [Drop] statement would be removed: drop elaboration treats a place
-   behind a pointer that is not a parameter as uninitialized. *)
+   untyped, as the slot is called. It calls the type's drop function. *)
 let any_drop glue ty =
   let builder = create () in
   let untyped = local builder ~name:"value" (Raw (Pointer Opaque)) in
@@ -264,7 +261,7 @@ let copy glue ty =
     | Returned _ | Nothing -> None
   in
   let parameter = Convention.parameter glue.env Read ty in
-  let self_local = Option.map (fun ty -> local builder ~name:"self" ~borrowed:true ty) parameter in
+  let self_local = Option.map (fun ty -> local builder ~name:"self" ty) parameter in
   let self : Lir.place =
     match (parameter, self_local) with
     | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }
