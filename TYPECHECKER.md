@@ -98,9 +98,10 @@ its own, so a change to the rest invalidates nothing beyond the definition:
 
 - **A function's specification is a result apart from its body:** the core
   form of its parameters and contract, which callers' proofs read. It holds
-  the body only where a caller's proof reads it. A second result, the
-  exported specification, is what another package's proofs read, with a body
-  only for a `public transparent` function.
+  the body only of a method of a trait or an `impl`, whose contract is the
+  trait's. A second result, the exported specification, is what another
+  package's proofs read. It drops the bodies of an `impl`'s methods, so only
+  a trait's provided bodies reach another package.
 - **A shape lists its fields by name,** so reordering fields leaves it
   equal. The declaration order is a result of its own, which only a derived
   `Ordered` reads.

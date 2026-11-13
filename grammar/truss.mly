@@ -10,9 +10,9 @@
      `}`, and items inside braces are separated by NEWLINEs, not ended by
      them;
    - return the cost words (amortized, time, allocations, allocated_bytes,
-     calls, O, finite, and potential) as ordinary LOWER or UPPER names. The
-     rules below accept any name in their positions; the real parser checks
-     the spelling;
+     calls, O, finite, and potential) and the words of `assert ... by
+     bit_vector` as ordinary LOWER or UPPER names. The rules below accept
+     any name in their positions; the real parser checks the spelling;
    - return a whole string literal, interpolations included, as one STRING
      or TAGGED token. */
 
@@ -21,7 +21,7 @@
 %token ANY ASSERT BREAK CAPABILITY CONCURRENT CONTINUE COST DECREASES DERIVES ECHO ELSE
 %token ENSURES EXISTS FALSE FN FOR FORALL IF IMPL IN INDIRECT INTERNAL INVARIANT IS LAW LENDS
 %token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
-%token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRANSPARENT TRUE TYPE UNREACHABLE USE USES
+%token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNREACHABLE USE USES
 %token VAR WHILE WITH YIELD YIELDS
 
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
@@ -109,7 +109,6 @@ visibility_opt:
   | { () }
   | PUBLIC { () }
   | PUBLIC OPAQUE { () }
-  | PUBLIC TRANSPARENT { () }
   | INTERNAL { () }
 
 /* Functions */
@@ -368,6 +367,7 @@ statement:
   | CONCURRENT FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
+  | ASSERT expression LOWER LOWER { () }
   | YIELD expression { () }
 
 annotation_opt:
