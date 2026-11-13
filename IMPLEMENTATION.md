@@ -37,11 +37,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   to a new version of Unicode, change that list and run
   `stage0/tools/unicode/regenerate.sh`. The functions that search the
   library's tables are written by hand, in
-  `standard/text/unicode_tables/unicode_tables.truss`. Each function there that names a
-  table assigns its result to a `var`, so that its body is not functional
-  and callers know it by its contract. With a functional body the function
-  would be known by its definition, and the prover would copy the table
-  into every query of every caller.
+  `standard/text/unicode_tables/unicode_tables.truss`.
 - **`dune build`** builds everything, **`dune test`** runs the tests, and
   **`dune fmt`** formats the code with the ocamlformat version that
   `.ocamlformat` pins.

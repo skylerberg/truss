@@ -88,10 +88,6 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
          && before.stores_functions = after.stores_functions
        then []
        else [ Breaks "changed its parameters or its result" ]);
-      (if before.transparent && not after.transparent then
-         [ Breaks "is no longer `transparent`, so callers' proofs cannot read its body" ]
-       else if after.transparent && not before.transparent then [ Grows "is `transparent`" ]
-       else []);
       (if before.terminates && not after.terminates then
          [ Breaks "no longer promises to terminate" ]
        else if after.terminates && not before.terminates then [ Grows "promises to terminate" ]
@@ -123,22 +119,6 @@ let pulling ~before ~after path (old_signature : Types.signature) (new_signature
       else if is > was then [ Grows "can be pulled as a cursor in more cases" ]
       else []
   | _ -> []
-
-(* The proofs of callers in other packages read a [transparent] function's
-   body as its definition, so a changed body can invalidate those
-   proofs. *)
-let transparent_body ~(before : Types.signature) ~(after : Types.signature)
-    ~(before_definition : definition option) ~(after_definition : definition option) =
-  let written (definition : definition option) =
-    match definition with
-    | Some { kind = Function { body; _ }; _ } ->
-        Some (List.map Syntax_print.statement body.statements)
-    | _ -> None
-  in
-  if
-    before.transparent && after.transparent && written before_definition <> written after_definition
-  then [ Breaks "changed its body, which callers' proofs read" ]
-  else []
 
 let clauses_of (definition : definition option) =
   match definition with
@@ -312,8 +292,6 @@ let compare ~before ~after package =
                   @ contract ~before:(clauses_of before_definition)
                       ~after:(clauses_of after_definition)
                   @ pulling ~before ~after path old_signature new_signature
-                  @ transparent_body ~before:old_signature ~after:new_signature ~before_definition
-                      ~after_definition
               | Some (Type_interface old_type), Some (Type_interface new_type) ->
                   type_ ~before:old_type ~after:new_type ~before_definition ~after_definition
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->

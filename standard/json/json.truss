@@ -564,6 +564,13 @@ public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: USize = 128) -> Result
 
 fn escape_overhead(byte: UInt8) -> USize
   ensures result <= 5
+  ensures result == (if byte == 34 || byte == 92 || byte == 8 || byte == 9 || byte == 10 || byte == 12 || byte == 13 {
+      1
+    } else if byte < 32 {
+      5
+    } else {
+      0
+    })
   cost time O(1)
   cost allocations == 0
 {
@@ -652,13 +659,18 @@ public fn Value.from_float64(value: Float64) -> Option[Value]
   }
 }
 
-public transparent fn Value.is_null(self) -> Bool
+public fn Value.is_null(self) -> Bool
+  ensures result == (self is Null)
   cost time O(1)
 {
   self is Null
 }
 
-public transparent fn Value.as_bool(self) -> Option[Bool]
+public fn Value.as_bool(self) -> Option[Bool]
+  ensures identical(result, match self {
+      Bool(value) => Some(value)
+      _ => None
+    })
   cost time O(1)
 {
   match self {
@@ -667,7 +679,11 @@ public transparent fn Value.as_bool(self) -> Option[Bool]
   }
 }
 
-public transparent fn Value.as_int64(self) -> Option[Int64]
+public fn Value.as_int64(self) -> Option[Int64]
+  ensures identical(result, match self {
+      Number(value) => value.to_int64()
+      _ => None
+    })
   cost time O(1)
 {
   match self {
@@ -676,7 +692,11 @@ public transparent fn Value.as_int64(self) -> Option[Int64]
   }
 }
 
-public transparent fn Value.as_float64(self) -> Option[Float64]
+public fn Value.as_float64(self) -> Option[Float64]
+  ensures identical(result, match self {
+      Number(value) => Some(value.to_float64())
+      _ => None
+    })
   cost time O(1)
 {
   match self {
@@ -685,7 +705,11 @@ public transparent fn Value.as_float64(self) -> Option[Float64]
   }
 }
 
-public transparent fn Value.as_text(self) -> Option[StringSlice]
+public fn Value.as_text(self) -> Option[StringSlice]
+  ensures identical(result, match self {
+      String(value) => Some(value.slice())
+      _ => None
+    })
   cost time O(1)
 {
   match self {
@@ -694,7 +718,11 @@ public transparent fn Value.as_text(self) -> Option[StringSlice]
   }
 }
 
-public transparent fn Value.as_items(self) -> Option[Slice[Value]]
+public fn Value.as_items(self) -> Option[Slice[Value]]
+  ensures identical(result, match self {
+      Array(items) => Some(items.slice())
+      _ => None
+    })
   cost time O(1)
 {
   match self {

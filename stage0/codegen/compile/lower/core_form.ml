@@ -1778,7 +1778,7 @@ and statement st (node : Core.statement) =
           into st value new_value;
           let target = place st target in
           replace st target ty ~by:new_value
-      | Assert { value; _ } ->
+      | Assert { condition = { value; _ }; _ } ->
           let condition = operand st value in
           let failed = block st.builder and after = block st.builder in
           Lir_builder.branch st.builder condition ~yes:after ~no:failed;

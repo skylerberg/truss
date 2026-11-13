@@ -160,6 +160,7 @@ internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
 }
 
 public fn Path.is_absolute(self) -> Bool
+  ensures result == (self.text.length() > 0 && self.text.slice().byte(0) == 47)
   cost time O(1)
 {
   self.text.length() > 0 && self.text.slice().byte(0) == 47
@@ -172,6 +173,7 @@ public fn Path.join(self, part: StringSlice) -> Path
 }
 
 public fn Path.join_path(self, other: Path) -> Path
+  ensures identical(result, join_paths(self.text.slice(), second: other.text.slice()))
   cost time O(self.text.length() + other.text.length())
 {
   join_paths(self.text.slice(), second: other.text.slice())
@@ -530,13 +532,15 @@ public type Metadata(
 )
   derives Equal
 
-public transparent fn Metadata.is_file(self) -> Bool
+public fn Metadata.is_file(self) -> Bool
+  ensures result == (self.kind == FileKind.File)
   cost time O(1)
 {
   self.kind == FileKind.File
 }
 
-public transparent fn Metadata.is_directory(self) -> Bool
+public fn Metadata.is_directory(self) -> Bool
+  ensures result == (self.kind == FileKind.Directory)
   cost time O(1)
 {
   self.kind == FileKind.Directory
@@ -1062,6 +1066,7 @@ impl FromTemplate for Glob {
 }
 
 public fn is_valid_glob(literals: Slice[text::Literal]) -> Bool
+  ensures result == (literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_))
   cost time finite
 {
   literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)

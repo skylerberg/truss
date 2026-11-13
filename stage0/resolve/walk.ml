@@ -794,7 +794,7 @@ and statement state scope (statement_ : statement) =
   | Proof body ->
       block state { scope with specification = in_specification } body;
       scope
-  | Assert value | Yield value ->
+  | Assert { value; _ } | Yield value ->
       expression state scope value;
       scope
   | Statement_error -> scope

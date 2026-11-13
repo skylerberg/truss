@@ -25,6 +25,7 @@ public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]]
 }
 
 public fn collections::Deque[Element].length(self) -> USize
+  ensures result == (self.front.length() + self.back.length())
   cost time O(1)
 {
   self.front.length() + self.back.length()

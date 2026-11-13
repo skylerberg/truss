@@ -408,19 +408,6 @@ let () =
       | [ Capability _ ] -> ()
       | uses -> fail "%d uses" (List.length uses))
 
-(* Transparent functions *)
-
-let () =
-  test "a transparent function is one whose body is its definition" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.transparent_function_is_one_whose_body_is_its) ];
-      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_2
-        "types.not_a_definition";
-      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_3
-        "types.not_a_definition";
-      one_diagnostic Fixtures.Interface.transparent_function_is_one_whose_body_is_its_4
-        "types.not_a_definition")
-
 (* Law proofs *)
 
 let () =

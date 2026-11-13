@@ -279,10 +279,7 @@ let is_type_kind : named -> bool = function
   | Function | Constant | Theorem -> false
 
 let is_value_kind kind = not (is_type_kind kind)
-
-let is_public = function
-  | Public | Public_opaque | Public_transparent -> true
-  | Private | Internal -> false
+let is_public = function Public | Public_opaque -> true | Private | Internal -> false
 
 (* Whether code in [from] can see a definition of [module_] with this
    visibility. A private definition is visible to every file of its module. *)

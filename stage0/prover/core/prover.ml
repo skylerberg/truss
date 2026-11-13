@@ -32,12 +32,12 @@ let inherited database (path : Path.t) =
   | _ -> None
 
 (* An [impl]'s obligation to keep each law of its trait. *)
-let impl_laws ?reveal database (key : Names.key) source =
+let impl_laws database (key : Names.key) source =
   match Query.demand database Interface.Environment.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
     when not (Translate.impl_unfinished database key) ->
       [
-        Translate.laws ?reveal database source ~impl:key.path ~trait:interface.implements
+        Translate.laws database source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
             (Translate.law_proofs database (Path.package key.path) interface.implements
@@ -118,7 +118,7 @@ let integer_instances database (path : Path.t) =
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
-let prove ?reveal database (key : Names.key) =
+let prove database (key : Names.key) =
   match (declaration database key, Translate.source_at_key database key) with
   | _ when is_specification_module key -> Not_proven_here
   | Some declaration, Some source -> (
@@ -129,11 +129,10 @@ let prove ?reveal database (key : Names.key) =
            trait's type parameter, so it keeps the trait's clauses for every
            [impl] that keeps it. *)
         | (Function | Method), Function { body = None; _ } -> Not_proven_here
-        | Theorem, Function _ ->
-            Obligations (Translate.theorem ?reveal database source ~path:key.path)
+        | Theorem, Function _ -> Obligations (Translate.theorem database source ~path:key.path)
         | (Function | Method), Function { body = Some _; _ } -> (
             let prove_with substitution =
-              Translate.function_ ?reveal
+              Translate.function_
                 ~updating_helper:(Translate.is_updating_helper database key.path)
                 ?inherited:(inherited database key.path) ~substitution database source
                 ~path:key.path
@@ -168,11 +167,10 @@ let prove ?reveal database (key : Names.key) =
                            (fun (outcome : Translate.outcome) -> outcome.holes)
                            outcomes);
                   })
-        | Test, Test _ -> Obligations (Translate.test ?reveal database source ~path:key.path)
-        | Constant, Constant _ ->
-            Obligations (Translate.constant ?reveal database source ~path:key.path)
+        | Test, Test _ -> Obligations (Translate.test database source ~path:key.path)
+        | Constant, Constant _ -> Obligations (Translate.constant database source ~path:key.path)
         | Impl, _ ->
-            let outcomes = impl_laws ?reveal database key source in
+            let outcomes = impl_laws database key source in
             Obligations
               {
                 obligations =
@@ -183,20 +181,14 @@ let prove ?reveal database (key : Names.key) =
                   List.concat_map (fun (outcome : Translate.outcome) -> outcome.holes) outcomes;
               }
         | Type, Type { invariants = _ :: _; _ } | Type, Type { potential = Some _; _ } ->
-            Obligations (Translate.type_ ?reveal database source ~path:key.path)
+            Obligations (Translate.type_ database source ~path:key.path)
         | _ -> Not_proven_here
       with
       | Translate.Unsupported (span, message) -> Unsupported (span, message)
       | Translate.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
   | _ -> Not_proven_here
 
-let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key (prove ?reveal:None)
-
-(* A definition's obligations with every callee read as its own package
-   reads it, hidden bodies included, in the same order as its own: asked
-   of only where one of them is not proven and names a hidden callee. *)
-let revealed_proof =
-  Query.query ~phase:Phases.proofs ~name:"revealed_proof" ~show:Names.show_key (prove ~reveal:true)
+let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key prove
 
 (* A value from the solver's model, written as Truss writes it: a negative
    number with its sign, and a datatype's value as its variant or record,
@@ -372,28 +364,10 @@ let clamp_to_definition database (key : Names.key) (span : span) =
   | Some text when span.stop <= String.length text -> span
   | _ -> Syntax.Span.make 0 0
 
-(* Bitwise operations, exactly. A query proves bitwise facts first from
-   the few facts the prover states about [&], [|], [^], [~], and shifts;
-   when it does not, and it mentions any, it is asked once more with each
-   of them defined exactly, as the operation on its operands' bits of
-   their type's width, which the solver decides by bit-blasting. A
-   definition gives the operation's semantics, so the second query is
-   equivalent to the first, and its answer is as sound. *)
 (* An obligation's answer: the solver's, or the result of running the code
    that decides it, or that it timed out, or none yet, while a response it
-   needs is pending. [Solved_hidden] is an answer that is not a proof,
-   where the query with the definitions of the callees whose bodies are
-   hidden here proves. *)
-type answer =
-  | Solved of Solver.answer
-  | Solved_hidden of Solver.answer
-  | Ran_true
-  | Ran_false
-  | Run_timed_out
-  | Pending_answer
-
-let proven = function Solved Proven | Ran_true -> true | _ -> false
-
+   needs is pending. *)
+type answer = Solved of Solver.answer | Ran_true | Ran_false | Run_timed_out | Pending_answer
 type run = Template_check of Translate.evaluation | Call of Translate.known_call
 type run_result = Returned of Z.t | Timed_out | Not_run
 
@@ -404,143 +378,19 @@ type evaluator = { code_key : run -> string option; run : run -> run_result }
 
 let no_evaluator = { code_key = (fun _ -> None); run = (fun _ -> Not_run) }
 
-let bitwise_operations =
-  [
-    "and";
-    "or";
-    "xor";
-    "complement";
-    "shift_left";
-    "shift_right";
-    "rotate_left";
-    "rotate_right";
-    "swap_bytes";
-  ]
-
-let bitwise_of : Logic.symbol -> _ = function
-  | Opaque_operation { operation; integer = Some (bits, signed); _ }
-    when List.mem operation bitwise_operations ->
-      Some (operation, bits, signed)
-  | _ -> None
-
-let exactly (query : Logic.query) =
-  let bitwise_terms = ref [] in
-  let rec walk bound = function
-    | Logic.Apply (name, arguments) as term ->
-        (if bitwise_of name <> None && not (List.mem_assoc term !bitwise_terms) then
-           let named = List.filter (fun (symbol, _) -> Logic.mentions [ symbol ] term) bound in
-           bitwise_terms := (term, named) :: !bitwise_terms);
-        List.iter (walk bound) arguments
-    | Logic.Forall (symbols, body) | Logic.Exists (symbols, body) -> walk (symbols @ bound) body
-    | term -> List.iter (walk bound) (Logic.arguments term)
-  in
-  List.iter (walk []) (query.goal :: query.facts);
-  let definition term =
-    match term with
-    | Logic.Apply (name, arguments) -> (
-        match (bitwise_of name, arguments) with
-        | Some (operation, bits, signed), first :: rest ->
-            let bits_of value = Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
-            let operand_bits = bits_of first in
-            let result =
-              match (operation, rest) with
-              | "complement", _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
-              | "and", [ second_operand ] ->
-                  Some (Logic.Operation ("bvand", [ operand_bits; bits_of second_operand ]))
-              | "or", [ second_operand ] ->
-                  Some (Logic.Operation ("bvor", [ operand_bits; bits_of second_operand ]))
-              | "xor", [ second_operand ] ->
-                  Some (Logic.Operation ("bvxor", [ operand_bits; bits_of second_operand ]))
-              | "shift_left", [ second_operand ] ->
-                  Some (Logic.Operation ("bvshl", [ operand_bits; bits_of second_operand ]))
-              | "shift_right", [ second_operand ] ->
-                  Some
-                    (Logic.Operation
-                       ( (if signed then "bvashr" else "bvlshr"),
-                         [ operand_bits; bits_of second_operand ] ))
-              | ("rotate_left" | "rotate_right"), [ second_operand ] ->
-                  (* By the amount modulo the width, with the bits that leave one
-                     end coming in at the other. *)
-                  let by = bits_of (Logic.Operation ("mod", [ second_operand; Logic.int bits ])) in
-                  let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
-                  let towards, back =
-                    if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
-                  in
-                  Some
-                    (Logic.Operation
-                       ( "bvor",
-                         [
-                           Logic.Operation (towards, [ operand_bits; by ]);
-                           Logic.Operation (back, [ operand_bits; rest ]);
-                         ] ))
-              | "swap_bytes", _ ->
-                  let byte index =
-                    Logic.Operation
-                      ( Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index),
-                        [ operand_bits ] )
-                  in
-                  let bytes = List.init (bits / 8) byte in
-                  Some
-                    (List.fold_left
-                       (fun swapped next -> Logic.Operation ("concat", [ swapped; next ]))
-                       (List.hd bytes) (List.tl bytes))
-              | _ -> None
-            in
-            Option.map
-              (fun result ->
-                let unsigned = Logic.Operation ("bv2nat", [ result ]) in
-                let value =
-                  if signed then
-                    let half = Logic.Integer (Z.shift_left Z.one (bits - 1)) in
-                    Logic.ite
-                      (Logic.Operation (">=", [ unsigned; half ]))
-                      (Logic.Operation ("-", [ unsigned; Logic.Integer (Z.shift_left Z.one bits) ]))
-                      unsigned
-                  else unsigned
-                in
-                Logic.equal term value)
-              result
-        | _ -> None)
-    | _ -> None
-  in
-  (* A term under a quantifier that names its bound symbols is defined for
-     each of their values. *)
-  let defined (term, named) =
-    Option.map
-      (fun definition -> if named = [] then definition else Logic.Forall (named, definition))
-      (definition term)
-  in
-  match List.filter_map defined (List.rev !bitwise_terms) with
-  | [] -> None
-  | definitions -> Some { query with facts = query.facts @ definitions }
-
-(* Which of an obligation's queries is asked: as it was made, or with its
-   bitwise operations defined exactly, either of those without its
-   callees' definitions, or with the definitions of the callees whose
-   bodies are hidden here. *)
-type variant = Plain | Exact | Alone | Alone_exact | Revealed
-
 (* The oracles a definition's proof is decided by: the solver, of one of
-   its obligations' queries, by the obligation's index, the choice of
-   constants for its bounds, the variant, and whether a counterexample
-   gives the locals too; and the evaluator, of a template's check and of
-   the values of the known calls. A definition's outcome is derived from
-   their responses. *)
+   its obligations' queries, by the obligation's index and whether a
+   counterexample gives the locals too; and the evaluator, of a template's
+   check and of the values of the known calls. A definition's outcome is
+   derived from their responses. *)
 type oracles = {
-  solve :
-    index:int ->
-    choice:(Logic.symbol * (Z.t * Z.t)) list ->
-    variant:variant ->
-    with_locals:bool ->
-    solver_response;
+  solve : index:int -> with_locals:bool -> solver_response;
   check_template : Translate.evaluation -> run_result;
   call : Translate.known_call -> Z.t option;
 }
 
-(* The solver's response to one query: its answer; none yet, so a search
-   that would ask more after it stops there instead; or that the query does
-   not exist. *)
-and solver_response = Answered of Solver.answer | Unanswered | No_query
+(* The solver's response to one query: its answer, or none yet. *)
+and solver_response = Answered of Solver.answer | Unanswered
 
 (* The values of the calls a query mentions that running them gave, as
    facts, which are only as true as the compiled code, which the prover
@@ -556,141 +406,39 @@ let call_facts ~call (obligation : Translate.obligation) =
         (call known))
     obligation.known_calls
 
-(* An obligation's query, or another of its own, with a choice of
-   constants for its bounds. *)
-let query_with ?query ~call (obligation : Translate.obligation) choice =
-  let query = Option.value query ~default:obligation.query in
-  let pins =
-    List.map
-      (fun (constants : Costs.constants) ->
-        Costs.pin constants (List.assoc constants.factor choice))
-      obligation.constants
-  in
-  (* The same query, not a copy, when nothing is added, so the solver finds
-     its earlier answer. *)
-  match pins @ call_facts ~call obligation with
-  | [] -> query
-  | added -> { query with facts = query.facts @ added }
+(* An obligation's query, with the results of running its calls. The same
+   query, not a copy, when nothing is added, so the solver finds its earlier
+   answer. *)
+let query_of ~call (obligation : Translate.obligation) =
+  match call_facts ~call obligation with
+  | [] -> obligation.query
+  | added -> { obligation.query with facts = obligation.query.facts @ added }
 
-(* Every choice of a pair of constants for each bound the obligations
-   mention, in the order they are tried. *)
-let choices (obligations : Translate.obligation list) =
-  let groups =
-    List.fold_left
-      (fun groups (obligation : Translate.obligation) ->
-        List.fold_left
-          (fun groups (constants : Costs.constants) ->
-            if List.exists (fun (group : Costs.constants) -> group.factor = constants.factor) groups
-            then groups
-            else groups @ [ constants ])
-          groups obligation.constants)
-      [] obligations
-  in
-  let rec all = function
-    | [] -> [ [] ]
-    | (constants : Costs.constants) :: rest ->
-        List.concat_map
-          (fun pair -> List.map (fun choice -> (constants.factor, pair) :: choice) (all rest))
-          constants.pairs
-  in
-  all groups
-
-(* An obligation's query of a variant, with a choice of constants, and
-   with the results of running its calls. *)
-let variant_query ~call (obligation : Translate.obligation) choice variant =
-  let query_of base = query_with ?query:base ~call obligation choice in
-  match variant with
-  | Plain -> Some (query_of None)
-  | Exact -> exactly (query_of None)
-  | Alone -> Option.map (fun query -> query_of (Some query)) obligation.contracts_alone
-  | Alone_exact ->
-      Option.bind obligation.contracts_alone (fun query -> exactly (query_of (Some query)))
-  | Revealed -> Some (query_of None)
-
-(* Each obligation's answer. One that mentions the constants of [O(...)]
-   bounds is asked with each choice of a pair for every bound in turn, the
-   same choice for all of them, since a recursive call assumes the bound
-   with the constants it is shown with; the first choice that proves them
-   all is taken, and if none does, the answers are the first choice's. *)
+(* Each obligation's answer. A clause that running code decides is decided
+   so, and the solver is never asked. Where the solver finds a
+   counterexample, the query is asked again for the values of the locals
+   there too, asked for only then, so that a query that proves keeps its
+   key. *)
 let answers (oracles : oracles) (obligations : Translate.obligation list) =
-  let solve index (obligation : Translate.obligation) choice =
-    (* A clause that running code decides is decided so, and the solver is
-       never asked. *)
-    match Option.map oracles.check_template obligation.evaluation with
-    | Some (Returned value) -> if Z.equal value Z.zero then Ran_false else Ran_true
-    | Some Timed_out -> Run_timed_out
-    | Some Not_run | None -> (
-        (* Each question is asked only once its dependencies are
-           answered: a pending response stops the search, which continues
-           once it is answered, rather than asking a question the answer may make
-           unneeded. *)
-        let ask variant ~with_locals = oracles.solve ~index ~choice ~variant ~with_locals in
-        let asked plain exact =
-          match ask plain ~with_locals:false with
-          | Answered Solver.Proven -> Some Solver.Proven
-          | Answered first -> (
-              match ask exact ~with_locals:false with
-              | Answered answer -> Some answer
-              | Unanswered -> None
-              | No_query -> Some first)
-          | Unanswered -> None
-          | No_query -> Some Solver.Out_of_steps
-        in
-        match (asked Plain Exact, obligation.contracts_alone) with
-        | None, _ -> Pending_answer
-        | Some Solver.Out_of_steps, Some _ -> (
-            (* Without its callees' definitions, a query is about their
-               contracts alone, which can be enough where unfolding is too
-               much for the solver. *)
-            match asked Alone Alone_exact with
-            | None -> Pending_answer
-            | Some Solver.Proven -> Solved Proven
-            | Some _ -> Solved Out_of_steps)
-        | Some (Solver.Counterexample _), _
-          when obligation.locals <> [] || obligation.decisions <> [] -> (
-            (* Where a counterexample is, the values of the locals there too,
-               asked for only now, so that a query that proves keeps its
-               key. *)
-            match ask Plain ~with_locals:true with
-            | Answered (Solver.Counterexample _ as answer) -> Solved answer
+  List.mapi
+    (fun index (obligation : Translate.obligation) ->
+      let answer =
+        match Option.map oracles.check_template obligation.evaluation with
+        | Some (Returned value) -> if Z.equal value Z.zero then Ran_false else Ran_true
+        | Some Timed_out -> Run_timed_out
+        | Some Not_run | None -> (
+            match oracles.solve ~index ~with_locals:false with
             | Unanswered -> Pending_answer
-            | Answered _ | No_query -> (
-                match asked Plain Exact with Some answer -> Solved answer | None -> Pending_answer))
-        | Some answer, _ -> Solved answer)
-  in
-  (* Where an obligation is not proven, whether seeing the bodies hidden
-     here would prove it, which is all its note about them is for. *)
-  let solve index (obligation : Translate.obligation) choice =
-    match solve index obligation choice with
-    | Solved ((Solver.Counterexample _ | Solver.Out_of_steps) as answer)
-      when obligation.hidden <> [] -> (
-        match oracles.solve ~index ~choice ~variant:Revealed ~with_locals:false with
-        | Answered Solver.Proven -> Solved_hidden answer
-        | Answered _ | No_query -> Solved answer
-        | Unanswered -> Pending_answer)
-    | answer -> answer
-  in
-  let indexed = List.mapi (fun index obligation -> (index, obligation)) obligations in
-  let bounded =
-    List.filter (fun (_, (obligation : Translate.obligation)) -> obligation.constants <> []) indexed
-  in
-  let all_choices = choices obligations in
-  (* The first choice that proves every bound, tried in order: a choice
-     with a pending answer stops the search there. *)
-  let chosen =
-    let rec first = function
-      | [] -> List.hd all_choices
-      | choice :: rest ->
-          let answers =
-            List.map (fun (index, obligation) -> solve index obligation choice) bounded
-          in
-          if List.for_all (fun answer -> proven answer) answers then choice
-          else if List.mem Pending_answer answers then choice
-          else first rest
-    in
-    first all_choices
-  in
-  List.map (fun (index, obligation) -> (obligation, solve index obligation chosen)) indexed
+            | Answered (Solver.Counterexample _ as plain)
+              when obligation.locals <> [] || obligation.decisions <> [] -> (
+                match oracles.solve ~index ~with_locals:true with
+                | Answered (Solver.Counterexample _ as answer) -> Solved answer
+                | Answered _ -> Solved plain
+                | Unanswered -> Pending_answer)
+            | Answered answer -> Solved answer)
+      in
+      (obligation, answer))
+    obligations
 
 (* An obligation's state: where it is, its goal, where it was not
    shown, the diagnostic that says why, and whether its proof trusts
@@ -742,69 +490,29 @@ let definition_states oracles database (key : Names.key) =
                 fixes = obligation.fixes;
               }
           in
-          (* A body that would have defined a callee is hidden from another
-             package's proofs unless the callee is [transparent]: named where
-             seeing it would prove the obligation. The bodies are revealed
-             together, so with several callees the proof may need only some
-             of them, and the note says so. *)
-          let answer, hidden_helps =
-            match answer with
-            | Solved_hidden answer -> (Solved answer, true)
-            | answer -> (answer, false)
-          in
-          let hidden =
-            let quoted callees = List.map (fun (name, _) -> "`" ^ name ^ "`") callees in
-            let transparent_fix callees =
-              match List.filter snd callees with
-              | [] -> ""
-              | markable when List.length markable = List.length callees ->
-                  if List.length callees = 1 then ", or make it a `public transparent fn`"
-                  else ", or make them `public transparent fn`s"
-              | markable ->
-                  Printf.sprintf ", or make %s a `public transparent fn`"
-                    (String.concat " or " (quoted markable))
-            in
-            match obligation.hidden with
-            | _ when not hidden_helps -> ""
-            | [] -> ""
-            | [ callee ] ->
-                Printf.sprintf
-                  " The body of %s is not visible in this package, and with it this would be \
-                   proven: give it an `ensures` that states the needed fact%s."
-                  (List.hd (quoted [ callee ]))
-                  (transparent_fix [ callee ])
-            | callees ->
-                Printf.sprintf
-                  " The bodies of %s are not visible in this package, and with all of them this \
-                   would be proven, though some may not be needed: give the needed ones an \
-                   `ensures` that states the needed fact%s."
-                  (String.concat ", " (quoted callees))
-                  (transparent_fix callees)
-          in
           ( {
               code = obligation.code;
               span;
               shows = obligation.message;
               failure =
                 (match answer with
-                | Solved Proven | Solved_hidden _ | Ran_true | Pending_answer -> None
+                | Solved Proven | Ran_true | Pending_answer -> None
                 | Ran_false -> failed " Running it on this template's text gives `false`."
                 | Run_timed_out ->
                     failed
                       " Running it on this template's text took longer than the time limit, so it \
                        is not known."
                 | Solved (Counterexample values) ->
-                    failed
-                      (counterexample (Logic.members obligation.query) obligation values ^ hidden)
+                    failed (counterexample (Logic.members obligation.query) obligation values)
                 | Solved Out_of_steps ->
                     failed
                       (" The solver ran out of steps, so it may hold but needs help: a `proof` \
                         block or a theorem."
-                      ^ (if Logic.untriggered obligation.query then
-                           " A quantified fact it may need has no term for the solver to use it \
-                            by, so an `assert` that names the term it is needed for may be enough."
-                         else "")
-                      ^ hidden));
+                      ^
+                      if Logic.untriggered obligation.query then
+                        " A quantified fact it may need has no term for the solver to use it by, \
+                         so an `assert` that names the term it is needed for may be enough."
+                      else ""));
               trusts_compiled_code =
                 (match answer with
                 | Ran_true -> true
@@ -814,16 +522,9 @@ let definition_states oracles database (key : Names.key) =
             obligation.cited ))
         (answers oracles outcome.obligations)
 
-(* One query an obligation may ask: the obligation's index, the choice of
-   constants for its bounds, the variant, and whether a counterexample
-   gives the locals too. *)
-type question = {
-  definition : Names.key;
-  index : int;
-  choice : (Logic.symbol * (Z.t * Z.t)) list;
-  variant : variant;
-  with_locals : bool;
-}
+(* One query an obligation may ask: the obligation's index, and whether a
+   counterexample gives the locals too. *)
+type question = { definition : Names.key; index : int; with_locals : bool }
 
 let show_question question =
   Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
@@ -883,16 +584,7 @@ let runs =
 let question_query database question =
   match Query.demand database proof question.definition with
   | Obligations outcome -> (
-      (* The question of whether seeing the hidden bodies would prove it
-         is asked of the same obligation as its revealed proof made it. *)
-      let obligations =
-        if question.variant = Revealed then
-          match Query.demand database revealed_proof question.definition with
-          | Obligations revealed -> revealed.obligations
-          | Not_proven_here | Unsupported _ -> []
-        else outcome.obligations
-      in
-      match List.nth_opt obligations question.index with
+      match List.nth_opt outcome.obligations question.index with
       | Some obligation ->
           let values =
             List.map fst obligation.values
@@ -909,9 +601,7 @@ let question_query database question =
                    obligation.decisions)
             else []
           in
-          Option.map
-            (fun query -> (query, values, terms))
-            (variant_query ~call:(call_value database) obligation question.choice question.variant)
+          Some (query_of ~call:(call_value database) obligation, values, terms)
       | None -> None)
   | Not_proven_here | Unsupported _ -> None
 
@@ -944,10 +634,10 @@ let outcome =
           let oracles =
             {
               solve =
-                (fun ~index ~choice ~variant ~with_locals ->
-                  let question = { definition = key; index; choice; variant; with_locals } in
+                (fun ~index ~with_locals ->
+                  let question = { definition = key; index; with_locals } in
                   match Query.demand database question_request question with
-                  | None -> No_query
+                  | None -> Answered Out_of_steps
                   | Some request -> (
                       let oracle_request = Solve (question, request) in
                       match Query.find database oracle_response (request_key oracle_request) with
@@ -1021,11 +711,12 @@ let rerun_changed (evaluator : evaluator) database keys =
           None
       | Some _ | None -> Some (request_key (Run run), run_response evaluator run code_key))
 
-(* Each definition of the modules decided: the runs whose code changed are
+(* Each definition of the files decided: the runs whose code changed are
    run again, the definitions' outcomes are asked for together, their
    pending requests are sent to the oracles together, and so on until none
-   is pending, which takes a round or two, since an obligation asks again
-   only after an answer such as running out of steps. *)
+   is pending, which takes a round or two, since a query waits for the runs
+   whose values it holds, and a counterexample asks again for the values of
+   the locals. *)
 let solve_ahead ?(evaluator = no_evaluator) ~record database solver files =
   let keys =
     List.concat_map

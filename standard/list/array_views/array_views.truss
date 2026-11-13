@@ -1,6 +1,5 @@
 use standard::core
 use standard::list
-use standard::list::slice
 
 public fn Array[Element, count: USize].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -142,7 +141,8 @@ public fn Array[Element: Equal, count: USize].find_slice(self, needle: Slice[Ele
   self.slice().find_slice(needle)
 }
 
-public transparent fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
+public fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
+  ensures result == (self.slice().is_sorted())
   cost time finite
 {
   self.slice().is_sorted()
@@ -429,9 +429,6 @@ public fn Array[Element: Ordered, count: USize].sort(mut self)
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
   mut self[..].sort()
-  proof {
-    slice::sorted_from_model(self.slice(), bound: self.length())
-  }
 }
 
 public fn Array[Element, count: USize].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))

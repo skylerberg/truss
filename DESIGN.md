@@ -32,15 +32,14 @@ behind these decisions, see [GOALS.md](GOALS.md).
   interface, which callers' types depend on, and its contract, which only
   callers' proofs depend on. Strengthening an `ensures` re-proves callers but
   type-checks none of them again.
-- **A body is part of its package's interface only when the function is
-  `transparent`.** A body that other packages' proofs rely on would
-  otherwise be part of the interface without being in the signature, and a
-  change to it could break their proofs with no change that a reader of
-  signatures sees. Verus makes the same split with `open` and `closed`. A
-  public contract and a `transparent` body name only public definitions,
-  because the contract of a function that other packages cannot see is not
-  compared between releases. A `transparent` body may read a hidden field,
-  since a change to the field is a change to the body, which is compared.
+- **A function's body is never part of its package's interface.** Proofs in
+  every package read its contract, which is in the signature and compared
+  between releases, so a change to a body breaks no proof that a reader of
+  signatures would not see break. A public `requires` and `cost` name only
+  public definitions, because the contract of a function that other packages
+  cannot see is not compared between releases. An `ensures` may name a
+  private function, so that callers in the package can know a result in
+  terms of private helpers.
 - **The order of a type's fields is not part of its shape.** The compiler
   chooses the layout, and a record with more than one field is built with
   named arguments, so field order is observable only to a derived `Ordered`.
@@ -1029,14 +1028,23 @@ Everything a program promises is proven at compile time.
 
 ### Bodies and contracts in proofs
 
-- **A functional body is its function's definition,** as Dafny's
-  `function`s are. A body with a loop has no meaning the solver could use
-  without a loop invariant, which would restate the contract.
-- **No keyword marks either kind.** The body already says which it is.
-  Whether a body is read is a fact callers' proofs depend on, so their traces
-  record it, and the tools show it with the signature.
-- **A definition is read only where everything it reads is visible,** so
-  `opaque` keeps the representation private from proofs too.
+- **A caller reads a function's contract, never its body.** A function whose
+  body is its meaning, such as `is_sorted`, states the body in its `ensures`,
+  so the dependency is in the signature, where a reader and the
+  compatibility check see it, and editing the body re-proves the function
+  alone. Verus knows an `exec fn` by its contract in the same way; Truss needs
+  no second, specification-only function to state what it means.
+- **A method of a trait or an `impl` is known by its body.** Its contract is
+  the trait's, which says nothing of the type it is for, so the body is what
+  the method means: `Int64.compare` is the integers' order.
+- **A clause is read only where everything it reads is visible.** An
+  `ensures` that reads an opaque type's fields is a fact for callers inside
+  the type's package and no fact elsewhere, so `opaque` keeps the
+  representation private from proofs too.
+- **Bit-level facts are asked for in the source.** An
+  `assert ... by bit_vector` is proven alone, for every value of what it
+  names, by bit-blasting, as Verus's `by (bit_vector)` is. Bitwise operations
+  are otherwise known by a few facts, so no query is asked twice.
 - **Definitions must be well founded,** which the `time` clause and the rules
   of [Termination](#termination) guarantee.
 - **Quantifiers are expressions in code too.** The binder carries its range,

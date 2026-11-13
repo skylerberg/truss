@@ -231,7 +231,8 @@ public type ExitStatus =
   | Signaled(signal: Signal)
   derives Equal
 
-public transparent fn ExitStatus.is_success(self) -> Bool
+public fn ExitStatus.is_success(self) -> Bool
+  ensures result == (self is Exited(0))
   cost time O(1)
 {
   self is Exited(0)

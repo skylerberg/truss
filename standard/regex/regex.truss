@@ -37,7 +37,8 @@ public type Match(start: USize, end: USize)
   derives Equal
   invariant start <= end
 
-public transparent fn Match.length(self) -> USize
+public fn Match.length(self) -> USize
+  ensures result == (self.end - self.start)
   cost time O(1)
 {
   self.end - self.start
@@ -128,6 +129,7 @@ fn failure(kind: PatternErrorKind, offset: USize) -> Option[ParseError]
 }
 
 fn word_of(count: USize) -> UInt32
+  ensures result == (if count > 4294967295 { 4294967295 } else { intrinsic::convert(count) })
   cost time O(1)
 {
   if count > 4294967295 { 4294967295 } else { intrinsic::convert(count) }
@@ -1356,6 +1358,10 @@ public fn Regex.find_from(self, text: StringSlice, offset: USize) -> Option[Matc
     Some(matched) => offset <= matched.start && matched.end <= text.length()
     None => true
   }
+  ensures identical(result, match self.run(text, from: offset, whole: false) {
+      Some(slots) => match_from(slots.slice(), text: text, offset: offset)
+      None => None
+    })
   cost time finite
 {
   match self.run(text, from: offset, whole: false) {
@@ -1365,6 +1371,7 @@ public fn Regex.find_from(self, text: StringSlice, offset: USize) -> Option[Matc
 }
 
 public fn Regex.is_match(self, text: StringSlice) -> Bool
+  ensures result == (self.find_from(text, offset: 0) is Some(_))
   cost time finite
 {
   self.find_from(text, offset: 0) is Some(_)

@@ -187,6 +187,9 @@ fn compress(value: UInt64, bits: USize) -> UInt64 {
   if bits == 0 || bits > 11 {
     return 0
   }
+  proof {
+    assert power(2, bits) <= power(2, 11)
+  }
   let shifted = ((value & 4095) << bits) + 1664
   ((shifted * 330282857) >> 40) & ((1 << bits) - 1)
 }
