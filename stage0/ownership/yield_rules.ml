@@ -1,6 +1,6 @@
-(* The rules on [yield], checked on the core form: a lending method yields
-   exactly once on every path, and only some yielding methods can be pulled
-   as cursors. *)
+(* The rules on [yield]: a lending method yields exactly once on every path
+   of its MIR, and only some yielding methods can be pulled as cursors,
+   which the core form's loops over their callees decide. *)
 open Context
 
 (* How many times a path has yielded. *)
@@ -8,80 +8,41 @@ type count = Zero | One | Many
 
 let add left right = match (left, right) with Zero, other | other, Zero -> other | _ -> Many
 
-(* The yield counts at the ends of the paths through a body. *)
-let yield_counts (body : Core.block) : count list =
-  let returned = ref [] in
-  (* For each enclosing loop, innermost first: the counts of the paths that
-     left it by [break], and of those that ended an iteration by
-     [continue]. *)
-  let loops = ref [] in
-  let rec block counts (body : Core.block) =
-    let counts = List.fold_left statement counts body.statements in
-    match body.value with Some value -> evaluated counts value | None -> counts
-  (* An expression statement. A path that reaches [todo] is incomplete, so
-     it is not reported. A path through an expression of type [Never]
-     diverges, so it has no end. *)
-  and evaluated counts (value : Core.expression) =
-    match value.kind with
-    | Todo -> List.map (fun _ -> One) counts
-    | _ ->
-        let after = expression counts value in
-        if value.type_ = Types.Never then [] else after
-  and statement counts (node : Core.statement) =
-    match node.kind with
-    | Yield _ -> List.map (fun count -> add count One) counts
-    | Evaluate value | Let { value = Value value; _ } -> evaluated counts value
-    | For { body; _ } | While { body; _ } ->
-        let broken = ref [] and continued = ref [] in
-        loops := (broken, continued) :: !loops;
-        (* The paths at the start of an iteration: those that reach the
-           loop, and those that reach the end of the body or a [continue].
-           A body whose every path returns adds none, so the paths after
-           the loop are those that reached it. There are three counts, so
-           the set stops growing. *)
-        let rec before_iteration reached =
-          continued := [];
-          let ended = block reached body in
-          let next = List.sort_uniq compare (reached @ ended @ !continued) in
-          if next = reached then reached else before_iteration next
-        in
-        let reached = before_iteration (List.sort_uniq compare counts) in
-        loops := List.tl !loops;
-        List.sort_uniq compare (reached @ !broken)
-    (* Every branch runs, so the yields of the branches add up. *)
-    | Parallel branches | Concurrent branches -> List.fold_left statement counts branches
-    | Let { value = Place _; _ } | Assign _ | Compound_assign _ | Proof _ | Assert _ -> counts
-  and expression counts (value : Core.expression) =
-    match value.kind with
-    | If { then_; else_; _ } ->
-        List.sort_uniq compare
-          (block counts then_ @ match else_ with Some else_ -> block counts else_ | None -> counts)
-    | Match { arms; _ } ->
-        List.sort_uniq compare
-          (List.concat_map (fun (arm : Core.arm) -> block counts arm.body) arms)
-    | Return _ ->
-        returned := counts @ !returned;
-        []
-    | Break -> (
-        match !loops with
-        | (broken, _) :: _ ->
-            broken := counts @ !broken;
-            []
-        | [] -> counts)
-    | Continue -> (
-        match !loops with
-        | (_, continued) :: _ ->
-            continued := counts @ !continued;
-            []
-        | [] -> counts)
-    | Block body -> block counts body
-    | _ -> counts
+(* The yield counts at the returns of a body: a forward dataflow over its
+   blocks, from no yield at the entry. A [yield] adds one; an iteration's
+   end goes back to its [for], which may run its body again or end, so the
+   counts grow until they stop changing, which, with three counts, they
+   do. A path that reaches [todo] is incomplete and one that reaches
+   [unreachable] has no end, so neither is counted. No [yield] runs in a
+   task, so an early exit from tasks takes its counts to where it goes. *)
+let yield_counts (body : Mir.body) : count list =
+  let reaching = Array.make (Array.length body.blocks) [] in
+  let iteration_loops = Mir.iteration_loops body in
+  let returned = ref [] and pending = Queue.create () in
+  let flow block counts =
+    let merged = List.sort_uniq compare (reaching.(block) @ counts) in
+    if merged <> reaching.(block) then begin
+      reaching.(block) <- merged;
+      Queue.add block pending
+    end
   in
-  let ended = block [ Zero ] body in
-  ended @ !returned
+  flow 0 [ Zero ];
+  while not (Queue.is_empty pending) do
+    let block = Queue.pop pending in
+    let counts = reaching.(block) in
+    match body.blocks.(block).terminator with
+    | Yield { resume; _ } -> flow resume (List.map (add One) counts)
+    | Return _ | Exit_tasks { exit = Exit_return _; _ } -> returned := counts @ !returned
+    | Exit_tasks { exit = Exit_to target; _ } -> flow target counts
+    | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
+        Option.iter (fun loop -> flow loop counts) (Hashtbl.find_opt iteration_loops block)
+    | (Goto _ | Branch _ | Switch_variant _ | For _ | Todo | Unreachable) as terminator ->
+        List.iter (fun target -> flow target counts) (Mir.successors terminator)
+  done;
+  List.sort_uniq compare !returned
 
 (* A lending method yields exactly once on every path. *)
-let check_yields_once context (body : Core.block) ~(name : Syntax.span) =
+let check_yields_once context (body : Mir.body) ~(name : Syntax.span) =
   let counts = yield_counts body in
   if List.mem Zero counts then
     report context Yield_count name

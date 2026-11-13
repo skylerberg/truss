@@ -1020,26 +1020,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       firsts.(index) <- (if index = 0 then entry else first);
       lasts.(index) <- (match builder.last with Some last -> last | None -> first))
     body.blocks;
-  (* The innermost [For] whose body reaches each [Iteration_end]. *)
-  let each_of = Hashtbl.create 4 in
-  Array.iteri
-    (fun index (block : Mir.basic_block) ->
-      match block.terminator with
-      | For { body = inside; after; _ } ->
-          let visited = Hashtbl.create 8 in
-          let rec visit block =
-            if block <> after && not (Hashtbl.mem visited block) then begin
-              Hashtbl.replace visited block ();
-              match body.blocks.(block).terminator with
-              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
-                  Hashtbl.replace each_of block index
-              | For { after = inner_after; _ } -> visit inner_after
-              | terminator -> List.iter visit (Mir.successors terminator)
-            end
-          in
-          visit inside
-      | _ -> ())
-    body.blocks;
+  let each_of = Mir.iteration_loops body in
   Array.iteri
     (fun index (block : Mir.basic_block) ->
       let from = lasts.(index) in

@@ -1,6 +1,6 @@
 type count = Zero | One | Many
 
-val check_yields_once : Context.context -> Core.block -> name:Syntax.span -> unit
+val check_yields_once : Context.context -> Mir.body -> name:Syntax.span -> unit
 
 type pulling = Pullable | Yields_mut | Recursive | Yields_places
 

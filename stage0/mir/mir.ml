@@ -1797,6 +1797,30 @@ and successors = function
       @ match tasks with innermost :: _ -> Option.to_list innermost.task_end | [] -> [])
   | Iteration_end | Return _ | Unreachable | Todo -> []
 
+(* The innermost [For] whose body each [Iteration_end] ends: the one that
+   reaches it from its body without passing a [For] nested in that body. *)
+let iteration_loops (body : body) =
+  let loops = Hashtbl.create 4 in
+  Array.iteri
+    (fun index (block : basic_block) ->
+      match block.terminator with
+      | For { body = inside; after; _ } ->
+          let visited = Hashtbl.create 8 in
+          let rec visit block =
+            if block <> after && not (Hashtbl.mem visited block) then begin
+              Hashtbl.replace visited block ();
+              match body.blocks.(block).terminator with
+              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
+                  Hashtbl.replace loops block index
+              | For { after = inner_after; _ } -> visit inner_after
+              | terminator -> List.iter visit (successors terminator)
+            end
+          in
+          visit inside
+      | _ -> ())
+    body.blocks;
+  loops
+
 let of_definition (definition : Core.definition) =
   let code =
     match definition with
