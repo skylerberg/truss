@@ -1396,7 +1396,7 @@ let () =
           [
             ( "main.truss",
               "use standard::html\n\n\
-               fn page(name: String, link: String) -> html::Html {\n\
+               fn page(name: own String, link: own String) -> html::Html {\n\
               \  html::Html\"<p title='${name.copy()}'><a href=\\\"${own link}\\\">${own \
                name}</a></p>\"\n\
                }\n" );
@@ -1416,7 +1416,7 @@ let () =
                 ( "main.truss",
                   Printf.sprintf
                     "use standard::html\n\n\
-                     fn page(code: String) -> html::Html {\n\
+                     fn page(code: own String) -> html::Html {\n\
                     \  html::Html\"%s\"\n\
                      }\n"
                     template );

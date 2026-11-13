@@ -230,7 +230,7 @@ let () =
   expect_body "a tagged string becomes a call of `from_template`"
     Fixtures.Core.tagged_string_becomes_a_call_of_from_template
     "{ template(\"hey \", \"!\") call FromTemplate.from_template for Shout by app::main::impl \
-     FromTemplate for Shout(own Template[String](literals: { let var own storage = \
+     FromTemplate for Shout(Template[String](literals: { let var own storage = \
      intrinsic::storage_with_capacity(2); intrinsic::storage_push(mut place storage, own \
      Literal(text: \"hey \")); intrinsic::storage_push(mut place storage, own Literal(text: \
      \"!\")); standard::list::List.from_storage[Literal](own storage) }, parts: { let var own \
