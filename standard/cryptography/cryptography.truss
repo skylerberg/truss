@@ -2507,15 +2507,22 @@ internal fn Poly1305.finish(self) -> Array[UInt8, 16]
   let f1 = w1 + pad1 + (f0 >> 32)
   let f2 = w2 + pad2 + (f1 >> 32)
   let f3 = w3 + pad3 + (f2 >> 32)
+  tag_bytes(f0, second: f1, third: f2, fourth: f3)
+}
+
+fn tag_bytes(first: UInt64, second: UInt64, third: UInt64, fourth: UInt64) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
   var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let count: USize = 4
   for index in 0..count
     cost allocations == 0
   {
-    tag[index] = intrinsic::convert((f0 >> (8 * index)) & 255)
-    tag[index + 4] = intrinsic::convert((f1 >> (8 * index)) & 255)
-    tag[index + 8] = intrinsic::convert((f2 >> (8 * index)) & 255)
-    tag[index + 12] = intrinsic::convert((f3 >> (8 * index)) & 255)
+    tag[index] = intrinsic::convert((first >> (8 * index)) & 255)
+    tag[index + 4] = intrinsic::convert((second >> (8 * index)) & 255)
+    tag[index + 8] = intrinsic::convert((third >> (8 * index)) & 255)
+    tag[index + 12] = intrinsic::convert((fourth >> (8 * index)) & 255)
   }
   tag
 }

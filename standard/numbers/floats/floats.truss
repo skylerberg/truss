@@ -178,6 +178,54 @@ impl Ordered for Float64 {
   }
 }
 
+theorem float64_less_then_less(first: Float64, second: Float64, third: Float64)
+  requires intrinsic::less(first, right: second)
+  requires intrinsic::less(second, right: third)
+  ensures first <= third
+  cost time finite
+{
+}
+
+theorem float64_less_then_equal(first: Float64, second: Float64, third: Float64)
+  requires intrinsic::less(first, right: second)
+  requires intrinsic::equal(second, right: third)
+  ensures first <= third
+  cost time finite
+{
+}
+
+theorem float64_equal_then_less(first: Float64, second: Float64, third: Float64)
+  requires intrinsic::equal(first, right: second)
+  requires intrinsic::less(second, right: third)
+  ensures first <= third
+  cost time finite
+{
+}
+
+theorem float64_equal_then_equal(first: Float64, second: Float64, third: Float64)
+  requires intrinsic::equal(first, right: second)
+  requires intrinsic::equal(second, right: third)
+  ensures first <= third
+  cost time finite
+{
+}
+
+proof Ordered.transitive for Float64 {
+  if intrinsic::less(first, right: second) {
+    if intrinsic::less(second, right: third) {
+      float64_less_then_less(first, second: second, third: third)
+    } else {
+      float64_less_then_equal(first, second: second, third: third)
+    }
+  } else {
+    if intrinsic::less(second, right: third) {
+      float64_equal_then_less(first, second: second, third: third)
+    } else {
+      float64_equal_then_equal(first, second: second, third: third)
+    }
+  }
+}
+
 impl Default for Float64 {
   fn default() -> Float64 {
     0.0
