@@ -235,7 +235,8 @@ type passed = {
 type driven = {
   run_body : frame -> Logic.term -> frame list * frame list;
   range : (Logic.term * Logic.term) option;
-  arguments : (int -> (Logic.term * passed_place option) option) option;
+  arguments :
+    (int -> (Logic.term * passed_place option * (Logic.term * Logic.term) option) option) option;
   cursor : passed_place option;
 }
 
@@ -2892,7 +2893,7 @@ and call_arguments ?given context frame (node : expression) (call_ : call) ~fact
             let given = Option.bind given (fun given -> given position) in
             let frame, term, run =
               match (operand, given) with
-              | _, Some (term, _) -> (frame, term, None)
+              | _, Some (term, _, run) -> (frame, term, run)
               | Value ({ kind = Slice { call }; _ } as slice_node), None ->
                   let base, start, stop = slice_parts call in
                   let frame, term, low, high =
@@ -2911,7 +2912,7 @@ and call_arguments ?given context frame (node : expression) (call_ : call) ~fact
             in
             let passed_place =
               match (given, operand) with
-              | Some (_, passed_place), _ -> passed_place
+              | Some (_, passed_place, _), _ -> passed_place
               | None, Place place -> Some (core_place context place)
               | None, Value _ ->
                   (* A value passed [mut], such as a slice, is read again after
@@ -4532,15 +4533,20 @@ and finite_map_path : Path.t = Well_known.path Finite_map
    model has the elements in order, or whose set has them. None of them
    allocates: an array is built in place, and the others are only in
    specifications. *)
-and list_literal context frame (node : expression) items =
+(* A literal of a sequence or a set. [given], where the MIR evaluated them,
+   is its items' values. *)
+and list_literal ?given context frame (node : expression) items =
   let ty = type_of context frame node in
   let span = at frame node in
   let frame, values =
-    List.fold_left
-      (fun (frame, values) item ->
-        let frame, term = value context frame item in
-        (frame, values @ [ term ]))
-      (frame, []) items
+    match given with
+    | Some values -> (frame, values)
+    | None ->
+        List.fold_left
+          (fun (frame, values) item ->
+            let frame, term = value context frame item in
+            (frame, values @ [ term ]))
+          (frame, []) items
   in
   let element =
     match ty with
@@ -4564,16 +4570,26 @@ and slice context frame (node : expression) base ~start ~stop ~inclusive =
   let frame, viewed, _, _ = slice_run context frame node base ~start ~stop ~inclusive in
   (frame, viewed)
 
-(* A slice, with its bounds as they were evaluated. *)
-and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
+(* A slice, with its bounds as they were evaluated. [given], where the MIR
+   evaluated them, is the collection's type and value, the start, and the
+   stop, if any. *)
+and slice_run ?given context frame (node : expression) base ~start ~stop ~inclusive =
   let span = at frame node in
-  let base_type = place_type context frame base in
+  let base_type =
+    match given with
+    | Some (base_type, _, _, _) -> base_type
+    | None -> place_type context frame base
+  in
   let element =
     match base_type with
     | Named { arguments = Types.Type element :: _; _ } -> element
     | _ -> unsupported span "a slice of `%s`" (Types.show base_type)
   in
-  let frame, collection = place_value context frame base in
+  let frame, collection =
+    match given with
+    | Some (_, collection, _, _) -> (frame, collection)
+    | None -> place_value context frame base
+  in
   let model =
     match model_of context base_type collection ~element with
     | Some model -> model
@@ -4581,14 +4597,19 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
   in
   let length = sequence_length context element model in
   let frame, low =
-    match start with Some start -> value context frame start | None -> (frame, Logic.int 0)
+    match (given, start) with
+    | Some (_, _, low, _), _ -> (frame, low)
+    | None, Some start -> value context frame start
+    | None, None -> (frame, Logic.int 0)
   in
   let frame, high =
-    match stop with
-    | Some stop ->
+    let bounded frame high = (frame, if inclusive then Costs.plus high (Logic.int 1) else high) in
+    match (given, stop) with
+    | Some (_, _, _, Some high), _ -> bounded frame high
+    | None, Some stop ->
         let frame, high = value context frame stop in
-        (frame, if inclusive then Costs.plus high (Logic.int 1) else high)
-    | None ->
+        bounded frame high
+    | Some (_, _, _, None), _ | None, None ->
         assume context frame (Operation ("<=", [ Logic.int 0; length ]));
         (frame, length)
   in
@@ -4651,7 +4672,9 @@ and template_trait : Path.t = Well_known.path From_template
    and its parts, each turned into the tag's [Part] by its [From]. The
    call's [requires], such as that the text is one character, is shown of
    that template. *)
-and tagged_template context frame (node : expression) texts (template_call : expression) =
+(* A tagged template. [given], where the MIR evaluated it, is the
+   template's value. *)
+and tagged_template ?given context frame (node : expression) texts (template_call : expression) =
   let span = at frame node in
   let tag_type = type_of context frame node in
   match template_call.kind with
@@ -4667,7 +4690,11 @@ and tagged_template context frame (node : expression) texts (template_call : exp
           receiver evidence
       with
       | Some contract ->
-          let frame, value_ = operand_value context frame template in
+          let frame, value_ =
+            match given with
+            | Some value_ -> (frame, value_)
+            | None -> operand_value context frame template
+          in
           let own = List.hd contract.parts in
           let entry = part_frame frame own ~arguments:[ (0, value_) ] ~substitution:[] in
           (* A clause that reads only the template's literal texts, of a tag
@@ -9488,6 +9515,8 @@ type core_index = {
   statements : (Core.origin, statement) Hashtbl.t;
   conditions : (Core.origin, unit) Hashtbl.t;  (** The condition of each [if], by its origin *)
   unreachable : (Core.origin, unit) Hashtbl.t;  (** Each [unreachable] written *)
+  enclosing : (Core.id, expression) Hashtbl.t;
+      (** The slice or the tagged template around each call that is one's *)
   names : (Core.local, string) Hashtbl.t;  (** Each binding's name *)
 }
 
@@ -9498,6 +9527,7 @@ let core_index (definition : Core.definition) =
       statements = Hashtbl.create 16;
       conditions = Hashtbl.create 8;
       unreachable = Hashtbl.create 2;
+      enclosing = Hashtbl.create 4;
       names = Hashtbl.create 16;
     }
   in
@@ -9511,6 +9541,7 @@ let core_index (definition : Core.definition) =
              match node.kind with
              | If { condition; _ } -> Hashtbl.replace index.conditions condition.origin ()
              | Unreachable -> Hashtbl.replace index.unreachable node.origin ()
+             | Slice { call } | Template { call; _ } -> Hashtbl.replace index.enclosing call.id node
              | _ -> ());
          statement = (fun (node : statement) -> Hashtbl.replace index.statements node.origin node);
          pattern =
@@ -9536,7 +9567,7 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
         | Call called ->
             List.for_all
               (function
-                | Passed { value = Value { kind = Lambda _ | Slice _; _ }; _ } -> false
+                | Passed { value = Value { kind = Lambda _; _ }; _ } -> false
                 | Passed _ | Default -> true)
               called.arguments
         | _ -> false)
@@ -9550,7 +9581,11 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
         | Some { kind = Operator _ | Construct _ | Convert _ | Function_value _ | To_any _; _ } ->
             true
         | _ -> false)
-    | Array _ | Lambda _ -> false
+    | Array _ -> (
+        match Option.bind node (Hashtbl.find_opt index.expressions) with
+        | Some { kind = Collection_literal _; _ } -> true
+        | _ -> false)
+    | Lambda _ -> false
   in
   let statement (statement : Mir.statement) =
     match statement.kind with
@@ -9562,7 +9597,9 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
         | Some { kind = Assert _; _ } -> true
         | _ -> false)
     | Lend { call; _ } -> core_call call
-    | Slice _ | Template _ | Pull _ | Provide _ | Provide_end | Fork_start _ | Fork_end _ -> false
+    | Slice { call; _ } | Template { call; _ } -> Hashtbl.mem index.enclosing call.node
+    | Pull _ | Provide _ | Provide_end -> true
+    | Fork_start _ | Fork_end _ -> false
   in
   let terminator (ending : Mir.terminator) =
     match ending with
@@ -9599,6 +9636,12 @@ type run = {
           lend ends *)
   constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
       (** The constructor each temporary is built by, for a [yield] of places it holds *)
+  slices : (Mir.local, expression * Mir.place * Logic.term * Logic.term) Hashtbl.t;
+      (** Each temporary that holds a slice: its core node, the collection it views, and its run's
+          start and stop, for a callee that changes the slice *)
+  provides : (Core.origin, Mir.provided list) Hashtbl.t;
+      (** Each [provide]'s implementations, by its origin, which its end on its normal path carries
+      *)
 }
 
 (* The key of a local of the MIR in a frame's locals: a parameter's or a
@@ -9857,7 +9900,13 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~node ~span =
           in
           construct ~given context frame node variant written
       | _ -> bug "a constructor whose core node is no constructor")
-  | Array _ | Lambda _ -> bug "a form the MIR's reading does not cover"
+  | Array elements -> (
+      let node = core_node () in
+      match node.kind with
+      | Collection_literal { elements = written; _ } ->
+          list_literal ~given:(List.map operand elements) context frame node written
+      | _ -> bug "an array whose core node is no literal")
+  | Lambda _ -> bug "a form the MIR's reading does not cover"
 
 (* A place of the MIR as the place of a [mut] argument. *)
 let mir_passed_place context run place =
@@ -9866,17 +9915,35 @@ let mir_passed_place context run place =
     write = (fun frame term -> write_place context frame run place term);
   }
 
+(* A slice of the MIR's collection [base] from [low] to [high], with the
+   facts about its elements. *)
+let mir_slice context frame run (node : expression) (base : Mir.place) low high =
+  slice_run
+    ~given:(mir_place_type context frame run base, read_place context frame run base, low, high)
+    context frame node (Temporary node) ~start:None ~stop:None ~inclusive:false
+
 (* The values of a call's arguments that the MIR has evaluated, by position,
-   with the place of each passed [mut]. *)
+   with the place of each passed [mut]. A slice passed [mut] gives its run,
+   and is read again after the call as a view of its collection's new
+   run. *)
 let mir_arguments context frame run (arguments : Mir.argument list) position =
   match List.nth_opt arguments position with
-  | Some (Passed { value; mode; _ }) ->
-      let place =
-        match (mode, value) with
-        | Types.Mut, Borrow { place; _ } -> Some (mir_passed_place context run place)
-        | _ -> None
-      in
-      Some (reading_callback context (fun () -> mir_operand context frame run value), place)
+  | Some (Passed { value; mode; _ }) -> (
+      let term = reading_callback context (fun () -> mir_operand context frame run value) in
+      match (mode, value) with
+      | Types.Mut, Borrow { place = { root = Local local; projections = [] }; _ }
+        when Hashtbl.mem run.slices local ->
+          let node, base, low, high = Hashtbl.find run.slices local in
+          let reread frame =
+            let _, viewed, _, _ =
+              mir_slice context { frame with checking = false } run node base low (Some high)
+            in
+            viewed
+          in
+          Some (term, Some { read = reread; write = (fun frame _ -> frame) }, Some (low, high))
+      | Types.Mut, Borrow { place; _ } ->
+          Some (term, Some (mir_passed_place context run place), None)
+      | _ -> Some (term, None, None))
   | Some Default | None -> None
 
 (* A call, through the callee's contract, with the arguments the MIR has
@@ -9911,7 +9978,9 @@ let mir_lend context frame run part (call : Mir.call) =
         | _ -> None
       in
       let index_term () =
-        match given 1 with Some (term, _) -> term | None -> bug "a lend at an index with no index"
+        match given 1 with
+        | Some (term, _, _) -> term
+        | None -> bug "a lend at an index with no index"
       in
       let lent =
         match (called.lends, called.callee, receiver) with
@@ -10097,8 +10166,68 @@ let mir_statement context frame run (statement : Mir.statement) =
             Logic.Boolean true )
           :: context.decisions;
       Some frame
-  | Slice _ | Template _ | Pull _ | Provide _ | Provide_end | Fork_start _ | Fork_end _ ->
-      bug "a form the MIR's reading does not cover"
+  | Slice { destination; base; call } -> (
+      match Hashtbl.find_opt run.index.enclosing call.node with
+      | Some node ->
+          let given = mir_arguments context frame run call.arguments in
+          let low = match given 1 with Some (term, _, _) -> term | None -> Logic.int 0 in
+          let high = Option.map (fun (term, _, _) -> term) (given 2) in
+          let frame, viewed, low, high = mir_slice context frame run node base low high in
+          (match destination with
+          | { root = Local local; projections = [] } ->
+              Hashtbl.replace run.slices local (node, base, low, high)
+          | _ -> ());
+          Some (write_place context frame run destination viewed)
+      | None -> bug "a slice of the MIR whose core slice is not known")
+  | Template { destination; literals; call } -> (
+      match Hashtbl.find_opt run.index.enclosing call.node with
+      | Some ({ kind = Template { call = template_call; _ }; _ } as node) ->
+          let template =
+            match mir_arguments context frame run call.arguments 0 with
+            | Some (term, _, _) -> term
+            | None -> bug "a tagged template with no template"
+          in
+          let frame, tagged =
+            tagged_template ~given:template context frame node literals template_call
+          in
+          Some (write_place context frame run destination tagged)
+      | _ -> bug "a tagged template of the MIR whose core template is not known")
+  | Pull { destination; cursor } -> (
+      (* A pull of a cursor whose method the prover knows. *)
+      let cursor_type = mir_place_type context frame run cursor in
+      let cursor_term = read_place context frame run cursor in
+      match List.assoc_opt cursor_term context.cursors with
+      | Some cursor_method ->
+          let pulled, later = pull context frame cursor_method cursor_term ~cursor_type in
+          let frame = write_place context frame run cursor later in
+          Some (write_place context (spend context frame one_step) run destination pulled)
+      | None -> unsupported span "a pull of a cursor whose method the prover does not know")
+  | Provide { provided; _ } ->
+      (* The body runs with the implementations, which the prover never
+         models, so a capability call in it gives a fresh value by its
+         contract. *)
+      Hashtbl.replace run.provides statement.origin provided;
+      Some frame
+  | Provide_end -> (
+      (* Where the body ends, each implementation handed over [mut] holds a
+         fresh value of its type, which meets its type's invariants. *)
+      match Hashtbl.find_opt run.provides statement.origin with
+      | Some provided ->
+          Some
+            (List.fold_left
+               (fun frame (implementation : Mir.provided) ->
+                 match (implementation.mode, implementation.value) with
+                 | Types.Mut, Borrow { place; _ } ->
+                     let root = { (expanded run place) with Mir.projections = [] } in
+                     let ty = mir_place_type context frame run root in
+                     let fresh_value = arrive context frame "changed" ty in
+                     let frame = write_place context frame run root fresh_value in
+                     assume_valid context frame ty fresh_value;
+                     frame
+                 | _ -> frame)
+               frame provided)
+      | None -> Some frame)
+  | Fork_start _ | Fork_end _ -> bug "a form the MIR's reading does not cover"
 
 (* The MIR of the body of a function proven, with its core form's nodes,
    where the MIR's reading covers it. A function for specifications only,
@@ -10192,7 +10321,17 @@ let mir_run context start index (body : Mir.body) =
           | _ -> ())
         block.statements)
     body.blocks;
-  let run = { index; body; places = Hashtbl.create 4; lends = Hashtbl.create 4; constructs } in
+  let run =
+    {
+      index;
+      body;
+      places = Hashtbl.create 4;
+      lends = Hashtbl.create 4;
+      constructs;
+      slices = Hashtbl.create 2;
+      provides = Hashtbl.create 2;
+    }
+  in
   let count = Array.length body.blocks in
   let incoming = Array.make count [] in
   let ran = Array.make count false in
