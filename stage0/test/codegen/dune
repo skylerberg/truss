@@ -16,7 +16,7 @@
   parallel_tests
   concurrent_tests
   shared_tests
-  core_form_tests
+  lowering_tests
   library_tests)
  (modules
   codegen_support
@@ -37,7 +37,7 @@
   parallel_tests
   concurrent_tests
   shared_tests
-  core_form_tests
+  lowering_tests
   library_tests)
  (libraries
   harness

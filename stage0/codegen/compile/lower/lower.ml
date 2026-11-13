@@ -55,7 +55,7 @@ let bind_parameters ?how st (parameters : Core.parameter list) =
           ~owned:(parameter.mode = Own && bit = None)
           (Monomorphic.mode parameter.mode) ty
       in
-      Core_form.bind_local st parameter.local place;
+      Mir_form.bind_core st parameter.local place;
       (arrives, parameter.mode, ty, bit))
     parameters
 
@@ -74,7 +74,7 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
   start st.builder (block st.builder);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
-  Option.iter (fun mask -> Core_form.fill_defaults st mask parameters) mask;
+  Option.iter (fun mask -> Mir_form.fill_defaults st mask parameters) mask;
   ( bound,
     mask,
     List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
@@ -88,7 +88,7 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
 let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
-  let parameters, body = Core_form.body_of context yielding.method_ in
+  let parameters, _ = Mir_form.core_of context yielding.method_ in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
   let bound, mask, parameter_locals =
     begin_body st ~how:(Convention.held context.env) ~parameters
@@ -110,7 +110,7 @@ let pulled context (yielding : Ground.yielding) :
         else None)
       bound
   in
-  Core_form.block_into st body None;
+  Mir_form.lower_code st yielding.method_;
   (finish_function st ~first:[] ~rest:parameter_locals (), owned)
 
 let code_state context path =
@@ -142,13 +142,13 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
           ~parts:[]
       in
-      Core_form.bind_local st parameter.local template;
+      Mir_form.bind_core st parameter.local template;
       let output = Constants.begin_output st in
       List.iter
         (fun (clause : Core.condition) ->
           if clause.executable then begin
             let holds = temporary st context.bool in
-            Core_form.into st clause.value holds;
+            Mir_form.expression_into ~parameters:[ parameter ] st clause.value holds;
             Glue.encode_call context.glue st.builder
               ~output:(Address { place = output; writable = true })
               context.bool holds
@@ -196,12 +196,12 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
 (* Lowers a function or a test that has a body in source. *)
 let source_code context key ~path ~type_arguments : Lir.t =
   let code = code_of context path type_arguments in
-  let parameters, body = Core_form.body_of context path in
+  let parameters, _ = Mir_form.core_of context path in
   let st = enter context (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
   let _, _, parameter_locals = begin_body st ~parameters in
-  Core_form.block_into st body (result_place st);
+  Mir_form.lower_code st path;
   {
     key;
     main = finish_function st ~returns ~first:[] ~rest:parameter_locals ();

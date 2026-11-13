@@ -57,7 +57,7 @@ type frame = {
   synthetic : (int, Lir.place) Hashtbl.t;
       (** The places of the core form's synthetic locals, by number *)
   mutable self_place : Lir.place option;
-  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> stop:Lir.block -> unit) option;
+  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
       (** In an inlined lending or yielding method, the action of a [yield] of a place. [owned] is
           true when the code that the [yield] runs may take the value: the method yields it [own],
           or computed it for this [yield]. Otherwise the place is borrowed. *)
@@ -73,6 +73,48 @@ type frame = {
           program's call, where a check that fails in this code is reported *)
   exit : (Lir.block * int) option;
       (** In an inlined method, where its [return] goes and how many scopes that keeps *)
+  mir : mir_frame option;  (** The MIR being lowered in this frame *)
+}
+
+(* A body of the MIR being lowered: the place of each of its locals, and what
+   each local's end runs, such as the rest of a lending method. *)
+and mir_frame = {
+  body : Mir.body;
+  lambdas : Mir.body array;  (** The bodies of the definition's lambdas *)
+  places : (Mir.local, Lir.place) Hashtbl.t;
+  ends : (Mir.local, cleanup list) Hashtbl.t;
+  lent : (Mir.local, conditional_lend) Hashtbl.t;
+      (** For the part of a lending call whose end some path reaches without the call, whether the
+          call ran, so that the rest of the method runs only after it *)
+  aliases : (Mir.local, int) Hashtbl.t;
+      (** The locals bound to a place they do not own, with the number of assignments that bind each
+      *)
+  constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
+      (** The temporaries that hold a constructor that lends places, which the [yield] that yields
+          the temporary builds *)
+  owner : scope option;
+      (** In an inlined method, the scope that owns the method's locals, so that an exit from the
+          caller's code at a [yield] drops them *)
+  returns_into : Lir.place option;
+      (** In an expression lowered on its own, such as a default, where its value is written *)
+  forks : (int, int) Hashtbl.t;  (** The fork of the LIR that marks each [parallel] block *)
+  mutable provides : (Path.t * Lir.operand) list list;
+      (** The evidence that each [provide] around the code being lowered replaced, innermost first
+      *)
+  returned : Mir.local list;
+      (** The temporaries that a [return] returns, which are the result's slot where the function
+          has one, so that the value is written before the [return] leaves its scopes *)
+  mutable taken : Mir.place list;
+      (** The targets of compound assignments whose old value an operator has taken, which hold
+          nothing until they are assigned again *)
+}
+
+(* A lending call whose part's end some path reaches without the call. *)
+and conditional_lend = {
+  ran : Lir.local;  (** A [Bool], true from the call to the part's end *)
+  mutable skipped : Lir.place list;
+      (** The locals of the methods inlined for the call, which the path that skips the rest of the
+          method drops, since drop elaboration cannot tell that they hold nothing there *)
 }
 
 (* The early exits of the tasks of one [concurrent] block or loop. An
@@ -87,9 +129,17 @@ type early_exits = {
   winner : Lir.place;  (** A [UInt32], 0 while no exit has won *)
   mutable return_value : Lir.place option;
   scope : scope;  (** The scope enclosing the block or loop, which owns [return_value] *)
-  mutable exits : (Core.task list * Core.expression) list;
-      (** Most recent first. Each entry is the enclosing tasks that the exit has yet to end,
-          innermost first, and the exit itself. *)
+  mutable exits : early_exit list;  (** Most recent first *)
+}
+
+(* An early exit that a task of a group took, which the code that joins
+   the group performs. *)
+and early_exit = {
+  ends : Mir.statement list;
+      (** The ends of the scopes between the task and the next task or the exit's target *)
+  remaining : (Core.task * Mir.statement list) list;
+      (** The enclosing tasks that the exit has yet to end, innermost first *)
+  exit : Mir.task_exit;
 }
 
 (* A task whose body is being lowered. *)
@@ -127,8 +177,6 @@ type state = {
   mutable result : result_slot;
   nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
-  mutable compound_target : Lir.place option;
-      (** The target of the compound assignment whose new value is being lowered *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
   mutable forks : int;  (** How many [parallel] statements the function has marked *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
@@ -136,6 +184,9 @@ type state = {
       (** The schedule of the next range loop, when it is not [Sequential]: a [parallel for] or a
           [concurrent for] is inlining a method that yields by position, and the next range loop is
           that method's loop *)
+  mutable inlined_owned : Lir.place list;
+      (** The locals of the methods inlined since the lending call being lowered began, which the
+          path that skips the rest of the method drops *)
 }
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
@@ -151,6 +202,7 @@ let frame_of code ~inlined =
     inlined;
     reported = None;
     exit = None;
+    mir = None;
   }
 
 (* The state to write one function in: a builder of its own and the
@@ -165,11 +217,11 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     result = No_result;
     nested;
     evidence = [];
-    compound_target = None;
     pulling;
     forks = 0;
     tasks = [];
     next_range = Sequential;
+    inlined_owned = [];
   }
 
 (* Whether a [parallel] statement's parts are marked here, to become

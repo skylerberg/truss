@@ -1507,9 +1507,8 @@ test the prover itself:
 
 ## Not built
 
-- **Reading the MIR.** The prover walks the core form, and code generation
-  lowers it itself, where the ownership check reads the MIR that MIR.md
-  describes.
+- **Reading the MIR.** The prover walks the core form, where the ownership
+  check and code generation read the MIR that MIR.md describes.
 - **Contracts for the intrinsic module's system calls.** A C function's
   result beyond its row of the table is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose

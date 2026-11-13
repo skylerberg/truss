@@ -861,7 +861,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
       hold builder destination { nothing with views = views_of_copy builder cursor }
   | Assert value | Echo value -> evaluate builder value
-  | Provide provided ->
+  | Provide { provided; _ } ->
       List.iter
         (fun (provided : Mir.provided) ->
           evaluate builder provided.value;
@@ -918,6 +918,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
   let firsts = Array.make blocks (-1) and lasts = Array.make blocks (-1) in
   let heads = Hashtbl.create 4 in
   let pending_edges = ref [] in
+  let task_ends = Hashtbl.create 1 in
   Array.iteri
     (fun index (block : Mir.basic_block) ->
       builder.last <- (if index = 0 then Some entry else None);
@@ -925,6 +926,18 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       let first = builder.count in
       if index > 0 then emit_ builder (Bind []) block.terminator_origin;
       List.iter (statement builder forks ~is_var) block.statements;
+      (* The other tasks of an early exit's group go on from the task's end,
+         with the scopes around the task still open. The exit then ends those
+         scopes once each task has ended, before it is taken. *)
+      (match block.terminator with
+      | Exit_tasks { task_end = Some target; _ } ->
+          Hashtbl.replace task_ends index
+            ((match builder.last with Some last -> last | None -> first), target)
+      | _ -> ());
+      (match block.terminator with
+      | Exit_tasks { tasks; _ } ->
+          List.iter (fun (_, ends) -> List.iter (statement builder forks ~is_var) ends) tasks
+      | _ -> ());
       let origin = block.terminator_origin in
       (match block.terminator with
       | Branch { condition; _ } -> evaluate builder condition
@@ -1033,9 +1046,12 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
           match Hashtbl.find_opt each_of index with
           | Some each -> link builder from (Hashtbl.find heads each)
           | None -> ())
+      | Exit_tasks { exit = Exit_to target; _ } -> link builder from firsts.(target)
+      | Exit_tasks _ -> ()
       | terminator ->
           List.iter (fun target -> link builder from firsts.(target)) (Mir.successors terminator))
     body.blocks;
+  Hashtbl.iter (fun _ (before_exit, target) -> link builder before_exit firsts.(target)) task_ends;
   List.iter (fun (from, `Block target) -> link builder from firsts.(target)) !pending_edges;
   (* A parallel loop's body is the points of the blocks it runs. *)
   builder.fork_join_loops <-

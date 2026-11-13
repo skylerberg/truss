@@ -3,8 +3,8 @@
 This document describes the design of stage0's mid-level IR, the MIR, in
 `stage0/mir/`. The MIR is a control-flow graph of each definition's body,
 built from the core form that [TYPECHECKER.md](TYPECHECKER.md) describes.
-The ownership check reads it, and the prover ([PROVER.md](PROVER.md)) and
-code generation ([CODEGEN.md](CODEGEN.md)) are to read it in place of the
+The ownership check and code generation ([CODEGEN.md](CODEGEN.md)) read
+it, and the prover ([PROVER.md](PROVER.md)) is to read it in place of the
 core form: [Not built](#not-built) lists the order. The MIR of a definition is a query
 of the code database, which [DATABASE.md](DATABASE.md) describes.
 
@@ -398,18 +398,17 @@ that reaches it as a bug in the compiler.
 
 ## Not built
 
-The builder is built, and the ownership check reads the MIR. The rest is
-built in this order, and each step removes the code that it replaces:
+The builder is built, and the ownership check and code generation read
+the MIR. The rest is built in this order, and each step removes the code
+that it replaces:
 
-1. **Code generation** lowers the MIR to the LIR, and its lowering of the
-   core form is removed.
-2. **The prover** runs the MIR forward, and its walk of the core form is
+1. **The prover** runs the MIR forward, and its walk of the core form is
    removed.
-3. **The core form** loses the forms that only the builder then reads,
+2. **The core form** loses the forms that only the builder then reads,
    such as `Current_target`, and its consumers' cases for
    specification-only forms in executable code.
 
 The prover already reads `Operator` and a call of an intrinsic that is a
 primitive operation through one translation, since the core form names the
-operation in both. Pattern matching as a decision tree comes after step 1,
-as an improvement of the builder.
+operation in both. Pattern matching as a decision tree is an improvement of
+the builder, which can come at any time.

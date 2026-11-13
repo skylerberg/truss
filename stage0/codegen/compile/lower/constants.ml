@@ -365,7 +365,7 @@ let evaluator context path : Lir.t =
   start st.builder (block st.builder);
   in_scope st (fun () ->
       let place = temporary st ty in
-      Core_form.into st value place;
+      Mir_form.expression_into st value place;
       let output = begin_output st in
       Glue.encode_call context.glue st.builder
         ~output:(Address { place = output; writable = true })

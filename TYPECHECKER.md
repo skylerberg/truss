@@ -5,7 +5,8 @@ This document describes name resolution and type checking in stage0, in
 form that the prover and code generation read. It follows the decisions in
 [SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md).
 Its input is the trees described in [PARSER.md](PARSER.md). Its output is the
-core form that [CODEGEN.md](CODEGEN.md) and [PROVER.md](PROVER.md) consume. Its
+core form that [PROVER.md](PROVER.md) consumes, and that the MIR of
+[MIR.md](MIR.md) is built from for code generation ([CODEGEN.md](CODEGEN.md)). Its
 queries run on the code database, which [DATABASE.md](DATABASE.md) describes.
 
 The type checker's inputs are the syntax tree of each definition, the package's
@@ -2488,8 +2489,8 @@ whenever the intent is unambiguous:
   checker's obligations, as [PROVER.md](PROVER.md) describes. It discharges
   every `requires` and invariant, every operation that could fail, every cost,
   termination, and every obligation above.
-- **Code generation** reads core forms, the shapes of types, and which methods
-  can be pulled, as CODEGEN.md describes. Instantiation cycles have already
+- **Code generation** reads the MIR built from core forms, the shapes of
+  types, and which methods can be pulled, as CODEGEN.md describes. Instantiation cycles have already
   been rejected.
 - **The build** uses core forms to find the definitions that `main` can reach,
   and rejects a program that can reach a `todo` or an `echo`.

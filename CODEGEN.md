@@ -3,27 +3,29 @@
 This document describes stage0's code generation, in
 [`stage0/codegen/`](stage0/codegen): everything between the type checker's
 output and a program that runs. It follows the decisions in
-[SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md), reads the core form
-that [TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs
-that [PROVER.md](PROVER.md) describes.
+[SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md), reads the MIR
+that [MIR.md](MIR.md) describes, and relies on the proofs that
+[PROVER.md](PROVER.md) describes.
 
-Code generation takes the core form of each definition the program can
-reach and produces C, which a C compiler turns into object files, which a
-linker turns into a program. In the core form every call has a resolved
-callee and one argument per parameter, each argument is marked as a place
-or a value, every operator is resolved to an intrinsic operation or a call,
-and every type is fully inferred. A slice of a range, `items[1..3]`, is a
-call of the base type's `slice_range` with both bounds evaluated, so
-lowering it is lowering that call. Lowering from the core form needs no
-name resolution and no type inference. Every proof obligation has been
-discharged by then.
+Code generation takes the MIR of each definition the program can reach and
+produces C, which a C compiler turns into object files, which a linker
+turns into a program. In the MIR every call has a resolved callee and one
+argument per parameter, every operand is a place, a borrow, or a value in
+a temporary, every type is fully inferred, and the order of evaluation,
+the scope of each temporary and binding, and the flow of patterns and loops
+are decided. A slice of a range, `items[1..3]`, is a call of the base
+type's `slice_range` with both bounds evaluated, so lowering it is lowering
+that call. Lowering from the MIR needs no name resolution and no type
+inference. Every proof obligation has been discharged by then.
 
-Lowering reads nothing else of a definition's body. A function's
-parameters, parameter defaults, `requires` checks, and body all come from
-its core form, and so do the lending and yielding methods inlined into it,
-the pulled version of a yielding method, a constant's value, and the check
-of a tagged template. The syntax tree gives only the source text and the
-positions that failure messages quote.
+Lowering reads nothing else of a definition's body. A function's body
+comes from its MIR, and so do the lending and yielding methods inlined into
+it and the pulled version of a yielding method. A parameter's default, a
+field's default, a constant's value, and the `requires` check of a tagged
+template are expressions of the core form, each lowered through the MIR of
+that one expression. The core form also gives the parameters' modes and
+defaults. The syntax tree gives only the source text and the positions that
+failure messages quote.
 
 Code generation:
 
@@ -71,7 +73,7 @@ checked definitions
                             └──────────── LIR, cached per instance ────────┘
 ```
 
-Code generation reads each definition's core form, as
+Code generation reads each definition's MIR and core form, as
 queries of the code database. It does not depend on the prover, and the
 prover and the code database do not depend on it. Only a driver depends on
 code generation: the command line, a test, a tool, and `stage0/evaluator`,
@@ -94,7 +96,7 @@ the platform's C toolchain, so emitting C adds almost no dependency.
 
 ### Why one IR before C
 
-Lowering straight from the core form to C text would put drops, yield
+Lowering straight from the MIR to C text would put drops, yield
 lowering, state machines, and hashing all inside a string printer. A small IR
 between them gives:
 
@@ -592,17 +594,24 @@ to drop.
 Every value lowering makes has an owner from its first moment, so that no
 way out of the code can forget it:
 
-- **A scope owns the values dropped as it ends.** A block's scope owns the
-  names bound in it. Each statement has a scope of its own, which owns the
-  statement's temporaries: an argument evaluated before the call, a value a
-  pattern looks into, the text an interpolation builds. Scopes are one
-  stack, so `return`, `?`, `break`, `continue`, and a loop's `stop` at a
-  `yield` each leave exactly the scopes inside where they go, the
-  statements' among them.
-- **A local for a value is made with its owner.** Lowering has no way to
-  make one without: a temporary belongs to the statement being lowered, and
-  a binding to the names around it. The one exception is the slot for the
-  function's result, which is the caller's once the function returns.
+- **The MIR ends each of its locals.** A binding or a temporary of the MIR
+  that owns its value is dropped where the MIR marks it dead, on each path
+  that leaves its scope. A local bound to a place it does not own, a
+  borrowed binding or the part a lending call lends, drops nothing.
+- **A scope owns the values that lowering itself makes.** Each statement of
+  the MIR has a scope, which owns the LIR temporaries its lowering makes:
+  an argument moved into a place before the call, a lent value copied
+  where it is used whole. A loop's machinery has scopes of its own, such
+  as the one that owns a cursor's `next` value. Scopes are one stack, so a
+  jump out of a loop's body and a loop's `stop` at a `yield` each leave
+  exactly the scopes inside where they go.
+- **An inlined method's locals have one owner.** The scope around an
+  inlined lending or yielding method owns every local of the method's MIR
+  that owns a value, so that a `break` out of the loop body at a `yield`,
+  which leaves the method, drops them. Drop elaboration removes a drop of a
+  local that holds nothing there. The one value without an owner is the
+  slot for the function's result, which is the caller's once the function
+  returns.
 - **A parameter says whose it is.** The function owns an `own` parameter,
   and drops it unless it gives it away. Any other is the caller's, and one
   passed by value is marked *borrowed* in the LIR: it holds the bits of a
@@ -781,41 +790,29 @@ and its siblings. Full-width multiplication, used by hashing and
 
 ### Control flow and patterns
 
-- **`match`** tests its arms in order: each arm tests its patterns against
-  the values, part by part, and jumps to the next arm at the first part
-  that does not match. The value is evaluated once, and the first arm that
-  matches runs.
-- **`?`** is a tag test and an early return, with the drops elaboration
-  inserted.
+The MIR builder lowers conditions, `match`, `is`, `let ... else`, `while`,
+and the exits from loops to blocks and jumps, as MIR.md describes, and
+code generation keeps its blocks. A `for` loop stays one structured `For`
+terminator in the MIR, since code generation decides how each kind of
+loop runs.
+
+- **A body is lowered as regions.** A region is code of one body that is
+  lowered with one stack of scopes: the whole body, a `for` loop's body,
+  or a branch of a `concurrent` block. A region lowers each block of the
+  MIR once, the first time a jump reaches it. A jump to a block of an
+  enclosing region leaves the scopes between, as a `break` does.
+- **A binding that aliases a place** is the place. One that only reads a
+  value that copies implicitly takes a copy. One that several patterns bind
+  from different parts, as `Circle(radius: n) | Square(side: n)` binds
+  `n`, is kept behind a pointer that each pattern sets, since the code
+  after the patterns is lowered once.
 - **A `for` over a range** counts in the range's own type, and an
   inclusive range stops after its last value without adding one to it,
   which could overflow. A range of characters goes from U+D7FF to U+E000,
   since the surrogates between them are not characters.
-- **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
-  boolean built with `&&`, `||`, `!`, and `is` all go through one lowering
-  that branches to a true block and a false one. `&&` and `||` short-circuit
-  by branching, and `!` swaps the two.
-- **`is`** is the same test as a `match` arm. The names it binds are bound
-  on the way to the true block, in a scope that covers the rest of the `&&`
-  chain and the `if`'s or `while`'s block and is closed, with its drops, on
-  every way out, the false one included. A `while`'s condition temporaries
-  end before its body and before its exit.
-- **A value is evaluated once for a pattern.** A pattern looks into the
-  place an expression names, or into a temporary holding its value, whose
-  parts its names then own.
-- **A guard sees views** of its arm's bindings, so a guard that fails leaves
-  the value whole for the next arm. The body then binds the parts again,
-  owning them.
-- **Alternatives that bind a name are tested as separate patterns.**
-  `Circle(radius: n) | Square(side: n)` is two patterns, and `n` is bound
-  from the part that the matching one found. The code after the pattern is
-  emitted once, so each name is kept in a slot that every alternative
-  fills: a local of the name's type where the name owns the part or copies
-  it, and a pointer to the part otherwise. Alternatives that bind nothing
-  stay one pattern.
-- **`while` and `for`** become blocks and gotos. A `for` over anything but a
-  range of built-in integers calls `each` (see
-  [Lending and yielding methods](#lending-and-yielding-methods)).
+- **A `for` over a call of a yielding method** inlines the method (see
+  [Lending and yielding methods](#lending-and-yielding-methods)), and a
+  `for` over a cursor calls its `next` until it gives `None`.
 
 ### Strings and templates
 
@@ -1014,8 +1011,9 @@ owns, so that it is dropped once whichever `yield` made it.
 
 A method may yield a constructor applied to places it lends:
 `yield Some(self[index])`, or `yield Indexed(index: index, value: mut
-self[index])`. The core form marks each such field as a place. Every
-`yield` of such a method builds a *lent value* in one local: a value of a
+self[index])`. The MIR holds such a constructor in a temporary whose lent
+fields are borrows, and the `yield` that yields the temporary builds it.
+Every `yield` of such a method builds a *lent value* in one local: a value of a
 type of its own, `Ground.Lent`, laid out as the yielded type but with an
 address in place of each lent field. So `Slice.get` lends an
 `Option[Element]` as one pointer, null for `None`, whatever the element's
@@ -1054,7 +1052,7 @@ A quantifier in code that runs, such as
 `forall i in 0..items.length() => items[i] > 0` or
 `exists item in items => item < 0`, is the same loop with another body:
 over a range it is the counted loop, and over a collection it is the call
-of `each` that a `for` loop makes, which the core form gives it. The
+of `each` that a `for` loop makes, which the MIR builder makes. The
 answer starts as true for `forall` and false for `exists`, each value's
 body is evaluated, and the first one that decides the answer sets it and
 leaves the loop as `break` does, so an `each` that is inlined drops its
@@ -2257,9 +2255,6 @@ a command line can hold.
 
 ## Not built
 
-- **Lowering from the MIR.** Code generation lowers the core form to the
-  LIR itself. MIR.md describes the lowering that the ownership check
-  already reads and code generation and the prover are to read.
 - **A check that reports its caller's position.** A check that fails in a
   function that is called, not inlined, reports the function's own
   position. Rust's `#[track_caller]` reports the caller's by passing its
