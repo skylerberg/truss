@@ -152,6 +152,7 @@ let () =
     \  _3 = read _0.(Some).value\n\
     \  goto 2\n\
      2:\n\
+    \  matched\n\
     \  loan 0: read read _0 for the operation\n\
     \  _4 = _3\n\
     \  loan 1: read _4 for the operation\n\
@@ -178,6 +179,7 @@ let () =
      9:\n\
     \  goto 10\n\
      10:\n\
+    \  matched\n\
     \  _1 = 0\n\
     \  dead _6, _7\n\
     \  goto 13\n\

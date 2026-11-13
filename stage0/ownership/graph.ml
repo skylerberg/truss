@@ -693,6 +693,7 @@ let returned_temporaries (body : Mir.body) =
                 {
                   target = { root = Local target; projections = [] };
                   value = Operand (Use { place = { root = Local source; projections = [] }; _ });
+                  _;
                 }
               when List.mem target !returned
                    && body.locals.(source).kind = Temporary
@@ -737,7 +738,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
           builder.keeps_lent;
       let core = List.filter_map (source builder) locals in
       if core <> [] then emit_ builder (Scope_end core) origin
-  | Assign { target = { root = Local local; projections = [] } as target; value }
+  | Assign { target = { root = Local local; projections = [] } as target; value; _ }
     when List.mem local builder.binding
          ||
          match (local_info builder local).kind with
@@ -769,7 +770,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
           | _ -> hold builder target result)
       | Source { local = core; _ } ->
           bound_value builder local core value origin ~is_var:(is_var core))
-  | Assign { target; value } -> (
+  | Assign { target; value; _ } -> (
       let result = rvalue builder value origin in
       match tracked builder target with
       | Some place -> (
@@ -904,7 +905,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
             :: builder.fork_join_blocks;
           Hashtbl.remove forks fork
       | None -> ())
-  | Provide_end | Ghost_assert _ | Proof _ -> ()
+  | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
 
 (* The points of a body: one run of points for each block, linked as its
    terminator jumps. *)

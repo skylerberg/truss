@@ -112,7 +112,9 @@ type loan_duration =
 type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
-  | Assign of { target : place; value : rvalue }
+  | Assign of { target : place; value : rvalue; node : Core.id option }
+      (** [node] is the core expression whose value the assignment computes, where it computes one,
+          for the prover's messages. *)
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
       (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
@@ -138,6 +140,9 @@ and statement_kind =
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
+  | Matched of { patterns : Core.origin list }
+      (** An arm of a [match] whose patterns, by their origins, matched here, before its guard. Only
+          the prover reads it, to tell which arm a counterexample takes. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
 type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
@@ -201,6 +206,9 @@ type t = { body : body; lambdas : body array }
 
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)
+
+val of_definition : Core.definition -> t option
+(** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. *)
 
 val of_path : (Path.t, (t * Types.substitution) option) Query.query
 (** The MIR of the function or method at a path that has code to run, with the substitution to apply
