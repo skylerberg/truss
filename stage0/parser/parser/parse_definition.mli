@@ -7,7 +7,7 @@ type written_visibility = {
 type container = In_trait | In_impl | In_capability
 
 val method_ : Cursor.t -> container:container -> visibility:Syntax.visibility -> Syntax.definition
-val header : Cursor.t -> Token.keyword option * Syntax.definition_name option
+val header : Cursor.t -> Syntax.intended_kind option * Syntax.definition_name option
 
 type empty = |
 

@@ -112,7 +112,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                      (Types.show type_));
               match
                 List.find_opt
-                  (fun (variant : Types.variant) -> variant.variant_name = variant_name.last.text)
+                  (fun (variant : Types.variant) -> variant.variant_name = variant_name.text)
                   variants
               with
               | Some variant ->
@@ -140,10 +140,10 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                         })
               | None ->
                   unknown
-                  @@ error state Unknown_variant variant_name.last.span
+                  @@ error state Unknown_variant variant_name.span
                        ~fixes:
                          (match
-                            Diagnostic.closest variant_name.last.text
+                            Diagnostic.closest variant_name.text
                               (List.map
                                  (fun (variant : Types.variant) -> variant.variant_name)
                                  variants)
@@ -152,11 +152,11 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                              [
                                fix
                                  (Printf.sprintf "Write `%s`." candidate)
-                                 [ replace variant_name.last.span candidate ];
+                                 [ replace variant_name.span candidate ];
                              ]
                          | None -> [])
                        (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
-                          variant_name.last.text))
+                          variant_name.text))
           | None -> (
               match Members.broken state.database path with
               | Some report -> unknown (Types.Error report)

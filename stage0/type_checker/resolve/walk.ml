@@ -86,6 +86,9 @@ type state = {
   mutable diagnostics : Syntax.diagnostic list;
   mutable holes : (id * (string * value) list) list;
       (** Each [todo], by its id, with the values in scope there, by name, latest first *)
+  mutable used_imports : string list;
+      (** The imports that a module path of the definition begins with, by the name code writes them
+          with *)
 }
 
 let reported state ?fixes code (span : span) message =
@@ -120,6 +123,13 @@ let module_of_names state (first : name) (rest : name list) =
     set state first (Unknown report);
     Error report
   in
+  (* An import is used where a module path begins with its name, as in
+     Rust, even where the rest of the path names no module: that path has an
+     error of its own, which deleting the [use] would not fix. *)
+  if
+    List.mem_assoc first.text (Query.demand state.database Names.imports state.file)
+    && not (List.mem first.text state.used_imports)
+  then state.used_imports <- first.text :: state.used_imports;
   begin match
     Names.lookup_module state.database ~from:state.file
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))

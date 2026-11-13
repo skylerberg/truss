@@ -58,7 +58,7 @@ let rec after_upper cursor start (path : path) =
     let fields =
       if Cursor.is_punctuation cursor (Open Paren) then Some (pattern_fields cursor) else None
     in
-    pattern_node cursor start (Variant { name = path; fields })
+    pattern_node cursor start (Variant { name = path.last; fields })
 
 (* A pattern of [kind], or, if [..] or [..=] follows, a range pattern that
    starts with [end_kind]. *)
@@ -138,10 +138,12 @@ and named cursor start =
       range_or cursor start (End_literal literal) (Literal literal)
   | _ -> Cursor.fail cursor "a name after `::`"
 
-(* [Shape.Circle(radius)] and [Shape::Circle(radius)]: a variant written
-   with its type, as an expression names it and as Rust and Swift write a
-   pattern. The qualifier is reported, and the result is the variant alone,
-   as after the fix. *)
+(* [Shape.Circle(radius)], [Shape::Circle(radius)], and
+   [geometry::Circle(radius)]: a variant written with its type or its
+   module, as an expression names it and as Rust and Swift write a pattern.
+   The qualifier is reported, and the result is the variant alone, as after
+   the fix. A [.] that remains begins a constant of the type, as in
+   [geometry::Status.teapot], whose module qualifier is valid. *)
 and unqualified_variant cursor start (path : path) =
   let rec last_name (qualified : Token.t option) =
     match (Cursor.peek_kind cursor, Cursor.token_at cursor (cursor.index + 1)) with
@@ -151,11 +153,15 @@ and unqualified_variant cursor start (path : path) =
         last_name (Some variant)
     | _ -> qualified
   in
+  let qualifier_start = (Cursor.token_at cursor start).span.start in
   match last_name None with
   | Some ({ kind = Upper text; _ } as variant) ->
-      Habits.qualified_variant cursor ~qualifier_start:(Cursor.token_at cursor start).span.start
-        ~variant;
+      Habits.qualified_variant cursor ~qualifier_start ~variant;
       { modules = []; last = Atoms.name cursor variant text }
+  | _ when path.modules <> [] && not (Cursor.is_punctuation cursor Dot) ->
+      Habits.qualified_variant cursor ~qualifier_start
+        ~variant:(Cursor.token_at cursor (cursor.index - 1));
+      { path with modules = [] }
   | _ -> path
 
 (* [(index, element: score, ..)]. [..] may only be the last field. *)

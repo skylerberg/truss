@@ -7,7 +7,6 @@
 
 type file = {
   source : Source.t;
-  tokens : Token.t array;
   uses : Syntax.path Syntax.item list;
   definitions : Syntax.definition Syntax.item list;
   diagnostics : Diagnostic.t list;  (** The lexer's and the parser's, in the file's offsets. *)

@@ -468,7 +468,7 @@ let walk_names ~on_name:add (definition_ : definition) =
         range_end start;
         range_end stop
     | Variant { name; fields } ->
-        path name;
+        add name;
         Option.iter (List.iter field_pattern) fields
     | Record fields -> List.iter field_pattern fields
     | Alternatives alternatives -> List.iter pattern alternatives

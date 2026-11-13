@@ -55,6 +55,9 @@ type resolved = {
   holes : (Syntax.id * (string * value) list) list;
       (** Each [todo], by its id, in the order of the walk, with the values in scope there, by name
           in order. *)
+  used_imports : string list;
+      (** The imports that the definition's module paths begin with, by the name code writes them
+          with, in order. *)
   diagnostics : Syntax.diagnostic list;
 }
 

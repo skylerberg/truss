@@ -55,6 +55,9 @@ type module_lookup =
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
+val imports : (Path.file, (string * Path.module_) list) Query.query
+(** The modules a file imports, each with the name code writes it with: its last name. *)
+
 val lookup_module : Query.context -> from:Path.file -> string list -> module_lookup
 (** The module that the names before [::] denote in a file, through the file's imports. *)
 
@@ -93,7 +96,3 @@ val per_definition :
   Query.context -> Path.file -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
 
 val text : (key, string option) Query.query
-
-module For_testing : sig
-  val imports : (Path.file, (string * Path.module_) list) Query.query
-end

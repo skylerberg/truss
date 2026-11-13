@@ -1219,9 +1219,9 @@ match status_code {
 }
 ```
 
-- A variant pattern names the variant without its type, and the variant is
-  looked up in the type of the matched value. A record pattern has no type
-  name.
+- A variant pattern names the variant without its type or its module, and
+  the variant is looked up in the type of the scrutinee. A record pattern
+  has no type name.
 - A bare name that matches a field binds that field to a variable of the
   same name. `field: pattern` matches one field. In a record or variant with
   exactly one field, a bare pattern matches that field.
@@ -2213,7 +2213,9 @@ let settings = json::parse(text)?
   names.
 - There are no import aliases. A full path works without a `use`, and
   importing two modules with the same last name is an error.
-- An unused `use` is an error.
+- An unused `use` is an error. A `use` is used when a module path in the
+  file begins with its last name. A file with a syntax error reports no
+  unused `use`, since the code that did not parse may use it.
 
 ### Module paths
 

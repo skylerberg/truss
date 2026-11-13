@@ -372,6 +372,25 @@ let () =
   test "an import nothing uses is an error with a fix that deletes it" (fun () ->
       one_diagnostic ~others Fixtures.Resolve.import_nothing_uses_is_an_error_with_a_fix_that
         "resolve.unused_import" ~fixed:"\nfn f() {}\n");
+  test "an import used only in an interpolation is used" (fun () ->
+      no_diagnostics
+        (others
+        @ [ ("app::main", "use app::shapes\n\nfn f() {\n  let text = \"${shapes::area()}\"\n}\n") ]
+        ));
+  test "a path through an import that names no module is that path's error alone" (fun () ->
+      one_diagnostic ~others "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n"
+        "resolve.unknown_module");
+  test "a file where the parser recovered reports no unused import" (fun () ->
+      let database =
+        setup
+          (others
+          @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
+      in
+      let file = file_of "app::main" in
+      if (Query.demand database Workspace.file file).diagnostics = [] then fail "parsed";
+      match Resolve.diagnostics database file with
+      | [] -> ()
+      | reported -> fail "reported %s" (String.concat "; " (codes reported)));
   test "an import of a module that does not exist is an error" (fun () ->
       one_diagnostic Fixtures.Resolve.import_of_a_module_that_does_not_exist_is_an_error
         "resolve.unknown_module");
@@ -576,7 +595,7 @@ let () =
       (match diagnostics database "app::main" with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-      match Query.demand database Resolve.Names.For_testing.imports (file_of "app::main") with
+      match Query.demand database Resolve.Names.imports (file_of "app::main") with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
   test "a package with an owner that the manifest does not list cannot be named" (fun () ->

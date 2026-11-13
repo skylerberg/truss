@@ -5,3 +5,9 @@ public fn turn() -> Int64 {
 public fn half() -> Int64 {
   echo 180
 }
+
+public fn label() -> String {
+  "turned ${echo 180}"
+}
+
+public type Pending = todo

@@ -6,7 +6,6 @@
   path
   source
   diagnostic
-  token
   lexer
   syntax
   parser

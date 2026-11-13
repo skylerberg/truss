@@ -52,6 +52,7 @@ type state = {
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;
   mutable holes : (Syntax.id * (string * value) list) list;
+  mutable used_imports : string list;
 }
 
 val report :

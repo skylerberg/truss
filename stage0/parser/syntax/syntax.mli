@@ -278,8 +278,8 @@ and pattern_kind =
   | Qualified_constant of constant
   | Literal of literal
   | Pattern_range of { start : range_end; stop : range_end; inclusive : bool }
-  | Variant of { name : path; fields : pattern_field list option }
-      (** [Circle(radius, ..)], [Empty] *)
+  | Variant of { name : name; fields : pattern_field list option }
+      (** [Circle(radius, ..)], [Empty]. A pattern names a variant without its type or module. *)
   | Record of pattern_field list  (** [(index, element)] *)
   | Alternatives of pattern list
   | Pattern_error
@@ -382,6 +382,15 @@ type impl_member =
 
 type capability_member = Capability_member_error
 
+(** The intended kind of a definition whose header did not parse, from its first keyword. *)
+type intended_kind =
+  | Intended_function
+  | Intended_constant
+  | Intended_type
+  | Intended_trait
+  | Intended_capability
+  | Intended_theorem
+
 type definition_kind =
   | Function of function_definition
   | Method_declaration of signature
@@ -415,9 +424,9 @@ type definition_kind =
       body : block;
     }
   | Law_proof of { trait_ : path_type; law : name; type_ : type_head; body : block }
-  | Definition_error of { keyword : Token.keyword option; name : definition_name option }
-      (** A definition whose header did not parse, with its keyword and its name when those were
-          read, so that later stages can still know it is there. *)
+  | Definition_error of { intended : intended_kind option; name : definition_name option }
+      (** A definition whose header did not parse, with its intended kind and its name when those
+          were read, so that later stages can still declare it. *)
 
 type definition = {
   visibility : visibility;

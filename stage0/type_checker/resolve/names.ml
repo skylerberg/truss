@@ -182,16 +182,13 @@ let top module_ name : Path.t = Top { module_; name }
    module changes no lookup of it. *)
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
-(* The kind of definition that a definition whose header did not parse was
-   meant to be, according to its first keyword. *)
-let named_of_keyword : Token.keyword option -> named option = function
-  | Some Fn -> Some Function
-  | Some Type -> Some Type
-  | Some Trait -> Some Trait
-  | Some Capability -> Some Capability
-  | Some Let -> Some Constant
-  | Some Theorem -> Some Theorem
-  | _ -> None
+let named_of_intended : intended_kind -> named = function
+  | Intended_function -> Function
+  | Intended_constant -> Constant
+  | Intended_type -> Type
+  | Intended_trait -> Trait
+  | Intended_capability -> Capability
+  | Intended_theorem -> Theorem
 
 let plain_items (definitions : definition Syntax.item list) =
   List.concat_map
@@ -211,8 +208,8 @@ let plain_items (definitions : definition Syntax.item list) =
       | Capability { name; _ } -> plain name.text Capability false
       | Constant { name = Plain_name name; _ } -> plain name.text Constant false
       | Theorem { name; generics; _ } -> plain name.text Theorem (generics <> [])
-      | Definition_error { name = Some (Plain_name name); keyword } -> (
-          match named_of_keyword keyword with Some kind -> plain name.text kind false | None -> [])
+      | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
+          plain name.text (named_of_intended intended) false
       | Function _ | Method_declaration _ | Constant _ | Impl _ | Test _ | Law_proof _
       | Definition_error _ ->
           [])
@@ -466,19 +463,22 @@ let file_declarations =
                             for_type = spell_head type_;
                           })
                        Law_proof false
-                 | Definition_error { name = Some (Plain_name name); keyword } -> (
-                     match named_of_keyword keyword with
-                     | Some kind -> declare (top module_ name.text) (kind_of_named kind) false
-                     | None -> None)
-                 | Definition_error { name = Some (Member_name (head, name)); keyword } ->
+                 | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
+                     declare (top module_ name.text)
+                       (kind_of_named (named_of_intended intended))
+                       false
+                 | Definition_error { name = Some (Member_name (head, name)); intended } ->
                      let owner = owner database ~from:file head in
-                     if keyword = Some Let then
+                     if intended = Some Intended_constant then
                        declare (Member_constant { owner; name = name.text }) Member_constant false
                      else
                        declare (Method { owner; name = name.text; receiver = Static }) Method false
                  (* A method without a body is written only inside a trait or a
                 capability. *)
-                 | Method_declaration _ | Definition_error { name = None; _ } -> None))
+                 | Method_declaration _
+                 | Definition_error { name = None; _ }
+                 | Definition_error { intended = None; _ } ->
+                     None))
            (Query.demand database Workspace.file file).definitions))
 
 (* A module's declarations, file by file, each numbered among the earlier
@@ -742,7 +742,3 @@ let text =
       | None -> None
       | Some declaration ->
           Some (Query.demand database items declaration.file).(declaration.index).text)
-
-module For_testing = struct
-  let imports = imports
-end

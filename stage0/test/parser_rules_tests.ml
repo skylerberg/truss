@@ -406,9 +406,15 @@ let () =
         ~at:"Shape." ~fixed:Fixtures.Parser_rules.variant_with_its_type_in_a_pattern_fixed;
       body_error "let empty = shape is geometry::Shape::Empty" ~code:Qualified_variant
         ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
+  test "a variant with its module in a pattern" (fun () ->
+      body_error "let round = shape is geometry::Circle(radius)" ~code:Qualified_variant
+        ~at:"geometry::" ~fixed:"let round = shape is Circle(radius)");
   test "a constant of a type in a pattern is not a variant" (fun () ->
-      let _, diagnostics = body_of "let teapot = status is Status.teapot" in
-      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
+      List.iter
+        (fun text ->
+          let _, diagnostics = body_of text in
+          if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)))
+        [ "let teapot = status is Status.teapot"; "let teapot = status is http::Status.teapot" ]);
   test "vec![...]" (fun () ->
       body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!" ~fixed:"let items = [1, 2]");
   test "println!(...) has no fix" (fun () ->
