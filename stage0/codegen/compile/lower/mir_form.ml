@@ -103,7 +103,8 @@ let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
       List.iter
         (fun (statement : Mir.statement) ->
           match statement.kind with
-          | Assign { target = { root = Local local; projections = [] }; value = Operand (Borrow _) }
+          | Assign
+              { target = { root = Local local; projections = [] }; value = Operand (Borrow _); _ }
             ->
               Hashtbl.replace aliases local
                 (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
@@ -111,6 +112,7 @@ let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
               {
                 target = { root = Local local; projections = [] };
                 value = Construct { variant; fields };
+                _;
               } ->
               Hashtbl.replace built local (variant, fields)
           | _ -> ())
@@ -1252,7 +1254,7 @@ and concurrent_block st region ~fork (entry_block, entry_index) =
 and lower_statement st (statement : Mir.statement) =
   let origin = statement.origin in
   match statement.kind with
-  | Assign { target; value } -> assign st target value ~origin
+  | Assign { target; value; _ } -> assign st target value ~origin
   | Call { destination; call } ->
       let destination =
         match destination with
@@ -1270,7 +1272,7 @@ and lower_statement st (statement : Mir.statement) =
       match mir_place_type st cursor with
       | Ground.Cursor yielding -> call_next st yielding (place st cursor) (place st destination)
       | _ -> bug "next on a place that is not a cursor")
-  | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Proof _ -> ()
+  | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
   | Dead locals -> List.iter (dead st) locals
   | Assert condition ->
       let holds = value st condition in

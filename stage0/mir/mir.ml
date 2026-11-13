@@ -107,7 +107,7 @@ type loan_duration =
 type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
-  | Assign of { target : place; value : rvalue }
+  | Assign of { target : place; value : rvalue; node : Core.id option }
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
       (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
@@ -130,6 +130,7 @@ and statement_kind =
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
+  | Matched of { patterns : Core.origin list }
   | Proof of Core.block  (** Only the prover reads it. *)
 
 type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
@@ -308,17 +309,17 @@ let terminate b terminator origin =
   b.current <- None
 
 let goto b target origin = terminate b (Goto target) origin
-let assign b target value origin = emit b (Assign { target; value }) origin
+let assign ?node b target value origin = emit b (Assign { target; value; node }) origin
 
 (* A new temporary that holds a value, or [None] where control does not
-   reach. *)
-let hold b type_ origin value =
+   reach. [node] is the core expression whose value it is. *)
+let hold ?node b type_ origin value =
   match b.current with
   | None -> None
   | Some _ ->
       let local = temporary b type_ origin in
-      assign b (at local) value origin;
-      Some (Use { place = at local; type_; node = origin; origin })
+      assign ?node b (at local) value origin;
+      Some (Use { place = at local; type_; node = Option.value node ~default:origin; origin })
 
 let source b (local : Core.local) =
   match Hashtbl.find_opt b.sources local with
@@ -476,7 +477,7 @@ let exit_depth b (exit : task_exit) =
 
 let rec expression b (node : Core.expression) : operand option =
   let origin = node.origin in
-  let hold value = hold b node.type_ origin value in
+  let hold value = hold ~node:node.id b node.type_ origin value in
   match b.current with
   | None -> None
   | Some _ -> (
@@ -946,7 +947,7 @@ and call_value b (node : Core.expression) (called : Core.call) =
                | Default -> bug "a primitive operation with a default argument")
              called.arguments)
       in
-      hold b node.type_ origin (Operation { operation; type_arguments; operands })
+      hold ~node:node.id b node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->
       let* call = call_of b called ~node:node.id in
       if diverges node.type_ then begin
@@ -1350,6 +1351,14 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
           in_scope b current.origin (fun () ->
               match_patterns b current.patterns places ~fail:next ~matched:body current.origin;
               start b body;
+              if current.patterns <> [] then
+                emit b
+                  (Matched
+                     {
+                       patterns =
+                         List.map (fun (pattern : Core.pattern) -> pattern.origin) current.patterns;
+                     })
+                  current.origin;
               match current.guard with
               | None -> arm current
               | Some guard ->
@@ -1406,7 +1415,7 @@ and statement b (node : Core.statement) =
               List.iter (register_binding b) (List.rev bound);
               start b matched)
       | Evaluate value -> ignore (expression b value)
-      | Assign { target; value = written } -> (
+      | Assign { target; value = written; _ } -> (
           match expression b written with
           | Some value -> (
               (* The value is evaluated before the target, and what it
@@ -1844,7 +1853,7 @@ let show_locals locals = String.concat ", " (List.map (Printf.sprintf "_%d") loc
 
 let show_statement (statement : statement) =
   match statement.kind with
-  | Assign { target; value } -> Printf.sprintf "%s = %s" (show_place target) (show_rvalue value)
+  | Assign { target; value; _ } -> Printf.sprintf "%s = %s" (show_place target) (show_rvalue value)
   | Call { destination = Some destination; call } ->
       Printf.sprintf "%s = %s" (show_place destination) (show_call call)
   | Call { destination = None; call } -> show_call call
@@ -1875,6 +1884,7 @@ let show_statement (statement : statement) =
         | Operand_evaluation -> "the operation")
   | Loan_end loans -> "end loans " ^ String.concat ", " (List.map string_of_int loans)
   | Ghost_assert _ -> "ghost assert"
+  | Matched _ -> "matched"
   | Proof _ -> "proof"
 
 let show_terminator = function

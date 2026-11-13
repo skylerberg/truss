@@ -109,10 +109,13 @@ type received = {
   advance : frame -> frame;
 }
 
+type passed_place = { read : frame -> Logic.term; write : frame -> Logic.term -> frame }
+
 type passed = {
   position : int;
   mode : Types.mode;
   operand : Core.operand option;
+  passed_place : passed_place option;
   type_ : Types.ty;
   term : Logic.term;
   run : (Logic.term * Logic.term) option;
