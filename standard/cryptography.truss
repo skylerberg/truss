@@ -1,3 +1,5 @@
+use standard::cryptography::elliptic
+use standard::cryptography::modular
 use standard::intrinsic
 
 let sha256_constants: Array[UInt32, 64] = [
@@ -2555,6 +2557,58 @@ internal fn aes_substitute(byte: UInt8) -> UInt8
     ^ 0x63
 }
 
+internal type AesKeys(bytes: Array[UInt8, 240], rounds: USize)
+  invariant rounds == 10 || rounds == 14
+
+internal fn aes128_round_keys(key: Array[UInt8, 16]) -> AesKeys
+  cost time O(1)
+  cost allocations == 0
+{
+  var keys: Array[UInt8, 240] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let key_length: USize = 16
+  for index in 0..key_length
+    cost allocations == 0
+  {
+    keys[index] = key[index]
+  }
+  var round_constant: UInt8 = 1
+  let words: USize = 40
+  for step in 0..words
+    cost allocations == 0
+  {
+    let word = step + 4
+    let at = 4 * word
+    var first = keys[at - 4]
+    var second = keys[at - 3]
+    var third = keys[at - 2]
+    var fourth = keys[at - 1]
+    if word % 4 == 0 {
+      let rotated = first
+      first = aes_substitute(second) ^ round_constant
+      second = aes_substitute(third)
+      third = aes_substitute(fourth)
+      fourth = aes_substitute(rotated)
+      round_constant = gf256_double(round_constant)
+    }
+    keys[at] = keys[at - 16] ^ first
+    keys[at + 1] = keys[at - 15] ^ second
+    keys[at + 2] = keys[at - 14] ^ third
+    keys[at + 3] = keys[at - 13] ^ fourth
+  }
+  AesKeys(bytes: keys, rounds: 10)
+}
+
 internal fn aes256_round_keys(key: Array[UInt8, 32]) -> Array[UInt8, 240]
   cost time O(1)
   cost allocations == 0
@@ -2660,21 +2714,21 @@ internal fn aes_mix_columns(state: Array[UInt8, 16]) -> Array[UInt8, 16]
   mixed
 }
 
-internal fn aes256_encrypt_block(keys: Array[UInt8, 240], block: Array[UInt8, 16]) -> Array[UInt8, 16]
+internal fn aes_encrypt_block(keys: AesKeys, block: Array[UInt8, 16]) -> Array[UInt8, 16]
   cost time O(1)
   cost allocations == 0
 {
   var state = block
-  aes_add_round_key(mut state, keys: keys, round: 0)
-  let rounds: USize = 13
-  for round in 0..rounds
+  aes_add_round_key(mut state, keys: keys.bytes, round: 0)
+  let middle = keys.rounds - 1
+  for round in 0..middle
     cost allocations == 0
   {
     state = aes_mix_columns(aes_substitute_and_shift(state))
-    aes_add_round_key(mut state, keys: keys, round: round + 1)
+    aes_add_round_key(mut state, keys: keys.bytes, round: round + 1)
   }
   state = aes_substitute_and_shift(state)
-  aes_add_round_key(mut state, keys: keys, round: 14)
+  aes_add_round_key(mut state, keys: keys.bytes, round: keys.rounds)
   state
 }
 
@@ -2825,7 +2879,7 @@ internal fn aes_gcm_counter_block(nonce: Array[UInt8, 12], counter: UInt32) -> A
 internal fn aes_gcm_xor(
   output: mut intrinsic::Storage[UInt8],
   input: Slice[UInt8],
-  keys: Array[UInt8, 240],
+  keys: AesKeys,
   nonce: Array[UInt8, 12],
 )
   requires intrinsic::storage_length(output) + input.length() <= intrinsic::storage_capacity(output)
@@ -2844,14 +2898,14 @@ internal fn aes_gcm_xor(
   {
     if index % 16 == 0 {
       let number: UInt32 = intrinsic::convert((index / 16 + 2) % 4294967296)
-      block = aes256_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: number))
+      block = aes_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: number))
     }
     intrinsic::storage_push(mut output, value: input[index] ^ block[index % 16])
   }
 }
 
 internal fn aes_gcm_tag(
-  keys: Array[UInt8, 240],
+  keys: AesKeys,
   nonce: Array[UInt8, 12],
   associated_data: Slice[UInt8],
   ciphertext: Slice[UInt8],
@@ -2860,14 +2914,14 @@ internal fn aes_gcm_tag(
   cost allocations == 0
 {
   let zero: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  var hash = Ghash.new(Block128.from_bytes(aes256_encrypt_block(keys, block: zero)))
+  var hash = Ghash.new(Block128.from_bytes(aes_encrypt_block(keys, block: zero)))
   mut hash.update(associated_data)
   mut hash.pad_to_block()
   mut hash.update(ciphertext)
   mut hash.pad_to_block()
   mut hash.update_bit_length(associated_data.length())
   mut hash.update_bit_length(ciphertext.length())
-  let mask = aes256_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: 1))
+  let mask = aes_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: 1))
   var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let count: USize = 16
   for index in 0..count
@@ -2888,7 +2942,7 @@ internal fn aes256_gcm_seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  let keys = aes256_round_keys(key)
+  let keys = AesKeys(bytes: aes256_round_keys(key), rounds: 14)
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
   aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
   let tag = aes_gcm_tag(
@@ -2914,7 +2968,55 @@ internal fn aes256_gcm_open(
   }
   cost time O(sealed.length() + associated_data.length())
 {
-  let keys = aes256_round_keys(key)
+  let keys = AesKeys(bytes: aes256_round_keys(key), rounds: 14)
+  let length = sealed.length() - 16
+  let ciphertext = sealed[..length]
+  let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
+  if !constant_time_equal(tag[..], second: sealed[length..]) {
+    return Err(AuthenticationError())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  aes_gcm_xor(mut output, input: ciphertext, keys: keys, nonce: nonce)
+  Ok(List(storage: own output))
+}
+
+internal fn aes128_gcm_seal(
+  key: Array[UInt8, 16],
+  nonce: Array[UInt8, 12],
+  plaintext: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> List[UInt8]
+  requires plaintext.length() <= USize.maximum - 16
+  ensures result.length() == plaintext.length() + 16
+  cost time O(plaintext.length() + associated_data.length())
+{
+  let keys = aes128_round_keys(key)
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
+  aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
+  let tag = aes_gcm_tag(
+    keys,
+    nonce: nonce,
+    associated_data: associated_data,
+    ciphertext: Slice(elements: intrinsic::storage_view(output)),
+  )
+  push_tag(mut output, tag: tag)
+  List(storage: own output)
+}
+
+internal fn aes128_gcm_open(
+  key: Array[UInt8, 16],
+  nonce: Array[UInt8, 12],
+  sealed: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> Result[List[UInt8], AuthenticationError]
+  requires sealed.length() >= 16
+  ensures match result {
+    Ok(plaintext) => plaintext.length() + 16 == sealed.length()
+    Err(_) => true
+  }
+  cost time O(sealed.length() + associated_data.length())
+{
+  let keys = aes128_round_keys(key)
   let length = sealed.length() - 16
   let ciphertext = sealed[..length]
   let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
@@ -3650,4 +3752,604 @@ public fn AgreementKey.agree(own self, peer: AgreementPublicKey) -> Option[Secre
     any_bit = any_bit | shared[index]
   }
   if any_bit == 0 { None } else { Some(SecretKey(bytes: shared)) }
+}
+
+public type Curve = P256 | P384
+  derives Equal
+
+fn curve_of(curve: Curve) -> elliptic::Curve
+  uses Panic
+{
+  match curve {
+    P256 => elliptic::Curve.p256()
+    P384 => elliptic::Curve.p384()
+  }.expect("the curve's constants make a field")
+}
+
+fn digest_for(curve: Curve, message: Slice[UInt8]) -> List[UInt8] {
+  match curve {
+    P256 => {
+      let digest = sha256(message)
+      digest[..].to_list()
+    }
+    P384 => {
+      let digest = sha384(message)
+      digest[..].to_list()
+    }
+  }
+}
+
+fn keyed_hash(curve: Curve, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+  match curve {
+    P256 => {
+      let code = hmac_sha256(key, message: message)
+      code[..].to_list()
+    }
+    P384 => {
+      let code = hmac_sha384(key, message: message)
+      code[..].to_list()
+    }
+  }
+}
+
+fn scalar_of_digest(elliptic_curve: elliptic::Curve, digest: Slice[UInt8]) -> List[UInt64] {
+  let size = elliptic_curve.size()
+  let used = if digest.length() > size { digest[..size] } else { digest }
+  var scalar = modular::limbs_from_bytes(used, count: size / 4)
+  let order = elliptic_curve.order()
+  if !modular::is_less(scalar.slice(), second: order.slice()) {
+    let scalars = elliptic_curve.scalars()
+    scalar = scalars.subtract(scalar.slice(), second: order.slice())
+  }
+  scalar
+}
+
+fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: Slice[UInt8], digest: Slice[UInt8]) -> List[UInt64] {
+  let size = elliptic_curve.size()
+  let hashed = modular::limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest).slice(), length: size)
+  let length = digest_for(curve, message: []).length()
+  var value: List[UInt8] = List.filled(1, count: length)
+  var key: List[UInt8] = List.filled(0, count: length)
+  let separators: List[UInt8] = [0, 1]
+  for separator in separators {
+    var input = value.copy()
+    mut input.push(separator)
+    mut input.append_slice(private)
+    mut input.append_slice(hashed.slice())
+    key = keyed_hash(curve, key: key.slice(), message: input.slice())
+    value = keyed_hash(curve, key: key.slice(), message: value.slice())
+  }
+  var attempts: USize = 0
+  while attempts < 64 {
+    var stream: List[UInt8] = []
+    while stream.length() < size {
+      value = keyed_hash(curve, key: key.slice(), message: value.slice())
+      mut stream.append_slice(value.slice())
+    }
+    let candidate = modular::limbs_from_bytes(stream[..size], count: size / 4)
+    if elliptic_curve.is_valid_scalar(candidate.slice()) {
+      return candidate
+    }
+    var input = value.copy()
+    mut input.push(0)
+    key = keyed_hash(curve, key: key.slice(), message: input.slice())
+    value = keyed_hash(curve, key: key.slice(), message: value.slice())
+    attempts += 1
+  }
+  modular::limbs_from_bytes([1], count: size / 4)
+}
+
+public opaque type EcdsaVerifyingKey(curve: Curve, point: List[UInt8])
+  derives Equal, Copyable
+
+public fn EcdsaVerifyingKey.from_sec1(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdsaVerifyingKey]
+  uses Panic
+{
+  let elliptic_curve = curve_of(curve)
+  if elliptic_curve.decode(bytes) is None {
+    return None
+  }
+  Some(EcdsaVerifyingKey(curve: curve, point: bytes.to_list()))
+}
+
+public fn EcdsaVerifyingKey.curve(self) -> Curve {
+  self.curve
+}
+
+public fn EcdsaVerifyingKey.sec1(self) -> Slice[UInt8] {
+  self.point.slice()
+}
+
+public fn EcdsaVerifyingKey.verify(self, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+  uses Panic
+{
+  self.verify_digest(digest_for(self.curve, message: message).slice(), signature: signature)
+}
+
+public fn EcdsaVerifyingKey.verify_digest(self, digest: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let size = elliptic_curve.size()
+  if signature.length() != 2 * size {
+    return false
+  }
+  let point = match elliptic_curve.decode(self.point.slice()) {
+    Some(point) => own point
+    None => return false
+  }
+  let count = size / 4
+  let r = modular::limbs_from_bytes(signature[..size], count: count)
+  let s = modular::limbs_from_bytes(signature[size..], count: count)
+  if !elliptic_curve.is_valid_scalar(r.slice()) || !elliptic_curve.is_valid_scalar(s.slice()) {
+    return false
+  }
+  let scalars = elliptic_curve.scalars()
+  let e = scalars.to_montgomery(scalar_of_digest(elliptic_curve, digest: digest).slice())
+  let w = scalars.invert(scalars.to_montgomery(s.slice()).slice())
+  let first = scalars.from_montgomery(scalars.multiply(e.slice(), second: w.slice()).slice())
+  let second = scalars.from_montgomery(scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: w.slice()).slice())
+  let first_point = elliptic_curve.multiply(modular::limbs_to_bytes(first.slice(), length: size).slice(), point: elliptic_curve.base())
+  let second_point = elliptic_curve.multiply(modular::limbs_to_bytes(second.slice(), length: size).slice(), point: point)
+  match elliptic_curve.affine(elliptic_curve.add(first_point, second: second_point)) {
+    Some(affine) => {
+      var x = affine.x.copy()
+      let order = elliptic_curve.order()
+      if !modular::is_less(x.slice(), second: order.slice()) {
+        x = scalars.subtract(x.slice(), second: order.slice())
+      }
+      scalars.equal(x.slice(), second: r.slice())
+    }
+    None => false
+  }
+}
+
+public opaque type EcdsaSigningKey(curve: Curve, scalar: List[UInt8])
+  derives Copyable
+
+fn random_scalar(curve: Curve) -> List[UInt8]
+  uses Random, Panic
+{
+  let elliptic_curve = curve_of(curve)
+  let size = elliptic_curve.size()
+  while true {
+    var bytes: List[UInt8] = []
+    while bytes.length() < size {
+      let word = Random.next()
+      let count: USize = 8
+      for index in 0..count {
+        if bytes.length() < size {
+          mut bytes.push(intrinsic::convert((word >> (8 * index)) & 255))
+        }
+      }
+    }
+    if elliptic_curve.is_valid_scalar(modular::limbs_from_bytes(bytes.slice(), count: size / 4).slice()) {
+      return bytes
+    }
+  }
+}
+
+public fn EcdsaSigningKey.generate(curve: Curve) -> EcdsaSigningKey
+  uses Random, Panic
+{
+  EcdsaSigningKey(curve: curve, scalar: random_scalar(curve))
+}
+
+public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdsaSigningKey]
+  uses Panic
+{
+  let elliptic_curve = curve_of(curve)
+  if bytes.length() != elliptic_curve.size()
+    || !elliptic_curve.is_valid_scalar(modular::limbs_from_bytes(bytes, count: bytes.length() / 4).slice())
+  {
+    return None
+  }
+  Some(EcdsaSigningKey(curve: curve, scalar: bytes.to_list()))
+}
+
+public fn EcdsaSigningKey.verifying_key(self) -> EcdsaVerifyingKey
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let point = elliptic_curve.multiply(self.scalar.slice(), point: elliptic_curve.base())
+  let affine = elliptic_curve.affine(point).expect("a valid scalar times the base point is not the identity")
+  EcdsaVerifyingKey(curve: self.curve, point: elliptic_curve.encode(affine))
+}
+
+public fn EcdsaSigningKey.sign(self, message: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  self.sign_digest(digest_for(self.curve, message: message).slice())
+}
+
+public fn EcdsaSigningKey.sign_digest(self, digest: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let size = elliptic_curve.size()
+  let scalars = elliptic_curve.scalars()
+  let nonce = deterministic_nonce(self.curve, elliptic_curve: elliptic_curve, private: self.scalar.slice(), digest: digest)
+  let point = elliptic_curve.multiply(modular::limbs_to_bytes(nonce.slice(), length: size).slice(), point: elliptic_curve.base())
+  let affine = elliptic_curve.affine(point).expect("a valid nonce times the base point is not the identity")
+  var r = affine.x.copy()
+  let order = elliptic_curve.order()
+  if !modular::is_less(r.slice(), second: order.slice()) {
+    r = scalars.subtract(r.slice(), second: order.slice())
+  }
+  let d = modular::limbs_from_bytes(self.scalar.slice(), count: size / 4)
+  let e = scalar_of_digest(elliptic_curve, digest: digest)
+  let product = scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: scalars.to_montgomery(d.slice()).slice())
+  let sum = scalars.add(scalars.to_montgomery(e.slice()).slice(), second: product.slice())
+  let inverse = scalars.invert(scalars.to_montgomery(nonce.slice()).slice())
+  let s = scalars.from_montgomery(scalars.multiply(inverse.slice(), second: sum.slice()).slice())
+  var signature = modular::limbs_to_bytes(r.slice(), length: size)
+  mut signature.append(modular::limbs_to_bytes(s.slice(), length: size))
+  signature
+}
+
+public opaque type EcdhKey(curve: Curve, scalar: List[UInt8])
+
+public fn EcdhKey.generate(curve: Curve) -> EcdhKey
+  uses Random, Panic
+{
+  EcdhKey(curve: curve, scalar: random_scalar(curve))
+}
+
+public fn EcdhKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdhKey]
+  uses Panic
+{
+  match EcdsaSigningKey.from_scalar(curve, bytes: bytes) {
+    Some(_) => Some(EcdhKey(curve: curve, scalar: bytes.to_list()))
+    None => None
+  }
+}
+
+public fn EcdhKey.public_key(self) -> List[UInt8]
+  uses Panic
+{
+  EcdsaSigningKey(curve: self.curve, scalar: self.scalar.copy()).verifying_key().point
+}
+
+public fn EcdhKey.agree(own self, peer: Slice[UInt8]) -> Option[List[UInt8]]
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let point = elliptic_curve.decode(peer)?
+  let shared = elliptic_curve.affine(elliptic_curve.multiply(self.scalar.slice(), point: point))?
+  Some(modular::limbs_to_bytes(shared.x.slice(), length: elliptic_curve.size()))
+}
+
+public type HashFunction = Sha256 | Sha384 | Sha512
+  derives Equal
+
+public fn HashFunction.length(self) -> USize
+  ensures result <= 64
+{
+  match self {
+    Sha256 => 32
+    Sha384 => 48
+    Sha512 => 64
+  }
+}
+
+public fn HashFunction.digest(self, message: Slice[UInt8]) -> List[UInt8] {
+  match self {
+    Sha256 => {
+      let digest = sha256(message)
+      digest[..].to_list()
+    }
+    Sha384 => {
+      let digest = sha384(message)
+      digest[..].to_list()
+    }
+    Sha512 => {
+      let digest = sha512(message)
+      digest[..].to_list()
+    }
+  }
+}
+
+fn digest_info(function: HashFunction) -> List[UInt8] {
+  let prefix = match function {
+    Sha256 => "3031300d060960864801650304020105000420"
+    Sha384 => "3041300d060960864801650304020205000430"
+    Sha512 => "3051300d060960864801650304020305000440"
+  }
+  var bytes: List[UInt8] = []
+  var index: USize = 0
+  let text = prefix.slice()
+  while index < text.length() && text.length() - index >= 2 {
+    let high = text.byte(index).digit_value()
+    let low = text.byte(index + 1).digit_value()
+    mut bytes.push(if high < 16 && low < 16 { high * 16 + low } else { 0 })
+    index += 2
+  }
+  bytes
+}
+
+fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: USize) -> List[UInt8] {
+  var mask: List[UInt8] = []
+  var counter: UInt32 = 0
+  while mask.length() < length && counter < 65536 {
+    var input = seed.to_list()
+    mut input.push(intrinsic::convert(counter >> 24))
+    mut input.push(intrinsic::convert((counter >> 16) & 255))
+    mut input.push(intrinsic::convert((counter >> 8) & 255))
+    mut input.push(intrinsic::convert(counter & 255))
+    mut mask.append(function.digest(input.slice()))
+    counter += 1
+  }
+  mut mask.truncate(length)
+  mask
+}
+
+public opaque type RsaPublicKey(modulus: List[UInt8], exponent: List[UInt8])
+  derives Equal, Copyable
+
+fn trimmed(bytes: Slice[UInt8]) -> List[UInt8] {
+  var start: USize = 0
+  while start < bytes.length() && bytes[start] == 0
+    invariant start <= bytes.length()
+  {
+    start += 1
+  }
+  bytes[start..].to_list()
+}
+
+public fn RsaPublicKey.new(modulus: Slice[UInt8], exponent: Slice[UInt8]) -> Option[RsaPublicKey] {
+  let n = trimmed(modulus)
+  let e = trimmed(exponent)
+  if n.length() < 128 || n.length() > 2048 || e.is_empty() || e.length() > 8 || n[n.length() - 1] % 2 == 0 {
+    return None
+  }
+  Some(RsaPublicKey(modulus: own n, exponent: own e))
+}
+
+public fn RsaPublicKey.modulus(self) -> Slice[UInt8] {
+  self.modulus.slice()
+}
+
+public fn RsaPublicKey.exponent(self) -> Slice[UInt8] {
+  self.exponent.slice()
+}
+
+public fn RsaPublicKey.bits(self) -> USize {
+  modular::bit_length(modular::limbs_from_bytes(self.modulus.slice(), count: (self.modulus.length() + 3) / 4).slice())
+}
+
+fn public_operation(key: RsaPublicKey, signature: Slice[UInt8]) -> Option[List[UInt8]] {
+  let size = key.modulus.length()
+  if signature.length() != size {
+    return None
+  }
+  let count = (size + 3) / 4
+  let modulus = modular::limbs_from_bytes(key.modulus.slice(), count: count)
+  let value = modular::limbs_from_bytes(signature, count: count)
+  if !modular::is_less(value.slice(), second: modulus.slice()) {
+    return None
+  }
+  let field = modular::Field.new(own modulus)?
+  let exponent = modular::limbs_from_bytes(key.exponent.slice(), count: 2)
+  let raised = field.power(field.to_montgomery(value.slice()).slice(), exponent: exponent.slice())
+  Some(modular::limbs_to_bytes(field.from_montgomery(raised.slice()).slice(), length: size))
+}
+
+fn constant_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool {
+  first.length() == second.length() && constant_time_equal(first, second: second)
+}
+
+fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: USize) -> Option[List[UInt8]] {
+  var info = digest_info(function)
+  mut info.append_slice(digest)
+  if size < info.length() + 11 {
+    return None
+  }
+  var encoded: List[UInt8] = [0, 1]
+  for _ in 0..size - info.length() - 3 {
+    mut encoded.push(255)
+  }
+  mut encoded.push(0)
+  mut encoded.append(own info)
+  Some(own encoded)
+}
+
+public fn RsaPublicKey.verify_pkcs1(self, function: HashFunction, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool {
+  match public_operation(self, signature: signature) {
+    Some(encoded) => match pkcs1_encoding(function, digest: function.digest(message).slice(), size: self.modulus.length()) {
+      Some(expected) => constant_equal(encoded.slice(), second: expected.slice())
+      None => false
+    }
+    None => false
+  }
+}
+
+fn pss_hash(function: HashFunction, digest: Slice[UInt8], salt: Slice[UInt8]) -> List[UInt8] {
+  var input: List[UInt8] = List.filled(0, count: 8)
+  mut input.append_slice(digest)
+  mut input.append_slice(salt)
+  function.digest(input.slice())
+}
+
+public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool {
+  let encoded = match public_operation(self, signature: signature) {
+    Some(encoded) => own encoded
+    None => return false
+  }
+  let bits = self.bits()
+  if bits < 2 {
+    return false
+  }
+  let encoded_bits = bits - 1
+  let length = encoded_bits / 8 + (if encoded_bits % 8 == 0 { 0 } else { 1 })
+  let hash_length = function.length()
+  if encoded.length() < length || length < hash_length + hash_length + 2 {
+    return false
+  }
+  let skip = encoded.length() - length
+  for index in 0..skip {
+    if encoded[index] != 0 {
+      return false
+    }
+  }
+  let message_encoded = encoded[skip..]
+  if message_encoded[length - 1] != 188 {
+    return false
+  }
+  let masked = message_encoded[..length - hash_length - 1]
+  let hashed = message_encoded[length - hash_length - 1..length - 1]
+  let top_bits = (8 - encoded_bits % 8) % 8
+  let top_mask: UInt8 = if top_bits >= 8 { 0 } else { 255 >> intrinsic::convert[USize, UInt8](top_bits) }
+  if masked.length() == 0 || (masked[0] & (255 ^ top_mask)) != 0 {
+    return false
+  }
+  let mask = mask_generation(function, seed: hashed, length: masked.length())
+  var block: List[UInt8] = List.with_capacity(masked.length())
+  for index in 0..masked.length() {
+    mut block.push(masked[index] ^ (if index < mask.length() { mask[index] } else { 0 }))
+  }
+  if block.length() > 0 {
+    block[0] = block[0] & top_mask
+  }
+  let salt_length = hash_length
+  if block.length() < salt_length + 1 {
+    return false
+  }
+  let zeros = block.length() - salt_length - 1
+  for index in 0..zeros {
+    if block[index] != 0 {
+      return false
+    }
+  }
+  if block[zeros] != 1 {
+    return false
+  }
+  let salt = block[zeros + 1..]
+  let expected = pss_hash(function, digest: function.digest(message).slice(), salt: salt)
+  constant_equal(expected.slice(), second: hashed)
+}
+
+public opaque type RsaPrivateKey(
+  public_key: RsaPublicKey,
+  exponent: List[UInt8],
+  first_prime: List[UInt8],
+  second_prime: List[UInt8],
+  first_exponent: List[UInt8],
+  second_exponent: List[UInt8],
+  coefficient: List[UInt8],
+)
+  derives Copyable
+
+public fn RsaPrivateKey.new(
+  public_key: RsaPublicKey,
+  exponent: Slice[UInt8],
+  first_prime: Slice[UInt8],
+  second_prime: Slice[UInt8],
+  first_exponent: Slice[UInt8],
+  second_exponent: Slice[UInt8],
+  coefficient: Slice[UInt8],
+) -> Option[RsaPrivateKey] {
+  let key = RsaPrivateKey(
+    public_key: public_key.copy(),
+    exponent: trimmed(exponent),
+    first_prime: trimmed(first_prime),
+    second_prime: trimmed(second_prime),
+    first_exponent: trimmed(first_exponent),
+    second_exponent: trimmed(second_exponent),
+    coefficient: trimmed(coefficient),
+  )
+  var message = public_key.modulus().to_list()
+  if message.length() > 0 {
+    message[0] = 0
+  }
+  match private_operation(key, value: message.slice()) {
+    Some(signed) => if public_operation(public_key, signature: signed.slice()) == Some(own message) { Some(own key) } else { None }
+    None => None
+  }
+}
+
+public fn RsaPrivateKey.public_key(self) -> RsaPublicKey {
+  self.public_key.copy()
+}
+
+fn exponentiate_modulo(prime: Slice[UInt8], exponent: Slice[UInt8], value: Slice[UInt64]) -> Option[List[UInt64]] {
+  let count = (prime.length() + 3) / 4
+  let field = modular::Field.new(modular::limbs_from_bytes(prime, count: count))?
+  let base = field.reduce(value)
+  Some(field.from_montgomery(field.power_secret(base.slice(), exponent: exponent).slice()))
+}
+
+fn private_operation(key: RsaPrivateKey, value: Slice[UInt8]) -> Option[List[UInt8]] {
+  let size = key.public_key.modulus.length()
+  let count = (size + 3) / 4
+  let limbs = modular::limbs_from_bytes(value, count: count)
+  let first = exponentiate_modulo(key.first_prime.slice(), exponent: key.first_exponent.slice(), value: limbs.slice())?
+  let second = exponentiate_modulo(key.second_prime.slice(), exponent: key.second_exponent.slice(), value: limbs.slice())?
+  let prime_count = (key.first_prime.length() + 3) / 4
+  let field = modular::Field.new(modular::limbs_from_bytes(key.first_prime.slice(), count: prime_count))?
+  let second_reduced = field.reduce(second.slice())
+  let difference = field.subtract(field.to_montgomery(first.slice()).slice(), second: second_reduced.slice())
+  let coefficient = field.to_montgomery(modular::limbs_from_bytes(key.coefficient.slice(), count: prime_count).slice())
+  let height = field.from_montgomery(field.multiply(difference.slice(), second: coefficient.slice()).slice())
+  let second_prime = modular::limbs_from_bytes(key.second_prime.slice(), count: (key.second_prime.length() + 3) / 4)
+  var result = modular::multiply_plain(height.slice(), second: second_prime.slice())
+  modular::add_plain(mut result, amount: second.slice())
+  Some(modular::limbs_to_bytes(result.slice(), length: size))
+}
+
+fn signed_or_crash(key: RsaPrivateKey, encoded: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  let signed = private_operation(key, value: encoded).expect("a key that RsaPrivateKey.new accepted signs")
+  if public_operation(key.public_key, signature: signed.slice()) != Some(encoded.to_list()) {
+    Panic.crash("an RSA signature did not verify, so the computation was faulty")
+  }
+  signed
+}
+
+public fn RsaPrivateKey.sign_pkcs1(self, function: HashFunction, message: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  let size = self.public_key.modulus.length()
+  let encoded = pkcs1_encoding(function, digest: function.digest(message).slice(), size: size).expect("the modulus holds the digest")
+  signed_or_crash(self, encoded: encoded.slice())
+}
+
+public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UInt8]) -> List[UInt8]
+  uses Random, Panic
+{
+  let bits = self.public_key.bits()
+  let encoded_bits = bits.saturating_subtract(1)
+  let length = encoded_bits / 8 + (if encoded_bits % 8 == 0 { 0 } else { 1 })
+  let hash_length = function.length()
+  if length < hash_length + hash_length + 2 {
+    Panic.crash("the RSA modulus is too short for PSS with this hash function")
+  }
+  var salt: List[UInt8] = []
+  while salt.length() < hash_length {
+    let word = Random.next()
+    let count: USize = 8
+    for index in 0..count {
+      if salt.length() < hash_length {
+        mut salt.push(intrinsic::convert((word >> (8 * index)) & 255))
+      }
+    }
+  }
+  let hashed = pss_hash(function, digest: function.digest(message).slice(), salt: salt.slice())
+  var plain_block: List[UInt8] = List.filled(0, count: length.saturating_subtract(hash_length + hash_length + 2))
+  mut plain_block.push(1)
+  mut plain_block.append_slice(salt.slice())
+  let mask = mask_generation(function, seed: hashed.slice(), length: plain_block.length())
+  var block: List[UInt8] = List.with_capacity(plain_block.length())
+  for index in 0..plain_block.length() {
+    mut block.push(plain_block[index] ^ (if index < mask.length() { mask[index] } else { 0 }))
+  }
+  let top_bits = (8 - encoded_bits % 8) % 8
+  if top_bits < 8 && block.length() > 0 {
+    block[0] = block[0] & (255 >> intrinsic::convert[USize, UInt8](top_bits))
+  }
+  var encoded: List[UInt8] = List.filled(0, count: self.public_key.modulus.length().saturating_subtract(length))
+  mut encoded.append(own block)
+  mut encoded.append(own hashed)
+  mut encoded.push(188)
+  signed_or_crash(self, encoded: encoded.slice())
 }

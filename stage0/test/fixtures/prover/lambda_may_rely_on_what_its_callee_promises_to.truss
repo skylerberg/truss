@@ -1,3 +1,0 @@
-fn f(items: List[Int64]) -> Int64 {
-  each_index(items.length(), visit: fn(i) { items[i] })
-}

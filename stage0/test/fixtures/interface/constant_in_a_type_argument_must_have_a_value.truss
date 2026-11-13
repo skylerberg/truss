@@ -2,4 +2,4 @@ let first: USize = second
 
 let second: USize = first
 
-fn f(values: Array[Int64, first]) {}
+fn run_example(values: Array[Int64, first]) {}

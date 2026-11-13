@@ -1,7 +1,7 @@
 let limit: Int64 = 10
 
-fn f(n: Int64) -> Int64 {
-  match n {
+fn run_example(limit_count: Int64) -> Int64 {
+  match limit_count {
     limit..=20 => 1
   }
 }

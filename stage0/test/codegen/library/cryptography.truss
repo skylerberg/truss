@@ -152,7 +152,7 @@ test "HMAC-SHA-384 gives the bytes of RFC 4231" {
     == "4ece084485813e9088d2c63a041bc5b44f9ef1012a2b588f3cd11f05033ac4c60c2ef6ab4030fe8296248df163f44952"
 }
 
-test "HKDF-SHA-384 gives what Python's hmac module gives" {
+test "HKDF-SHA-384 matches Python's hmac module" {
   let derived = cryptography::hkdf_sha384("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 100)
   assert hex::encode(derived)
     == "29c042775183ec5dbc2c085eb49502b15d9e8abe4a4c1ef98e8e0fb95ad5f6a9fa0e85c3523ecd2f61559c763355e2f2dfed63026045c7a7b9c55a558ccab4807691a096e509089499ede615913c1e8a0be4892aa300a28d570eddcf87707de249644ed7"
@@ -385,7 +385,7 @@ fn open_round_trips(cipher: cryptography::Cipher) -> Bool {
   opens(cipher, sealed: box[..15], data: 9) is None && opens(cipher, sealed: box, data: 9) is Some(_)
 }
 
-test "open returns what was sealed and rejects anything that was changed" {
+test "open returns the sealed data and rejects any change to it" {
   assert open_round_trips(cryptography::Cipher.ChaCha20Poly1305)
   assert open_round_trips(cryptography::Cipher.Aes256Gcm)
   let empty = seal_pattern(cryptography::Cipher.ChaCha20Poly1305, plain: 0, data: 0)

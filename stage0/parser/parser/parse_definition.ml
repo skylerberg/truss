@@ -433,7 +433,7 @@ let type_clauses cursor =
         Cursor.advance cursor;
         ignore
           (Cost_word.expect cursor ~accepted:[ Potential ]
-             ~what:"`potential`; a type's only cost clause is `cost potential expression`"
+             ~category:"`potential`; a type's only cost clause is `cost potential expression`"
              ~expected:"`potential`; a type's only cost clause is `cost potential expression`");
         clause (Potential (Parse_expression.expression cursor))
     | _ -> List.rev clauses
@@ -573,9 +573,9 @@ type empty = |
 let top_level cursor ~function_ =
   let start = cursor.Cursor.index in
   let { visibility; tokens = visibility_tokens; modifier } = visibility cursor in
-  let no_visibility what =
+  let no_visibility construct =
     remove_visibility cursor Misplaced_visibility visibility_tokens
-      (Printf.sprintf "%s takes no visibility: nothing refers to it by name." what)
+      (Printf.sprintf "%s takes no visibility: nothing refers to it by name." construct)
   in
   let kind =
     match Cursor.peek_kind cursor with

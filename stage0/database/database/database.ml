@@ -45,8 +45,9 @@ let load_package ?(usize_bits = 32) engine ~name ~dependencies modules =
 (* The standard library holds the code for each platform, and its bounds of
    [USize] are its target's, so it is checked with the target's width. *)
 let set_standard engine modules =
-  set_package engine ~root:Project.standard_root ~usize_bits:64 ~name:Path.standard_package
-    ~dependencies:[] modules
+  set_package engine
+    ~root:(Project.package_root Path.standard_package)
+    ~usize_bits:64 ~name:Path.standard_package ~dependencies:[] modules
 
 let load_standard engine = set_standard engine Standard_library.modules
 
@@ -65,12 +66,12 @@ let standard_base () =
   Engine.freeze ~fixed:true engine;
   engine
 
-(* Each file's stamp, by its path: what says, without reading the file,
+(* Each file's stamp, by its path: the evidence, without reading the file,
    that it has not changed. A restart reads only the files whose stamps
    changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-(* What a session's files are, for what is asked of git. *)
+(* The source of a session's files, for the questions asked of git. *)
 type kind =
   | Worktree of string  (** A project's root *)
   | Commit of { repository : string; commit : string }
@@ -113,7 +114,7 @@ let stored_standard () =
       Engine.attach engine store ~version:identity;
       check_standard engine;
       Store.add_result store ~kind:"package" ~key:(standard_key identity)
-        (Engine.write ~full:true engine);
+        (Engine.write ~full:true ~stores_every_value:true engine);
       Engine.freeze ~fixed:true engine;
       engine
 
@@ -145,7 +146,8 @@ let fetch name version ~hash =
     | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
     | None ->
         Error
-          (Printf.sprintf "no registry is set: `%s` names its directory" Registry.Index.variable)
+          (Printf.sprintf "no registry is set; set `%s` to the registry's directory"
+             Registry.Index.variable)
 
 (* A published package's manifest and record, for planning a lock file. *)
 let load_published name version ~hash =
@@ -384,7 +386,7 @@ let context session = Session.context session
 let set = Session.set
 let problems session = demand session Project.problems ()
 
-(* What only a package's code shows to be wrong with its manifest, which
+(* The errors in a package's manifest that only its code shows, which
    checks the package. *)
 let manifest_problems session names =
   List.concat_map
@@ -465,14 +467,13 @@ let sessions = Session.sessions
 
 let check_all session = ignore (diagnostics_of session (packages session))
 
-type dependencies = Session.Graph.dependencies
-
-let dependencies session =
+let after_checking question session paths =
   check_all session;
-  Session.Graph.dependencies (Session.engine session)
+  question (Session.engine session) paths
 
-let reads = Session.Graph.reads
-let readers = Session.Graph.readers
+let dependencies = after_checking Session.Graph.dependencies
+let dependents = after_checking Session.Graph.dependents
+let reachable = after_checking Session.Graph.reachable
 
 let all_declarations session =
   List.concat_map
@@ -484,14 +485,24 @@ let all_declarations session =
         (package_modules session name))
     (packages session)
 
-let matches name path =
-  let shown = Path.show path in
+(* Whether [name] is a path's text or the end of it after [::] or [.]. *)
+let ends_path name shown =
   shown = name
   ||
   let name_length = String.length name and shown_length = String.length shown in
   shown_length > name_length
   && String.sub shown (shown_length - name_length) name_length = name
   && (shown.[shown_length - name_length - 1] = ':' || shown.[shown_length - name_length - 1] = '.')
+
+(* A method is written without its receiver, which [Path.show] appends for
+   [mut self] and [own self], so [Counter.bump] names every version of the
+   method and [Counter.bump(mut self)] names one. *)
+let matches name (path : Path.t) =
+  ends_path name (Path.show path)
+  ||
+  match path with
+  | Method method_ -> ends_path name (Path.show (Method { method_ with receiver = Read }))
+  | _ -> false
 
 let find_definitions session name =
   List.sort_uniq Path.compare
@@ -501,8 +512,6 @@ let find_definitions session name =
        (all_declarations session))
 
 (* Comparing a session with another, such as its base commit's *)
-
-type difference = Session.Graph.difference = Changed | Added | Same
 
 let changes mine theirs =
   check_all mine;
@@ -519,12 +528,6 @@ let base_commit session base =
       | None, _ -> None)
 
 let open_commit_of session commit = open_commit ~repository:(root session) commit
-
-type place = Session.Graph.place = { path : Path.t option; part : string option; label : string }
-
-type overlap = Session.Graph.overlap =
-  | Both_change of place
-  | Reads of { this_worktree : bool; change : place; reads : place }
 
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
@@ -668,7 +671,9 @@ let project_manifests session =
 let plan_lock session ~set ~all =
   match Registry.Index.current () with
   | None ->
-      Error (Printf.sprintf "No registry is set: `%s` names its directory." Registry.Index.variable)
+      Error
+        (Printf.sprintf "No registry is set. Set `%s` to the registry's directory."
+           Registry.Index.variable)
   | Some registry -> (
       let before =
         try
@@ -849,7 +854,7 @@ let standard_artifacts () =
        (fun artifact -> (identity, artifact))
        (Session.find_result ~kind:"package" ~key:(standard_key identity)))
 
-(* What names the background process for a directory: its project's root.
+(* The name of the background process for a directory: its project's root.
    A directory in no project is served by a process of its own. *)
 let server_key directory = Option.value (root_of directory) ~default:""
 
@@ -868,7 +873,10 @@ let servers = Session.Server.serving
 let stop = Session.Server.stop
 let store_directory = Session.Server.store_directory
 
-module Testing = struct
+module For_testing = struct
+  let prepare_store = prepare_store
+  let open_library = open_library
+
   (* Gives one module of a package given by itself another text. *)
   let set_text engine (module_ : Path.module_) text =
     let root = Project.package_root module_.package in

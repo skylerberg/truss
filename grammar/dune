@@ -1,5 +1,5 @@
-; Checks that Menhir finds exactly the conflicts GRAMMAR.md documents in
-; "Checking the grammar". `--interpret` with no input builds the automaton,
+; Checks that Menhir finds exactly the conflicts SPECIFICATION.md documents in
+; "Ambiguities in the grammar". `--interpret` with no input builds the automaton,
 ; writes truss.conflicts, and stops before generating a parser, which this
 ; grammar, whose actions are all empty, is not meant to be.
 

@@ -1,4 +1,4 @@
-fn f(value: Int64) -> Int64 {
+fn run_example(value: Int64) -> Int64 {
   match value {
     other => other
   }

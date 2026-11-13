@@ -1,14 +1,14 @@
-type Positive(n: Int64)
-  invariant n > 0
+type Positive(limit_count: Int64)
+  invariant limit_count > 0
 
 fn apply(change: fn(Positive) -> Positive, value: Positive) -> Positive {
   change(value)
 }
 
-fn f() -> Positive {
-  apply(fn(p) {
-    var q = p
-    q.n = 0
-    q
-  }, value: Positive(n: 1))
+fn run_example() -> Positive {
+  apply(fn(probe_point) {
+    var second_point = probe_point
+    second_point.limit_count = 0
+    second_point
+  }, value: Positive(limit_count: 1))
 }

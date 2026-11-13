@@ -1,3 +1,3 @@
-fn f(labeled: own Labeled) -> StringSlice {
+fn run_example(labeled: own Labeled) -> StringSlice {
   labeled.name.slice()
 }

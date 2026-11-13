@@ -8,6 +8,7 @@
   types
   core
   core_walk
+  mir
   infer
   interface
   resolve

@@ -1,10 +1,11 @@
-(* [truss explain FILE:LINE:COLUMN]: what is at a position: the name or
-   expression there, what it means, its type, and the signature of the
-   definition it refers to. *)
+(* [truss explain FILE:LINE:COLUMN]: the name or expression at a position,
+   its meaning, its type, and the signature of the definition it refers
+   to. *)
 
 module Names = Resolve.Names
 
-(* [FILE:LINE:COLUMN], from the right, so a file name may hold a colon. *)
+(* Parses [FILE:LINE:COLUMN] from the right, so a file name may contain a
+   colon. *)
 let parse_position text =
   match List.rev (String.split_on_char ':' text) with
   | column :: line :: (_ :: _ as file) -> (
@@ -44,7 +45,8 @@ let run ~directory ~position ~json =
                         (fun (result : Infer.type_check_result) -> result.tables)
                         (Query.demand context Infer.type_check_result key)
                     in
-                    Inspect.explain_at definition resolved tables ~text (offset - base)
+                    Inspect.explain_at ~path:key.path definition resolved tables ~text
+                      (offset - base)
                 | _ -> None)
             | _ -> None)
           (Query.demand context Names.declarations module_)

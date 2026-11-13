@@ -19,8 +19,8 @@ module Symbol : sig
   (** A symbol, over the terms it can hold. *)
   type 'term t =
     | Variable of { label : string; numbers : int list }
-        (** A value the prover makes, or a bound variable: [label] says what it is for, and
-            [numbers] tell it from others with the same label. *)
+        (** A value the prover makes, or a bound variable: [label] names its purpose, and [numbers]
+            tell it from others with the same label. *)
     | Function of { callee : Path.t; instance : string list }
         (** A pure callee as a function in the logic, at the keys of its type arguments. *)
     | Function_value of { callee : Path.t; instance : string list }
@@ -47,10 +47,10 @@ module Symbol : sig
     | Rank of string  (** A value's place in the order of parts. *)
     | Capacity of string  (** How many elements a storage has room for. *)
     | Model of string  (** The sequence a storage or a view holds. *)
-    | Slack of string  (** What a buffer has saved for growing. *)
+    | Slack of string  (** A buffer's slack for growing. *)
     | Potential of string  (** A value's potential. *)
     | Potential_measure of string  (** A type's potential as a measure for a sum. *)
-    | Cursor_yielded of string  (** What a cursor has yielded. *)
+    | Cursor_yielded of string  (** A cursor's yielded parts. *)
     | Cursor_ended of string  (** Whether a cursor has ended. *)
     | Block_bytes of { type_key : string; variant : string option }
         (** The size of a variant's or a record's block. *)
@@ -100,8 +100,8 @@ type declaration =
 
 type query = {
   declarations : declaration list;
-  facts : term list;  (** What may be assumed, in order. *)
-  goal : term;  (** What must be shown; the query asks whether it can be false. *)
+  facts : term list;  (** The assumptions, in order. *)
+  goal : term;  (** The goal; the query asks whether it can be false. *)
 }
 
 val arguments : term -> term list
@@ -161,11 +161,21 @@ val text : query -> string
     then the negated goal, then [(check-sat)]. Each quantifier states the triggers chosen for it.
     Only symbols reached from the facts or the goal are declared. *)
 
-val term_text : query -> term -> string option
+type rendering
+(** A query's canonical text, with the canonical names it gives the query's symbols. *)
+
+val render : query -> rendering
+(** The query rendered once, for its text and for the names that {!term_text} and {!symbols} read.
+*)
+
+val rendered_text : rendering -> string
+(** The text {!text} gives. *)
+
+val term_text : rendering -> term -> string option
 (** A term in the query's canonical names, for asking its value of a model, or [None] if it names a
     symbol the query's text does not. *)
 
-val symbols : query -> (symbol * string) list
+val symbols : rendering -> (symbol * string) list
 (** Each declared symbol the canonical text mentions, with its canonical name, for reading a model
     back. *)
 
@@ -176,9 +186,6 @@ val members : query -> (string * (symbol * symbol list)) list
 val hash : string -> string
 (** The hash of a query's text, in hexadecimal, with a prefix naming the format and the algorithm.
 *)
-
-val show_term : term -> string
-(** A term as SMT-LIB, with the prover's own names, for tests and debugging. *)
 
 val show_symbol : symbol -> string
 (** A symbol as readable text, for tests and debugging. *)

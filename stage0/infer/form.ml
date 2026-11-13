@@ -392,7 +392,9 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
       let builder_type = Types.named (Well_known.path Text_builder) [] in
       let builder = fresh_synthetic_local state in
       let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
-      let call callee arguments : Core.kind = Call { callee; arguments; lends = None; uses = [] } in
+      let call callee arguments : Core.kind =
+        Call { callee; arguments; lends = None; uses = Types.no_capabilities }
+      in
       let let_builder =
         statement
           (Let
@@ -494,7 +496,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
            callee = Intrinsic { operation; type_arguments = [ Types.Type element ] };
            arguments;
            lends = None;
-           uses = [];
+           uses = Types.no_capabilities;
          })
   in
   let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length elements))) in
@@ -567,7 +569,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
                         };
                     ];
                   lends = None;
-                  uses = [];
+                  uses = Types.no_capabilities;
                 }));
     }
 
@@ -783,6 +785,30 @@ let comparison state (value : expression) operator (left : expression) (right : 
       | Greater -> is "Greater"
       | Greater_equal -> not_ (is "Less")
       | _ -> bug "this operator is not a comparison")
+
+(* Whether a condition calls a lending method and binds a name that may
+   alias the lent part: a name bound [mut], or one whose type is a view or
+   is not [Plain]. Such a name would dangle if the lends ended with the
+   condition, so they last until the guarded block ends. A [Plain] name bound
+   read-only holds a copy. *)
+let binds_lent_part state (condition : Core.expression) =
+  let may_alias (pattern : Core.pattern) =
+    match pattern.kind with
+    | Bind { mode = Mut; _ } -> true
+    | Bind { mode = Read | Own; _ } ->
+        State.is_view state pattern.type_ || not (State.plain state pattern.type_)
+    | Wildcard | Variant _ | Record _ | Alternatives _ | Literal _ | Range _ | Equal_to _ -> false
+  in
+  let lends (place : Core.place) = match place with Lent _ -> true | _ -> false in
+  let found_lend = ref false and found_alias = ref false in
+  Core_walk.expression
+    {
+      Core_walk.ignore_all with
+      place = (fun place -> if lends place then found_lend := true);
+      pattern = (fun pattern -> if may_alias pattern then found_alias := true);
+    }
+    condition;
+  !found_lend && !found_alias
 
 (* Whether a condition can be evaluated at run time. It cannot if it
    contains a quantifier, a value of type [Integer], a specification-only
@@ -1093,7 +1119,7 @@ let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive
              Function { path = Method { owner = path; name; receiver = Read }; type_arguments };
            arguments;
            lends = None;
-           uses = [];
+           uses = Types.no_capabilities;
          })
   in
   let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
@@ -1138,7 +1164,7 @@ let inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
            callee = Function { path = Method { owner = path; name; receiver }; type_arguments };
            arguments;
            lends = None;
-           uses = [];
+           uses = Types.no_capabilities;
          })
   in
   let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length entries))) in

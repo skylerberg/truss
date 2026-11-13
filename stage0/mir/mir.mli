@@ -6,7 +6,7 @@
 type local = int
 type block = int
 
-(** What a local holds. *)
+(** Whether a local is a source binding or a temporary. *)
 type local_kind =
   | Source of { local : Core.local; mode : Types.mode }
       (** A parameter, [self], or a local that a pattern or a lambda binds. With [Read] or [Mut], it
@@ -31,11 +31,14 @@ and projection =
 type constant = Unit | Integer of Z.t | Float of float | Boolean of bool | String of string
 
 type operand =
-  | Use of { place : place; node : Core.id }
-      (** The value at a place, copied if its type copies implicitly and moved otherwise. [node] is
-          the core node the value is read for. *)
-  | Borrow of { place : place; mode : Types.mode }
+  | Use of { place : place; type_ : Types.ty; node : Core.id; origin : Core.origin }
+      (** The value at a place, of [type_], copied if the type copies implicitly and moved
+          otherwise. [node] is the core node the value is read for. *)
+  | Borrow of { place : place; type_ : Types.ty; mode : Types.mode; origin : Core.origin }
       (** The place itself, lent for the operation: read-only, or [mut]. *)
+  | Take of { place : place; type_ : Types.ty; origin : Core.origin }
+      (** The old value of a compound assignment's target, which the operator takes as owned. The
+          statement assigns the target again before any other code runs. *)
   | Constant of constant
 
 type callee =
@@ -60,7 +63,7 @@ type argument =
 type call = {
   callee : callee;
   arguments : argument list;  (** One per parameter, in parameter order. *)
-  uses : Types.capability list;
+  uses : Types.capability_set;
   node : Core.id;  (** The core form's [Call]. *)
 }
 
@@ -92,6 +95,15 @@ type provided = {
   origin : Core.origin;
 }
 
+(** How long a loan lasts. *)
+type loan_duration =
+  | Loop_body  (** A loop borrows what it iterates over for its body. *)
+  | Provide_body  (** A [provide] block borrows its implementations for its body. *)
+  | Rest_of_statement  (** A lending call borrows its receiver until the statement ends. *)
+  | Operand_evaluation
+      (** An evaluated operand stays borrowed until its operation runs, so that a later operand
+          cannot mutate it. *)
+
 type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
@@ -114,30 +126,40 @@ and statement_kind =
   | Fork_start of { fork : int; concurrent : bool }
       (** The start of a branch of a [parallel] or [concurrent] block. *)
   | Fork_end of { fork : int }  (** The end of the block's last branch. *)
+  | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
+      (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
+  | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
-type loop = {
-  clauses : Core.loop_clause list;
-  schedule : Core.loop_mode;
-  counter : local option;
-      (** The counter of a loop over an integer range, which is at least the range's start and at
-          most its stop at the header. *)
-  origin : Core.origin;
-}
+type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
 (** The clauses of a loop, which its header carries. *)
 
+(** What a [for] loop iterates over. *)
+type iteration =
+  | Yielding of call  (** The parts a call of a yielding method yields. *)
+  | Range of { start : operand; stop : operand; inclusive : bool }
+      (** The integers or characters from [start] to [stop], each once. A range of [Character] skips
+          the surrogates. *)
+  | Pull of { cursor : place; next : callee option }
+      (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
+          [next] is [None], or else the cursor type's [Cursor.next]. *)
+
 (** Where an early exit from [concurrent] code goes once its tasks end. *)
-type task_exit = Exit_return of operand option | Exit_to of block
+type task_exit =
+  | Exit_return of operand option
+  | Exit_to of block
+  | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
   | Switch_variant of { place : place; cases : (string * block) list }
-  | Each of { call : call; part : local; body : block; after : block; loop : loop }
-      (** A [for] loop over a call of a yielding method. [body] runs for each part the callee
-          yields, which [part] holds, and ends with {!Iteration_end} or a jump to [after]. *)
-  | Iteration_end  (** The end of an iteration of the enclosing {!Each}. *)
+  | For of { iteration : iteration; part : local; body : block; after : block; loop : loop }
+      (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
+          {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
+          [loop]'s schedule says. *)
+  | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : operand; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : Core.task list; exit : task_exit }
@@ -159,6 +181,9 @@ type body = {
 }
 
 type t = { body : body; lambdas : body array }
+
+val successors : terminator -> block list
+(** The blocks a terminator can jump to. *)
 
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs. The body of a function for specifications only never

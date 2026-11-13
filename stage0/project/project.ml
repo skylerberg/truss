@@ -14,7 +14,10 @@ let unavailable : (string, string) Query.input =
 let project_root = ""
 let standard_root = "standard"
 let registry_root hash = "registry " ^ hash
-let package_root name = "package " ^ Path.show_package name
+
+let package_root name =
+  if name = Path.standard_package then standard_root else "package " ^ Path.show_package name
+
 let lock_file = "truss.lock"
 let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
 
@@ -233,8 +236,8 @@ let selection =
           ~local:named ~load
       in
       let missing = List.sort_uniq compare !missing in
-      (* While a package is still to be fetched, what is wrong with the
-         build is not known yet. *)
+      (* While a package is still to be fetched, the build's errors are
+         not known yet. *)
       let lock_fix = ref None in
       if missing = [] then begin
         List.iter
@@ -310,9 +313,20 @@ let build =
         (fun (left, _) (right, _) -> Path.compare_package left right)
         (Hashtbl.fold (fun name place packages -> (name, place) :: packages) by_name []))
 
+(* The standard package is the standard library in every project, so its
+   place reads the standard library's root alone, and the results derived
+   from it are the standard library's own: the fixed base holds them, and
+   a project's state does not compute them again. *)
 let place =
   Query.query ~name:"project_place" ~phase:Phases.project ~saved:true ~show:Path.show_package
-    (fun database name -> List.assoc_opt name (Query.demand database build ()))
+    (fun database name ->
+      if name = Path.standard_package then
+        List.find_map
+          (fun (directory, (manifest : Manifest.package)) ->
+            if manifest.name = name then Some { root = standard_root; directory; manifest }
+            else None)
+          (Query.demand database layout standard_root).packages
+      else List.assoc_opt name (Query.demand database build ()))
 
 let package =
   Query.query ~name:"project_package" ~phase:Phases.project ~saved:true ~show:Path.show_package

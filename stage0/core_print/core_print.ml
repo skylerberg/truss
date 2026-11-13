@@ -86,7 +86,7 @@ let rec expression names (node : expression) =
   | To_any { value; trait; evidence = source } ->
       Printf.sprintf "any %s(%s by %s)" (Types.show_trait trait) (expression value)
         (evidence source)
-  | If { condition; then_; else_ } ->
+  | If { condition; then_; else_; _ } ->
       Printf.sprintf "if %s %s%s" (expression condition) (block names then_)
         (match else_ with Some else_ -> " else " ^ block names else_ | None -> "")
   | Match { scrutinees; arms } ->
@@ -220,7 +220,7 @@ and statement names (node : statement) =
             Printf.sprintf "cursor %s%s" (place names cursor)
               (match next with Some next -> " by " ^ callee names next | None -> ""))
         (loop_clauses names clauses) (block names body)
-  | While { condition; clauses; body } ->
+  | While { condition; clauses; body; _ } ->
       Printf.sprintf "while %s%s %s" (expression names condition) (loop_clauses names clauses)
         (block names body)
   | Parallel branches ->

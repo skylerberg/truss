@@ -6,10 +6,9 @@
    in the LIR, so the result is the same on every run. *)
 
 (* The instances an instance refers to, in the order they first appear. *)
-val references : Memory_layout.env -> Lir.t -> Instance.key list
 
 (* Every instance reachable from the roots, roots first, each once, in the
-   order it is first reached. [lookup] gives what an instance compiles to. *)
+   order it is first reached. [lookup] gives an instance's compiled form. *)
 val reachable :
   Memory_layout.env ->
   lookup:(Instance.key -> Lir.compiled) ->
@@ -26,11 +25,11 @@ val running :
   Instance.key list ->
   (Lir.compiled * Instance.key list) list
 
-(* What a unit refers to, and its key. *)
+(* A unit's references, and its key. *)
 val compiled_key : Lir.compiled -> Instance.key
 val compiled_references : Memory_layout.env -> Lir.compiled -> Instance.key list
 
-(* The hash of what an instance compiles to, by itself: its encoding with
+(* The hash of an instance's compiled form, by itself: its encoding with
    each instance it refers to written as that instance's place among
    [references], itself as a mark, and each path as a number given in the
    order paths are first met. It holds no name, so renaming or moving a
@@ -52,12 +51,16 @@ val unit_key : own:string -> string list -> string
 
 (* The key of everything an instance of a group can reach: the group's
    instances in the order a walk from the instance first reaches them, each
-   as its own hash and what it refers to, a number for an instance of the
+   as its own hash and its references, a number for an instance of the
    group and the key of everything it can reach for any other. [link] gives
-   an instance's own hash and what it refers to. *)
+   an instance's own hash and its references. *)
 val group_key :
   link:(Instance.key -> string * Instance.key list) ->
   deep:(Instance.key -> string) ->
   members:Instance.key list ->
   Instance.key ->
   string
+
+module For_testing : sig
+  val references : Memory_layout.env -> Lir.t -> Instance.key list
+end

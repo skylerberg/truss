@@ -807,3 +807,7 @@ let to_json_object source diagnostic =
 
 let to_json source diagnostics =
   "[" ^ String.concat ",\n" (List.map (to_json_object source) diagnostics) ^ "]\n"
+
+module For_testing = struct
+  let limit = limit
+end

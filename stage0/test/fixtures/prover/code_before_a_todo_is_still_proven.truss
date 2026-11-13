@@ -1,0 +1,6 @@
+fn run_example(items: List[Int64], index: USize) -> Int64
+  ensures result > 0
+{
+  let first = items[index]
+  first + todo
+}

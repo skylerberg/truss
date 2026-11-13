@@ -42,11 +42,16 @@ public capability FileWrite {
 public capability NetworkClient {
   fn resolve(host: StringSlice) -> Result[List[network::IpAddress], SystemError]
   fn connect(address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError]
+  fn connect_local(path: Path) -> Result[network::LocalConnection, SystemError]
   fn open_datagram() -> Result[network::DatagramSocket, SystemError]
 }
 
 public capability NetworkServer {
-  fn listen(address: network::SocketAddress) -> Result[network::Listener, SystemError]
+  fn listen(
+    address: network::SocketAddress,
+    options: network::ListenOptions = network::ListenOptions(),
+  ) -> Result[network::Listener, SystemError]
+  fn listen_local(path: Path) -> Result[network::LocalListener, SystemError]
   fn bind_datagram(address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError]
 }
 
@@ -78,6 +83,8 @@ public capability Handles {
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError]
   fn accept(listener: streams::Handle) -> Result[network::Accepted, SystemError]
+  fn accept_local(listener: streams::Handle) -> Result[streams::Handle, SystemError]
+  fn configure(socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError]
   fn send_to(
     socket: streams::Handle,
     bytes: Slice[UInt8],

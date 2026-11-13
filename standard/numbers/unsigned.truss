@@ -434,7 +434,10 @@ impl TryFrom[ISize] for UInt16 {
 }
 
 impl From[UInt8] for UInt16 {
-  fn from(value: own UInt8) -> UInt16 {
+  fn from(value: own UInt8) -> UInt16
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -668,13 +671,19 @@ impl TryFrom[ISize] for UInt32 {
 }
 
 impl From[UInt8] for UInt32 {
-  fn from(value: own UInt8) -> UInt32 {
+  fn from(value: own UInt8) -> UInt32
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for UInt32 {
-  fn from(value: own UInt16) -> UInt32 {
+  fn from(value: own UInt16) -> UInt32
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -896,25 +905,37 @@ impl TryFrom[ISize] for UInt64 {
 }
 
 impl From[UInt8] for UInt64 {
-  fn from(value: own UInt8) -> UInt64 {
+  fn from(value: own UInt8) -> UInt64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for UInt64 {
-  fn from(value: own UInt16) -> UInt64 {
+  fn from(value: own UInt16) -> UInt64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt32] for UInt64 {
-  fn from(value: own UInt32) -> UInt64 {
+  fn from(value: own UInt32) -> UInt64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[USize] for UInt64 {
-  fn from(value: own USize) -> UInt64 {
+  fn from(value: own USize) -> UInt64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -1112,19 +1133,28 @@ impl TryFrom[ISize] for USize {
 }
 
 impl From[UInt8] for USize {
-  fn from(value: own UInt8) -> USize {
+  fn from(value: own UInt8) -> USize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for USize {
-  fn from(value: own UInt16) -> USize {
+  fn from(value: own UInt16) -> USize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt32] for USize {
-  fn from(value: own UInt32) -> USize {
+  fn from(value: own UInt32) -> USize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }

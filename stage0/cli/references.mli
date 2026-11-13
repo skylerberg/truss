@@ -10,6 +10,7 @@ type occurrence = {
   declares : bool;
 }
 
+val declared_name : Syntax.definition -> Syntax.name option
 val all : Project.t -> occurrence list
 val uses : Project.t -> Path.module_ -> (Path.module_ * Source.span) list
 val names_definition : Path.t -> occurrence -> bool

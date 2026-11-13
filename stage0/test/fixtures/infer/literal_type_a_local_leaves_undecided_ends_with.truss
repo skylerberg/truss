@@ -1,0 +1,8 @@
+fn run_example() {
+  for index in 0..10 {
+    let small: UInt8 = index
+  }
+  for index in 5..10 {
+    let large: UInt64 = index
+  }
+}

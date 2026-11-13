@@ -4,11 +4,11 @@ fn hang() -> Bool
   while true {}
 }
 
-fn f(x: Int64) -> Int64
+fn run_example(first_number: Int64) -> Int64
   ensures result <= 0
 {
-  if x > 0 {
+  if first_number > 0 {
     let _ = exists _ in 0..0 => hang()
   }
-  x
+  first_number
 }

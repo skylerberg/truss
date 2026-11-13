@@ -1,4 +1,4 @@
-fn f() -> USize
+fn run_example() -> USize
   ensures result == 5
 {
   var text = "ab"

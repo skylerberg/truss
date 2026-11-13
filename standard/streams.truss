@@ -214,29 +214,34 @@ public fn BufferedReader[Source: Reader].read_until(
   mut self,
   delimiter: UInt8,
   buffer: mut List[UInt8],
+  limit: USize = USize.maximum,
 ) -> Result[USize, SystemError]
   uses Handles
+  ensures !(result is Ok(count) && count > limit)
 {
   var consumed: USize = 0
   var more = true
   while more
     invariant self.start <= self.pending.length()
     invariant self.capacity > 0
+    invariant consumed <= limit
   {
     var index = self.start
     var at_delimiter = false
-    while index < self.pending.length() && !at_delimiter
+    let room = limit - consumed
+    while index < self.pending.length() && !at_delimiter && index - self.start < room
       invariant self.start <= index
       invariant index <= self.pending.length()
+      invariant index - self.start <= room
       decreases self.pending.length() - index + (if at_delimiter { 0 } else { 1 })
     {
       at_delimiter = self.pending[index] == delimiter
       index += 1
     }
     mut buffer.append_slice(self.pending.slice_range(self.start, stop: index))
-    consumed = consumed.saturating_add(index - self.start)
+    consumed += index - self.start
     self.start = index
-    if at_delimiter {
+    if at_delimiter || consumed == limit {
       more = false
     } else {
       let count = mut self.fill()?
@@ -304,12 +309,20 @@ public fn BufferedReader[Source: Reader].peek(mut self, count: USize) -> Result[
   Ok(self.pending.slice_range(self.start, stop: self.start + shown))
 }
 
+public fn BufferedReader[Source: Reader].buffered(self) -> USize {
+  self.pending.length() - self.start
+}
+
 public fn BufferedReader[Source: Reader].finish(own self) -> Source {
   self.source
 }
 
 public fn BufferedReader[Source: Reader].source(self) lends Source {
   yield self.source
+}
+
+public fn BufferedReader[Source: Reader].source(mut self) lends mut Source {
+  yield mut self.source
 }
 
 impl Reader for BufferedReader[Source: Reader] {
@@ -496,6 +509,14 @@ impl Handles for NoHandles {
   }
 
   fn accept(self, listener: Handle) -> Result[network::Accepted, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn accept_local(self, listener: Handle) -> Result[Handle, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn configure(self, socket: Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
     Err(SystemError.Closed)
   }
 

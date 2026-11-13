@@ -1,3 +1,3 @@
-fn f(flag: Bool, box: own Box) -> Bool {
+fn run_example(flag: Bool, box: own Box) -> Bool {
   flag && take(own box)
 }

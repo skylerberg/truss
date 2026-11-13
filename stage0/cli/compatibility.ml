@@ -1,9 +1,9 @@
-(* Whether a release of a package is compatible with the release before it,
-   read from the two releases' public definitions. The types of a signature
-   are compared as the checker worked them out, and a contract as it is
-   written: a `requires` may lose clauses, an `ensures` and a cost may gain
-   them. Whether a yielding method can be pulled is the one thing read from
-   a body. *)
+(* Whether a release of a package is compatible with the previous release,
+   by comparing the two releases' public definitions. A signature's types
+   are compared after type checking, and a contract syntactically: a
+   release may remove [requires] clauses and add [ensures] and cost
+   clauses. Whether a yielding method can be pulled is the only property
+   inferred from a body. *)
 
 open Syntax
 module Names = Resolve.Names
@@ -12,8 +12,8 @@ module Environment = Interface.Environment
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
 
-(* A method written inside a trait or a capability is compared with that
-   one, not on its own. *)
+(* A method declared inside a trait or a capability is compared as part of
+   its trait or capability, not separately. *)
 let public (declaration : Names.declaration) =
   declaration.ordinal = 0 && declaration.container = None && Names.is_public declaration.visibility
 
@@ -41,23 +41,23 @@ let contract ~(before : clause list) ~(after : clause list) =
   List.concat
     [
       (if missing_from requires_before requires_after <> [] then
-         [ Breaks "requires what it did not" ]
-       else if missing_from requires_after requires_before <> [] then [ Grows "requires less" ]
+         [ Breaks "has a `requires` clause it did not have" ]
+       else if missing_from requires_after requires_before <> [] then
+         [ Grows "has fewer `requires` clauses" ]
        else []);
-      (if missing_from ensures_after ensures_before <> [] then
-         [ Breaks "no longer ensures what it did" ]
-       else if missing_from ensures_before ensures_after <> [] then [ Grows "ensures more" ]
+      (if missing_from ensures_after ensures_before <> [] then [ Breaks "lost an `ensures` clause" ]
+       else if missing_from ensures_before ensures_after <> [] then
+         [ Grows "has more `ensures` clauses" ]
        else []);
-      (if missing_from cost_after cost_before <> [] then
-         [ Breaks "no longer promises a cost it did" ]
-       else if missing_from cost_before cost_after <> [] then [ Grows "promises a cost more" ]
+      (if missing_from cost_after cost_before <> [] then [ Breaks "lost a `cost` clause" ]
+       else if missing_from cost_before cost_after <> [] then [ Grows "has more `cost` clauses" ]
        else []);
     ]
 
 let uses_more : Types.capability -> change = function
-  | Capability path -> Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
+  | Capability path -> Breaks (Printf.sprintf "now uses `%s`" (Path.show path))
   | (Capability_parameter _ | Capability_projection _) as capability ->
-      Breaks (Printf.sprintf "uses `%s`, which it did not" (Types.show_capability capability))
+      Breaks (Printf.sprintf "now uses `%s`" (Types.show_capability capability))
   | Capability_variable _ ->
       Compiler_bug.bug ~stage:"Compatibility" "a signature holds an unknown set of capabilities"
 
@@ -77,7 +77,8 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
            now.has_default && not was.has_default)
          before.parameters after.parameters
   in
-  let more = missing_from before.uses after.uses and fewer = missing_from after.uses before.uses in
+  let more = Types.capability_difference after.uses before.uses
+  and fewer = Types.capability_difference before.uses after.uses in
   List.concat
     [
       (if
@@ -86,18 +87,20 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
          && before.specification_only = after.specification_only
          && before.stores_functions = after.stores_functions
        then []
-       else [ Breaks "has other parameters or another result" ]);
-      (if before.terminates && not after.terminates then [ Breaks "no longer promises to end" ]
-       else if after.terminates && not before.terminates then [ Grows "promises to end" ]
+       else [ Breaks "changed its parameters or its result" ]);
+      (if before.terminates && not after.terminates then
+         [ Breaks "no longer promises to terminate" ]
+       else if after.terminates && not before.terminates then [ Grows "promises to terminate" ]
        else []);
-      List.map uses_more more;
-      (if fewer <> [] then [ Grows "uses fewer capabilities" ] else []);
-      (if gained_default then [ Grows "has a default it did not" ] else []);
+      List.map uses_more (more :> Types.capability list);
+      (if fewer <> Types.no_capabilities then [ Grows "uses fewer capabilities" ] else []);
+      (if gained_default then [ Grows "gained a default" ] else []);
     ]
 
-(* How far a yielding method can be pulled as a cursor: for every element,
-   for one that copies implicitly, or not at all. A user that pulls it
-   relies on that, though it is inferred from the method's body. *)
+(* Whether a yielding method can be pulled as a cursor: for every element
+   type, only for an element type that copies implicitly, or not at all. A
+   caller that pulls the method relies on this, although it is inferred
+   from the method's body. *)
 let pulled database path (signature : Types.signature) =
   match (Query.demand database Ownership.pullable path, signature.output) with
   | Pullable, _ -> 2
@@ -112,8 +115,8 @@ let pulling ~before ~after path (old_signature : Types.signature) (new_signature
   match (old_signature.output, new_signature.output) with
   | Yields _, Yields _ ->
       let was = pulled before path old_signature and is = pulled after path new_signature in
-      if is < was then [ Breaks "can no longer be pulled as it could" ]
-      else if is > was then [ Grows "can be pulled where it could not" ]
+      if is < was then [ Breaks "can be pulled as a cursor in fewer cases" ]
+      else if is > was then [ Grows "can be pulled as a cursor in more cases" ]
       else []
   | _ -> []
 
@@ -138,26 +141,28 @@ let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~befo
     ~after_definition =
   List.concat
     [
-      (if before.type_generics <> after.type_generics then [ Breaks "has other generic parameters" ]
+      (if before.type_generics <> after.type_generics then
+         [ Breaks "changed its generic parameters" ]
        else []);
       (match (before.opaque, after.opaque) with
       | true, true -> []
-      | true, false -> [ Grows "shows its fields" ]
-      | false, true -> [ Breaks "hides fields it showed" ]
+      | true, false -> [ Grows "made its fields visible" ]
+      | false, true -> [ Breaks "hid its fields" ]
       | false, false ->
-          (if before.shape <> after.shape then [ Breaks "has other fields or variants" ] else [])
+          (if before.shape <> after.shape then [ Breaks "changed its fields or variants" ] else [])
           @
           if invariants before_definition <> invariants after_definition then
-            [ Breaks "has another invariant" ]
+            [ Breaks "changed its invariant" ]
           else []);
       (if missing_from after.derives before.derives <> [] then
-         [ Breaks "no longer derives a trait it did" ]
-       else if missing_from before.derives after.derives <> [] then [ Grows "derives a trait more" ]
+         [ Breaks "no longer derives a trait" ]
+       else if missing_from before.derives after.derives <> [] then
+         [ Grows "derives another trait" ]
        else []);
     ]
 
-(* The clauses of a method written inside a trait or a capability, which
-   is a definition of its own. *)
+(* The clauses of a method declared inside a trait or a capability, which
+   is a separate definition. *)
 let member_clauses database (owner : Path.t) name receiver =
   match Interface.Summary.definition database (Method { owner; name; receiver }) with
   | Some (_, { kind = Function { signature; _ } | Method_declaration signature; _ }) ->
@@ -184,8 +189,10 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
       (fun (was : Types.trait_method) ->
         let named change =
           match change with
-          | Breaks what -> Breaks (Printf.sprintf "its method `%s` %s" was.method_name what)
-          | Grows what -> Grows (Printf.sprintf "its method `%s` %s" was.method_name what)
+          | Breaks description ->
+              Breaks (Printf.sprintf "its method `%s` %s" was.method_name description)
+          | Grows description ->
+              Grows (Printf.sprintf "its method `%s` %s" was.method_name description)
         in
         match List.find_opt (same was) after.methods with
         | None -> [ Breaks (Printf.sprintf "no longer has the method `%s`" was.method_name) ]
@@ -197,7 +204,8 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
                     (Option.value ~default:[] (clauses_before was.method_name was.method_receiver))
                   ~after:
                     (Option.value ~default:[] (clauses_after now.method_name now.method_receiver))
-              @ if was.provided && not now.provided then [ Breaks "has no body any more" ] else []))
+              @ if was.provided && not now.provided then [ Breaks "lost its default body" ] else []
+              ))
       before.methods
   in
   let gained =
@@ -205,30 +213,31 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
       (fun (now : Types.trait_method) ->
         if List.exists (fun was -> same was now) before.methods then None
         else if now.provided then
-          Some (Grows (Printf.sprintf "has the method `%s`" now.method_name))
+          Some (Grows (Printf.sprintf "gained the method `%s`" now.method_name))
         else
           Some
             (Breaks
                (Printf.sprintf
-                  "has the method `%s` without a body, which every `impl` of it would have to add"
+                  "gained the method `%s` without a default body, which every `impl` must then \
+                   define"
                   now.method_name)))
       after.methods
   in
   List.concat
     [
       (if before.trait_generics <> after.trait_generics then
-         [ Breaks "has other generic parameters" ]
+         [ Breaks "changed its generic parameters" ]
        else []);
-      (if before.requires <> after.requires then [ Breaks "requires other traits" ] else []);
+      (if before.requires <> after.requires then [ Breaks "changed its supertraits" ] else []);
       (if before.associated_types <> after.associated_types then
-         [ Breaks "has other associated types" ]
+         [ Breaks "changed its associated types" ]
        else []);
       (if missing_from after.associated_capabilities before.associated_capabilities <> [] then
-         [ Breaks "no longer has an associated capability set it did" ]
+         [ Breaks "lost an associated capability set" ]
        else if missing_from before.associated_capabilities after.associated_capabilities <> [] then
-         [ Grows "has an associated capability set more" ]
+         [ Grows "gained an associated capability set" ]
        else []);
-      (if laws before_definition <> laws after_definition then [ Breaks "has other laws" ] else []);
+      (if laws before_definition <> laws after_definition then [ Breaks "changed its laws" ] else []);
       methods;
       gained;
     ]
@@ -266,9 +275,9 @@ let compare ~before ~after package =
       (fun (was : Names.declaration) ->
         let path = was.path in
         match List.find_opt (fun (other : Names.declaration) -> Path.equal other.path path) now with
-        | None -> [ public_change path (Breaks "is gone, or is no longer public") ]
+        | None -> [ public_change path (Breaks "was removed or is no longer public") ]
         | Some is when is.kind <> was.kind ->
-            [ public_change path (Breaks "is another kind of definition") ]
+            [ public_change path (Breaks "became another kind of definition") ]
         | Some is ->
             let before_definition = definition before was
             and after_definition = definition after is in
@@ -291,13 +300,13 @@ let compare ~before ~after package =
                     ~clauses_after:(member_clauses after path)
               | Some (Constant_interface old_constant), Some (Constant_interface new_constant) ->
                   (if old_constant.constant_type <> new_constant.constant_type then
-                     [ Breaks "has another type" ]
+                     [ Breaks "changed its type" ]
                    else [])
                   @
                   if
                     constant_value before path before_definition
                     <> constant_value after path after_definition
-                  then [ Breaks "has another value" ]
+                  then [ Breaks "changed its value" ]
                   else []
               | _ -> []))
       old
@@ -311,15 +320,17 @@ let compare ~before ~after package =
   in
   let old_impls = impls before package and new_impls = impls after package in
   let impl_changes =
-    (* A caller of the trait's methods on the type needs each capability
-       of an associated capability set, so a set that gains one breaks the
-       caller. *)
+    (* A caller of the trait's methods on the type needs every capability
+       in an associated capability set, so adding a capability to the set
+       is incompatible. *)
     List.concat_map
       (fun (path, shown, old_sets) ->
         match List.find_opt (fun (_, other, _) -> other = shown) new_impls with
-        | None -> [ public_change path (Breaks (Printf.sprintf "is gone: %s" shown)) ]
+        | None -> [ public_change path (Breaks (Printf.sprintf "was removed: %s" shown)) ]
         | Some (_, _, new_sets) ->
-            let set name sets = Option.value ~default:[] (List.assoc_opt name sets) in
+            let set name sets =
+              Option.value ~default:Types.no_capabilities (List.assoc_opt name sets)
+            in
             List.concat_map
               (fun name ->
                 let was = set name old_sets and is = set name new_sets in
@@ -327,15 +338,15 @@ let compare ~before ~after package =
                   (fun capability ->
                     public_change path
                       (Breaks
-                         (Printf.sprintf "has `%s` in its `%s`, which it did not: %s"
+                         (Printf.sprintf "added `%s` to its `%s`: %s"
                             (Types.show_capability capability)
                             name shown)))
-                  (missing_from was is)
+                  (Types.capability_difference is was :> Types.capability list)
                 @
-                if missing_from is was <> [] then
+                if Types.capability_difference was is <> Types.no_capabilities then
                   [
                     public_change path
-                      (Grows (Printf.sprintf "has fewer capabilities in its `%s`: %s" name shown));
+                      (Grows (Printf.sprintf "removed capabilities from its `%s`: %s" name shown));
                   ]
                 else [])
               (List.sort_uniq String.compare (List.map fst (old_sets @ new_sets))))
@@ -356,10 +367,12 @@ let compare ~before ~after package =
 
 let breaks changes =
   List.filter_map
-    (fun { path; change } -> match change with Breaks what -> Some (path, what) | Grows _ -> None)
+    (fun { path; change } ->
+      match change with Breaks description -> Some (path, description) | Grows _ -> None)
     changes
 
 let grows changes =
   List.filter_map
-    (fun { path; change } -> match change with Grows what -> Some (path, what) | Breaks _ -> None)
+    (fun { path; change } ->
+      match change with Grows description -> Some (path, description) | Breaks _ -> None)
     changes

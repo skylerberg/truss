@@ -54,38 +54,49 @@ develop as well as make it easier to bootstrap the compiler in parts.
     come from a cache of the whole opam root, keyed by the opam and OCaml
     versions, the runner's image, and `truss.opam`
     (`.github/actions/opam`). A change to `truss.opam` starts from the newest
-    cache with the same opam, OCaml, and image, and installs only what
-    changed. Only a new opam, OCaml, or image builds the switch from nothing,
+    cache with the same opam, OCaml, and image, and installs only the changed
+    packages. Only a new opam, OCaml, or image builds the switch from nothing,
     with the opam binary downloaded from its release and checked against a
     pinned hash. Nothing comes from apt, so a slow package mirror cannot slow
     a run.
   - **Dune's cache carries over from `main`,** so a pull request builds only
-    what it changed. Only pushes to `main` save it, trimmed so that it stays
+    its changes. Only pushes to `main` save it, trimmed so that it stays
     quick to restore.
   - **The build, formatting, the opam file, and the compiler's tests are one
-    dune run,** so they overlap. Four things run beside it, each on a
+    dune run,** so they overlap. Five things run beside it, each on a
     runner of its own: the codegen tests, the codegen tests again under
     AddressSanitizer and UndefinedBehaviorSanitizer, the programs that use
-    several threads under ThreadSanitizer, and the standard library's
-    proofs. ThreadSanitizer cannot run beside the other sanitizers, and its
-    tests take as long as theirs, so it has a job of its own.
-  - **The standard library's proofs have their own jobs.** They are the
-    longest test, and the one that grows with the library, so they do not
-    share a runner's cores with the rest. The dune run sets
-    `TRUSS_SKIP_LIBRARY_PROOFS`, which makes `standard_library_tests` say it
-    is skipped and stop, and the proofs' jobs build and run that one
-    executable.
-  - **The proofs are dealt out to several runners.** `TRUSS_PROOF_SHARE`
-    names a run's share as `index/count`, and `standard_library_tests` then
-    checks and proves only that share's modules. The modules are dealt out
-    by the size of their source, so the shares take about as long as each
-    other. When the proofs' jobs become the longest again, add a share: one
-    more entry in the workflow's list.
-  - **Solver answers are cached between runs.** Most of proving the
-    standard library is the solver. The cache key of an answer is the query
-    text, the solver version, and the step limit. A run restores the cache
-    from `main` and solves only the queries whose text changed. Only pushes
-    to `main` save the cache. Each share of the proofs keeps its own.
+    several threads under ThreadSanitizer, the prover's and the code
+    database's tests, and the standard library's proofs. ThreadSanitizer
+    cannot run beside the other sanitizers, and its tests take as long as
+    theirs, so it has a job of its own.
+  - **The longest suites have their own jobs.** The standard library's
+    proofs grow with the library, and `prover_tests` and `database_tests`
+    take twice as long as any other suite of the compiler's, so none of
+    them share the check's cores, which the other suites keep busy. The
+    dune run sets `TRUSS_SKIP_SUITES` to the three executables' names,
+    which makes each say it is skipped and stop.
+  - **A suite on a runner of its own runs as several processes.** One
+    process runs its tests one after another on one core, so the job
+    starts each suite twice, with `TRUSS_TEST_SHARE` set to `0/2` and
+    `1/2`: each process runs every other test
+    (`.github/scripts/test-shares.sh`). Each repeats the suite's setup, so
+    a suite runs this way only on cores that would otherwise be idle.
+  - **The proofs are dealt out to several runners, and to each of a
+    runner's cores.** `TRUSS_PROOF_SHARE` names a process's share as
+    `index/count`, and `standard_library_tests` then checks and proves only
+    that share's modules. The prover translates on one core, so each runner
+    starts one process for each of its cores, each with a share and a
+    state of its own (`.github/scripts/prove-share.sh`). The modules are
+    dealt out by their measured weights, so the shares take about as long
+    as each other. When the proofs' jobs become the longest again, add a
+    runner: one more entry in the workflow's list.
+  - **Solver answers are cached between runs.** The cache key of an answer
+    is the query text, the solver version, and the step limit. A run
+    restores the cache from `main` and solves only the queries whose text
+    changed. Only pushes to `main` save the cache. Each runner of the proofs
+    keeps its own. With the answers cached, most of a run is translating
+    the library's definitions into queries.
   - **A new push to a pull request cancels the run it replaces.**
 - **A pull request that takes out a recent merge fails,** before anything is
   built (`.github/scripts/reverts.sh`). Several sessions fetch into one
@@ -93,7 +104,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   a squash onto it, and the squashed commit then carries the branch's older
   tree onto the newer `main`: every merge the tree lacks is undone, with no
   conflict. The check fails a pull request that changes every file one of
-  the last merges changed and puts one of them back to what it was before
+  the last merges changed and puts one of them back to its state before
   that merge. A pull request that means to do so has a title that starts
   with "Revert". To squash safely, read `origin/main` once into a variable,
   merge that commit, and squash onto that commit.
@@ -101,9 +112,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
 ### Libraries
 
 - **A library is a contract with more than one consumer, or a unit that
-  must not see what its consumer sees.** Code that one library alone uses
+  must not see its consumer's dependencies.** Code that one library alone uses
   is a module of that library, so that nothing else can come to depend on
-  it. It stays a library of its own when its short dependency list is what
+  it. It stays a library of its own when its short dependency list
   keeps it apart from a layer, as `session` knows no compiler stage and the
   passes over LIR, such as `drops`, know nothing of the front end.
 - **A unit of several modules inside a library is a subdirectory.** The
@@ -113,39 +124,42 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **Every dependency is listed.** `dune-project` sets
   `(implicit_transitive_deps false)`, so a module names only the libraries
   its own `dune` file lists, and those lists are the whole graph.
-- **Tests reach a library's hidden modules through `For_testing`,** a
-  submodule of its interface that only tests read.
+- **Tests reach internal values through `For_testing`,** a submodule of an
+  interface that exports only the values tests and tools read. CI rejects a
+  use anywhere else.
 
 ### Documents
 
 Each document has one job, and a fact is stated in one of them:
 
-- **[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-  [GRAMMAR.md](GRAMMAR.md) say what Truss is:** what code means and why, how
-  it is written, and its exact grammar. They describe the language, whether
-  or not stage0 builds all of it yet.
+- **[SPECIFICATION.md](SPECIFICATION.md) and [PACKAGES.md](PACKAGES.md)
+  define Truss,** its grammar and the rules of the language and of
+  packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
+  language, whether or not stage0 builds all of it yet.
+- **The Markdown files beside the modules of [`standard/`](standard)
+  document the standard library,** each its module's types and functions.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
   [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
-  [CLI.md](CLI.md) say what stage0 does,**
-  each for its own stage, and each ends with the one list of what that stage
-  does not build yet. How results are kept current and kept from being
-  computed twice is DATABASE.md's, and the other documents say only what
-  their own stage adds to it.
+  [CLI.md](CLI.md) describe stage0,**
+  each for its own stage, and each ends with the one list of the features
+  that stage does not build yet. How results are kept current and kept from being
+  computed twice is DATABASE.md's, and the other documents describe only
+  their own stage's additions to it.
 - **This document holds the rules for working on stage0.**
 
-A document does not restate the code: which module holds what, a signature,
-or what each test covers is read from the code, where it cannot go stale.
+A document does not restate the code: a module's contents, a signature, or a
+test's coverage is read from the code, where it cannot go stale.
 
 A design document describes the design as it is. How it got there belongs in
 version control, in commit messages and pull request descriptions. A
-document has no sections that list what changed, what an earlier version
-did, or which review settled what; when the design changes, the document is
+document has no sections that list changes, an earlier version's behavior,
+or the review that settled a question; when the design changes, the document is
 rewritten to describe the new design.
 
 A document records no measurement. A time or a size is true of one commit,
 and a document that states one gives every later change something to measure
-again. What was measured belongs in the commit message or the pull request
+again. A measurement belongs in the commit message or the pull request
 it explains.
 
 ### Comments
@@ -153,15 +167,15 @@ it explains.
 A comment holds information the code cannot express: a reason, an invariant, or a trap. One
 that restates the code, labels a section, or retells a document is left
 out. A comment never points at a document, a section of one, or another
-file, since such a pointer goes stale when what it names moves.
+file, since such a pointer goes stale when its target moves.
 
 ### Testing
 
 Every stage of stage0 is tested the same way:
 
-- **A test states what it checks.** Each test gives a small input and asserts
+- **A test states its claim.** Each test gives a small input and asserts
   exact facts about the result: the tokens, a diagnostic's code and
-  position, the text after applying a fix. Its name says what behavior it
+  position, the text after applying a fix. Its name names the behavior it
   covers.
 - **Tests are fast and deterministic.** No randomness, no large inputs, and
   no test cases generated by combining options, so the suite can run on
@@ -187,12 +201,12 @@ Every stage of stage0 is tested the same way:
   runs: the solver's answer to a query, and the object compiled from a
   file of generated C. `TRUSS_SOLVER_CACHE` and `TRUSS_OBJECT_CACHE` name
   the directories. CI restores both from `main`'s last run, so a run
-  solves and compiles only what changed.
+  solves and compiles only the changes.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into
   one program and runs it, so a new test adds its own code to that build
-  and no build of its own. A test of what a library function returns goes
+  and no build of its own. A test of a library function's result goes
   there. A test of a panic goes in the module `panics`: each of its tests
   must panic with a message that contains the test's name. A test written
   in OCaml that compiles a program of its own is for the compiler: a
@@ -209,11 +223,13 @@ Every stage of stage0 is tested the same way:
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not
-  a function of what it reads, or a result the database left stale, fails
+  a function of its reads, or a result the database left stale, fails
   whichever test met it.
 - **Checks against the documents are tests,** as long as each one states a
-  single property, such as "GRAMMAR.md's keyword list matches the lexer's",
+  single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".
 - **One test can be run alone.** With `TRUSS_TEST` set, a test executable
   runs only the tests whose names contain it, for working on one:
   `TRUSS_TEST=standard::text _build/default/stage0/test/standard_library_tests.exe`.
+  A test must not depend on what an earlier test did, since `TRUSS_TEST`
+  and `TRUSS_TEST_SHARE` run it without the tests before it.

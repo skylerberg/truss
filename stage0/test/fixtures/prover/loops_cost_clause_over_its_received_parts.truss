@@ -1,0 +1,9 @@
+fn run_example(items: List[UInt32])
+  cost time O(items.length())
+{
+  for item in items
+    cost time O(yielded.length())
+  {
+    let _ = step(item)
+  }
+}

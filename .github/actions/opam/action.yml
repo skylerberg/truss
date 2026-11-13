@@ -3,8 +3,8 @@ description: >
   Restores opam with the OCaml switch and every dependency already built,
   from a cache keyed by the opam and OCaml versions, the runner's image, and
   truss.opam. When truss.opam changed, it starts from the newest cache with
-  the same opam, OCaml, and image, and installs only what changed, so a new
-  dependency costs what building it costs. Only a new opam, OCaml, or image
+  the same opam, OCaml, and image, and installs only the changed packages, so a
+  new dependency costs only its own build. Only a new opam, OCaml, or image
   builds the switch from nothing: the opam binary is downloaded and checked
   against its pinned hash. Nothing comes from apt, so a slow package mirror
   cannot slow a run.

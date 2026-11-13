@@ -1,12 +1,9 @@
-module Patterns = Type_checker.For_testing.Patterns
-module Usage = Type_checker.For_testing.Usage
-
 (* The tests of moves, loans, and views. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Ownership
+let check = Type_checker.For_testing.through Ownership
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = Fixtures.Ownership.keep
@@ -16,14 +13,14 @@ let keep = Fixtures.Ownership.keep
 let () =
   let bump = Fixtures.Ownership.bump in
   List.iter
-    (fun (what, text) ->
-      test (what ^ " cannot be written through a slice") (fun () ->
+    (fun (place, text) ->
+      test (place ^ " cannot be written through a slice") (fun () ->
           one_diagnostic (bump ^ text) "ownership.read_only_view"))
     [
       ("a read-only parameter", Fixtures.Ownership.read_only_parameter);
       ("a constant", Fixtures.Ownership.constant);
-      ("a `let`", Fixtures.Ownership.let_);
-      ("what a slice in a field views", Fixtures.Ownership.what_a_slice_in_a_field_views);
+      ("first_value `let`", Fixtures.Ownership.let_);
+      ("the place a slice in a field views", Fixtures.Ownership.place_a_slice_in_a_field_views);
     ];
   test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
       fine (bump ^ Fixtures.Ownership.var_and_a_mut_parameter_can_be_written_through_a))
@@ -34,7 +31,9 @@ let () =
   let functions = Fixtures.Ownership.functions in
   let rejected name body code =
     test name (fun () ->
-        one_diagnostic (functions ^ "fn f(items: mut List[Int64]) {\n" ^ body ^ "}\n") code)
+        one_diagnostic
+          (functions ^ "fn run_example(items: mut List[Int64]) {\n" ^ body ^ "}\n")
+          code)
   in
   rejected "a view cannot be passed after a `mut` borrow of the place that it views"
     "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
@@ -317,7 +316,7 @@ let () =
   test "an executable quantifier reads the collection that it iterates over" (fun () ->
       fine Fixtures.Ownership.executable_quantifier_reads_the_collection_that_it)
 
-(* What a place given [mut] is taken to keep *)
+(* The facts a place passed [mut] keeps *)
 
 let () =
   let reader = Fixtures.Ownership.reader in
@@ -405,7 +404,7 @@ let () =
   let rejected_loop name ~says method_ loop =
     test name (fun () ->
         one_diagnostic ~says
-          (pair ^ method_ ^ "\nfn f(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
+          (pair ^ method_ ^ "\nfn run_example(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
           "ownership.task_outlives_yield")
   in
   rejected_loop "a `concurrent for` cannot iterate over a method that yields `mut` borrows"
@@ -448,7 +447,8 @@ let () =
   let names = "let names: List[Int64] = [1, 2]\n\n" in
   let config = Fixtures.Ownership.config in
   List.iter
-    (fun (what, text, code) -> test (what ^ " is an error") (fun () -> one_diagnostic text code))
+    (fun (construct, text, code) ->
+      test (construct ^ " is an error") (fun () -> one_diagnostic text code))
     [
       ( "moving a constant with `own`",
         keep ^ names ^ Fixtures.Ownership.moving_a_constant_with_own,
@@ -465,7 +465,7 @@ let () =
       ( "binding a constant with `var`",
         names ^ Fixtures.Ownership.binding_a_constant_with_var,
         "ownership.needs_owned" );
-      ( "binding a type's constant with `var`",
+      ( "binding first_value type's constant with `var`",
         config ^ Fixtures.Ownership.binding_a_types_constant_with_var,
         "ownership.needs_owned" );
       ( "returning a constant",
@@ -733,7 +733,34 @@ let () =
   test "an is binding in an if inside a loop may be moved" (fun () ->
       fine (make ^ Fixtures.Ownership.is_binding_in_an_if_inside_a_loop_may_be_moved));
   test "a let-else binding inside a loop may be moved" (fun () ->
-      fine (make ^ Fixtures.Ownership.let_else_binding_inside_a_loop_may_be_moved))
+      fine (make ^ Fixtures.Ownership.let_else_binding_inside_a_loop_may_be_moved));
+  (* The body runs only where the whole condition is true, so where [text]
+     was bound again. *)
+  test "an `is` binding after `&&` in a `while` condition may be moved in every iteration"
+    (fun () ->
+      fine (make ^ Fixtures.Ownership.is_binding_after_and_in_a_while_condition_may_be_moved))
+
+(* The lends of an [if] or a [while] condition *)
+
+let () =
+  test "a `Plain` name that an `if` condition binds is a copy, which views nothing" (fun () ->
+      fine Fixtures.Ownership.copy_bound_by_an_if_condition_does_not_view_the);
+  test "the then-block may mutate the lender when the condition binds only copies" (fun () ->
+      fine Fixtures.Ownership.then_block_may_mutate_the_lender_when_the_condition);
+  test "a name bound before a test after `&&` fails ends with the part it aliases" (fun () ->
+      fine Fixtures.Ownership.name_bound_before_a_false_test_ends_with_the);
+  test "the else-block may mutate the lender" (fun () ->
+      fine Fixtures.Ownership.else_block_may_mutate_the_lender);
+  test
+    "the then-block cannot mutate the lender while a name the condition binds aliases the lent part"
+    (fun () ->
+      one_diagnostic Fixtures.Ownership.then_block_cannot_mutate_the_lender_while_a_name_the
+        "ownership.changed_while_viewed");
+  test
+    "a `while` body cannot mutate the lender while a name the condition binds aliases the lent part"
+    (fun () ->
+      one_diagnostic Fixtures.Ownership.while_body_cannot_mutate_the_lender_while_a_name_the
+        "ownership.changed_while_viewed")
 
 (* The prover's part *)
 
@@ -835,7 +862,7 @@ let () =
   test "two `mut` indexes of a list in one call produce a `Disjoint` obligation" (fun () ->
       fine Fixtures.Ownership.two_mut_indexes_of_a_list_in_one_call_produce_a)
 
-(* What comes to hold a view *)
+(* Values that come to hold a view *)
 
 let window = "type Window(view: Slice[Int64])\n\n"
 
@@ -910,8 +937,8 @@ let () =
 
 let () =
   let take = Fixtures.Ownership.take in
-  let moved_twice what condition =
-    test (what ^ " may have evaluated its right operand") (fun () ->
+  let moved_twice operator condition =
+    test (operator ^ " may have evaluated its right operand") (fun () ->
         one_diagnostic
           (take
           ^ Printf.sprintf

@@ -172,6 +172,6 @@ let is known path = of_path path = Some known
 let specification = Path.standard_module [ "specification" ]
 let system_module name = Path.standard_module [ "system"; name ]
 
-let in_system (module_ : Path.module_) =
-  module_.package = Path.standard_package
-  && match module_.modules with "system" :: _ -> true | _ -> false
+module For_testing = struct
+  let all = all
+end

@@ -1,12 +1,10 @@
-module Package_checks = Type_checker.For_testing.Package_checks
-
-(* The tests of capabilities: what code may call, lambdas' uses,
+(* The tests of capabilities: capability checking, lambdas' uses,
    capability parameters, provide, and dependency grants. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Infer
+let check = Type_checker.For_testing.through Infer
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -27,7 +25,7 @@ let () =
       let key : Resolve.Names.key =
         {
           module_ = module_of "app::main";
-          path = Top { module_ = module_of "app::main"; name = "f" };
+          path = Top { module_ = module_of "app::main"; name = "run_example" };
           ordinal = 0;
         }
       in
@@ -79,8 +77,10 @@ let () =
       let call =
         "{\n  numbers.visit_all(fn(value) {\n    let _ = Clock.now()\n    let _ = value\n  })\n}\n"
       in
-      fine (visitor ^ "fn f(numbers: Numbers)\n  uses Clock\n" ^ call);
-      one_diagnostic (visitor ^ "fn f(numbers: Numbers)\n" ^ call) "capabilities.not_available");
+      fine (visitor ^ "fn run_example(numbers: Numbers)\n  uses Clock\n" ^ call);
+      one_diagnostic
+        (visitor ^ "fn run_example(numbers: Numbers)\n" ^ call)
+        "capabilities.not_available");
   test "a capability parameter's set must be available at the call" (fun () ->
       one_diagnostic Fixtures.Capabilities.capability_parameters_set_must_be_available_at_the
         "capabilities.not_available");
@@ -99,7 +99,7 @@ let () =
               Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it_time );
           ]
       in
-      Database.Testing.set_manifest (Engine.of_context database)
+      Database.For_testing.set_manifest (Engine.of_context database)
         ~name:{ owner = None; name = "app" }
         ~dependencies:[ { package = { owner = None; name = "clock_library" }; capabilities = [] } ];
       match codes (check database (module_of "app::main")) with
@@ -109,7 +109,8 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
+    Database.For_testing.set_manifest (Engine.of_context database)
+      ~name:{ owner = None; name = "app" }
       ~dependencies:
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ];
     codes (check database (module_of "app::main"))
@@ -159,10 +160,11 @@ let () =
 (* A grant wherever a dependency's code is named *)
 
 (* The codes of [app::main], whose manifest lists the dependencies given,
-   each with what it is granted. *)
+   each with its grants. *)
 let codes_with_grants files grants =
   let database = setup files in
-  Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
+  Database.For_testing.set_manifest (Engine.of_context database)
+    ~name:{ owner = None; name = "app" }
     ~dependencies:
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
@@ -215,13 +217,13 @@ let () =
              ({ owner = None; name = "plugins" }, []);
            ]))
 
-(* What a grant names *)
+(* Grant names *)
 
 let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
 let problems database =
-  Query.demand database Package_checks.manifest_problems { owner = None; name = "app" }
+  Query.demand database Type_checker.manifest_problems { owner = None; name = "app" }
 
 let () =
   test "a grant names a capability outside the prelude by its full path" (fun () ->
@@ -381,7 +383,7 @@ let () =
       one_diagnostic (repeat "Mine") "capabilities.not_available";
       fine (repeat "Mine, Clock"))
 
-(* A capability parameter in what a call gives, and in a type *)
+(* A capability parameter in a call's arguments, and in a type *)
 
 let later = ticks ^ Fixtures.Capabilities.later
 

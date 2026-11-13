@@ -79,7 +79,7 @@ test "an array lends its elements to change with their indexes, in pairs, and ba
   assert same_items(fixed[..], expected: [3, 2, 1])
 }
 
-test "an array is made of copies of one value, or of what a function gives for each index" {
+test "an array is made of copies of one value, or of a function's result for each index" {
   let zeros: Array[Int64, 4] = Array.filled(0)
   assert same_items(zeros[..], expected: [0, 0, 0, 0])
   let words: Array[String, 3] = Array.filled("ab${1}")

@@ -2145,6 +2145,14 @@ impl Handles for MemoryFiles {
     Err(SystemError.Unsupported)
   }
 
+  fn accept_local(mut self, listener: streams::Handle) -> Result[streams::Handle, SystemError] {
+    Err(SystemError.Unsupported)
+  }
+
+  fn configure(mut self, socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+    Err(SystemError.Unsupported)
+  }
+
   fn send_to(
     mut self,
     socket: streams::Handle,

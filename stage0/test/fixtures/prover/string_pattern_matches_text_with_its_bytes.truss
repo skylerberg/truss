@@ -1,4 +1,4 @@
-fn f(text: String) -> USize
+fn run_example(text: String) -> USize
   ensures result <= 3
 {
   match text {

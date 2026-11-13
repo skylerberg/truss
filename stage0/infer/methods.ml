@@ -371,7 +371,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
             let mode = check_argument state env first.value parameter in
-            ignore (default_literal state self_type);
+            ignore (default_literal state ~at:value.span self_type);
             ( [ { Tables.expression = first.value.id; parameter_index = 0; mode; mark = None } ],
               1,
               parameters,
@@ -456,7 +456,7 @@ and capability_call state env (value : expression) capability (member : name) ar
             callee = Capability_method { capability; name = member.text };
             arguments = checked;
             omitted_defaults = left_out;
-            uses = [ Types.Capability capability ];
+            uses = Types.capability_set [ Types.Capability capability ];
             callee_result = result;
           };
       Form.register_call state value;
@@ -469,7 +469,9 @@ and capability_call state env (value : expression) capability (member : name) ar
 (* [receiver.name(...)]: a method of the receiver's type, or a trait method. *)
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
     ~type_arguments arguments =
-  let receiver_type = default_literal state (normalize state (expression state env base)) in
+  let receiver_type =
+    default_literal state ~at:value.span (normalize state (expression state env base))
+  in
   let marked = List.mem_assoc value.id state.receiver_modes in
   (* A part that is lent [mut] takes no mark of its own to call a [mut self]
      method: the mark is on the place that lends it. *)

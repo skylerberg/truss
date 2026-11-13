@@ -126,7 +126,7 @@ test "an encoder appends to the bytes it starts with, and returns them all" {
   assert same_bytes(finished, expected: [9, 7, 8, 254, 255])
 }
 
-test "what an encoder writes, a decoder reads back" {
+test "a decoder reads back an encoder's output" {
   var encoder = binary::Encoder.new()
   mut encoder.int64(Int64.minimum)
   mut encoder.uint64(UInt64.maximum, order: binary::ByteOrder.LittleEndian)

@@ -1,5 +1,5 @@
 (* The tests of name resolution. Each gives a few small files and states one
-   fact: what a name refers to, or the one diagnostic, with its code and the
+   fact: a name's referent, or the one diagnostic, with its code and the
    text after applying its fix. *)
 
 open Harness
@@ -191,7 +191,7 @@ let () =
       one_diagnostic Fixtures.Resolve.local_cannot_share_a_name_with_a_function_in_the
         "resolve.hides_name");
   test "a generic parameter cannot hide a prelude type" (fun () ->
-      one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.hides_name");
+      one_diagnostic "fn run_example[Option](value: Option) {}\n" "resolve.hides_name");
   test "locals in sibling blocks may share a name" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Resolve.locals_in_sibling_blocks_may_share_a_name) ])
 
@@ -224,15 +224,16 @@ let () =
       one_diagnostic Fixtures.Resolve.null_is_an_error_with_a_fix_that_writes_none "resolve.null"
         ~fixed:Fixtures.Resolve.null_is_an_error_with_a_fix_that_writes_none_fixed);
   test "an unknown type is an error" (fun () ->
-      one_diagnostic "fn f(value: Strng) {}\n" "resolve.unknown_name")
+      one_diagnostic "fn run_example(value: Strng) {}\n" "resolve.unknown_name")
 
 (* The prelude *)
 
 let () =
   test "a prelude type is the standard library's" (fun () ->
-      refers "fn f(value: Option[Int64]) {}\n" ~name:("Option", 1) "standard::option::Option");
+      refers "fn run_example(value: Option[Int64]) {}\n" ~name:("Option", 1)
+        "standard::option::Option");
   test "a built-in type is the intrinsic module's" (fun () ->
-      refers "fn f(value: Int64) {}\n" ~name:("Int64", 1) "standard::intrinsic::Int64");
+      refers "fn run_example(value: Int64) {}\n" ~name:("Int64", 1) "standard::intrinsic::Int64");
   test "a prelude variant is written bare" (fun () ->
       refers Fixtures.Resolve.prelude_variant_is_written_bare ~name:("Some", 1)
         "variant Some of standard::option::Option")
@@ -334,7 +335,7 @@ let () =
         "resolve.not_visible");
   test "an import nothing uses is an error with a fix that deletes it" (fun () ->
       one_diagnostic ~others Fixtures.Resolve.import_nothing_uses_is_an_error_with_a_fix_that
-        "resolve.unused_import" ~fixed:"\nfn f() {}\n");
+        "resolve.unused_import" ~fixed:"\nfn run_example() {}\n");
   test "an import of a module that does not exist is an error" (fun () ->
       one_diagnostic Fixtures.Resolve.import_of_a_module_that_does_not_exist_is_an_error
         "resolve.unknown_module");
@@ -393,10 +394,10 @@ let () =
       let database = setup [ ("app::main", text "2") ] in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Database.Testing.set_text (Engine.of_context database) module_ (text "3");
-      Engine.clear_log (Engine.of_context database);
+      Database.For_testing.set_text (Engine.of_context database) module_ (text "3");
+      Engine.For_testing.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "second" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "moving a definition down resolves nothing again" (fun () ->
@@ -406,7 +407,7 @@ let () =
       expect_not_recomputed engine
         ~first:(fun () -> ignore (Resolve.diagnostics database module_))
         ~again:(fun () ->
-          Database.Testing.set_text engine module_
+          Database.For_testing.set_text engine module_
             Fixtures.Resolve.moving_a_definition_down_resolves_nothing_again;
           ignore (Resolve.diagnostics database module_))
         Resolve.resolved
@@ -431,12 +432,12 @@ let () =
       in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Database.Testing.set_text (Engine.of_context database) module_
+      Database.For_testing.set_text (Engine.of_context database) module_
         Fixtures.Resolve.definition_added_above_another_resolves_nothing_2;
-      Engine.clear_log (Engine.of_context database);
+      Engine.For_testing.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
-      if resolved <> [ Support.top_key "app::main" "z" ] then
+      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
+      if resolved <> [ Support.top_key "app::main" "third_number" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "an import used only in a part the parser could not read is not unused" (fun () ->
       let database =
@@ -460,7 +461,7 @@ let () =
   test "a definition cannot take a prelude name" (fun () ->
       one_diagnostic "type List(count: Int64)\n" "resolve.hides_name");
   test "a generic parameter cannot take a prelude variant's name" (fun () ->
-      one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.hides_name");
+      one_diagnostic "fn run_example[Some](value: Some) {}\n" "resolve.hides_name");
   test "a trait whose header did not parse is not resolved" (fun () ->
       let database =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]
@@ -485,7 +486,7 @@ let () =
       ~name:{ Path.owner = Some "acme"; name = "geometry" }
       ~dependencies:[]
       [ (geometry, Fixtures.Resolve.geometry_length) ];
-    Database.Testing.set_manifest engine
+    Database.For_testing.set_manifest engine
       ~name:{ Path.owner = None; name = "app" }
       ~dependencies:(List.map (fun package -> { Manifest.package; capabilities = [] }) dependencies);
     database
@@ -498,7 +499,7 @@ let () =
       (match diagnostics database "app::main" with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-      match Query.demand database Resolve.Names.imports (module_of "app::main") with
+      match Query.demand database Resolve.Names.For_testing.imports (module_of "app::main") with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
   test "a package with an owner that the manifest does not list cannot be named" (fun () ->

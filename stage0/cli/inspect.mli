@@ -10,6 +10,7 @@ type explanation = {
 }
 
 val explain_at :
+  path:Path.t ->
   Syntax.definition ->
   Resolve.resolved ->
   Infer.tables option ->

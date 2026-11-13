@@ -11,7 +11,7 @@ type cleanup =
           are dropped. *)
   | Free_blocks of { place : Lir.place; variants : string list }
       (** Frees the block of the value at [place] where its variant is one of [variants], without
-          dropping what is in the block. *)
+          dropping the block's contents. *)
   | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
       (** Moves the value at [source] into [destination], the place it was moved out of so that the
           caller could change it. *)
@@ -41,7 +41,7 @@ and lend = {
       (** The places the method's own scopes owned at each [yield] the caller resumed from *)
 }
 
-(* A scope owns what is dropped as it ends: the scope of a block's names,
+(* A scope owns the values dropped as it ends: the scope of a block's names,
    or the scope of one statement, whose temporaries end with it. *)
 type scope_kind = Bindings | Statement
 type scope = { kind : scope_kind; mutable owned : cleanup list  (** Most recent first *) }
@@ -58,9 +58,9 @@ type frame = {
       (** The places of the core form's synthetic locals, by number *)
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> stop:Lir.block -> unit) option;
-      (** In an inlined lending or yielding method, what a [yield] of a place does. [owned] is true
-          when the code that the [yield] runs may take the value: the method yields it [own], or
-          computed it for this [yield]. Otherwise the place is borrowed. *)
+      (** In an inlined lending or yielding method, the action of a [yield] of a place. [owned] is
+          true when the code that the [yield] runs may take the value: the method yields it [own],
+          or computed it for this [yield]. Otherwise the place is borrowed. *)
   yield_into : Lir.place option;
       (** In an inlined lending method with a [yield] on each of several paths, where a value the
           method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
@@ -210,11 +210,12 @@ let site st (span : Syntax.span) : Lir.site =
     text;
   { definition = st.frame.code.anchor; line = !line; column = !column }
 
-type unsupported = { what : string; at : Lir.site option }
+type unsupported = { construct : string; at : Lir.site option }
 
 exception Unsupported of unsupported
 
-let unsupported ?at format = Printf.ksprintf (fun what -> raise (Unsupported { what; at })) format
+let unsupported ?at format =
+  Printf.ksprintf (fun construct -> raise (Unsupported { construct; at })) format
 
 let source st (span : Syntax.span) =
   let text = st.frame.code.text in
@@ -229,12 +230,12 @@ let rec binding_scope = function
 
 let innermost_scope st = match st.scopes with scope :: _ -> scope | [] -> bug "no scope"
 
-(* Has the scope of the names around own what is at a place. *)
+(* Has the scope of the names around own the value at a place. *)
 let own_in_scope st place =
   let scope = binding_scope st.scopes in
   scope.owned <- Drop_value place :: scope.owned
 
-(* A heap block the scope frees as it ends, after the drops of what is in it,
+(* A heap block the scope frees as it ends, after the drops of its contents,
    which are owned later and so come first. *)
 let free_in_scope st pointer =
   let scope = binding_scope st.scopes in
@@ -409,7 +410,7 @@ let with_scope st kind body =
 let in_scope st body = with_scope st Bindings body
 let in_statement st body = with_scope st Statement body
 
-(* Ends the function being written: what its scope still owns is dropped
+(* Ends the function being written: its scope's remaining values are dropped
    and its result returned. Its parameters are [first], which it is given
    before anything else, the pointer its result is written through, if it
    has one, and [rest]. *)

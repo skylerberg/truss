@@ -1,12 +1,9 @@
-module Patterns = Type_checker.For_testing.Patterns
-module Usage = Type_checker.For_testing.Usage
-
 (* The tests of the rules on use: unused variables and unreachable code. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Usage
+let check = Type_checker.For_testing.through Usage
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -15,7 +12,8 @@ let () =
       one_diagnostic Fixtures.Usage.variable_nothing_reads_is_an_error_with_a_fix_that
         "usage.unused_variable"
         ~fixed:Fixtures.Usage.variable_nothing_reads_is_an_error_with_a_fix_that_fixed);
-  test "a parameter nothing reads is not an error" (fun () -> fine "fn f(count: Int64) {}\n");
+  test "a parameter nothing reads is not an error" (fun () ->
+      fine "fn run_example(count: Int64) {}\n");
   test "an unused field of a record pattern is fixed by name" (fun () ->
       one_diagnostic Fixtures.Usage.unused_field_of_a_record_pattern_is_fixed_by_name
         "usage.unused_variable"

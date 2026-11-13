@@ -125,7 +125,7 @@ let check_parse_robust text =
             fail "a parser diagnostic is out of bounds in %s" (Diagnostic.quote text))
         diagnostics
 
-(* What a parser diagnostic says about the reference grammar: that it
+(* A parser diagnostic's claim about the reference grammar: that it
    rejects the tokens, that it accepts them because the rule is checked
    after parsing, or nothing. The grammar accepts any name where a cost word
    goes, and reads a string as one token, so it cannot check either. *)
@@ -225,8 +225,8 @@ let check_parsers_agree text =
             item.first item.stop (Diagnostic.quote text))
     items
 
-(* Applying a fix removes its diagnostic and adds no other: what is left is
-   the other diagnostics, or fewer. *)
+(* Applying a fix removes its diagnostic and adds no other: the remaining
+   diagnostics are the others, or fewer. *)
 let check_fixes_work text =
   let all text =
     let _, _, diagnostics = snippet text in

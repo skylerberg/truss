@@ -4,8 +4,8 @@ open Harness
 module Manifest = Manifest
 
 let manifest_block () =
-  let text = Documents.read (Harness.workspace_path "SYNTAX.md") in
-  String.concat "\n" (Documents.block_after text "### Package manifest")
+  let text = Documents.read (Harness.workspace_path "PACKAGES.md") in
+  String.concat "\n" (Documents.block_after text "## Package manifest")
 
 let contains text part = Substring.contains text part
 
@@ -16,7 +16,7 @@ let malformed_at line text =
   | _ -> fail "accepted"
 
 let () =
-  test "SYNTAX.md's manifest gives the name and each dependency's capabilities" (fun () ->
+  test "PACKAGES.md's manifest gives the name and each dependency's capabilities" (fun () ->
       match Manifest.parse (manifest_block ()) with
       | {
        package =
@@ -39,9 +39,9 @@ let () =
       } ->
           ()
       | _ -> fail "read differently");
-  test "SYNTAX.md's project manifest is a project with a time limit, and no package" (fun () ->
-      let text = Documents.read (Harness.workspace_path "SYNTAX.md") in
-      match Manifest.parse (String.concat "\n" (Documents.block_after text "### Projects")) with
+  test "PACKAGES.md's project manifest is a project with a time limit, and no package" (fun () ->
+      let text = Documents.read (Harness.workspace_path "PACKAGES.md") in
+      match Manifest.parse (String.concat "\n" (Documents.block_after text "## Projects")) with
       | { package = None; project = true; time_limit = Some 10 } -> ()
       | _ -> fail "read differently");
   test "a manifest has a package, a project, or both" (fun () ->
@@ -84,7 +84,8 @@ let () =
       malformed_at 2 "[package]\nname = \"Weather\"\n");
   test "a dependency's name with :: is written in quotes" (fun () ->
       malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\ntruss::json = []\n");
-  test "a version, as other languages' manifests have, is malformed, with what to write" (fun () ->
+  test "a version, as other languages' manifests have, is malformed, with the replacement"
+    (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
       | exception Manifest.Malformed (3, message) ->
           if not (contains message "holds no version") then fail "said %s" message

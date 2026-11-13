@@ -6,6 +6,6 @@ trait Second {
   fn label(mut self) -> Int64
 }
 
-fn f[Value: First + Second](value: Value) -> Int64 {
+fn run_example[Value: First + Second](value: Value) -> Int64 {
   value.label()
 }

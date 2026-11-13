@@ -79,9 +79,9 @@ test "everything" {
   }
   assert total == 19
   assert names == ["square 3", "rectangle 2x5"]
-  let doubled = [1, 2, 3].map(fn(x) { x * 2 })
+  let doubled = [1, 2, 3].map(fn(first_number) { first_number * 2 })
   assert doubled == [2, 4, 6]
-  let labels = [1, 2].map(fn(x) { "#${x}" })
+  let labels = [1, 2].map(fn(first_number) { "#${first_number}" })
   assert labels == ["#1", "#2"]
   assert twice("abc") == Ok(6)
   assert twice("") == Err(ParseError.Empty)

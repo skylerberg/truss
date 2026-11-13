@@ -1,5 +1,5 @@
-public type Point(x: Int64, y: Int64)
+public type Point(first_number: Int64, second_number: Int64)
 
 public fn Point.sum(self) -> Int64 {
-  self.x + self.y
+  self.first_number + self.second_number
 }

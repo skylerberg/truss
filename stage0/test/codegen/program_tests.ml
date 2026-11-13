@@ -322,7 +322,7 @@ let () =
              ])
         (in_terminal ());
       (* Run as it is, the program has this test's terminal, which a run
-         under CI lacks. Only there can the test say what it finds. *)
+         under CI lacks. Only there can the test report its findings. *)
       match Unix.openfile "/dev/tty" [ O_RDWR ] 0 with
       | terminal -> Unix.close terminal
       | exception Unix.Unix_error _ ->
@@ -380,6 +380,73 @@ let () =
                "sent 3";
                "received 3 from loopback true";
                "no second packet true";
+               "";
+             ])
+        output)
+
+let () =
+  test "a program serves on a local socket, and sets a connection's TCP options" (fun () ->
+      let path = Filename.concat (Lazy.force scratch) "served.socket" in
+      let status, output, _ =
+        run_main ~arguments:[ path ]
+          {|use standard::network
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, NetworkServer, NetworkClient, Handles
+{
+  let path = Path.new(arguments[1].slice())
+  if NetworkServer.listen_local(path) is Ok(opened) {
+    var listener = own opened
+    say("listening at the path ${listener.path() == path}")
+    if NetworkClient.connect_local(path) is Ok(made) {
+      var client = own made
+      if mut listener.accept() is Ok(moved) {
+        var server = own moved
+        let _ = mut client.write("ping".bytes())
+        var heard: List[UInt8] = []
+        if mut server.read(mut heard, limit: 100) is Ok(count) {
+          say("the server read ${count}")
+        }
+      }
+    }
+    if NetworkServer.listen_local(path) is Err(error) {
+      say("the path is taken ${error == SystemError.AddressInUse}")
+    }
+  }
+  if NetworkClient.connect_local(Path.new("${arguments[1]}.missing".slice())) is Err(_) {
+    say("a missing path is refused")
+  }
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  let shared = network::ListenOptions(backlog: 16, reuse_port: true)
+  if NetworkServer.listen(loopback, options: shared) is Ok(opened) {
+    let listener = own opened
+    if NetworkClient.connect(listener.local_address(), timeout: None) is Ok(made) {
+      var client = own made
+      say("no delay ${mut client.set_no_delay(true) is Ok(_)}")
+      say("keep alive ${mut client.set_keep_alive(Some(Duration.seconds(30))) is Ok(_)}")
+      say("keep alive off ${mut client.set_keep_alive(None) is Ok(_)}")
+    }
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "listening at the path true";
+               "the server read 4";
+               "the path is taken true";
+               "a missing path is refused";
+               "no delay true";
+               "keep alive true";
+               "keep alive off true";
                "";
              ])
         output)
@@ -488,18 +555,21 @@ let () =
       expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n" output)
 
 let () =
-  test "a line longer than a block is read whole, and what follows it is kept" (fun () ->
+  test "a line longer than a block is read whole, and the text after it is kept" (fun () ->
       let long = String.make 150_000 'x' in
       let status, output, _ =
         run_main
           ~input:(long ^ "\nshort\n" ^ long)
-          Fixtures.Program.line_longer_than_a_block_is_read_whole_and_what
+          Fixtures.Program.line_longer_than_a_block_is_read_whole_and_the
       in
       expect_int ~expected:0 status;
       expect_string ~expected:"150000\n5\n150000\n" output);
   test "the console a program is given is a value its start owns and drops" (fun () ->
       let _, compile = load Fixtures.Program.console_a_program_is_given_is_a_value_its_start in
-      match Compile.compiled compile (Program_main (Top { module_ = example; name = "main" })) with
+      match
+        Compile.For_testing.compiled compile
+          (Program_main (Top { module_ = example; name = "main" }))
+      with
       | Code instance ->
           let console local =
             match instance.main.locals.(local).ty with
@@ -516,7 +586,8 @@ let () =
                   block.statements)
               instance.main.blocks
           in
-          if not dropped then fail "no drop of the console:\n%s" (Lir.to_string instance)
+          if not dropped then
+            fail "no drop of the console:\n%s" (Lir.For_testing.to_string instance)
       | _ -> fail "expected code")
 
 let () =
@@ -556,7 +627,7 @@ let () =
                     with
                     | Top _, Some { generics = []; specification_only = false; _ } ->
                         ignore
-                          (Compile.compiled compile
+                          (Compile.For_testing.compiled compile
                              (Code { path = declaration.path; type_arguments = [] }))
                     | _ -> ())
                   (Query.demand database Resolve.Names.declarations example);
@@ -575,7 +646,9 @@ let () =
       (match run_main source with
       | 0, output, _ -> expect_string ~expected:"counted 1\ndone 3\n" output
       | status, _, errors -> fail "ended with status %d: %s" status errors);
-      match run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
+      match
+        run_main ~arguments:[ "first_value"; "second_value"; "third_value"; "fourth_value" ] source
+      with
       | 101, output, errors ->
           expect_string ~expected:"counted 5\n" output;
           if not (contains errors "many arguments") then fail "panicked with %S" errors

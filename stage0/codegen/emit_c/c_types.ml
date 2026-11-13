@@ -1,6 +1,6 @@
-(* A file's context, and the C types and definitions of what it names:
+(* A file's context, and the C types and definitions of the entities it names:
    structs, unions, function types, and environments, each defined once and
-   before what uses it. *)
+   before its first use. *)
 
 open C_runtime
 
@@ -69,7 +69,7 @@ type context = {
   mutable bytes : (string * string) list;  (** Text and name, most recent first *)
   mutable prototypes : (string * string) list;  (** Symbol and declaration, most recent first *)
   mutable anchors : (string * Path.t) list;
-  mutable references : key list option;  (** While defining a key, what its text names *)
+  mutable references : key list option;  (** While defining a key, the keys its text names *)
   mutable helpers_used : string list;
   mutable statics : string list;
       (** Static arrays and blocks that data refers to, most recent first *)

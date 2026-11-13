@@ -1,6 +1,5 @@
-(* [truss references] and [truss dependencies]: what reads a definition,
-   and what a definition reads, part by part, from the graph of results the
-   session keeps. *)
+(* [truss references] and [truss dependencies]: a definition's dependents
+   and dependencies, by part, from the session's dependency graph. *)
 
 type direction = References | Dependencies
 
@@ -9,22 +8,10 @@ let run ~directory ~direction ~name ~json =
   match Database.find_definitions project.session name with
   | [] -> Project.cannot_run "No definition named %s in this worktree." name
   | targets ->
-      let dependencies = Database.dependencies project.session in
-      (* Each row: the reader, its part, the part it reads, and what it reads. *)
-      let rows =
-        List.concat_map
-          (fun target ->
-            match direction with
-            | References ->
-                List.map
-                  (fun (reader, part, read) -> (reader, part, read, target))
-                  (Database.readers dependencies target)
-            | Dependencies ->
-                List.map
-                  (fun (read_path, part, read) -> (target, part, read, read_path))
-                  (Database.reads dependencies target))
-          targets
-        |> List.sort_uniq compare
+      let edges =
+        match direction with
+        | References -> Database.dependents project.session targets
+        | Dependencies -> Database.dependencies project.session targets
       in
       if json then
         Json.print
@@ -33,25 +20,25 @@ let run ~directory ~direction ~name ~json =
                ( "reads",
                  Json.List
                    (List.map
-                      (fun (reader, part, read, path) ->
+                      (fun (edge : Graph_types.edge) ->
                         Json.Object
                           [
-                            ("reader", Json.String (Path.show reader));
-                            ("part", Json.String part);
-                            ("reads", Json.String read);
-                            ("of", Json.String (Path.show path));
+                            ("reader", Json.String (Path.show edge.dependent));
+                            ("part", Json.String edge.dependent_part);
+                            ("reads", Json.String edge.dependency_part);
+                            ("of", Json.String (Path.show edge.dependency));
                           ])
-                      rows) );
+                      edges) );
              ])
-      else if rows = [] then
+      else if edges = [] then
         Output.print_line
           (match direction with
           | References -> "Nothing reads it."
           | Dependencies -> "It reads nothing.")
       else
         List.iter
-          (fun (reader, part, read, path) ->
-            Output.printf "%s: its %s reads the %s of %s\n" (Path.show reader) part read
-              (Path.show path))
-          rows;
+          (fun (edge : Graph_types.edge) ->
+            Output.printf "%s: its %s reads the %s of %s\n" (Path.show edge.dependent)
+              edge.dependent_part edge.dependency_part (Path.show edge.dependency))
+          edges;
       0

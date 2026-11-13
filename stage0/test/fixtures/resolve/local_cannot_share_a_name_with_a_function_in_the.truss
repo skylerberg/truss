@@ -1,5 +1,5 @@
 fn total() -> Int64 { 0 }
 
-fn f() {
+fn run_example() {
   let total = 2
 }

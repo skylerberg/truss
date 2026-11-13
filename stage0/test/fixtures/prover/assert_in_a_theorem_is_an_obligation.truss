@@ -1,4 +1,4 @@
-theorem t(value: Int64)
+theorem term_value(value: Int64)
   ensures true
 {
   assert value > 0

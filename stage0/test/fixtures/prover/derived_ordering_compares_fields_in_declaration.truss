@@ -1,7 +1,7 @@
 type Entry(weight: Int64, label: Int64)
   derives Equal, Ordered
 
-fn f(first: Entry, second: Entry) -> Bool
+fn run_example(first: Entry, second: Entry) -> Bool
   requires first.weight < second.weight
   ensures result
 {

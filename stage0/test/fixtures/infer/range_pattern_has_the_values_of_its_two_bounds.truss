@@ -1,5 +1,5 @@
-fn f(n: Int64) -> Int64 {
-  match n {
+fn run_example(limit_count: Int64) -> Int64 {
+  match limit_count {
     1..=5 => 1
     _ => 2
   }

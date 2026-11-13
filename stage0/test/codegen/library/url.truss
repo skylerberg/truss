@@ -57,7 +57,7 @@ test "a URL is displayed as it was read, with its scheme and host in lower case"
   assert shows("a+b.c-d://x", expected: "a+b.c-d://x")
 }
 
-test "text that is not a URL says what is wrong with it" {
+test "text that is not a URL names the problem with it" {
   assert fails("", expected: url::ParseError.MissingScheme)
   assert fails("/path/only", expected: url::ParseError.MissingScheme)
   assert fails("example.com/path", expected: url::ParseError.MissingScheme)

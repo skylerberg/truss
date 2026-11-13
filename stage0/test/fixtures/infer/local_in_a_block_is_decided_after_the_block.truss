@@ -1,0 +1,10 @@
+fn run_example(flag: Bool) -> UInt16 {
+  let value = if flag {
+    let inner = 5
+    inner
+  } else {
+    7
+  }
+  let other: UInt16 = value
+  other
+}

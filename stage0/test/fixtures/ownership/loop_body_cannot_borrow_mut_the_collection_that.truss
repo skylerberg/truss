@@ -1,4 +1,4 @@
-fn f() {
+fn run_example() {
   var items: List[Int64] = [1, 2]
   for item in items {
     mut items.push(item)

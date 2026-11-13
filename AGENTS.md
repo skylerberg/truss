@@ -39,8 +39,8 @@ It does not mean everyday vocabulary.
    failure. When a sentence needs one, find the term it stands for.
 
 2. **Keep Truss's own terms.** `view`, `own`, `mut`, `lends`, `yields`,
-   `uses`, `provide`, capability, and cursor mean what DESIGN.md and
-   SYNTAX.md define. Do not coin more terms. If a new concept needs a name,
+   `uses`, `provide`, capability, and cursor mean what SPECIFICATION.md
+   defines. Do not coin more terms. If a new concept needs a name,
    define the name once, where the concept is introduced.
 
 3. **Name the failure that a rule prevents.** Write "this prevents a use
@@ -109,6 +109,14 @@ Give every module an `.mli` that exports only what other modules use. The
 compiler reports an unused value, type, constructor, or field only when the
 interface hides it, so a module without an interface hides dead code. The
 entry module of an executable needs none: dune gives it an empty one.
+
+Test through the public interface. A test is not a user for this rule: an
+export that only tests read hides dead code from the compiler as surely as
+a missing `.mli`. When a test needs an internal value, such as an engine's
+log or a printer of an intermediate form, export that value in a
+`For_testing` submodule, and only the values the tests read, never a whole
+module. CI rejects a use of `For_testing` outside `stage0/test` and
+`stage0/tools`.
 
 ## Testing
 

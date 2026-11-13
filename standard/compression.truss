@@ -1,0 +1,980 @@
+use standard::checksum
+use standard::core
+use standard::intrinsic
+
+public type Format = Deflate | Zlib | Gzip
+  derives Equal
+
+public type Level = Fastest | Balanced | Smallest
+  derives Equal
+
+public type Error =
+  | Malformed(offset: USize)
+  | TooLarge(limit: USize)
+  | ChecksumMismatch
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Malformed(offset) => {
+        mut output.write("the compressed data is malformed at byte ")
+        offset.display(mut output)
+      }
+      TooLarge(limit) => {
+        mut output.write("the data decompresses to more than ")
+        limit.display(mut output)
+        mut output.write(" bytes")
+      }
+      ChecksumMismatch => mut output.write("the decompressed data does not match its checksum")
+    }
+  }
+}
+
+let length_bases: Array[USize, 29] = [
+  3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258,
+]
+
+let length_extra_bits: Array[USize, 29] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+]
+
+let distance_bases: Array[USize, 30] = [
+  1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+  8193, 12289, 16385, 24577,
+]
+
+let distance_extra_bits: Array[USize, 30] = [
+  0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
+]
+
+let code_length_limit: USize = 16
+
+let longest_code: USize = 15
+
+let nine_bit_start: USize = 144
+
+let nine_bit_end: USize = 256
+
+let seven_bit_start: USize = 256
+
+let seven_bit_end: USize = 280
+
+let code_length_order: Array[USize, 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+
+type BitReader(position: USize, bits: UInt64, count: USize)
+
+fn BitReader.new(start: USize) -> BitReader {
+  BitReader(position: start, bits: 0, count: 0)
+}
+
+fn read_bits(reader: mut BitReader, input: Slice[UInt8], wanted: USize) -> Result[USize, Error] {
+  if wanted > 32 {
+    return Err(Error.Malformed(offset: reader.position))
+  }
+  while reader.count < wanted {
+    if reader.position >= input.length() {
+      return Err(Error.Malformed(offset: reader.position))
+    }
+    let byte: UInt64 = intrinsic::convert(input[reader.position])
+    reader.bits = reader.bits | (byte << reader.count)
+    reader.position += 1
+    reader.count += 8
+  }
+  let mask: UInt64 = (1 << wanted) - 1
+  let value: USize = intrinsic::convert(reader.bits & mask)
+  reader.bits = reader.bits >> wanted
+  reader.count -= wanted
+  Ok(value)
+}
+
+fn align_to_byte(reader: mut BitReader) {
+  let spare = reader.count % 8
+  reader.bits = reader.bits >> spare
+  reader.count -= spare
+}
+
+fn value_at(values: Slice[USize], index: USize) -> USize {
+  if index < values.length() { values[index] } else { 0 }
+}
+
+fn put_at(values: mut List[USize], index: USize, value: USize) {
+  if index < values.length() {
+    values[index] = value
+  }
+}
+
+fn add_at(values: mut List[USize], index: USize, amount: USize) {
+  if index < values.length() {
+    values[index] = values[index].saturating_add(amount)
+  }
+}
+
+type Huffman(counts: List[USize], symbols: List[USize])
+
+fn Huffman.from_lengths(lengths: Slice[USize], at: USize) -> Result[Huffman, Error] {
+  var counts: List[USize] = List.filled(0, count: 16)
+  for length in lengths {
+    if length > 15 {
+      return Err(Error.Malformed(offset: at))
+    }
+    add_at(mut counts, index: length, amount: 1)
+  }
+  put_at(mut counts, index: 0, value: 0)
+  var left: USize = 1
+  for length in 1..code_length_limit {
+    left = left.saturating_multiply(2)
+    let count = value_at(counts.slice(), index: length)
+    if count > left {
+      return Err(Error.Malformed(offset: at))
+    }
+    left -= count
+  }
+  var offsets: List[USize] = List.filled(0, count: 16)
+  for length in 1..longest_code {
+    put_at(mut offsets, index: length.saturating_add(1), value: value_at(offsets.slice(), index: length).saturating_add(value_at(counts.slice(), index: length)))
+  }
+  var symbols: List[USize] = List.filled(0, count: lengths.length())
+  for symbol in 0..lengths.length() {
+    let length = lengths[symbol]
+    if length != 0 {
+      let slot = value_at(offsets.slice(), index: length)
+      put_at(mut symbols, index: slot, value: symbol)
+      add_at(mut offsets, index: length, amount: 1)
+    }
+  }
+  Ok(Huffman(counts: own counts, symbols: own symbols))
+}
+
+fn decode_symbol(reader: mut BitReader, input: Slice[UInt8], code: Huffman) -> Result[USize, Error] {
+  var bits: USize = 0
+  var first: USize = 0
+  var index: USize = 0
+  for length in 1..code_length_limit {
+    bits = bits | read_bits(mut reader, input: input, wanted: 1)?
+    let count = value_at(code.counts.slice(), index: length)
+    if bits >= first && bits - first < count {
+      let at = index.saturating_add(bits - first)
+      return if at < code.symbols.length() { Ok(code.symbols[at]) } else { Err(Error.Malformed(offset: reader.position)) }
+    }
+    index = index.saturating_add(count)
+    first = first.saturating_add(count)
+    first = first.saturating_multiply(2)
+    bits = bits.saturating_multiply(2)
+  }
+  Err(Error.Malformed(offset: reader.position))
+}
+
+fn push_limited(output: mut List[UInt8], byte: UInt8, limit: USize) -> Result[Unit, Error]
+  ensures output.length() >= old(output.length())
+{
+  if output.length() >= limit {
+    return Err(Error.TooLarge(limit: limit))
+  }
+  mut output.push(byte)
+  Ok(Unit)
+}
+
+fn inflate_codes(
+  reader: mut BitReader,
+  input: Slice[UInt8],
+  output: mut List[UInt8],
+  lengths: Huffman,
+  distances: Huffman,
+  limit: USize,
+) -> Result[Unit, Error] {
+  while true {
+    let symbol = decode_symbol(mut reader, input: input, code: lengths)?
+    if symbol < 256 {
+      push_limited(mut output, byte: intrinsic::convert(symbol), limit: limit)?
+    } else if symbol == 256 {
+      return Ok(Unit)
+    } else {
+      let index = symbol - 257
+      if index >= 29 {
+        return Err(Error.Malformed(offset: reader.position))
+      }
+      let length = length_bases[index].saturating_add(read_bits(mut reader, input: input, wanted: length_extra_bits[index])?)
+      let code = decode_symbol(mut reader, input: input, code: distances)?
+      if code >= 30 {
+        return Err(Error.Malformed(offset: reader.position))
+      }
+      let distance = distance_bases[code].saturating_add(read_bits(mut reader, input: input, wanted: distance_extra_bits[code])?)
+      if distance > output.length() {
+        return Err(Error.Malformed(offset: reader.position))
+      }
+      for _ in 0..length
+        invariant distance <= output.length()
+      {
+        let from = output.length() - distance
+        if from >= output.length() {
+          return Err(Error.Malformed(offset: reader.position))
+        }
+        let byte = output[from]
+        push_limited(mut output, byte: byte, limit: limit)?
+      }
+    }
+  }
+}
+
+fn fixed_codes() -> Result[core::Pair[Huffman, Huffman], Error] {
+  var lengths: List[USize] = List.with_capacity(288)
+  let symbols: USize = 288
+  for symbol in 0..symbols {
+    mut lengths.push(if symbol < 144 { 8 } else if symbol < 256 { 9 } else if symbol < 280 { 7 } else { 8 })
+  }
+  let distances: List[USize] = List.filled(5, count: 30)
+  Ok(core::Pair(first: Huffman.from_lengths(lengths.slice(), at: 0)?, second: Huffman.from_lengths(distances.slice(), at: 0)?))
+}
+
+fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pair[Huffman, Huffman], Error] {
+  let at = reader.position
+  let literal_count = read_bits(mut reader, input: input, wanted: 5)?.saturating_add(257)
+  let distance_count = read_bits(mut reader, input: input, wanted: 5)?.saturating_add(1)
+  let code_count = read_bits(mut reader, input: input, wanted: 4)?.saturating_add(4)
+  if literal_count > 286 || distance_count > 30 {
+    return Err(Error.Malformed(offset: at))
+  }
+  var length_code_lengths: List[USize] = List.filled(0, count: 19)
+  for index in 0..code_count {
+    if index < 19 {
+      let length = read_bits(mut reader, input: input, wanted: 3)?
+      put_at(mut length_code_lengths, index: code_length_order[index], value: length)
+    }
+  }
+  let lengths_code = Huffman.from_lengths(length_code_lengths.slice(), at: at)?
+  let total = literal_count + distance_count
+  var lengths: List[USize] = []
+  while lengths.length() < total
+    invariant lengths.length() <= total
+  {
+    let symbol = decode_symbol(mut reader, input: input, code: lengths_code)?
+    if symbol < 16 {
+      mut lengths.push(symbol)
+    } else {
+      var repeated: USize = 0
+      var times: USize = 0
+      if symbol == 16 {
+        match lengths.last() {
+          Some(previous) => repeated = previous
+          None => return Err(Error.Malformed(offset: reader.position))
+        }
+        times = read_bits(mut reader, input: input, wanted: 2)?.saturating_add(3)
+      } else if symbol == 17 {
+        times = read_bits(mut reader, input: input, wanted: 3)?.saturating_add(3)
+      } else {
+        times = read_bits(mut reader, input: input, wanted: 7)?.saturating_add(11)
+      }
+      if lengths.length().saturating_add(times) > total {
+        return Err(Error.Malformed(offset: reader.position))
+      }
+      for _ in 0..times
+        invariant lengths.length() <= total
+      {
+        if lengths.length() < total {
+          mut lengths.push(repeated)
+        }
+      }
+    }
+  }
+  if lengths.length() <= 256 || lengths[256] == 0 {
+    return Err(Error.Malformed(offset: at))
+  }
+  let literal_lengths = lengths[..literal_count]
+  let distance_lengths = lengths[literal_count..]
+  Ok(core::Pair(
+    first: Huffman.from_lengths(literal_lengths, at: at)?,
+    second: Huffman.from_lengths(distance_lengths, at: at)?,
+  ))
+}
+
+fn inflate_from(input: Slice[UInt8], start: USize, limit: USize) -> Result[core::Pair[List[UInt8], USize], Error] {
+  var reader = BitReader.new(start)
+  var output: List[UInt8] = []
+  var last = false
+  while !last {
+    last = read_bits(mut reader, input: input, wanted: 1)? == 1
+    let kind = read_bits(mut reader, input: input, wanted: 2)?
+    if kind == 0 {
+      align_to_byte(mut reader)
+      let length = read_bits(mut reader, input: input, wanted: 16)?
+      let complement = read_bits(mut reader, input: input, wanted: 16)?
+      if length != (complement ^ 65535) {
+        return Err(Error.Malformed(offset: reader.position))
+      }
+      for _ in 0..length {
+        let byte: UInt8 = intrinsic::convert(read_bits(mut reader, input: input, wanted: 8)?)
+        push_limited(mut output, byte: byte, limit: limit)?
+      }
+    } else if kind == 1 {
+      let codes = fixed_codes()?
+      inflate_codes(mut reader, input: input, output: mut output, lengths: codes.first, distances: codes.second, limit: limit)?
+    } else if kind == 2 {
+      let codes = dynamic_codes(mut reader, input: input)?
+      inflate_codes(mut reader, input: input, output: mut output, lengths: codes.first, distances: codes.second, limit: limit)?
+    } else {
+      return Err(Error.Malformed(offset: reader.position))
+    }
+  }
+  align_to_byte(mut reader)
+  let consumed = reader.position.saturating_subtract(reader.count / 8)
+  Ok(core::Pair(first: own output, second: consumed))
+}
+
+fn number_at(input: Slice[UInt8], offset: USize, size: USize, big_endian: Bool) -> Option[UInt32] {
+  if size > 4 || offset > input.length() || input.length() - offset < size {
+    return None
+  }
+  var value: UInt32 = 0
+  for index in 0..size {
+    let byte: UInt32 = intrinsic::convert(input[offset + index])
+    if big_endian {
+      value = (value << 8) | byte
+    } else {
+      value = value | (byte << (8 * index))
+    }
+  }
+  Some(value)
+}
+
+public fn decompress(input: Slice[UInt8], format: Format = Format.Gzip, limit: USize = 268435456) -> Result[List[UInt8], Error] {
+  match format {
+    Deflate => {
+      let inflated = inflate_from(input, start: 0, limit: limit)?
+      Ok(own inflated.first)
+    }
+    Zlib => {
+      if input.length() < 6 {
+        return Err(Error.Malformed(offset: input.length()))
+      }
+      let method = input[0]
+      let flags = input[1]
+      let header: UInt32 = intrinsic::convert[UInt8, UInt32](method) * 256 + intrinsic::convert[UInt8, UInt32](flags)
+      if (method & 15) != 8 || header % 31 != 0 || (flags & 32) != 0 {
+        return Err(Error.Malformed(offset: 0))
+      }
+      let inflated = inflate_from(input, start: 2, limit: limit)?
+      match number_at(input, offset: inflated.second, size: 4, big_endian: true) {
+        Some(expected) => {
+          if checksum::adler32(inflated.first.slice()) != expected {
+            return Err(Error.ChecksumMismatch)
+          }
+          Ok(own inflated.first)
+        }
+        None => Err(Error.Malformed(offset: inflated.second))
+      }
+    }
+    Gzip => {
+      var output: List[UInt8] = []
+      var offset: USize = 0
+      while offset < input.length() {
+        let member = gunzip_member(input, start: offset, limit: limit.saturating_subtract(output.length()))?
+        mut output.append(own member.first)
+        offset = member.second
+      }
+      if input.is_empty() {
+        return Err(Error.Malformed(offset: 0))
+      }
+      Ok(own output)
+    }
+  }
+}
+
+fn skip_text(input: Slice[UInt8], from: USize) -> Result[USize, Error] {
+  var at = from
+  while at < input.length() && input[at] != 0 {
+    at += 1
+  }
+  if at >= input.length() {
+    return Err(Error.Malformed(offset: at))
+  }
+  Ok(at + 1)
+}
+
+fn gunzip_member(input: Slice[UInt8], start: USize, limit: USize) -> Result[core::Pair[List[UInt8], USize], Error] {
+  if start > input.length() || input.length() - start < 18 || input[start] != 31 || input[start + 1] != 139 || input[start + 2] != 8 {
+    return Err(Error.Malformed(offset: start))
+  }
+  let flags = input[start + 3]
+  var at = start + 10
+  if (flags & 4) != 0 {
+    match number_at(input, offset: at, size: 2, big_endian: false) {
+      Some(extra) => at = at.saturating_add(2).saturating_add(intrinsic::convert(extra))
+      None => return Err(Error.Malformed(offset: at))
+    }
+  }
+  if (flags & 8) != 0 {
+    at = skip_text(input, from: at)?
+  }
+  if (flags & 16) != 0 {
+    at = skip_text(input, from: at)?
+  }
+  if (flags & 2) != 0 {
+    at = at.saturating_add(2)
+  }
+  if at > input.length() {
+    return Err(Error.Malformed(offset: at))
+  }
+  let inflated = inflate_from(input, start: at, limit: limit)?
+  let end = inflated.second
+  match number_at(input, offset: end, size: 4, big_endian: false) {
+    Some(expected) => {
+      if checksum::crc32(inflated.first.slice()) != expected {
+        return Err(Error.ChecksumMismatch)
+      }
+      match number_at(input, offset: end.saturating_add(4), size: 4, big_endian: false) {
+        Some(size) => {
+          let length: UInt32 = intrinsic::convert(inflated.first.length() % 4294967296)
+          if size != length {
+            return Err(Error.ChecksumMismatch)
+          }
+          Ok(core::Pair(first: own inflated.first, second: end.saturating_add(8)))
+        }
+        None => Err(Error.Malformed(offset: end))
+      }
+    }
+    None => Err(Error.Malformed(offset: end))
+  }
+}
+
+type BitWriter(bytes: List[UInt8], bits: UInt64, count: USize)
+  invariant count < 8
+
+fn BitWriter.new() -> BitWriter {
+  BitWriter(bytes: [], bits: 0, count: 0)
+}
+
+fn write_bits(writer: mut BitWriter, value: USize, count: USize) {
+  if count == 0 || count > 32 {
+    return
+  }
+  let mask: UInt64 = (1 << count) - 1
+  let bits: UInt64 = intrinsic::convert[USize, UInt64](value) & mask
+  writer.bits = writer.bits | (bits << writer.count)
+  writer.count += count
+  while writer.count >= 8 {
+    mut writer.bytes.push(intrinsic::convert(writer.bits & 255))
+    writer.bits = writer.bits >> 8
+    writer.count -= 8
+  }
+}
+
+fn finish_byte(writer: mut BitWriter) {
+  if writer.count > 0 {
+    mut writer.bytes.push(intrinsic::convert(writer.bits & 255))
+  }
+  writer.bits = 0
+  writer.count = 0
+}
+
+type Token =
+  | Literal(byte: UInt8)
+  | Match(length: USize, distance: USize)
+
+let window: USize = 32768
+
+let maximum_match: USize = 258
+
+fn hash_at(input: Slice[UInt8], position: USize) -> USize {
+  if position >= input.length() || input.length() - position < 3 {
+    return 0
+  }
+  let first: USize = intrinsic::convert(input[position])
+  let second: USize = intrinsic::convert(input[position + 1])
+  let third: USize = intrinsic::convert(input[position + 2])
+  ((first << 10) ^ (second << 5) ^ third) % 32768
+}
+
+type Matcher(head: List[USize], previous: List[USize], chain: USize)
+
+fn Matcher.new(chain: USize) -> Matcher {
+  Matcher(head: List.filled(USize.maximum, count: 32768), previous: List.filled(USize.maximum, count: 32768), chain: chain)
+}
+
+fn insert_position(matcher: mut Matcher, input: Slice[UInt8], position: USize) {
+  if position >= input.length() || input.length() - position < 3 {
+    return
+  }
+  let hash = hash_at(input, position: position)
+  let slot = position % window
+  if hash < matcher.head.length() && slot < matcher.previous.length() {
+    matcher.previous[slot] = matcher.head[hash]
+    matcher.head[hash] = position
+  }
+}
+
+fn match_length(input: Slice[UInt8], candidate: USize, position: USize) -> USize {
+  if candidate >= position || position >= input.length() {
+    return 0
+  }
+  let room = input.length() - position
+  let reach = position - candidate
+  var length: USize = 0
+  while length < maximum_match && length < room && length < reach && input[candidate + length] == input[position + length] {
+    length += 1
+  }
+  length
+}
+
+type Found(length: USize, distance: USize)
+
+fn longest_match(matcher: Matcher, input: Slice[UInt8], position: USize) -> Found {
+  var best = Found(length: 0, distance: 0)
+  if position >= input.length() || input.length() - position < 3 {
+    return best
+  }
+  let hash = hash_at(input, position: position)
+  var candidate = if hash < matcher.head.length() { matcher.head[hash] } else { USize.maximum }
+  var steps: USize = 0
+  while candidate < position && position - candidate <= window && steps < matcher.chain {
+    let length = match_length(input, candidate: candidate, position: position)
+    if length > best.length {
+      best = Found(length: length, distance: position - candidate)
+      if length >= maximum_match {
+        return best
+      }
+    }
+    let slot = candidate % window
+    let next = if slot < matcher.previous.length() { matcher.previous[slot] } else { USize.maximum }
+    if next >= candidate {
+      return best
+    }
+    candidate = next
+    steps += 1
+  }
+  best
+}
+
+fn tokens_of(input: Slice[UInt8], level: Level) -> List[Token] {
+  let chain: USize = match level {
+    Fastest => 8
+    Balanced => 64
+    Smallest => 1024
+  }
+  let lazy = level != Level.Fastest
+  var matcher = Matcher.new(chain)
+  var tokens: List[Token] = []
+  var position: USize = 0
+  while position < input.length() {
+    let found = longest_match(matcher, input: input, position: position)
+    insert_position(mut matcher, input: input, position: position)
+    if found.length < 3 {
+      mut tokens.push(Token.Literal(byte: input[position]))
+      position += 1
+    } else {
+      var taken = found
+      if lazy && found.length < maximum_match && position + 1 < input.length() {
+        let next = longest_match(matcher, input: input, position: position + 1)
+        if next.length > found.length {
+          mut tokens.push(Token.Literal(byte: input[position]))
+          position += 1
+          insert_position(mut matcher, input: input, position: position)
+          taken = next
+        }
+      }
+      mut tokens.push(Token.Match(length: taken.length, distance: taken.distance))
+      for offset in 1..taken.length {
+        insert_position(mut matcher, input: input, position: position.saturating_add(offset))
+      }
+      position = position.saturating_add(taken.length)
+    }
+  }
+  tokens
+}
+
+fn length_symbol(length: USize) -> USize
+  ensures result < 29
+{
+  var index: USize = 0
+  while index < 28 && length_bases[index + 1] <= length
+    invariant index <= 28
+  {
+    index += 1
+  }
+  index
+}
+
+fn distance_symbol(distance: USize) -> USize
+  ensures result < 30
+{
+  var index: USize = 0
+  while index < 29 && distance_bases[index + 1] <= distance
+    invariant index <= 29
+  {
+    index += 1
+  }
+  index
+}
+
+type Node(weight: USize, parent: USize)
+
+fn code_lengths(frequencies: Slice[USize], limit: USize) -> List[USize] {
+  var weights: List[USize] = frequencies.to_list()
+  var used: USize = 0
+  for weight in weights {
+    if weight > 0 {
+      used = used.saturating_add(1)
+    }
+  }
+  var added: USize = 0
+  while used < 2 && added < weights.length() {
+    if value_at(weights.slice(), index: added) == 0 {
+      put_at(mut weights, index: added, value: 1)
+      used = used.saturating_add(1)
+    }
+    added += 1
+  }
+  var attempts: USize = 0
+  while attempts < 64 {
+    let lengths = tree_depths(weights.slice())
+    var longest: USize = 0
+    for length in lengths {
+      if length > longest {
+        longest = length
+      }
+    }
+    if longest <= limit {
+      return lengths
+    }
+    for index in 0..weights.length() {
+      let weight = value_at(weights.slice(), index: index)
+      if weight > 0 {
+        put_at(mut weights, index: index, value: weight / 2 + 1)
+      }
+    }
+    attempts += 1
+  }
+  List.filled(limit, count: weights.length())
+}
+
+fn tree_depths(weights: Slice[USize]) -> List[USize] {
+  let none = USize.maximum
+  var nodes: List[Node] = []
+  var open: List[USize] = []
+  var leaf_of: List[USize] = List.filled(none, count: weights.length())
+  for symbol in 0..weights.length() {
+    if weights[symbol] > 0 {
+      put_at(mut leaf_of, index: symbol, value: nodes.length())
+      mut open.push(nodes.length())
+      mut nodes.push(Node(weight: weights[symbol], parent: none))
+    }
+  }
+  while open.length() > 1 {
+    let first = take_lightest(mut open, nodes: nodes.slice())
+    let second = take_lightest(mut open, nodes: nodes.slice())
+    let joined = nodes.length()
+    var weight: USize = 0
+    if first < nodes.length() && second < nodes.length() {
+      weight = nodes[first].weight.saturating_add(nodes[second].weight)
+      nodes[first].parent = joined
+      nodes[second].parent = joined
+    }
+    mut nodes.push(Node(weight: weight, parent: none))
+    mut open.push(joined)
+  }
+  var depths: List[USize] = []
+  for symbol in 0..weights.length() {
+    var node = value_at(leaf_of.slice(), index: symbol)
+    var depth: USize = 0
+    while node < nodes.length() && nodes[node].parent != none && depth < 600 {
+      node = nodes[node].parent
+      depth += 1
+    }
+    mut depths.push(depth)
+  }
+  depths
+}
+
+fn take_lightest(open: mut List[USize], nodes: Slice[Node]) -> USize {
+  if open.is_empty() {
+    return 0
+  }
+  var best: USize = 0
+  for index in 1..open.length()
+    invariant best < open.length()
+  {
+    let candidate = open[index]
+    let current = open[best]
+    if candidate < nodes.length() && current < nodes.length() && nodes[candidate].weight < nodes[current].weight {
+      best = index
+    }
+  }
+  mut open.swap_remove(best)
+}
+
+fn reversed_bits(code: USize, length: USize) -> USize {
+  var reversed: USize = 0
+  var rest = code
+  for _ in 0..length {
+    reversed = (reversed << 1) | (rest & 1)
+    rest = rest >> 1
+  }
+  reversed
+}
+
+fn canonical_codes(lengths: Slice[USize]) -> List[USize] {
+  var counts: List[USize] = List.filled(0, count: 16)
+  for length in lengths {
+    if length > 0 {
+      add_at(mut counts, index: length, amount: 1)
+    }
+  }
+  var next: List[USize] = List.filled(0, count: 16)
+  var code: USize = 0
+  for length in 1..code_length_limit {
+    code = code.saturating_add(value_at(counts.slice(), index: length - 1)).saturating_multiply(2)
+    put_at(mut next, index: length, value: code)
+  }
+  var codes: List[USize] = []
+  for length in lengths {
+    if length > 0 && length < 16 {
+      mut codes.push(reversed_bits(value_at(next.slice(), index: length), length: length))
+      add_at(mut next, index: length, amount: 1)
+    } else {
+      mut codes.push(0)
+    }
+  }
+  codes
+}
+
+type Run(symbol: USize, extra: USize, extra_bits: USize)
+
+fn length_runs(lengths: Slice[USize]) -> List[Run] {
+  var runs: List[Run] = []
+  var index: USize = 0
+  while index < lengths.length() {
+    let length = lengths[index]
+    var count: USize = 1
+    while count < lengths.length() - index && lengths[index + count] == length && count < 138 {
+      count += 1
+    }
+    if length == 0 && count >= 11 {
+      mut runs.push(Run(symbol: 18, extra: count - 11, extra_bits: 7))
+    } else if length == 0 && count >= 3 {
+      mut runs.push(Run(symbol: 17, extra: count - 3, extra_bits: 3))
+    } else if length != 0 && count >= 4 {
+      mut runs.push(Run(symbol: length, extra: 0, extra_bits: 0))
+      var left = count - 1
+      while left >= 3 {
+        let taken = if left > 6 { 6 } else { left }
+        mut runs.push(Run(symbol: 16, extra: taken - 3, extra_bits: 2))
+        left -= taken
+      }
+      count -= left
+    } else {
+      mut runs.push(Run(symbol: length, extra: 0, extra_bits: 0))
+      count = 1
+    }
+    index = index.saturating_add(count)
+  }
+  runs
+}
+
+fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token], from: USize, to: USize, last: Bool) {
+  var literal_frequencies: List[USize] = List.filled(0, count: 286)
+  var distance_frequencies: List[USize] = List.filled(0, count: 30)
+  for token in tokens {
+    match token {
+      Literal(byte) => {
+        let symbol: USize = intrinsic::convert(byte)
+        add_at(mut literal_frequencies, index: symbol, amount: 1)
+      }
+      Match(length, distance) => {
+        let symbol = 257 + length_symbol(length)
+        if symbol < 286 {
+          add_at(mut literal_frequencies, index: symbol, amount: 1)
+        }
+        let code = distance_symbol(distance)
+        if code < 30 {
+          add_at(mut distance_frequencies, index: code, amount: 1)
+        }
+      }
+    }
+  }
+  put_at(mut literal_frequencies, index: 256, value: 1)
+  let literal_lengths = code_lengths(literal_frequencies.slice(), limit: 15)
+  let distance_lengths = code_lengths(distance_frequencies.slice(), limit: 15)
+  var literal_count: USize = 286
+  while literal_count > 257 && value_at(literal_lengths.slice(), index: literal_count - 1) == 0 {
+    literal_count -= 1
+  }
+  var distance_count: USize = 30
+  while distance_count > 1 && value_at(distance_lengths.slice(), index: distance_count - 1) == 0 {
+    distance_count -= 1
+  }
+  var all_lengths: List[USize] = []
+  for index in 0..literal_count {
+    mut all_lengths.push(value_at(literal_lengths.slice(), index: index))
+  }
+  for index in 0..distance_count {
+    mut all_lengths.push(value_at(distance_lengths.slice(), index: index))
+  }
+  let runs = length_runs(all_lengths.slice())
+  var run_frequencies: List[USize] = List.filled(0, count: 19)
+  for run in runs {
+    if run.symbol < 19 {
+      add_at(mut run_frequencies, index: run.symbol, amount: 1)
+    }
+  }
+  let run_lengths = code_lengths(run_frequencies.slice(), limit: 7)
+  var run_count: USize = 19
+  while run_count > 4 && value_at(run_lengths.slice(), index: code_length_order[run_count - 1]) == 0
+    invariant run_count <= 19
+  {
+    run_count -= 1
+  }
+  var bits_needed: USize = 3 + 5 + 5 + 4 + 3 * run_count
+  for run in runs {
+    if run.symbol < 19 {
+      bits_needed = bits_needed.saturating_add(value_at(run_lengths.slice(), index: run.symbol)).saturating_add(run.extra_bits)
+    }
+  }
+  for token in tokens {
+    match token {
+      Literal(byte) => {
+        let symbol: USize = intrinsic::convert(byte)
+        bits_needed = bits_needed.saturating_add(value_at(literal_lengths.slice(), index: symbol))
+      }
+      Match(length, distance) => {
+        let symbol = length_symbol(length)
+        let code = distance_symbol(distance)
+        if 257 + symbol < 286 && code < 30 {
+          bits_needed = bits_needed.saturating_add(value_at(literal_lengths.slice(), index: 257 + symbol)).saturating_add(length_extra_bits[symbol])
+          bits_needed = bits_needed.saturating_add(value_at(distance_lengths.slice(), index: code)).saturating_add(distance_extra_bits[code])
+        }
+      }
+    }
+  }
+  bits_needed = bits_needed.saturating_add(value_at(literal_lengths.slice(), index: 256))
+  let raw = if to >= from { to - from } else { 0 }
+  let stored_cost = raw.saturating_add(5 * (raw / 65535 + 1)).saturating_multiply(8)
+  if stored_cost <= bits_needed {
+    write_stored(mut writer, input: input, from: from, to: to, last: last)
+    return
+  }
+  write_bits(mut writer, value: if last { 1 } else { 0 }, count: 1)
+  write_bits(mut writer, value: 2, count: 2)
+  write_bits(mut writer, value: literal_count.saturating_subtract(257), count: 5)
+  write_bits(mut writer, value: distance_count.saturating_subtract(1), count: 5)
+  write_bits(mut writer, value: run_count.saturating_subtract(4), count: 4)
+  for index in 0..run_count {
+    if index < 19 {
+      write_bits(mut writer, value: value_at(run_lengths.slice(), index: code_length_order[index]), count: 3)
+    }
+  }
+  let run_codes = canonical_codes(run_lengths.slice())
+  for run in runs {
+    if run.symbol < 19 {
+      write_bits(mut writer, value: value_at(run_codes.slice(), index: run.symbol), count: value_at(run_lengths.slice(), index: run.symbol))
+      write_bits(mut writer, value: run.extra, count: run.extra_bits)
+    }
+  }
+  let literal_codes = canonical_codes(literal_lengths.slice())
+  let distance_codes = canonical_codes(distance_lengths.slice())
+  for token in tokens {
+    match token {
+      Literal(byte) => {
+        let symbol: USize = intrinsic::convert(byte)
+        write_bits(mut writer, value: value_at(literal_codes.slice(), index: symbol), count: value_at(literal_lengths.slice(), index: symbol))
+      }
+      Match(length, distance) => {
+        let symbol = length_symbol(length)
+        let code = distance_symbol(distance)
+        if 257 + symbol < 286 && code < 30 {
+          write_bits(mut writer, value: value_at(literal_codes.slice(), index: 257 + symbol), count: value_at(literal_lengths.slice(), index: 257 + symbol))
+          write_bits(mut writer, value: length.saturating_subtract(length_bases[symbol]), count: length_extra_bits[symbol])
+          write_bits(mut writer, value: value_at(distance_codes.slice(), index: code), count: value_at(distance_lengths.slice(), index: code))
+          write_bits(mut writer, value: distance.saturating_subtract(distance_bases[code]), count: distance_extra_bits[code])
+        }
+      }
+    }
+  }
+  write_bits(mut writer, value: value_at(literal_codes.slice(), index: 256), count: value_at(literal_lengths.slice(), index: 256))
+}
+
+fn write_stored(writer: mut BitWriter, input: Slice[UInt8], from: USize, to: USize, last: Bool) {
+  let stop = if to < from { from } else { to }
+  var start = from
+  var first = true
+  while first || start < stop
+    invariant start <= stop
+  {
+    first = false
+    let end = if stop - start > 65535 { start + 65535 } else { stop }
+    let final = last && end == stop
+    write_bits(mut writer, value: if final { 1 } else { 0 }, count: 1)
+    write_bits(mut writer, value: 0, count: 2)
+    finish_byte(mut writer)
+    let length = end - start
+    write_bits(mut writer, value: length, count: 16)
+    write_bits(mut writer, value: length ^ 65535, count: 16)
+    for index in start..end {
+      if index < input.length() {
+        mut writer.bytes.push(input[index])
+      }
+    }
+    start = end
+  }
+}
+
+fn deflate(input: Slice[UInt8], level: Level) -> List[UInt8] {
+  let tokens = tokens_of(input, level: level)
+  var writer = BitWriter.new()
+  let block: USize = 16384
+  var start: USize = 0
+  var covered: USize = 0
+  if tokens.is_empty() {
+    write_stored(mut writer, input: input, from: 0, to: 0, last: true)
+  }
+  while start < tokens.length() {
+    let end = if tokens.length() - start > block { start + block } else { tokens.length() }
+    var length: USize = 0
+    for index in start..end {
+      length = length.saturating_add(match tokens[index] {
+        Literal(_) => 1
+        Match(length: matched, ..) => matched
+      })
+    }
+    write_block(
+      mut writer,
+      input: input,
+      tokens: tokens[start..end],
+      from: covered,
+      to: covered.saturating_add(length),
+      last: end == tokens.length(),
+    )
+    covered = covered.saturating_add(length)
+    start = end
+  }
+  finish_byte(mut writer)
+  writer.bytes
+}
+
+fn push_number(output: mut List[UInt8], value: UInt32, big_endian: Bool) {
+  let width: UInt32 = 4
+  for index in 0..width {
+    let shift: UInt32 = if big_endian { 24 - 8 * index } else { 8 * index }
+    mut output.push(intrinsic::convert((value >> shift) & 255))
+  }
+}
+
+public fn compress(input: Slice[UInt8], format: Format = Format.Gzip, level: Level = Level.Balanced) -> List[UInt8] {
+  let deflated = deflate(input, level: level)
+  match format {
+    Deflate => deflated
+    Zlib => {
+      var output: List[UInt8] = [120, 156]
+      mut output.append(own deflated)
+      push_number(mut output, value: checksum::adler32(input), big_endian: true)
+      output
+    }
+    Gzip => {
+      var output: List[UInt8] = [31, 139, 8, 0, 0, 0, 0, 0, 0, 255]
+      mut output.append(own deflated)
+      push_number(mut output, value: checksum::crc32(input), big_endian: false)
+      push_number(mut output, value: intrinsic::convert(input.length() % 4294967296), big_endian: false)
+      output
+    }
+  }
+}

@@ -3,7 +3,7 @@
    excerpts: they use names defined elsewhere, show a definition of the
    standard library's, or redefine a prelude name to show how it is written.
    Those diagnostics say the block is an excerpt, and such a block is
-   skipped, as is one that uses what stage0 has not built. Every other block
+   skipped, as is one that uses a feature stage0 has not built. Every other block
    is a whole program and must check cleanly and prove. *)
 
 open Harness

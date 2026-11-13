@@ -583,6 +583,7 @@ impl text::Parse for Float32 {
 
 impl From[Int8] for Float32 {
   fn from(value: own Int8) -> Float32
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -590,6 +591,7 @@ impl From[Int8] for Float32 {
 
 impl From[Int16] for Float32 {
   fn from(value: own Int16) -> Float32
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -597,6 +599,7 @@ impl From[Int16] for Float32 {
 
 impl From[UInt8] for Float32 {
   fn from(value: own UInt8) -> Float32
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -604,6 +607,7 @@ impl From[UInt8] for Float32 {
 
 impl From[UInt16] for Float32 {
   fn from(value: own UInt16) -> Float32
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1649,6 +1653,7 @@ impl text::Parse for Float64 {
 
 impl From[Int8] for Float64 {
   fn from(value: own Int8) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1656,6 +1661,7 @@ impl From[Int8] for Float64 {
 
 impl From[Int16] for Float64 {
   fn from(value: own Int16) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1663,6 +1669,7 @@ impl From[Int16] for Float64 {
 
 impl From[Int32] for Float64 {
   fn from(value: own Int32) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1670,6 +1677,7 @@ impl From[Int32] for Float64 {
 
 impl From[UInt8] for Float64 {
   fn from(value: own UInt8) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1677,6 +1685,7 @@ impl From[UInt8] for Float64 {
 
 impl From[UInt16] for Float64 {
   fn from(value: own UInt16) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1684,6 +1693,7 @@ impl From[UInt16] for Float64 {
 
 impl From[UInt32] for Float64 {
   fn from(value: own UInt32) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }
@@ -1821,6 +1831,7 @@ impl TryFrom[Float64] for USize {
 
 impl From[Float32] for Float64 {
   fn from(value: own Float32) -> Float64
+    cost time O(1)
   {
     intrinsic::convert(value)
   }

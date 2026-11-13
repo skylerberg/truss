@@ -6,7 +6,7 @@ impl Dice for Fixed {
   }
 }
 
-fn f() -> UInt8
+fn run_example() -> UInt8
   ensures result <= 6
 {
   provide Fixed() {

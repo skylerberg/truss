@@ -50,7 +50,7 @@ let loop_form env ~(body : Ground.function_type) (function_ : Lir.function_) =
     blocks;
   }
 
-(* Liveness of locals, to find what a cursor must keep *)
+(* Liveness of locals, to find the values a cursor must keep *)
 
 let rec place_reads (place : Lir.place) =
   let indexes =
@@ -405,3 +405,7 @@ let cursor_drop _env ~cursor ~owned ~evidence (function_ : Lir.function_) =
         ];
     environment = [];
   }
+
+module For_testing = struct
+  let loop_form = loop_form
+end

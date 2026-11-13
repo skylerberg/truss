@@ -1,4 +1,4 @@
-fn f(count: Int64) -> Bool
+fn run_example(count: Int64) -> Bool
   ensures result
 {
   forall _ in 0..count => true

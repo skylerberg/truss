@@ -6,7 +6,7 @@ trait Cleared: Shown {
   fn label(mut self) -> Int64
 }
 
-fn f[Value: Cleared](value: mut Value) -> Int64 {
+fn run_example[Value: Cleared](value: mut Value) -> Int64 {
   let read = value.label()
   let cleared = mut value.label()
   let in_full = Value.label(mut value)

@@ -4,10 +4,6 @@
 (** The stages, in the order they run. *)
 type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
-val through : stage -> Query.context -> Path.module_ -> Diagnostic.t list
-(** The diagnostics of a file's definitions from the stages up to and including one, in the order
-    the stages run, for tests of a stage that leave the later ones out. *)
-
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** Every diagnostic of a file, from the lexer to the package checks, in its offsets and in order.
 *)
@@ -15,7 +11,7 @@ val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 val file_diagnostics : (Path.module_, Diagnostic.t list) Query.query
 (** {!diagnostics} as a query, which the database keeps current and saves. *)
 
-(** What only a package's code shows to be wrong with its manifest. *)
+(** An error in a package's manifest that only its code shows. *)
 type manifest_problem = Package_checks.manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
       (** A grant's entry that names no capability *)
@@ -34,7 +30,7 @@ val code_packages : (Path.package, Path.package list) Query.query
 
 (** The type checker's own stages, for their tests. *)
 module For_testing : sig
-  module Patterns = Patterns
-  module Usage = Usage
-  module Package_checks = Package_checks
+  val through : stage -> Query.context -> Path.module_ -> Diagnostic.t list
+  (** The diagnostics of a file's definitions from the stages up to and including one, in the order
+      the stages run, for tests of a stage that leave the later ones out. *)
 end

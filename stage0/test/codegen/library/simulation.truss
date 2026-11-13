@@ -324,6 +324,28 @@ test "a connection in a world carries bytes both ways, and ends when a side shut
   }
 }
 
+test "a world connects to a local socket by its path, and refuses a path with no listener" {
+  provide simulation::World.new() {
+    let path = Path.new("/run/app.socket")
+    var listener = NetworkServer.listen_local(path).expect("the path is free")
+    assert NetworkServer.listen_local(path) is Err(AddressInUse)
+    assert NetworkClient.connect_local(Path.new("/run/other.socket")) is Err(ConnectionRefused)
+    concurrent {
+      {
+        var served = mut listener.accept().expect("a connection arrives")
+        var request: List[UInt8] = []
+        assert mut served.read_to_end(mut request) == Ok(4)
+        assert text_of(request) == "ping"
+      }
+      {
+        var connection = NetworkClient.connect_local(path).expect("the listener accepts")
+        assert mut connection.write_all("ping".bytes()) is Ok(_)
+        assert mut connection.shut_down(network::Direction.Sending) is Ok(_)
+      }
+    }
+  }
+}
+
 test "a world refuses a connection to a port with no listener, and a port taken twice" {
   let world = simulation::World.new()
   provide world {
@@ -396,7 +418,7 @@ test "a world runs the programs of its setup and keeps the commands that were ru
   }
 }
 
-test "a program spawned in a world has pipes that hold what it wrote, and has already exited" {
+test "a program spawned in a world has pipes that hold its output, and has already exited" {
   var setup = simulation::Setup.new()
   setup = own setup.with_program("sort", output: scripted(0, output: "a\nb\n", error_output: "warning"))
   provide simulation::World.from(own setup) {

@@ -1,5 +1,3 @@
-module Layout = Lexer.For_testing.Layout
-
 (* Each test gives an input and the lexer's exact output: the tokens, or
    the one diagnostic with its code, position, and fix.
 
@@ -585,7 +583,8 @@ let () =
         Diagnostic.make ~code:(Lexer Semicolon) (Source.span offset (offset + 1)) "x"
       in
       let shown = Diagnostic.shown (List.init 250 diagnostic) in
-      if List.length shown <> Diagnostic.limit + 1 then fail "%d shown" (List.length shown);
+      if List.length shown <> Diagnostic.For_testing.limit + 1 then
+        fail "%d shown" (List.length shown);
       match List.rev shown with
       | last :: _ when last.code = Too_many_diagnostics -> ()
       | _ -> fail "the last one counts the rest");
@@ -593,7 +592,7 @@ let () =
       let text = String.concat "" (List.init 250 (Printf.sprintf "a%d;\n")) in
       List.iteri
         (fun index (diagnostic : Diagnostic.t) ->
-          if index < Diagnostic.limit && diagnostic.fixes = [] then
+          if index < Diagnostic.For_testing.limit && diagnostic.fixes = [] then
             fail "diagnostic %d has no fix" index)
         (snd (lex text)));
   test "overlapping edits are refused" (fun () ->
@@ -641,18 +640,18 @@ let between = Documents.between
 let backticked = Documents.backticked
 
 let () =
-  let grammar = document "GRAMMAR.md" in
+  let grammar = document "SPECIFICATION.md" in
   let spellings list = List.sort_uniq compare (List.map fst list) in
-  test "GRAMMAR.md lists the keywords" (fun () ->
+  test "SPECIFICATION.md lists the keywords" (fun () ->
       equal_lists Fun.id "keywords" (spellings Token.keywords)
         (words (block_after grammar "Reserved everywhere:")));
-  test "GRAMMAR.md lists the reserved words" (fun () ->
+  test "SPECIFICATION.md lists the reserved words" (fun () ->
       equal_lists Fun.id "reserved" (spellings Token.reserved_words)
         (words (block_after grammar "Reserved for later use")));
-  test "GRAMMAR.md lists the punctuation" (fun () ->
+  test "SPECIFICATION.md lists the punctuation" (fun () ->
       equal_lists Fun.id "punctuation" (spellings Token.punctuation)
         (words (block_after grammar "### Punctuation")));
-  test "GRAMMAR.md's line-break lists match Layout" (fun () ->
+  test "SPECIFICATION.md's line-break lists match Layout" (fun () ->
       let kind_of spelling =
         match Token.word spelling with
         | Some kind -> Some kind
@@ -675,8 +674,9 @@ let () =
       in
       List.iter
         (fun kind ->
-          if Layout.can_end kind <> List.mem kind can_end then fail "can_end %s" (spelling kind);
-          if Layout.can_begin kind <> List.mem kind can_begin then
+          if Lexer.For_testing.can_end kind <> List.mem kind can_end then
+            fail "can_end %s" (spelling kind);
+          if Lexer.For_testing.can_begin kind <> List.mem kind can_begin then
             fail "can_begin %s" (spelling kind))
         (List.map (fun (_, keyword) -> Keyword keyword) Token.keywords
         @ List.map (fun (_, punctuation) -> Punctuation punctuation) Token.punctuation
@@ -689,6 +689,6 @@ let () =
             (Printf.sprintf "%s block %d lexes cleanly" name (index + 1))
             (fun () -> equal_lists Fun.id "codes" [] (codes text)))
         (truss_blocks name))
-    (* Every document at the root of the repository, so a new one is
-       covered without being listed here. *)
+    (* Every document at the root of the repository and under standard/, so
+       a new one is covered without being listed here. *)
     (Harness.markdown_documents ())

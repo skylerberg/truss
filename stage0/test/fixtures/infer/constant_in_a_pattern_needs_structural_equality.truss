@@ -1,9 +1,9 @@
-type Point(x: Float64)
+type Point(first_number: Float64)
   derives Equal
 
-let origin: Point = Point(x: 0.0)
+let origin: Point = Point(first_number: 0.0)
 
-fn f(point: Point) -> Bool {
+fn run_example(point: Point) -> Bool {
   match point {
     origin => true
     _ => false

@@ -47,25 +47,12 @@ type t = {
   fork_join_loops : fork_join_loop list;
 }
 
-type builder = {
-  table : (int, point) Hashtbl.t;
-  mutable count : int;
-  mutable entries : int list;
-  mutable loops : (int list ref * int list ref) list;
-  mutable captured : Core.local list;
-  mutable loans : loan list;
-  mutable fork_join_blocks : fork_join_block list;
-  mutable fork_join_loops : fork_join_loop list;
-  plain : Types.ty -> bool;
-  is_view : Types.ty -> bool;
-  holds_function : Types.ty -> bool;
-  stores_function : Core.callee -> int -> bool;
-}
-
-val of_definition :
+val of_mir :
   plain:(Types.ty -> bool) ->
   is_view:(Types.ty -> bool) ->
   holds_function:(Types.ty -> bool) ->
-  stores_function:(Core.callee -> int -> bool) ->
-  Core.definition ->
-  t option
+  stores_function:(Mir.callee -> int -> bool) ->
+  returns:bool ->
+  is_var:(Core.local -> bool) ->
+  Mir.t ->
+  t

@@ -1,6 +1,6 @@
 fn look(cell: Cell) {}
 
-fn f(grid: Grid) {
+fn run_example(grid: Grid) {
   let held = grid.cell(0)
   look(held)
 }

@@ -1,4 +1,4 @@
-fn f(names: List[String]) -> USize {
+fn run_example(names: List[String]) -> USize {
   var count: USize = 0
   for name in names {
     count = count + name.length()

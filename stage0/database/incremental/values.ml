@@ -42,8 +42,8 @@ let forget_fingerprint (node : node) = node.fingerprint <- Unknown
    name and arguments, and are never stored: an exception read back would
    not be the one a handler matches. An outcome with no bytes, which is a
    value or an exception that holds a function, is [opaque]: its fingerprint
-   is a nonce, so it compares equal to no other computation's, and what
-   reads it is computed again whenever it is. *)
+   is a nonce, so it compares equal to no other computation's, and its
+   readers are computed again whenever it is. *)
 let derive_exception_fingerprint =
   Blake3.derive_key ~context:"truss 2026-11-12 incremental exception fingerprint"
 
@@ -84,18 +84,24 @@ let fingerprint engine (node : node) =
 
 (* Puts a value's bytes in the store, if its fingerprint was computed
    before the engine had one. *)
-let ensure_stored engine (node : node) =
+let ensure_stored ?(stores_every_value = false) engine (node : node) =
   match (engine.store, node.cell) with
   | Some store, Input (_, { slot = Set value; _ }) -> ignore (store.put (bytes_of value))
-  | Some store, Result (query, { outcome = Some (Value value); _ }) when query.saved -> (
+  | Some store, Result (query, { outcome = Some (Value value); _ })
+    when query.saved || stores_every_value -> (
       match node.fingerprint with
-      | Hashed { hash; stored = false } ->
-          ignore (store.put (bytes_of value));
-          node.fingerprint <- Hashed { hash; stored = true }
+      | Hashed { hash; stored = false } -> (
+          (* An unsaved query's value may hold a function, which cannot be
+             stored; such a value is computed again where it is read. *)
+          match bytes_of value with
+          | bytes ->
+              ignore (store.put bytes);
+              node.fingerprint <- Hashed { hash; stored = true }
+          | exception Invalid_argument _ when not query.saved -> ())
       | Hashed { stored = true; _ } | Opaque _ | Unknown -> ())
   | _ -> ()
 
-(* What a fact's key takes of a node: its fingerprint, or that it is an
+(* A node's contribution to a fact's key: its fingerprint, or that it is an
    input that is not set. An opaque node gives none, since its fingerprint
    will never be met again. *)
 let key_part engine (node : node) =
@@ -154,7 +160,7 @@ let same_outcomes (query : ('key, 'value) query) left right =
   | Raised left, Raised right -> same_exception left right
   | _ -> false
 
-(* What a result read, as the engine sees each node now. *)
+(* A result's dependencies, as the engine sees each node now. *)
 let current_reads engine (node : node) = List.map (resolve engine) node.reads
 
 (* The keys a fact and its reads are kept under. The store names each

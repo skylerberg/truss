@@ -1,6 +1,6 @@
-/* The grammar from GRAMMAR.md, written for Menhir so that it can be checked
+/* The grammar of SPECIFICATION.md, written for Menhir so that it can be checked
    for conflicts with `menhir --explain truss.mly`. Semantic actions are
-   empty; this file checks the grammar's shape, not what it builds.
+   empty; this file checks the grammar's shape, not its output.
 
    The lexer is assumed to:
    - apply the line-break rule, emitting a single NEWLINE where the token
@@ -360,12 +360,12 @@ statement:
   | VAR pattern annotation_opt EQ expression else_opt { () }
   | expression { () }
   | expression assignment_operator expression { () }
-  | FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | WHILE expression list(loop_clause) newline_opt block { () }
   | PARALLEL block { () }
-  | PARALLEL FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | PARALLEL FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | CONCURRENT block { () }
-  | CONCURRENT FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | CONCURRENT FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
   | YIELD expression { () }

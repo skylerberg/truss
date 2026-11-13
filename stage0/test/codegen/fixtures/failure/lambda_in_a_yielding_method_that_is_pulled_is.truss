@@ -1,5 +1,5 @@
 fn offsets(base: Int64) yields Int64 {
-  let add: fn(Int64) -> Int64 = fn(x) { x + base }
+  let add: fn(Int64) -> Int64 = fn(first_number) { first_number + base }
   yield add(1)
   yield add(2)
 }

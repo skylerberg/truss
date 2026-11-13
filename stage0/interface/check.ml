@@ -144,13 +144,13 @@ let check_main state (signature : Types.signature) span =
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
     report state Main_signature span main_message
 
-let check_duplicates state what (names : name list) =
+let check_duplicates state member_kind (names : name list) =
   ignore
     (List.fold_left
        (fun seen (name : name) ->
          if List.mem name.text seen then
            report state Duplicate_field name.span
-             (Printf.sprintf "Another %s of this type is already named `%s`." what name.text);
+             (Printf.sprintf "Another %s of this type is already named `%s`." member_kind name.text);
          name.text :: seen)
        [] names)
 
@@ -302,7 +302,8 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
    written for a capability parameter of a type or of a trait. A signature
    or a field could then not name the type with the capabilities that its
    value uses. *)
-let check_no_capability_parameter state what (name : name) (generics : generic_parameter list) =
+let check_no_capability_parameter state definition_kind (name : name)
+    (generics : generic_parameter list) =
   List.iter
     (fun (generic : generic_parameter) ->
       match generic.kind with
@@ -313,7 +314,7 @@ let check_no_capability_parameter state what (name : name) (generics : generic_p
                 be                 written for `%s`, so no signature or field could name %s `%s` \
                 with the                 capabilities that it uses. Write the capabilities in the \
                 function type, as in                 `(fn() uses Clock)`."
-               parameter.text what name.text)
+               parameter.text definition_kind name.text)
       | Type_parameter _ | Value_parameter _ | Generic_error -> ())
     generics
 
@@ -383,7 +384,8 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
             | Type_generic _ -> Types.Type (Types.Parameter of_impl.generic)
             | Value_generic -> Types.Value (Types.Value_parameter of_impl.generic)
             | Capability_generic ->
-                Types.Capabilities [ Types.Capability_parameter of_impl.generic ] ))
+                Types.Capabilities
+                  (Types.capability_set [ Types.Capability_parameter of_impl.generic ]) ))
         generics impl.impl_generics
     in
     let impl_bounds = Types.bounds_of impl.impl_generics in

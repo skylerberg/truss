@@ -31,14 +31,13 @@ val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key l
    does not wait for proofs. [file_name] names the file of each position the
    program reports, by its module, and is [Workspace.file_path] unless a
    driver shows files another way. [want] is told which instances' keys are
-   about to be asked for, and adds them to [roots]; without it, asking for
-   a key is an error. [worked_on] says whether a package is one of the
+   about to be asked for, and adds them to [roots]. [worked_on] says whether a package is one of the
    project's own, whose code a development build never copies into
    another's file; without it, every package but the standard library is. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.module_ -> string) ->
-  ?want:(lowering -> Instance.key list -> unit) ->
+  want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
   Query.context ->
   Memory_layout.target ->
@@ -47,10 +46,9 @@ val create :
   Build.settings ->
   t
 
-(* What an instance compiles to: its LIR, lowered or generated, with its
+(* An instance's compiled form: its LIR, lowered or generated, with its
    drops elaborated, in canonical form, or a constant's static data. Each
    is made once. *)
-val compiled : t -> Instance.key -> Lir.compiled
 
 (* How a test ended, as the runner names it. *)
 type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
@@ -72,7 +70,6 @@ type record = {
 
 (* A test program's whole report, one record a test, in the order of the tests however they ended, or why
    it cannot be read. *)
-val parse_report : string -> (record list, string) result
 
 (* How a test run is getting on: lowering the instances the tests reach, compiling
    the C files that are not cached, out of how many, running the tests that
@@ -108,10 +105,8 @@ val run_tests :
 
 (* Builds, at [output], a program that runs tests that are instances made
    by hand, in order, as [run_tests] builds one of tests in source. It is
-   for testing the runner on what no source compiles to, such as a test
+   for testing the runner on LIR no source compiles to, such as a test
    that leaves a block allocated. *)
-val build_supplied_tests :
-  t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
 
 (* Each test's key: the hash of the code it can run, as "Test results"
    says, which changes exactly when the test's outcome may. A test that
@@ -142,13 +137,6 @@ val build_program : t -> main:Path.t -> output:string -> (unit, string) result
    status, its output, and its errors. With [in_order], the program is
    linked with the runtime that starts no threads, as a test program is, so
    its tasks and [parallel] branches run sequentially. *)
-val run_program :
-  ?input:string ->
-  ?in_order:bool ->
-  t ->
-  main:Path.t ->
-  arguments:string list ->
-  (int * string * string, string) result
 
 (* The key a run of code while compiling is kept under: the key of
    everything the root can reach, with the version of code generation and
@@ -188,6 +176,38 @@ val evaluate_call :
 
 (** Code generation's own passes, for their tests. *)
 module For_testing : sig
-  module Lower = Lower
+  module Lower : sig
+    type context
+    type constant = Lower.constant = Folded of Lir.data | Run of Ground.ty
+
+    val context :
+      ?checks:bool ->
+      cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+      constant:(context -> Path.t -> Lir.static_value option) ->
+      Query.context ->
+      Memory_layout.target ->
+      context
+
+    val constant : context -> Path.t -> constant
+
+    val constant_value : context -> Path.t -> Lir.static_value option
+    (** Another constant's value, where it folds. *)
+  end
+
   module Intrinsics = Intrinsics
+
+  val parse_report : string -> (record list, string) result
+
+  val build_supplied_tests :
+    t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
+
+  val compiled : t -> Instance.key -> Lir.compiled
+
+  val run_program :
+    ?input:string ->
+    ?in_order:bool ->
+    t ->
+    main:Path.t ->
+    arguments:string list ->
+    (int * string * string, string) result
 end

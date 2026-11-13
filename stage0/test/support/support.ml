@@ -11,7 +11,7 @@ let top_key module_name name : Resolve.Names.key =
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is checked once. *)
-let standard = lazy (Database.Testing.standard_base ())
+let standard = lazy (Database.For_testing.standard_base ())
 
 let setup files =
   let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in
@@ -85,46 +85,48 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     | Some container -> declared container.path
     | None -> []
   in
-  let parameter what (mentioned : T.parameter) =
+  let parameter subject (mentioned : T.parameter) =
     if not (List.mem mentioned own) then
-      wrong "%s mentions `%s`, a generic parameter of `%s`" what mentioned.name
+      wrong "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
         (Path.show mentioned.owner)
   in
-  let rec capabilities what =
-    List.iter (function
-      | T.Capability _ -> ()
-      | T.Capability_parameter mentioned -> parameter what mentioned
-      | T.Capability_projection { base; trait = reference; name } ->
-          (match base with
-          | Parameter _ | Projection _ -> ()
-          | _ -> wrong "%s contains `%s.%s`, which is not normalized" what (T.show base) name);
-          type_ what base;
-          trait what reference
-      | T.Capability_variable _ -> wrong "%s contains a capability inference variable" what)
-  and type_ what (ty : T.ty) =
+  let rec capabilities subject (set : T.capability_set) =
+    List.iter
+      (function
+        | T.Capability _ -> ()
+        | T.Capability_parameter mentioned -> parameter subject mentioned
+        | T.Capability_projection { base; trait = reference; name } ->
+            (match base with
+            | Parameter _ | Projection _ -> ()
+            | _ -> wrong "%s contains `%s.%s`, which is not normalized" subject (T.show base) name);
+            type_ subject base;
+            trait subject reference
+        | T.Capability_variable _ -> wrong "%s contains a capability inference variable" subject)
+      (set :> T.capability list)
+  and type_ subject (ty : T.ty) =
     match ty with
-    | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter (argument what) arguments
-    | Parameter named -> parameter what named
+    | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter (argument subject) arguments
+    | Parameter named -> parameter subject named
     | Projection { base; trait = reference; _ } ->
-        type_ what base;
-        trait what reference
+        type_ subject base;
+        trait subject reference
     | Function { inputs; output; uses; _ } ->
-        List.iter (fun (_, input) -> type_ what input) inputs;
-        capabilities what uses;
-        type_ what (Types.result_type output)
-    | Any reference -> trait what reference
+        List.iter (fun (_, input) -> type_ subject input) inputs;
+        capabilities subject uses;
+        type_ subject (Types.result_type output)
+    | Any reference -> trait subject reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->
-        wrong "%s has the type `%s`, which is not fully inferred" what (T.show ty)
-  and argument what = function
-    | T.Type inner -> type_ what inner
-    | T.Value (Value_parameter named) -> parameter what named
+        wrong "%s has the type `%s`, which is not fully inferred" subject (T.show ty)
+  and argument subject = function
+    | T.Type inner -> type_ subject inner
+    | T.Value (Value_parameter named) -> parameter subject named
     | T.Value (Known _) -> ()
-    | T.Value (Value_variable _) -> wrong "%s contains a value inference variable" what
-    | T.Capabilities set -> capabilities what set
-  and trait what (reference : T.trait_reference) =
-    List.iter (argument what) reference.trait_arguments;
-    List.iter (fun (_, inner) -> type_ what inner) reference.associated
+    | T.Value (Value_variable _) -> wrong "%s contains a value inference variable" subject
+    | T.Capabilities set -> capabilities subject set
+  and trait subject (reference : T.trait_reference) =
+    List.iter (argument subject) reference.trait_arguments;
+    List.iter (fun (_, inner) -> type_ subject inner) reference.associated
   in
   let seen = Hashtbl.create 64 in
   let unique id =
@@ -133,11 +135,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   in
   let callee (callee : Core.callee) =
     match callee with
-    | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
+    | Function { type_arguments; _ } ->
+        List.iter (argument "first_value call's type argument") type_arguments
     | Trait_method { trait = reference; name; self_type; type_arguments; evidence; _ } -> (
-        trait "a call's trait" reference;
+        trait "first_value call's trait" reference;
         type_ "a call's `Self`" self_type;
-        List.iter (argument "a call's type argument") type_arguments;
+        List.iter (argument "first_value call's type argument") type_arguments;
         match evidence with
         | Impl { impl; arguments } ->
             (* The [next] of a yielding method's cursor is a [Cursor_next]. *)
@@ -180,8 +183,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
         type_ "a local" used;
         match Hashtbl.find_opt local_types local with
         | Some bound when not (T.equal bound used) ->
-            wrong "a local is used with the type `%s` and bound with the type `%s`" (T.show used)
-              (T.show bound)
+            wrong "first_value local is used with the type `%s` and bound with the type `%s`"
+              (T.show used) (T.show bound)
         | _ -> ())
     | Constant { type_ = constant; _ } -> type_ "a constant" constant
     | Lent { kind = Call { lends = Some _; _ }; _ } | Temporary _ -> ()
@@ -193,14 +196,14 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let operand (core_operand : Core.operand) =
     match core_operand with Place core_place -> place core_place | Value _ -> ()
   in
-  let rec mutable_place what (core_place : Core.place) =
+  let rec mutable_place subject (core_place : Core.place) =
     place core_place;
     match core_place with
     | Local _ | Temporary _ -> ()
-    | Constant { path; _ } -> wrong "%s mutates the constant `%s`" what (Path.show path)
-    | Field { base; _ } -> mutable_place what base
+    | Constant { path; _ } -> wrong "%s mutates the constant `%s`" subject (Path.show path)
+    | Field { base; _ } -> mutable_place subject base
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
-    | Lent _ -> wrong "%s mutates a place that is lent read-only" what
+    | Lent _ -> wrong "%s mutates a place that is lent read-only" subject
   in
   (* The constructs that a [yield] yields: its operand, and each construct
      that is a field of one. Only they may have a field that is a place. A
@@ -218,7 +221,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let rec yielded_operand ~lends (mode : T.mode) (part : Core.operand) =
     match part with
     | Place core_place ->
-        if mode = Mut then mutable_place "a `yield mut`" core_place else place core_place
+        if mode = Mut then mutable_place "first_value `yield mut`" core_place else place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
         List.iter (fun (_, field) -> Option.iter (yielded_operand ~lends mode) field) fields
@@ -247,12 +250,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     | Alternatives (first :: _) -> bindings first
     | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
   in
-  let binds_own what (value : Core.operand) (pattern : Core.pattern) =
+  let binds_own subject (value : Core.operand) (pattern : Core.pattern) =
     operand value;
     match value with
     | Value _ ->
         if List.exists (fun (_, _, mode) -> mode <> T.Own) (bindings pattern) then
-          wrong "%s on a value binds a name that is not `own`" what
+          wrong "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in
   Core_walk.definition
@@ -288,7 +291,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 (fun (arm : Core.arm) ->
                   if List.length arm.patterns <> List.length scrutinees then
                     wrong "a `match` arm does not have one pattern per scrutinee";
-                  List.iter2 (binds_own "a `match`") scrutinees arm.patterns)
+                  List.iter2 (binds_own "first_value `match`") scrutinees arm.patterns)
                 arms
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
@@ -306,12 +309,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 (fun (implementation : Core.implementation) ->
                   type_ "an implementation" implementation.type_;
                   match (implementation.mode, implementation.value) with
-                  | Mut, Place core_place -> mutable_place "a `provide`" core_place
+                  | Mut, Place core_place -> mutable_place "first_value `provide`" core_place
                   | _, value -> operand value)
                 implementations
           | Call call ->
               callee call.callee;
-              capabilities "a call's `uses`" call.uses;
+              capabilities "first_value call's `uses`" call.uses;
               (match call.callee with Indirect function_value -> operand function_value | _ -> ());
               List.iter
                 (function
@@ -320,7 +323,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                   | Core.Passed { mode = Mut; value = Value _; _ } ->
                       wrong "a `mut` parameter receives a value that is not a slice"
                   | Passed { mode = Mut; value = Place core_place; _ } ->
-                      mutable_place "a `mut` argument" core_place
+                      mutable_place "first_value `mut` argument" core_place
                   | Passed { mode = Own; value = Place _; _ } ->
                       wrong "an `own` parameter receives a place"
                   | Passed { value; _ } -> operand value
@@ -334,12 +337,13 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Assign { target; _ } | Compound_assign { target; _ } ->
               mutable_place "an assignment" target
           | Let { pattern; value; _ } -> (
-              binds_own "a `let`" value pattern;
+              binds_own "first_value `let`" value pattern;
               match (pattern.kind, value) with
               | Bind { is_var = true; _ }, Place _ ->
                   wrong "a `let` that binds a mutable local receives a place"
               | _ -> ())
-          | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
+          | For { iteration = Cursor { cursor; _ }; _ } ->
+              mutable_place "first_value `for` loop" cursor
           | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
               let output =
                 match callee with

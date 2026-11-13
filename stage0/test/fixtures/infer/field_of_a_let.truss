@@ -1,6 +1,6 @@
 type Config(ports: List[Int64])
 
-fn f() {
+fn run_example() {
   let config = Config(ports: [1])
   mut config.ports.push(2)
 }

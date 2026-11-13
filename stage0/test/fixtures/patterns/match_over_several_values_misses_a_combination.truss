@@ -2,7 +2,7 @@ type State = Idle | Running
 
 type Event = Start | Stop
 
-fn f(state: State, event: Event) -> Int64 {
+fn run_example(state: State, event: Event) -> Int64 {
   match state, event {
     Idle, Start => 1
     Running, _ => 2

@@ -1,6 +1,6 @@
 (* The runtime is C, kept here as text. Its parts: writing and failing,
    which every program uses; allocation; the threads that run branches at
-   once; and what a test program gives the runner, which is Truss in the
+   once; and a test program's output to the runner, which is Truss in the
    standard library. *)
 
 let headers =
@@ -852,7 +852,7 @@ struct t_branch {
 #ifdef T_IN_ORDER
 
 /* A test program, and code run while compiling, run a fork's branches in
-   order, which gives what running them at once gives. A test already has
+   order, which gives the same result as running them at once. A test already has
    one core of the machine, and in order a check that fails is the same
    check on every run. */
 void t_runtime_parallel(const struct t_branch *branches, t_usize count) {
@@ -1234,7 +1234,7 @@ struct t_task {
   void (*code)(void *environment, uint64_t item);
   void *environment;
   uint64_t item;
-  struct t_task *next;        /* In the ready queue, or in what it is parked on */
+  struct t_task *next;        /* In the ready queue, or in the object it is parked on */
   uint64_t wait_key;          /* The key that it is parked on */
   _Atomic(struct t_wait_slot *) cancellable; /* Where it parks in a wait that a cancel ends */
   struct t_task *sibling;     /* In the group's [tasks] */
@@ -1271,12 +1271,12 @@ struct t_group {
   struct t_group *children;   /* The groups that those tasks opened, under [lock] */
   struct t_group *next;       /* In the parent's [children], under the parent's [lock] */
   struct t_task *joiner;      /* A task that is parked in [join], under [lock] */
-  atomic_int *joined;         /* What a thread that blocks in [join] waits for, under [lock] */
+  atomic_int *joined;         /* The flag a thread that blocks in [join] waits for, under [lock] */
   struct t_group *interrupted; /* In the list of cancelled groups */
 };
 
 /* The states of a task. A task that parks releases the lock that guards
-   what it waits for before it leaves its stack, so its waker can find it
+   its wait condition before it leaves its stack, so its waker can find it
    while it still runs on that stack. Making it ready then would let
    another thread run it on a stack that is in use. So the task marks
    itself [T_PARKING] before it releases the lock, and the thread that ran
@@ -2668,3 +2668,7 @@ let program_calling entry =
     \  return (int)%s((int32_t)count, (void *)arguments);\n\
      }\n"
     entry entry
+
+module For_testing = struct
+  let main_calling = main_calling
+end

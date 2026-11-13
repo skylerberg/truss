@@ -1,16 +1,22 @@
-(* Inference variables and unification, within one statement. *)
+(* Inference variables and unification. A variable is solved within its
+   statement, except a literal variable in the type of a local, which later
+   statements may solve. *)
 type t = {
   mutable next : int;
   types : (int, Types.ty) Hashtbl.t;  (** The solution of each solved type variable or literal. *)
   values : (int, Types.value) Hashtbl.t;  (** The solution of each solved value variable. *)
   mutable capability_variable_count : int;  (** The number of capability variables created. *)
-  mutable deferred_capability_equalities : (Types.capability list * Types.capability list) list;
+  mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
       (** Pairs of capability sets that unification found in the same position of two types, where
           at least one has a capability variable. They must be equal once the variables are solved.
       *)
   mutable integer_range : Types.ty -> (Z.t * Z.t) option;
       (** For a type parameter or projection that an integer trait bounds, the values an integer
           literal of its type may have: those every implementor holds. *)
+  code_literals : (int, unit) Hashtbl.t;
+      (** The literal variables in the types of locals of code that later statements may decide. A
+          specification can use such a local, and converts it to [Integer] as it does any built-in
+          integer, so the variable never becomes [Integer]: [Integer] is no type of code. *)
 }
 
 let create () =
@@ -21,6 +27,7 @@ let create () =
     capability_variable_count = 0;
     deferred_capability_equalities = [];
     integer_range = (fun _ -> None);
+    code_literals = Hashtbl.create 4;
   }
 
 let fresh unifier =
@@ -42,15 +49,14 @@ let fresh_value unifier =
    constraint on it. *)
 let fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
-  [ Types.Capability_variable unifier.capability_variable_count ]
+  Types.capability_set [ Types.Capability_variable unifier.capability_variable_count ]
 
 (* Unifies two capability sets. Two sets that are both known unify only if
    they are equal. If either set has a capability variable, or an associated
    capability set of a type that is not inferred yet, the equality is
    deferred until the definition is checked, and unification succeeds for
    now. *)
-let unify_capabilities unifier left right =
-  let left = List.sort_uniq compare left and right = List.sort_uniq compare right in
+let unify_capabilities unifier (left : Types.capability_set) right =
   left = right
   || (Types.capabilities_unsolved left || Types.capabilities_unsolved right)
      && begin
@@ -97,12 +103,14 @@ and zonk_argument unifier = function
   | Types.Capabilities capabilities -> Types.Capabilities (zonk_capabilities unifier capabilities)
 
 and zonk_capabilities unifier capabilities =
-  List.map
+  Types.flat_map_capabilities
     (function
       | Types.Capability_projection { base; trait; name } ->
-          Types.Capability_projection
-            { base = zonk unifier base; trait = zonk_trait unifier trait; name }
-      | capability -> capability)
+          [
+            Types.Capability_projection
+              { base = zonk unifier base; trait = zonk_trait unifier trait; name };
+          ]
+      | capability -> [ capability ])
     capabilities
 
 and zonk_trait unifier (trait : Types.trait_reference) =
@@ -216,9 +224,17 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Variable left_index, Variable right_index when left_index = right_index -> true
   | Variable index, other | other, Variable index -> bind unifier index other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
-      left_kind = right_kind && (left_index = right_index || bind unifier left_index right)
+      let join () =
+        (* The joined variable is of code if either one is. *)
+        if Hashtbl.mem unifier.code_literals left_index then
+          Hashtbl.replace unifier.code_literals right_index ();
+        bind unifier left_index right
+      in
+      left_kind = right_kind && (left_index = right_index || join ())
   | Literal (kind, index), other | other, Literal (kind, index) ->
-      literal_fits unifier kind other && bind unifier index other
+      literal_fits unifier kind other
+      && (not (other = Integer && Hashtbl.mem unifier.code_literals index))
+      && bind unifier index other
   | Named left, Named right ->
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right

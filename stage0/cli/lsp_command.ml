@@ -2,14 +2,13 @@
    on standard input and output.
 
    The server holds the text of each file the editor has open. After each
-   change it asks for the open files' diagnostics through [check], which
-   runs where every other command runs, in the project's background
-   process unless [--no-server] says otherwise, and checks a trial session
-   with the open files' texts in place of what is on disk. Nothing is
-   written to a file. *)
+   change it requests the open files' diagnostics from [check], which runs
+   in the project's background process unless [--no-server] is given. The
+   check reads a trial session in which the open files' texts replace the
+   files on disk. The server writes no file. *)
 
-(* An LSP position counts columns in UTF-16 code units unless the client
-   accepts UTF-8, which is the file's bytes. *)
+(* An LSP position counts columns in UTF-16 code units, or in bytes when
+   the client accepts UTF-8. *)
 type encoding = Utf_8 | Utf_16
 
 let encoding_name = function Utf_8 -> "utf-8" | Utf_16 -> "utf-16"
@@ -58,7 +57,7 @@ let path_of_uri uri =
     decode 0;
     Some (Buffer.contents buffer)
 
-(* A diagnostic as the protocol states it, with its notes as related
+(* A diagnostic in the protocol's form, with its notes as related
    information in the same file. *)
 let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
@@ -82,8 +81,8 @@ let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
              diagnostic.notes) );
     ]
 
-(* An obligation's state: where it is, what it is to show, whether it is
-   shown, and whether its proof trusts compiled code. *)
+(* An obligation's state: its range, the proposition to prove, whether it
+   is proven, and whether its proof trusts compiled code. *)
 let lsp_state encoding source (state : Diagnostic.span Prover.state) =
   Json.Object
     [
@@ -94,12 +93,11 @@ let lsp_state encoding source (state : Diagnostic.span Prover.state) =
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
 
-(* The diagnostics of each open file, by its URI as the client writes it,
-   and the states of its obligations, with each file's text in place of
-   what is on disk: a JSON object with a field [files], each with its
-   [uri], [diagnostics], and [states]. A file's proofs are checked once it
-   has no other diagnostic, as [truss check] does. A file in no package of
-   the project has neither. *)
+(* The diagnostics and obligation states of each open file, with the
+   editor's text in place of the file on disk, as a JSON object with a
+   field [files]. Each file has its [uri], as the client wrote it, its
+   [diagnostics], and its [states]. A file in no package of the project has
+   no diagnostics and no states. *)
 let check ~root encoding (buffers : (string * string) list) =
   let buffers =
     List.filter_map
@@ -134,32 +132,24 @@ let check ~root encoding (buffers : (string * string) list) =
       (fun (module_, file) -> if Project.normalize file = path then Some module_ else None)
       project.files
   in
-  let checked =
+  let opened =
     List.map
-      (fun (uri, path, text) ->
-        let module_ = module_of (Project.normalize path) in
-        let module_diagnostics = Option.map (Database.diagnostics trial) module_ in
-        (uri, Source.create ~path text, module_, module_diagnostics))
+      (fun (uri, path, text) -> (uri, Source.create ~path text, module_of (Project.normalize path)))
       buffers
   in
-  let provable =
-    List.filter_map
-      (fun (_, _, module_, module_diagnostics) ->
-        if module_diagnostics = Some [] then module_ else None)
-      checked
-  in
-  let proofs = Proofs.checked project provable in
+  let proofs = Proofs.checked project (List.filter_map (fun (_, _, module_) -> module_) opened) in
   Json.Object
     [
       ( "files",
         Json.List
           (List.map
-             (fun (uri, source, module_, module_diagnostics) ->
+             (fun (uri, source, module_) ->
                let diagnostics, states =
-                 match (module_, module_diagnostics) with
-                 | Some module_, Some [] -> proofs module_
-                 | _, Some module_diagnostics -> (Diagnostic.shown module_diagnostics, [])
-                 | _, None -> ([], [])
+                 match module_ with
+                 | Some module_ ->
+                     let proven, states = proofs module_ in
+                     (Diagnostic.shown (Database.diagnostics trial module_ @ proven), states)
+                 | None -> ([], [])
                in
                Json.Object
                  [
@@ -168,11 +158,11 @@ let check ~root encoding (buffers : (string * string) list) =
                      Json.List (List.map (lsp_diagnostic encoding ~uri source) diagnostics) );
                    ("states", Json.List (List.map (lsp_state encoding source) states));
                  ])
-             checked) );
+             opened) );
     ]
 
-(* One message's body from a stream of messages, each after a header that
-   gives its length, or [None] at the stream's end. *)
+(* Reads one message body from a stream in which a header with the length
+   precedes each body, or returns [None] at the end of the stream. *)
 let read_message input =
   let rec headers length =
     match In_channel.input_line input with
@@ -200,12 +190,13 @@ let write_message output body =
 type server = {
   write : Json.t -> unit;
   check : root:string -> encoding -> (string * string) list -> string option;
-      (** The JSON text of [check], computed where commands run; [None] when it could not be. *)
+      (** The JSON text of [check], computed where commands run, or [None] if the check failed. *)
   mutable root : string;
   mutable encoding : encoding;
   mutable buffers : (string * string) list;  (** Each open file's text, by its URI. *)
   mutable shut_down : bool;
-  mutable published : string list;  (** The URIs given diagnostics, to clear once closed. *)
+  mutable published : string list;
+      (** The URIs with published diagnostics, which are cleared when the file closes. *)
 }
 
 let notify server name params =
@@ -233,9 +224,9 @@ let publish server uri diagnostics =
   notify server "textDocument/publishDiagnostics"
     (Json.Object [ ("uri", Json.String uri); ("diagnostics", diagnostics) ])
 
-(* Checks the open files and publishes what was found: each file's
-   diagnostics, and its obligations' states as [truss/proofStates]. A
-   closed file's diagnostics are cleared. *)
+(* Checks the open files and publishes each file's diagnostics, and its
+   obligations' states as [truss/proofStates]. A closed file's diagnostics
+   are cleared. *)
 let refresh server =
   let open_uris = List.map fst server.buffers in
   List.iter
@@ -294,9 +285,9 @@ let capabilities server =
       ("serverInfo", Json.Object [ ("name", Json.String "truss") ]);
     ]
 
-(* The text a change gives: the whole file, since the server asks for
-   full changes, or, from a client that sends ranges anyway, the old text
-   with each range replaced. *)
+(* The file's text after a change: the whole text, since the server asks
+   for full changes, or for a client that sends range edits anyway, the
+   old text with each range replaced. *)
 let changed encoding text changes =
   List.fold_left
     (fun text change ->
@@ -319,7 +310,7 @@ let changed encoding text changes =
 
 type step = Continue | Recheck | Stop of int
 
-(* What one message does to the server. *)
+(* The server's action for one message. *)
 let handle server message =
   let id = Json.field "id" message and params = Json.field "params" message in
   let document = Json.field "textDocument" params in
@@ -365,8 +356,8 @@ let handle server message =
       Continue
   | _ -> Continue
 
-(* Answers messages until the client says to exit, or the input ends.
-   Checking waits until no message is waiting, so a burst of edits is
+(* Answers messages until the client sends [exit] or the input ends. A
+   check starts only when no message is waiting, so a burst of edits is
    checked once. *)
 let create ~write ~check =
   {
@@ -408,7 +399,8 @@ let serve ~input ~output ~check =
   loop false
 
 (* The hidden command [__check-buffers ROOT ENCODING URI TEXT ...], which
-   the server runs where commands run: [check], printed. *)
+   the server runs where commands run, and which prints [check]'s
+   result. *)
 let check_buffers = function
   | root :: encoding :: rest ->
       let rec pairs = function uri :: text :: rest -> (uri, text) :: pairs rest | _ -> [] in
@@ -420,3 +412,14 @@ let check_buffers = function
 let check_arguments ~root encoding buffers =
   "__check-buffers" :: root :: encoding_name encoding
   :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
+
+module For_testing = struct
+  let position = position
+  let offset = offset
+
+  type nonrec server = server
+
+  let create = create
+  let handle server message = ignore (handle server message)
+  let refresh = refresh
+end

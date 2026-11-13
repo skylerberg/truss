@@ -34,7 +34,7 @@ let signed : Memory_layout.integer -> bool = function
   | Int8 | Int16 | Int32 | Int64 | ISize -> true
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> false
 
-(* What every file declares first: the fixed-width integers, from the
+(* The declarations every file starts with: the fixed-width integers, from the
    compiler's own predefined macros, the target's [USize], and the runtime. *)
 let runtime_declarations (target : Memory_layout.target) =
   let usize, isize =

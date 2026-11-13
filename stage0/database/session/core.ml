@@ -1,4 +1,4 @@
-(* What a client keeps with a session, such as the problems of a project's
+(* The data a client keeps with a session, such as the problems of a project's
    manifests. The session layer does not look inside. *)
 type attachment = ..
 type attachment += Nothing
@@ -7,7 +7,7 @@ type t = {
   key : string;
   mutable engine : Engine.t;
   pointer : Store.pointer option;  (** Where the state is named in the store, if it is saved *)
-  version : string;  (** What names the code that computed the state's results *)
+  version : string;  (** The name of the code that computed the state's results *)
   bases : Engine.t list;  (** The fixed bases the state is over *)
   mutable used : float;
   fingerprints : (string, string) Hashtbl.t;
@@ -24,7 +24,7 @@ let state : state option ref = ref None
 let logging = ref false
 
 (* Run when every state is closed or discarded, so that a client lets go of
-   what it built on them. *)
+   its data built on them. *)
 let closing : (unit -> unit) list ref = ref []
 let on_close hook = closing := hook :: !closing
 
@@ -132,7 +132,7 @@ let point session pointer artifact =
   Store.write_pointer pointer (print_record { version = session.version; artifact; files });
   session.pointed <- true
 
-(* Writes what changed in a session's state since it was last written, as a
+(* Writes a session's state's changes since it was last written, as a
    difference over the artifact it was opened from or last wrote, and points
    its name at it. *)
 let save session =
@@ -457,8 +457,8 @@ let prune state =
     with Sys_error _ -> ()
   end
 
-(* Keeps the store within its budget. What a state of a version this
-   program can read refers to is kept, and so is what [keep] names. A state
+(* Keeps the store within its budget. The values a state of a version this
+   program can read refers to are kept, and so are those [keep] names. A state
    another version wrote can be read only by that version, so its values
    are not kept; that version finds its state gone, and starts again. *)
 let collect ~keep =

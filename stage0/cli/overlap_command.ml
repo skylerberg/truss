@@ -1,14 +1,14 @@
-(* [truss overlap]: where this worktree's changes meet those of other open
-   worktrees of the repository, or of a branch, and with [--merge], the
-   errors a merge of the two would have that neither has. *)
+(* [truss overlap]: the overlaps between this worktree's changes and those
+   of the repository's other open worktrees, or of a branch, and with
+   [--merge], the diagnostics that only the merge result has. *)
 
-let describe (place : Database.place) =
+let describe (place : Graph_types.place) =
   match place.path with
   | Some path ->
       Printf.sprintf "the %s of %s" (Option.value place.part ~default:"definition") (Path.show path)
   | None -> place.label
 
-let sentence : Database.overlap -> string = function
+let sentence : Graph_types.overlap -> string = function
   | Both_change place -> "both change " ^ describe place
   | Reads { this_worktree; change; reads } ->
       Printf.sprintf "%s worktree's change to %s reads %s, which the other changes"
@@ -16,20 +16,20 @@ let sentence : Database.overlap -> string = function
         (describe change) (describe reads)
 
 type comparison = {
-  other : string;  (** The other worktree, as the current directory reaches it, or the branch *)
-  overlaps : Database.overlap list;
+  other : string;  (** The other worktree, relative to the current directory, or the branch *)
+  overlaps : Graph_types.overlap list;
   merged : (string * string * string) list;  (** A merge's new diagnostics: file, code, message *)
   error : string option;
 }
 
-let place_json (place : Database.place) =
+let place_json (place : Graph_types.place) =
   Json.Object
     [
       ("path", Json.option (fun path -> Json.String (Path.show path)) place.path);
       ("part", Json.option (fun path -> Json.String path) place.part);
     ]
 
-let overlap_json : Database.overlap -> Json.t = function
+let overlap_json : Graph_types.overlap -> Json.t = function
   | Both_change place ->
       Json.Object [ ("kind", Json.String "both_change"); ("place", place_json place) ]
   | Reads { this_worktree; change; reads } ->
@@ -92,8 +92,8 @@ let compare_with ~merge session (name, other) =
   in
   { other = name; overlaps; merged; error }
 
-(* The overlaps with every other open worktree, leaving out those with
-   none, for [truss check]. *)
+(* The overlaps with each other open worktree that has any, for [truss
+   check]. *)
 let with_other_worktrees session =
   List.filter_map
     (fun other ->
@@ -134,3 +134,7 @@ let run ~directory ~with_ ~merge ~json =
       (if merge then "No overlap, and merging gives no new error." else "No overlap.")
   else print comparisons;
   0
+
+module For_testing = struct
+  let sentence = sentence
+end

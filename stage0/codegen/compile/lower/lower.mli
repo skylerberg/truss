@@ -1,20 +1,20 @@
 (* Lowering: the core form of one instance to its LIR.
 
-   Lowering reads a definition's core form, which says what every node
-   means, and writes LIR with every choice made:
+   Lowering reads a definition's core form, which gives every node's
+   meaning, and writes LIR with every choice made:
    which instance each call reaches, how each argument is passed, which
    values move and which are copied, and where each owned local goes out of
    scope, on every path. It writes a [drop] wherever an owned value leaves
-   its scope; drop elaboration then decides what each still owns. *)
+   its scope; drop elaboration then decides each one's remaining ownership. *)
 
-(* A valid program stage0 cannot lower yet: what it is, and its position
+(* A valid program stage0 cannot lower yet: the construct, and its position
    if one is known. It is not a compiler bug: the driver reports it as a
    limit of stage0. *)
-type unsupported = { what : string; at : Lir.site option }
+type unsupported = { construct : string; at : Lir.site option }
 
 exception Unsupported of unsupported
 
-(* What lowering reads, each one of the type checker's queries or code
+(* Lowering's inputs, each one of the type checker's queries or code
    generation's own tables. *)
 type context
 
@@ -22,19 +22,16 @@ val env : context -> Memory_layout.env
 val glue : context -> Glue.t
 val monomorphic : context -> Monomorphic.context
 
-val constant_value : context -> Path.t -> Lir.static_value option
-(** Another constant's value, where it folds. *)
-
 val context :
   ?checks:bool ->
-  ?cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
-  ?constant:(context -> Path.t -> Lir.static_value option) ->
+  cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+  constant:(context -> Path.t -> Lir.static_value option) ->
   Query.context ->
   Memory_layout.target ->
   context
 (** The driver gives [cursor_fields], a pulled method's cursor fields, from its pulled lowering, and
-    [constant] from whatever keeps each constant's lowering, so that each is made once and what
-    reads it is known. *)
+    [constant] from whatever keeps each constant's lowering, so that each is made once and its
+    readers are known. *)
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
    test, before drop elaboration. *)
@@ -43,7 +40,7 @@ val instance : context -> Instance.key -> Lir.t
 (* A constant's static data, where its value folds: literals, operators on
    numbers and on [Bool], other constants that fold, and records, variants,
    strings, lists, and arrays of parts that fold. Otherwise the type of the
-   value its [Evaluator] computes. Folding gives exactly what running
+   value its [Evaluator] computes. Folding gives exactly the result running
    would, and anything it does not know is run. *)
 type constant = Folded of Lir.data | Run of Ground.ty
 
@@ -54,7 +51,7 @@ val constant : context -> Path.t -> constant
 val evaluator : context -> Path.t -> Lir.t
 
 (* The pulled version of a yielding method, before drop elaboration: its
-   body with each [yield] left in place for yield lowering, and what a
+   body with each [yield] left in place for yield lowering, and the values a
    cursor that has not started owns, as [Yields.cursor_drop] takes it. *)
 val pulled :
   context -> Ground.yielding -> Lir.function_ * (Lir.local * (Lir.local * int) option) list
@@ -94,3 +91,8 @@ val template_checked : context -> Path.t -> int list
    function, which is not generic, called with each argument a constant, an
    integer or a [Bool] as 0 or 1, and its result written out. *)
 val call_evaluation : context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Lir.t
+
+module For_testing : sig
+  val constant_value : context -> Path.t -> Lir.static_value option
+  (** Another constant's value, where it folds. *)
+end

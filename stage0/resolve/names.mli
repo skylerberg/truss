@@ -36,7 +36,6 @@ val signature_name : Syntax.signature -> Syntax.name
 val receiver : Syntax.parameter list -> Path.receiver
 val used_module : Query.context -> from:Path.module_ -> Syntax.path -> Path.module_
 val last_name : Path.module_ -> string
-val imports : (Path.module_, (string * Path.module_) list) Query.query
 val module_exists : Query.context -> Path.module_ -> bool
 
 type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
@@ -62,6 +61,10 @@ val declarations : (Path.module_, declaration list) Query.query
 module Member_map : Map.S with type key = Path.t * string
 
 val package_declarations : (Path.package, declaration list) Query.query
+
+val impl_types : (Path.module_, (Path.t option * Path.t) list) Query.query
+(** Each [impl] of a module, with the type its head names, if it names one. *)
+
 val traits_declaring : (Path.package * String_map.key, Path.t list) Query.query
 val members : (Path.t * string, key list) Query.query
 
@@ -79,3 +82,7 @@ val per_definition :
   Query.context -> Path.module_ -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
 
 val text : (key, string option) Query.query
+
+module For_testing : sig
+  val imports : (Path.module_, (string * Path.module_) list) Query.query
+end

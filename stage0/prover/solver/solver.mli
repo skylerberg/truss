@@ -17,13 +17,10 @@ type answer =
       (** The goal can be false: the value of each requested symbol or term, as SMT-LIB text. *)
   | Out_of_steps  (** The solver could not decide within its limit. *)
 
-val key : Logic.query -> string
-(** The cache key of a query: the hash of its canonical text together with the solver's version, its
-    options, and its limit. *)
-
 type request
-(** A query as it is asked: its canonical text and key, and the canonical names of the symbols whose
-    values a counterexample should give. *)
+(** A query as it is asked: its key, and the canonical names of the symbols whose values a
+    counterexample should give. It holds no text, so a run that keeps every request it makes does
+    not keep every query's text. *)
 
 type canonical
 (** An answer in a query's canonical names, which every query with the same text shares, so it can
@@ -36,17 +33,21 @@ val request :
 
 val request_key : request -> string
 
-val ask_all : t -> request list -> canonical list
-(** Runs each request, as {!ask} does, several at once, one for each core. *)
+val ask_all : t -> (request * Logic.query) list -> canonical list
+(** Answers each request, several at once, one for each core, from a cache or else by running the
+    solver on the query the request was made from. A query is rendered only to be run, and one whose
+    text does not have the request's key raises [Invalid_argument], since its answer would be kept
+    under another query's key and prove that query wrongly. *)
 
 val read : request -> canonical -> answer
 (** A canonical answer in the request's own symbols. *)
 
-val solve : t -> ?values:Logic.symbol list -> Logic.query -> answer
-(** Runs one query. [values] are the prover's symbols whose values a counterexample should give;
-    those the query does not mention are left out. Results are cached by {!key} for the life of the
-    process, and solving the same text twice gives the same answer. *)
-
 val solved : t -> int
-(** How many queries this solver has run itself, leaving out those answered from a cache: what
+(** How many queries this solver has run itself, leaving out those answered from a cache, as
     incremental work's tests count. *)
+
+module For_testing : sig
+  val key : Logic.query -> string
+  (** The cache key of a query: the hash of its canonical text together with the solver's version,
+      its options, and its limit. *)
+end

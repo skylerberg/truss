@@ -1,4 +1,4 @@
-type Point(x: Int64)
+type Point(first_number: Int64)
 
 fn Point.equal(self, other: Point) -> Bool { todo }
 

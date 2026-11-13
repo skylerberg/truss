@@ -450,7 +450,7 @@ and cost cursor =
   end;
   let resource =
     match
-      Cost_word.expect cursor ~accepted:Cost_word.resources ~what:"a resource"
+      Cost_word.expect cursor ~accepted:Cost_word.resources ~category:"a resource"
         ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
     with
     | Time -> Time
@@ -472,7 +472,7 @@ and cost cursor =
            there. *)
         let suggested = if resource = Time then [ Cost_word.O; Finite ] else [ O ] in
         match
-          Cost_word.expect cursor ~accepted:[ O; Finite ] ~suggested ~what:"a bound"
+          Cost_word.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
             ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
         with
         | O -> Big_o (parenthesized_expression cursor)
@@ -1333,7 +1333,7 @@ and statement_line cursor ~previous : statement =
       let statement = statement cursor in
       end_of_statement cursor statement
 
-(* What may follow a statement on its line, where the grammar allows only a
+(* The tokens that may follow a statement on its line, where the grammar allows only a
    line break or [}]: habits are reported and parsing continues. *)
 and end_of_statement cursor (statement : statement) =
   match (Cursor.peek_kind cursor, statement.kind) with
@@ -1588,6 +1588,9 @@ and binding cursor ~is_var =
 
 and for_loop cursor ~mode =
   let pattern = Parse_pattern.pattern cursor in
+  let annotation =
+    if Cursor.accept_punctuation cursor Colon then Some (type_expression cursor) else None
+  in
   Cursor.expect_keyword cursor In;
   let iterable = expression cursor in
   (* In [for i in 0.. {}], the grammar reads the body as the end of the
@@ -1600,7 +1603,7 @@ and for_loop cursor ~mode =
       raise Cursor.Failed
   | _ -> ());
   let clauses = loop_clauses cursor in
-  For { mode; pattern; iterable; clauses; body = body cursor }
+  For { mode; pattern; annotation; iterable; clauses; body = body cursor }
 
 (* [invariant] and [cost] may repeat; [decreases] appears at most once. *)
 and loop_clauses cursor =

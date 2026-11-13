@@ -1,7 +1,7 @@
-(* [truss add]: makes registry packages dependencies of the package it is
-   run in. Each gets an entry in the manifest that grants it nothing, and a
-   line in the project's lock file at the version asked for, or its newest,
-   with the packages it brings with it. *)
+(* [truss add]: adds registry packages as dependencies of the package the
+   command runs in. Each gets a manifest entry that grants it nothing, and
+   a lock file line at the requested version or the newest, with lines for
+   its own dependencies. *)
 
 let run ~directory ~names ~json =
   let project = Project.load directory in
@@ -11,7 +11,8 @@ let run ~directory ~names ~json =
     match Registry.Index.current () with
     | Some registry -> registry
     | None ->
-        Project.cannot_run "No registry is set: `%s` names its directory." Registry.Index.variable
+        Project.cannot_run "No registry is set. Set `%s` to the registry's directory."
+          Registry.Index.variable
   in
   List.iter
     (fun (name, version) ->
@@ -40,8 +41,8 @@ let run ~directory ~names ~json =
   write with_entries;
   match Database.plan_lock project.session ~set:wanted ~all:false with
   | Error message ->
-      (* The manifest is left as it was, so that a package that cannot be
-         had is not left as a dependency. *)
+      (* The manifest is restored, so a package that cannot be fetched
+         is not left as a dependency. *)
       write written;
       Project.cannot_run "%s" message
   | Ok plan ->

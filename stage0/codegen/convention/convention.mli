@@ -16,7 +16,7 @@ val parameter : Memory_layout.env -> Ground.mode -> Ground.ty -> Lir.ty option
 val held : Memory_layout.env -> Ground.mode -> Ground.ty -> Lir.ty option
 
 (* A cursor's fields that whoever makes one fills in: its state number, and
-   what it holds for each of its method's parameters that has a size, by
+   its field for each of its method's parameters that has a size, by
    the parameter's place among them. *)
 val cursor_state : string
 val cursor_parameter : int -> string

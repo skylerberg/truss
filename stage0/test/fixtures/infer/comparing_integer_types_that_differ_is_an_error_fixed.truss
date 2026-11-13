@@ -1,3 +1,3 @@
-fn f(count: UInt32, length: UInt64) -> Bool {
+fn run_example(count: UInt32, length: UInt64) -> Bool {
   length == UInt64.from(count)
 }

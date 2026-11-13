@@ -11,7 +11,7 @@
     - every type is fully inferred and normalized.
 
     If a later stage has to look up which method a name refers to, or inspect the shape of a type to
-    decide what a node means, the core form is missing something.
+    decide a node's meaning, the core form is missing something.
 
     Every node has an [id], unique within the definition. Later results (such as ownership's) are
     keyed by it. Every node also has an [origin]: the id of the syntax node it was built from.
@@ -74,7 +74,7 @@ and call = {
   lends : Types.mode option;
       (** [Some mode] if the callee is a lending method ([lends] in its signature). The result of
           such a call is a place: see {!Lent}. *)
-  uses : Types.capability list;
+  uses : Types.capability_set;
       (** The capabilities this call requires: the callee's [uses] clause, with the callee's
           capability parameters substituted by this call's type arguments. *)
 }
@@ -90,7 +90,7 @@ and argument =
           is in the callee's core form. *)
 
 and mark = { written : origin; marked : origin }
-(** A [mut] or [own] mark: [written], the syntax node of the mark with what it marks, and [marked],
+(** A [mut] or [own] mark: [written], the syntax node of the mark with its operand, and [marked],
     the expression after the mark. *)
 
 (** An operand is either a place, which is borrowed, or a value. *)
@@ -124,7 +124,8 @@ and place =
   | Lent of expression
       (** The part of a value that a lending call returns, such as [items[index]] (a call of
           [Index.at]) or [grid.cell(position)]. The expression is a {!Call} whose [lends] is
-          [Some _]. The borrow lasts until the end of the enclosing statement. *)
+          [Some _]. The borrow lasts until the end of the enclosing statement, except in the
+          condition of an {!If} or a {!While}, where its [binds_lent_part] says how long. *)
   | Temporary of expression
       (** A value that has no place of its own, stored in a temporary for the enclosing statement so
           that part of it can be accessed, as in [origin().x]. *)
@@ -221,7 +222,18 @@ and kind =
       (** Converts a value to [any Trait]. [evidence] is the [impl] of the trait for the value's
           type. *)
   (* Control flow *)
-  | If of { condition : expression; then_ : block; else_ : block option }
+  | If of {
+      condition : expression;
+      then_ : block;
+      else_ : block option;
+      binds_lent_part : bool;
+          (** The condition calls a lending method and binds a name that may alias the lent part: a
+              name bound [mut], or one whose type is a view or is not [Plain]. The condition's lends
+              then last until [then_] ends, so that the name cannot dangle. Otherwise they end with
+              the condition, every name it binds holds a copy, and [then_] can mutate the lender, as
+              in [if counts.get(word) is Some(count) { counts[word] = count + 1 }]. The lends never
+              last into [else_]. *)
+    }
   | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
@@ -343,7 +355,14 @@ and statement_kind =
       body : block;
       mode : loop_mode;
     }
-  | While of { condition : expression; clauses : loop_clause list; body : block }
+  | While of {
+      condition : expression;
+      clauses : loop_clause list;
+      body : block;
+      binds_lent_part : bool;
+          (** As for {!If}: whether the condition's lends last until [body] ends, or end with the
+              condition. *)
+    }
   | Parallel of statement list
       (** A [parallel] block. Each statement is a branch. A branch uses no capability but [Panic],
           and no early exit leaves one. *)

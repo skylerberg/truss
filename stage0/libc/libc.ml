@@ -145,6 +145,13 @@ type number =
   | Pollout
   | Sockaddr_family_offset
   | Sockaddr_family_size
+  | Af_unix
+  | Ipproto_tcp
+  | Tcp_nodelay
+  | So_keepalive
+  | Tcp_keepidle
+  | So_reuseport
+  | Sockaddr_un_path_size
 
 type extent =
   | Counted of { by : string; each : int }
@@ -448,7 +455,7 @@ let function_name = function
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
-   [headers] declare the function; [layout] is what must hold of a structure
+   [headers] declare the function; [layout] is the condition on a structure
    it takes for the storage passed to be that structure; and [named] gives a
    parameter the type the headers call it by, where that is a name only the
    headers have and the C that is emitted says [void]. *)
@@ -629,7 +636,7 @@ let describe function_ =
         ~headers:[ "unistd.h" ]
   | Poll ->
       (* A [pollfd] is its descriptor and then two numbers of half the
-         size, what to wait for and what was found, which are the low and
+         size, the requested and the returned events, which are the low and
          the high half of one [Int32] where the low byte comes first. *)
       row ~at_most:"count" (everywhere (Named "int")) (Returns Int32)
         [
@@ -862,7 +869,7 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Posix_spawn_file_actions_init ->
-      (* What a program that is started does to its descriptors before it
+      (* The actions a started program applies to its descriptors before it
          runs. The structure is storage of as many bytes as it takes, which
          only these functions read. *)
       row (everywhere (Named "int")) (Returns Int32)
@@ -1426,6 +1433,13 @@ let numbers =
     Pollout;
     Sockaddr_family_offset;
     Sockaddr_family_size;
+    Af_unix;
+    Ipproto_tcp;
+    Tcp_nodelay;
+    So_keepalive;
+    Tcp_keepidle;
+    So_reuseport;
+    Sockaddr_un_path_size;
   ]
 
 let number_name = function
@@ -1551,6 +1565,13 @@ let number_name = function
   | Pollout -> "POLLOUT"
   | Sockaddr_family_offset -> "SOCKADDR_FAMILY_OFFSET"
   | Sockaddr_family_size -> "SOCKADDR_FAMILY_SIZE"
+  | Af_unix -> "AF_UNIX"
+  | Ipproto_tcp -> "IPPROTO_TCP"
+  | Tcp_nodelay -> "TCP_NODELAY"
+  | So_keepalive -> "SO_KEEPALIVE"
+  | Tcp_keepidle -> "TCP_KEEPIDLE"
+  | So_reuseport -> "SO_REUSEPORT"
+  | Sockaddr_un_path_size -> "SOCKADDR_UN_PATH_SIZE"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -1563,7 +1584,7 @@ let number_type = function
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
   | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
   | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
-  | Vtime | Sockaddr_family_offset | Sockaddr_family_size ->
+  | Vtime | Sockaddr_family_offset | Sockaddr_family_size | Sockaddr_un_path_size ->
       USize
   | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
   | Cs8 ->
@@ -1606,7 +1627,10 @@ let number_headers = function
   | So_sndtimeo | So_error | Shut_rd | Shut_wr | Shut_rdwr | Sockaddr_family_offset
   | Sockaddr_family_size ->
       [ "sys/socket.h" ]
-  | Ipproto_ipv6 | Ipv6_v6only -> [ "netinet/in.h" ]
+  | Af_unix | So_keepalive | So_reuseport -> [ "sys/socket.h" ]
+  | Ipproto_ipv6 | Ipv6_v6only | Ipproto_tcp -> [ "netinet/in.h" ]
+  | Tcp_nodelay | Tcp_keepidle -> [ "netinet/tcp.h" ]
+  | Sockaddr_un_path_size -> [ "sys/un.h" ]
   | O_nonblock | F_getfl | F_setfl -> [ "fcntl.h" ]
   | Einprogress | Eagain -> [ "errno.h" ]
   | Pollout -> [ "poll.h" ]
@@ -1622,6 +1646,8 @@ let number_expression (system : system) number =
   | Stat_size, _ -> Some "sizeof(struct stat)"
   | Sockaddr_family_offset, _ -> Some "__builtin_offsetof(struct sockaddr, sa_family)"
   | Sockaddr_family_size, _ -> Some "sizeof(((struct sockaddr *)0)->sa_family)"
+  | Sockaddr_un_path_size, _ -> Some "sizeof(((struct sockaddr_un *)0)->sun_path)"
+  | Tcp_keepidle, Macos -> Some "TCP_KEEPALIVE"
   | Termios_size, _ -> Some "sizeof(struct termios)"
   | Termios_iflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_iflag)"
   | Termios_oflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_oflag)"
@@ -1834,6 +1860,17 @@ let value (system : system) number =
   | Sockaddr_family_offset, Macos -> 1
   | Sockaddr_family_size, Linux -> 2
   | Sockaddr_family_size, Macos -> 1
+  | Af_unix, (Linux | Macos) -> 1
+  | Ipproto_tcp, (Linux | Macos) -> 6
+  | Tcp_nodelay, (Linux | Macos) -> 1
+  | So_keepalive, Linux -> 9
+  | So_keepalive, Macos -> 8
+  | Tcp_keepidle, Linux -> 4
+  | Tcp_keepidle, Macos -> 16
+  | So_reuseport, Linux -> 15
+  | So_reuseport, Macos -> 512
+  | Sockaddr_un_path_size, Linux -> 108
+  | Sockaddr_un_path_size, Macos -> 104
   | Vreg, Macos -> 1
   | Vdir, Macos -> 2
   | Vlnk, Macos -> 5
@@ -1861,7 +1898,7 @@ let check system =
       @ List.concat_map number_headers
           (List.filter (fun number -> number_expression system number <> None) numbers))
   in
-  let holds what condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition what in
+  let holds message condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition message in
   (* The address is of one of the numbers, where C takes the first of
      several, or of a structure that is all of them. *)
   let reached symbol c_type count scalar =
@@ -1880,7 +1917,7 @@ let check system =
      ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
     (* A header may also define a function as a macro, as macOS does
-       [sigaddset]. The function is what a program calls. *)
+       [sigaddset]. A program calls the function. *)
     @ List.sort_uniq String.compare
         (List.map
            (fun function_ -> Printf.sprintf "#undef %s\n" (declaration system function_).symbol)
@@ -1922,3 +1959,7 @@ let check system =
                     None)
               row.parameters)
         functions)
+
+module For_testing = struct
+  let check = check
+end

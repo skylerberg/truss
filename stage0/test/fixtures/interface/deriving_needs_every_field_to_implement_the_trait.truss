@@ -1,4 +1,4 @@
-type Opaque(x: Int64)
+type Opaque(first_number: Int64)
 
 type Point(inner: Opaque)
   derives Equal

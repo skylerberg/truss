@@ -6,6 +6,6 @@ impl Multiply[Int64] for Span2 {
   fn multiply(self, right: Int64) -> Span2 { todo }
 }
 
-fn f(span: Span2) -> Int64 {
+fn run_example(span: Span2) -> Int64 {
   span * 3
 }

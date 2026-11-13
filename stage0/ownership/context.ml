@@ -39,7 +39,7 @@ let holds_function context type_ =
    parameter. A generic [own] parameter that is instantiated with a function
    type does not count: the callee treats its value as any other view, so
    the view rules track it. *)
-let stores_function context (callee : Core.callee) position =
+let stores_function context (callee : Mir.callee) position =
   let declared (signature : Types.signature) =
     let index = if Option.is_some signature.receiver then position - 1 else position in
     match List.nth_opt signature.parameters index with

@@ -3,7 +3,7 @@ fn tick()
 {
 }
 
-fn f(items: List[Int64])
+fn run_example(items: List[Int64])
   uses Tasks, Clock
 {
   concurrent {

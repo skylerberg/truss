@@ -1,4 +1,4 @@
-fn f(first: Bool) -> Slice[Int64] {
+fn run_example(first: Bool) -> Slice[Int64] {
   let items: List[Int64] = [1, 2, 3]
   let part = if first { items[..1] } else { items[1..] }
   part

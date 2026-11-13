@@ -1,0 +1,11 @@
+type Counter(count: Int64)
+
+fn Counter.bump(mut self) {
+  self.count = self.count + 1
+}
+
+fn bumped() -> Int64 {
+  var counter = Counter(count: 0)
+  mut counter.bump()
+  counter.count
+}

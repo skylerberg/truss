@@ -20,7 +20,6 @@ val runtime : Memory_layout.target -> tests:bool -> in_order:bool -> string
 (* A C [main] that installs the stack-overflow handler, calls the C
    function [entry], which takes nothing and returns an [Int32], and exits
    with the status it returns. *)
-val main_calling : string -> string
 
 (* A C [main] of a test program: it gives the runtime the table of the
    tests, each a C function [void name(void)], and calls [runner], the
@@ -53,3 +52,7 @@ val tests_calling : time_limit:int -> runner:string -> string list -> string
 (* The startup of code run while compiling, which calls the evaluator. *)
 val evaluator_calling : string -> string
 val program_calling : string -> string
+
+module For_testing : sig
+  val main_calling : string -> string
+end

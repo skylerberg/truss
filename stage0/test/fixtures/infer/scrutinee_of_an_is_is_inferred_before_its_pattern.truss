@@ -10,6 +10,6 @@ impl Divide[Int64] for Span {
   }
 }
 
-fn f(span: Span) -> Bool {
+fn run_example(span: Span) -> Bool {
   span / 0 is None
 }

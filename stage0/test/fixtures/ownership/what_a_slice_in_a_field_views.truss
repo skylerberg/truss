@@ -1,5 +1,0 @@
-type Window(rest: Slice[Int64])
-
-fn f(window: mut Window) {
-  bump(mut window.rest)
-}

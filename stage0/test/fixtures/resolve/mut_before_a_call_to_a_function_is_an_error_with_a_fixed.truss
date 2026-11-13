@@ -1,5 +1,5 @@
 fn make() -> List[Int64] { todo }
 
-fn f() {
+fn run_example() {
   make().push(1)
 }

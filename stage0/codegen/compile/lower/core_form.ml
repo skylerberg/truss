@@ -142,7 +142,7 @@ let bind_name st (bound : bound_name) =
 let rec place st (source : Core.place) : Lir.place = whole st (part st source)
 
 (* A place as the code names it, which may hold a lent value: the base of a
-   field, or what a pattern is matched against. *)
+   field, or a scrutinee. *)
 and part st (source : Core.place) : Lir.place =
   match source with
   | Local { local; _ } -> local_place st local
@@ -282,7 +282,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
           assign (Use (Constant (Bool false)));
           finish st.builder (Goto after);
           start st.builder after)
-  | If { condition; then_; else_ } -> if_ st ~condition ~then_ ~else_ (Some destination)
+  | If { condition; then_; else_; binds_lent_part } ->
+      if_ st ~condition ~then_ ~else_ ~binds_lent_part (Some destination)
   | Match { scrutinees; arms; _ } -> match_ st ~scrutinees ~arms destination
   | Block inner -> block_into st inner (Some destination)
   | Return returned -> return_ st returned
@@ -657,7 +658,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
     | Spawned loop -> fun value -> spawn_with_item st loop value ~owned:true ~each
     | Sequential | Chunked -> each
   in
-  (* What a range of a type counts in. A range of [Character] goes from
+  (* The unit a range of a type counts in. A range of [Character] goes from
      U+D7FF to U+E000, since the surrogates between them are no
      characters. *)
   let counting element =
@@ -871,7 +872,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
               st.frame <- inner);
           finish st.builder (Goto after);
           start st.builder after)
-  | Yielding_call _, _ -> bug "a loop over what is not a call"
+  | Yielding_call _, _ -> bug "a loop over an expression that is not a call"
   | Cursor { cursor; next = None }, _ -> (
       match ground st (Core_walk.place_type cursor) with
       | Cursor yielding -> pull_cursor st yielding (place st cursor) ~each:owned_each
@@ -896,7 +897,7 @@ and pull_cursor st (yielding : Ground.yielding) cursor ~(each : Lir.place -> uni
     ~call_next:(fun destination -> call_next st yielding cursor destination)
     ~body:each
 
-(* For a cursor, whose caller keeps what [next] gives it: the value with a
+(* For a cursor, whose caller keeps [next]'s result: the value with a
    copy of each place in place of the place, which it owns. *)
 and copied st (built : Core.expression) : Lir.place =
   let copy = temporary st (ground st built.type_) in
@@ -1052,7 +1053,7 @@ and lent_type_of st ~writable ty (parts : Core.operand list) : Ground.lent =
         (variants_of st ty);
   }
 
-(* Builds what a [yield] lends into [destination], a lent value of type
+(* Builds a [yield]'s lent part into [destination], a lent value of type
    [lent]. A field that holds an address is given the address of a place,
    or of a temporary that the [yield]'s statement owns, which the method
    drops once it resumes. *)
@@ -1655,17 +1656,25 @@ and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
     ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ())))
     (fun () -> in_scope st (fun () -> each (unbox ())))
 
+(* An [if]. The names that the condition binds live until the then-block
+   ends. The condition's temporaries and lends end before the then-block
+   unless [binds_lent_part], when a name may alias a lent part, and then they
+   end with the then-block. They end before the else-block either way. *)
 and if_ st ~(condition : Core.expression) ~(then_ : Core.block) ~(else_ : Core.block option)
-    destination =
+    ~binds_lent_part destination =
   let yes = block st.builder and no = block st.builder and after = block st.builder in
-  let scope = open_scope st Bindings in
+  let names = open_scope st Bindings in
+  let tested = open_scope st Statement in
   branch st condition ~yes ~no;
   start st.builder yes;
+  if not binds_lent_part then close_scope st tested;
   block_into st then_ destination;
-  close_scope st scope;
+  if binds_lent_part then close_scope st tested;
+  close_scope st names;
   finish st.builder (Goto after);
   start st.builder no;
-  drop_scope st scope;
+  drop_scope st tested;
+  drop_scope st names;
   Option.iter (fun inner -> block_into st inner destination) else_;
   finish st.builder (Goto after);
   start st.builder after
@@ -1805,9 +1814,11 @@ and statement st (node : Core.statement) =
           into st value result;
           st.compound_target <- enclosing;
           emit st.builder (Assign (target, Use (owned st result ty)))
-      | While { condition; body; _ } ->
-          (* The condition's temporaries are dropped before the body and
-             before the exit. The names it binds live until the body ends. *)
+      | While { condition; body; binds_lent_part; _ } ->
+          (* The condition's temporaries and lends end before the exit, and
+             before the body unless [binds_lent_part], when they end with the
+             body, as for an [if]. The names it binds live until the body
+             ends. *)
           let test = block st.builder and inside = block st.builder and failed = block st.builder in
           let after = block st.builder in
           let depth = List.length st.scopes in
@@ -1816,14 +1827,14 @@ and statement st (node : Core.statement) =
           let names = open_scope st Bindings in
           let tested = open_scope st Statement in
           branch st condition ~yes:inside ~no:failed;
-          pop_scope st tested;
           start st.builder failed;
           drop_scope st tested;
           drop_scope st names;
           finish st.builder (Goto after);
           start st.builder inside;
-          drop_scope st tested;
+          if not binds_lent_part then close_scope st tested;
           looping st ~continue_:test ~break_:after ~depth (fun () -> block_into st body None);
+          if binds_lent_part then close_scope st tested;
           close_scope st names;
           finish st.builder (Goto test);
           start st.builder after
@@ -1851,7 +1862,7 @@ and statement st (node : Core.statement) =
               let resume = block st.builder and stop = block st.builder in
               on_yield place ~owned ~resume ~stop;
               (* On the [stop] path the loop is leaving, so the method drops
-                 what it owns and ends. *)
+                 its owned values and ends. *)
               start st.builder stop;
               (match st.frame.exit with
               | Some (exit, depth) ->
@@ -1884,7 +1895,7 @@ and statement st (node : Core.statement) =
               let resume = block st.builder and stop = block st.builder in
               finish st.builder (Yield { value = owned st value ty; resume; stop = Some stop });
               (* On the [stop] path the cursor is dropped before it ended, so
-                 the method drops what it owns and returns. *)
+                 the method drops its owned values and returns. *)
               start st.builder stop;
               leave_to st 0;
               finish st.builder (Return None);
@@ -2097,8 +2108,8 @@ and inline ?(several = false) st path type_arguments ~arguments ~call_site ~on_y
   st.frame <- caller
 
 (* Inlines a lending method up to its [yield] and returns the place it
-   lends. What is left of the method, its code after the [yield] and the
-   drops of what it owns, runs as the caller's statement ends, on every way
+   lends. The rest of the method, its code after the [yield] and the
+   drops of its owned values, runs as the caller's statement ends, on every way
    out of it, so the innermost scope owns the lend. Where nothing is left,
    as for an index into a [List], the method ends at its [yield]. *)
 and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
@@ -2107,7 +2118,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   let depth = List.length st.scopes in
   let goes_on = block st.builder in
   (* A method with a [yield] on each of several paths lends whichever it
-     reaches, so the caller reads through the address of what was lent,
+     reaches, so the caller reads through the address of the lent part,
      and the method resumes from the [yield] it reached. *)
   let ty = yielded_type st path type_arguments in
   let through =
@@ -2220,10 +2231,10 @@ and fill_defaults st mask (parameters : Core.parameter list) =
       let unless_passed other =
         Lir_builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
       in
-      let pulled what =
+      let pulled reason =
         if st.pulling then
           unsupported ~at:(site_of st default.origin)
-            "a default for %s, %s, in a yielding method that is pulled" parameter.name what
+            "a default for %s, %s, in a yielding method that is pulled" parameter.name reason
       in
       if parameter.mode = Own && not (trivial st ty) then begin
         let owned_here = binding st ~name:parameter.name ty in

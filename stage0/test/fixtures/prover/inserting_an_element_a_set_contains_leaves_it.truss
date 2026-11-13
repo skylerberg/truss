@@ -1,0 +1,6 @@
+fn run_example(items: mut Set[Int64])
+  requires items.model().contains(5)
+  ensures identical(items.model(), old(items.model()))
+{
+  mut items.insert(5)
+}

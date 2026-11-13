@@ -1,5 +1,5 @@
 type Marker()
 
-fn f() -> Marker {
+fn run_example() -> Marker {
   Marker
 }

@@ -10,6 +10,6 @@ impl FromTemplate for Count {
   }
 }
 
-fn f() -> Count {
+fn run_example() -> Count {
   Count"none"
 }

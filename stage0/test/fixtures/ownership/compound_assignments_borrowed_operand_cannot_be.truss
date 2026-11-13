@@ -3,6 +3,6 @@ fn spoil(others: mut List[Bag]) -> USize {
   0
 }
 
-fn f(bags: mut List[Bag], others: mut List[Bag]) {
+fn run_example(bags: mut List[Bag], others: mut List[Bag]) {
   bags[spoil(mut others)] += others[0]
 }

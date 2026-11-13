@@ -1,6 +1,6 @@
-fn f(x: USize, divisor: USize) -> USize {
+fn run_example(first_number: USize, divisor: USize) -> USize {
   proof {
     return 1
   }
-  x / divisor
+  first_number / divisor
 }

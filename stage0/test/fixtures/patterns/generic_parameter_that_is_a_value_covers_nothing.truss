@@ -1,4 +1,4 @@
-fn f[limit: USize](count: USize) -> Bool {
+fn run_example[limit: USize](count: USize) -> Bool {
   match count {
     limit => true
   }

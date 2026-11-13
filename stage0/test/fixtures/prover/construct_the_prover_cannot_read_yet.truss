@@ -4,7 +4,7 @@ fn run(task: (fn() cost time finite))
   task()
 }
 
-fn f(quick: (fn() cost time O(1)))
+fn run_example(quick: (fn() cost time O(1)))
   cost time finite
 {
   run(quick)

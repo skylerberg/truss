@@ -7,7 +7,7 @@
    their variants; and niches that remove the tag where a field has spare
    values. *)
 
-(* What code is built for: the width of the pointers of the machine it runs
+(* The target code is built for: the width of the pointers of the machine it runs
    on, the width of [USize] and [ISize], and the system whose C library it
    calls. The widths differ only for code built to run while compiling for
    a target whose [USize] is narrower than the host's pointers: such code
@@ -16,11 +16,10 @@
 type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
 
 val target_64 : Libc.system -> target
-val target_32 : Libc.system -> target
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 
-(* What a pointer points at, which matters only to the C that is emitted: a
+(* A pointer's target, which matters only to the C that is emitted: a
    value of a type, the heap block of an [indirect] variant, code, or
    something the C does not name, such as an [any] value's contents. *)
 type pointee =
@@ -42,7 +41,7 @@ type scalar =
    names, such as the code pointer of a function value. *)
 type member = Typed of Ground.ty | Raw of scalar
 
-(* What a type is made of, which the code that knows the type checker's type
+(* A type's shape, which the code that knows the type checker's type
    shapes provides, after substituting type arguments. Fields and variants
    are in declaration order. [Unit] and every record with no fields are
    [Record []]; [Never] is [Sum []]. *)
@@ -98,7 +97,7 @@ type env
 val create : target -> shape_of:(Ground.ty -> shape) -> env
 val target : env -> target
 
-(* What a type is made of, as the layouts are computed from. *)
+(* A type's shape, from which the layouts are computed. *)
 val shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t
 
@@ -126,6 +125,9 @@ type discriminant =
 val discriminant : t -> string -> discriminant
 
 (* A compact, one-line description, for tests. *)
-val integer_to_string : integer -> string
 val scalar_to_string : scalar -> string
-val to_string : t -> string
+
+module For_testing : sig
+  val target_32 : Libc.system -> target
+  val to_string : t -> string
+end

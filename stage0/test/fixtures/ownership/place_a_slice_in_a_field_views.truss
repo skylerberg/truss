@@ -1,0 +1,5 @@
+type Window(rest: Slice[Int64])
+
+fn run_example(window: mut Window) {
+  bump(mut window.rest)
+}

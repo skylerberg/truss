@@ -225,7 +225,7 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
             };
         arguments = operands;
         omitted_defaults = [];
-        uses = [];
+        uses = Types.no_capabilities;
         callee_result = result;
       };
   defer state (fun () ->
@@ -264,7 +264,7 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
                       };
                   arguments = operands;
                   omitted_defaults = [];
-                  uses = [];
+                  uses = Types.no_capabilities;
                   callee_result = output;
                 }
         | None ->
@@ -305,7 +305,7 @@ and built_in_operator state (value : expression) (operands : expression list) re
               { Tables.expression = operand.id; parameter_index = index; mode = Read; mark = None })
             operands;
         omitted_defaults = [];
-        uses = [];
+        uses = Types.no_capabilities;
         callee_result = result;
       }
 
@@ -436,7 +436,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
                   { expression = right.id; parameter_index = 1; mode = Read; mark = None };
                 ];
               omitted_defaults = [];
-              uses = [];
+              uses = Types.no_capabilities;
               callee_result = result;
             };
         resolve_evidence state value left_type (trait_reference trait);
@@ -550,6 +550,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
 
 and mismatched_operands state (value : expression) (left : expression) (right : expression)
     ~left_type ~right_type =
+  let sides = [ (left_type, right_type); (right_type, left_type) ] in
   let left_type = normalize state left_type and right_type = normalize state right_type in
   if integer_type state left_type && integer_type state right_type then begin
     let from = trait_reference ~arguments:[ Types.Type right_type ] (Well_known.path From) in
@@ -578,7 +579,7 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
         ]
       else []
     in
-    reported state Mismatched_integers value.span ~fixes
+    reported_mismatch state Mismatched_integers value.span ~sides ~fixes
       (Printf.sprintf
          "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
          (Types.show left_type) (Types.show right_type))
@@ -621,8 +622,9 @@ and any_ state env ?expected (value : expression) (inner : expression) =
                       List.iter
                         (fun name ->
                           match
-                            Impls.capability_set state.database ~bounds:(bounds state) inner_type
-                              { bound with associated = [] } name
+                            (Impls.capability_set state.database ~bounds:(bounds state) inner_type
+                               { bound with associated = [] } name
+                              :> Types.capability list)
                           with
                           | [] -> ()
                           | set ->

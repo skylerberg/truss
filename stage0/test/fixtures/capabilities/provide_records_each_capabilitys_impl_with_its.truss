@@ -6,7 +6,7 @@ impl Clock for Fixed[Tag] {
   fn sleep(self, duration: Duration) {}
 }
 
-fn f() -> Instant {
+fn run_example() -> Instant {
   provide Fixed(time: Instant.epoch, tag: true) {
     Clock.now()
   }

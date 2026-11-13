@@ -1,0 +1,160 @@
+use standard::html
+use standard::http
+use standard::network
+use standard::serialization
+use standard::simulation
+use standard::url
+
+type Greeting(name: String, count: Int64)
+  derives Equal, serialization::Serialize, serialization::Deserialize
+
+fn made(method: http::Method, target: StringSlice) -> http::Request {
+  http::Request(method: method.copy(), target: target.to_string())
+}
+
+test "a route matches a method and a path, and gives each parameter's decoded value" {
+  let user = http::Route"GET /users/{id}"
+  assert made(http::Method.Get, target: "/users/7?tab=a").matches(user) is Some(found) && found.get("id") == Some("7".slice())
+  assert made(http::Method.Head, target: "/users/7").matches(user) is Some(_)
+  assert made(http::Method.Post, target: "/users/7").matches(user) is None
+  assert made(http::Method.Get, target: "/users/7/posts").matches(user) is None
+  assert made(http::Method.Get, target: "/users/").matches(user) is None
+  assert made(http::Method.Get, target: "/users/a%20b").matches(user) is Some(spaced) && spaced.get("id") == Some("a b".slice())
+  let files = http::Route"/static/{path...}"
+  assert made(http::Method.Delete, target: "/static/css/site.css").matches(files) is Some(rest)
+    && rest.get("path") == Some("css/site.css".slice())
+  let root = http::Route"GET /"
+  assert made(http::Method.Get, target: "/").matches(root) is Some(_)
+  assert made(http::Method.Get, target: "/x").matches(root) is None
+  assert http::Route.parse("GET users") is None && http::Route.parse("/a/{b}/{b}") is None
+}
+
+test "an HTTP date is written in IMF-fixdate form and read in all three of its forms" {
+  let instant = Instant.from_unix_seconds(784111777).expect("in range")
+  assert http::format_date(instant) == "Sun, 06 Nov 1994 08:49:37 GMT"
+  assert http::parse_date("Sun, 06 Nov 1994 08:49:37 GMT") == Some(instant)
+  assert http::parse_date("Sunday, 06-Nov-94 08:49:37 GMT") == Some(instant)
+  assert http::parse_date("Sun Nov  6 08:49:37 1994") == Some(instant)
+  assert http::parse_date("yesterday") is None
+}
+
+test "headers are found whatever the case of their names, and set replaces every value" {
+  var headers = http::Headers.new()
+  mut headers.add("Content-Type", value: "text/plain")
+  mut headers.add("X-Tag", value: "a")
+  mut headers.add("x-tag", value: "b")
+  assert headers.get("content-type") == Some("text/plain".slice())
+  mut headers.set("X-TAG", value: "c")
+  assert headers.length() == 2 && headers.get("x-tag") == Some("c".slice())
+  mut headers.remove("CONTENT-TYPE")
+  assert !headers.contains("Content-Type")
+}
+
+fn application(request: http::Request) -> http::Response {
+  if request.matches(http::Route"GET /hello/{name}") is Some(found) {
+    let name = found.get("name").unwrap_or("nobody".slice())
+    return http::Response.json(Greeting(name: name.to_string(), count: 1))
+  }
+  if request.matches(http::Route"POST /echo") is Some(_) {
+    return match request.json[Greeting]() {
+      Ok(greeting) => http::Response.json(Greeting(name: own greeting.name, count: greeting.count + 1), status: http::Status.created)
+      Err(_) => http::Response.text("not a greeting", status: http::Status.bad_request)
+    }
+  }
+  if request.matches(http::Route"GET /big") is Some(_) {
+    let words = "word ".slice().repeated(500)
+    return http::Response.text(words.slice()).compressed(request)
+  }
+  if request.matches(http::Route"GET /page/{title}") is Some(found) {
+    let title = found.get("title").unwrap_or("".slice()).to_string()
+    return http::Response.html(html::Html"<h1>${own title}</h1>")
+  }
+  http::Response.text("no such page", status: http::Status.not_found)
+}
+
+fn loopback(port: UInt16) -> network::SocketAddress {
+  network::SocketAddress(address: network::IpAddress.loopback, port: port)
+}
+
+fn exchange(raw: StringSlice) -> String
+  uses NetworkClient, Handles, Panic
+{
+  var connection = network::connect("localhost", port: 8080).expect("the server accepts")
+  let _ = mut connection.write_all(raw.bytes())
+  let _ = mut connection.shut_down(network::Direction.Sending)
+  var reply: List[UInt8] = []
+  let _ = mut connection.read_to_end(mut reply)
+  String.from_utf8_lossy(reply.slice())
+}
+
+fn client_and_server() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(loopback(8080)).expect("the port is free")
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut listener, handler: application)
+    {
+      match http::get("http://localhost:8080/hello/ada") {
+        Ok(response) => {
+          mut seen.push("${response.status.code} ${response.headers.get("Content-Type").unwrap_or("".slice())}")
+          mut seen.push(response.text_body().unwrap_or(""))
+        }
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let body = "{\"name\":\"bo\",\"count\":4}"
+      match http::send(
+        http::Method.Post,
+        url: url::Url"http://localhost:8080/echo",
+        body: body.bytes().to_list(),
+      ) {
+        Ok(response) => mut seen.push("${response.status.code} ${response.text_body().unwrap_or("")}")
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      match http::get("http://localhost:8080/missing") {
+        Ok(response) => mut seen.push("${response.status.code}")
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let two = exchange("GET /hello/a HTTP/1.1\r\nHost: x\r\n\r\nHEAD /hello/b HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+      mut seen.push("${two.slice().occurrences("HTTP/1.1 200 OK")} ${two.slice().ends_with("\r\n\r\n")}")
+      let chunked = exchange("POST /echo HTTP/1.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n6\r\n{\"name\r\n11\r\n\":\"cy\",\"count\":1}\r\n0\r\n\r\n")
+      mut seen.push("${chunked.slice().starts_with("HTTP/1.1 201 Created")} ${chunked.slice().ends_with("{\"name\":\"cy\",\"count\":2}")}")
+      let broken = exchange("GET /hello/a HTTP/1.1\r\nBad Header\r\n\r\n")
+      mut seen.push("${broken.slice().starts_with("HTTP/1.1 400 Bad Request")}")
+      let smuggled = exchange("POST /echo HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+      mut seen.push("${smuggled.slice().starts_with("HTTP/1.1 400")}")
+      var accepting = http::Headers.new()
+      mut accepting.add("Accept-Encoding", value: "gzip, br")
+      match http::send(http::Method.Get, url: url::Url"http://localhost:8080/big", headers: accepting) {
+        Ok(response) => mut seen.push("${response.body.length()} ${response.headers.contains("Content-Encoding")}")
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let zipped = exchange("GET /big HTTP/1.1\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n")
+      let plain = exchange("GET /big HTTP/1.1\r\nConnection: close\r\n\r\n")
+      mut seen.push("${zipped.slice().contains("Content-Encoding: gzip")} ${zipped.length() < plain.length()}")
+      match http::get("http://localhost:8080/page/a%3Cb") {
+        Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      return own seen
+    }
+  }
+}
+
+test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" {
+  provide simulation::World.new() {
+    let seen = client_and_server()
+    assert seen.length() == 11
+    assert seen[0] == "200 application/json"
+    assert seen[1] == "{\"name\":\"ada\",\"count\":1}"
+    assert seen[2] == "201 {\"name\":\"bo\",\"count\":5}"
+    assert seen[3] == "404"
+    assert seen[4] == "2 true"
+    assert seen[5] == "true true"
+    assert seen[6] == "true"
+    assert seen[7] == "true"
+    assert seen[8] == "2500 false"
+    assert seen[9] == "true true"
+    assert seen[10] == "<h1>a&lt;b</h1>"
+  }
+}

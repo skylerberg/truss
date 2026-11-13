@@ -12,11 +12,8 @@ val current : unit -> t option
 *)
 
 val configure : string option -> unit
-(** Tells the process which registry to use, in place of what its own environment names. The
+(** Tells the process which registry to use, in place of the one its own environment names. The
     background process is told each client's. *)
-
-val at : string -> t
-val root : t -> string
 
 val versions : t -> Path.package -> (Version.t * string) list
 (** A package's versions, each with its hash, in the order they were published. A package the
@@ -24,9 +21,6 @@ val versions : t -> Path.package -> (Version.t * string) list
 
 val newest : t -> Path.package -> (Version.t * string) option
 val hash_of : t -> Path.package -> Version.t -> string option
-
-val version_directory : t -> Path.package -> Version.t -> string
-(** Where a version's files are. *)
 
 val add : t -> Path.package -> Version.t -> (string * string) list -> unit
 (** Adds a version of a package with these files, each a path and its bytes. *)

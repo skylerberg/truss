@@ -7,7 +7,7 @@ impl Iterable for Bag {
 
 fn Bag.each(mut self) yields mut Int64 { todo }
 
-fn f(bag: mut Bag) -> Int64 {
+fn run_example(bag: mut Bag) -> Int64 {
   for item in mut bag {
     item = 0
   }

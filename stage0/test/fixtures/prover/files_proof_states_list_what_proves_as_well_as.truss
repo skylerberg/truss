@@ -1,5 +1,0 @@
-fn f(items: List[Int64], index: USize) -> Int64
-  requires index < items.length()
-{
-  items[index] + items[0]
-}

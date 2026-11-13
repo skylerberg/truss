@@ -1,11 +1,11 @@
-type Point(x: Float64, y: Float32)
+type Point(first_number: Float64, second_number: Float32)
 
 test "echoes" {
   let _ = echo Some(true)
   let _ = echo Some(1.5)
   let _ = echo [1, 2, 3]
   let _ = echo "hi\n \${x} \u{1}"
-  let _ = echo Point(x: 0.1, y: 2.0)
+  let _ = echo Point(first_number: 0.1, second_number: 2.0)
   let _ = echo -7
   let _ = echo Character"é"
 }

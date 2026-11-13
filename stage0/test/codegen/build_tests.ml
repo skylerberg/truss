@@ -1,9 +1,9 @@
-(* What a build reaches, test keys, and the test runner. *)
+(* The instances a build reaches, test keys, and the test runner. *)
 
 open Memory_layout
 open Codegen_support
 
-(* What a build reaches, and test keys *)
+(* Reachable instances, and test keys *)
 
 (* A program whose [entry] calls [helper], under the given names, and whose
    [helper] returns [value]. *)
@@ -23,7 +23,7 @@ let named_program ~entry_name ~helper_name returned =
 let lookup instances key =
   List.find (fun (instance : Lir.t) -> Instance.equal instance.key key) instances
 
-(* What each instance of a small program refers to. *)
+(* Each instance's references in a small program. *)
 let references program key =
   Reachable.compiled_references (shape_env ()) (Lir.Code (lookup program key))
 
@@ -81,12 +81,14 @@ let () =
               reached)));
   test "a drop reaches the type's drop function" (fun () ->
       let dropping_instance =
-        instance "f"
+        instance "run_example"
           (function_ ~parameters:[ 0 ]
              [ local (value text) ]
              [ block [ Drop (at 0) ] (Return None) ])
       in
-      let references = Reachable.references (shape_env ~extra:drop_shapes ()) dropping_instance in
+      let references =
+        Reachable.For_testing.references (shape_env ~extra:drop_shapes ()) dropping_instance
+      in
       expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
   let test_key ~entry_name ~helper_name returned =
@@ -97,7 +99,7 @@ let () =
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
       then fail "the keys differ");
-  test "changing what a test reaches changes its key" (fun () ->
+  test "changing the code a test reaches changes its key" (fun () ->
       if
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         = test_key ~entry_name:"start" ~helper_name:"helper" 2
@@ -197,7 +199,7 @@ let () =
       in
       incr counter;
       let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "tests%d" !counter) in
-      match Compile.build_supplied_tests compile ~time_limit:300 tests ~output with
+      match Compile.For_testing.build_supplied_tests compile ~time_limit:300 tests ~output with
       | Error message -> fail "%s" message
       | Ok () ->
           let status, out, _ = Process.run output [] in
@@ -218,7 +220,7 @@ let () =
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                    "test 7 crashed\nmessage 19\nended with status 3\n";
                  ])
-            (match Compile.parse_report out with
+            (match Compile.For_testing.parse_report out with
             | Ok records -> render_records records
             | Error message -> message))
 
@@ -228,7 +230,7 @@ let () =
       let cache = Build.cache directory in
       let objects () =
         match
-          Build.objects (Lazy.force compiler) cache settings
+          Build.For_testing.objects (Lazy.force compiler) cache settings
             [ ("one", "int one(void) { return 1; }\n") ]
         with
         | Ok [ path ] -> path

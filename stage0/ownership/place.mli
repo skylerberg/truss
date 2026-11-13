@@ -5,9 +5,5 @@ type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin * Core.ori
 
 val overlap : t -> t -> overlap
 val is_prefix : t -> t -> bool
-val storage_index : Core.expression -> Core.place option
 val of_core : Core.place -> t option
 val is_slice_type : Types.ty -> bool
-val written_slice : whole:bool -> Core.place -> Core.place option
-val of_slice : Core.expression -> t option
-val is_lent_part : Core.place -> bool

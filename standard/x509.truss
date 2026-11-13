@@ -1,0 +1,843 @@
+use standard::base64
+use standard::cryptography
+use standard::der
+use standard::hex
+use standard::intrinsic
+use standard::network
+use standard::time
+
+public type Error(message: String)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write(self.message.slice())
+  }
+}
+
+fn malformed(what: StringSlice) -> Error {
+  var message = "a certificate whose "
+  mut message.push(what)
+  mut message.push(" is malformed")
+  Error(message: own message)
+}
+
+fn oid(text: StringSlice) -> List[UInt8] {
+  match hex::decode(text) {
+    Ok(bytes) => own bytes
+    Err(_) => []
+  }
+}
+
+fn is_oid(value: der::Value, expected: StringSlice) -> Bool {
+  match value {
+    ObjectIdentifier(bytes) => bytes == oid(expected)
+    _ => false
+  }
+}
+
+public type PublicKey =
+  | Ecdsa(key: cryptography::EcdsaVerifyingKey)
+  | Rsa(key: cryptography::RsaPublicKey)
+  | Ed25519(key: cryptography::VerifyingKey)
+  derives Equal
+
+public type SignatureAlgorithm =
+  | EcdsaSha256
+  | EcdsaSha384
+  | RsaPkcs1(function: cryptography::HashFunction)
+  | RsaPss(function: cryptography::HashFunction)
+  | Ed25519Signature
+  | Unsupported
+  derives Equal
+
+public opaque type Certificate(
+  encoded: List[UInt8],
+  signed: List[UInt8],
+  algorithm: SignatureAlgorithm,
+  signature: List[UInt8],
+  issuer: List[UInt8],
+  subject: List[UInt8],
+  not_before: Instant,
+  not_after: Instant,
+  public_key: PublicKey,
+  is_authority: Bool,
+  path_length: Option[UInt64],
+  signs_certificates: Bool,
+  serves: Bool,
+  dns_names: List[String],
+  ip_addresses: List[network::IpAddress],
+  common_name: Option[String],
+  unknown_critical: Bool,
+)
+  derives Equal, Copyable
+
+public fn Certificate.encoded(self) -> Slice[UInt8] {
+  self.encoded.slice()
+}
+
+public fn Certificate.public_key(self) -> PublicKey {
+  self.public_key.copy()
+}
+
+public fn Certificate.not_before(self) -> Instant {
+  self.not_before
+}
+
+public fn Certificate.not_after(self) -> Instant {
+  self.not_after
+}
+
+public fn Certificate.dns_names(self) -> Slice[String] {
+  self.dns_names.slice()
+}
+
+public fn Certificate.common_name(self) -> Option[StringSlice] {
+  match self.common_name {
+    Some(name) => Some(name.slice())
+    None => None
+  }
+}
+
+public fn Certificate.is_authority(self) -> Bool {
+  self.is_authority
+}
+
+fn items_of(value: der::Value) -> List[der::Value] {
+  match value {
+    Sequence(items) => items.copy()
+    Set(items) => items.copy()
+    _ => []
+  }
+}
+
+fn text_of(value: der::Value) -> Option[String] {
+  match value {
+    Text(bytes, ..) => match String.from_utf8(bytes.copy()) {
+      Ok(text) => Some(own text)
+      Err(_) => None
+    }
+    _ => None
+  }
+}
+
+fn digits(bytes: Slice[UInt8], from: USize, count: USize) -> Option[UInt32] {
+  if from > bytes.length() || bytes.length() - from < count {
+    return None
+  }
+  var number: UInt32 = 0
+  for index in 0..count {
+    let byte = bytes[from + index]
+    if byte < 48 || byte > 57 {
+      return None
+    }
+    number = number.saturating_multiply(10).saturating_add(intrinsic::convert[UInt8, UInt32](byte - 48))
+  }
+  Some(number)
+}
+
+fn time_of(value: der::Value) -> Option[Instant] {
+  match value {
+    Time(tag, bytes) => {
+      let long = tag == 24
+      let year_digits: USize = if long { 4 } else { 2 }
+      if bytes.length() != year_digits + 11 || bytes[bytes.length() - 1] != 90 {
+        return None
+      }
+      let written = digits(bytes.slice(), from: 0, count: year_digits)?
+      let year = if long { written } else if written < 50 { written.saturating_add(2000) } else { written.saturating_add(1900) }
+      let month = digits(bytes.slice(), from: year_digits, count: 2)?
+      let day = digits(bytes.slice(), from: year_digits + 2, count: 2)?
+      let hour = digits(bytes.slice(), from: year_digits + 4, count: 2)?
+      let minute = digits(bytes.slice(), from: year_digits + 6, count: 2)?
+      let second = digits(bytes.slice(), from: year_digits + 8, count: 2)?
+      if year > 9999 || month > 12 || day > 31 || hour > 23 || minute > 59 || second > 59 {
+        return None
+      }
+      let date = time::Date.new(intrinsic::convert(year), month: intrinsic::convert(month), day: intrinsic::convert(day))?
+      let clock = time::TimeOfDay.new(intrinsic::convert(hour), minute: intrinsic::convert(minute), second: intrinsic::convert(second))?
+      date.at(clock).instant(0)
+    }
+    _ => None
+  }
+}
+
+fn hash_of_identifier(value: der::Value) -> Option[cryptography::HashFunction] {
+  if is_oid(value, expected: "608648016503040201") {
+    Some(cryptography::HashFunction.Sha256)
+  } else if is_oid(value, expected: "608648016503040202") {
+    Some(cryptography::HashFunction.Sha384)
+  } else if is_oid(value, expected: "608648016503040203") {
+    Some(cryptography::HashFunction.Sha512)
+  } else {
+    None
+  }
+}
+
+fn pss_hash(parameters: der::Value) -> Option[cryptography::HashFunction] {
+  for item in items_of(parameters) {
+    match item {
+      Tagged(number, bytes, ..) => {
+        if number == 0 {
+          let identifier = der::parse(bytes.slice()).ok()?
+          let parts = items_of(identifier)
+          if parts.length() > 0 {
+            return hash_of_identifier(parts[0])
+          }
+        }
+      }
+      _ => {}
+    }
+  }
+  Some(cryptography::HashFunction.Sha256)
+}
+
+fn algorithm_of(value: der::Value) -> Option[SignatureAlgorithm] {
+  let parts = items_of(value)
+  if parts.is_empty() {
+    return None
+  }
+  let identifier = parts[0]
+  if is_oid(identifier, expected: "2a8648ce3d040302") {
+    Some(SignatureAlgorithm.EcdsaSha256)
+  } else if is_oid(identifier, expected: "2a8648ce3d040303") {
+    Some(SignatureAlgorithm.EcdsaSha384)
+  } else if is_oid(identifier, expected: "2a864886f70d01010b") {
+    Some(SignatureAlgorithm.RsaPkcs1(function: cryptography::HashFunction.Sha256))
+  } else if is_oid(identifier, expected: "2a864886f70d01010c") {
+    Some(SignatureAlgorithm.RsaPkcs1(function: cryptography::HashFunction.Sha384))
+  } else if is_oid(identifier, expected: "2a864886f70d01010d") {
+    Some(SignatureAlgorithm.RsaPkcs1(function: cryptography::HashFunction.Sha512))
+  } else if is_oid(identifier, expected: "2a864886f70d01010a") && parts.length() > 1 {
+    Some(SignatureAlgorithm.RsaPss(function: pss_hash(parts[1])?))
+  } else if is_oid(identifier, expected: "2b6570") {
+    Some(SignatureAlgorithm.Ed25519Signature)
+  } else {
+    None
+  }
+}
+
+public fn public_key_of(info: der::Value) -> Option[PublicKey]
+  uses Panic
+{
+  let parts = items_of(info)
+  if parts.length() != 2 {
+    return None
+  }
+  let algorithm = items_of(parts[0])
+  let key = match parts[1] {
+    BitString(unused_bits, bytes) => if unused_bits == 0 { bytes.copy() } else { return None }
+    _ => return None
+  }
+  if algorithm.is_empty() {
+    return None
+  }
+  if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
+    let curve = if is_oid(algorithm[1], expected: "2a8648ce3d030107") {
+      cryptography::Curve.P256
+    } else if is_oid(algorithm[1], expected: "2b81040022") {
+      cryptography::Curve.P384
+    } else {
+      return None
+    }
+    return match cryptography::EcdsaVerifyingKey.from_sec1(curve, bytes: key.slice()) {
+      Some(verifying) => Some(PublicKey.Ecdsa(key: own verifying))
+      None => None
+    }
+  }
+  if is_oid(algorithm[0], expected: "2a864886f70d010101") {
+    let numbers = items_of(der::parse(key.slice()).ok()?)
+    if numbers.length() != 2 {
+      return None
+    }
+    let modulus = match numbers[0] {
+      Integer(bytes) => bytes.copy()
+      _ => return None
+    }
+    let exponent = match numbers[1] {
+      Integer(bytes) => bytes.copy()
+      _ => return None
+    }
+    return match cryptography::RsaPublicKey.new(modulus.slice(), exponent: exponent.slice()) {
+      Some(rsa) => Some(PublicKey.Rsa(key: own rsa))
+      None => None
+    }
+  }
+  if is_oid(algorithm[0], expected: "2b6570") && key.length() == 32 {
+    var bytes: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let width: USize = 32
+    for index in 0..width {
+      if index < key.length() {
+        bytes[index] = key[index]
+      }
+    }
+    return match cryptography::VerifyingKey.from_bytes(bytes) {
+      Some(verifying) => Some(PublicKey.Ed25519(key: verifying))
+      None => None
+    }
+  }
+  None
+}
+
+fn common_name_of(name: der::Value) -> Option[String] {
+  for set in items_of(name) {
+    for attribute in items_of(set) {
+      let parts = items_of(attribute)
+      if parts.length() == 2 && is_oid(parts[0], expected: "550403") {
+        return text_of(parts[1])
+      }
+    }
+  }
+  None
+}
+
+type Extensions(
+  is_authority: Bool,
+  path_length: Option[UInt64],
+  signs_certificates: Bool,
+  serves: Bool,
+  dns_names: List[String],
+  ip_addresses: List[network::IpAddress],
+  unknown_critical: Bool,
+)
+
+fn small_number(value: der::Value) -> Option[UInt64] {
+  match value {
+    Integer(bytes) => {
+      if bytes.length() > 8 || (bytes.length() > 0 && bytes[0] >= 128) {
+        return None
+      }
+      var number: UInt64 = 0
+      for byte in bytes {
+        number = (number << 8) | intrinsic::convert[UInt8, UInt64](byte)
+      }
+      Some(number)
+    }
+    _ => None
+  }
+}
+
+fn read_extensions(list: der::Value) -> Option[Extensions] {
+  var found = Extensions(
+    is_authority: false,
+    path_length: None,
+    signs_certificates: true,
+    serves: true,
+    dns_names: [],
+    ip_addresses: [],
+    unknown_critical: false,
+  )
+  for extension in items_of(list) {
+    let parts = items_of(extension)
+    if parts.length() < 2 {
+      return None
+    }
+    let critical = parts.length() == 3 && parts[1] == der::Value.Boolean(value: true)
+    let content = match parts[parts.length() - 1] {
+      OctetString(bytes) => der::parse(bytes.slice()).ok()?
+      _ => return None
+    }
+    let identifier = parts[0]
+    if is_oid(identifier, expected: "551d13") {
+      let fields = items_of(content)
+      for field in fields {
+        match field {
+          Boolean(value) => found.is_authority = value
+          Integer(_) => found.path_length = small_number(field)
+          _ => {}
+        }
+      }
+    } else if is_oid(identifier, expected: "551d0f") {
+      found.signs_certificates = match content {
+        BitString(bytes, ..) => bytes.length() > 0 && (bytes[0] & 4) != 0
+        _ => false
+      }
+    } else if is_oid(identifier, expected: "551d25") {
+      var serves = false
+      for usage in items_of(content) {
+        if is_oid(usage, expected: "2b06010505070301") || is_oid(usage, expected: "551d2500") {
+          serves = true
+        }
+      }
+      found.serves = serves
+    } else if is_oid(identifier, expected: "551d11") {
+      for general in items_of(content) {
+        match general {
+          Tagged(number, bytes, ..) => {
+            if number == 2 {
+              match String.from_utf8(bytes.copy()) {
+                Ok(name) => mut found.dns_names.push(own name)
+                Err(_) => {}
+              }
+            } else if number == 7 && bytes.length() == 4 {
+              mut found.ip_addresses.push(network::IpAddress.Version4([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            } else if number == 7 && bytes.length() == 16 {
+              var octets: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              let width: USize = 16
+              for index in 0..width {
+                if index < bytes.length() {
+                  octets[index] = bytes[index]
+                }
+              }
+              mut found.ip_addresses.push(network::IpAddress.Version6(octets))
+            }
+          }
+          _ => {}
+        }
+      }
+    } else if critical && !is_oid(identifier, expected: "551d0e") && !is_oid(identifier, expected: "551d23") {
+      found.unknown_critical = true
+    }
+  }
+  Some(own found)
+}
+
+public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
+  uses Panic
+{
+  let whole = match der::parse(encoded) {
+    Ok(value) => own value
+    Err(_) => return Err(malformed("encoding"))
+  }
+  let parts = items_of(whole)
+  if parts.length() != 3 {
+    return Err(malformed("outer structure"))
+  }
+  let algorithm = algorithm_of(parts[1]).unwrap_or(SignatureAlgorithm.Unsupported)
+  let signature = match parts[2] {
+    BitString(unused_bits, bytes) => if unused_bits == 0 { bytes.copy() } else { return Err(malformed("signature")) }
+    _ => return Err(malformed("signature"))
+  }
+  let fields = items_of(parts[0])
+  var index: USize = 0
+  if fields.length() > 0 && fields[0] is Tagged(number: 0, constructed: true, ..) {
+    index = 1
+  }
+  if fields.length() < index + 6 {
+    return Err(malformed("fields"))
+  }
+  let validity = items_of(fields[index + 3])
+  if validity.length() != 2 {
+    return Err(malformed("validity"))
+  }
+  let not_before = match time_of(validity[0]) {
+    Some(instant) => instant
+    None => return Err(malformed("validity"))
+  }
+  let not_after = match time_of(validity[1]) {
+    Some(instant) => instant
+    None => return Err(malformed("validity"))
+  }
+  let public_key = match public_key_of(fields[index + 5]) {
+    Some(key) => own key
+    None => return Err(Error(message: "a certificate whose public key is not supported"))
+  }
+  var extensions = Extensions(
+    is_authority: false,
+    path_length: None,
+    signs_certificates: true,
+    serves: true,
+    dns_names: [],
+    ip_addresses: [],
+    unknown_critical: false,
+  )
+  for field in fields[index + 6..] {
+    match field {
+      Tagged(number, bytes, ..) => {
+        if number == 3 {
+          let list = match der::parse(bytes.slice()) {
+            Ok(list) => own list
+            Err(_) => return Err(malformed("extensions"))
+          }
+          extensions = match read_extensions(list) {
+            Some(read) => own read
+            None => return Err(malformed("extensions"))
+          }
+        }
+      }
+      _ => {}
+    }
+  }
+  Ok(Certificate(
+    encoded: encoded.to_list(),
+    signed: der::encode(parts[0]),
+    algorithm: algorithm,
+    signature: own signature,
+    issuer: der::encode(fields[index + 2]),
+    subject: der::encode(fields[index + 4]),
+    not_before: not_before,
+    not_after: not_after,
+    public_key: own public_key,
+    is_authority: extensions.is_authority,
+    path_length: extensions.path_length,
+    signs_certificates: extensions.signs_certificates,
+    serves: extensions.serves,
+    dns_names: own extensions.dns_names,
+    ip_addresses: own extensions.ip_addresses,
+    common_name: common_name_of(fields[index + 4]),
+    unknown_critical: extensions.unknown_critical,
+  ))
+}
+
+public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]] {
+  var begin = "-----BEGIN "
+  mut begin.push(label)
+  mut begin.push("-----")
+  var end = "-----END "
+  mut end.push(label)
+  mut end.push("-----")
+  var blocks: List[List[UInt8]] = []
+  var inside = false
+  var body = ""
+  for line in text.lines() {
+    let trimmed = line.trim()
+    if trimmed == begin.slice() {
+      inside = true
+      body = ""
+    } else if trimmed == end.slice() {
+      if inside {
+        match base64::decode(body.slice()) {
+          Ok(bytes) => mut blocks.push(own bytes)
+          Err(_) => {}
+        }
+      }
+      inside = false
+    } else if inside {
+      mut body.push(trimmed)
+    }
+  }
+  blocks
+}
+
+public fn parse_pem(text: StringSlice) -> Result[List[Certificate], Error]
+  uses Panic
+{
+  var certificates: List[Certificate] = []
+  for block in pem_blocks(text, label: "CERTIFICATE") {
+    mut certificates.push(Certificate.parse(block.slice())?)
+  }
+  Ok(own certificates)
+}
+
+public fn ecdsa_signature_from_der(encoded: Slice[UInt8], size: USize) -> Option[List[UInt8]] {
+  let parts = items_of(der::parse(encoded).ok()?)
+  if parts.length() != 2 {
+    return None
+  }
+  var raw = parts[0].unsigned_bytes(size)?
+  mut raw.append(parts[1].unsigned_bytes(size)?)
+  Some(own raw)
+}
+
+public fn ecdsa_signature_to_der(raw: Slice[UInt8]) -> List[UInt8] {
+  let half = raw.length() / 2
+  der::encode(der::Value.Sequence(items: [der::unsigned_integer(raw[..half]), der::unsigned_integer(raw[half..])]))
+}
+
+fn curve_size(key: cryptography::EcdsaVerifyingKey) -> USize {
+  match key.curve() {
+    P256 => 32
+    P384 => 48
+  }
+}
+
+public fn PublicKey.verify(self, algorithm: SignatureAlgorithm, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+  uses Panic
+{
+  match self {
+    Ecdsa(key) => {
+      let digest = match algorithm {
+        EcdsaSha256 => cryptography::HashFunction.Sha256.digest(message)
+        EcdsaSha384 => cryptography::HashFunction.Sha384.digest(message)
+        _ => return false
+      }
+      match ecdsa_signature_from_der(signature, size: curve_size(key)) {
+        Some(raw) => key.verify_digest(digest.slice(), signature: raw.slice())
+        None => false
+      }
+    }
+    Rsa(key) => match algorithm {
+      RsaPkcs1(function) => key.verify_pkcs1(function, message: message, signature: signature)
+      RsaPss(function) => key.verify_pss(function, message: message, signature: signature)
+      _ => false
+    }
+    Ed25519(key) => match algorithm {
+      Ed25519Signature => {
+        if signature.length() != 64 {
+          return false
+        }
+        var bytes: Array[UInt8, 64] = [
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]
+        let width: USize = 64
+        for index in 0..width {
+          if index < signature.length() {
+            bytes[index] = signature[index]
+          }
+        }
+        key.verify(message, signature: cryptography::Signature(bytes: bytes))
+      }
+      _ => false
+    }
+  }
+}
+
+public fn Certificate.is_signed_by(self, issuer: Certificate) -> Bool
+  uses Panic
+{
+  self.issuer == issuer.subject && issuer.public_key.verify(self.algorithm, message: self.signed.slice(), signature: self.signature.slice())
+}
+
+fn lowered(text: StringSlice) -> String {
+  text.to_ascii_lowercase()
+}
+
+public fn Certificate.matches_host(self, host: StringSlice) -> Bool {
+  match network::IpAddress.parse(host) {
+    Ok(address) => return self.ip_addresses.contains(address)
+    Err(_) => {}
+  }
+  let wanted = lowered(host)
+  let wanted_text = wanted.slice()
+  let trimmed = if wanted_text.ends_with(".") { wanted_text.part(0, to: wanted_text.length() - 1) } else { wanted_text }
+  for name in self.dns_names {
+    let pattern = lowered(name.slice())
+    let pattern_text = pattern.slice()
+    if pattern_text == trimmed {
+      return true
+    }
+    if pattern_text.starts_with("*.") && pattern_text.length() > 2 {
+      let suffix = pattern_text.part(1, to: pattern_text.length())
+      match trimmed.find(".") {
+        Some(dot) => {
+          if dot > 0 && trimmed.part(dot, to: trimmed.length()) == suffix {
+            return true
+          }
+        }
+        None => {}
+      }
+    }
+  }
+  false
+}
+
+public type VerifyError =
+  | Expired
+  | NotYetValid
+  | UnknownIssuer
+  | NotAuthority
+  | PathTooLong
+  | WrongHost
+  | NotForServers
+  | UnsupportedCritical
+  | Empty
+  derives Equal
+
+impl Display for VerifyError {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Expired => mut output.write("a certificate in the chain has expired")
+      NotYetValid => mut output.write("a certificate in the chain is not valid yet")
+      UnknownIssuer => mut output.write("the chain does not lead to a trusted root")
+      NotAuthority => mut output.write("a certificate that signs another is not a certificate authority")
+      PathTooLong => mut output.write("the chain is longer than an authority allows")
+      WrongHost => mut output.write("the certificate is not for this host")
+      NotForServers => mut output.write("the certificate is not for servers")
+      UnsupportedCritical => mut output.write("a certificate has a critical extension that is not supported")
+      Empty => mut output.write("there is no certificate")
+    }
+  }
+}
+
+fn check_time(certificate: Certificate, now: Instant) -> Result[Unit, VerifyError] {
+  if now < certificate.not_before {
+    return Err(VerifyError.NotYetValid)
+  }
+  if now > certificate.not_after {
+    return Err(VerifyError.Expired)
+  }
+  if certificate.unknown_critical {
+    return Err(VerifyError.UnsupportedCritical)
+  }
+  Ok(Unit)
+}
+
+public fn verify_chain(
+  chain: Slice[Certificate],
+  roots: Slice[Certificate],
+  host: StringSlice,
+  now: Instant,
+) -> Result[Unit, VerifyError]
+  uses Panic
+{
+  if chain.is_empty() {
+    return Err(VerifyError.Empty)
+  }
+  let leaf = chain[0]
+  check_time(leaf, now: now)?
+  if !leaf.serves {
+    return Err(VerifyError.NotForServers)
+  }
+  if !leaf.matches_host(host) {
+    return Err(VerifyError.WrongHost)
+  }
+  var current = leaf.copy()
+  var below: UInt64 = 0
+  var steps: USize = 0
+  while steps < 10 {
+    for root in roots {
+      if current.is_signed_by(root) {
+        return Ok(Unit)
+      }
+      if current == root {
+        return Ok(Unit)
+      }
+    }
+    var next: Option[Certificate] = None
+    for candidate in chain {
+      if next is None && candidate != current && current.is_signed_by(candidate) {
+        next = Some(candidate.copy())
+      }
+    }
+    match own next {
+      Some(issuer) => {
+        check_time(issuer, now: now)?
+        if !issuer.is_authority || !issuer.signs_certificates {
+          return Err(VerifyError.NotAuthority)
+        }
+        match issuer.path_length {
+          Some(limit) => {
+            if below > limit {
+              return Err(VerifyError.PathTooLong)
+            }
+          }
+          None => {}
+        }
+        below = below.saturating_add(1)
+        current = own issuer
+      }
+      None => return Err(VerifyError.UnknownIssuer)
+    }
+    steps += 1
+  }
+  Err(VerifyError.UnknownIssuer)
+}
+
+let root_bundles: Array[String, 5] = [
+  "/etc/ssl/certs/ca-certificates.crt",
+  "/etc/pki/tls/certs/ca-bundle.crt",
+  "/etc/ssl/ca-bundle.pem",
+  "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+  "/etc/ssl/cert.pem",
+]
+
+public fn system_roots() -> Result[List[Certificate], SystemError]
+  uses FileRead, Panic
+{
+  for path in root_bundles {
+    match FileRead.read_text(Path.new(path.slice())) {
+      Ok(text) => {
+        var roots: List[Certificate] = []
+        for block in pem_blocks(text.slice(), label: "CERTIFICATE") {
+          match Certificate.parse(block.slice()) {
+            Ok(root) => mut roots.push(own root)
+            Err(_) => {}
+          }
+        }
+        return Ok(own roots)
+      }
+      Err(_) => {}
+    }
+  }
+  Err(SystemError.NotFound)
+}
+
+public type PrivateKey =
+  | Ecdsa(key: cryptography::EcdsaSigningKey)
+  | Rsa(key: cryptography::RsaPrivateKey)
+  | Ed25519(key: cryptography::SigningKey)
+
+fn integer_bytes(value: der::Value) -> Option[List[UInt8]] {
+  match value {
+    Integer(bytes) => Some(bytes.copy())
+    _ => None
+  }
+}
+
+public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
+  uses Panic
+{
+  let parts = items_of(der::parse(encoded).ok()?)
+  if parts.length() < 3 {
+    return None
+  }
+  let algorithm = items_of(parts[1])
+  let inner = match parts[2] {
+    OctetString(bytes) => bytes.copy()
+    _ => return None
+  }
+  if algorithm.is_empty() {
+    return None
+  }
+  if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
+    let curve = if is_oid(algorithm[1], expected: "2a8648ce3d030107") {
+      cryptography::Curve.P256
+    } else if is_oid(algorithm[1], expected: "2b81040022") {
+      cryptography::Curve.P384
+    } else {
+      return None
+    }
+    let fields = items_of(der::parse(inner.slice()).ok()?)
+    if fields.length() < 2 {
+      return None
+    }
+    let scalar = match fields[1] {
+      OctetString(bytes) => bytes.copy()
+      _ => return None
+    }
+    return match cryptography::EcdsaSigningKey.from_scalar(curve, bytes: scalar.slice()) {
+      Some(key) => Some(PrivateKey.Ecdsa(key: own key))
+      None => None
+    }
+  }
+  if is_oid(algorithm[0], expected: "2a864886f70d010101") {
+    let fields = items_of(der::parse(inner.slice()).ok()?)
+    if fields.length() < 9 {
+      return None
+    }
+    let public_key = cryptography::RsaPublicKey.new(integer_bytes(fields[1])?.slice(), exponent: integer_bytes(fields[2])?.slice())?
+    return match cryptography::RsaPrivateKey.new(
+      public_key,
+      exponent: integer_bytes(fields[3])?.slice(),
+      first_prime: integer_bytes(fields[4])?.slice(),
+      second_prime: integer_bytes(fields[5])?.slice(),
+      first_exponent: integer_bytes(fields[6])?.slice(),
+      second_exponent: integer_bytes(fields[7])?.slice(),
+      coefficient: integer_bytes(fields[8])?.slice(),
+    ) {
+      Some(key) => Some(PrivateKey.Rsa(key: own key))
+      None => None
+    }
+  }
+  if is_oid(algorithm[0], expected: "2b6570") {
+    let seed = match der::parse(inner.slice()).ok()? {
+      OctetString(bytes) => bytes.copy()
+      _ => return None
+    }
+    if seed.length() != 32 {
+      return None
+    }
+    var bytes: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let width: USize = 32
+    for index in 0..width {
+      if index < seed.length() {
+        bytes[index] = seed[index]
+      }
+    }
+    return Some(PrivateKey.Ed25519(key: cryptography::SigningKey.from_seed(bytes)))
+  }
+  None
+}

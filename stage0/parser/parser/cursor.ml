@@ -249,7 +249,7 @@ let describe (token : Token.t) =
   | Punctuation punctuation -> Printf.sprintf "`%s`" (punctuation_spelling punctuation)
   | Foreign foreign -> Printf.sprintf "`%s`" (foreign_spelling foreign)
 
-(* Reports that the current token is not what [expected] describes, unless it
+(* Reports that the current token does not match [expected], unless it
    is a closer the lexer inserted, and raises [Failed]. *)
 let fail cursor expected =
   let token = peek cursor in
@@ -351,7 +351,7 @@ let bracketed cursor ~item ~recover =
       with
       | value -> loop (value :: items)
       | exception Failed ->
-          (* The item becomes [recover] of what it covered, up to the next
+          (* The item becomes [recover] of the tokens it covered, up to the next
              comma of this list, and the items after that comma are parsed,
              so that each invalid item gets an error of its own. *)
           while cursor.index < closer_index && peek_kind cursor <> Punctuation Comma do

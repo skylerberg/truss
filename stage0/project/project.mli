@@ -1,4 +1,4 @@
-(** A project's files as inputs, and what follows from them as queries.
+(** A project's files as inputs, and queries derived from them.
 
     A root is a tree of files: the project being worked on, the standard library, a registry
     package's files, or a package given by itself. *)
@@ -47,9 +47,9 @@ type layout = {
 }
 
 val layout : (string, layout) Query.query
-(** What a root's manifests and paths give: its packages, each module file's module, and what is
-    wrong with a manifest by itself. It reads the tree and the manifests, and no module's text, so
-    an edit to a module leaves it as it was. Manifests of another project are left out: under a root
+(** A root's layout from its manifests and paths: its packages, each module file's module, and the
+    errors in a manifest by itself. It reads the tree and the manifests, and no module's text, so an
+    edit to a module leaves it as it was. Manifests of another project are left out: under a root
     whose own manifest has a [[project]] table, a directory whose manifest has one too, with
     everything below it, and under a root without one, which is a project of one package, every
     other directory with a manifest. *)
@@ -86,14 +86,13 @@ type package = {
 }
 
 val package : (Path.package, package option) Query.query
-(** A package: what its manifest says, and its modules. *)
+(** A package: its manifest's contents, and its modules. *)
 
 val module_text : (Path.module_, string option) Query.query
 (** A module's text, [None] for a module that no package has. *)
 
 val problems : (unit, string list) Query.query
-(** What reading the project's manifests and lock file shows to be wrong, each as its file and
-    sentences. *)
+(** The errors in the project's manifests and lock file, each as its file and sentences. *)
 
 val registry : (unit, (Path.package * Registry.Version.t * string) list) Query.query
 (** The registry packages of the build, in order of name: each one's name, its version, and the hash

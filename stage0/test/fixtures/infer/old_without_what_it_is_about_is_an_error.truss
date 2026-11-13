@@ -1,5 +1,0 @@
-fn f(value: Int64) -> Int64
-  ensures old == 3
-{
-  value
-}

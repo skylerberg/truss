@@ -1,0 +1,6 @@
+
+fn run_example() -> UInt8
+  ensures result == 8
+{
+  count_up(7)
+}

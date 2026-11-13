@@ -173,7 +173,8 @@ val interpolations : string_literal -> interpolation array
 
 (** {1 Spellings}
 
-    Each list is the one place its items are spelled. A test checks them against GRAMMAR.md. *)
+    Each list is the one place its items are spelled. A test checks them against SPECIFICATION.md.
+*)
 
 val keywords : (string * keyword) list
 val reserved_words : (string * reserved) list

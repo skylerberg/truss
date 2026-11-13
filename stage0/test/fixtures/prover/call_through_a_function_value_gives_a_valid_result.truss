@@ -1,8 +1,8 @@
-type Positive(n: Int64)
-  invariant n > 0
+type Positive(limit_count: Int64)
+  invariant limit_count > 0
 
 fn take(make: fn() -> Positive) -> Int64
   ensures result > 0
 {
-  make().n
+  make().limit_count
 }

@@ -74,22 +74,21 @@ let compiles text =
 let linux : Libc.system = { os = Linux; architecture = X86_64 }
 
 let () =
-  test "the C library's numbers, prototypes, and structures are what this system's headers give"
-    (fun () ->
-      match compiles (Libc.check host) with
+  test "the C library's numbers, prototypes, and structures match this system's headers" (fun () ->
+      match compiles (Libc.For_testing.check host) with
       | Ok () -> ()
       | Error message -> fail "the table disagrees with the headers:\n%s" message);
   test "another system's numbers do not pass for this one's" (fun () ->
       let other : Libc.system =
         { host with os = (match host.os with Linux -> Macos | Macos -> Linux) }
       in
-      match compiles (Libc.check other) with
+      match compiles (Libc.For_testing.check other) with
       | Ok () ->
           fail "the check takes the table of %s on %s" (Libc.system_name other)
             (Libc.system_name host)
       | Error _ -> ());
   test "a function that only macOS has is held to its headers, and to no other system's" (fun () ->
-      let checked system = contains (Libc.check system) "proc_pidpath" in
+      let checked system = contains (Libc.For_testing.check system) "proc_pidpath" in
       if not (checked { os = Macos; architecture = Arm64 }) then
         fail "the check for macOS leaves out proc_pidpath";
       if checked linux then fail "the check for Linux looks for proc_pidpath");
@@ -108,7 +107,8 @@ let () =
            ~site:{ definition = definition "entry"; line = 0; column = 1 });
       finish builder (Return (Some (Copy (at length))));
       let lowered =
-        Lir.to_string (instance "entry" (build builder ~parameters:[] ~result:(Some (value int32))))
+        Lir.For_testing.to_string
+          (instance "entry" (build builder ~parameters:[] ~result:(Some (value int32))))
       in
       if not (contains lowered "this system's C library has no proc_pidpath") then
         fail "the call does not stop the program:\n%s" lowered;
@@ -132,16 +132,15 @@ let () =
         modes (Libc Read) <> [ ("descriptor", Types.Read); ("buffer", Mut); ("count", Read) ]
         || modes (Libc Write) <> [ ("descriptor", Types.Read); ("bytes", Read); ("count", Read) ]
       then fail "read and write take their memory in the wrong modes");
-  test "what a row says a call reads and writes is counted by a number the call is passed"
-    (fun () ->
+  test "a row's reads and writes are counted by a number the call is passed" (fun () ->
       List.iter
         (fun function_ ->
           let { Libc.parameters; at_most; _ } = Libc.signature function_ in
           let name = Libc.function_name function_ in
-          let passed what parameter =
+          let passed role parameter =
             match List.assoc_opt parameter parameters with
             | Some (Libc.Value USize) | Some (Written (UInt32, [ _ ])) -> ()
-            | _ -> fail "%s: %s is `%s`, which is no count the call is passed" name what parameter
+            | _ -> fail "%s: %s is `%s`, which is no count the call is passed" name role parameter
           in
           Option.iter (passed "the bound of the result") at_most;
           List.iter
@@ -372,7 +371,7 @@ let () =
               emit builder (Assign (at status, Use (constant_int32 0)));
               status);
         ]);
-  test "a pipe's two ends arrive in the arguments named for them, and poll finds what was written"
+  test "a pipe's two ends arrive in the arguments named for them, and poll finds the written data"
     (fun () ->
       let open Lir_builder in
       let waited_ty = Storage.of_elements int32 in
@@ -382,7 +381,7 @@ let () =
               let read_end = local builder (value int32)
               and write_end = local builder (value int32) in
               operate builder (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
-              let view = view_of builder "x" in
+              let view = view_of builder "first_number" in
               operate builder (Libc Write)
                 [ Value (Copy (at write_end)); Place (at view); Value (usize 1) ];
               let waited = local builder (value waited_ty) in
@@ -397,7 +396,7 @@ let () =
               let ready = local builder (value int32) in
               operate builder ~destination:(at ready) (Libc Poll)
                 [ Place (at waited); Value (usize 1); Value (constant_int32 1000) ];
-              (* What was found is the high half of the second number. *)
+              (* The returned events are the high half of the second number. *)
               let actual = local builder (value int32) in
               emit builder
                 (Assign

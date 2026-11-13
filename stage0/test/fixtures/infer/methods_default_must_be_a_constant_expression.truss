@@ -3,5 +3,5 @@ fn compute() -> Int64 {
 }
 
 fn Point.moved(self, by: Int64 = compute()) -> Int64 {
-  self.x + by
+  self.first_number + by
 }

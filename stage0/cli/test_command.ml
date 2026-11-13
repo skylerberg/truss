@@ -1,5 +1,5 @@
-(* [truss test]: checks the package, then runs the tests whose results are
-   not kept. *)
+(* [truss test]: checks the packages, then runs the tests without a cached
+   result. *)
 
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
@@ -43,8 +43,8 @@ let indented text =
   |> List.filter (( <> ) "")
   |> List.iter (fun line -> Output.print_line ("    " ^ line))
 
-(* How many tests ended each way, in the order the runner names outcomes,
-   leaving out those that none did. *)
+(* The number of tests with each outcome, in the runner's order of
+   outcomes, omitting outcomes with no test. *)
 let summary (records : Compile.record list) =
   let count outcome =
     List.length (List.filter (fun (record : Compile.record) -> record.outcome = outcome) records)
@@ -180,8 +180,9 @@ let on_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-(* Runs each package's tests with its own time limit, one test program a
-   package, and reports each test by its place among them all. *)
+(* Runs each package's tests in one test program per package, with the
+   package's time limit, and reports each test by its index among all the
+   selected tests. *)
 let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
   let offset = ref 0 in
   List.fold_left
@@ -215,7 +216,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
   let project = Project.load directory in
   let report = Report.gather project in
   let checked = now_microseconds () in
-  (* In the packages' order, so each package's tests are together. *)
+  (* In package order, so each package's tests are contiguous. *)
   let tests =
     let selected = select project ~paths ~match_ in
     List.concat_map
@@ -244,8 +245,8 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
       }
     in
     let build_ended = ref None in
-    (* A sanitized run keeps no results, since it checks what a plain one
-       does not. *)
+    (* A sanitized run caches no results, since its checks differ from
+       an unsanitized run's. *)
     let results = if sanitize then None else Some (Compiler.test_results ()) in
     let outcome =
       run_all project compile ~results ~rerun ~progress:(on_progress progress ~build_ended) tests
@@ -277,3 +278,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
         else print_report tests records ~timings:show_timings timings;
         if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0
         else 1
+
+module For_testing = struct
+  let duration = duration
+end

@@ -1,16 +1,16 @@
 (** The code database's sessions: states with their place in the store, the questions a state's
     graph answers, and the background process that holds sessions between commands.
 
-    This layer knows no compiler stage and no project: not what a manifest is, nor a package, nor
-    git. A client, such as {!Database}, says what a session's inputs are and keeps what it needs
-    with each session as its {!attachment}. So the layer can be given another client, and a client
-    another layer, without either changing. *)
+    This layer knows no compiler stage and no project: no manifest, package, or git. A client, such
+    as {!Database}, sets a session's inputs and keeps the data it needs with each session as its
+    {!attachment}. So the layer can be given another client, and a client another layer, without
+    either changing. *)
 
 type t
 (** One state, with the name it is saved under in the store, if it is saved. *)
 
 type attachment = ..
-(** What a client keeps with a session. This layer does not look inside. *)
+(** The data a client keeps with a session. This layer does not look inside. *)
 
 type attachment += Nothing
 
@@ -79,13 +79,13 @@ val homes : unit -> (string * string) list
 (** Each directory that has a saved state, with the name its state is saved under. *)
 
 val save : t -> unit
-(** Writes what changed in the state since it was last written, and points its name at it. *)
+(** Writes the state's changes since it was last written, and points its name at it. *)
 
 val stabilize : t -> Engine.change
 (** Brings the state up to date, and saves it. *)
 
 val compact : ?waited_for:bool -> t -> unit
-(** Writes the state whole and opens it again, once what was written since the last whole state has
+(** Writes the state whole and opens it again, once the data written since the last whole state has
     grown to half its size; with [waited_for], in the background process, only at four times that,
     since a command is waiting. *)
 
@@ -114,7 +114,7 @@ val find_result : kind:string -> key:string -> string option
 val flush : unit -> unit
 
 val on_close : (unit -> unit) -> unit
-(** Runs a function whenever every state is closed or discarded, for a client to let go of what it
+(** Runs a function whenever every state is closed or discarded, for a client to let go of its data
     built on them. *)
 
 val reset : unit -> unit
@@ -128,33 +128,9 @@ val recovering : (unit -> 'a) -> 'a
 val logging : bool ref
 (** Whether new sessions keep a log of the queries they compute, for tests. *)
 
-(** {1 What a state's graph answers} *)
+(** {1 Graph questions about a state} *)
 
-module Graph : sig
-  type dependencies
-
-  val dependencies : Engine.t -> dependencies
-  (** For every definition a state holds results about, what its parts read of other definitions'
-      parts. *)
-
-  val reads : dependencies -> Path.t -> (Path.t * string * string) list
-  val readers : dependencies -> Path.t -> (Path.t * string * string) list
-
-  type difference = Changed | Added | Same
-
-  val changes : Engine.t -> Engine.t -> (Path.t * string option * difference) list
-  (** Every part of a definition that a change between two states could reach, in the first, with
-      how it compares with the same part in the second. *)
-
-  type place = { path : Path.t option; part : string option; label : string }
-
-  type overlap =
-    | Both_change of place
-    | Reads of { this_worktree : bool; change : place; reads : place }
-
-  val overlaps : base:Engine.t -> Engine.t -> Engine.t -> overlap list
-  (** Where two states' changes from a common base meet. *)
-end
+module Graph = Graph
 
 (** {1 The background process} *)
 

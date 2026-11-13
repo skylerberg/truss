@@ -1,17 +1,17 @@
-(* The line on standard error that shows how a long step is getting on,
-   redrawn in place. It is drawn only when standard error is a terminal, and
-   erased when the step ends, so logs hold only the report. *)
+(* A progress line on standard error, redrawn in place during a long step.
+   It is drawn only when standard error is a terminal, and erased when the
+   step ends, so logs contain only the report. *)
 
 type t = { enabled : bool; mutable drawn : bool }
 
 let create ~enabled = { enabled = enabled && Output.terminal (); drawn = false }
 
-(* The terminal's width, from [COLUMNS] when the shell exports it. A line
-   that wrapped could not be erased, so it is cut to fit. *)
+(* The terminal's width, from [COLUMNS] when the shell exports it. A
+   wrapped line could not be erased, so the line is truncated to fit. *)
 let width () =
   match Output.columns () with Some columns when columns > 10 -> columns - 1 | _ -> 79
 
-(* The text cut to [limit] characters, counting each UTF-8 sequence once. *)
+(* Truncates the text to [limit] code points. *)
 let cut text limit =
   let rec cut_at index count =
     if index >= String.length text then text
@@ -34,3 +34,7 @@ let clear status =
     Output.eprint erase_line;
     status.drawn <- false
   end
+
+module For_testing = struct
+  let cut = cut
+end

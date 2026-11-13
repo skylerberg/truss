@@ -256,13 +256,19 @@ and statement (statement : statement) =
   | Expression value -> expression value
   | Assignment { target; operator; value } ->
       form (assignment operator) [ expression target; expression value ]
-  | For { mode; pattern = bound; iterable; clauses; body } ->
+  | For { mode; pattern = bound; annotation; iterable; clauses; body } ->
       form
         (match mode with
         | Sequential -> "for"
         | Parallel_loop -> "parallel-for"
         | Concurrent_loop -> "concurrent-for")
-        ([ pattern bound; expression iterable ] @ list loop_clause clauses @ [ block body ])
+        ([
+           pattern bound;
+           optional (fun type_ -> ": " ^ type_expression type_) annotation;
+           expression iterable;
+         ]
+        @ list loop_clause clauses
+        @ [ block body ])
   | While { condition; clauses; body } ->
       form "while" ((expression condition :: list loop_clause clauses) @ [ block body ])
   | Parallel body -> form "parallel" [ block body ]
@@ -488,3 +494,8 @@ let file (file : file) =
   String.concat "\n"
     (List.map (fun (item : path item) -> form "use" [ path item.value ]) file.uses
     @ definitions file.definitions)
+
+module For_testing = struct
+  let definition = definition
+  let definitions = definitions
+end

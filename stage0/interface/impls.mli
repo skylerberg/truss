@@ -13,17 +13,13 @@ val derivable : Path.t -> bool
 val index : (Path.package, ((Path.t * Path.t) * Path.t) list) Query.query
 (** Every [impl] of a package, written or derived, by trait and type constructor. *)
 
-val real_implementation : Query.context -> Path.t -> Path.t option
-(** The system implementation of a capability: its one [impl] in [standard::system], which the
-    program's entry point provides to [main]. *)
-
 val impls_for : Query.context -> Path.t -> Path.package -> (Path.t * Path.t) list
 (** The impls of a package for a type, each with its trait. *)
 
 val impls_in : (Path.t * Path.t * Path.package, Path.t list) Query.query
 val cursor_trait : Path.t
 
-val cursor_uses : Query.context -> Types.ty -> Types.capability list
+val cursor_uses : Query.context -> Types.ty -> Types.capability_set
 (** The capabilities that [next] uses on the cursor of a yielding method: the method's, for the
     cursor's type arguments, since [next] runs the method's code. Any other type has none. *)
 
@@ -126,14 +122,14 @@ val capability_set :
   Types.ty ->
   Types.trait_reference ->
   string ->
-  Types.capability list
+  Types.capability_set
 (** The associated capability set of a type, as the trait's [impl] for the type defines it. The set
     of a generic parameter is known only for each instantiation, so it stays a projection, and so
     does the set of a type that is not inferred yet. An [any] type fixes every set to the empty one:
     the code that holds the value cannot name the capabilities of the type that it hides. *)
 
 val normalize_capabilities :
-  Query.context -> bounds:bounds -> ?depth:int -> Types.capability list -> Types.capability list
+  Query.context -> bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
 (** Normalizes a set of capabilities: replaces every associated capability set whose type is known
     by the capabilities that the [impl] defines for it. *)
 

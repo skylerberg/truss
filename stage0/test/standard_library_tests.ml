@@ -3,24 +3,18 @@
 
 open Harness
 
-(* CI proves the library on runners of its own, beside the other tests. *)
-let () =
-  if Sys.getenv_opt "TRUSS_SKIP_LIBRARY_PROOFS" = Some "1" then begin
-    print_endline "skipped: the library's proofs run in jobs of their own";
-    exit 0
-  end
-
-(* CI proves the library on several runners at once. [TRUSS_PROOF_SHARE]
-   names this run's share as [index/count], and the run checks and proves
-   only its own modules, and computes the parts of other modules they use on
-   demand. The modules are dealt out by weight, heaviest first, each to the
-   share with the least so far, so that the shares take about as long as
-   each other. A module's weight is what proving it was measured to cost,
-   which [Proof_weights] lists. The letters of a module's source do not
-   tell: a module of loops with invariants costs several times what
-   straight-line code of the same length does. A module that was not
-   measured weighs by its letters, which leaves out tables of numbers:
-   they are large and have nothing to prove. *)
+(* CI proves the library in several processes at once, one for each core
+   of several runners. [TRUSS_PROOF_SHARE] names this process's share as
+   [index/count], and the process checks and proves only its own modules,
+   and computes the parts of other modules they use on demand. The modules
+   are dealt out by weight, heaviest first, each to the share with the
+   least so far, so that the shares take about as long as each other. A
+   module's weight is its measured proof cost, which [Proof_weights]
+   lists. The letters of a module's source do not tell: a module of loops
+   with invariants costs several times as much as straight-line code of
+   the same length. A module that was not measured weighs by its letters,
+   which leaves out tables of numbers: they are large and have nothing to
+   prove. *)
 let share =
   match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
   | None | Some "" -> None
@@ -81,8 +75,9 @@ let solver =
    proven by itself, and the run prints [Proof_weights] again, with the
    processor time of each measured module, the solver's included, in
    hundredths of a second, and the recorded weight of every other module.
-   With no directory of solver answers, that is what a module costs a run
-   that starts from nothing. *)
+   Measure with a directory that holds every query's answer, as CI's runs
+   start with: there a module's cost is translating it, which the solver's
+   cost from nothing would hide. *)
 let measured_modules =
   match Sys.getenv_opt "TRUSS_PROOF_WEIGHTS" with
   | None | Some "" -> None
@@ -129,7 +124,7 @@ let measure database ~record ~is_measured =
 
 (* A run prints how long each stage and each module took, and how many
    queries the solver ran and did not read from its kept answers, so the
-   log of a slow job names what was slow. *)
+   log of a slow job names the slow modules. *)
 let timed label work =
   let start = Unix.gettimeofday () in
   let solved = Solver.solved solver in
@@ -148,7 +143,7 @@ let session =
   match Sys.getenv_opt "TRUSS_PROOF_STATE" with
   | None | Some "" -> None
   | Some name -> (
-      match Database.open_library name with
+      match Database.For_testing.open_library name with
       | Ok session -> Some session
       | Error message ->
           prerr_endline message;
@@ -157,7 +152,7 @@ let session =
 let () =
   let engine =
     match session with
-    | Some session -> Database.Testing.engine session
+    | Some session -> Database.For_testing.engine session
     | None ->
         let engine = Engine.create () in
         Database.load_standard engine;

@@ -2,7 +2,7 @@ fn is_small(value: Int64) -> Bool {
   value < 10
 }
 
-fn f() -> Bool
+fn run_example() -> Bool
   ensures result
 {
   is_small(3)

@@ -1,6 +1,6 @@
 let primes: List[Int64] = [2, 3, 5]
 
-fn f() -> USize {
+fn run_example() -> USize {
   var part = primes.slice()
   bump(mut part)
   primes.length()

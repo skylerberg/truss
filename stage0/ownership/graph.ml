@@ -1,19 +1,8 @@
-(* The control-flow graph of a definition's body, built from its core form.
-   Each point performs one action, and the edges follow evaluation order.
-
-   Evaluation order:
-   - A call evaluates an indirect callee, then its arguments in order. The
-     [mut] borrows of its arguments start after the last argument is
-     evaluated.
-   - An assignment evaluates its value, then the index keys of its target,
-     then assigns.
-   - [&&], [||], and [==>] short-circuit: the right operand may not run.
-   - A [match] arm binds its pattern, then evaluates its guard, then runs
-     its body.
-
-   A lambda's body is a separate entry point: it runs when the lambda is
-   called, not where the lambda is created. Contracts and [proof] blocks are
-   not in the graph, because they are not executed. *)
+(* The control-flow graph of a definition's body, built from its MIR. Each
+   point performs one action, and the edges follow the MIR's, so the order
+   of evaluation is the MIR's. A lambda's body is a separate entry point: it
+   runs when the lambda is called, not where it is made. Specifications and
+   [proof] blocks are not in the graph, because they do not run. *)
 (* A loan: a borrow of a place that lasts for a region of code. While a
    read-only loan is live, the place cannot be mutated. While a [mut] loan
    is live, the place cannot be used at all.
@@ -83,7 +72,7 @@ type action =
       (** A [let] binds a part that a lending call lent. The loan ends with the statement. *)
   | Pass_owned_function of view list
       (** A function value that has these views is passed to an [own] parameter. The callee may
-          store the function, so the function could outlive what it captures. *)
+          store the function, so the function could outlive its captures. *)
   | Write_through of Place.t
       (** A mutation writes through the slice that is stored in this place, so it mutates every
           place that the slice views. *)
@@ -123,1046 +112,1075 @@ type t = {
   fork_join_loops : fork_join_loop list;
 }
 
+(* The builder *)
+
+(* A point before its loans are known: the loans it starts or ends, which a
+   forward pass turns into the loans live at each point. *)
+type draft = {
+  draft_action : action;
+  draft_origin : Core.origin;
+  mutable draft_successors : int list;
+  starts : (int * loan list) option;
+  ends : int list;
+}
+
+(* What the builder knows of a local of the MIR. *)
+type held = {
+  place : Place.t option;  (** The tracked place it is, for a lent part or an alias. *)
+  views : view list;  (** The views of the value it holds, for a temporary. *)
+  temporaries : Core.origin list;
+      (** The owned temporaries the value it holds views, which end with their statement. *)
+  slice : Place.t option;  (** For a slice, the elements it views. *)
+  lent : Place.t option list;  (** For a constructed value, the places its fields lend. *)
+  collection : (Place.t option * Types.ty) option;
+      (** For an element of a collection, the collection and its type. *)
+  fresh : bool;
+      (** For a temporary, whether its value is a new one, which the statement drops: not a string
+          literal, a lambda, or a value read out of a named place. *)
+  alias : Mir.place option;  (** For an operand held where it is evaluated, the place it is. *)
+  part : bool;  (** Whether it is the part a loop over a yielding call is given. *)
+}
+
+let nothing =
+  {
+    place = None;
+    views = [];
+    temporaries = [];
+    slice = None;
+    lent = [];
+    collection = None;
+    fresh = true;
+    alias = None;
+    part = false;
+  }
+
 type builder = {
-  table : (int, point) Hashtbl.t;
+  drafts : (int, draft) Hashtbl.t;
   mutable count : int;
   mutable entries : int list;
-  mutable loops : (int list ref * int list ref) list;
-      (** For each enclosing loop, innermost first: the points that [break] out of it and the points
-          that [continue] it. *)
-  mutable captured : Core.local list;  (** The captures of the enclosing lambdas. *)
-  mutable loans : loan list;
   mutable fork_join_blocks : fork_join_block list;
   mutable fork_join_loops : fork_join_loop list;
   plain : Types.ty -> bool;
   is_view : Types.ty -> bool;
   holds_function : Types.ty -> bool;
-  stores_function : Core.callee -> int -> bool;
-      (** Whether the callee declares the parameter at a position as an [own] parameter of a
-          function type. *)
+  stores_function : Mir.callee -> int -> bool;
+  mutable body : Mir.body;
+  mutable captured : Core.local list;
+  mutable last : int option;  (** The point the next point follows. *)
+  held : (Mir.local, held) Hashtbl.t;
+  mutable returned : Mir.local list;  (** The temporaries whose value the body returns. *)
+  mutable aliases : Mir.local list;
+      (** The lent locals that an assignment made: an operand held where it is evaluated. *)
+  mutable binding : Mir.local list;  (** The locals made live and not yet given a value. *)
+  mutable storage_lend : bool;
+      (** Whether the last lend was of an element of a collection, which lends nothing for the
+          statement. *)
+  mutable block : int;  (** The block being built. *)
+  mutable keeps_lent : (Mir.local * Mir.local * Types.ty * Core.origin) list;
+      (** Each binding of a lent part not yet dead: the binding, the part, its type, and where it is
+          bound. A binding still live where its part ends would outlive the loan. *)
+  loop_entries : (int, int) Hashtbl.t;
+      (** For the first block of a loop's body, the first point after the loop's loan starts. *)
 }
 
-let add builder action origin =
+let add builder ?starts ?(ends = []) action origin =
   let id = builder.count in
+  Hashtbl.replace builder.drafts id
+    { draft_action = action; draft_origin = origin; draft_successors = []; starts; ends };
   builder.count <- id + 1;
-  Hashtbl.replace builder.table id { action; origin; loans = builder.loans; successors = [] };
   id
 
-let link builder (frontier : int list) target =
-  List.iter
-    (fun from ->
-      let point = Hashtbl.find builder.table from in
-      if not (List.mem target point.successors) then point.successors <- target :: point.successors)
-    frontier
+let link builder from target =
+  let draft = Hashtbl.find builder.drafts from in
+  if not (List.mem target draft.draft_successors) then
+    draft.draft_successors <- target :: draft.draft_successors
 
-(* Adds a point whose predecessors are the points of the frontier. A
-   frontier is the set of points from which control reaches the code being
-   built. An empty frontier means that the code is unreachable, and it gets
-   no points. *)
-let emit builder (frontier : int list) action origin : int list =
-  match frontier with
-  | [] -> []
-  | _ ->
-      let id = add builder action origin in
-      link builder frontier id;
-      [ id ]
+(* Adds a point after the last, and makes it the last. *)
+let emit builder ?starts ?ends action origin =
+  let id = add builder ?starts ?ends action origin in
+  Option.iter (fun last -> link builder last id) builder.last;
+  builder.last <- Some id;
+  id
 
-let rec pattern_locals (pattern : Core.pattern) : Core.local list =
-  match pattern.kind with
-  | Bind { local; _ } -> [ local ]
-  | Variant { fields; _ } | Record fields ->
-      List.concat_map (fun (_, inner) -> pattern_locals inner) fields
-  | Alternatives (first :: _) -> pattern_locals first
-  | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
+let emit_ builder ?starts ?ends action origin = ignore (emit builder ?starts ?ends action origin)
+let held builder local = Option.value ~default:nothing (Hashtbl.find_opt builder.held local)
+let local_info builder local = builder.body.locals.(local)
 
-let operand_type : Core.operand -> Types.ty = function
-  | Place core_place -> Core_walk.place_type core_place
-  | Value value -> value.type_
+(* The core local a local of the MIR is, if it is one. *)
+let source builder (local : Mir.local) =
+  match (local_info builder local).kind with
+  | Source { local; _ } -> Some local
+  | Temporary | Lent _ -> None
 
-(* Whether a call's result may be a view of an argument: the argument is
-   borrowed and is not [Plain], or the argument is itself a view. The
-   callee's body is not inspected, so this is the conservative answer. *)
-let result_may_view builder (mode : Types.mode) type_ =
-  (mode <> Own && not (builder.plain type_)) || builder.is_view type_
+(* The tracked place a place of the MIR denotes: a source local's place, or
+   the place a lent part or an alias is. A field of a variant is tracked as
+   the whole value, since a test selected it. *)
+let tracked builder (place : Mir.place) : Place.t option =
+  let base =
+    match place.root with
+    | Constant path -> Some { Place.root = Constant path; steps = [] }
+    | Local local -> (
+        match source builder local with
+        | Some local -> Some { Place.root = Local local; steps = [] }
+        | None -> (held builder local).place)
+  in
+  Option.map
+    (fun (base : Place.t) ->
+      List.fold_left
+        (fun (place : Place.t) (projection : Mir.projection) ->
+          match projection with
+          | Field field -> { place with steps = place.steps @ [ Field field ] }
+          | Variant_field _ -> place)
+        base place.projections)
+    base
 
-(* The tail expressions of an [if], a [match], or a block. The expression's
-   value is the value of one of them. *)
-let tail_values (value : Core.expression) : Core.expression list =
-  let of_block (body : Core.block) = Option.to_list body.value in
-  match value.kind with
-  | If { then_; else_; _ } -> of_block then_ @ Option.fold ~none:[] ~some:of_block else_
-  | Match { arms; _ } -> List.concat_map (fun (arm : Core.arm) -> of_block arm.body) arms
-  | Block body | Provide { body; _ } -> of_block body
-  | _ -> []
+(* Whether a place is a part that a lending call lent other than an element
+   of a [List], a [Slice], or an [Array]: such a part is not tracked. *)
+let is_lent_part builder (place : Mir.place) =
+  match place.root with
+  | Local local -> (
+      match (local_info builder local).kind with
+      | Lent _ -> (held builder local).collection = None && (held builder local).place = None
+      | Source _ | Temporary -> false)
+  | Constant _ -> false
 
-(* The views of a value, derived from its expression alone, without the
-   views that the roots of these places hold.
+let is_temporary builder (place : Mir.place) =
+  match place.root with
+  | Local local -> (local_info builder local).kind = Temporary
+  | Constant _ -> false
 
-   - A value that is copied or moved out of a place is a copy of a view
-     stored there.
-   - A slice borrows the elements of its base. A slice of a slice is a copy
-     of the base slice's view.
-   - A capturing lambda borrows each captured local, and its environment
-     record.
-   - A call's result may view each argument for which [result_may_view]
-     holds. *)
-let rec views_of builder (value : Core.expression) : view list =
-  match value.kind with
-  | Use core_place | Copy (Place core_place) | Cursor_next core_place ->
-      views_of_copy builder core_place
-  | Copy (Value copied) -> views_of builder copied
-  | Slice { base; _ } -> (
-      match Place.of_slice value with
-      | Some place -> [ { place; copied_out = Place.is_slice_type (Core_walk.place_type base) } ]
-      | None -> views_of_borrow builder base)
-  | Lambda { captures = []; _ } -> []
-  | Lambda { captures; _ } ->
-      { place = { root = Environment; steps = [] }; copied_out = false }
-      :: List.map
-           (fun (capture : Core.capture) ->
-             { place = { root = Local capture.local; steps = [] }; copied_out = false })
-           captures
-  | Call call -> List.concat_map (views_of_operand builder) (viewable_arguments builder call)
-  | Template { call; _ } -> views_of builder call
-  | Construct { fields; _ } ->
-      List.concat_map
-        (fun (_, (field : Core.operand option)) ->
-          match field with
-          | Some (Value field) when builder.is_view field.type_ -> views_of builder field
-          | Some (Place core_place) -> views_of_borrow builder core_place
-          | _ -> [])
-        fields
-  | Collection_literal { elements; _ } -> List.concat_map (views_of_part builder) elements
-  | Record_update { base; updates } ->
-      views_of builder base
-      @ List.concat_map (fun (_, update) -> views_of_part builder update) updates
-  | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } ->
-      views_of builder inner
-  (* The value of an [if], a [match], or a block is one of its tail
-     expressions. *)
-  | If _ | Match _ | Block _ | Provide _ -> List.concat_map (views_of builder) (tail_values value)
-  (* These produce a value that has no views, or no value. Every kind is
-     listed, so that adding a kind to the core form forces a decision here. *)
-  | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _
-  | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _ | Matches _ | Return _
-  | Break | Continue | Task_exit _ | Todo | Unreachable | Result | Old _ | Current_target
-  | Quantified _ | Yielded | Finished | Identical _ | Specification_function _ | Method_time _ ->
-      []
+let rec temporary_of builder (place : Mir.place) =
+  match place with
+  | { root = Local local; _ } when (local_info builder local).kind = Temporary -> Some local
+  | { root = Local local; _ } -> (
+      match (held builder local).alias with
+      | Some aliased -> temporary_of builder aliased
+      | None -> None)
+  | _ -> None
 
-(* The views of a subexpression, if it has a view type. *)
-and views_of_part builder (part : Core.expression) : view list =
-  if builder.is_view part.type_ then views_of builder part else []
-
-(* The views of a value that is copied or moved out of a place. *)
-and views_of_copy builder (core_place : Core.place) : view list =
-  match (Place.of_core core_place, core_place) with
-  | Some place, _ -> [ { place; copied_out = true } ]
-  | None, Lent call -> views_of builder call
-  | None, _ -> []
+(* The views of a value read out of a place. *)
+let views_of_copy builder (place : Mir.place) =
+  match tracked builder place with
+  | Some place -> [ { place; copied_out = true } ]
+  | None -> ( match place.root with Local local -> (held builder local).views | Constant _ -> [])
 
 (* The views of a borrow of a place: the place itself. A place of a [Plain]
    type is copied, not borrowed. *)
-and views_of_borrow builder (core_place : Core.place) : view list =
-  match (Place.of_core core_place, core_place) with
-  | Some place, _ -> [ { place; copied_out = builder.plain (Core_walk.place_type core_place) } ]
-  | None, Lent call -> views_of builder call
-  | None, _ -> []
+let views_of_borrow builder (place : Mir.place) type_ =
+  match tracked builder place with
+  | Some place -> [ { place; copied_out = builder.plain type_ } ]
+  | None -> ( match place.root with Local local -> (held builder local).views | Constant _ -> [])
 
-and views_of_operand builder (core_operand : Core.operand) =
-  match core_operand with
-  | Place core_place -> views_of_borrow builder core_place
-  | Value value -> views_of builder value
+let operand_type : Mir.operand -> Types.ty option = function
+  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } -> Some type_
+  | Constant _ -> None
 
-and viewable_arguments builder (call : Core.call) : Core.operand list =
+let views_of_operand builder (operand : Mir.operand) =
+  match operand with
+  | Use { place; _ } | Take { place; _ } -> views_of_copy builder place
+  | Borrow { place; type_; _ } -> views_of_borrow builder place type_
+  | Constant _ -> []
+
+(* The views of a part of a value, if it has a view type. *)
+let views_of_part builder (operand : Mir.operand) =
+  match operand_type operand with
+  | Some type_ when builder.is_view type_ -> views_of_operand builder operand
+  | _ -> []
+
+(* The places an operand depends on until its operation runs: the place it
+   borrows, or the places its value views. *)
+let operand_borrows builder (operand : Mir.operand) =
+  match operand with
+  | Borrow { place; _ } -> Option.to_list (tracked builder place)
+  | Use { type_; _ } when builder.is_view type_ ->
+      List.map (fun (view : view) -> view.place) (views_of_operand builder operand)
+  | Use _ | Take _ | Constant _ -> []
+
+(* Whether a call's result may be a view of an argument: the argument is
+   borrowed and is not [Plain], or it is itself a view. *)
+let result_may_view builder (mode : Types.mode) type_ =
+  (mode <> Own && not (builder.plain type_)) || builder.is_view type_
+
+let viewable_arguments builder (call : Mir.call) =
   List.filter_map
-    (fun (argument : Core.argument) ->
+    (fun (argument : Mir.argument) ->
       match argument with
-      | Passed { mode; value; _ } when result_may_view builder mode (operand_type value) ->
-          Some value
-      | _ -> None)
+      | Passed { mode; value; _ } -> (
+          match operand_type value with
+          | Some type_ when result_may_view builder mode type_ -> Some value
+          | _ -> None)
+      | Default -> None)
     call.arguments
 
-(* The temporaries that a view-typed value borrows from: owned values that
-   have no name and were passed read-only to the call that produced the
-   view. A temporary is dropped when its statement ends. A string literal
-   has static storage, so it is never dropped. *)
-let rec viewed_temporaries builder (value : Core.expression) : Core.expression list =
-  let of_part (part : Core.expression) =
-    if builder.is_view part.type_ then viewed_temporaries builder part else []
+(* The owned temporaries an operand passed read-only views: a value with no
+   name that the statement drops. *)
+let owned_temporaries builder (mode : Types.mode) (operand : Mir.operand) =
+  match operand with
+  | (Borrow { place; type_; _ } | Use { place; type_; _ }) when mode = Read -> (
+      match temporary_of builder place with
+      | Some local when not (builder.plain type_) ->
+          if builder.is_view type_ then (held builder local).temporaries
+          else if (held builder local).fresh then [ (local_info builder local).origin ]
+          else []
+      | _ -> [])
+  | Use { place; type_; _ } when builder.is_view type_ -> (
+      match place.root with Local local -> (held builder local).temporaries | Constant _ -> [])
+  | _ -> []
+
+(* The slice that a mutation of a place writes through, if any: the place
+   itself where it is a slice borrowed [mut] whole, or the innermost slice
+   whose element the place is. *)
+let written_slice builder ~whole (place : Mir.place) type_ =
+  if whole && Place.is_slice_type type_ then tracked builder place
+  else
+    match place.root with
+    | Local local -> (
+        match (held builder local).collection with
+        | Some (collection, collection_type) when Place.is_slice_type collection_type -> collection
+        | _ -> None)
+    | Constant _ -> None
+
+let writes_through builder ~whole (place : Mir.place) type_ origin =
+  Option.iter
+    (fun slice -> emit_ builder (Write_through slice) origin)
+    (written_slice builder ~whole place type_)
+
+(* Actions *)
+
+let is_captured builder (place : Place.t) =
+  match place.root with
+  | Local local -> List.mem local builder.captured
+  | Constant _ | Environment -> false
+
+(* The value at a place is read: copied, or moved out of it. *)
+let use builder (place : Mir.place) type_ node origin ~returned =
+  match tracked builder place with
+  | Some tracked ->
+      if builder.plain type_ then emit_ builder (Read tracked) origin
+      else
+        emit_ builder
+          (Move
+             {
+               place = tracked;
+               use = node;
+               type_;
+               returned;
+               captured = is_captured builder tracked;
+             })
+          origin
+  | None ->
+      if is_lent_part builder place && not (builder.plain type_) then
+        emit_ builder (Move_out_of_lent type_) origin
+
+(* An operand is evaluated: a value is read, and a read-only borrow reads
+   the place. A [mut] borrow starts where its operation runs. *)
+let evaluate builder ?(returned = false) (operand : Mir.operand) =
+  match operand with
+  | Use { place; type_; node; origin } -> use builder place type_ node origin ~returned
+  | Borrow { place; mode = Read | Own; origin; _ } -> (
+      match place.root with
+      | Local local when List.mem local builder.aliases -> ()
+      | _ ->
+          Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place))
+  | Take { place; origin; _ } ->
+      Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place)
+  | Borrow { mode = Mut; _ } | Constant _ -> ()
+
+(* The [mut] borrow of an operand. *)
+let borrow_mut builder (operand : Mir.operand) =
+  match operand with
+  | Borrow { place; type_; mode = Mut; origin } ->
+      writes_through builder ~whole:true place type_ origin;
+      Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder place)
+  | Use { place; origin; _ } -> (
+      match place.root with
+      | Local local ->
+          Option.iter (fun slice -> emit_ builder (Mutate slice) origin) (held builder local).slice
+      | Constant _ -> ())
+  | _ -> ()
+
+(* Stores views in a place. None of them may be a view of a temporary,
+   which is dropped when the statement ends. *)
+let store_views builder (place : Place.t) origin ~views ~temporaries =
+  List.iter (fun origin -> emit_ builder (View_of_temporary (Some place)) origin) temporaries;
+  emit_ builder (Store { place; views }) origin
+
+(* A call: what it reads, its [mut] borrows, the aliasing of what it
+   borrows, the views it may store in a [mut] argument, and the functions it
+   may keep. *)
+let call builder (call : Mir.call) origin =
+  (match call.callee with Indirect value -> evaluate builder value | _ -> ());
+  let passed =
+    List.filter_map
+      (function Mir.Passed { mode; value; _ } -> Some (mode, value) | Default -> None)
+      call.arguments
   in
-  match value.kind with
-  | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } | Copy (Value inner) ->
-      viewed_temporaries builder inner
-  | If _ | Match _ | Block _ | Provide _ ->
-      List.concat_map (viewed_temporaries builder) (tail_values value)
-  | Slice { base; _ } -> owned_temporary_place builder base
-  | Call call ->
-      List.concat_map
-        (fun (argument : Core.argument) ->
-          match argument with
-          | Passed { mode = Read; value; _ } -> owned_temporary builder value
-          | Passed { value = Value value; _ } -> of_part value
-          | _ -> [])
-        call.arguments
-  | Template { call; _ } -> viewed_temporaries builder call
-  | Construct { fields; _ } ->
-      List.concat_map
-        (fun (_, (field : Core.operand option)) ->
-          match field with Some (Value field) -> of_part field | Some (Place _) | None -> [])
-        fields
-  | Collection_literal { elements; _ } -> List.concat_map of_part elements
-  | Record_update { base; updates } ->
-      viewed_temporaries builder base @ List.concat_map (fun (_, update) -> of_part update) updates
-  (* A value copied out of a place borrows from a named place, not from a
-     temporary. A lambda borrows locals. The rest have no views. Every kind
-     is listed, so that adding a kind to the core form forces a decision
-     here. *)
-  | Use _
-  | Copy (Place _)
-  | Cursor_next _ | Lambda _ | Integer _ | Float _ | Boolean _ | String _ | Function_value _
-  | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _
-  | Matches _ | Return _ | Break | Continue | Task_exit _ | Todo | Unreachable | Result | Old _
-  | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
-  | Method_time _ ->
-      []
-
-and owned_temporary builder (core_operand : Core.operand) : Core.expression list =
-  match core_operand with
-  | Place core_place -> owned_temporary_place builder core_place
-  | Value value -> (
-      match value.kind with
-      | String _ | Lambda _ -> []
-      | Use core_place when Option.is_some (Place.of_core core_place) -> []
-      | _ when builder.plain value.type_ -> []
-      | _ when builder.is_view value.type_ -> viewed_temporaries builder value
-      | _ -> [ value ])
-
-and owned_temporary_place builder (core_place : Core.place) : Core.expression list =
-  match (Place.of_core core_place, core_place) with
-  | Some _, _ -> []
-  | None, (Lent value | Temporary value) ->
-      if builder.plain value.type_ then []
-      else if builder.is_view value.type_ then viewed_temporaries builder value
-      else [ value ]
-  | None, _ -> []
-
-(* The places that an evaluated operand depends on until its operation runs:
-   the place that it borrows, or the places that its view-typed value views. *)
-let operand_borrows builder (core_operand : Core.operand) : Place.t list =
-  match core_operand with
-  | Place core_place -> Option.to_list (Place.of_core core_place)
-  | Value value when builder.is_view value.type_ ->
-      List.map (fun (view : view) -> view.place) (views_of builder value)
-  | Value _ -> []
-
-(* Starts a read-only [Operand_evaluation] loan on each place. *)
-let add_operand_loans builder (places : Place.t list) : loan list =
-  let added =
-    List.map (fun borrowed -> { borrowed; mode = Types.Read; duration = Operand_evaluation }) places
-  in
-  builder.loans <- added @ builder.loans;
-  added
-
-let remove_loans builder (added : loan list) =
-  builder.loans <- List.filter (fun loan -> not (List.memq loan added)) builder.loans
-
-(* Evaluates the operands of one operation in order. A later operand must
-   not mutate what an earlier operand evaluated to, so the places of each
-   evaluated operand stay borrowed read-only until the last operand is
-   evaluated. *)
-let evaluate_in_order builder frontier operands ~evaluate ~borrows =
-  let frontier, added =
-    List.fold_left
-      (fun (frontier, added) operand ->
-        let frontier = evaluate frontier operand in
-        (frontier, add_operand_loans builder (borrows operand) @ added))
-      (frontier, []) operands
-  in
-  remove_loans builder added;
-  frontier
-
-let rec expression builder frontier (node : Core.expression) : int list =
-  let all frontier nodes =
-    evaluate_in_order builder frontier nodes ~evaluate:(expression builder) ~borrows:(fun node ->
-        operand_borrows builder (Value node))
-  in
-  let scrutinized frontier scrutinees =
-    evaluate_in_order builder frontier scrutinees
-      ~evaluate:(fun frontier scrutinee -> operand builder frontier Read scrutinee)
-      ~borrows:(operand_borrows builder)
-  in
-  match node.kind with
-  | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Result
-  | Current_target | Yielded | Finished | Todo | Method_time _ ->
-      frontier
-  | Quantified { binder; body; _ } -> quantified builder frontier node binder body
-  (* An early exit from a [concurrent] task transfers control to the exit's
-     target. The sibling tasks have finished by then, and each is modeled by
-     its own control flow. *)
-  | Task_exit { exit; _ } -> expression builder frontier exit
-  | Unreachable -> []
-  | Break ->
-      (match builder.loops with (breaks, _) :: _ -> breaks := frontier @ !breaks | [] -> ());
-      []
-  | Continue ->
-      (match builder.loops with
-      | (_, continues) :: _ -> continues := frontier @ !continues
-      | [] -> ());
-      []
-  | Template { call; _ } -> expression builder frontier call
-  | Use core_place -> use builder frontier node core_place ~returned:false
-  | Copy value -> operand builder frontier Read value
-  | Lambda { parameters; captures; body; _ } ->
-      let frontier =
-        List.fold_left
-          (fun frontier (capture : Core.capture) ->
-            emit builder frontier (Read { root = Local capture.local; steps = [] }) node.origin)
-          frontier captures
-      in
-      let loops = builder.loops and captured = builder.captured and loans = builder.loans in
-      builder.loops <- [];
-      builder.loans <- [];
-      builder.captured <-
-        List.map (fun (capture : Core.capture) -> capture.local) captures @ captured;
-      let entry = add builder Enter node.origin in
-      builder.entries <- entry :: builder.entries;
-      let bound = List.concat_map pattern_locals parameters in
-      let inside = emit builder [ entry ] (Bind bound) node.origin in
-      ignore (emit builder (block builder inside body) (Scope_end bound) node.origin);
-      builder.loops <- loops;
-      builder.loans <- loans;
-      builder.captured <- captured;
-      frontier
-  | Construct { fields; _ } -> construct builder frontier Read fields
-  | Collection_literal { elements; _ } -> all frontier elements
-  | Map_literal { entries } ->
-      all frontier (List.concat_map (fun (key, value) -> [ key; value ]) entries)
-  | Record_update { base; updates } -> all frontier (base :: List.map snd updates)
-  | Slice { call = { kind = Call call; _ }; _ } -> arguments builder frontier call.arguments
-  | Slice { call; _ } -> expression builder frontier call
-  | Call call -> call_ builder frontier node call
-  | Operator { arguments; _ } | Specification_function { arguments; _ } -> all frontier arguments
-  | Compare { left; right; _ } | Identical (left, right) -> all frontier [ left; right ]
-  | And _ | Or _ | Implies _ | Not _ ->
-      let on_true, on_false = condition builder frontier node in
-      List.sort_uniq compare (on_true @ on_false)
-  | Echo inner | Old inner | To_any { value = inner; _ } | Convert { value = inner; _ } ->
-      expression builder frontier inner
-  | Matches { value; pattern } ->
-      let frontier = operand builder frontier Read value in
-      bind_pattern builder frontier (pattern_locals pattern) [ value ] node.origin
-  | Cursor_next cursor -> operand builder frontier Mut (Place cursor)
-  | If { condition; then_; else_ } ->
-      let after = expression builder frontier condition in
-      let then_end = block builder after then_ in
-      let else_end = match else_ with Some else_ -> block builder after else_ | None -> after in
-      then_end @ else_end
-  | Match { scrutinees; arms; _ } ->
-      arms_ builder (scrutinized frontier scrutinees) scrutinees arms ~body:(block builder)
-  | Block body -> block builder frontier body
-  | Provide { implementations; body } ->
-      let frontier =
-        evaluate_in_order builder frontier implementations
-          ~evaluate:(fun frontier (implementation : Core.implementation) ->
-            operand builder frontier implementation.mode implementation.value)
-          ~borrows:(fun (implementation : Core.implementation) ->
-            operand_borrows builder implementation.value)
-      in
-      (* The body uses the implementations, so an implementation that is a
-         place stays borrowed for the body. *)
-      let loans = builder.loans in
-      builder.loans <-
-        List.filter_map
-          (fun (implementation : Core.implementation) ->
-            match implementation.value with
-            | Place core_place ->
-                Option.map
-                  (fun borrowed : loan ->
-                    {
-                      borrowed;
-                      mode = (if implementation.mode = Mut then Mut else Read);
-                      duration = Provide_body;
-                    })
-                  (Place.of_core core_place)
-            | Value _ -> None)
-          implementations
-        @ loans;
-      let frontier = block builder frontier body in
-      builder.loans <- loans;
-      frontier
-  | Return value ->
-      let frontier =
-        match value with Some value -> returned_value builder frontier value | None -> frontier
-      in
-      ignore (emit builder frontier Exit node.origin);
-      []
-
-(* Evaluates a constructor's fields in order. A field that is a place is
-   lent to the constructed value, with the mode of the enclosing [yield]. A
-   [mut] loan starts at the [yield], after every field is evaluated, as an
-   argument's [mut] borrow starts at the call. *)
-and construct builder frontier (mode : Types.mode) fields =
-  evaluate_in_order builder frontier (List.filter_map snd fields)
-    ~evaluate:(fun frontier (field : Core.operand) ->
-      match field with
-      | Value { kind = Construct { fields; _ }; _ } -> construct builder frontier mode fields
-      | _ -> evaluate_operand builder frontier mode field)
-    ~borrows:(fun field ->
-      operand_borrows builder field @ List.filter_map Place.of_core (Core_walk.lent_places field))
-
-(* Binds a pattern's locals. If the scrutinee is a place, the bindings alias
-   parts of the place, so they view it. If the scrutinee is a value, the
-   bindings have the value's views. *)
-and bind_pattern builder frontier (bound : Core.local list) (scrutinees : Core.operand list) origin
-    =
-  let frontier = emit builder frontier (Bind bound) origin in
-  let views =
-    List.concat_map
-      (fun (scrutinee : Core.operand) ->
-        match scrutinee with
-        | Place core_place -> (
-            match Place.of_core core_place with
-            | Some place -> [ { place; copied_out = false } ]
-            | None -> views_of_borrow builder core_place)
-        | Value value -> if builder.is_view value.type_ then views_of builder value else [])
-      scrutinees
-  in
-  if bound = [] || views = [] then frontier
-  else emit builder frontier (Bind_views { locals = bound; views }) origin
-
-(* An executable quantifier is a loop that stops at the first counterexample
-   or witness: it evaluates its range or collection, then its body once per
-   element. It borrows the collection for the loop, as a [for] loop does. A
-   quantifier in a specification is not executed. *)
-and quantified builder frontier (node : Core.expression) (binder : Core.binder)
-    (body : Core.expression) =
-  let run frontier (pattern : Core.pattern) ~views ~loan =
-    loop builder frontier ~bound:(pattern_locals pattern) ~views ~loan ~condition:None
-      { statements = []; value = Some body }
-      node.origin ~fork_join:None
-  in
-  match binder with
-  | Over_type _ | Over_collection _ -> frontier
-  | Over_range { pattern; start; stop; _ } ->
-      run (expression builder (expression builder frontier start) stop) pattern ~views:[] ~loan:None
-  | Over_each { pattern; call } ->
-      let loan =
-        match call.kind with
-        | Call { arguments = Passed { value = Place core_place; _ } :: _; _ } ->
-            Option.map
-              (fun borrowed : loan -> { borrowed; mode = Read; duration = Loop_body })
-              (Place.of_core core_place)
-        | _ -> None
-      in
-      let views =
-        List.map
-          (fun (view : view) ->
-            if builder.plain pattern.type_ then { view with copied_out = true } else view)
-          (views_of builder call)
-      in
-      run (expression builder frontier call) pattern ~views ~loan
-
-(* The arms of a [match], given the frontier after its scrutinees are
-   evaluated. [body] builds an arm's body. *)
-and arms_ builder frontier scrutinees (arms : Core.arm list) ~body =
-  List.concat_map
-    (fun (arm : Core.arm) ->
-      let bound = List.concat_map pattern_locals arm.patterns in
-      let frontier = bind_pattern builder frontier bound scrutinees arm.origin in
-      (* If a guard is false, the later arms are matched against the same
-         scrutinees. So the scrutinees stay borrowed read-only while a guard
-         is evaluated, and a guard cannot mutate them. *)
-      let frontier =
-        match arm.guard with
-        | Some guard ->
-            let added =
-              add_operand_loans builder (List.concat_map (operand_borrows builder) scrutinees)
-            in
-            let frontier = expression builder frontier guard in
-            remove_loans builder added;
-            frontier
-        | None -> frontier
-      in
-      emit builder (body frontier arm.body) (Scope_end bound) arm.origin)
-    arms
-
-(* A call: evaluates the callee and the arguments, then emits the checks and
-   the effects of the call on the places that it borrows. *)
-and call_ builder frontier (node : Core.expression) (call : Core.call) =
-  let frontier =
-    match call.callee with
-    | Indirect function_value -> operand builder frontier Read function_value
-    | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> frontier
-  in
-  let frontier = arguments builder frontier call.arguments in
-  (* Aliasing: two places that the call borrows must not overlap if either
-     is borrowed [mut]. *)
+  List.iter (fun (_, value) -> evaluate builder value) passed;
+  List.iter (fun (mode, value) -> if mode = Types.Mut then borrow_mut builder value) passed;
   let places =
     List.concat
       (List.mapi
-         (fun position (argument : Core.argument) ->
-           let place, at =
-             match argument with
-             | Passed { value = Place core_place; _ } ->
-                 (Place.of_core core_place, Core_walk.place_origin core_place)
-             | Passed { mode = Mut; value = Value ({ kind = Slice _; _ } as slice); _ } ->
-                 (Place.of_slice slice, slice.origin)
-             | Passed { value = Value value; _ } -> (None, value.origin)
-             | Default -> (None, node.origin)
-           in
-           match (place, argument) with
-           | Some place, Passed { mode; _ } -> [ { place; mode; at; position } ]
-           | _ -> [])
+         (fun position (argument : Mir.argument) ->
+           match argument with
+           | Passed { mode; value = Borrow { place; origin; _ }; _ } -> (
+               match tracked builder place with
+               | Some place -> [ { place; mode; at = origin; position } ]
+               | None -> [])
+           | Passed { mode = Mut; value = Use { place = { root = Local local; _ }; origin; _ }; _ }
+             -> (
+               match (held builder local).slice with
+               | Some place -> [ { place; mode = Mut; at = origin; position } ]
+               | None -> [])
+           | Passed _ | Default -> [])
          call.arguments)
   in
-  (* Aliasing: a view argument must not view a place that the call borrows
-     [mut]. The intrinsics that return a view to its owner are exempt: they
-     take the owner [mut] together with its view. *)
   let views =
     match call.callee with
     | Intrinsic { operation = Storage_take_view | View_take_view | Array_take_view; _ } -> []
     | _ ->
         List.concat
           (List.mapi
-             (fun position (argument : Core.argument) ->
+             (fun position (argument : Mir.argument) ->
                match argument with
-               | Passed { value; _ } when builder.is_view (operand_type value) ->
-                   let origin =
-                     match value with
-                     | Place core_place -> Core_walk.place_origin core_place
-                     | Value value -> value.origin
-                   in
+               | Passed
+                   { value = (Use { type_; origin; _ } | Borrow { type_; origin; _ }) as value; _ }
+                 when builder.is_view type_ ->
                    [ (position, views_of_operand builder value, origin) ]
                | Passed _ | Default -> [])
              call.arguments)
   in
-  let frontier =
-    if List.length places > 1 || (places <> [] && views <> []) then
-      emit builder frontier (Arguments { places; views; yielded = false }) node.origin
-    else frontier
-  in
-  (* The callee may store its view arguments in a [mut] argument whose type
-     can hold views. It cannot store a view of a borrowed argument that is
-     not a view: the callee's own check rejects that. From a function whose
-     result is not a view, the callee gets no view but the function itself,
-     so it can store that argument only in a type that holds a function. *)
-  let can_store_in target (other : Core.operand) =
+  if List.length places > 1 || (places <> [] && views <> []) then
+    emit_ builder (Arguments { places; views; yielded = false }) origin;
+  let can_store_in target (other : Mir.operand) =
     match operand_type other with
-    | Types.Function { output = Returns output; _ } when not (builder.is_view output) ->
+    | Some (Types.Function { output = Returns output; _ }) when not (builder.is_view output) ->
         builder.holds_function target
     | _ -> true
   in
-  let frontier =
-    List.fold_left
-      (fun frontier (argument : Core.argument) ->
-        match argument with
-        | Passed { mode = Mut; value = Place core_place as target; _ }
-          when builder.is_view (Core_walk.place_type core_place) -> (
-            match Place.of_core core_place with
-            | Some place ->
-                let others =
-                  List.filter
-                    (fun other ->
-                      other != target
-                      && builder.is_view (operand_type other)
-                      && can_store_in (Core_walk.place_type core_place) other)
-                    (viewable_arguments builder call)
-                in
-                store_views builder frontier place node.origin
-                  ~views:(List.concat_map (views_of_operand builder) others)
-                  ~temporaries:
-                    (List.concat_map
-                       (function
-                         | Core.Value value -> viewed_temporaries builder value | Place _ -> [])
-                       others)
-            | None -> frontier)
-        | _ -> frontier)
-      frontier call.arguments
-  in
-  (* The callee may store a function value that it receives through an [own]
-     parameter. *)
-  let frontier =
-    List.fold_left
-      (fun frontier (position, (argument : Core.argument)) ->
-        match argument with
-        | Passed { mode = Own; value = Value ({ type_ = Types.Function _; _ } as value); _ }
-          when builder.stores_function call.callee position ->
-            emit builder frontier (Pass_owned_function (views_of builder value)) value.origin
-        | _ -> frontier)
-      frontier
-      (List.mapi (fun position argument -> (position, argument)) call.arguments)
-  in
-  (* A call of a lending method borrows its receiver until the statement
-     ends. *)
-  (match (call.lends, call.arguments) with
-  | Some _, Passed { mode; value = Place receiver; _ } :: _ -> (
-      match Place.of_core receiver with
-      | Some borrowed ->
-          builder.loans <-
-            { borrowed; mode = (if mode = Mut then Mut else Read); duration = Rest_of_statement }
-            :: builder.loans
-      | None -> ())
-  | _ -> ());
-  frontier
+  List.iter
+    (fun (argument : Mir.argument) ->
+      match argument with
+      | Passed { mode = Mut; value = Borrow { place; type_; _ } as target; _ }
+        when builder.is_view type_ -> (
+          match tracked builder place with
+          | Some place ->
+              let others =
+                List.filter
+                  (fun other ->
+                    other != target
+                    && (match operand_type other with Some t -> builder.is_view t | None -> false)
+                    && can_store_in type_ other)
+                  (viewable_arguments builder call)
+              in
+              store_views builder place origin
+                ~views:(List.concat_map (views_of_operand builder) others)
+                ~temporaries:(List.concat_map (owned_temporaries builder Own) others)
+          | None -> ())
+      | _ -> ())
+    call.arguments;
+  List.iteri
+    (fun position (argument : Mir.argument) ->
+      match argument with
+      | Passed { mode = Own; value = Use { type_ = Types.Function _; origin; _ } as value; _ }
+        when builder.stores_function call.callee position ->
+          emit_ builder (Pass_owned_function (views_of_operand builder value)) origin
+      | _ -> ())
+    call.arguments
 
-(* Stores views in a place. None of them may be a view of a temporary, which
-   is dropped when the statement ends. *)
-and store_views builder frontier (place : Place.t) origin ~views ~temporaries =
-  let frontier =
-    List.fold_left
-      (fun frontier (temporary : Core.expression) ->
-        emit builder frontier (View_of_temporary (Some place)) temporary.origin)
-      frontier temporaries
-  in
-  emit builder frontier (Store { place; views }) origin
+(* What a call's result holds: views of the arguments it may view. *)
+let call_result builder (call : Mir.call) =
+  let viewable = viewable_arguments builder call in
+  {
+    nothing with
+    views = List.concat_map (views_of_operand builder) viewable;
+    temporaries =
+      List.concat_map
+        (fun (argument : Mir.argument) ->
+          match argument with
+          | Passed { mode; value; _ } -> owned_temporaries builder mode value
+          | Default -> [])
+        call.arguments;
+  }
 
-(* Evaluates a call's arguments. An argument's [mut] borrow starts at the
-   call, after every argument is evaluated, so the later arguments can still
-   read the place. *)
-and arguments builder frontier (call_arguments : Core.argument list) =
-  let passed =
-    List.filter_map
-      (function Core.Passed { mode; value; _ } -> Some (mode, value) | Default -> None)
-      call_arguments
-  in
-  let frontier =
-    evaluate_in_order builder frontier passed
-      ~evaluate:(fun frontier (mode, value) -> evaluate_operand builder frontier mode value)
-      ~borrows:(fun (_, value) -> operand_borrows builder value)
-  in
-  List.fold_left
-    (fun frontier (mode, value) ->
-      if mode = Types.Mut then borrow_mut builder frontier value else frontier)
-    frontier passed
+let hold builder (place : Mir.place) (value : held) =
+  match place with
+  | { root = Local local; projections = [] } ->
+      let known = held builder local in
+      Hashtbl.replace builder.held local
+        {
+          place = (match value.place with Some _ -> value.place | None -> known.place);
+          views =
+            known.views @ List.filter (fun view -> not (List.mem view known.views)) value.views;
+          temporaries = known.temporaries @ value.temporaries;
+          slice = (match value.slice with Some _ -> value.slice | None -> known.slice);
+          lent = (match value.lent with [] -> known.lent | lent -> lent);
+          collection =
+            (match value.collection with Some _ -> value.collection | None -> known.collection);
+          fresh = known.fresh && value.fresh;
+          alias = (match value.alias with Some _ -> value.alias | None -> known.alias);
+          part = known.part || value.part;
+        }
+  | _ -> ()
 
-(* An operand: a place that is borrowed with the given mode, or a value. *)
-and operand builder frontier (mode : Types.mode) (core_operand : Core.operand) =
-  let frontier = evaluate_operand builder frontier mode core_operand in
-  if mode = Mut then borrow_mut builder frontier core_operand else frontier
+(* The places a yielded or constructed value lends: its fields that are
+   borrows, to any depth. *)
+let lent_places builder (operand : Mir.operand) =
+  match operand with
+  | Borrow { place; _ } -> [ tracked builder place ]
+  | Use { place = { root = Local local; projections = [] }; _ }
+    when (local_info builder local).kind = Temporary ->
+      (held builder local).lent
+  | Use _ | Take _ | Constant _ -> []
 
-(* Evaluates an operand. [borrow_mut] emits the [mut] borrow of the operand
-   separately. *)
-and evaluate_operand builder frontier (mode : Types.mode) (core_operand : Core.operand) =
-  match core_operand with
-  | Place core_place -> (
-      let frontier = place_subexpressions builder frontier core_place in
-      match Place.of_core core_place with
-      | Some place when mode <> Mut ->
-          emit builder frontier (Read place) (Core_walk.place_origin core_place)
-      | _ -> frontier)
-  | Value value -> expression builder frontier value
-
-and borrow_mut builder frontier (core_operand : Core.operand) =
-  match core_operand with
-  | Place core_place -> (
-      let frontier = writes_through builder frontier core_place ~whole:true in
-      match Place.of_core core_place with
-      | Some place -> emit builder frontier (Mutate place) (Core_walk.place_origin core_place)
-      | None -> frontier)
-  | Value ({ kind = Slice _; _ } as slice) -> (
-      match Place.of_slice slice with
-      | Some place -> emit builder frontier (Mutate place) slice.origin
-      | None -> frontier)
-  | Value _ -> frontier
-
-(* A mutation of a place writes through a slice if the path to the place
-   goes through one. *)
-and writes_through builder frontier (core_place : Core.place) ~whole =
-  match
-    Option.bind (Place.written_slice ~whole core_place) (fun slice ->
-        Option.map (fun place -> (place, slice)) (Place.of_core slice))
-  with
-  | Some (place, slice) ->
-      emit builder frontier (Write_through place) (Core_walk.place_origin slice)
-  | None -> frontier
-
-(* Evaluates the subexpressions of a place: its index keys, a lending call,
-   and the value of a temporary. *)
-and place_subexpressions builder frontier (core_place : Core.place) =
-  match core_place with
-  | Local _ | Constant _ -> frontier
-  | Field { base; _ } -> place_subexpressions builder frontier base
-  | Lent index -> (
-      match (Place.storage_index index, index.kind) with
-      | Some collection, Call { arguments = _ :: keys; _ } ->
-          let frontier = place_subexpressions builder frontier collection in
-          let added =
-            add_operand_loans builder
-              (List.map (fun (view : view) -> view.place) (views_of_borrow builder collection))
-          in
-          let frontier = arguments builder frontier keys in
-          remove_loans builder added;
-          frontier
-      | _ -> expression builder frontier index)
-  | Temporary value -> expression builder frontier value
-
-(* A [Use]: the value is copied or moved out of the place. *)
-and use builder frontier (node : Core.expression) (core_place : Core.place) ~returned =
-  let frontier = place_subexpressions builder frontier core_place in
-  match Place.of_core core_place with
-  | Some place ->
-      if builder.plain node.type_ then emit builder frontier (Read place) node.origin
-      else
-        let captured =
-          match place.root with
-          | Local local -> List.mem local builder.captured
-          | Constant _ | Environment -> false
-        in
-        emit builder frontier
-          (Move { place; use = node.id; type_ = node.type_; returned; captured })
-          node.origin
-  | None ->
-      if Place.is_lent_part core_place && not (builder.plain node.type_) then
-        emit builder frontier (Move_out_of_lent node.type_) node.origin
-      else frontier
-
-(* The function's return value. If it is a block, an [if], or a [match], its
-   tail expressions are return values too. *)
-and returned_value builder frontier (value : Core.expression) =
-  match value.kind with
-  | Block body -> returned_block builder frontier body
-  | If { condition; then_; else_ = Some else_ } ->
-      let after = expression builder frontier condition in
-      returned_block builder after then_ @ returned_block builder after else_
-  | Match { scrutinees; arms; _ } ->
-      let after =
-        evaluate_in_order builder frontier scrutinees
-          ~evaluate:(fun frontier scrutinee -> operand builder frontier Read scrutinee)
-          ~borrows:(operand_borrows builder)
+(* What an rvalue reads, and what its value holds. *)
+let rvalue builder (value : Mir.rvalue) origin : held =
+  match value with
+  | Operand operand ->
+      evaluate builder operand;
+      let views = views_of_operand builder operand in
+      let temporaries =
+        match operand with
+        | Use { place = { root = Local local; _ }; _ } -> (held builder local).temporaries
+        | _ -> []
       in
-      arms_ builder after scrutinees arms ~body:(returned_block builder)
-  | _ ->
-      let frontier =
-        match value.kind with
-        | Use core_place -> use builder frontier value core_place ~returned:true
-        | _ -> expression builder frontier value
+      let lent = lent_places builder operand in
+      let slice, fresh =
+        match operand with
+        | Use { place = { root = Local local; _ } as place; _ } when is_temporary builder place ->
+            ((held builder local).slice, (held builder local).fresh)
+        | Use _ | Take _ | Borrow _ -> (None, false)
+        | Constant _ -> (None, false)
       in
-      if builder.is_view value.type_ then
-        emit builder frontier (Return_view (views_of builder value)) value.origin
-      else frontier
-
-and returned_block builder frontier (body : Core.block) =
-  let frontier = List.fold_left (statement builder) frontier body.statements in
-  match body.value with Some value -> returned_value builder frontier value | None -> frontier
-
-(* The points from which control leaves a Boolean expression with [true],
-   and the points from which it leaves with [false]. A short-circuit
-   operator evaluates its right operand from one of the two: [left && right]
-   evaluates [right] only where [left] is [true]. So an operand has an edge
-   to the operand after it and to the code after the whole expression, and a
-   chain of operators has a number of edges linear in its length. *)
-and condition builder frontier (node : Core.expression) : int list * int list =
-  match node.kind with
-  | And (left, right) ->
-      let left_true, left_false = condition builder frontier left in
-      let right_true, right_false = condition builder left_true right in
-      (right_true, left_false @ right_false)
-  | Or (left, right) ->
-      let left_true, left_false = condition builder frontier left in
-      let right_true, right_false = condition builder left_false right in
-      (left_true @ right_true, right_false)
-  | Implies (left, right) ->
-      let left_true, left_false = condition builder frontier left in
-      let right_true, right_false = condition builder left_true right in
-      (left_false @ right_true, right_false)
-  | Not inner ->
-      let on_true, on_false = condition builder frontier inner in
-      (on_false, on_true)
-  | _ ->
-      let after = expression builder frontier node in
-      (after, after)
-
-and block builder frontier (body : Core.block) =
-  let frontier = List.fold_left (statement builder) frontier body.statements in
-  match body.value with Some value -> expression builder frontier value | None -> frontier
-
-(* A statement. The loans that lending calls start in the statement end with
-   it. *)
-and statement builder frontier (node : Core.statement) =
-  let loans = builder.loans in
-  let frontier = statement_and_yield_point builder frontier node in
-  builder.loans <- loans;
-  frontier
-
-and statement_actions builder frontier (node : Core.statement) =
-  match node.kind with
-  | Let { pattern; value; else_ } -> let_ builder frontier node pattern value else_
-  | Evaluate value -> expression builder frontier value
-  | Assign { target; value } -> (
-      let frontier = expression builder frontier value in
-      let added = add_operand_loans builder (operand_borrows builder (Value value)) in
-      let frontier = place_subexpressions builder frontier target in
-      remove_loans builder added;
-      let frontier = writes_through builder frontier target ~whole:false in
-      match Place.of_core target with
-      | Some place ->
-          let frontier = emit builder frontier (Assign place) (Core_walk.place_origin target) in
-          if builder.is_view value.type_ then
-            store_views builder frontier place node.origin ~views:(views_of builder value)
-              ~temporaries:(viewed_temporaries builder value)
-          else frontier
-      | None -> frontier)
-  | Compound_assign { target; operand = right; bound; value } -> (
-      let frontier = evaluate_operand builder frontier Read right in
-      let frontier = bind_pattern builder frontier [ bound ] [ right ] node.origin in
-      let added = add_operand_loans builder (operand_borrows builder right) in
-      let frontier = place_subexpressions builder frontier target in
-      remove_loans builder added;
-      let frontier = writes_through builder frontier target ~whole:false in
-      let origin = Core_walk.place_origin target in
-      let place = Place.of_core target in
-      let frontier =
-        match place with
-        | Some place -> emit builder frontier (Read place) origin
-        | None -> frontier
+      {
+        nothing with
+        views;
+        temporaries;
+        lent = (match operand with Borrow _ -> [] | _ -> lent);
+        slice;
+        fresh;
+      }
+  | Operation { operands; _ } ->
+      List.iter (evaluate builder) operands;
+      nothing
+  | Compare { left; right; _ } ->
+      evaluate builder left;
+      evaluate builder right;
+      nothing
+  | Not operand | Convert { value = operand; _ } | To_any { value = operand; _ } | Copy operand ->
+      evaluate builder operand;
+      let temporaries =
+        match operand with
+        | Use { place = { root = Local local; _ } as place; _ } when is_temporary builder place ->
+            (held builder local).temporaries
+        | _ -> []
       in
-      let frontier = expression builder frontier value in
-      match place with
-      | Some place -> emit builder frontier (Assign place) origin
-      | None -> frontier)
-  | For { pattern; iteration; body; _ } ->
-      let frontier, loan =
-        match iteration with
-        | Integer_range { start; stop; _ } ->
-            (expression builder (expression builder frontier start) stop, None)
-        | Yielding_call
-            ({ kind = Call { arguments = Passed { mode; value = Place core_place; _ } :: _; _ }; _ }
-             as call) ->
-            ( expression builder frontier call,
-              Option.map
-                (fun borrowed : loan ->
-                  { borrowed; mode = (if mode = Mut then Mut else Read); duration = Loop_body })
-                (Place.of_core core_place) )
-        | Yielding_call call -> (expression builder frontier call, None)
-        | Cursor { cursor; _ } ->
-            ( operand builder frontier Mut (Place cursor),
-              Option.map
-                (fun borrowed : loan -> { borrowed; mode = Read; duration = Loop_body })
-                (Place.of_core cursor) )
-      in
-      (* The loop's pattern variables view the collection that the loop
-         iterates over. A variable of a [Plain] type holds a copy of the
-         element, so it has only the element's own views. *)
-      let views =
-        match iteration with
-        | Integer_range _ -> []
-        | Yielding_call call ->
-            List.map
-              (fun (view : view) ->
-                if builder.plain pattern.type_ then { view with copied_out = true } else view)
-              (views_of builder call)
-        | Cursor { cursor; _ } -> views_of_copy builder cursor
-      in
-      loop builder frontier ~bound:(pattern_locals pattern) ~views ~loan ~condition:None body
-        node.origin
-        ~fork_join:
-          (match node.kind with
-          | For { mode = Parallel_loop; _ } -> Some "parallel"
-          | For { mode = Concurrent_loop; _ } -> Some "concurrent"
-          | _ -> None)
-  | While { condition; body; _ } ->
-      loop builder frontier ~bound:[] ~views:[] ~loan:None ~condition:(Some condition) body
-        node.origin ~fork_join:None
-  | Parallel branches | Concurrent branches ->
-      let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
-      let frontier, ranges =
-        List.fold_left
-          (fun (frontier, ranges) branch ->
-            let first = builder.count in
-            let frontier = statement builder frontier branch in
-            let limit = builder.count in
-            let frontier =
-              if concurrent then emit builder frontier (Task_end { first; limit }) branch.origin
-              else frontier
-            in
-            (frontier, { first; limit } :: ranges))
-          (frontier, []) branches
-      in
-      builder.fork_join_blocks <-
-        { keyword = (if concurrent then "concurrent" else "parallel"); branches = List.rev ranges }
-        :: builder.fork_join_blocks;
-      frontier
-  | Proof _ -> frontier
-  | Assert { condition = { value; _ }; _ } -> expression builder frontier value
-  | Yield { mode; part = Value { kind = Construct { fields; _ }; _ } as part } ->
-      let frontier = construct builder frontier mode fields in
-      let lent = Core_walk.lent_places part in
-      if mode = Mut then
-        let frontier =
-          List.fold_left
-            (fun frontier core_place -> borrow_mut builder frontier (Place core_place))
-            frontier lent
-        in
-        (* Aliasing: the places that are lent [mut] to the yielded value
-           must not overlap. *)
-        let places =
-          List.concat
-            (List.mapi
-               (fun position (core_place : Core.place) ->
-                 match Place.of_core core_place with
-                 | Some place ->
-                     [ { place; mode; at = Core_walk.place_origin core_place; position } ]
-                 | None -> [])
-               lent)
-        in
-        if List.length places > 1 then
-          emit builder frontier (Arguments { places; views = []; yielded = true }) node.origin
-        else frontier
-      else frontier
-  | Yield { mode; part } -> operand builder frontier mode part
+      { nothing with views = views_of_operand builder operand; temporaries }
+  | Construct { fields; _ } ->
+      let given = List.filter_map snd fields in
+      List.iter
+        (fun field -> match field with Mir.Borrow _ -> () | _ -> evaluate builder field)
+        given;
+      {
+        nothing with
+        views =
+          List.concat_map
+            (fun (field : Mir.operand) ->
+              match field with
+              | Borrow { place; type_; _ } -> views_of_borrow builder place type_
+              | _ -> views_of_part builder field)
+            given;
+        temporaries =
+          List.concat_map
+            (fun field ->
+              match field with Mir.Borrow _ -> [] | _ -> owned_temporaries builder Own field)
+            given;
+        lent = List.concat_map (lent_places builder) given;
+      }
+  | Array elements ->
+      List.iter (evaluate builder) elements;
+      { nothing with views = List.concat_map (views_of_part builder) elements }
+  | Is_variant { place; _ } ->
+      Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place);
+      nothing
+  | Lambda { captures; _ } -> (
+      List.iter
+        (fun (capture : Core.capture) ->
+          emit_ builder (Read { root = Local capture.local; steps = [] }) origin)
+        captures;
+      match captures with
+      | [] -> { nothing with fresh = false }
+      | _ ->
+          {
+            nothing with
+            fresh = false;
+            views =
+              { place = { root = Environment; steps = [] }; copied_out = false }
+              :: List.map
+                   (fun (capture : Core.capture) ->
+                     { place = { root = Local capture.local; steps = [] }; copied_out = false })
+                   captures;
+          })
+  | Function_value _ | Value_parameter _ -> nothing
 
-and statement_and_yield_point builder frontier (node : Core.statement) =
-  let frontier = statement_actions builder frontier node in
-  match node.kind with
-  | Yield { mode; part } ->
-      let views =
-        if builder.is_view (operand_type part) then views_of_operand builder part else []
-      in
-      let lent = List.map Place.of_core (Core_walk.lent_places part) in
-      emit builder frontier (Yield_point { mode; lent; views }) node.origin
-  | _ -> frontier
-
-(* A [let]: evaluates the value, then records the views of the locals that
-   the pattern binds. *)
-and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (value : Core.operand)
-    else_ =
-  let frontier = operand builder frontier Read value in
-  Option.iter (fun else_ -> ignore (block builder frontier else_)) else_;
-  let type_ = operand_type value in
-  let is_var = match pattern.kind with Bind { is_var; _ } -> is_var | _ -> false in
-  let lent_part =
-    match value with Place core_place -> Place.is_lent_part core_place | Value _ -> false
-  in
-  let origin =
-    match value with
-    | Place core_place -> Core_walk.place_origin core_place
-    | Value value -> value.origin
-  in
-  (* A [let] cannot bind a part that a lending call lent, because the loan
-     ends with the statement. A [Plain] part is copied instead, unless it is
-     a view: a copied view still borrows from the lender. *)
-  let frontier =
-    if (not is_var) && lent_part && ((not (builder.plain type_)) || builder.is_view type_) then
-      emit builder frontier (Bind_lent_part type_) origin
-    else frontier
-  in
+(* A local the body is about to bind: its first assignment is its value. *)
+let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin ~is_var
+    =
+  let type_ = (local_info builder local).type_ in
   let holds_views =
     builder.is_view type_ || match type_ with Types.Cursor _ -> true | _ -> false
   in
-  (* A local that is bound to a place aliases the place, so it views it. A
-     local that is bound to a value of a view type has the value's views. A
-     local that takes ownership of a moved value has no views. *)
+  let result = rvalue builder value origin in
+  (match value with
+  | Operand
+      (Borrow { place = { root = Local part; _ } as place; type_ = part_type; origin = at; _ })
+    when (not is_var) && is_lent_part builder place
+         && ((not (builder.plain part_type)) || builder.is_view part_type) ->
+      builder.keeps_lent <- (local, part, part_type, at) :: builder.keeps_lent
+  | _ -> ());
   let views =
     match value with
-    | Place core_place
-      when holds_views || (Option.is_some (Place.of_core core_place) && not (builder.plain type_))
-      ->
-        views_of_borrow builder core_place
-    | Value value when holds_views -> views_of builder value
-    | Place _ | Value _ -> []
+    | Operand (Borrow { place; type_ = part_type; _ })
+      when holds_views || is_temporary builder place
+           || (Option.is_some (tracked builder place) && not (builder.plain part_type)) ->
+        views_of_borrow builder place part_type
+    | Operand (Borrow _) -> []
+    | _ when holds_views -> result.views
+    | _ -> []
   in
-  let frontier =
-    if holds_views then
-      List.fold_left
-        (fun frontier (temporary : Core.expression) ->
-          emit builder frontier (View_of_temporary None) temporary.origin)
-        frontier
-        (match value with Value value -> viewed_temporaries builder value | Place _ -> [])
-    else frontier
+  (* A loop's variable of a [Plain] type holds a copy of the element, so it
+     has only the element's own views. *)
+  let from_part =
+    match value with
+    | Operand
+        ( Use { place = { root = Local part; _ }; _ }
+        | Borrow { place = { root = Local part; _ }; _ } ) ->
+        (held builder part).part
+    | _ -> false
   in
-  let locals = pattern_locals pattern in
-  let frontier = emit builder frontier (Bind locals) node.origin in
-  if holds_views || views <> [] then
-    emit builder frontier (Bind_views { locals; views }) node.origin
-  else frontier
+  let views =
+    if from_part && builder.plain type_ then
+      List.map (fun (view : view) -> { view with copied_out = true }) views
+    else views
+  in
+  if holds_views then
+    List.iter (fun at -> emit_ builder (View_of_temporary None) at) result.temporaries;
+  if holds_views || views <> [] then emit_ builder (Bind_views { locals = [ core ]; views }) origin
 
-(* A loop. Every iteration passes through the head point. A [while] loop
-   evaluates its condition after the head. Control leaves the loop from the
-   head, from the condition, and from each [break]. A loop over a place
-   borrows the place for the body. *)
-and loop builder frontier ~bound ~views ~loan ~condition ~fork_join (body : Core.block) origin =
-  match frontier with
-  | [] -> []
-  | _ ->
-      let head = add builder (Bind bound) origin in
-      link builder frontier head;
-      (* A loop that borrows its collection [mut] may mutate the collection
-         on every iteration. *)
-      let stepped =
-        match loan with
-        | Some { borrowed; mode = Mut; _ } -> emit builder [ head ] (Mutate borrowed) origin
-        | _ -> [ head ]
-      in
-      let breaks = ref [] and continues = ref [] in
-      builder.loops <- (breaks, continues) :: builder.loops;
-      let loans = builder.loans in
-      let tested =
-        match condition with
-        | Some condition ->
-            let tested = expression builder stepped condition in
-            builder.loans <- loans;
-            tested
-        | None -> stepped
-      in
-      builder.loans <- Option.to_list loan @ loans;
-      let entered =
-        if bound = [] || views = [] then tested
-        else emit builder tested (Bind_views { locals = bound; views }) origin
-      in
-      let first = builder.count in
-      let body_end = block builder entered body in
+let returned_temporaries (body : Mir.body) =
+  let returned = ref [] in
+  Array.iter
+    (fun (block : Mir.basic_block) ->
+      match block.terminator with
+      | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
+      | Exit_tasks
+          {
+            exit = Exit_return (Some (Use { place = { root = Local local; projections = [] }; _ }));
+            _;
+          }
+        when body.locals.(local).kind = Temporary ->
+          returned := local :: !returned
+      | _ -> ())
+    body.blocks;
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Array.iter
+      (fun (block : Mir.basic_block) ->
+        List.iter
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Assign
+                {
+                  target = { root = Local target; projections = [] };
+                  value = Operand (Use { place = { root = Local source; projections = [] }; _ });
+                }
+              when List.mem target !returned
+                   && body.locals.(source).kind = Temporary
+                   && not (List.mem source !returned) ->
+                returned := source :: !returned;
+                changed := true
+            | _ -> ())
+          block.statements)
+      body.blocks
+  done;
+  !returned
+
+(* The loans one [Loan_start] starts. *)
+let loans_of builder (borrowed : Mir.operand) mode (duration : Mir.loan_duration) : loan list =
+  let duration : duration =
+    match duration with
+    | Loop_body -> Loop_body
+    | Provide_body -> Provide_body
+    | Rest_of_statement -> Rest_of_statement
+    | Operand_evaluation -> Operand_evaluation
+  in
+  List.map (fun borrowed : loan -> { borrowed; mode; duration }) (operand_borrows builder borrowed)
+
+type fork = { concurrent : bool; mutable branches : range list; mutable first : int }
+
+let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.statement) =
+  let origin = statement.origin in
+  match statement.kind with
+  | Live locals ->
+      builder.binding <- locals @ builder.binding;
+      let core = List.filter_map (source builder) locals in
+      if core <> [] then emit_ builder (Bind core) origin
+  | Dead locals ->
+      List.iter
+        (fun (binding, part, part_type, at) ->
+          if List.mem part locals && not (List.mem binding locals) then
+            emit_ builder (Bind_lent_part part_type) at)
+        builder.keeps_lent;
+      builder.keeps_lent <-
+        List.filter
+          (fun (binding, part, _, _) -> not (List.mem binding locals || List.mem part locals))
+          builder.keeps_lent;
+      let core = List.filter_map (source builder) locals in
+      if core <> [] then emit_ builder (Scope_end core) origin
+  | Assign { target = { root = Local local; projections = [] } as target; value }
+    when List.mem local builder.binding
+         ||
+         match (local_info builder local).kind with
+         | Temporary -> true
+         | Lent _ -> not (Hashtbl.mem builder.held local)
+         | Source _ -> false -> (
+      builder.binding <- List.filter (fun bound -> bound <> local) builder.binding;
+      match (local_info builder local).kind with
+      | Temporary -> (
+          match value with
+          | Operand (Use { place; type_; node; origin = at })
+            when List.mem local builder.returned && Option.is_some (tracked builder place) ->
+              use builder place type_ node at ~returned:true;
+              hold builder target { nothing with views = views_of_copy builder place }
+          | _ -> hold builder target (rvalue builder value origin))
+      | Lent _ -> (
+          builder.aliases <- local :: builder.aliases;
+          let result = rvalue builder value origin in
+          match value with
+          | Operand (Borrow { place; _ }) ->
+              hold builder target
+                {
+                  nothing with
+                  place = tracked builder place;
+                  views = result.views;
+                  alias = Some place;
+                  fresh = false;
+                }
+          | _ -> hold builder target result)
+      | Source { local = core; _ } ->
+          bound_value builder local core value origin ~is_var:(is_var core))
+  | Assign { target; value } -> (
+      let result = rvalue builder value origin in
+      match tracked builder target with
+      | Some place -> (
+          let type_ = match value with Operand operand -> operand_type operand | _ -> None in
+          writes_through builder ~whole:false target (Option.value ~default:Types.unit type_) origin;
+          emit_ builder (Assign place) origin;
+          match type_ with
+          | Some type_ when builder.is_view type_ ->
+              store_views builder place origin ~views:result.views ~temporaries:result.temporaries
+          | _ -> ())
+      | None -> hold builder { target with projections = [] } result)
+  | Call { destination; call = called } ->
+      call builder called origin;
       Option.iter
-        (fun keyword ->
-          builder.fork_join_loops <-
-            { keyword; body = { first; limit = builder.count }; bound } :: builder.fork_join_loops)
-        fork_join;
-      builder.loans <- loans;
-      builder.loops <- List.tl builder.loops;
-      link builder (body_end @ !continues) head;
-      let ended = tested @ !breaks in
-      if bound = [] then ended else emit builder ended (Scope_end bound) origin
+        (fun destination -> hold builder destination (call_result builder called))
+        destination
+  | Template { destination; call = called; _ } ->
+      call builder called origin;
+      hold builder destination (call_result builder called)
+  | Lend { part; call = called } -> (
+      let element =
+        match (called.callee, called.arguments) with
+        | ( Trait_method { trait; name = "at"; self_type; _ },
+            Passed { value = Borrow { place = collection; type_ = collection_type; _ }; _ } :: _ )
+          when Well_known.is Index trait.trait
+               && (Types.is_well_known List self_type
+                  || Types.is_well_known Slice self_type
+                  || Types.is_builtin Array self_type) ->
+            let collection_place = tracked builder collection in
+            Some
+              ( Option.map
+                  (fun (place : Place.t) ->
+                    { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
+                  collection_place,
+                (collection_place, collection_type) )
+        | _ -> None
+      in
+      match element with
+      | Some (place, collection) ->
+          (* An element of a [List], a [Slice], or an [Array] is a place of
+             its own: the index reads the collection, and lends no part of
+             it for the statement. *)
+          List.iter
+            (fun (argument : Mir.argument) ->
+              match argument with Passed { value; _ } -> evaluate builder value | Default -> ())
+            (List.tl called.arguments);
+          builder.storage_lend <- true;
+          hold builder
+            { Mir.root = Local part; projections = [] }
+            { nothing with place; collection = Some collection }
+      | None ->
+          call builder called origin;
+          hold builder { Mir.root = Local part; projections = [] } (call_result builder called))
+  | Slice { destination; base; call = called } ->
+      call builder called origin;
+      let base_type =
+        match called.arguments with
+        | Passed { value = Borrow { type_; _ }; _ } :: _ -> Some type_
+        | _ -> None
+      in
+      let elements =
+        Option.map
+          (fun (place : Place.t) ->
+            { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
+          (tracked builder base)
+      in
+      let views =
+        match elements with
+        | Some place ->
+            [
+              {
+                place;
+                copied_out =
+                  (match base_type with Some t -> Place.is_slice_type t | None -> false);
+              };
+            ]
+        | None -> views_of_borrow builder base (Option.value ~default:Types.unit base_type)
+      in
+      let temporaries =
+        match temporary_of builder base with
+        | Some local
+          when (held builder local).fresh
+               && not (builder.plain (Option.value ~default:Types.unit base_type)) ->
+            [ (local_info builder local).origin ]
+        | _ -> []
+      in
+      hold builder destination { nothing with views; slice = elements; temporaries }
+  | Pull { destination; cursor } ->
+      Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
+      hold builder destination { nothing with views = views_of_copy builder cursor }
+  | Assert value | Echo value -> evaluate builder value
+  | Provide provided ->
+      List.iter
+        (fun (provided : Mir.provided) ->
+          evaluate builder provided.value;
+          if provided.mode = Mut then borrow_mut builder provided.value)
+        provided
+  | Loan_start { loan; borrowed; mode; duration } ->
+      let loans =
+        if duration = Rest_of_statement && builder.storage_lend then []
+        else loans_of builder borrowed mode duration
+      in
+      builder.storage_lend <- false;
+      (* A loop that borrows its collection [mut] may change it on every
+         iteration. *)
+      if duration = Loop_body && mode = Mut then
+        List.iter (fun (loan : loan) -> emit_ builder (Mutate loan.borrowed) origin) loans;
+      emit_ builder ~starts:(loan, loans) (Bind []) origin;
+      if duration = Loop_body then Hashtbl.replace builder.loop_entries builder.block builder.count
+  | Loan_end loans -> emit_ builder ~ends:loans (Bind []) origin
+  | Fork_start { fork; concurrent } ->
+      (match Hashtbl.find_opt forks fork with
+      | Some open_fork ->
+          if open_fork.concurrent then
+            emit_ builder (Task_end { first = open_fork.first; limit = builder.count }) origin;
+          open_fork.branches <-
+            open_fork.branches @ [ { first = open_fork.first; limit = builder.count } ];
+          open_fork.first <- builder.count
+      | None -> Hashtbl.replace forks fork { concurrent; branches = []; first = builder.count });
+      emit_ builder (Bind []) origin
+  | Fork_end { fork } -> (
+      match Hashtbl.find_opt forks fork with
+      | Some open_fork ->
+          let limit = builder.count in
+          if open_fork.concurrent then
+            emit_ builder (Task_end { first = open_fork.first; limit }) origin;
+          builder.fork_join_blocks <-
+            {
+              keyword = (if open_fork.concurrent then "concurrent" else "parallel");
+              branches = open_fork.branches @ [ { first = open_fork.first; limit } ];
+            }
+            :: builder.fork_join_blocks;
+          Hashtbl.remove forks fork
+      | None -> ())
+  | Provide_end | Ghost_assert _ | Proof _ -> ()
 
-(* The graph of a definition, or [None] if the definition has no body to
-   check: only a function, a test, and a law's proof have one. *)
-let of_definition ~plain ~is_view ~holds_function ~stores_function (definition : Core.definition) :
-    t option =
-  let body =
-    match definition with
-    | Function { body = Some body; _ } -> Some (body, true)
-    | Test body | Law_proof { body; _ } -> Some (body, false)
-    | Function { body = None; _ } | Type _ | Trait _ | Constant _ | Empty -> None
+(* The points of a body: one run of points for each block, linked as its
+   terminator jumps. *)
+let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~ending =
+  builder.body <- body;
+  builder.returned <- returned_temporaries body;
+  builder.aliases <- [];
+  builder.binding <- [];
+  let forks = Hashtbl.create 4 in
+  let blocks = Array.length body.blocks in
+  let firsts = Array.make blocks (-1) and lasts = Array.make blocks (-1) in
+  let heads = Hashtbl.create 4 in
+  let pending_edges = ref [] in
+  Array.iteri
+    (fun index (block : Mir.basic_block) ->
+      builder.last <- (if index = 0 then Some entry else None);
+      builder.block <- index;
+      let first = builder.count in
+      if index > 0 then emit_ builder (Bind []) block.terminator_origin;
+      List.iter (statement builder forks ~is_var) block.statements;
+      let origin = block.terminator_origin in
+      (match block.terminator with
+      | Branch { condition; _ } -> evaluate builder condition
+      | Switch_variant { place; _ } ->
+          Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place)
+      | For { iteration; part; body = inside; after; loop } -> (
+          let part_place = { Mir.root = Local part; projections = [] } in
+          (match iteration with
+          | Yielding called ->
+              call builder called origin;
+              hold builder part_place { (call_result builder called) with part = true }
+          | Range { start; stop; _ } ->
+              evaluate builder start;
+              evaluate builder stop
+          | Pull { cursor; _ } ->
+              (* Each pull changes the cursor. *)
+              Option.iter
+                (fun tracked -> emit_ builder (Mutate tracked) origin)
+                (tracked builder cursor);
+              hold builder part_place { nothing with views = views_of_copy builder cursor });
+          let head = emit builder (Bind []) origin in
+          Hashtbl.replace heads index head;
+          pending_edges := (head, `Block inside) :: (head, `Block after) :: !pending_edges;
+          match loop.schedule with
+          | Parallel_loop | Concurrent_loop ->
+              builder.fork_join_loops <-
+                {
+                  keyword = (if loop.schedule = Parallel_loop then "parallel" else "concurrent");
+                  body = { first = 0; limit = -inside };
+                  bound = [];
+                }
+                :: builder.fork_join_loops
+          | Sequential -> ())
+      | Yield { mode; part; _ } ->
+          (match part with
+          | Use { place = { root = Local local; projections = [] }; _ }
+            when (local_info builder local).kind = Temporary ->
+              ()
+          | _ -> evaluate builder part);
+          let lent = lent_places builder part in
+          if mode = Mut then begin
+            List.iter
+              (fun lent -> Option.iter (fun place -> emit_ builder (Mutate place) origin) lent)
+              lent;
+            let places =
+              List.concat
+                (List.mapi
+                   (fun position lent ->
+                     match lent with
+                     | Some place -> [ { place; mode; at = origin; position } ]
+                     | None -> [])
+                   lent)
+            in
+            if List.length places > 1 then
+              emit_ builder (Arguments { places; views = []; yielded = true }) origin
+          end;
+          let views =
+            match operand_type part with
+            | Some type_ when builder.is_view type_ -> views_of_operand builder part
+            | _ -> []
+          in
+          emit_ builder (Yield_point { mode; lent; views }) origin
+      | Return value | Exit_tasks { exit = Exit_return value; _ } ->
+          (match value with
+          | Some value -> (
+              let is_returned =
+                match value with Use { place; _ } -> not (is_temporary builder place) | _ -> false
+              in
+              evaluate builder ~returned:is_returned value;
+              match operand_type value with
+              | Some type_ when returns && builder.is_view type_ ->
+                  emit_ builder (Return_view (views_of_operand builder value)) origin
+              | _ -> ())
+          | None -> ());
+          ending origin
+      | Goto _ | Exit_tasks _ | Iteration_end | Unreachable | Todo -> ());
+      firsts.(index) <- (if index = 0 then entry else first);
+      lasts.(index) <- (match builder.last with Some last -> last | None -> first))
+    body.blocks;
+  (* The innermost [For] whose body reaches each [Iteration_end]. *)
+  let each_of = Hashtbl.create 4 in
+  Array.iteri
+    (fun index (block : Mir.basic_block) ->
+      match block.terminator with
+      | For { body = inside; after; _ } ->
+          let visited = Hashtbl.create 8 in
+          let rec visit block =
+            if block <> after && not (Hashtbl.mem visited block) then begin
+              Hashtbl.replace visited block ();
+              match body.blocks.(block).terminator with
+              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
+                  Hashtbl.replace each_of block index
+              | For { after = inner_after; _ } -> visit inner_after
+              | terminator -> List.iter visit (Mir.successors terminator)
+            end
+          in
+          visit inside
+      | _ -> ())
+    body.blocks;
+  Array.iteri
+    (fun index (block : Mir.basic_block) ->
+      let from = lasts.(index) in
+      match block.terminator with
+      | For _ -> ()
+      | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } -> (
+          match Hashtbl.find_opt each_of index with
+          | Some each -> link builder from (Hashtbl.find heads each)
+          | None -> ())
+      | terminator ->
+          List.iter (fun target -> link builder from firsts.(target)) (Mir.successors terminator))
+    body.blocks;
+  List.iter (fun (from, `Block target) -> link builder from firsts.(target)) !pending_edges;
+  (* A parallel loop's body is the points of the blocks it runs. *)
+  builder.fork_join_loops <-
+    List.map
+      (fun (loop : fork_join_loop) ->
+        if loop.body.limit < 0 then (
+          let inside = -loop.body.limit in
+          let points = ref [] and visited = Hashtbl.create 8 in
+          let rec visit block =
+            if not (Hashtbl.mem visited block) then begin
+              Hashtbl.replace visited block ();
+              points := firsts.(block) :: lasts.(block) :: !points;
+              match body.blocks.(block).terminator with
+              | Iteration_end -> ()
+              | For { after; _ } -> visit after
+              | terminator -> List.iter visit (Mir.successors terminator)
+            end
+          in
+          visit inside;
+          let bound =
+            List.concat_map
+              (fun (statement : Mir.statement) ->
+                match statement.kind with
+                | Live locals -> List.filter_map (source builder) locals
+                | _ -> [])
+              body.blocks.(inside).statements
+          in
+          let first = List.fold_left min max_int !points in
+          let first =
+            match Hashtbl.find_opt builder.loop_entries inside with
+            | Some entered -> max first entered
+            | None -> first
+          in
+          { loop with body = { first; limit = List.fold_left max 0 !points + 1 }; bound })
+        else loop)
+      builder.fork_join_loops
+
+(* The loans live at each point: a forward pass from the entries. *)
+let live_loans builder =
+  let count = builder.count in
+  let live = Array.make count None in
+  let pending = Queue.create () in
+  List.iter
+    (fun entry ->
+      live.(entry) <- Some [];
+      Queue.add entry pending)
+    builder.entries;
+  while not (Queue.is_empty pending) do
+    let index = Queue.pop pending in
+    let draft = Hashtbl.find builder.drafts index in
+    let before = Option.value ~default:[] live.(index) in
+    let after =
+      let without = List.filter (fun (loan, _) -> not (List.mem loan draft.ends)) before in
+      match draft.starts with
+      | Some started -> if List.mem_assoc (fst started) without then without else started :: without
+      | None -> without
+    in
+    List.iter
+      (fun successor ->
+        match live.(successor) with
+        | None ->
+            live.(successor) <- Some after;
+            Queue.add successor pending
+        | Some known ->
+            let added = List.filter (fun loan -> not (List.mem loan known)) after in
+            if added <> [] then begin
+              live.(successor) <- Some (known @ added);
+              Queue.add successor pending
+            end)
+      draft.draft_successors
+  done;
+  Array.map (fun loans -> List.concat_map snd (List.rev (Option.value ~default:[] loans))) live
+
+(* The graph of a definition, or [None] if it has no code to run. *)
+let of_mir ~plain ~is_view ~holds_function ~stores_function ~returns ~is_var (mir : Mir.t) : t =
+  let builder =
+    {
+      drafts = Hashtbl.create 64;
+      count = 0;
+      entries = [];
+      fork_join_blocks = [];
+      fork_join_loops = [];
+      plain;
+      is_view;
+      holds_function;
+      stores_function;
+      body = mir.body;
+      captured = [];
+      last = None;
+      held = Hashtbl.create 32;
+      returned = [];
+      aliases = [];
+      binding = [];
+      storage_lend = false;
+      block = 0;
+      keeps_lent = [];
+      loop_entries = Hashtbl.create 4;
+    }
   in
-  Option.map
-    (fun ((body : Core.block), returns) ->
-      let builder =
-        {
-          table = Hashtbl.create 64;
-          count = 0;
-          entries = [];
-          loops = [];
-          captured = [];
-          loans = [];
-          fork_join_blocks = [];
-          fork_join_loops = [];
-          plain;
-          is_view;
-          holds_function;
-          stores_function;
-        }
+  let entry = add builder Enter 0 in
+  builder.entries <- [ entry ];
+  let parameters (body : Mir.body) = List.filter_map (source builder) body.parameters in
+  body_points builder mir.body ~returns ~is_var ~entry ~ending:(fun origin ->
+      if returns then emit_ builder Exit origin);
+  Array.iter
+    (fun (lambda : Mir.body) ->
+      builder.body <- lambda;
+      let made_live =
+        Array.to_list lambda.blocks
+        |> List.concat_map (fun (block : Mir.basic_block) ->
+            List.concat_map
+              (fun (statement : Mir.statement) ->
+                match statement.kind with Live locals -> locals | _ -> [])
+              block.statements)
       in
+      builder.captured <-
+        List.filter_map
+          (fun local ->
+            match lambda.locals.(local).kind with
+            | Source { local = core; _ }
+              when (not (List.mem local lambda.parameters)) && not (List.mem local made_live) ->
+                Some core
+            | _ -> None)
+          (List.init (Array.length lambda.locals) Fun.id);
+      Hashtbl.reset builder.held;
       let entry = add builder Enter 0 in
-      let frontier = List.fold_left (statement builder) [ entry ] body.statements in
-      let frontier =
-        match body.value with
-        | Some value when returns -> returned_value builder frontier value
-        | Some value -> expression builder frontier value
-        | None -> frontier
-      in
-      if returns then ignore (emit builder frontier Exit 0);
-      {
-        points = Array.init builder.count (Hashtbl.find builder.table);
-        entries = entry :: List.rev builder.entries;
-        fork_join_blocks = List.rev builder.fork_join_blocks;
-        fork_join_loops = List.rev builder.fork_join_loops;
-      })
-    body
+      builder.entries <- builder.entries @ [ entry ];
+      builder.last <- Some entry;
+      let bound = parameters lambda in
+      let entry = emit builder (Bind bound) 0 in
+      body_points builder lambda ~returns:false ~is_var ~entry ~ending:(fun origin ->
+          emit_ builder (Scope_end bound) origin))
+    mir.lambdas;
+  let loans = live_loans builder in
+  {
+    points =
+      Array.init builder.count (fun index ->
+          let draft = Hashtbl.find builder.drafts index in
+          {
+            action = draft.draft_action;
+            origin = draft.draft_origin;
+            loans = loans.(index);
+            successors = draft.draft_successors;
+          });
+    entries = builder.entries;
+    fork_join_blocks = List.rev builder.fork_join_blocks;
+    fork_join_loops = List.rev builder.fork_join_loops;
+  }

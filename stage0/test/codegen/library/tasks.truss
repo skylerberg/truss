@@ -503,7 +503,7 @@ test "a cell's updates from many tasks each see the value the one before left" {
   }
 }
 
-test "a counter adds what each task adds, and gives the total" {
+test "a counter adds each task's increments, and gives the total" {
   provide tasks::SeededTasks.new(3) {
     let requests = tasks::Counter.new()
     concurrent for _ in 0..50 {

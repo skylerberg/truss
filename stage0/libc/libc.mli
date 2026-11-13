@@ -145,6 +145,13 @@ type number =
       (** Where the family of a socket's address is, and how many bytes it takes: two from the start
           on Linux; one, after a byte for the address's length, on macOS *)
   | Sockaddr_family_size
+  | Af_unix
+  | Ipproto_tcp
+  | Tcp_nodelay
+  | So_keepalive
+  | Tcp_keepidle
+  | So_reuseport
+  | Sockaddr_un_path_size
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -347,7 +354,7 @@ val signature : function_ -> signature
 val declaration : system -> function_ -> declaration
 
 val prototype : declaration -> string
-(** What a C file that includes no header writes before it calls the function. *)
+(** The prototype a C file that includes no header writes before it calls the function. *)
 
 val numbers : number list
 
@@ -357,7 +364,9 @@ val number_name : number -> string
 val number_type : number -> scalar
 val value : system -> number -> int
 
-val check : system -> string
-(** A C file that includes the system's own headers and compiles only if every number has the value
-    given here, every prototype is the one the headers declare, and every structure a function takes
-    is laid out as the storage passed for it. *)
+module For_testing : sig
+  val check : system -> string
+  (** A C file that includes the system's own headers and compiles only if every number has the
+      value given here, every prototype is the one the headers declare, and every structure a
+      function takes is laid out as the storage passed for it. *)
+end

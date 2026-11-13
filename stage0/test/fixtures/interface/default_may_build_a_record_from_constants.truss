@@ -1,3 +1,3 @@
-type Point(x: Int64, y: Int64)
+type Point(first_number: Int64, second_number: Int64)
 
-fn f(at: Point = Point(x: 0, y: 1)) {}
+fn run_example(at: Point = Point(first_number: 0, second_number: 1)) {}

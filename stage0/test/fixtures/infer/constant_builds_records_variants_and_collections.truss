@@ -1,11 +1,11 @@
-let origin: Point = Point(x: 1, y: 2 * 3)
+let origin: Point = Point(first_number: 1, second_number: 2 * 3)
 
-let points: List[Point] = [origin, Point(x: 0, y: 0)]
+let points: List[Point] = [origin, Point(first_number: 0, second_number: 0)]
 
 let no_point: Option[Point] = None
 
 let wrapped: Option[Int64] = Some(4)
 
-let first: Int64 = origin.x
+let first: Int64 = origin.first_number
 
 let epoch: Instant = Instant.epoch

@@ -1,0 +1,6 @@
+fn run_example() {
+  let base = 1
+  let small: UInt8 = base
+  let medium: UInt16 = base
+  let large: UInt32 = base
+}

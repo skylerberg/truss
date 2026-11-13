@@ -1,3 +1,3 @@
-fn f(data: own List[Int64]) -> Slice[Int64] {
+fn run_example(data: own List[Int64]) -> Slice[Int64] {
   data[0..1]
 }

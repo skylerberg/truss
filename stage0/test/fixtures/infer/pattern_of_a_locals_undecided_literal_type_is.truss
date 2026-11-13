@@ -1,0 +1,8 @@
+fn run_example(small: UInt8) -> UInt8 {
+  let base = 3
+  let kind = match base {
+    0 => 1
+    _ => 2
+  }
+  small + base + kind
+}

@@ -129,7 +129,8 @@ let statement_parts ~expression:on_expression ~statement (written : statement) =
   | Assignment { target; value; _ } ->
       on_expression target;
       on_expression value
-  | For { iterable; clauses; body; _ } ->
+  | For { annotation; iterable; clauses; body; _ } ->
+      Option.iter (type_expression on_expression) annotation;
       on_expression iterable;
       List.iter (loop_clause on_expression) clauses;
       block body
@@ -449,7 +450,8 @@ let walk_names ~on_name:add (definition_ : definition) =
         expression value;
         Option.iter block_ else_;
         pattern bound
-    | For { pattern = bound; iterable; clauses; body; _ } ->
+    | For { pattern = bound; annotation; iterable; clauses; body; _ } ->
+        Option.iter type_ annotation;
         expression iterable;
         pattern bound;
         List.iter (loop_clause expression) clauses;
