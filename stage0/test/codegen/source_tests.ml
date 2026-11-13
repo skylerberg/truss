@@ -91,17 +91,13 @@ let () =
             type_arguments = [];
           }
       in
-      match Compile.For_testing.compiled compile equal with
-      | Code instance ->
-          let branches =
-            Array.to_list instance.main.blocks
-            |> List.filter (fun (block : Lir.basic_block) ->
-                match block.terminator with Switch _ -> true | _ -> false)
-          in
-          if List.length branches <> 2 then
-            fail "expected a branch after each field, got %d:\n%s" (List.length branches)
-              (Lir.For_testing.to_string instance)
-      | _ -> fail "expected code")
+      let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile equal) in
+      let branches =
+        List.length
+          (String.split_on_char '\n' c
+          |> List.filter (fun line -> String.starts_with ~prefix:"  switch (" line))
+      in
+      if branches <> 2 then fail "expected a branch after each field, got %d:\n%s" branches c)
 
 let () =
   test "negating the least value of a signed type panics, where the checks are on" (fun () ->

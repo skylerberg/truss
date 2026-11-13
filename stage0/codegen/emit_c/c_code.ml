@@ -280,10 +280,9 @@ let statement_c context fc buffer (statement : Lir.statement) =
         (function_ref_symbol fc (Nested body))
         (operand environment) (operand first) (operand last)
 
-let unreachable_c context =
-  match context.build with
-  | Development -> "t_runtime_compiler_bug();"
-  | Release -> "__builtin_unreachable();"
+(* A point no run reaches, which each file defines for its build: a call
+   that reports a compiler bug, or a promise to the C compiler. *)
+let unreachable_c _ = "T_UNREACHABLE();"
 
 let terminator_c context fc buffer (terminator : Lir.terminator) =
   let line format =
@@ -353,11 +352,13 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
         site.line site.column
   | Yield _ -> bug "a yield that yield lowering left in place"
 
-let function_c context key symbol ~linkage (function_ : Lir.function_) =
+let function_c context key symbol (function_ : Lir.function_) =
   let fc = { symbol = Instance.symbol key; function_ } in
   let buffer = Buffer.create 1024 in
   let names = List.map (local_name function_) function_.parameters in
-  let header = prototype context fc.symbol symbol ~names ~linkage (Lir.signature function_) in
+  let header =
+    prototype context fc.symbol symbol ~names ~linkage:External (Lir.signature function_)
+  in
   let targets = Hashtbl.create 16 in
   Array.iter
     (fun (block : Lir.basic_block) ->
@@ -365,7 +366,7 @@ let function_c context key symbol ~linkage (function_ : Lir.function_) =
         (fun block_index -> Hashtbl.replace targets block_index ())
         (Lir.successors block.terminator))
     function_.blocks;
-  Buffer.add_string buffer (header ^ " {\n");
+  Buffer.add_string buffer " {\n";
   Array.iteri
     (fun local (info : Lir.local_info) ->
       if (not (List.mem local function_.parameters)) && not (erased context info.ty) then
@@ -387,4 +388,4 @@ let function_c context key symbol ~linkage (function_ : Lir.function_) =
       terminator_c context fc buffer block.terminator)
     function_.blocks;
   Buffer.add_string buffer "}\n";
-  Buffer.contents buffer
+  (header, Buffer.contents buffer)

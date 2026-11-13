@@ -215,7 +215,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t lis
   in
   match
     Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-      ~files:[ List.map (fun index -> Lir.Code index) instances ]
+      ~files:[ List.map (fun instance -> Emit_c.fragment env (Lir.Code instance)) instances ]
       ~sources ~output
   with
   | Ok () -> Process.run ?input output []

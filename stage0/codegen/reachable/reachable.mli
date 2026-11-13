@@ -3,38 +3,26 @@
    A build starts from roots and compiles only the instances they reach: each
    instance that an instance calls, takes as a function value, reads as a
    constant, or drops. The walk takes references in the order they appear
-   in the LIR, so the result is the same on every run. *)
-
-(* The instances an instance refers to, in the order they first appear. *)
+   in the C, so the result is the same on every run. *)
 
 (* Every instance reachable from the roots, roots first, each once, in the
    order it is first reached. [lookup] gives an instance's compiled form. *)
 val reachable :
-  Memory_layout.env ->
-  lookup:(Instance.key -> Lir.compiled) ->
-  Instance.key list ->
-  Lir.compiled list
+  lookup:(Instance.key -> Emit_c.fragment) -> Instance.key list -> Emit_c.fragment list
 
 (* Every instance that running the roots can reach, each with the first way
    to it. It walks as [reachable] does, but for the entries of a capability's
    table: a build compiles them all, and running reaches one only where code
    that runs calls that method of the capability, whose way it is given. *)
 val running :
-  Memory_layout.env ->
-  lookup:(Instance.key -> Lir.compiled) ->
+  lookup:(Instance.key -> Emit_c.fragment) ->
   Instance.key list ->
-  (Lir.compiled * Instance.key list) list
+  (Emit_c.fragment * Instance.key list) list
 
-(* A unit's references, and its key. *)
-val compiled_key : Lir.compiled -> Instance.key
-val compiled_references : Memory_layout.env -> Lir.compiled -> Instance.key list
-
-(* The hash of an instance's compiled form, by itself: its encoding with
-   each instance it refers to written as that instance's place among
-   [references], itself as a mark, and each path as a number given in the
-   order paths are first met. It holds no name, so renaming or moving a
-   definition changes no hash. *)
-val own_hash : references:Instance.key list -> Lir.compiled -> string
+(* The hash of an instance's C, by itself, with each name it holds written as
+   a number, as {!Emit_c.text} writes it. It holds no name, so renaming or
+   moving a definition changes no hash. *)
+val own_hash : Emit_c.fragment -> string
 
 module Keys : Map.S with type key = Instance.key
 
@@ -60,7 +48,3 @@ val group_key :
   members:Instance.key list ->
   Instance.key ->
   string
-
-module For_testing : sig
-  val references : Memory_layout.env -> Lir.t -> Instance.key list
-end

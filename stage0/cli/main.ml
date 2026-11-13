@@ -310,7 +310,7 @@ let lsp =
 
 let version =
   Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
-    Lir.version Unicode.version
+    Emit_c.version Unicode.version
 
 let truss =
   Cmd.group

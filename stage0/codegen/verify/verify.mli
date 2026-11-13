@@ -19,10 +19,3 @@
    - a call of a nested function, or a function value made of one, names it
      with the signature it has *)
 val instance : Memory_layout.env -> Lir.t -> unit
-
-(* Everything a build links, where [find] gives an instance's compiled
-   form: each call names its callee with the signature the callee has, as
-   does each entry of a table and each named function used as a value; a
-   drop reaches a drop function; and each address of static evidence, of a
-   table, or of a constant reaches one. *)
-val links : Memory_layout.env -> find:(Instance.key -> Lir.compiled option) -> Lir.compiled -> unit

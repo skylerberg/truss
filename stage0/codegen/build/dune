@@ -3,7 +3,6 @@
  (libraries
   instance
   memory_layout
-  lir
   emit_c
   toolchain
   startup

@@ -29,7 +29,13 @@ let target_key (target : Memory_layout.target) =
       Cbor.Text (Libc.system_name target.system);
     ]
 
-type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
+(* An instance's C; or a constant's data, where its value folds, which
+   folding other constants reads; or, for a constant whose value does not
+   fold, that its evaluator is to be run. *)
+type lowered_outcome =
+  | Compiled of Emit_c.fragment
+  | Folded of Lir.data
+  | Evaluate of Path.t * Ground.ty
 
 let environment (instance : Lir.t) nested_index = instance.nested.(nested_index).environment
 
@@ -59,7 +65,7 @@ let rec fresh_context lowering database =
         function_)
     ~constant:(fun _ path ->
       match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
-      | Compiled (Data data) -> Some data.value
+      | Folded data -> Some data.value
       | Evaluate _ -> None
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
     database lowering.target
@@ -82,20 +88,27 @@ and pulled =
                  function_,
                owned ))))
 
+(* An instance's C, once its LIR is checked. *)
+and emitted (context : Lower.context) (compiled : Lir.compiled) =
+  (match compiled with
+  | Code instance -> Verify.instance (Lower.env context) instance
+  | Data _ | Table _ -> ());
+  Compiled (Emit_c.fragment (Lower.env context) compiled)
+
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-  let code instance = Compiled (elaborate_code context instance) in
+  let code instance = emitted context (elaborate_code context instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)
   | Constant path -> (
       match Lower.constant context path with
-      | Folded data -> Compiled (Data data)
+      | Folded data -> Folded data
       | Run ty -> Evaluate (path, ty))
   | Drop (Cursor yielding as cursor) ->
       let function_, owned = pulled yielding in
-      Compiled
+      emitted context
         (Code
            (Lir.canonical_instance
               {
@@ -110,7 +123,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       let function_, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
       let result = Lower.cursor_result context yielding in
-      Compiled
+      emitted context
         (Code
            (Lir.canonical_instance
               {
@@ -131,12 +144,12 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       code (Lower.template_check context key ~from_template ~texts)
   | Call_evaluation { function_; arguments } ->
       code (Lower.call_evaluation context key ~function_ ~arguments)
-  | Any_table _ -> Compiled (Table (Lower.any_table context key))
-  | Table _ -> Compiled (Table (Lower.table context key))
-  | Locked_table capability -> Compiled (Table (Lower.locked_table context key ~capability))
+  | Any_table _ -> emitted context (Table (Lower.any_table context key))
+  | Table _ -> emitted context (Table (Lower.table context key))
+  | Locked_table capability -> emitted context (Table (Lower.locked_table context key ~capability))
 
-(* An instance's compiled form, or for a constant whose value does not
-   fold, that its evaluator is to be run, which no query can do, since
+(* An instance's C, a constant's data, or for a constant whose value does
+   not fold, that its evaluator is to be run, which no query can do, since
    running code is not a function of a query's reads. *)
 and lowered =
   lazy
@@ -145,13 +158,7 @@ and lowered =
        (fun database (lowering, key) ->
          Compiler_bug.while_doing ~stage:"Compile"
            ("lowering " ^ Instance.to_string key)
-           (fun () ->
-             let context = fresh_context lowering database in
-             let outcome = make context lowering database key in
-             (match outcome with
-             | Compiled (Code instance) -> Verify.instance (Lower.env context) instance
-             | Compiled _ | Evaluate _ -> ());
-             outcome)))
+           (fun () -> make (fresh_context lowering database) lowering database key)))
 
 (* Keys. A test's result is kept under the key of everything its code can
    reach, which is composed from the instances' own keys, so that an edit
@@ -172,12 +179,13 @@ let evaluated_own_hash =
 let linked =
   Query.query ~name:"linked" ~phase:Phases.linking ~show:show_instance
     (fun database (lowering, key) ->
+      let of_fragment fragment = (Reachable.own_hash fragment, Emit_c.references fragment) in
       match Query.demand database (Lazy.force lowered) (lowering, key) with
       | Evaluate (path, _) -> (evaluated_own_hash, [ Instance.Evaluator path ])
-      | Compiled compiled ->
+      | Compiled fragment -> of_fragment fragment
+      | Folded data ->
           let context = fresh_context lowering database in
-          let references = Reachable.compiled_references (Lower.env context) compiled in
-          (Reachable.own_hash ~references compiled, references))
+          of_fragment (Emit_c.fragment (Lower.env context) (Data data)))
 
 let own_hash =
   Query.query ~name:"own_hash" ~phase:Phases.linking ~saved:true ~portable:true ~show:show_instance
@@ -297,7 +305,7 @@ let result_key compiler root =
     (Cbor.encode
        (Cbor.Array
           [
-            Cbor.int Lir.version;
+            Cbor.int Emit_c.version;
             target_key compiler.lowering.target;
             Bytes (Query.demand compiler.database (Lazy.force reach) (compiler.lowering, root));
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
@@ -310,18 +318,6 @@ let test_key compiler test = result_key compiler (Lower.test_key test)
 let run_key compiler root =
   compiler.want compiler.lowering [ root ];
   result_key compiler root
-
-(* The definitions an instance's positions are relative to. *)
-let anchored (instance : Lir.t) =
-  let of_function (function_ : Lir.function_) =
-    Array.to_list function_.blocks
-    |> List.concat_map (fun (block : Lir.basic_block) ->
-        List.filter_map
-          (function Lir.Echo { site; _ } -> Some site.definition | _ -> None)
-          block.statements
-        @ match block.terminator with Fail { site; _ } -> [ site.definition ] | _ -> [])
-  in
-  of_function instance.main @ List.concat_map of_function (Array.to_list instance.nested)
 
 let anchor compiler (path : Path.t) : Positions.anchor option =
   match Query.demand compiler.database Interface.Summary.key path with
@@ -413,47 +409,23 @@ let decode compiler ty text : Lir.static_value =
   if !at <> String.length text then bug "a value written out while compiling has bytes left over";
   result
 
-(* A function's code size, for choosing the small ones: each statement,
-   and each block twice. *)
-let weight (function_ : Lir.function_) =
-  Array.fold_left
-    (fun total (block : Lir.basic_block) -> total + 2 + List.length block.statements)
-    0 function_.blocks
-
-let small = 24
-
-(* The instances an instance calls by name. *)
-let called (instance : Lir.t) =
-  let of_function (function_ : Lir.function_) =
-    Array.to_list function_.blocks
-    |> List.concat_map (fun (block : Lir.basic_block) ->
-        List.filter_map
-          (function
-            | Lir.Call { target = Direct { function_ = Instance key; _ }; _ } -> Some key
-            | _ -> None)
-          block.statements)
-  in
-  of_function instance.main @ List.concat_map of_function (Array.to_list instance.nested)
-
 (* The small callees emitted beside an instance in a development build, so
    that the C compiler can inline them: functions from source that the
    instance calls, of the standard library or a registry package, with
    little code and no lambdas. Those change only with the toolchain or a
    version in the lock file. The small functions of the project's own
    packages stay calls, so that an edit to one compiles only it again. *)
-let small_callees ~find ~worked_on (instance : Lir.t) =
-  match instance.key with
+let small_callees ~find ~worked_on fragment =
+  match Emit_c.key fragment with
   | Code _ ->
       List.filter_map
         (fun (key : Instance.key) ->
           match (key, find key) with
-          | Code { path = callee; _ }, Some (Lir.Code copy)
-            when (not (worked_on (Path.package callee)))
-                 && Array.length copy.nested = 0
-                 && weight copy.main <= small ->
+          | Code { path = callee; _ }, Some copy
+            when (not (worked_on (Path.package callee))) && Emit_c.is_small copy ->
               Some copy
           | _ -> None)
-        (called instance)
+        (Emit_c.called fragment)
   | _ -> []
 
 (* The standard library's test runner, which a test program's [main]
@@ -464,28 +436,21 @@ let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_a
    startup code, once the instances agree with one another. An instance
    among [supplied] is itself, and no query's. *)
 let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~startup ~output =
+  let supplied =
+    List.map (fun instance -> Emit_c.fragment (Lower.env compiler.context) (Code instance)) supplied
+  in
   let lookup key =
-    match List.find_opt (fun (instance : Lir.t) -> Instance.equal instance.key key) supplied with
-    | Some instance -> Lir.Code instance
+    match List.find_opt (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied with
+    | Some fragment -> fragment
     | None -> compiled compiler key
   in
-  let units = Reachable.reachable (Lower.env compiler.context) ~lookup roots in
+  let units = Reachable.reachable ~lookup roots in
   let units_by_key =
     List.fold_left
-      (fun units_by_key unit -> Reachable.Keys.add (Reachable.compiled_key unit) unit units_by_key)
+      (fun units_by_key unit -> Reachable.Keys.add (Emit_c.key unit) unit units_by_key)
       Reachable.Keys.empty units
   in
-  List.iter
-    (fun unit ->
-      Compiler_bug.while_doing ~stage:"Compile"
-        ("linking " ^ Instance.to_string (Reachable.compiled_key unit))
-        (fun () ->
-          Verify.links (Lower.env compiler.context)
-            ~find:(fun key -> Reachable.Keys.find_opt key units_by_key)
-            unit))
-    units;
-  let code = List.filter_map (function Lir.Code instance -> Some instance | _ -> None) units in
-  let paths = List.sort_uniq Path.compare (List.concat_map anchored code) in
+  let paths = List.sort_uniq Path.compare (List.concat_map Emit_c.anchors units) in
   let anchors = List.filter_map (anchor compiler) paths in
   let target = Memory_layout.target (Lower.env compiler.context) in
   let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
@@ -559,22 +524,23 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
   in
   match ran with Ran output -> Ran (read output) | Ran_too_long -> Ran_too_long
 
-(* An instance's LIR from the query, or, for a constant the query could
-   not fold, the value its evaluator computes. *)
+(* An instance's C from the query, or, for a constant the query could not
+   fold, the data of the value its evaluator computes. *)
 and compiled compiler key =
+  let data (data : Lir.data) = Emit_c.fragment (Lower.env compiler.context) (Data data) in
   let compiled =
     match Query.demand compiler.database (Lazy.force lowered) (compiler.lowering, key) with
-    | Compiled compiled -> compiled
+    | Compiled fragment -> fragment
+    | Folded folded -> data folded
     | Evaluate (path, ty) -> (
         match run_while_compiling compiler (Instance.Evaluator path) ~read:(decode compiler ty) with
-        | Ran value -> Data { data_key = Constant path; ty; value }
+        | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
             cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
               compiler.evaluation_time_limit)
   in
-  if not (Instance.equal (Reachable.compiled_key compiled) key) then
-    bug "%s compiled to %s" (Instance.to_string key)
-      (Instance.to_string (Reachable.compiled_key compiled));
+  if not (Instance.equal (Emit_c.key compiled) key) then
+    bug "%s compiled to %s" (Instance.to_string key) (Instance.to_string (Emit_c.key compiled));
   compiled
 
 (* A valid program stage0 cannot build yet, as a message with the file and
@@ -836,9 +802,7 @@ type unshippable = {
 let unshippable compiler ~main =
   reporting compiler @@ fun () ->
   let root = Instance.Program_main main in
-  let reached =
-    Reachable.running (Lower.env compiler.context) ~lookup:(compiled compiler) [ root ]
-  in
+  let reached = Reachable.running ~lookup:(compiled compiler) [ root ] in
   begin
     let definitions keys =
       List.fold_left
@@ -853,37 +817,20 @@ let unshippable compiler ~main =
     let reports =
       List.concat_map
         (fun (compiled, keys) ->
-          match compiled with
-          | Lir.Code instance ->
-              let sites =
-                List.concat_map
-                  (fun (function_ : Lir.function_) ->
-                    Array.to_list function_.blocks
-                    |> List.concat_map (fun (block : Lir.basic_block) ->
-                        List.filter_map
-                          (function Lir.Echo { site; _ } -> Some (`Echo, site) | _ -> None)
-                          block.statements
-                        @
-                        match block.terminator with
-                        | Fail { failure = Todo; site; _ } -> [ (`Todo, site) ]
-                        | _ -> []))
-                  (instance.main :: Array.to_list instance.nested)
-              in
-              List.filter_map
-                (fun (failure, (site : Lir.site)) ->
-                  match anchor compiler site.definition with
-                  | None -> None
-                  | Some anchor ->
-                      Some
-                        {
-                          failure;
-                          file = anchor.path;
-                          line = anchor.first_line + site.line;
-                          column = site.column;
-                          way = definitions keys;
-                        })
-                sites
-          | _ -> [])
+          List.filter_map
+            (fun (failure, (site : Emit_c.site)) ->
+              match anchor compiler site.definition with
+              | None -> None
+              | Some anchor ->
+                  Some
+                    {
+                      failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
+                      file = anchor.path;
+                      line = anchor.first_line + site.line;
+                      column = site.column;
+                      way = definitions keys;
+                    })
+            (Emit_c.failures compiled))
         reached
     in
     (* One report for each place, however many instances hold it. *)

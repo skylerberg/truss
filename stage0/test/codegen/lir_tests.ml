@@ -7,6 +7,13 @@ open Codegen_support
 
 (* Lowered IR and C *)
 
+(* A file holding the instances, each with its linkage. *)
+let c_file env instances =
+  Emit_c.file env Development
+    (List.map
+       (fun (instance, linkage) -> (Emit_c.fragment env (Lir.Code instance), linkage))
+       instances)
+
 let () =
   test "a function that returns a constant runs and exits with it" (fun () ->
       expect_status 7 [ entry [] [ block [] (Return (Some (constant_int32 7))) ] ]);
@@ -214,7 +221,7 @@ let () =
             ];
         ]);
   test "a mut parameter is a restrict pointer in C" (fun () ->
-      let c_file = Emit_c.file (shape_env ()) Development [ (bump, External) ] in
+      let c_file = c_file (shape_env ()) [ (bump, External) ] in
       let expected = "void t_test__bump(int32_t *restrict l0_count)" in
       if not (contains c_file expected) then fail "no %S in:\n%s" expected c_file);
   let callback =
@@ -388,9 +395,7 @@ let () =
               (Return (Some (copy 0)));
           ]
       in
-      let c_file =
-        Emit_c.file (shape_env ()) Development [ (caller, External); (callee, Internal) ]
-      in
+      let c_file = c_file (shape_env ()) [ (caller, External); (callee, Internal) ] in
       let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
       if not (contains c_file copy) then fail "no %S in:\n%s" copy c_file;
       if contains c_file "\nint32_t t_test__callee(int32_t);" then
@@ -400,18 +405,14 @@ let () =
       let holder =
         instance "holder" (function_ [ local (value pair) ] [ block [] (Return None) ])
       in
-      let c_file =
-        Emit_c.file (shape_env ~extra:[ pair_shape ] ()) Development [ (holder, External) ]
-      in
+      let c_file = c_file (shape_env ~extra:[ pair_shape ] ()) [ (holder, External) ] in
       let expected =
         "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
       in
       if not (contains c_file expected) then fail "no %S in:\n%s" expected c_file);
   test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
-      expect_string
-        ~expected:(Emit_c.file (shape_env ()) Development instances)
-        (Emit_c.file (shape_env ()) Development instances));
+      expect_string ~expected:(c_file (shape_env ()) instances) (c_file (shape_env ()) instances));
   test "canonical form numbers blocks in reverse postorder and locals by first use" (fun () ->
       let function_ =
         function_ ~result:(value int32)
@@ -432,29 +433,6 @@ let () =
   ()
 
 let () =
-  let numbered first second =
-    function_ ~result:(value int32)
-      [ local (value int32); local (value int32) ]
-      [
-        block
-          [ Assign (at first, Use (constant_int32 1)); Assign (at second, Use (copy first)) ]
-          (Return (Some (copy second)));
-      ]
-  in
-  test "two lowerings that differ only in numbering hash the same" (fun () ->
-      let hash function_ = Lir.For_testing.hash (instance "f" function_) in
-      let left = numbered 0 1 and right = numbered 1 0 in
-      if hash left <> hash right then fail "the hashes differ");
-  test "a change to an instance's code changes its hash" (fun () ->
-      let changed =
-        function_ ~result:(value int32)
-          [ local (value int32) ]
-          [ block [ Assign (at 0, Use (constant_int32 2)) ] (Return (Some (copy 0))) ]
-      in
-      if
-        Lir.For_testing.hash (instance "f" (numbered 0 1))
-        = Lir.For_testing.hash (instance "f" changed)
-      then fail "the hashes are equal");
   test "a symbol names the path and the type arguments" (fun () ->
       let key =
         Instance.Code

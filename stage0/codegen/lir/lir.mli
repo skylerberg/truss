@@ -58,28 +58,10 @@ val target_operands : target -> operand list
    canonical forms. *)
 val canonical_instance : t -> t
 
-(* The version of code generation, part of every key built from the LIR. *)
-val version : int
-
-(* The canonical encoding, in deterministic CBOR. Each path, in a type or a
-   site, is written by [path], and each reference to another instance by
-   [instance], which by default encode them; test keys pass ones that
-   number them instead, so that no name is in them. *)
-val encode : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
-val encode_data : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> data -> Cbor.t
-val encode_table : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> table -> Cbor.t
-
-(* Whether two signatures are the same, by their canonical encoding. *)
-val equal_signature : signature -> signature -> bool
-
-(* The BLAKE3 hash of the canonical form's encoding and [version], which
-   early cutoff compares. *)
-
 (* A compact text form, for tests. *)
 
 module For_testing : sig
   val canonical : function_ -> function_
-  val hash : t -> string
   val to_string : t -> string
   val function_to_string : function_ -> string
 end

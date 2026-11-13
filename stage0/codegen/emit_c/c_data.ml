@@ -6,7 +6,7 @@ open C_types
 open C_values
 
 let static_name context =
-  let name = Printf.sprintf "t_static_%d" (List.length context.statics) in
+  let name = Printf.sprintf "%s_static_%d" context.prefix (List.length context.statics) in
   name
 
 (* A static value as a C initializer, or [None] for a value of zero size.

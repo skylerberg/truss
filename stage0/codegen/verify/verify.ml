@@ -7,9 +7,6 @@ let each_function (instance : Lir.t) visit =
     (fun nested_index nested -> visit (Printf.sprintf "nested function %d" nested_index) nested)
     instance.nested
 
-let each_statement (function_ : Lir.function_) visit =
-  Array.iter (fun (block : Lir.basic_block) -> List.iter visit block.statements) function_.blocks
-
 (* Whether two places may share memory. Places under different roots do
    not. Under one root they do not if their paths part at different fields
    of a record or of one variant, or if one path is the other followed by a
@@ -49,7 +46,7 @@ let target_signature (instance : Lir.t) : Lir.target -> Lir.signature option = f
   | Direct { function_ = Nested nested_index; signature } ->
       if nested_index < 0 || nested_index >= Array.length instance.nested then
         bug "a call of nested function %d" nested_index;
-      if not (Lir.equal_signature signature (Lir.signature instance.nested.(nested_index))) then
+      if not (signature = Lir.signature instance.nested.(nested_index)) then
         bug "a call of nested function %d with a signature it does not have" nested_index;
       Some signature
   | Direct { signature; _ }
@@ -188,66 +185,3 @@ let function_ env (instance : Lir.t) label (function_ : Lir.function_) =
     function_.blocks
 
 let instance env (instance : Lir.t) = each_function instance (function_ env instance)
-
-let links env ~find (compiled : Lir.compiled) =
-  let code key =
-    match find key with
-    | Some (Lir.Code callee) -> callee
-    | Some _ -> bug "%s is called, and is not code" (Instance.to_string key)
-    | None -> bug "%s is called, and is not built" (Instance.to_string key)
-  in
-  let has key (signature : Lir.signature) =
-    if not (Lir.equal_signature signature (Lir.signature (code key).main)) then
-      bug "%s is named with a signature it does not have" (Instance.to_string key)
-  in
-  let reaches key ~is expected =
-    match find key with
-    | Some unit when is unit -> ()
-    | _ -> bug "the address of %s, which is not %s" (Instance.to_string key) expected
-  in
-  let is_table = function Lir.Table _ -> true | _ -> false
-  and is_data = function Lir.Data _ -> true | _ -> false in
-  match compiled with
-  | Data _ -> ()
-  | Table table -> List.iter (fun (key, signature) -> has key signature) table.entries
-  | Code instance ->
-      each_function instance (fun _ function_ ->
-          let type_of place =
-            Lir.place_type env ~environment:(environment instance) function_ place
-          in
-          let visitor : Lir.visitor =
-            {
-              place =
-                (fun place ->
-                  match place.root with
-                  | Static { key; _ } -> reaches key ~is:is_data "a constant"
-                  | Local _ -> ());
-              operand =
-                (function
-                | Constant (Symbol_address ((Table _ | Any_table _ | Locked_table _) as key)) ->
-                    reaches key ~is:is_table "a table"
-                | Constant (Symbol_address key) ->
-                    bug "the address of %s, which is not a table" (Instance.to_string key)
-                | _ -> ());
-            }
-          in
-          each_statement function_ (fun statement ->
-              Lir.visit_statement visitor statement;
-              match statement with
-              | Call { target = Direct { function_ = Instance key; signature }; _ } ->
-                  has key signature
-              | Assign (place, Function_value { code = Instance key; _ }) -> (
-                  match type_of place with
-                  | Some (Value (Function ty)) -> has key (Convention.function_value env ty)
-                  | _ -> bug "a function value stored where no function goes")
-              | Drop place -> (
-                  match type_of place with
-                  | Some (Value ty) -> has (Drop ty) (Convention.drop_signature ty)
-                  | Some _ -> bug "a drop of a place that is not a value"
-                  | None -> ())
-              | Assign _ | Call _ | Echo _ | Free_block _ | Region _ | Regions_end _ | Fork _
-              | Fork_range _ ->
-                  ());
-          Array.iter
-            (fun (block : Lir.basic_block) -> Lir.visit_terminator visitor block.terminator)
-            function_.blocks)

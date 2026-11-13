@@ -62,7 +62,8 @@ type defined = { definition : definition; references : key list }
 
 type context = {
   env : Memory_layout.env;
-  build : build;
+  prefix : string;
+      (** The symbol of the instance being emitted, which its statics' names start with *)
   mutable order : key list;  (** Registered keys, most recent first *)
   mutable registered : unit Keys.t;
   mutable environments : (string * Lir.ty) list Keys.t;
