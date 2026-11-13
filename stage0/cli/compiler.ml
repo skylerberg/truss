@@ -30,6 +30,11 @@ let target () =
 let want session context lowering wanted =
   Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted)
 
+(* Where the results of runs are kept: the database's store. *)
+let results () : Compile.results =
+  let find, add = Database.results ~kind:"tests" in
+  { find; add }
+
 (* A compiler that lowers code and compiles nothing, so it needs no C
    compiler. *)
 let lowering_only session context =
@@ -64,13 +69,9 @@ let create ?(checks = true) (project : Project.t) build =
     | _ -> Path.show_file file
   in
   let own = List.map snd (Database.packages project.session) in
-  Compile.create ~checks ~file_name
+  Compile.create ~checks ~file_name ~results:(results ())
     ~want:(want project.session project.context)
     ~worked_on:(fun package -> List.mem package own)
     project.context (target ()) toolchain
     (Build.cache (Database.objects_directory ()))
     settings
-
-let test_results () : Compile.results =
-  let find, add = Database.results ~kind:"tests" in
-  { find; add }

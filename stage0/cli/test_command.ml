@@ -190,7 +190,7 @@ let on_progress progress ~build_ended (event : Compile.progress) =
 (* Runs each package's tests in one test program per package, with the
    package's time limit, and reports each test by its index among all the
    selected tests. *)
-let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
+let run_all (project : Project.t) compile ~rerun ~progress tests =
   let offset = ref 0 in
   List.fold_left
     (fun outcome (package : Project.package) ->
@@ -208,7 +208,7 @@ let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
           if own = [] then outcome
           else
             match
-              Compile.run_tests ~results ~rerun
+              Compile.run_tests ~rerun
                 ~progress:(fun event -> progress (shifted event))
                 compile
                 ~time_limit:(Database.time_limit project.session * 1000)
@@ -252,9 +252,8 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
       }
     in
     let build_ended = ref None in
-    let results = Compiler.test_results () in
     let outcome =
-      run_all project compile ~results ~rerun ~progress:(on_progress progress ~build_ended) tests
+      run_all project compile ~rerun ~progress:(on_progress progress ~build_ended) tests
     in
     Status_line.clear progress.line;
     Database.flush_store ();

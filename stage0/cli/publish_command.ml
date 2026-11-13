@@ -124,7 +124,7 @@ let failed_tests (project : Project.t) (package : Project.package) =
   else
     let compile = Compiler.create project Development in
     match
-      Compile.run_tests ~results:(Compiler.test_results ()) compile
+      Compile.run_tests compile
         ~time_limit:(Database.time_limit project.session * 1000)
         (List.map (fun (test : Test_command.test) -> test.path) tests)
     with

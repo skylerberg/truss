@@ -98,8 +98,8 @@ val example_file : Path.file
 (** [example/main.truss], the file {!load} gives its text. *)
 
 val checked_standard : Engine.t lazy_t
-val load_files : (Path.file * string) list -> Query.context * Compile.t
-val load : string -> Query.context * Compile.t
+val load_files : ?results:Compile.results -> (Path.file * string) list -> Query.context * Compile.t
+val load : ?results:Compile.results -> string -> Query.context * Compile.t
 val tests_in : Query.context -> Path.module_ -> Path.t list
 val tests_of : Query.context -> Path.t list
 val run_source : string -> string
