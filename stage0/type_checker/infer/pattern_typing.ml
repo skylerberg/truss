@@ -30,7 +30,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
   in
   match written.kind with
   | Wildcard | Pattern_error -> register_pattern state written (fun () -> Wildcard)
-  | Binding_or_constant bound -> (
+  | Binding bound -> (
       match target state bound with
       | Some Binding ->
           binds bound.id bound;
@@ -48,16 +48,6 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                       binds it with one type."
                      bound.text (show state local.type_) (show state type_))
           | None -> ())
-      | Some (Definition (Constant, path)) ->
-          constant ();
-          constant_pattern state written.id written.span path type_
-      | Some (Value_parameter parameter) ->
-          register_pattern state written (fun () ->
-              Literal
-                (synthetic_expression state ~origin:written.id (Types.builtin USize)
-                   (Value_parameter parameter)));
-          if not (unify state (Types.builtin USize) type_) then
-            mismatch state written.span ~expected:type_ ~actual:(Types.builtin USize)
       | _ -> ())
   | Qualified_constant written_constant ->
       constant ();
@@ -75,7 +65,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
               (Form.pattern_type state written.id)
               (match written_end.kind with
               | End_literal literal -> Form.pattern_literal state written_end.id literal
-              | End_constant _ | End_name _ -> Form.pattern_constant state written_end.id)
+              | End_constant _ -> Form.pattern_constant state written_end.id)
           in
           let start = end_ start in
           Range { start; stop = end_ stop; inclusive });
@@ -94,12 +84,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
             (fun (end_ : range_end) ->
               match end_.kind with
               | End_literal literal -> literal_pattern state end_.id end_.span literal type_
-              | End_constant constant -> qualified_constant state end_.id end_.span constant type_
-              | End_name bound -> (
-                  match target state bound with
-                  | Some (Definition (Constant, path)) ->
-                      constant_pattern state end_.id end_.span path type_
-                  | _ -> ()))
+              | End_constant constant -> qualified_constant state end_.id end_.span constant type_)
             [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
@@ -202,7 +187,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
 and pattern_fields state env (written : pattern) (fields : Types.field list)
     (written_fields : pattern_field list) ~is_var ~mode =
   let bare_name (inner : pattern) =
-    match inner.kind with Binding_or_constant name -> Some name.text | _ -> None
+    match inner.kind with Binding name -> Some name.text | _ -> None
   in
   (* A pattern must name every field, or end with [..] for the rest. *)
   let named =

@@ -1533,13 +1533,15 @@ compiler.
 give the lexer a third kind of name, and an `UpperCamelCase` constant could
 not be told apart from a type.
 
-**A constant in a pattern is written by its name.** In Rust this is a known
-trap: a misspelled constant silently becomes a binding that matches
-everything. Truss closes it with errors where Rust warns: such a binding makes
-later arms unreachable, or is unused as the last arm, and adding a constant
-that turns a binding into a comparison leaves the `match` incomplete. A
-constant in a pattern has structural equality, so matching it and comparing
-it with `==` agree.
+**A bare name in a pattern binds, and a constant is written with its module
+or type,** as in Python's `match`. In Rust a bare name is a constant if one
+is in scope and a binding otherwise, so adding a constant to any file of the
+module silently changes what a pattern in another file matches, and every
+binding in a pattern depends on the module's names. Writing `limit` meaning
+a constant still compiles, as in Python, but the binding matches every
+value, so it usually makes later arms unreachable or is unused, and both are
+errors. A constant in a pattern has structural equality, so matching it and
+comparing it with `==` agree.
 
 **Imports bring in modules, not names,** so every name from another module
 shows where it comes from, two modules can both define `ParseError`, and
@@ -1562,17 +1564,14 @@ reaches no lookup.
 **A local may hide a definition of its module, and nothing else.** Hiding a
 local of an enclosing scope loses an update or reads a stale value, as an
 inner `err :=` does in Go, so it is an error, as in C# and Java. Hiding a
-function, a constant, or a theorem of the module is safe: a call of a
-hidden function no longer type-checks, and a `match` arm whose bare name
-becomes a constant leaves the `match` incomplete. Forbidding it would make
-an error of adding a definition to one file wherever another file of the
-module has a local of that name, so two correct changes, such as two
-agents', could merge into a broken build. In a pattern that must match
-every value, as a `let`'s, a constant could only make the pattern fail, so
-every bare name there binds. A generic parameter still cannot hide a type of
-its module: an `impl`'s head declares the names in its brackets, so
-`impl Shown for Box[Marker]` would silently mean every `Box` where the type
-`Marker` was meant.
+function, a constant, or a theorem of the module is safe: a call of a hidden
+function no longer type-checks. Forbidding it would make an error of adding
+a definition to one file wherever another file of the module has a local of
+that name, so two correct changes, such as two agents', could merge into a
+broken build. A generic parameter still cannot hide a type of its module: an
+`impl`'s head declares the names in its brackets, so `impl Shown for
+Box[Marker]` would silently mean every `Box` where the type `Marker` was
+meant.
 
 **Every module path starts with a package name,** even inside the package, so
 a path is written the same everywhere and found by searching. Relative paths

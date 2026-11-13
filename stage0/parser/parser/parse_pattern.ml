@@ -2,14 +2,16 @@
 
    A pattern position is always known from the token before it, and a
    pattern contains no expressions, so this module needs nothing from the
-   others. A bare lowercase name is [Binding_or_constant]: name resolution
-   decides which. At the end of a range, a name can only be a constant. *)
+   others. A bare lowercase name binds. A constant is written with its
+   module or its type, so the parser decides every pattern's meaning. *)
 
 open Token
 open Syntax
 
 let pattern_node cursor start kind : pattern =
   { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+
+let range_bound = "a literal or a constant with its module or type, such as `http::last`"
 
 (* A string in a pattern is a literal, so it cannot interpolate. *)
 let string_literal cursor ~start ~modules literal =
@@ -88,13 +90,12 @@ and range_or cursor start end_kind kind =
         (Pattern_range { start = first; stop; inclusive = operator = Dot_dot_equal })
   | _ -> pattern_node cursor start kind
 
-(* A constant at the end of a range: [max_port], [http::last], or
-   [UInt16.maximum]. *)
+(* A constant at the end of a range: [http::last] or [UInt16.maximum]. *)
 and constant_end cursor start : range_end =
   let modules = Atoms.module_prefix cursor in
   let kind =
     match Cursor.peek_kind cursor with
-    | Lower text when modules = [] -> End_name (Atoms.name cursor (Cursor.next cursor) text)
+    | Lower _ when modules = [] -> Cursor.fail cursor range_bound
     | Lower text ->
         End_constant
           (Module_constant { modules; last = Atoms.name cursor (Cursor.next cursor) text })
@@ -119,21 +120,24 @@ and primary cursor : pattern =
       | Lower _ | Upper _ -> named cursor start
       | _ -> Cursor.fail cursor "a pattern")
 
-(* A pattern that starts with a name: a binding or constant, a qualified
-   constant, a variant, or a tagged string. *)
+(* A pattern that starts with a name: a binding, a qualified constant, a
+   variant, or a tagged string. *)
 and named cursor start =
   let modules = Atoms.module_prefix cursor in
-  match Cursor.peek_kind cursor with
-  | Lower text ->
-      let name = Atoms.name cursor (Cursor.next cursor) text in
-      if modules = [] then range_or cursor start (End_name name) (Binding_or_constant name)
-      else
-        let constant = Module_constant { modules; last = name } in
-        range_or cursor start (End_constant constant) (Qualified_constant constant)
-  | Upper text ->
+  match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
+  | Lower _, Punctuation (Dot_dot | Dot_dot_equal) when modules = [] ->
+      Cursor.fail cursor range_bound
+  | Lower text, _ when modules = [] ->
+      pattern_node cursor start (Binding (Atoms.name cursor (Cursor.next cursor) text))
+  | Lower text, _ ->
+      let constant =
+        Module_constant { modules; last = Atoms.name cursor (Cursor.next cursor) text }
+      in
+      range_or cursor start (End_constant constant) (Qualified_constant constant)
+  | Upper text, _ ->
       let path = { modules; last = Atoms.name cursor (Cursor.next cursor) text } in
       after_upper cursor start (unqualified_variant cursor start path)
-  | String ({ tag = Some _; _ } as literal) ->
+  | String ({ tag = Some _; _ } as literal), _ ->
       let literal = Literal_string (string_literal cursor ~start ~modules literal) in
       range_or cursor start (End_literal literal) (Literal literal)
   | _ -> Cursor.fail cursor "a name after `::`"

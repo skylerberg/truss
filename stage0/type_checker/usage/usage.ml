@@ -56,7 +56,7 @@ let pattern_bindings (definition : definition) =
   let bindings = ref [] in
   let rec pattern ~bare_field (written : pattern) =
     match written.kind with
-    | Binding_or_constant name -> bindings := (name, bare_field) :: !bindings
+    | Binding name -> bindings := (name, bare_field) :: !bindings
     | Variant { fields = Some fields; _ } | Record fields -> pattern_fields fields
     | Alternatives alternatives -> List.iter (pattern ~bare_field) alternatives
     | _ -> ()

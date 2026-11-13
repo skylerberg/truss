@@ -7,8 +7,8 @@
     tokens that did not parse.
 
     Constructs that parse the same are one node, and later stages annotate them without rebuilding
-    them: [Bracket] is an index or type arguments, [Name] is a variable, constant, function, type,
-    or variant, and a bare name in a pattern is [Binding_or_constant]. *)
+    them: [Bracket] is an index or type arguments, and [Name] is a variable, constant, function,
+    type, or variant. *)
 
 module Span = Span
 
@@ -274,7 +274,7 @@ and pattern = pattern_kind node
 
 and pattern_kind =
   | Wildcard
-  | Binding_or_constant of name  (** Name resolution decides. *)
+  | Binding of name  (** A bare name binds, whatever constants have its name. *)
   | Qualified_constant of constant
   | Literal of literal
   | Pattern_range of { start : range_end; stop : range_end; inclusive : bool }
@@ -294,9 +294,7 @@ and literal =
   | Literal_string of string_literal
 
 and range_end = range_end_kind node
-(** A bare name at the end of a range can only be a constant. *)
-
-and range_end_kind = End_literal of literal | End_constant of constant | End_name of name
+and range_end_kind = End_literal of literal | End_constant of constant
 and pattern_field = pattern_field_kind node
 
 and pattern_field_kind =

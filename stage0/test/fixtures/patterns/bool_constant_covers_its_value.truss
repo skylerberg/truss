@@ -2,7 +2,7 @@ let on: Bool = true
 
 fn f(b: Bool) -> Int64 {
   match b {
-    on => 1
+    app::main::on => 1
     false => 2
   }
 }

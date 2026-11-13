@@ -1,6 +1,8 @@
+let limit: Int64 = 10
+
 fn f(value: Int64) -> Bool {
   match value {
-    0..=top => true
+    app::main::limit => true
     _ => false
   }
 }

@@ -2,6 +2,6 @@ let limit: Int64 = 10
 
 fn f(n: Int64) -> Int64 {
   match n {
-    limit..=20 => 1
+    app::main::limit..=20 => 1
   }
 }

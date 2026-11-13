@@ -1,6 +1,0 @@
-fn f[top: USize](value: USize) -> Bool {
-  match value {
-    0..=top => true
-    _ => false
-  }
-}

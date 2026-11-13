@@ -1190,14 +1190,14 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 ```ebnf
 pattern         = pattern_primary { "|" pattern_primary } ;
 pattern_primary = "_"
+                | LOWER_NAME
                 | range_end [ ( ".." | "..=" ) range_end ]
                 | [ module_path "::" ] UPPER_NAME [ pattern_fields ]
                 | pattern_fields ;
 range_end       = literal_pattern | constant ;
 literal_pattern = [ "-" ] INTEGER | "true" | "false" | plain_string
                 | [ module_path "::" ] TAGGED_STRING ;
-constant        = LOWER_NAME
-                | module_path "::" LOWER_NAME
+constant        = module_path "::" LOWER_NAME
                 | [ module_path "::" ] UPPER_NAME "." LOWER_NAME ;
 pattern_fields  = "(" list(pattern_field) ")" ;
 pattern_field   = LOWER_NAME ":" pattern | pattern | ".." ;
@@ -1227,16 +1227,15 @@ match status_code {
   exactly one field, a bare pattern matches that field.
 - Fields can be written in any order, and `..`, the remaining fields, comes
   last.
-- In a `match` arm, an `is` test, or a `let ... else`, a bare name that names
-  a constant in scope, and no local, means that constant; any other binds. A
-  constant in a pattern has a type with structural equality (see
-  [Equality](#equality)).
+- A bare name binds, in every pattern. A constant is written with its module
+  or its type, `http::ok` or `Status.teapot`, so adding a constant never
+  changes what a pattern matches. A constant in a pattern has a type with
+  structural equality (see [Equality](#equality)).
 - Range patterns match integers and characters.
 - Every alternative of an or-pattern binds the same names, with the same
   types.
 - A pattern in `let`, `var`, `for`, or a lambda's parameters matches every
-  value of its type. Every bare name in it binds, and may hide a constant of
-  the module, since a constant could only make the pattern fail.
+  value of its type.
 
 ### `match`
 
@@ -2288,10 +2287,9 @@ library reaches the operating system, through the compiler.
 | Construct | Decided by | How |
 |---|---|---|
 | `name[...]` | Name resolution | Type arguments if `name` is a generic function, a type, or a trait; otherwise an index. For a method, type checking decides. |
-| A bare `LOWER_NAME` in a pattern | Name resolution | A constant if one with that name is in scope; otherwise a binding |
 | A bare argument after the first | Type checking | Names a parameter or field of the callee |
 | Whether an expression after `mut` or `own` starts with a place | Name resolution | It starts with a variable, a parameter, `self`, or a constant |
-| A variant in a pattern | Type checking | Looked up in the type of the matched value |
+| A variant in a pattern | Type checking | Looked up in the type of the scrutinee |
 | A method call or field | Type checking | Looked up in the type of the receiver |
 | An `impl` of a trait with type parameters | Type checking | Chosen by the argument types, inferred first |
 | The cost words, `log`, `power`, `result`, `old` | The parser and name resolution | The parser checks their spelling where a `cost` clause expects them |

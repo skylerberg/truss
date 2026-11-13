@@ -300,7 +300,7 @@ and literal = function
 and pattern (written : pattern) =
   match written.kind with
   | Wildcard -> "_"
-  | Binding_or_constant name -> name.text
+  | Binding name -> name.text
   | Qualified_constant written -> constant written
   | Literal written -> literal written
   | Pattern_range { start; stop; inclusive } ->
@@ -308,7 +308,6 @@ and pattern (written : pattern) =
         match written.kind with
         | End_literal value -> literal value
         | End_constant value -> constant value
-        | End_name name -> name.text
       in
       form (if inclusive then "..=" else "..") [ range_end start; range_end stop ]
   | Variant { name; fields = None } -> name.text

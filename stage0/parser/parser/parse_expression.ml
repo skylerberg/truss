@@ -1454,8 +1454,7 @@ and trailing_lambda cursor statement =
                 [
                   {
                     kind =
-                      Binding_or_constant
-                        { text = parameter; span = at_start; id = Cursor.fresh_id cursor };
+                      Binding { text = parameter; span = at_start; id = Cursor.fresh_id cursor };
                     span = at_start;
                     id = Cursor.fresh_id cursor;
                   };
@@ -1547,7 +1546,7 @@ and statement cursor : statement =
           match target.kind with
           | Name { modules = []; last } ->
               let pattern : pattern =
-                { kind = Binding_or_constant last; span = target.span; id = Cursor.fresh_id cursor }
+                { kind = Binding last; span = target.span; id = Cursor.fresh_id cursor }
               in
               finish (Let { is_var = false; pattern; annotation = None; value; else_ = None })
           | _ -> finish (Assignment { target; operator = Assign; value }))

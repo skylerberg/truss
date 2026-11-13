@@ -201,10 +201,6 @@ let () =
   test "a let binds the name of a constant of its module, which its uses then name" (fun () ->
       refers_to_binding Fixtures.Resolve.let_may_hide_a_constant_of_its_module ~use:("limit", 3)
         ~binding:("limit", 2));
-  test "a bare name in a pattern binds when a local hides the constant, and hides the local"
-    (fun () ->
-      one_diagnostic Fixtures.Resolve.pattern_binds_a_name_whose_constant_a_local_hides
-        "resolve.hides_name");
   test "a generic parameter cannot hide a type of its module" (fun () ->
       one_diagnostic Fixtures.Resolve.generic_parameter_cannot_hide_a_type_of_its_module
         ~says:"a type of this module" "resolve.hides_name");
@@ -236,20 +232,18 @@ let () =
 (* Patterns *)
 
 let () =
-  test "a bare name in a pattern that names a constant is the constant" (fun () ->
-      refers Fixtures.Resolve.bare_name_in_a_pattern_that_names_a_constant_is ~name:("limit", 2)
+  test "a bare name in a pattern binds where a constant has its name" (fun () ->
+      refers Fixtures.Resolve.bare_name_in_a_pattern_binds_where_a_constant_has ~name:("limit", 2)
+        "binding");
+  test "a constant of its own module in a pattern is written with its module" (fun () ->
+      refers Fixtures.Resolve.constant_of_its_own_module_in_a_pattern_is_written ~name:("limit", 2)
         "app::main::limit");
-  test "any other bare name in a pattern binds" (fun () ->
-      refers Fixtures.Resolve.any_other_bare_name_in_a_pattern_binds ~name:("other", 1) "binding");
   test "the alternatives of a pattern must bind the same names" (fun () ->
       one_diagnostic Fixtures.Resolve.alternatives_of_a_pattern_must_bind_the_same_names
         "resolve.alternative_bindings");
   test "an alternative's name refers to the first alternative's binding" (fun () ->
       refers_to_binding Fixtures.Resolve.alternatives_name_refers_to_the_first_alternatives
-        ~use:("value", 3) ~binding:("value", 1));
-  test "the end of a range pattern must be a constant" (fun () ->
-      one_diagnostic Fixtures.Resolve.end_of_a_range_pattern_must_be_a_constant
-        "resolve.not_a_constant")
+        ~use:("value", 3) ~binding:("value", 1))
 
 (* Unknown names *)
 
@@ -564,10 +558,7 @@ let () =
       in
       match Resolve.diagnostics database (file_of "app::main") with
       | [] -> ()
-      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-  test "a value generic parameter can end a range pattern" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Resolve.value_generic_parameter_can_end_a_range_pattern) ])
+      | reported -> fail "found [%s]" (String.concat "; " (codes reported)))
 
 (* A package with an owner in its name *)
 

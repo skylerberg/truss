@@ -109,7 +109,6 @@ let rec space ?replace context (written : Core.pattern) : space =
 and compared context (value : Core.expression) : space =
   match value.kind with
   | Use (Constant { path; _ }) -> constant context path
-  | Value_parameter parameter -> Constructed (Opaque parameter.name, [])
   | _ -> Option.value ~default:(Constructed (Opaque "this value", [])) (literal value)
 
 and literal (value : Core.expression) : space option =

@@ -537,7 +537,7 @@ and expression state scope (value : expression) =
         match binder with
         | Binder_in (pattern_, collection) ->
             expression state scope collection;
-            bind_pattern ~irrefutable:true state scope pattern_
+            bind_pattern state scope pattern_
         | Binder_type (name, type_) ->
             type_expression state scope type_;
             declare_value state scope name
@@ -553,9 +553,7 @@ and expression state scope (value : expression) =
         entries
   | Lambda { parameters; body } ->
       let inner =
-        List.fold_left
-          (fun scope pattern_ -> bind_pattern ~irrefutable:true state scope pattern_)
-          scope parameters
+        List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope parameters
       in
       block state inner body
   | If { condition = test; then_; else_ } ->
@@ -623,34 +621,17 @@ and declare_parameter state scope (name : name) =
   let scope = declare_value state scope name in
   { scope with values = String_map.add name.text (Value_local name.id, "a parameter") scope.values }
 
-(* The names a pattern binds, in the order written, with alternatives
-   checked to bind the same names. *)
-(* Binds a pattern's names. A pattern that must match every value, as a
-   [let]'s without [else], a [for]'s, a lambda's parameters, or a
-   quantifier's binder, is [irrefutable]: a constant could only make it
-   fail, so every bare name in it binds, and may hide a constant. *)
-and bind_pattern ?(irrefutable = false) state scope (pattern_ : pattern) =
+(* Binds a pattern's names, in the order written, with alternatives checked
+   to bind the same names. *)
+and bind_pattern state scope (pattern_ : pattern) =
   let bound = ref [] in
-  pattern ~irrefutable state scope bound pattern_;
+  pattern state scope bound pattern_;
   List.fold_left (fun scope (name : name) -> declare_value state scope name) scope (List.rev !bound)
 
-and pattern ~irrefutable state scope bound (pattern_ : pattern) =
-  let pattern = pattern ~irrefutable and pattern_field = pattern_field ~irrefutable in
+and pattern state scope bound (pattern_ : pattern) =
   match pattern_.kind with
   | Wildcard | Pattern_error -> ()
-  | Binding_or_constant name when irrefutable -> bound := name :: !bound
-  | Binding_or_constant name -> (
-      match String_map.find_opt name.text scope.values with
-      | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
-      (* A local hides a constant of its name, so the name binds, and the
-         binding is reported as hiding the local. *)
-      | Some _ -> bound := name :: !bound
-      | None -> (
-          match module_item state name.text with
-          | Some item when item.kind = Constant ->
-              set state name
-                (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
-          | _ -> bound := name :: !bound))
+  | Binding name -> bound := name :: !bound
   | Qualified_constant constant_ -> qualified_constant state scope constant_
   | Literal literal -> literal_pattern state scope literal
   | Pattern_range { start; stop; _ } ->
@@ -694,9 +675,9 @@ and pattern ~irrefutable state scope bound (pattern_ : pattern) =
                   names)
             rest)
 
-and pattern_field ~irrefutable state scope bound (field : pattern_field) =
+and pattern_field state scope bound (field : pattern_field) =
   match field.kind with
-  | Named_field (_, inner) | Field inner -> pattern ~irrefutable state scope bound inner
+  | Named_field (_, inner) | Field inner -> pattern state scope bound inner
   | Rest -> ()
 
 and literal_pattern state scope = function
@@ -717,20 +698,6 @@ and range_end state scope (end_ : range_end) =
   match end_.kind with
   | End_literal literal -> literal_pattern state scope literal
   | End_constant constant_ -> qualified_constant state scope constant_
-  | End_name name -> (
-      match (String_map.find_opt name.text scope.values, module_item state name.text) with
-      | Some (Value_generic parameter, _), _ -> set state name (Value_parameter parameter)
-      | None, Some item when item.kind = Constant ->
-          set state name
-            (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
-      | _ ->
-          set state name
-            (Unknown
-               (reported state Not_a_constant name.span
-                  (Printf.sprintf
-                     "The end of a range pattern must be a literal or a constant, and `%s` is not \
-                      a constant."
-                     name.text))))
 
 and block state scope (block_ : block) =
   ignore
@@ -745,7 +712,7 @@ and statement state scope (statement_ : statement) =
       Option.iter (type_expression state scope) annotation;
       expression state scope value;
       Option.iter (block state scope) else_;
-      bind_pattern ~irrefutable:(else_ = None) state scope pattern_
+      bind_pattern state scope pattern_
   | Expression value ->
       expression state scope value;
       scope
@@ -756,7 +723,7 @@ and statement state scope (statement_ : statement) =
   | For { pattern = pattern_; annotation; iterable; clauses; body; _ } ->
       Option.iter (type_expression state scope) annotation;
       expression state scope iterable;
-      let inner = bind_pattern ~irrefutable:true state scope pattern_ in
+      let inner = bind_pattern state scope pattern_ in
       (* A range's index names the next index in the loop's clauses. Any
          other loop's element is bound only in its body. *)
       let elements, clause_scope =
