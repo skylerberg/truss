@@ -44,17 +44,27 @@ let diagnostics (project : Project.t) files =
   let checked = checked project files in
   fun file -> fst (checked file)
 
-(* Each definition that [main] reaches and whose proofs have a hole. A
-   program with such a definition cannot be built. *)
+(* A hole in a proof: a [todo] in it, or a law that an impl leaves
+   unshown. *)
+type hole = { definition : Path.t; file : Path.file; offset : int }
+
+(* Each hole in the proofs of the definitions that [main] reaches. A program
+   with one cannot be built. *)
 let holes_reached (project : Project.t) main =
   let reached = List.hd (Database.reachable project.session [ main ]) in
   List.concat_map
     (fun file ->
-      List.filter_map
+      List.concat_map
         (fun (declaration : Resolve.Names.declaration) ->
           match Query.demand project.context Prover.proof (Resolve.Names.key_of declaration) with
-          | Obligations { holes = _ :: _; _ } when Path.Set.mem declaration.path reached ->
-              Some declaration.path
-          | _ -> None)
+          | Obligations { holes; _ } when Path.Set.mem declaration.path reached ->
+              List.filter_map
+                (fun (home, (span : Syntax.span)) ->
+                  Option.map
+                    (fun (file, base) ->
+                      { definition = declaration.path; file; offset = base + span.start })
+                    (Query.demand project.context Resolve.Names.base home))
+                holes
+          | _ -> [])
         (Query.demand project.context Resolve.Names.declarations_in file))
     (Project.program_files project)

@@ -63,12 +63,12 @@ Division by zero and `Int64.minimum / -1` are proven impossible, and making
 them defined would cost a test per division, so they are the one place a
 prover bug could still reach undefined behavior.
 
-**Test builds check instead of waiting for proofs.** A test build, `truss
-run`, and code run while compiling check every primitive operation that
-could fail, in constant time each, whether or not the prover has finished.
-The checks do not depend on which proofs passed, so neither do the test
-build's results. `truss build` builds only once every proof is done, so it
-omits them.
+**Test builds check instead of waiting for proofs.** A test build, a
+development build, and code run while compiling check every primitive
+operation that could fail, in constant time each, whether or not the prover
+has finished. The checks do not depend on which proofs passed, so neither do
+the test build's results. A release build builds only once every proof is
+done, so it omits them.
 
 ## Instances
 
@@ -290,8 +290,9 @@ compiler bug, and every test that compiles Truss also checks its drops.
 **A test's result is kept under a key of all the code it can reach,** with
 no names, so renaming or moving a definition finds its results done.
 Instances that reach each other are keyed as a group, since a key cannot be
-made of keys made of it. The key adds code generation's version and the
-target. Only a pass with nothing to show is kept, since a failure's message
+made of keys made of it. The key adds code generation's version, the
+target, and the flags in `TRUSS_CFLAGS`, since a sanitizer can fail a test
+that passes without one. Only a pass with nothing to show is kept, since a failure's message
 gives positions, which the key leaves out.
 
 ## Failures

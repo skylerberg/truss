@@ -29,15 +29,6 @@ let paths items =
     & info [] ~docv:"FILE_OR_DIRECTORY"
         ~doc:("Select only the " ^ items ^ " in these files and directories."))
 
-(* For testing the compiler, so it is hidden from the commands' help. *)
-let sanitize =
-  Arg.(
-    value & flag
-    & info [ "sanitize" ] ~docs:Manpage.s_none
-        ~doc:
-          "Build with AddressSanitizer and UndefinedBehaviorSanitizer, and cache no test results. \
-           Every report is a compiler bug.")
-
 let exits =
   [
     Cmd.Exit.info 0 ~doc:"when the command succeeded and the code has no error.";
@@ -94,9 +85,9 @@ let test =
   in
   command "test" ~doc:"Check the packages, then run the tests without a cached result."
     Term.(
-      const (fun directory paths match_ timings rerun json sanitize ->
-          Outcome.Exit (Test_command.run ~directory ~paths ~match_ ~timings ~rerun ~json ~sanitize))
-      $ directory $ paths "tests" $ match_ $ timings $ rerun $ json $ sanitize)
+      const (fun directory paths match_ timings rerun json ->
+          Outcome.Exit (Test_command.run ~directory ~paths ~match_ ~timings ~rerun ~json))
+      $ directory $ paths "tests" $ match_ $ timings $ rerun $ json)
 
 let release_flag doc = Arg.(value & flag & info [ "release" ] ~doc)
 
@@ -114,11 +105,10 @@ let run =
            marks the start when the first one begins with $(b,-).";
       ]
     Term.(
-      const (fun directory release sanitize arguments ->
-          Program_command.run ~directory ~release ~sanitize ~arguments)
+      const (fun directory release arguments -> Program_command.run ~directory ~release ~arguments)
       $ directory
-      $ release_flag "Build as $(b,truss build) does, which also rejects an $(b,echo)."
-      $ sanitize $ arguments)
+      $ release_flag "Build as $(b,truss build) does, then run the program."
+      $ arguments)
 
 let build =
   let output =
@@ -427,6 +417,7 @@ type request = {
   arguments : string list;
   directory : string;  (** The client's current directory *)
   registry : string option;  (** The client's [TRUSS_REGISTRY] *)
+  c_flags : string option;  (** The client's [TRUSS_CFLAGS] *)
   terminal : bool;
   columns : int option;
 }
@@ -445,6 +436,7 @@ let handle ~progress request =
       (fun () ->
         Sys.chdir request.directory;
         Registry.Index.configure request.registry;
+        Compiler.configure_c_flags request.c_flags;
         Output.with_
           {
             out = Buffer.add_string buffer;
@@ -477,6 +469,7 @@ let request arguments =
     arguments;
     directory = Sys.getcwd ();
     registry = Sys.getenv_opt Registry.Index.variable;
+    c_flags = Sys.getenv_opt Toolchain.added_flags_variable;
     terminal = Output.terminal ();
     columns = Output.columns ();
   }

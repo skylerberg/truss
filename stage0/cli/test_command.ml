@@ -208,7 +208,7 @@ let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
           if own = [] then outcome
           else
             match
-              Compile.run_tests ?results ~rerun
+              Compile.run_tests ~results ~rerun
                 ~progress:(fun event -> progress (shifted event))
                 compile
                 ~time_limit:(Database.time_limit project.session * 1000)
@@ -218,7 +218,7 @@ let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
             | Error message -> Error message))
     (Ok []) project.packages
 
-let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
+let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json =
   let started = now_microseconds () in
   let project = Project.load directory in
   let report = Report.gather project in
@@ -240,7 +240,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
     1
   end
   else
-    let compile = Compiler.create ~sanitize project Development in
+    let compile = Compiler.create project Development in
     let progress =
       {
         line = Status_line.create ~enabled:(not json);
@@ -252,9 +252,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
       }
     in
     let build_ended = ref None in
-    (* A sanitized run caches no results, since its checks differ from
-       an unsanitized run's. *)
-    let results = if sanitize then None else Some (Compiler.test_results ()) in
+    let results = Compiler.test_results () in
     let outcome =
       run_all project compile ~results ~rerun ~progress:(on_progress progress ~build_ended) tests
     in

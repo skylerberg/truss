@@ -2,10 +2,17 @@
 
 type build = Development | Release
 
-(* [--sanitize] builds with AddressSanitizer and UndefinedBehaviorSanitizer,
-   for testing the compiler: every report is a compiler bug. *)
-let sanitizers =
-  [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
+(* A process that answers for others, as the background process does, is
+   told each one's [TRUSS_CFLAGS], which is not its own environment's. *)
+let configured_c_flags : string option option ref = ref None
+let configure_c_flags flags = configured_c_flags := Some flags
+
+let c_flags () =
+  match !configured_c_flags with
+  | Some told -> Toolchain.split_flags (Option.value told ~default:"")
+  | None ->
+      Toolchain.split_flags
+        (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
 let toolchain () =
   match Toolchain.find () with
@@ -28,15 +35,15 @@ let lowering_only session context =
   Compile.create ~want:(want session context) context (target ())
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
-    { build = Development; optimization = O1; extra = [] }
+    { build = Development; optimization = O1; extra = c_flags () }
 
 (* A development build compiles at -O1, one C file per instance. A release
    build compiles at -O2 with link-time optimization. A build checks every
    fallible primitive operation at run time unless [checks] is false, which
    is sound only when every obligation the program reaches is proven. *)
-let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
+let create ?(checks = true) (project : Project.t) build =
   let toolchain = toolchain () in
-  let extra = if sanitize then sanitizers else [] in
+  let extra = c_flags () in
   let settings : Build.settings =
     match build with
     | Development -> { build = Development; optimization = O1; extra }

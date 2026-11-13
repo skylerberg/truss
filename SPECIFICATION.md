@@ -2178,7 +2178,9 @@ public opaque type Session = todo
   scope.
 - Code with a `todo` is type-checked and proven, and callers are checked
   against the signature of an unfinished function.
-- `truss build` refuses a program whose `main` can reach a `todo`.
+- `truss build` and `truss run --release` refuse a program whose `main` can
+  reach a `todo`. In a development build, a `todo` that runs stops the
+  program and reports its position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output
@@ -2195,8 +2197,9 @@ fn score(player: Player) -> Int64 {
   it as `expr`.
 - In tests, the output is attached to the test's report, grouped by branch or
   task; otherwise it goes to standard error.
-- It is not allowed in proofs. `truss build` refuses a program whose `main`
-  can reach an `echo`, and a package that contains one cannot be published.
+- It is not allowed in proofs. `truss build` and `truss run --release`
+  refuse a program whose `main` can reach an `echo`, and a package that
+  contains one cannot be published.
 
 ## Modules and visibility
 

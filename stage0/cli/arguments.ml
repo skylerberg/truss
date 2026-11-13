@@ -13,7 +13,7 @@ let program_arguments = function
       let rec options = function
         | "--" :: rest -> "--" :: rest
         | ("-C" as option) :: value :: rest -> option :: value :: options rest
-        | (("--release" | "--sanitize" | "--help" | "-h") as option) :: rest ->
+        | (("--release" | "--no-server" | "--help" | "-h") as option) :: rest ->
             option :: options rest
         | option :: rest
           when String.starts_with ~prefix:"-C" option || String.starts_with ~prefix:"--help=" option

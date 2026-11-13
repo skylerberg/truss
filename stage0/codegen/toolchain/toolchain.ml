@@ -19,6 +19,13 @@ let find () =
   in
   first [] candidates
 
+let added_flags_variable = "TRUSS_CFLAGS"
+
+let split_flags text =
+  String.map (function '\t' | '\n' | '\r' -> ' ' | character -> character) text
+  |> String.split_on_char ' '
+  |> List.filter (( <> ) "")
+
 let required_flags =
   [
     "-std=c11";
