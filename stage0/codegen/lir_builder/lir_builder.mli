@@ -45,15 +45,28 @@ val loop :
 (** Runs [body] for each index from 0 to before [count]. The index is a local of [index_type], an
     integer of the kind [integer], [USize] by default. *)
 
+(* Writes code with [body] as an outlined function: a function of its own,
+   nested in the instance as [nested], which the code around it runs by
+   naming the local this returns, the holder of its environment. The
+   function is given [parts], locals of the code around it, as its
+   parameters, and reaches every other local of the code around it through
+   its environment. [body] starts in the function's entry block and ends
+   each of its paths with a return. *)
+val outline : t -> nested:int -> parts:Lir.local list -> (unit -> unit) -> Lir.local
+
 (* The function built: [written_result] is the parameter pointing to where
-   a large result is written, if any. *)
+   a large result is written, if any. A builder with outlined functions
+   needs [env], to tell which locals take no room. *)
 val build :
   ?written_result:Lir.local ->
+  ?env:Memory_layout.env ->
   t ->
   parameters:Lir.local list ->
   result:Lir.ty option ->
   Lir.function_
 
+(* The outlined functions that [build] wrote, by their nested numbers. *)
+val outlined_functions : t -> (int * Lir.function_) list
 val at : Lir.local -> Lir.place
 val ( / ) : Lir.place -> Lir.projection -> Lir.place
 val usize : int -> Lir.operand

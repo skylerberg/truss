@@ -158,7 +158,7 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           end)
         requires;
       Constants.write_output st output);
-  { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
+  finish_instance st ~rest:[] key
 
 let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
   let st, _ = code_state context function_ in
@@ -194,7 +194,7 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
         ~output:(Address { place = output; writable = true })
         result_ty result;
       Constants.write_output st output);
-  { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
+  finish_instance st ~rest:[] key
 
 (* Lowers a function or a test that has a body in source. *)
 let source_code context key ~path ~type_arguments : Lir.t =
@@ -205,11 +205,7 @@ let source_code context key ~path ~type_arguments : Lir.t =
   result_slot st convention;
   let _, _, parameter_locals, places = begin_body st ~body in
   Mir_form.lower_code st path ~parameters:places;
-  {
-    key;
-    main = finish_function st ~returns ~first:[] ~rest:parameter_locals ();
-    nested = nested_functions st;
-  }
+  finish_instance st ~returns ~rest:parameter_locals key
 
 let instance context (key : Instance.key) : Lir.t =
   match key with

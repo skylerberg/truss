@@ -131,19 +131,12 @@ type site = Ir_types.site = { definition : Path.t; line : int; column : int }
 type failure = Ir_types.failure = Panic | Assertion | Todo
 type destination = Ir_types.destination = Discarded | Returned of place | Written of place
 
-type region = Ir_types.region =
-  | Branch
-  | Chunk of { first : local; last : local }
-  | Task of { function_value : local; item : local }
-
 type statement = Ir_types.statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : destination }
   | Drop of place
   | Echo of { text : operand; length : operand; site : site }
   | Free_block of { place : place; variant : string }
-  | Region of { fork : int; region : region }
-  | Regions_end of { fork : int }
   | Fork of { branches : (int * operand) list }
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
 

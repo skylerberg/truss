@@ -175,7 +175,6 @@ let instance_references env (instance : Lir.t) =
                   | _ -> keys)
               | Free_block { place; _ } -> place_keys place keys
               | Echo { text; length; _ } -> operand_keys length (operand_keys text keys)
-              | Region _ | Regions_end _ -> keys
               | Fork { branches } ->
                   List.fold_left (fun keys (_, operand) -> operand_keys operand keys) keys branches
               | Fork_range { environment; first; last; _ } ->

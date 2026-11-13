@@ -56,7 +56,6 @@ and mir_frame = {
       (** The scope that owns the body's locals, which drops them on each way out *)
   returns_into : Lir.place option;
       (** In an expression lowered on its own, such as a default, where its value is written *)
-  forks : (int, int) Hashtbl.t;  (** The fork of the LIR that marks each [parallel] block *)
   mutable provides : (Path.t * Lir.operand) list list;
       (** The evidence that each [provide] around the code being lowered replaced, innermost first
       *)
@@ -131,10 +130,10 @@ type state = {
   mutable scopes : scope list;  (** Innermost first *)
   mutable loops : loop list;
   mutable result : result_slot;
-  nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
+  nested : Lir.function_ option list ref;
+      (** The instance's nested functions, its lambdas and outlined code, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
-  mutable forks : int;  (** How many [parallel] statements the function has marked *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable moved : Lir.place list;
       (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
@@ -158,21 +157,25 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     nested;
     evidence = [];
     pulling;
-    forks = 0;
     tasks = [];
     moved = [];
   }
 
-(* Whether a [parallel] statement's parts are marked here, to become
-   functions of their own that the runtime may run at the same time. They
-   are not in a method's pulled version, whose code is a state machine, nor
-   in an expression lowered on its own, whose [return] leaves to its end,
-   and a region has one way out. *)
+(* Whether a [parallel] statement's parts are outlined here, as functions
+   of their own that the runtime may run at the same time.
+   They are not in a method's pulled version, whose code is a state
+   machine, nor in an expression lowered on its own, whose [return] leaves
+   to its end, and a region has one way out. *)
 let may_fork st = (not st.pulling) && st.frame.exit = None
 
-let fresh_fork st =
-  st.forks <- st.forks + 1;
-  st.forks - 1
+(* Writes code with [body] as an outlined function, nested in the instance,
+   given [parts] as its parameters. Gives the function's number and the
+   operand for its environment. *)
+let outlined st ~parts body =
+  let nested = List.length !(st.nested) in
+  st.nested := !(st.nested) @ [ None ];
+  let holder = Lir_builder.outline st.builder ~nested ~parts body in
+  (nested, Lir.Address { place = at holder; writable = false })
 
 (* A record for the early exits of a block's branch or a loop's
    iterations. The current scope owns the return value, so the value
@@ -380,16 +383,29 @@ let finish_function st ?(returns = true) ~first ~rest () : Lir.function_ =
     match st.result with Returned_in local -> Some (local_type st.builder local) | _ -> None
   in
   let built =
-    Lir_builder.build st.builder ?written_result:pointer
+    Lir_builder.build st.builder ?written_result:pointer ~env:st.context.env
       ~parameters:(first @ Option.to_list pointer @ rest)
       ~result
   in
+  List.iter
+    (fun (index, region) ->
+      st.nested :=
+        List.mapi
+          (fun position nested -> if position = index then Some region else nested)
+          !(st.nested))
+    (Lir_builder.outlined_functions st.builder);
   { built with returns }
 
-(* The lambdas the function made, in order. *)
-let nested_functions st =
-  Array.of_list
-    (List.map (function Some body -> body | None -> bug "a lambda left unfinished") !(st.nested))
+(* The instance written: its function, which [finish_function] ends with
+   [rest] as its parameters, and the nested functions it made, in order. *)
+let finish_instance st ?returns ~rest key : Lir.t =
+  let main = finish_function st ?returns ~first:[] ~rest () in
+  let nested =
+    List.map
+      (function Some body -> body | None -> bug "a nested function left unfinished")
+      !(st.nested)
+  in
+  { key; main; nested = Array.of_list nested }
 
 let unreachable_block st =
   finish st.builder Unreachable;

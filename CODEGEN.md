@@ -39,8 +39,8 @@ already needs the platform's C toolchain.
 ### Why one IR before C
 
 A small IR, the LIR, between the MIR and C text gives one place for
-every transformation, since the cursor state machine and outlining
-`parallel` branches are passes over a control-flow graph. The LIR
+every transformation, since the cursor state machine is a pass over a
+control-flow graph. The LIR
 is not SSA: locals are mutable slots, since the C compiler builds SSA
 itself, and slots make drops and state machines simpler.
 
@@ -210,11 +210,12 @@ on a stack of its own, on a pool of threads:
 
 ## Parallelism
 
-A `parallel` branch, and a `parallel for` body, becomes a function of its
-own, in two steps. Lowering first writes the branches in place, in order,
-as regions, with their drops decided. `Outline` then makes each region a
-nested function. It stops at a drop flag shared between regions, which
-would let one branch drop a value another had moved, a double free.
+A `parallel` branch, and a `parallel for` body, is an outlined function:
+lowering writes its code as a nested function of the instance, while the
+moves of the whole body decide its drops. A local belongs to the innermost
+function that every function naming it is in, so a local of one branch
+belongs to each run of it, and a local shared with the code around is
+reached through the environment, which holds its address.
 
 A fork runs its first branch and offers the rest to other threads through
 Chase and Lev's work-stealing deque. A branch's record lives in the fork's
@@ -225,8 +226,8 @@ machine. A test program runs a fork's branches in order.
 
 ## Concurrency
 
-A `concurrent` branch, and each `concurrent for` iteration, is a region
-outlined as for `parallel`, then spawned through `Tasks`. The join is a scope
+A `concurrent` branch, and each `concurrent for` iteration, is outlined as
+for `parallel`, then spawned through `Tasks`. The join is a scope
 cleanup, on every exit, and the scope's temporaries are dropped after it,
 since a task may read them until then. An early exit from a task cancels the
 group and records its value, and the enclosing code performs the exit after

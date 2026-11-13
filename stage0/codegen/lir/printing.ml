@@ -163,16 +163,6 @@ let statement_to_string = function
   | Free_block { place; variant } -> "free " ^ place_to_string place ^ "." ^ variant
   | Echo { text; length; _ } ->
       "echo(" ^ operand_to_string text ^ ", " ^ operand_to_string length ^ ")"
-  | Region { fork; region = Branch } -> Printf.sprintf "region of fork %d" fork
-  | Region { fork; region = Chunk { first; last } } ->
-      Printf.sprintf "region of fork %d for %s to %s" fork
-        (place_to_string (local_place first))
-        (place_to_string (local_place last))
-  | Region { fork; region = Task { function_value; item } } ->
-      Printf.sprintf "region of fork %d as a task %s given %s" fork
-        (place_to_string (local_place function_value))
-        (place_to_string (local_place item))
-  | Regions_end { fork } -> Printf.sprintf "end of fork %d" fork
   | Fork { branches } ->
       "fork "
       ^ String.concat ", "

@@ -28,7 +28,6 @@ and mir_frame = {
           with each value assigned to them *)
   owner : scope option;
   returns_into : Lir.place option;
-  forks : (int, int) Hashtbl.t;
   mutable provides : (Path.t * Lir.operand) list list;
   returned : Mir.local list;
   mutable taken : Mir.place list;
@@ -81,7 +80,6 @@ type state = {
   nested : Lir.function_ option list ref;
   mutable evidence : (Path.t * Lir.operand) list;
   pulling : bool;
-  mutable forks : int;
   mutable tasks : task list;
   mutable moved : Lir.place list;
       (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
@@ -94,7 +92,11 @@ val enter :
   Definitions.context -> ?pulling:bool -> ?nested:Lir.function_ option list ref -> frame -> state
 
 val may_fork : state -> bool
-val fresh_fork : state -> int
+
+(* Writes code with [body] as an outlined function, nested in the instance,
+   given [parts] as its parameters. Gives the function's number and the
+   operand for its environment. *)
+val outlined : state -> parts:Lir.local list -> (unit -> unit) -> int * Lir.operand
 val new_early_exits : state -> early_exits
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
@@ -135,7 +137,9 @@ val in_statement : state -> (unit -> 'a) -> 'a
 val finish_function :
   state -> ?returns:bool -> first:Lir.local list -> rest:Lir.local list -> unit -> Lir.function_
 
-val nested_functions : state -> Lir.function_ array
+(* The instance written: its function, which [finish_function] ends with
+   [rest] as its parameters, and the nested functions it made, in order. *)
+val finish_instance : state -> ?returns:bool -> rest:Lir.local list -> Instance.key -> Lir.t
 val unreachable_block : state -> unit
 val moved : state -> Lir.place -> Lir.operand
 val owned : state -> Lir.place -> Ground.ty -> Lir.operand

@@ -386,8 +386,4 @@ let evaluator context path : Lir.t =
         ~output:(Address { place = output; writable = true })
         ty place;
       write_output st output);
-  {
-    key = Evaluator path;
-    main = finish_function st ~first:[] ~rest:[] ();
-    nested = nested_functions st;
-  }
+  finish_instance st ~rest:[] (Evaluator path)
