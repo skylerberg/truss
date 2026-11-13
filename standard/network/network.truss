@@ -640,6 +640,26 @@ impl streams::Reader for Connection {
   }
 }
 
+impl streams::Duplex for Connection {
+  fn receive(self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles, Tasks
+  {
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
+  }
+
+  fn send(self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles, Tasks
+  {
+    Handles.write(self.handle, bytes: bytes)
+  }
+
+  fn close_sending(self) -> Result[Unit, SystemError]
+    uses Handles, Tasks
+  {
+    Handles.shut_down(self.handle, direction: Direction.Sending)
+  }
+}
+
 impl streams::Writer for Connection {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
@@ -720,6 +740,26 @@ impl streams::Reader for LocalConnection {
     uses Handles
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
+  }
+}
+
+impl streams::Duplex for LocalConnection {
+  fn receive(self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles, Tasks
+  {
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
+  }
+
+  fn send(self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles, Tasks
+  {
+    Handles.write(self.handle, bytes: bytes)
+  }
+
+  fn close_sending(self) -> Result[Unit, SystemError]
+    uses Handles, Tasks
+  {
+    Handles.shut_down(self.handle, direction: Direction.Sending)
   }
 }
 

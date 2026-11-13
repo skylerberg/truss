@@ -123,6 +123,66 @@ public trait Writer {
   }
 }
 
+public trait Duplex {
+  fn receive(self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles, Tasks
+    ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
+    ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
+
+  fn send(self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles, Tasks
+    ensures !(result is Ok(count) && count > bytes.length())
+
+  fn close_sending(self) -> Result[Unit, SystemError]
+    uses Handles, Tasks
+
+  fn send_all(self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+    uses Handles, Tasks
+  {
+    var sent: USize = 0
+    while sent < bytes.length()
+      invariant sent <= bytes.length()
+    {
+      let count = self.send(bytes.slice_range(sent, stop: bytes.length()))?
+      if count == 0 {
+        return Err(SystemError.NothingWritten)
+      }
+      sent += count
+    }
+    Ok(Unit)
+  }
+
+  fn receive_exactly(self, buffer: mut List[UInt8], count: USize) -> Result[Unit, SystemError]
+    uses Handles, Tasks
+  {
+    var left = count
+    while left > 0
+      invariant left <= count
+    {
+      let got = self.receive(mut buffer, limit: left)?
+      if got == 0 {
+        return Err(SystemError.UnexpectedEnd)
+      }
+      left -= got
+    }
+    Ok(Unit)
+  }
+
+  fn receive_to_end(self, buffer: mut List[UInt8]) -> Result[USize, SystemError]
+    uses Handles, Tasks
+  {
+    let start = buffer.length()
+    var more = true
+    while more
+      invariant buffer.length() >= start
+    {
+      let count = self.receive(mut buffer, limit: 65536)?
+      more = count > 0
+    }
+    Ok(buffer.length() - start)
+  }
+}
+
 public trait Seek {
   fn seek(mut self, to: Position) -> Result[UInt64, SystemError]
     uses Handles
