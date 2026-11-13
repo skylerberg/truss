@@ -14,9 +14,6 @@ val local_type : t -> Lir.local -> Lir.ty
 (* A new block, which nothing jumps to yet. *)
 val block : t -> Lir.block
 
-(* The block statements are added to. *)
-val current : t -> Lir.block
-
 (* Makes [block] the current block. Statements added since the last
    [finish] are dropped, so [finish] comes first. *)
 val start : t -> Lir.block -> unit

@@ -229,7 +229,7 @@ type terminator =
       (** An [unreachable] written in code, which the prover shows no path reaches. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
-type natural_loop = { loop : loop; body : block; after : block }
+type natural_loop = { loop : loop; body : block; after : block option }
 (** A [while] loop, which its header block carries: its clauses, the first block of its body, which
     the loop's condition goes to where it holds, and the block it exits to where the condition does
     not hold or a [break] leaves. *)
@@ -239,7 +239,17 @@ type basic_block = {
   terminator : terminator;
   terminator_origin : Core.origin;
   header : natural_loop option;  (** The [while] loop this block heads. *)
+  inlined : inlined list;
+      (** For a block of a method inlined into the body, the methods it was inlined from, innermost
+          first. The block's origins are the innermost method's. Empty for the body's own blocks. *)
 }
+
+and inlined = {
+  method_ : Path.t;
+  type_arguments : Types.argument list;  (** The method's, as the instance has them. *)
+  call : Core.origin;  (** Where the call is, in the code around it. *)
+}
+(** A method inlined at a call. *)
 
 type body = {
   parameters : local list;
@@ -1619,7 +1629,7 @@ and statement b (node : Core.statement) =
               {
                 loop = { clauses; schedule = Sequential; origin; formula = Some tested };
                 body = inside;
-                after;
+                after = Some after;
               };
           start b header;
           let held =
@@ -1937,6 +1947,7 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
           terminator;
           terminator_origin;
           header = pending.heading;
+          inlined = [];
         })
   in
   {
@@ -2000,7 +2011,13 @@ and canonical (blocks : basic_block array) =
           {
             tasks =
               List.map
-                (fun (left : left_task) -> { left with task_end = Option.map target left.task_end })
+                (fun (left : left_task) ->
+                  {
+                    left with
+                    task_end =
+                      Option.bind left.task_end (fun task_end ->
+                          if visited.(task_end) then Some (target task_end) else None);
+                  })
                 tasks;
             exit = (match exit with Exit_to block -> Exit_to (target block) | other -> other);
           }
@@ -2015,7 +2032,13 @@ and canonical (blocks : basic_block array) =
            header =
              Option.map
                (fun (natural : natural_loop) ->
-                 { natural with body = target natural.body; after = target natural.after })
+                 {
+                   natural with
+                   body = target natural.body;
+                   after =
+                     Option.bind natural.after (fun after ->
+                         if visited.(after) then Some (target after) else None);
+                 })
                blocks.(block).header;
          })
        !order)

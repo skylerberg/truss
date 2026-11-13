@@ -36,6 +36,9 @@ val evidence_for : context -> Types.substitution -> Types.capability_set -> Path
    lookups apply to it. *)
 val substitution : Types.generic list -> Ground.argument list -> Types.substitution
 
+(* A ground argument as an argument of the type checker's types. *)
+val back_argument : Ground.argument -> Types.argument
+
 (* The ground type of a built-in. *)
 val builtin : Intrinsic.builtin -> Ground.ty
 

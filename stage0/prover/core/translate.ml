@@ -10187,7 +10187,7 @@ let reached (body : Mir.body) ~from ~avoid =
 (* The blocks of a [while] loop: those its header reaches without leaving
    by its exit, and from which the header is reached again. *)
 let loop_blocks (body : Mir.body) header (natural : Mir.natural_loop) =
-  let forward = reached body ~from:[ header ] ~avoid:(fun block -> block = natural.after) in
+  let forward = reached body ~from:[ header ] ~avoid:(fun block -> Some block = natural.after) in
   let blocks = Hashtbl.create 16 in
   Hashtbl.replace blocks header ();
   let changed = ref true in
@@ -10625,7 +10625,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
        one leaves the loop, as a [return] does not. *)
     let toward_exit =
       let reaching = Hashtbl.create 8 in
-      Hashtbl.replace reaching natural.after ();
+      Option.iter (fun after -> Hashtbl.replace reaching after ()) natural.after;
       let changed = ref true in
       while !changed do
         changed := false;

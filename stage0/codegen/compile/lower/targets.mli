@@ -126,7 +126,6 @@ val template_value :
   parts:(Lir.place -> unit) list ->
   Lir.place
 
-val yielded_type : Lowering.state -> Path.t -> Ground.argument list -> Ground.ty
 val cursor_result : Definitions.context -> Ground.yielding -> Ground.ty
 val call_next : Lowering.state -> Ground.yielding -> Lir.place -> Lir.place -> unit
 
