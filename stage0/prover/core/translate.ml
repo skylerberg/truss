@@ -8304,11 +8304,22 @@ and concurrent context frame (node : statement) branches =
    the clauses about each part; a [mut] part comes back as the caller left
    it, which is any value of its type; and a yielding method may end here,
    if a loop stops it, so its other clauses and [self]'s invariant hold. *)
-and yield_part context frame (node : statement) (mode : Types.mode) (part : operand) =
+(* [given], where the MIR gives the part: its value, whether it lends places,
+   and how the caller's changes to it are written back to them. *)
+and yield_part ?given context frame (node : statement) (mode : Types.mode) (part : operand) =
   let span = span_of frame.source node.origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
   | Some (part_type, kind), Some (each, at_end), Some before ->
-      let frame, handed = operand_value context frame part in
+      let frame, handed, lends, write_back =
+        match given with
+        | Some (handed, lends, write_back) -> (frame, handed, lends, write_back)
+        | None ->
+            let frame, handed = operand_value context frame part in
+            ( frame,
+              handed,
+              Core_walk.lent_places part <> [],
+              fun frame after -> written_back context frame part part_type after )
+      in
       let show clauses ~at ~result ~yielded ~finished ~when_ =
         List.iter
           (fun (clause : expression) ->
@@ -8326,11 +8337,11 @@ and yield_part context frame (node : statement) (mode : Types.mode) (part : oper
       (* The caller's changes to a part lent [mut] are written to each lent
          place. *)
       let frame, part_after =
-        if mode = Types.Mut && Core_walk.lent_places part <> [] then (
+        if mode = Types.Mut && lends then (
           let part_after = arrive context frame "lent" part_type in
           if kind = `Lends then
             context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
-          (written_back context frame part part_type part_after, part_after))
+          (write_back frame part_after, part_after))
         else (frame, handed)
       in
       let after = appended context frame part_type before part_after in
@@ -9515,24 +9526,31 @@ let core_index (definition : Core.definition) =
 let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mir.t) =
   let core_call (call : Mir.call) =
     match Hashtbl.find_opt index.expressions call.node with
-    | Some { kind = Call called; _ } ->
-        (match called.callee with Indirect _ -> false | _ -> true)
-        && List.for_all
-             (function
-               | Passed { value = Value { kind = Lambda _ | Slice _; _ }; _ } -> false
-               | Passed _ | Default -> true)
-             called.arguments
+    | Some { kind = Call _ as called; _ } -> (
+        (match (called, call.callee) with
+          | Call { callee = Indirect _; _ }, Indirect _ -> true
+          | Call { callee = Indirect _; _ }, _ | _, Indirect _ -> false
+          | _ -> true)
+        &&
+        match called with
+        | Call called ->
+            List.for_all
+              (function
+                | Passed { value = Value { kind = Lambda _ | Slice _; _ }; _ } -> false
+                | Passed _ | Default -> true)
+              called.arguments
+        | _ -> false)
     | _ -> false
   in
   let rvalue (value : Mir.rvalue) ~node =
     match value with
     | Operand _ | Compare _ | Not _ | Is_variant _ | Copy _ | Value_parameter _ -> true
-    | Convert { conversion = Widen; _ } -> true
-    | Operation _ | Construct _ -> (
+    | Operation _ | Construct _ | Convert _ | Function_value _ | To_any _ -> (
         match Option.bind node (Hashtbl.find_opt index.expressions) with
-        | Some { kind = Operator _ | Construct _; _ } -> true
+        | Some { kind = Operator _ | Construct _ | Convert _ | Function_value _ | To_any _; _ } ->
+            true
         | _ -> false)
-    | Convert _ | Array _ | To_any _ | Function_value _ | Lambda _ -> false
+    | Array _ | Lambda _ -> false
   in
   let statement (statement : Mir.statement) =
     match statement.kind with
@@ -9553,12 +9571,11 @@ let mir_covers (index : core_index) (parameters : Core.parameter list) (mir : Mi
         match Hashtbl.find_opt index.statements loop.origin with
         | Some { kind = For _; _ } -> true
         | _ -> false)
-    | Yield _ | Exit_tasks _ -> false
+    | Yield _ -> true
+    | Exit_tasks _ -> false
   in
+  ignore parameters;
   mir.lambdas = [||]
-  && List.for_all
-       (fun (parameter : Core.parameter) -> parameter.callback_contract = None)
-       parameters
   && Array.for_all
        (fun (block : Mir.basic_block) ->
          (match block.Mir.header with
@@ -9580,6 +9597,8 @@ type run = {
   lends : (Mir.local, frame -> Logic.term -> frame) Hashtbl.t;
       (** For each part lent to change, how its final value goes back where it was lent from, as the
           lend ends *)
+  constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
+      (** The constructor each temporary is built by, for a [yield] of places it holds *)
 }
 
 (* The key of a local of the MIR in a frame's locals: a parameter's or a
@@ -9635,6 +9654,9 @@ let read_root context frame run (root : Mir.root) =
           | Some self -> self
           | None -> raise (Foreign_unsupported "`self` outside a method"))
       | key -> (
+          (* A function-typed parameter read other than to be called or passed
+             on keeps its [requires]. *)
+          if frame.checking && not context.reading_callback then escaping_callback context frame key;
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None -> raise (Foreign_unsupported "a local the prover did not bind")))
@@ -9788,6 +9810,31 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~node ~span =
       | _ -> ());
       (frame, operand value)
   | Value_parameter parameter -> (frame, value_term context frame (Value_parameter parameter))
+  | Convert { conversion = To_integer; value } -> (frame, operand value)
+  | Convert { conversion = From_integer; value } ->
+      let node = core_node () in
+      let ty = type_of context frame node in
+      let term = operand value in
+      oblige context frame Out_of_range (at frame node)
+        (Printf.sprintf "`%s` may not fit in `%s`." (quote frame.source node.origin) (Types.show ty))
+        (in_range ty term);
+      (frame, term)
+  | Function_value { path; type_arguments } ->
+      let node = core_node () in
+      (frame, global_value context frame node path type_arguments)
+  | To_any _ ->
+      (* A value of [any Trait], known through the trait's contracts: one
+         allocation, of the block that holds the value. *)
+      let node = core_node () in
+      let frame =
+        spend context frame (fun (counter : Costs.counter) ->
+            match (counter.resource, counter.counting) with
+            | Allocations, _ -> Logic.int 1
+            | Allocated_bytes, Units -> Logic.int 1
+            | Allocated_bytes, (At_most | Exactly) -> unknown_amount context frame counter
+            | (Time | Calls _), _ -> Costs.zero)
+      in
+      (frame, arrive context frame "any" (type_of context frame node))
   | Operation { operation; operands; _ } -> (
       let node = core_node () in
       match node.kind with
@@ -9810,8 +9857,7 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~node ~span =
           in
           construct ~given context frame node variant written
       | _ -> bug "a constructor whose core node is no constructor")
-  | Convert _ | Array _ | To_any _ | Function_value _ | Lambda _ ->
-      bug "a form the MIR's reading does not cover"
+  | Array _ | Lambda _ -> bug "a form the MIR's reading does not cover"
 
 (* A place of the MIR as the place of a [mut] argument. *)
 let mir_passed_place context run place =
@@ -9830,7 +9876,7 @@ let mir_arguments context frame run (arguments : Mir.argument list) position =
         | Types.Mut, Borrow { place; _ } -> Some (mir_passed_place context run place)
         | _ -> None
       in
-      Some (mir_operand context frame run value, place)
+      Some (reading_callback context (fun () -> mir_operand context frame run value), place)
   | Some Default | None -> None
 
 (* A call, through the callee's contract, with the arguments the MIR has
@@ -9839,7 +9885,13 @@ let mir_call context frame run (call : Mir.call) =
   match Hashtbl.find_opt run.index.expressions call.node with
   | Some ({ kind = Call called; _ } as node) -> (
       let given = mir_arguments context frame run call.arguments in
-      match resolved_call ~given context frame node called with
+      let callee =
+        match call.callee with
+        | Indirect callee ->
+            Some (reading_callback context (fun () -> mir_operand context frame run callee))
+        | _ -> None
+      in
+      match resolved_call ~given ?callee context frame node called with
       | Some _ when Types.equal (type_of context frame node) Types.Never -> None
       | translated -> translated)
   | _ -> bug "a call of the MIR whose core call is not known"
@@ -9913,6 +9965,54 @@ let mir_lend context frame run part (call : Mir.call) =
           Some (write_place context after run { root = Local part; projections = [] } term)
       | None -> None)
   | _ -> bug "a lend of the MIR whose core call is not known"
+
+(* Whether a yielded operand lends places: it is a place, or a constructor
+   applied to places, to any depth. *)
+let rec mir_lends_places run (operand : Mir.operand) =
+  match operand with
+  | Borrow _ -> true
+  | Use { place = { root = Local local; projections = [] }; _ } -> (
+      match Hashtbl.find_opt run.constructs local with
+      | Some (_, fields) ->
+          List.exists
+            (function _, Some field -> mir_lends_places run field | _, None -> false)
+            fields
+      | None -> false)
+  | Use _ | Take _ | Constant _ -> false
+
+(* The frame after the caller's changes to a part lent [mut] come back, as
+   [after]: each place the part lends has its part of [after]. A variant's
+   field is its part only where [after] is still that variant, and is
+   otherwise a value nothing more is known about. *)
+let rec mir_written_back context run ty (operand : Mir.operand) frame after =
+  match operand with
+  | Borrow { place; _ } -> write_place context frame run place after
+  | Use { place = { root = Local local; projections = [] }; _ } -> (
+      match (Hashtbl.find_opt run.constructs local, constructors context ty) with
+      | Some (variant, fields), Some shape ->
+          let shaped = Option.value (List.assoc_opt variant shape) ~default:[] in
+          List.fold_left
+            (fun frame (name, field) ->
+              match (field, List.assoc_opt name shaped) with
+              | Some field, Some field_type when mir_lends_places run field ->
+                  let field_type = substituted context frame field_type in
+                  let selected = field_of context frame ty variant name field_type after in
+                  let value =
+                    match variant with
+                    | None -> selected
+                    | Some _ ->
+                        Logic.ite
+                          (Logic.Is (constructor_name ty variant, after))
+                          selected
+                          (arrive context frame "lent" field_type)
+                  in
+                  mir_written_back context run field_type field frame value
+              | _ -> frame)
+            frame fields
+      | Some _, None ->
+          raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty)))
+      | None, _ -> frame)
+  | Use _ | Take _ | Constant _ -> frame
 
 let mir_statement context frame run (statement : Mir.statement) =
   let span = span_of frame.source statement.origin in
@@ -10053,7 +10153,46 @@ let loop_blocks (body : Mir.body) header (natural : Mir.natural_loop) =
    a [while] loop runs as the core form's does, with its changes havocked
    at its head and its invariants checked at the end of each iteration. *)
 let mir_run context start index (body : Mir.body) =
-  let run = { index; body; places = Hashtbl.create 4; lends = Hashtbl.create 4 } in
+  (* A named function passed directly as an argument is checked against the
+     parameter's function type at the call, as the core form's reading does,
+     and not as a value used on its own. *)
+  Hashtbl.iter
+    (fun _ (node : expression) ->
+      match node.kind with
+      | Call called ->
+          List.iter
+            (function
+              | Passed { value = Value argument; _ } -> (
+                  let rec unwidened (node : expression) =
+                    match node.kind with
+                    | Convert { conversion = Widen; value = inner } -> unwidened inner
+                    | _ -> node
+                  in
+                  match unwidened argument with
+                  | { kind = Function_value _; id; _ } ->
+                      context.passed_values <- id :: context.passed_values
+                  | _ -> ())
+              | Passed _ | Default -> ())
+            called.arguments
+      | _ -> ())
+    index.expressions;
+  let constructs = Hashtbl.create 4 in
+  Array.iter
+    (fun (block : Mir.basic_block) ->
+      List.iter
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Assign
+              {
+                target = { root = Local local; projections = [] };
+                value = Construct { variant; fields };
+                _;
+              } ->
+              Hashtbl.replace constructs local (variant, fields)
+          | _ -> ())
+        block.statements)
+    body.blocks;
+  let run = { index; body; places = Hashtbl.create 4; lends = Hashtbl.create 4; constructs } in
   let count = Array.length body.blocks in
   let incoming = Array.make count [] in
   let ran = Array.make count false in
@@ -10138,7 +10277,23 @@ let mir_run context start index (body : Mir.body) =
             | Some ended -> jump after ended
             | None -> ())
         | _ -> bug "a loop of the MIR whose core loop is not known")
-    | Yield _ | Exit_tasks _ -> bug "a form the MIR's reading does not cover"
+    | Yield { mode; part; resume } -> (
+        match Hashtbl.find_opt index.statements block.terminator_origin with
+        | Some ({ kind = Yield { part = written; _ }; _ } as node) -> (
+            let handed = mir_operand context frame run part in
+            let part_type = mir_operand_type context frame part in
+            match
+              yield_part
+                ~given:
+                  ( handed,
+                    mir_lends_places run part,
+                    fun frame after -> mir_written_back context run part_type part frame after )
+                context frame node mode written
+            with
+            | Some after -> jump resume after
+            | None -> ())
+        | _ -> bug "a yield of the MIR whose core yield is not known")
+    | Exit_tasks _ -> bug "a form the MIR's reading does not cover"
   and run_block position frame ~jump ~iteration_end =
     let block = body.blocks.(position) in
     let ended =
