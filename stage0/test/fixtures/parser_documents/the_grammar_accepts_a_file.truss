@@ -3,3 +3,9 @@ use a::b
 fn f() -> Int64 {
   1
 }
+
+theorem shifted_out(word: UInt64, used: Int64)
+  requires used >= 0
+{
+  assert used < 64 ==> (word >> used) <= word by bit_vector
+}

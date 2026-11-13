@@ -1343,10 +1343,10 @@ type form_origin = Written | Derived | Provided
 
 (* The form of a function or a method by its path, with the substitution it
    is read under: the [impl]'s, for the form of the trait's method that the
-   [impl] leaves to it. A caller reads its callee's specification, whose
-   body is there only where the callee is a function in the logic, so
-   editing another body proves no caller again; a caller in another
-   package, [reading_package], reads the specification the callee's package
+   [impl] leaves to it. A caller reads its callee's specification, which
+   holds a body only for a method of a trait or an [impl], so editing a
+   function's body proves no caller again. A caller in another package,
+   [reading_package], reads the specification the callee's package
    exports. *)
 let source_at ?reading_package database (path : Path.t) =
   let specification =

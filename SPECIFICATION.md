@@ -2293,12 +2293,15 @@ library reaches the operating system, through the compiler.
 
 ## Ambiguities in the grammar
 
-The grammar has two shift/reduce conflicts, both resolved by shifting, and
+The grammar has three shift/reduce conflicts, all resolved by shifting, and
 the test of `grammar/truss.mly` checks that Menhir finds exactly these:
 
 - **`else` after `let pattern = if ... { } else { }`** attaches to the `if`.
   A `let ... else` expression that ends with `}` is rejected after parsing.
 - **`{` after `return`** starts the returned value.
+- **A name after `return`** starts the returned value, so in
+  `assert return by bit_vector`, `by` is `return`'s operand and not the
+  start of `by bit_vector`.
 
 ## Layout
 
