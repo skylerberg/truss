@@ -40,7 +40,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **`dune build`** builds everything, and **`dune fmt`** formats the code
   with the ocamlformat version that `.ocamlformat` pins.
 - **`stage0/tools/docs/build.sh`** builds the odoc documentation of every
-  library and a page of the library dependency graph into `_build/docs`. It
+  library, a page of the library dependency graph, and a page of the
+  dependencies between areas into `_build/docs`. It
   needs odoc and dune-deps from opam and Graphviz from Homebrew, which
   `dune-project` does not list because CI never builds the documentation.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
