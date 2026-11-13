@@ -4,7 +4,7 @@
 open Harness
 open Support
 
-let check = Type_checker.For_testing.through Infer
+let check = Checks.For_testing.through Infer
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -221,7 +221,7 @@ let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
 let problems database =
-  Query.demand database Type_checker.manifest_problems { owner = None; name = "app" }
+  Query.demand database Checks.manifest_problems { owner = None; name = "app" }
 
 let () =
   test "a grant names a capability outside the prelude by its full path" (fun () ->

@@ -1,5 +1,5 @@
-(** The type checker's entry point: loading a build's packages and gathering every stage's
-    diagnostics. *)
+(** The checks of a build's packages: every stage that reports diagnostics before the prover, from
+    the lexer to the package checks, run in order and gathered by file. *)
 
 (** The stages, in the order they run. *)
 type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
@@ -28,7 +28,7 @@ val code_packages : (Path.package, Path.package list) Query.query
 (** The packages a package's code uses, its tests apart, by the package's name. A dependency that is
     not among them is one only its tests use. *)
 
-(** The type checker's own stages, for their tests. *)
+(** The stages, for their tests. *)
 module For_testing : sig
   val through : stage -> Query.context -> Path.file -> Diagnostic.t list
   (** The diagnostics of a file's definitions from the stages up to and including one, in the order

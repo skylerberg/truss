@@ -34,7 +34,7 @@
   const areas = [...new Set(LIBRARIES.map((library) => library.area))].sort(byName);
   const namedAreas = areas.filter((area) => area !== "");
   const areaColor = (area) =>
-    area === "" ? "var(--area-0)" : `var(--area-${(namedAreas.indexOf(area) % 8) + 1})`;
+    area === "" ? "var(--area-0)" : `var(--area-${(namedAreas.indexOf(area) % 13) + 1})`;
   const areaLabel = (area) => (area === "" ? "stage0" : `stage0/${area}`);
 
   const nodes = new Map();

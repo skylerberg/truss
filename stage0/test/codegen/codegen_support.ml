@@ -250,7 +250,7 @@ let load_files files =
   List.iter
     (fun (file, _) ->
       let source = (Query.demand database Workspace.file file).source in
-      match Type_checker.diagnostics database file with
+      match Checks.diagnostics database file with
       | [] -> ()
       | diagnostics ->
           fail "the source has diagnostics:\n%s"

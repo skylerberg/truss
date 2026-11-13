@@ -29,7 +29,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   its hash.
 - **The Unicode tables are generated** from the Unicode character database
   files that `stage0/tools/unicode/sources.txt` lists with their hashes:
-  the compiler's into `stage0/unicode/unicode_tables.ml`, and the standard
+  the compiler's into `stage0/support/unicode/unicode_tables.ml`, and the standard
   library's into `standard/text/unicode_data/unicode_data.truss`. To move to a new
   version of Unicode, change that list and run
   `stage0/tools/unicode/regenerate.sh`. Each function of
@@ -67,6 +67,26 @@ develop as well as make it easier to bootstrap the compiler in parts.
   it. It stays a library of its own when its short dependency list
   keeps it apart from a layer, as `session` knows no compiler stage and the
   passes over LIR, such as `drops`, know nothing of the front end.
+- **Each library belongs to one area of stage0,** a directory under
+  `stage0`, and the dependency graph that `stage0/tools/docs/build.sh`
+  draws colors libraries by area:
+
+  | Area | Holds |
+  |---|---|
+  | `support` | Leaf libraries every area uses: sources, diagnostics, paths, encodings, hashing, and the operating system |
+  | `standard_library` | What the compiler knows of the standard library: its embedded source, the definitions it names, its intrinsics, and the C library it calls |
+  | `packages` | Manifests, the registry, and a build's packages and files |
+  | `query` | The incremental query engine, its phases, sessions, and the saved store |
+  | `lexer`, `parser` | Text to tokens, and tokens to syntax trees |
+  | `type_checker` | Syntax trees to the core form, and the checks of patterns, use, and packages |
+  | `mir` | The MIR and its builder |
+  | `ownership`, `prover`, `codegen` | The MIR's three consumers |
+  | `tools`, `test` | Executables that are not shipped, and the tests |
+
+  The libraries at the top of `stage0` put the areas together: `checks`
+  runs every check before the prover, `database` is the project's layer over
+  sessions, `evaluator` gives the prover code generation, and `cli` is the
+  command line. No area depends on them, so the areas form no cycle.
 - **A unit of several modules inside a library is a subdirectory.** The
   library's `dune` file sets `(include_subdirs qualified)`, the
   subdirectory's module of its own name is its interface, and its other

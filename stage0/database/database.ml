@@ -60,7 +60,7 @@ let check_standard engine =
   let rendered =
     List.concat_map
       (fun (file, _) ->
-        match Engine.get engine Type_checker.file_diagnostics file with
+        match Engine.get engine Checks.file_diagnostics file with
         | [] -> []
         | diagnostics ->
             let source = (Engine.get engine Workspace.file file).source in
@@ -259,7 +259,7 @@ let scan (files : Files.t) session =
         (* A file that is gone has no diagnostics to maintain, so they
            are no longer a root. *)
         match List.find_opt (fun (written, _, _) -> written = path) was_files with
-        | Some (_, _, file) -> Engine.unroot engine Type_checker.file_diagnostics file
+        | Some (_, _, file) -> Engine.unroot engine Checks.file_diagnostics file
         | None -> ()
       end)
     was;
@@ -411,7 +411,7 @@ let manifest_problems session names =
       else
         List.map
           (fun problem -> (Project.manifest_file directory, name, problem))
-          (try Engine.get (Session.engine session) Type_checker.manifest_problems name
+          (try Engine.get (Session.engine session) Checks.manifest_problems name
            with Not_found -> []))
     (packages session)
 
@@ -428,7 +428,7 @@ let registry_packages session = demand session Project.registry ()
 let lock_fix session = (demand session Project.selection ()).lock_fix
 
 let diagnostics session file =
-  try Engine.get (Session.engine session) Type_checker.file_diagnostics file with Not_found -> []
+  try Engine.get (Session.engine session) Checks.file_diagnostics file with Not_found -> []
 
 let diagnostics_of session packages =
   List.concat_map
@@ -795,7 +795,7 @@ let published name version =
               match problems session with [] -> Ok session | problem :: _ -> cannot problem)))
 
 let code_packages session name =
-  try Engine.get (Session.engine session) Type_checker.code_packages name with Not_found -> []
+  try Engine.get (Session.engine session) Checks.code_packages name with Not_found -> []
 
 (* The diagnostics of a merge of two commits that neither has. *)
 let merge_preview session other =

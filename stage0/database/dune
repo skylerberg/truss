@@ -17,7 +17,7 @@
   diagnostic
   standard_library
   compiler_version
-  type_checker
+  checks
   registry
   resolve
   process))

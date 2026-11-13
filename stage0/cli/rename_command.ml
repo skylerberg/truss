@@ -243,7 +243,7 @@ let run ~directory ~from_ ~to_ ~json =
     let caused =
       List.filter_map
         (fun (_, file, text) ->
-          match Diagnostic.shown (Type_checker.diagnostics checked file) with
+          match Diagnostic.shown (Checks.diagnostics checked file) with
           | [] -> None
           | diagnostics ->
               Some

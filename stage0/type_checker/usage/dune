@@ -1,0 +1,13 @@
+(library
+ (name usage)
+ (libraries
+  query
+  phases
+  path
+  diagnostic
+  source
+  resolve
+  syntax
+  syntax_walk
+  types
+  infer))

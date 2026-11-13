@@ -1,0 +1,16 @@
+(library
+ (name patterns)
+ (libraries
+  query
+  phases
+  path
+  diagnostic
+  source
+  resolve
+  syntax
+  types
+  core
+  core_walk
+  interface
+  infer
+  zarith))

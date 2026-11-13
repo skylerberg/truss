@@ -668,7 +668,7 @@ let open_library files =
 let check_library library files =
   List.iter
     (fun (file, _) ->
-      ignore (Engine.get (Database.For_testing.engine library) Type_checker.file_diagnostics file))
+      ignore (Engine.get (Database.For_testing.engine library) Checks.file_diagnostics file))
     files;
   Database.save_session library
 

@@ -8,7 +8,7 @@ open Harness
 let solver = Lazy.force Support.solver
 
 let check database module_ =
-  match Type_checker.diagnostics database module_ with
+  match Checks.diagnostics database module_ with
   | [] -> Prover.diagnostics ~record:(Support.record database) database solver module_
   | errors -> errors
 

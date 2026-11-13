@@ -44,7 +44,7 @@
 
    A token's level also applies to every production whose rightmost terminal
    is that token, so a new conflict involving `else`, `{`, or a name can be
-   resolved here without a warning. The build of stage0/reference checks that
+   resolved here without a warning. The build of stage0/parser/reference checks that
    precedence resolves exactly three conflicts. */
 %nonassoc if_without_else
 %nonassoc ELSE

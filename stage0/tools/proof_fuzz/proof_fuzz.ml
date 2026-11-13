@@ -52,7 +52,7 @@ let load text =
     ~dependencies:[]
     [ (example_file, text) ];
   let database = Engine.context engine in
-  if Type_checker.diagnostics database example_file <> [] then None
+  if Checks.diagnostics database example_file <> [] then None
   else
     Some
       ( database,
@@ -284,7 +284,7 @@ let () =
                   ~name:{ owner = None; name = "example" }
                   ~dependencies:[]
                   [ (example_file, text) ];
-                shown (Type_checker.diagnostics (Engine.context engine) example_file);
+                shown (Checks.diagnostics (Engine.context engine) example_file);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (Documents.read file)
            else [ Documents.read file ]))

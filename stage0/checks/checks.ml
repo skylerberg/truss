@@ -1,5 +1,5 @@
-(* The type checker's entry point: every stage, in order, over the
-   definitions of a build. The stages are linked together; each reads the
+(* The checks of a build: every stage before the prover, in order, over
+   the definitions of a build. The stages are linked together; each reads the
    earlier ones' results through their queries. *)
 
 type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks

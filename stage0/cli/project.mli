@@ -21,7 +21,7 @@ val file_paths : Database.session -> package list -> (Path.file * string) list
 val load : string -> t
 val package : t -> package
 val is_own : t -> Path.module_ -> bool
-val manifest_problems : t -> (string * Path.package * Type_checker.manifest_problem) list
+val manifest_problems : t -> (string * Path.package * Checks.manifest_problem) list
 val reload : t -> unit
 val files : t -> Path.file list
 val modules : t -> Path.module_ list
