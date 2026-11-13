@@ -9632,19 +9632,20 @@ let mir_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.site) 
       in
       (frame, arrive context frame "any" ty)
   | Operation { operation; operands; type_arguments } ->
-      (* An operator and a call of the intrinsic are one operation, read
-         alike. *)
+      (* An operator and a call of the intrinsic are one operation, read as
+         the intrinsic: a primitive operation takes constant time and
+         allocates nothing, so its call costs nothing more. *)
       let types =
         List.filter_map
           (function Types.Type ty -> Some (substituted context frame ty) | _ -> None)
           type_arguments
       in
       let types = match types with [] -> [ ty ] | types -> types in
+      let terms = List.map operand operands in
       ( frame,
-        primitive_operation context frame ~site operation types (List.map operand operands)
-          ~arguments:(List.map operand_origin operands) ~fallback:(fun () ->
-            if float_format ty <> None then arrive context frame "operator" ty
-            else unsupported span "this operator") )
+        intrinsic context frame ~site operation types terms
+          ~arguments:(List.map operand_origin operands)
+          ~changed:terms ty )
   | Construct { variant; fields } ->
       apply_construct context frame site variant
         (List.map (fun (name, field) -> (name, Option.map operand field)) fields)
