@@ -33,7 +33,8 @@ lines(item) = [ item { NEWLINE item } ] ;
 
 [`grammar/truss.mly`](grammar/truss.mly) is the whole grammar written for
 Menhir. A test checks that it accepts every example in the repository's
-documents, and that the parser agrees with it.
+documents and every Truss file of the repository that the parser accepts, and
+that it rejects inputs the parser rejects.
 
 Some examples show a signature without a body. In a program, every function
 has a body, except a method declared in a trait or a capability.
@@ -2293,8 +2294,9 @@ library reaches the operating system, through the compiler.
 
 ## Ambiguities in the grammar
 
-The grammar has three shift/reduce conflicts, all resolved by shifting, and
-the test of `grammar/truss.mly` checks that Menhir finds exactly these:
+The grammar has three shift/reduce conflicts, all resolved by shifting.
+Precedence declarations in `grammar/truss.mly` resolve them, and the checks of
+the reference parser fail on any other conflict:
 
 - **`else` after `let pattern = if ... { } else { }`** attaches to the `if`.
   A `let ... else` expression that ends with `}` is rejected after parsing.

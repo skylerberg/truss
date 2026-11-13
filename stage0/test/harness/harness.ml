@@ -155,22 +155,26 @@ let git directory arguments =
   | 0, _ -> ()
   | _ -> fail "git %s failed" (String.concat " " arguments)
 
+let rec files_under ~suffix directory =
+  Sys.readdir (workspace_path directory)
+  |> Array.to_list
+  |> List.concat_map (fun name ->
+      let path = Filename.concat directory name in
+      if Sys.is_directory (workspace_path path) then files_under ~suffix path
+      else if Filename.check_suffix name suffix then [ path ]
+      else [])
+
 let markdown_documents () =
-  let rec markdown directory =
-    Sys.readdir (workspace_path directory)
-    |> Array.to_list
-    |> List.concat_map (fun name ->
-        let path = if directory = "." then name else Filename.concat directory name in
-        if Sys.is_directory (workspace_path path) then markdown path
-        else if Filename.check_suffix name ".md" then [ path ]
-        else [])
-  in
   let root =
     Sys.readdir (workspace_path ".")
     |> Array.to_list
     |> List.filter (fun name -> Filename.check_suffix name ".md")
   in
-  List.sort compare (root @ markdown "standard")
+  List.sort compare (root @ files_under ~suffix:".md" "standard")
+
+let truss_files () =
+  List.sort compare
+    (files_under ~suffix:".truss" "standard" @ files_under ~suffix:".truss" "stage0/test/fixtures")
 
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual

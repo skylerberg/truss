@@ -1,6 +1,7 @@
 /* The grammar of SPECIFICATION.md, written for Menhir so that it can be checked
-   for conflicts with `menhir --explain truss.mly`. Semantic actions are
-   empty; this file checks the grammar's shape, not its output.
+   for conflicts. Menhir runs with `--strict`, so a conflict that no precedence
+   declaration resolves fails the build. Semantic actions are empty; this file
+   checks the grammar's shape, not its output.
 
    The lexer is assumed to:
    - apply the line-break rule, emitting a single NEWLINE where the token
@@ -29,6 +30,26 @@
 %token EQ PLUSEQ MINUSEQ STAREQ SLASHEQ PERCENTEQ AMPEQ BAREQ CARETEQ SHLEQ SHREQ
 %token PLUS MINUS STAR SLASH PERCENT EQEQ NEQ LT LE GT GE ANDAND OROR IMPLIES
 %token BANG AMP CARET TILDE SHL SHR
+
+/* The three conflicts that SPECIFICATION.md documents in "Ambiguities in the
+   grammar", each resolved by shifting: the lookahead token's level is above
+   the level of the production that would otherwise be reduced.
+
+   - `else` after `if c { }` attaches to that `if`. In `let x = if c { } else
+     { }`, the `else` belongs to the `if`, not to the `let`.
+   - `{` after `return` starts the returned value. In `while return { }`, the
+     block is the operand of `return`, not the body of the loop.
+   - A name after `return` starts the returned value. In `assert return by
+     bit_vector`, `by` is the operand of `return`.
+
+   A token's level also applies to every production whose rightmost terminal
+   is that token, so a new conflict involving `else`, `{`, or a name can be
+   resolved here without a warning. The build of stage0/reference checks that
+   precedence resolves exactly three conflicts. */
+%nonassoc if_without_else
+%nonassoc ELSE
+%nonassoc return_without_value
+%nonassoc LBRACE LOWER
 
 %start <unit> file
 
@@ -392,7 +413,7 @@ loop_clause:
 
 expression:
   | ECHO expression { () }
-  | RETURN { () }
+  | RETURN %prec return_without_value { () }
   | RETURN expression { () }
   | implication { () }
   | bitwise { () }
@@ -577,7 +598,7 @@ lambda:
   | FN LPAREN comma_list(pattern) RPAREN newline_opt block { () }
 
 if_expression:
-  | IF expression newline_opt block { () }
+  | IF expression newline_opt block %prec if_without_else { () }
   | IF expression newline_opt block ELSE block { () }
   | IF expression newline_opt block ELSE if_expression { () }
 

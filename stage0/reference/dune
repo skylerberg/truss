@@ -6,5 +6,37 @@
 (rule
  (copy %{workspace_root}/grammar/truss.mly truss.mly))
 
+; `--strict` fails the build on a conflict that no precedence declaration
+; resolves.
+
 (menhir
- (modules truss))
+ (modules truss)
+ (flags --strict))
+
+; The precedence declarations in truss.mly resolve the three conflicts that
+; SPECIFICATION.md documents in "Ambiguities in the grammar". A token's level
+; also applies to every other production that ends in that token, so a new
+; conflict could be resolved by precedence without a warning. Menhir counts
+; the conflicts that precedence resolves, and this check fails when the count
+; changes: document the new conflict and update the expected count, or remove
+; it. `--interpret` builds the automaton and stops before generating a parser.
+
+(rule
+ (write-file no_sentences ""))
+
+(rule
+ (with-outputs-to
+  menhir.log
+  (with-stdin-from
+   no_sentences
+   (run %{bin:menhir} --log-automaton 2 --interpret %{dep:truss.mly}))))
+
+(rule
+ (with-stdout-to
+  resolved_conflicts
+  (run grep "silently solved" %{dep:menhir.log})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff resolved_conflicts.expected resolved_conflicts)))
