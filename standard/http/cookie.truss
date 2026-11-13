@@ -1,0 +1,331 @@
+use standard::base64
+use standard::cryptography
+use standard::intrinsic
+
+public type SameSite = Strict | Lax | Cross
+  derives Equal
+
+public type Cookie(
+  name: String,
+  value: String,
+  path: Option[String] = Some("/"),
+  domain: Option[String] = None,
+  max_age_seconds: Option[Int64] = None,
+  expires: Option[Instant] = None,
+  is_secure: Bool = true,
+  is_http_only: Bool = true,
+  same_site: SameSite = SameSite.Lax,
+)
+  derives Equal
+
+public type CookiePair(name: String, value: String)
+  derives Equal
+
+fn is_cookie_byte(byte: UInt8) -> Bool {
+  byte == 33 || (byte >= 35 && byte <= 43) || (byte >= 45 && byte <= 58) || (byte >= 60 && byte <= 91) || (byte >= 93 && byte <= 126)
+}
+
+fn is_cookie_value(value: StringSlice) -> Bool {
+  for byte in value.bytes() {
+    if !is_cookie_byte(byte) {
+      return false
+    }
+  }
+  true
+}
+
+public fn Cookie.header(self) -> Result[String, Error] {
+  if !is_token(self.name.slice()) {
+    return Err(malformed("a cookie name that is not a token"))
+  }
+  if !is_cookie_value(self.value.slice()) {
+    return Err(malformed("a cookie value with a byte that cookies cannot carry"))
+  }
+  var text = self.name.copy()
+  mut text.push("=")
+  mut text.push(self.value.slice())
+  match self.path {
+    Some(path) => {
+      mut text.push("; Path=")
+      mut text.push(path.slice())
+    }
+    None => {}
+  }
+  match self.domain {
+    Some(domain) => {
+      mut text.push("; Domain=")
+      mut text.push(domain.slice())
+    }
+    None => {}
+  }
+  match self.max_age_seconds {
+    Some(seconds) => mut text.push("; Max-Age=${seconds}".slice())
+    None => {}
+  }
+  match self.expires {
+    Some(instant) => {
+      mut text.push("; Expires=")
+      mut text.push(format_date(instant).slice())
+    }
+    None => {}
+  }
+  if self.is_secure || self.same_site == SameSite.Cross {
+    mut text.push("; Secure")
+  }
+  if self.is_http_only {
+    mut text.push("; HttpOnly")
+  }
+  mut text.push(match self.same_site {
+    Strict => "; SameSite=Strict"
+    Lax => "; SameSite=Lax"
+    Cross => "; SameSite=None"
+  }.slice())
+  Ok(own text)
+}
+
+public fn Cookie.removal(name: StringSlice, path: StringSlice = "/") -> Cookie {
+  Cookie(name: name.to_string(), value: "", path: Some(path.to_string()), max_age_seconds: Some(0))
+}
+
+public fn Request.cookies(self) -> List[CookiePair] {
+  var pairs: List[CookiePair] = []
+  for entry in self.headers.entries() {
+    if same_name(entry.name.slice(), second: "Cookie") {
+      for piece in entry.value.slice().split(";") {
+        let part = piece.trim()
+        match part.find("=") {
+          Some(at) => {
+            var value = part.part(at + 1, to: part.length()).trim()
+            if value.length() >= 2 && value.starts_with("\"") && value.ends_with("\"") {
+              value = value.part(1, to: value.length() - 1)
+            }
+            mut pairs.push(CookiePair(name: part.part(0, to: at).trim().to_string(), value: value.to_string()))
+          }
+          None => {}
+        }
+      }
+    }
+  }
+  pairs
+}
+
+public fn Request.cookie(self, name: StringSlice) -> Option[String] {
+  for pair in self.cookies() {
+    if pair.name.slice() == name {
+      return Some(pair.value.copy())
+    }
+  }
+  None
+}
+
+public fn Response.with_cookie(own self, cookie: Cookie) -> Result[Response, Error] {
+  var response = own self
+  let header = cookie.header()?
+  mut response.headers.add("Set-Cookie", value: header.slice())
+  Ok(own response)
+}
+
+public opaque type CookieKey(signing: List[UInt8], sealing: cryptography::SecretKey)
+  derives Copyable
+
+public fn CookieKey.new(secret: Slice[UInt8]) -> Option[CookieKey] {
+  if secret.length() < 32 {
+    return None
+  }
+  let signing = cryptography::hkdf_sha256(secret, salt: [], information: "truss cookie signing".bytes(), length: 32)
+  let sealing = cryptography::hkdf_sha256(secret, salt: [], information: "truss cookie sealing".bytes(), length: 32)
+  var bytes: Array[UInt8, 32] = Array.filled(0)
+  let width: USize = 32
+  for index in 0..width {
+    if index < sealing.length() {
+      bytes[index] = sealing[index]
+    }
+  }
+  Some(CookieKey(signing: own signing, sealing: cryptography::SecretKey.from_bytes(bytes)))
+}
+
+public fn CookieKey.generate() -> CookieKey
+  uses Random
+{
+  var secret: List[UInt8] = []
+  let words: USize = 4
+  for _ in 0..words {
+    let word = Random.next()
+    let width: USize = 8
+    for index in 0..width {
+      mut secret.push(intrinsic::convert((word >> (8 * index)) & 255))
+    }
+  }
+  match CookieKey.new(secret.slice()) {
+    Some(key) => own key
+    None => CookieKey(signing: own secret, sealing: cryptography::SecretKey.generate())
+  }
+}
+
+fn signature_of(key: CookieKey, name: StringSlice, value: StringSlice) -> String {
+  var message = name.to_string()
+  mut message.push("=")
+  mut message.push(value)
+  let code = cryptography::hmac_sha256(key.signing.slice(), message: message.slice().bytes())
+  base64::encode(code[..], alphabet: base64::Alphabet.UrlSafe, padding: false)
+}
+
+public fn CookieKey.sign(self, cookie: own Cookie) -> Cookie {
+  var signed = own cookie
+  let encoded = base64::encode(signed.value.slice().bytes(), alphabet: base64::Alphabet.UrlSafe, padding: false)
+  let signature = signature_of(self, name: signed.name.slice(), value: encoded.slice())
+  var value = own encoded
+  mut value.push(".")
+  mut value.push(signature.slice())
+  signed.value = own value
+  signed
+}
+
+fn verify_with(key: CookieKey, name: StringSlice, value: StringSlice) -> Option[String] {
+  let dot = value.find_last(".")?
+  let encoded = value.part(0, to: dot)
+  let signature = value.part(dot + 1, to: value.length())
+  let expected = signature_of(key, name: name, value: encoded)
+  if !cryptography::constant_time_equal(expected.slice().bytes(), second: signature.bytes()) {
+    return None
+  }
+  let bytes = base64::decode(encoded, alphabet: base64::Alphabet.UrlSafe).ok()?
+  String.from_utf8(own bytes).ok()
+}
+
+public fn verify_cookie(keys: Slice[CookieKey], name: StringSlice, value: StringSlice) -> Option[String] {
+  for key in keys {
+    match verify_with(key, name: name, value: value) {
+      Some(plain) => return Some(own plain)
+      None => {}
+    }
+  }
+  None
+}
+
+public fn CookieKey.seal(self, cookie: own Cookie) -> Cookie
+  uses Random
+{
+  var sealed = own cookie
+  let nonce = cryptography::Nonce.generate()
+  let ciphertext = cryptography::seal(self.sealing, nonce: nonce, plaintext: sealed.value.slice().bytes(), associated_data: sealed.name.slice().bytes())
+  var bytes = nonce.bytes[..].to_list()
+  mut bytes.append(own ciphertext)
+  sealed.value = base64::encode(bytes.slice(), alphabet: base64::Alphabet.UrlSafe, padding: false)
+  sealed
+}
+
+fn open_with(key: CookieKey, name: StringSlice, value: StringSlice) -> Option[String] {
+  let bytes = base64::decode(value, alphabet: base64::Alphabet.UrlSafe).ok()?
+  if bytes.length() < 28 {
+    return None
+  }
+  var nonce: Array[UInt8, 12] = Array.filled(0)
+  let width: USize = 12
+  for index in 0..width {
+    nonce[index] = bytes[index]
+  }
+  let plain = cryptography::open(key.sealing, nonce: cryptography::Nonce(bytes: nonce), sealed: bytes[12..], associated_data: name.bytes()).ok()?
+  String.from_utf8(own plain).ok()
+}
+
+public fn open_cookie(keys: Slice[CookieKey], name: StringSlice, value: StringSlice) -> Option[String] {
+  for key in keys {
+    match open_with(key, name: name, value: value) {
+      Some(plain) => return Some(own plain)
+      None => {}
+    }
+  }
+  None
+}
+
+public fn Request.signed_cookie(self, keys: Slice[CookieKey], name: StringSlice) -> Option[String] {
+  let value = self.cookie(name)?
+  verify_cookie(keys, name: name, value: value.slice())
+}
+
+public fn Request.sealed_cookie(self, keys: Slice[CookieKey], name: StringSlice) -> Option[String] {
+  let value = self.cookie(name)?
+  open_cookie(keys, name: name, value: value.slice())
+}
+
+public opaque type Session(values: Form, is_changed: Bool, issued: Instant)
+
+public fn Session.new() -> Session
+  uses Clock
+{
+  Session(values: Form.new(), is_changed: false, issued: Clock.now())
+}
+
+public fn Session.load(request: Request, keys: Slice[CookieKey], name: StringSlice = "session", max_age_seconds: Int64 = 1209600) -> Session
+  uses Clock
+{
+  let now = Clock.now()
+  let opened = match request.sealed_cookie(keys, name: name) {
+    Some(text) => own text
+    None => return Session.new()
+  }
+  let newline = match opened.slice().find("\n") {
+    Some(at) => at
+    None => return Session.new()
+  }
+  let issued_seconds = match Int64.parse(opened.slice().part(0, to: newline)) {
+    Ok(seconds) => seconds
+    Err(_) => return Session.new()
+  }
+  if now.unix_seconds() < issued_seconds || now.unix_seconds().saturating_subtract(issued_seconds) > max_age_seconds {
+    return Session.new()
+  }
+  let issued = match Instant.from_unix_seconds(issued_seconds) {
+    Some(issued) => issued
+    None => return Session.new()
+  }
+  match Form.parse(opened.slice().part(newline + 1, to: opened.length())) {
+    Ok(values) => Session(values: own values, is_changed: false, issued: issued)
+    Err(_) => Session.new()
+  }
+}
+
+public fn Session.get(self, name: StringSlice) -> Option[StringSlice] {
+  self.values.get(name)
+}
+
+public fn Session.set(mut self, name: StringSlice, value: StringSlice) {
+  var kept = Form.new()
+  for field in self.values.entries() {
+    if field.name.slice() != name {
+      mut kept.add(field.name.slice(), value: field.value.slice())
+    }
+  }
+  mut kept.add(name, value: value)
+  self.values = own kept
+  self.is_changed = true
+}
+
+public fn Session.remove(mut self, name: StringSlice) {
+  var kept = Form.new()
+  for field in self.values.entries() {
+    if field.name.slice() != name {
+      mut kept.add(field.name.slice(), value: field.value.slice())
+    }
+  }
+  self.values = own kept
+  self.is_changed = true
+}
+
+public fn Session.clear(mut self) {
+  self.values = Form.new()
+  self.is_changed = true
+}
+
+public fn Session.is_changed(self) -> Bool {
+  self.is_changed
+}
+
+public fn Session.cookie(self, key: CookieKey, name: StringSlice = "session", max_age_seconds: Int64 = 1209600) -> Cookie
+  uses Random
+{
+  var payload = "${self.issued.unix_seconds()}\n"
+  mut payload.push(self.values.encode().slice())
+  key.seal(Cookie(name: name.to_string(), value: own payload, max_age_seconds: Some(max_age_seconds)))
+}
