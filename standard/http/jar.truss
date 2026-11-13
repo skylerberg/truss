@@ -1,0 +1,252 @@
+use standard::url
+
+fn trimmed(text: StringSlice) -> StringSlice {
+  text.trim()
+}
+
+fn attribute_named(name: StringSlice, expected: StringSlice) -> Bool {
+  same_name(name, second: expected)
+}
+
+type Attribute(key: StringSlice, argument: StringSlice)
+
+fn split_attribute(text: StringSlice) -> Attribute {
+  match text.find("=") {
+    Some(index) => {
+      let halves = text.split_at(index)
+      Attribute(key: trimmed(halves.first), argument: trimmed(halves.second.strip_prefix("=").unwrap_or(halves.second)))
+    }
+    None => Attribute(key: trimmed(text), argument: "".slice())
+  }
+}
+
+public fn Cookie.parse(set_cookie: StringSlice) -> Result[Cookie, Error] {
+  var parts: List[StringSlice] = []
+  for part in set_cookie.split(";") {
+    mut parts.push(part)
+  }
+  if parts.is_empty() {
+    return Err(malformed("an empty Set-Cookie"))
+  }
+  if !parts[0].contains("=") {
+    return Err(malformed("a Set-Cookie without a name and value"))
+  }
+  let pair = split_attribute(parts[0])
+  let name = pair.key
+  let value = pair.argument
+  if name.is_empty() {
+    return Err(malformed("a Set-Cookie with an empty name"))
+  }
+  var cookie = Cookie(
+    name: name.to_string(),
+    value: value.to_string(),
+    path: None,
+    is_secure: false,
+    is_http_only: false,
+  )
+  for index in 1..parts.length() {
+    let attribute = split_attribute(parts[index])
+    let key = attribute.key
+    let argument = attribute.argument
+    if attribute_named(key, expected: "Expires") {
+      cookie.expires = parse_date(argument)
+    } else if attribute_named(key, expected: "Max-Age") {
+      match Int64.parse(argument) {
+        Ok(seconds) => cookie.max_age_seconds = Some(seconds)
+        Err(_) => {}
+      }
+    } else if attribute_named(key, expected: "Domain") {
+      let domain = argument.strip_prefix(".").unwrap_or(argument)
+      if !domain.is_empty() {
+        cookie.domain = Some(domain.to_ascii_lowercase())
+      }
+    } else if attribute_named(key, expected: "Path") {
+      if argument.starts_with("/") {
+        cookie.path = Some(argument.to_string())
+      }
+    } else if attribute_named(key, expected: "Secure") {
+      cookie.is_secure = true
+    } else if attribute_named(key, expected: "HttpOnly") {
+      cookie.is_http_only = true
+    } else if attribute_named(key, expected: "SameSite") {
+      if attribute_named(argument, expected: "Strict") {
+        cookie.same_site = SameSite.Strict
+      } else if attribute_named(argument, expected: "None") {
+        cookie.same_site = SameSite.Cross
+      }
+    }
+  }
+  Ok(own cookie)
+}
+
+type Stored(
+  name: String,
+  value: String,
+  domain: String,
+  is_host_only: Bool,
+  path: String,
+  is_secure: Bool,
+  expires_at: Option[Int64],
+  sequence: UInt64,
+)
+
+internal type CookieJar(cookies: List[Stored], sequence: UInt64)
+
+let jar_limit: USize = 3000
+
+internal fn CookieJar.new() -> CookieJar {
+  CookieJar(cookies: [], sequence: 0)
+}
+
+fn is_address(host: StringSlice) -> Bool {
+  if host.contains(":") || host.starts_with("[") {
+    return true
+  }
+  for byte in host.bytes() {
+    if byte != 46 && (byte < 48 || byte > 57) {
+      return false
+    }
+  }
+  true
+}
+
+fn domain_matches(host: StringSlice, domain: StringSlice) -> Bool {
+  if host == domain {
+    return true
+  }
+  !is_address(host) && host.length() > domain.length() && host.ends_with(domain)
+    && host.bytes()[host.length() - domain.length() - 1] == 46
+}
+
+fn default_path(path: StringSlice) -> String {
+  if !path.starts_with("/") {
+    return "/"
+  }
+  match path.find_last("/") {
+    Some(index) => if index == 0 { "/" } else { path.split_at(index).first.to_string() }
+    None => "/"
+  }
+}
+
+fn path_matches(request_path: StringSlice, cookie_path: StringSlice) -> Bool {
+  if request_path == cookie_path {
+    return true
+  }
+  request_path.length() > cookie_path.length() && request_path.starts_with(cookie_path)
+    && (cookie_path.ends_with("/") || request_path.bytes()[cookie_path.length()] == 47)
+}
+
+fn host_of(address: url::Url) -> String {
+  match address.host() {
+    Some(host) => "${host}".slice().to_ascii_lowercase()
+    None => ""
+  }
+}
+
+fn request_path(address: url::Url) -> StringSlice {
+  let path = address.path()
+  if path.is_empty() { "/".slice() } else { path }
+}
+
+internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice, now: Int64) {
+  let cookie = match Cookie.parse(set_cookie) {
+    Ok(cookie) => own cookie
+    Err(_) => return
+  }
+  let host = host_of(address)
+  let is_https = address.scheme() == "https".slice()
+  if cookie.is_secure && !is_https {
+    return
+  }
+  let is_host_only = cookie.domain == None
+  let domain = match cookie.domain {
+    Some(domain) => {
+      if !domain.slice().contains(".") && domain != host {
+        return
+      }
+      if !domain_matches(host.slice(), domain: domain.slice()) {
+        return
+      }
+      domain.copy()
+    }
+    None => host.copy()
+  }
+  let path = match cookie.path {
+    Some(path) => path.copy()
+    None => default_path(request_path(address))
+  }
+  let expires_at = match cookie.max_age_seconds {
+    Some(seconds) => Some(if seconds <= 0 { now.saturating_subtract(1) } else { now.saturating_add(seconds) })
+    None => match cookie.expires {
+      Some(instant) => Some(instant.unix_seconds())
+      None => None
+    }
+  }
+  var index: USize = 0
+  while index < self.cookies.length() {
+    let stored = self.cookies[index]
+    if stored.name == cookie.name && stored.domain == domain && stored.path == path {
+      let _ = mut self.cookies.remove_at(index)
+    } else {
+      index += 1
+    }
+  }
+  if expires_at is Some(moment) && moment <= now {
+    return
+  }
+  if self.cookies.length() >= jar_limit {
+    let _ = mut self.cookies.remove_at(0)
+  }
+  self.sequence = self.sequence.saturating_add(1)
+  mut self.cookies.push(Stored(
+    name: cookie.name.copy(),
+    value: cookie.value.copy(),
+    domain: own domain,
+    is_host_only: is_host_only,
+    path: own path,
+    is_secure: cookie.is_secure,
+    expires_at: expires_at,
+    sequence: self.sequence,
+  ))
+}
+
+internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Option[String] {
+  var index: USize = 0
+  while index < self.cookies.length() {
+    if self.cookies[index].expires_at is Some(moment) && moment <= now {
+      let _ = mut self.cookies.remove_at(index)
+    } else {
+      index += 1
+    }
+  }
+  let host = host_of(address)
+  let path = request_path(address)
+  let is_https = address.scheme() == "https".slice()
+  var matching: List[Stored] = []
+  for stored in self.cookies {
+    let is_domain_match = if stored.is_host_only { stored.domain == host } else { domain_matches(host.slice(), domain: stored.domain.slice()) }
+    if is_domain_match && path_matches(path, cookie_path: stored.path.slice()) && (is_https || !stored.is_secure) {
+      mut matching.push(stored.copy())
+    }
+  }
+  if matching.is_empty() {
+    return None
+  }
+  mut matching.sort_by(fn(first, second) {
+    if first.path.length() != second.path.length() {
+      second.path.length().compare(first.path.length())
+    } else {
+      first.sequence.compare(second.sequence)
+    }
+  })
+  var header = ""
+  for stored in matching {
+    if !header.is_empty() {
+      mut header.push("; ")
+    }
+    mut header.push(stored.name.slice())
+    mut header.push("=")
+    mut header.push(stored.value.slice())
+  }
+  Some(own header)
+}
