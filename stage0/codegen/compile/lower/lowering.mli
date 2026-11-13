@@ -37,7 +37,8 @@ and mir_frame = {
   lambdas : Mir.body array;
   places : (Mir.local, Lir.place) Hashtbl.t;
   ends : (Mir.local, cleanup list) Hashtbl.t;
-  lent : (Mir.local, conditional_lend) Hashtbl.t;
+  conditionally_lent : Mir.local list;
+  mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
   constructs : (Mir.local, string option * (string * Mir.operand option) list) Hashtbl.t;
   owner : scope option;

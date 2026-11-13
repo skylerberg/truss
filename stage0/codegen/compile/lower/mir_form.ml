@@ -51,6 +51,49 @@ let site_of st (origin : Core.origin) =
 let failure_site st (origin : Core.origin) =
   match st.frame.reported with Some site -> site | None -> site_of st origin
 
+(* The parts of lending calls whose end some path from the entry reaches
+   without passing the call. *)
+let conditionally_lent (body : Mir.body) =
+  let ends_of part (statement : Mir.statement) =
+    match statement.kind with Dead locals -> List.mem part locals | _ -> false
+  in
+  let ends_in part (block : Mir.basic_block) =
+    List.exists (ends_of part) block.statements
+    ||
+    match block.terminator with
+    | Exit_tasks { tasks; _ } ->
+        List.exists (fun (_, ends) -> List.exists (ends_of part) ends) tasks
+    | _ -> false
+  in
+  let lends = ref [] in
+  Array.iteri
+    (fun index (block : Mir.basic_block) ->
+      List.iteri
+        (fun position (statement : Mir.statement) ->
+          match statement.kind with
+          | Lend { part; _ } -> lends := (part, index, position) :: !lends
+          | _ -> ())
+        block.statements)
+    body.blocks;
+  List.filter_map
+    (fun (part, lending, position) ->
+      let ended_before =
+        List.exists (ends_of part)
+          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
+      in
+      let visited = Array.make (Array.length body.blocks) false in
+      let rec reaches block =
+        block <> lending
+        && (not visited.(block))
+        && begin
+          visited.(block) <- true;
+          ends_in part body.blocks.(block)
+          || List.exists reaches (Mir.successors body.blocks.(block).terminator)
+        end
+      in
+      if ended_before || reaches 0 then Some part else None)
+    !lends
+
 (* The MIR of one body, ready to lower: which locals alias a place, and
    which temporaries hold a constructor that lends places. *)
 let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
@@ -94,6 +137,7 @@ let frame_of_body ?owner ?returns_into ~lambdas (body : Mir.body) : mir_frame =
     lambdas;
     places = Hashtbl.create 32;
     ends = Hashtbl.create 4;
+    conditionally_lent = conditionally_lent body;
     lent = Hashtbl.create 1;
     aliases;
     constructs;
@@ -1077,57 +1121,8 @@ let make_owned_locals st =
 
 (* Lowers [mir], the MIR of the code in the current frame, from its entry,
    into the current block. Leaves a block that nothing reaches. *)
-(* The parts of lending calls whose end some path from the entry reaches
-   without passing the call. *)
-let conditionally_lent (body : Mir.body) =
-  let ends_of part (statement : Mir.statement) =
-    match statement.kind with Dead locals -> List.mem part locals | _ -> false
-  in
-  let ends_in part (block : Mir.basic_block) =
-    List.exists (ends_of part) block.statements
-    ||
-    match block.terminator with
-    | Exit_tasks { tasks; _ } ->
-        List.exists (fun (_, ends) -> List.exists (ends_of part) ends) tasks
-    | _ -> false
-  in
-  let lends = ref [] in
-  Array.iteri
-    (fun index (block : Mir.basic_block) ->
-      List.iteri
-        (fun position (statement : Mir.statement) ->
-          match statement.kind with
-          | Lend { part; _ } -> lends := (part, index, position) :: !lends
-          | _ -> ())
-        block.statements)
-    body.blocks;
-  List.filter_map
-    (fun (part, lending, position) ->
-      let ended_before =
-        List.exists (ends_of part)
-          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
-      in
-      let visited = Array.make (Array.length body.blocks) false in
-      let rec reaches block =
-        block <> lending
-        && (not visited.(block))
-        && begin
-          visited.(block) <- true;
-          ends_in part body.blocks.(block)
-          || List.exists reaches (Mir.successors body.blocks.(block).terminator)
-        end
-      in
-      if ended_before || reaches 0 then Some part else None)
-    !lends
-
 let rec lower_body ?enclosing st (frame : mir_frame) =
   st.frame <- { st.frame with mir = Some frame };
-  List.iter
-    (fun part ->
-      let ran = Lir_builder.local st.builder ~name:"lent" (Raw Bool) in
-      emit st.builder (Assign (at ran, Use (Constant (Bool false))));
-      Hashtbl.replace frame.lent part { ran; skipped = [] })
-    (conditionally_lent frame.body);
   run_region st (new_region ?enclosing st) ~entry:(0, 0)
 
 (* Lowers a region from the statement [index] of a block into the current
@@ -1136,6 +1131,15 @@ let rec lower_body ?enclosing st (frame : mir_frame) =
 and run_region st region ~entry:(block, index) =
   let caller = st.frame in
   st.frame <- region.region_frame;
+  let body = region.region_body in
+  let enclosing_lent = body.lent in
+  body.lent <- Hashtbl.create 1;
+  List.iter
+    (fun part ->
+      let ran = Lir_builder.local st.builder ~name:"lent" (Raw Bool) in
+      emit st.builder (Assign (at ran, Use (Constant (Bool false))));
+      Hashtbl.replace body.lent part { ran; skipped = [] })
+    body.conditionally_lent;
   lower_from st region block index;
   let rec drain () =
     match
@@ -1154,6 +1158,7 @@ and run_region st region ~entry:(block, index) =
         drain ()
   in
   drain ();
+  body.lent <- enclosing_lent;
   st.frame <- caller
 
 and lower_from st region block index =

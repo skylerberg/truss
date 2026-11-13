@@ -83,9 +83,12 @@ and mir_frame = {
   lambdas : Mir.body array;  (** The bodies of the definition's lambdas *)
   places : (Mir.local, Lir.place) Hashtbl.t;
   ends : (Mir.local, cleanup list) Hashtbl.t;
-  lent : (Mir.local, conditional_lend) Hashtbl.t;
-      (** For the part of a lending call whose end some path reaches without the call, whether the
-          call ran, so that the rest of the method runs only after it *)
+  conditionally_lent : Mir.local list;
+      (** The parts of lending calls whose end some path reaches without the call *)
+  mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
+      (** For each of those parts in the region being lowered, whether the call ran, so that the
+          rest of the method runs only after it. Each region has its own, since tasks run the
+          regions of a [concurrent] block or loop at the same time. *)
   aliases : (Mir.local, int) Hashtbl.t;
       (** The locals bound to a place they do not own, with the number of assignments that bind each
       *)
