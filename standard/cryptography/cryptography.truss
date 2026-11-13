@@ -3686,6 +3686,10 @@ public fn SigningKey.from_seed(seed: Array[UInt8, 32]) -> SigningKey
   SigningKey(seed: seed, verifying_key: EdwardsPoint.base().multiply(scalar).to_bytes())
 }
 
+public fn SigningKey.expose_seed(self) -> Array[UInt8, 32] {
+  self.seed
+}
+
 public fn SigningKey.verifying_key(self) -> VerifyingKey
   cost time O(1)
 {
@@ -3986,6 +3990,10 @@ public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Opti
     return None
   }
   Some(EcdsaSigningKey(curve: curve, scalar: bytes.to_list()))
+}
+
+public fn EcdsaSigningKey.expose_scalar(self) -> Slice[UInt8] {
+  self.scalar.slice()
 }
 
 public fn EcdsaSigningKey.verifying_key(self) -> EcdsaVerifyingKey
@@ -4306,6 +4314,26 @@ public fn RsaPrivateKey.new(
     Some(signed) => if public_operation(public_key, signature: signed.slice()) == Some(own message) { Some(own key) } else { None }
     None => None
   }
+}
+
+public type RsaPrivateParts(
+  exponent: List[UInt8],
+  first_prime: List[UInt8],
+  second_prime: List[UInt8],
+  first_exponent: List[UInt8],
+  second_exponent: List[UInt8],
+  coefficient: List[UInt8],
+)
+
+public fn RsaPrivateKey.expose_parts(self) -> RsaPrivateParts {
+  RsaPrivateParts(
+    exponent: self.exponent.copy(),
+    first_prime: self.first_prime.copy(),
+    second_prime: self.second_prime.copy(),
+    first_exponent: self.first_exponent.copy(),
+    second_exponent: self.second_exponent.copy(),
+    coefficient: self.coefficient.copy(),
+  )
 }
 
 public fn RsaPrivateKey.public_key(self) -> RsaPublicKey {

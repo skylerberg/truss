@@ -20,7 +20,7 @@ let weights =
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 1470);
+    ("standard::cryptography", 1602);
     ("standard::cryptography::elliptic", 247);
     ("standard::cryptography::keccak", 41);
     ("standard::cryptography::mlkem", 63);
@@ -40,6 +40,8 @@ let weights =
     ("standard::http::two", 300);
     ("standard::http::websocket", 21);
     ("standard::json", 1513);
+    ("standard::jwk", 492);
+    ("standard::jwt", 1004);
     ("standard::list", 104);
     ("standard::list::array", 43);
     ("standard::list::array_views", 42);
