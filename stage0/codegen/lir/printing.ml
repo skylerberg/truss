@@ -28,6 +28,7 @@ let constant_to_string = function
   | Symbol_address key -> "&" ^ Instance.to_string key
   | Size_of ty -> "size_of(" ^ Ground.to_string ty ^ ")"
   | Alignment_of ty -> "alignment_of(" ^ Ground.to_string ty ^ ")"
+  | Site site -> Printf.sprintf "&site(%s:%d:%d)" (Path.show site.definition) site.line site.column
 
 let rec place_to_string (place : place) =
   List.fold_left

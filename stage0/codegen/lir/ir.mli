@@ -8,6 +8,7 @@ type ty = Ir_types.ty =
   | Environment of int
   | Evidence of int
 
+type site = Ir_types.site = { definition : Path.t; line : int; column : int }
 type root = Ir_types.root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
 
 type place = Ir_types.place = { root : root; projections : projection list }
@@ -36,6 +37,7 @@ and constant = Ir_types.constant =
   | Symbol_address of Instance.key
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
+  | Site of site
 
 and function_ref = Ir_types.function_ref = Instance of Instance.key | Nested of int
 
@@ -127,7 +129,6 @@ type rvalue = Ir_types.rvalue =
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-type site = Ir_types.site = { definition : Path.t; line : int; column : int }
 type failure = Ir_types.failure = Panic | Assertion | Todo
 type destination = Ir_types.destination = Discarded | Returned of place | Written of place
 
@@ -155,7 +156,13 @@ type terminator = Ir_types.terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable
-  | Fail of { failure : failure; message : operand; length : operand; site : site }
+  | Fail of {
+      failure : failure;
+      message : operand;
+      length : operand;
+      site : site;
+      caller : operand option;
+    }
   | Yield of { value : operand; resume : block; stop : block option }
   | Loop_call of {
       loop : int;

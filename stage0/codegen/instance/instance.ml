@@ -11,6 +11,8 @@ type key =
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Cursor_next of Ground.yielding
   | Looped of { yielding : Ground.yielding; chunked : bool }
+  | Lend_begin of Ground.yielding
+  | Lend_finish of Ground.yielding
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
   | Table of { impl : Path.t; type_arguments : Ground.argument list }
@@ -40,6 +42,8 @@ let rank = function
   | Call_evaluation _ -> 17
   | Locked_entry _ -> 18
   | Looped _ -> 20
+  | Lend_begin _ -> 21
+  | Lend_finish _ -> 22
   | Locked_table _ -> 19
 
 let ( >>= ) order next = if order <> 0 then order else next ()
@@ -57,6 +61,8 @@ let rec compare left right =
   | Any_drop left, Any_drop right ->
       Ground.compare left right
   | Cursor_next left, Cursor_next right -> Ground.compare (Cursor left) (Cursor right)
+  | Lend_begin left, Lend_begin right | Lend_finish left, Lend_finish right ->
+      Ground.compare (Cursor left) (Cursor right)
   | Looped left, Looped right ->
       Ground.compare (Cursor left.yielding) (Cursor right.yielding) >>= fun () ->
       Bool.compare left.chunked right.chunked
@@ -110,6 +116,8 @@ let rec encode ?(path = Ground.encode_path) key =
         ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Looped { yielding; chunked } -> tagged 20 [ ty (Cursor yielding); Cbor.Bool chunked ]
+  | Lend_begin yielding -> tagged 21 [ ty (Cursor yielding) ]
+  | Lend_finish yielding -> tagged 22 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
   | Any_entry key -> tagged 11 [ encode ~path key ]
@@ -254,6 +262,8 @@ let rec mangle = function
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Looped { yielding; chunked } ->
       marker (if chunked then "Chunked" else "Looped") ^ mangle_yielding yielding
+  | Lend_begin yielding -> marker "Lend" ^ mangle_yielding yielding
+  | Lend_finish yielding -> marker "Finish" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->
       marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
   | Any_entry key -> marker "Dynamic" ^ mangle key
@@ -298,6 +308,8 @@ let rec to_string = function
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
   | Looped { yielding; chunked } ->
       (if chunked then "chunked " else "looped ") ^ Ground.to_string (Cursor yielding)
+  | Lend_begin yielding -> "lend " ^ Ground.to_string (Cursor yielding)
+  | Lend_finish yielding -> "finish " ^ Ground.to_string (Cursor yielding)
   | Adapter { function_; _ } -> "adapter " ^ to_string function_
   | Any_entry key -> "any entry " ^ to_string key
   | Any_table { impl; type_arguments } ->

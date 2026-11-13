@@ -163,9 +163,10 @@ let visit_terminator visitor = function
   | Switch { value; _ } | Yield { value; _ } -> visit_operand visitor value
   | Switch_variant { place; _ } -> visit_place visitor place
   | Return value -> Option.iter (visit_operand visitor) value
-  | Fail { message; length; _ } ->
+  | Fail { message; length; caller; _ } ->
       visit_operand visitor message;
-      visit_operand visitor length
+      visit_operand visitor length;
+      Option.iter (visit_operand visitor) caller
   | Loop_call { target; arguments; exit; _ } ->
       List.iter (visit_operand visitor) (target_operands target);
       List.iter (visit_operand visitor) arguments;
@@ -332,8 +333,15 @@ let map_terminator ~place ~block terminator =
         }
   | Return value -> Return (Option.map operand value)
   | Unreachable -> Unreachable
-  | Fail { failure; message; length; site } ->
-      Fail { failure; message = operand message; length = operand length; site }
+  | Fail { failure; message; length; site; caller } ->
+      Fail
+        {
+          failure;
+          message = operand message;
+          length = operand length;
+          site;
+          caller = Option.map operand caller;
+        }
   | Yield { value; resume; stop } ->
       Yield { value = operand value; resume = block resume; stop = Option.map block stop }
   | Loop_call { loop; target; arguments; go_on; body = first; after; exit } ->

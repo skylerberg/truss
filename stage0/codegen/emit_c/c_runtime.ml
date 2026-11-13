@@ -10,6 +10,7 @@ let anchor_symbol definition = "t_Anchor_" ^ Instance.path_symbol definition
 
 let anchor_struct =
   "struct t_anchor {\n  const uint8_t *path;\n  t_usize path_length;\n  uint32_t line;\n};\n"
+  ^ "struct t_site {\n  const struct t_anchor *anchor;\n  uint32_t line;\n  uint32_t column;\n};\n"
 
 let integer_c : Memory_layout.integer -> string = function
   | Int8 -> "int8_t"

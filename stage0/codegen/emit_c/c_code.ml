@@ -193,11 +193,7 @@ let call_c context fc (target : Lir.target) arguments =
         evidence slot
         (String.concat ", " (evidence :: List.map fst arguments))
 
-let anchor_c context definition =
-  let symbol = anchor_symbol definition in
-  if not (List.mem_assoc symbol context.anchors) then
-    context.anchors <- (symbol, definition) :: context.anchors;
-  "&" ^ symbol
+let anchor_c = C_values.anchor_c
 
 let statement_c context fc buffer (statement : Lir.statement) =
   let line format =
@@ -342,16 +338,27 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
       | None, _ | _, None -> line "return;"
       | Some _, Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
-  | Fail { failure; message; length; site } ->
-      line "%s(%s, %s, %s, %d, %d);"
-        (match failure with
+  | Fail { failure; message; length; site; caller } -> (
+      let call =
+        match failure with
         | Panic -> "t_runtime_panic"
         | Assertion -> "t_runtime_assertion_failed"
-        | Todo -> "t_runtime_todo")
-        (fst (operand message))
-        (fst (operand length))
-        (anchor_c context site.definition)
-        site.line site.column
+        | Todo -> "t_runtime_todo"
+      in
+      match caller with
+      | None ->
+          line "%s(%s, %s, %s, %d, %d);" call
+            (fst (operand message))
+            (fst (operand length))
+            (anchor_c context site.definition)
+            site.line site.column
+      | Some caller ->
+          (* The position of the caller's call, which the method was given. *)
+          let site = Printf.sprintf "((const struct t_site *)%s)" (fst (operand caller)) in
+          line "%s(%s, %s, %s->anchor, %s->line, %s->column);" call
+            (fst (operand message))
+            (fst (operand length))
+            site site site)
   | Yield _ -> bug "a yield that yield lowering left in place"
   | Loop_call _ | Loop_next _ -> bug "a loop that outlining left in place"
 

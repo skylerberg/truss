@@ -229,9 +229,7 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
               (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
               type_arguments
           in
-          let callee =
-            enter st.context (frame_of (code_of st.context path type_arguments) ~inlined:[])
-          in
+          let callee = enter st.context (frame_of (code_of st.context path type_arguments)) in
           let bound = Hashtbl.create 4 in
           List.iter2
             (fun (parameter : Core.parameter) argument ->
@@ -300,7 +298,7 @@ let constant_state context path =
       text = text_of context key;
     }
   in
-  let st = enter context (frame_of code ~inlined:[]) in
+  let st = enter context (frame_of code) in
   (st, value, ty)
 
 (* A constant's static data, where its value folds, and otherwise the type

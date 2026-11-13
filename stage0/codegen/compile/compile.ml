@@ -115,6 +115,35 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
                        function_;
                    nested = [||];
                  })))
+  | Lend_begin lending ->
+      let function_, _ = pulled lending in
+      Compiled
+        (Code
+           (Lir.canonical_instance
+              (Outline.instance (Lower.env context)
+                 {
+                   key;
+                   main =
+                     Yields.lend_begin (Lower.env context) ~cursor:(Cursor lending)
+                       ~part:(Lower.lend_part_type context lending)
+                       ~evidence:(Lower.pulled_evidence context lending function_)
+                       function_;
+                   nested = [||];
+                 })))
+  | Lend_finish lending ->
+      let function_, _ = pulled lending in
+      Compiled
+        (Code
+           (Lir.canonical_instance
+              (Outline.instance (Lower.env context)
+                 {
+                   key;
+                   main =
+                     Yields.lend_finish (Lower.env context) ~cursor:(Cursor lending)
+                       ~evidence:(Lower.pulled_evidence context lending function_)
+                       function_;
+                   nested = [||];
+                 })))
   | Cursor_next yielding ->
       let function_, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
@@ -307,15 +336,30 @@ let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build me
 (* A test's key, once it has been said to be wanted. *)
 let test_key compiler test = Query.demand compiler.database test_key_query (compiler.lowering, test)
 
-(* The definitions an instance's positions are relative to. *)
+(* The definitions an instance's positions are relative to: those of its
+   [echo]s and failures, and those of the positions it gives a method that
+   reports its checks at its caller's position. *)
 let anchored (instance : Lir.t) =
   let of_function (function_ : Lir.function_) =
-    Array.to_list function_.blocks
+    let sites = ref [] in
+    let visitor : Lir.visitor =
+      {
+        place = (fun _ -> ());
+        operand = (function Constant (Site site) -> sites := site.definition :: !sites | _ -> ());
+      }
+    in
+    Array.iter
+      (fun (block : Lir.basic_block) ->
+        List.iter (Lir.visit_statement visitor) block.statements;
+        Lir.visit_terminator visitor block.terminator)
+      function_.blocks;
+    (Array.to_list function_.blocks
     |> List.concat_map (fun (block : Lir.basic_block) ->
         List.filter_map
           (function Lir.Echo { site; _ } -> Some site.definition | _ -> None)
           block.statements
-        @ match block.terminator with Fail { site; _ } -> [ site.definition ] | _ -> [])
+        @ match block.terminator with Fail { site; _ } -> [ site.definition ] | _ -> []))
+    @ !sites
   in
   of_function instance.main @ List.concat_map of_function (Array.to_list instance.nested)
 

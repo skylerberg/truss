@@ -32,6 +32,12 @@ type key =
           that it calls at each [yield], and that returns whether to go on. [chunked] is for a
           [parallel for] over a method that yields by position: the method's range loop runs in
           parts at once, and the body always goes on. *)
+  | Lend_begin of Ground.yielding
+      (** A lending method run up to its [yield], over its state, a value of its [Cursor] type that
+          the caller holds: it gives the part, its address, or the lent value its [yield] builds *)
+  | Lend_finish of Ground.yielding
+      (** The rest of a lending method, from the [yield] its [Lend_begin] reached, over the same
+          state *)
   | Adapter of { function_ : key; ty : Ground.function_type }
       (** A named function used as a function value: it takes the environment and ignores it *)
   | Entry of key

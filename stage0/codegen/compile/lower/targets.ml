@@ -246,12 +246,14 @@ let cursor_evidence context (yielding : Ground.yielding) =
 (* Writes a cursor over a yielding method to [destination]. The cursor holds
    the call's arguments, in the order of the pulled method's parameters:
    its own, then the mask of defaults passed. *)
-let cursor_into st ~path ~type_arguments ~(signature : Types.signature)
+let cursor_into ?site st ~path ~type_arguments ~(signature : Types.signature)
     ~(arguments : (Types.mode * Ground.ty * Lir.place) list) ~mask destination =
   let held = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
   let mask = if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [] in
   let fields =
-    List.mapi (fun position operand -> (Convention.cursor_parameter position, operand)) (held @ mask)
+    List.mapi
+      (fun position operand -> (Convention.cursor_parameter position, operand))
+      (held @ mask @ Option.to_list site)
   in
   emit st.builder
     (Assign
@@ -307,9 +309,6 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
     enter st.context ~form:Ordinary ~nested:st.nested
       {
         st.frame with
-        on_yield = None;
-        yield_into = None;
-        lent_into = None;
         exit = None;
         code =
           (match output with

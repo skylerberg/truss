@@ -9,6 +9,7 @@ val environment_of : C_types.context -> function_context -> int -> (string * Lir
 val block_pointer : C_types.context -> string -> Ground.ty -> string -> string
 val place_c : C_types.context -> function_context -> Lir.place -> (string * Lir.ty) option
 val operand_c : C_types.context -> function_context -> Lir.operand -> (string * Lir.ty) option
+val anchor_c : C_types.context -> Path.t -> string
 val constant_c : C_types.context -> Lir.constant -> string * Lir.ty
 val scalar_of : C_types.context -> Lir.ty -> Memory_layout.scalar
 val bit_width : C_types.context -> Memory_layout.scalar -> int

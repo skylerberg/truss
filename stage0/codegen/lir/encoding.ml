@@ -84,6 +84,8 @@ and encode_constant instance = function
   | Symbol_address key -> tagged 7 [ instance.instance key ]
   | Size_of ty -> tagged 8 [ Ground.encode ~path:instance.path ty ]
   | Alignment_of ty -> tagged 9 [ Ground.encode ~path:instance.path ty ]
+  | Site site ->
+      tagged 10 [ instance.path site.definition; Cbor.int site.line; Cbor.int site.column ]
 
 let encode_signature instance (lir_signature : signature) =
   Cbor.Array
@@ -299,7 +301,7 @@ let encode_terminator instance terminator =
         ]
   | Return value -> tagged 3 [ option operand value ]
   | Unreachable -> tagged 4 []
-  | Fail { failure; message; length; site } ->
+  | Fail { failure; message; length; site; caller } ->
       tagged 5
         [
           Cbor.int (match failure with Panic -> 0 | Assertion -> 1 | Todo -> 2);
@@ -308,6 +310,7 @@ let encode_terminator instance terminator =
           instance.path site.definition;
           Cbor.int site.line;
           Cbor.int site.column;
+          option operand caller;
         ]
   | Yield { value; resume; stop } -> tagged 6 [ operand value; Cbor.int resume; block stop ]
   | Loop_call { loop; target; arguments; go_on; body; after; exit } ->

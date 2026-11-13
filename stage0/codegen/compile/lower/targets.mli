@@ -39,6 +39,7 @@ val evidence_of : Lowering.state -> Path.t -> Lir.operand
 val cursor_evidence : Definitions.context -> Ground.yielding -> Path.t list
 
 val cursor_into :
+  ?site:Lir.operand ->
   Lowering.state ->
   path:Path.t ->
   type_arguments:Ground.argument list ->

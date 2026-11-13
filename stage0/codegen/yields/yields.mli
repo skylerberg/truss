@@ -51,3 +51,19 @@ val cursor_drop :
    goes on where the body returns true and takes its [stop] path where it
    returns false. *)
 val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
+
+(* A lending method run up to its [yield], over its state: takes a writable
+   pointer to the state, of type [cursor], then the method's evidence, and
+   returns the part, of type [part]. *)
+val lend_begin :
+  Memory_layout.env ->
+  cursor:Ground.ty ->
+  part:Lir.ty ->
+  evidence:Lir.local list ->
+  Lir.function_ ->
+  Lir.function_
+
+(* The rest of a lending method, from the [yield] its state records: takes
+   the same pointer and evidence, and returns nothing. *)
+val lend_finish :
+  Memory_layout.env -> cursor:Ground.ty -> evidence:Lir.local list -> Lir.function_ -> Lir.function_

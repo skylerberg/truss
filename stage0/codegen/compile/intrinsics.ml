@@ -61,6 +61,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
            message = Constant (Bytes message);
            length = usize (String.length message);
            site;
+           caller = None;
          });
     start builder go_on
   in
@@ -151,6 +152,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  message = Constant (Bytes message);
                  length = usize (String.length message);
                  site;
+                 caller = None;
                });
           start builder (block builder)
       | None ->
@@ -747,6 +749,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  message = Copy (Storage.view_elements bytes);
                  length = Copy (Storage.view_length bytes);
                  site;
+                 caller = None;
                });
           start builder (block builder)
       | Handle_from ->
@@ -839,6 +842,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  message = Constant (Bytes message);
                  length = usize (String.length message);
                  site;
+                 caller = None;
                });
           start builder (block builder)
       | Libc function_ -> (

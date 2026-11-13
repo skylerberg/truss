@@ -94,7 +94,7 @@ let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let parameters, _ = Mir_form.core_of context yielding.method_ in
-  let st = enter context ~form:Pulled (frame_of code ~inlined:[ yielding.method_ ]) in
+  let st = enter context ~form:Pulled (frame_of code) in
   let bound, mask, parameter_locals, places =
     begin_body st ~how:(Convention.held context.env) ~parameters
   in
@@ -115,12 +115,33 @@ let pulled context (yielding : Ground.yielding) :
         else None)
       bound
   in
+  (* A lending method of the standard library holds the position its caller
+     gave it, before its evidence, as one of its state's fields. *)
+  let parameter_locals =
+    let lends =
+      match (signature_of context yielding.method_).output with
+      | Lends _ -> true
+      | Returns _ | Yields _ -> false
+    in
+    if reports_at_caller yielding.method_ && lends then begin
+      let site = local st.builder ~name:"caller_site" (Raw (Nullable_pointer Opaque)) in
+      st.caller_site <- Some site;
+      let evidence = List.length (Targets.cursor_evidence context yielding) in
+      let arguments = List.length parameter_locals - evidence in
+      List.filteri (fun position _ -> position < arguments) parameter_locals
+      @ [ site ]
+      @ List.filteri (fun position _ -> position >= arguments) parameter_locals
+    end
+    else parameter_locals
+  in
   Mir_form.lower_code st yielding.method_ ~parameters:places;
-  (finish_function st ~first:[] ~rest:parameter_locals (), owned)
+  let function_ = finish_function st ~first:[] ~rest:parameter_locals () in
+  ( (match st.caller_site with Some site -> report_at_caller site function_ | None -> function_),
+    owned )
 
 let code_state context path =
   let code = code_of context path [] in
-  (enter context (frame_of code ~inlined:[ path ]), code)
+  (enter context (frame_of code), code)
 
 (* A tag's [from_template]: its one parameter and its [requires] clauses,
    from its core form. *)
@@ -201,7 +222,7 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
 let source_code context key ~path ~type_arguments : Lir.t =
   let code = code_of context path type_arguments in
   let parameters, _ = Mir_form.core_of context path in
-  let st = enter context (frame_of code ~inlined:[ path ]) in
+  let st = enter context (frame_of code) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
   let _, _, parameter_locals, places = begin_body st ~parameters in
@@ -220,16 +241,25 @@ let looped context key (yielding : Ground.yielding) ~chunked : Lir.t =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let parameters, _ = Mir_form.core_of context yielding.method_ in
   let body = Mir_form.loop_body_type context yielding in
-  let st =
-    enter context ~form:(Looped { body; chunked }) (frame_of code ~inlined:[ yielding.method_ ])
-  in
+  let st = enter context ~form:(Looped { body; chunked }) (frame_of code) in
   (* The method's one range loop takes the schedule of the [parallel for]. *)
   if chunked then st.next_range <- Chunked;
   let _, _, parameter_locals, places = begin_body st ~parameters in
+  (* A method of the standard library takes the position its caller gave it
+     last, before the body that yield lowering adds. *)
+  let parameter_locals =
+    if reports_at_caller yielding.method_ then begin
+      let site = local st.builder ~name:"caller_site" (Raw (Nullable_pointer Opaque)) in
+      st.caller_site <- Some site;
+      parameter_locals @ [ site ]
+    end
+    else parameter_locals
+  in
   Mir_form.lower_code st yielding.method_ ~parameters:places;
+  let main = finish_function st ~first:[] ~rest:parameter_locals () in
   {
     key;
-    main = finish_function st ~first:[] ~rest:parameter_locals ();
+    main = (match st.caller_site with Some site -> report_at_caller site main | None -> main);
     nested = nested_functions st;
   }
 
@@ -245,6 +275,7 @@ let instance context (key : Instance.key) : Lir.t =
   | _ -> bug "%s is not code from source" (Instance.to_string key)
 
 let loop_body_type = Mir_form.loop_body_type
+let lend_part_type = Mir_form.lend_part_type
 
 module For_testing = struct
   let constant_value = constant_value

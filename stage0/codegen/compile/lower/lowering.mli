@@ -3,16 +3,8 @@ type cleanup =
   | Free_pointed of Lir.place
   | Free_blocks of { place : Lir.place; variants : string list }
   | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
-  | Finish_lend of lend
+  | Finish_lend of Lir.statement
   | Join_group of Lir.statement
-
-and lend = {
-  resume : Lir.block;
-  finished : Lir.block;
-  selector : Lir.local;
-  mutable ways : Lir.block list;
-  owned : Lir.place list;
-}
 
 type scope_kind = Bindings | Statement
 type scope = { kind : scope_kind; mutable owned : cleanup list }
@@ -21,11 +13,6 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 type frame = {
   code : Definitions.code;
   mutable self_place : Lir.place option;
-  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
-  yield_into : Lir.place option;
-  lent_into : (Lir.place * Ground.lent) option;
-  inlined : Path.t list;
-  reported : Lir.site option;
   exit : (Lir.block * int) option;
   mir : mir_frame option;
 }
@@ -36,7 +23,7 @@ and mir_frame = {
   places : (Mir.local, Lir.place) Hashtbl.t;
   ends : (Mir.local, cleanup list) Hashtbl.t;
   conditionally_lent : Mir.local list;
-  mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
+  mutable lent : (Mir.local, Lir.local) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
   owner : scope option;
   returns_into : Lir.place option;
@@ -45,8 +32,6 @@ and mir_frame = {
   returned : Mir.local list;
   mutable taken : Mir.place list;
 }
-
-and conditional_lend = { ran : Lir.local; mutable skipped : Lir.place list }
 
 type early_exits = {
   winner : Lir.place;
@@ -94,16 +79,19 @@ type state = {
   mutable forks : int;
   mutable tasks : task list;
   mutable next_range : schedule;
-  mutable inlined_owned : Lir.place list;
+  mutable caller_site : Lir.local option;
   mutable active_loops : int list;
 }
 
-val frame_of : Definitions.code -> inlined:Path.t list -> frame
+val frame_of : Definitions.code -> frame
 
 val enter :
   Definitions.context -> ?form:form -> ?nested:Lir.function_ option list ref -> frame -> state
 
 val is_pulled : state -> bool
+val reports_at_caller : Path.t -> bool
+val report_at_caller : Lir.local -> Lir.function_ -> Lir.function_
+val caller_site_operand : state -> Lir.site -> Lir.operand
 val may_fork : state -> bool
 val fresh_fork : state -> int
 val new_early_exits : state -> early_exits

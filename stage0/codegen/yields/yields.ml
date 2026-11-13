@@ -149,14 +149,38 @@ let yields (function_ : Lir.function_) =
       | _ -> None)
     (List.init (Array.length function_.blocks) Fun.id)
 
-(* The parameters, and every local live where a [yield] resumes or stops,
-   but the parameters in [evidence]. A cursor holds no evidence: [next]
-   takes it from its caller. A cursor that held the evidence it was made
-   with could use an implementation after the [provide] block that
-   provided it had ended, which is a use after free. *)
+(* The locals holding a value whose address the function takes: a lending
+   method's part may be such an address, which its caller holds until the
+   method ends. *)
+let addressed (function_ : Lir.function_) =
+  let addressed = Array.make (Array.length function_.locals) false in
+  let visitor : Lir.visitor =
+    {
+      place = (fun _ -> ());
+      operand =
+        (function
+        | Address { place = { root = Local local; _ }; _ } -> (
+            match function_.locals.(local).ty with
+            | Value _ -> addressed.(local) <- true
+            | Pointer _ | Raw _ | Environment _ | Evidence _ -> ())
+        | _ -> ());
+    }
+  in
+  Array.iter
+    (fun (block : Lir.basic_block) ->
+      List.iter (Lir.visit_statement visitor) block.statements;
+      Lir.visit_terminator visitor block.terminator)
+    function_.blocks;
+  addressed
+
+(* The parameters, every local live where a [yield] resumes or stops, and
+   every local whose address is taken, but the parameters in [evidence]. A
+   cursor holds no evidence: [next] takes it from its caller. A cursor that
+   held the evidence it was made with could use an implementation after the
+   [provide] block that provided it had ended, which is a use after free. *)
 let saved_locals ~evidence (function_ : Lir.function_) =
   let live = live_in function_ in
-  let is_saved = Array.make (Array.length function_.locals) false in
+  let is_saved = addressed function_ in
   List.iter (fun parameter -> is_saved.(parameter) <- true) function_.parameters;
   List.iter
     (fun (_, resume, stop) ->
@@ -409,5 +433,63 @@ let cursor_drop _env ~cursor ~owned ~evidence (function_ : Lir.function_) =
           [| { statements = []; terminator = Return None } |];
           Array.of_list (List.rev !started);
         ];
+    environment = [];
+  }
+
+(* A lending method's [Lend_begin]: from its entry to the [yield] it
+   reaches, which records its state and gives the part. Every path yields
+   once, so none returns. *)
+let lend_begin _env ~cursor ~part ~evidence (function_ : Lir.function_) =
+  let blocks, _ =
+    state_machine function_ ~evidence ~cursor:0 ~base:1
+      ~yield_:(fun ~state ~value ~resume:_ ~stop:_ -> ([ set_state 0 state ], Return (Some value)))
+      ~return_:(fun () -> ([], Unreachable))
+  in
+  {
+    Lir.parameters = 0 :: List.map (fun local -> local + 1) evidence;
+    written_result = None;
+    result = Some part;
+    returns = true;
+    locals =
+      Array.append
+        [|
+          {
+            Lir.ty = Pointer { target = Value cursor; writable = true };
+            name = Some "state";
+            borrowed = false;
+          };
+        |]
+        function_.locals;
+    blocks = Array.append [| { Lir.statements = []; terminator = Goto 1 } |] blocks;
+    environment = [];
+  }
+
+(* A lending method's [Lend_finish]: its code from the [yield] that its
+   state records, to its end. *)
+let lend_finish _env ~cursor ~evidence (function_ : Lir.function_) =
+  let blocks, _ =
+    state_machine function_ ~evidence ~cursor:0 ~base:1
+      ~yield_:(fun ~state:_ ~value:_ ~resume:_ ~stop:_ -> ([], Unreachable))
+      ~return_:(fun () -> ([], Return None))
+  in
+  let resumes =
+    List.mapi (fun local (_, resume, _) -> (local + 1, resume + 1)) (yields function_)
+  in
+  {
+    Lir.parameters = 0 :: List.map (fun local -> local + 1) evidence;
+    written_result = None;
+    result = None;
+    returns = true;
+    locals =
+      Array.append
+        [|
+          {
+            Lir.ty = Pointer { target = Value cursor; writable = true };
+            name = Some "state";
+            borrowed = false;
+          };
+        |]
+        function_.locals;
+    blocks = Array.append [| entry_switch 0 resumes ~default:None |] blocks;
     environment = [];
   }

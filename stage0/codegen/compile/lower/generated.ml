@@ -9,7 +9,7 @@ open Lir_builder
 
 let generated_state context ~anchor ~substitution =
   enter context
-    (frame_of ~inlined:[]
+    (frame_of
        (unwritten
           ~definition_key:
             {

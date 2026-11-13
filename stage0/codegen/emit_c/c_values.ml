@@ -145,7 +145,19 @@ and operand_c_exn context fc operand =
   | Some (text, _) -> text
   | None -> bug "an operand of zero size"
 
+(* The address of a definition's anchor, which this file then defines. *)
+and anchor_c context definition =
+  let symbol = C_runtime.anchor_symbol definition in
+  if not (List.mem_assoc symbol context.anchors) then
+    context.anchors <- (symbol, definition) :: context.anchors;
+  "&" ^ symbol
+
 and constant_c context : Lir.constant -> string * Lir.ty = function
+  | Site site ->
+      ( Printf.sprintf "((void *)&(const struct t_site){ %s, %d, %d })"
+          (anchor_c context site.definition)
+          site.line site.column,
+        Raw (Pointer Opaque) )
   | Integer (integer, value) -> (integer_literal integer value, Raw (Integer integer))
   | Float32 bits -> (float32_literal bits, Raw Float32)
   | Float64 bits -> (float64_literal bits, Raw Float64)

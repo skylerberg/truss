@@ -35,41 +35,6 @@ let mir_of context path : Mir.t =
   | Some (mir, _) -> mir
   | None -> bug "%s has no MIR" (Path.show path)
 
-(* How many [yield]s a lending method's body has. *)
-let yield_count (body : Mir.body) =
-  Array.fold_left
-    (fun count (block : Mir.basic_block) ->
-      match block.terminator with Yield _ -> count + 1 | _ -> count)
-    0 body.blocks
-
-(* Whether nothing runs after a [yield] on any path through a body: from
-   each [yield], the paths only end scopes and loans until they return no
-   value. *)
-let each_yield_is_last (body : Mir.body) =
-  let visited = Hashtbl.create 8 in
-  let rec runs_nothing block =
-    Hashtbl.mem visited block
-    || begin
-      Hashtbl.replace visited block ();
-      let { Mir.statements; terminator; _ } = body.blocks.(block) in
-      List.for_all
-        (fun (statement : Mir.statement) ->
-          match statement.kind with
-          | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ -> true
-          | _ -> false)
-        statements
-      &&
-      match terminator with
-      | Goto target -> runs_nothing target
-      | Return (None | Some (Constant { value = Unit; _ })) -> true
-      | _ -> false
-    end
-  in
-  Array.for_all
-    (fun (block : Mir.basic_block) ->
-      match block.terminator with Yield { resume; _ } -> runs_nothing resume | _ -> true)
-    body.blocks
-
 let spans st =
   match demand st.context Names.spans st.frame.code.definition_key with
   | Some spans -> spans
@@ -79,12 +44,6 @@ let site_of st (origin : Core.origin) =
   let spans = spans st in
   if origin >= 0 && origin < Array.length spans then site st spans.(origin)
   else site st (Syntax.Span.make 0 0)
-
-(* Where a check that fails in the code being lowered is reported: at the
-   code's own position, or, for the standard library's code that is
-   inlined into a program's, at the program's call. *)
-let failure_site st (origin : Core.origin) =
-  match st.frame.reported with Some site -> site | None -> site_of st origin
 
 (* The MIR of one body, ready to lower: how many times each local that
    names a place is bound to one, which is more than once where several
@@ -160,9 +119,9 @@ let result_slot st =
   | None, None -> result_place st
   | None, Some _ -> None
 
-(* A new LIR local for a local of the MIR. In an inlined method, the scope
-   that owns the method's locals owns it. A temporary that a [return]
-   returns is the result's slot. *)
+(* A new LIR local for a local of the MIR, which the scope that owns the
+   body's locals owns. A temporary that a [return] returns is the result's
+   slot. *)
 let rec fresh_place st local : Lir.place =
   match result_slot st with
   | Some slot when List.mem local (mir st).returned ->
@@ -177,8 +136,7 @@ and new_place st local : Lir.place =
   let place = at (Lir_builder.local st.builder ?name (Value ty)) in
   (match frame.owner with
   | Some scope when owns st local && not (trivial st ty) ->
-      scope.owned <- Drop_value place :: scope.owned;
-      st.inlined_owned <- place :: st.inlined_owned
+      scope.owned <- Drop_value place :: scope.owned
   | _ -> ());
   bind_local st local place;
   place
@@ -633,19 +591,6 @@ let argument_place st (argument : Mir.argument) =
   | Passed { mode; value; _ } -> (mode, operand_type st value, operand_place st value)
   | Default -> bug "an omitted argument in a call that has no defaults"
 
-(* Evaluates the arguments of a call that is inlined: each with its
-   parameter's index, without the omitted ones, which the inlined method
-   fills from its defaults. *)
-let arguments_to_inline st path type_arguments (arguments : Mir.argument list) =
-  let signature = signature_of st.context path in
-  let substitution = bind signature.generics type_arguments in
-  let evaluated, _ = evaluate_arguments st signature substitution arguments in
-  List.filter_map Fun.id
-    (List.mapi
-       (fun index ((mode, ty, place), (argument : Mir.argument)) ->
-         match argument with Default -> None | Passed _ -> Some (index, mode, ty, place))
-       (List.combine evaluated arguments))
-
 (* Lowers [shared_update]: locks the shared value's mutex, calls [change]
    on the value and the input, and unlocks the mutex. *)
 let shared_update st ~shared ~input ~change ~destination =
@@ -786,7 +731,12 @@ let task_body st ~(id : Core.task) ~group ~early_exits (f : task -> unit) =
     { id; group; early_exits; end_block = block st.builder; scope_depth = List.length st.scopes }
   in
   st.tasks <- task :: st.tasks;
+  (* A loop around the task is the enclosing code's: an exit from the task
+     goes to its end, and leaves only the loop bodies inside it. *)
+  let enclosing_loops = st.active_loops in
+  st.active_loops <- [];
   f task;
+  st.active_loops <- enclosing_loops;
   st.tasks <- List.tl st.tasks;
   finish st.builder (Goto task.end_block);
   start st.builder task.end_block
@@ -864,7 +814,7 @@ let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit
               replace st return_value ty ~by:value
           | _ -> ());
       leave_to st task.scope_depth;
-      finish st.builder (Goto task.end_block);
+      finish st.builder (Goto (exits_through st st.active_loops task.end_block));
       start st.builder (block st.builder)
   | _ -> bug "an early exit leaves a task that is not the innermost enclosing task"
 
@@ -1094,13 +1044,32 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
       emit st.builder (Assign (built, Build { ty = Lent lent; variant; fields })));
   built
 
+(* Whether the code being lowered is a lending method's. *)
+let lends_part st =
+  match st.frame.code.result with Lends _ -> true | Returns _ | Yields _ -> false
+
+(* The type of the part that a lending method's [Lend_begin] gives: the
+   lent value its [yield]s build, where one of them is a constructor built
+   from places, or else the part's address. *)
+let lend_part_type context (lending : Ground.yielding) : Lir.ty =
+  let code = code_of context lending.method_ lending.type_arguments in
+  let st = enter context (frame_of code) in
+  let method_mir = mir_of context lending.method_ in
+  st.frame <-
+    { st.frame with mir = Some (frame_of_body ~lambdas:method_mir.lambdas method_mir.body) };
+  match (lent_type st, code.result) with
+  | Some lent, _ -> Value (Lent lent)
+  | None, Lends (mode, _) ->
+      Pointer { target = Value (yielded_type_of_frame st); writable = mode = Types.Mut }
+  | None, (Returns _ | Yields _) -> bug "%s does not lend" (Path.show lending.method_)
+
 (* The type of the loop body that a yielding method in loop form takes: a
    function of its part that returns whether to go on. The part is what the
    method yields, with the method's mode, or, where one of its [yield]s is
    a constructor built from places, the lent value that the [yield] builds. *)
 let loop_body_type context (yielding : Ground.yielding) : Ground.function_type =
   let code = code_of context yielding.method_ yielding.type_arguments in
-  let st = enter context (frame_of code ~inlined:[]) in
+  let st = enter context (frame_of code) in
   let method_mir = mir_of context yielding.method_ in
   st.frame <-
     { st.frame with mir = Some (frame_of_body ~lambdas:method_mir.lambdas method_mir.body) };
@@ -1160,7 +1129,7 @@ and run_region st region ~entry:(block, index) =
     (fun part ->
       let ran = Lir_builder.local st.builder ~name:"lent" (Raw Bool) in
       emit st.builder (Assign (at ran, Use (Constant (Bool false))));
-      Hashtbl.replace body.lent part { ran; skipped = [] })
+      Hashtbl.replace body.lent part ran)
     body.conditionally_lent;
   lower_from st region block index;
   let rec drain () =
@@ -1314,6 +1283,7 @@ and lower_statement st (statement : Mir.statement) =
              message = Constant (Bytes message);
              length = usize (String.length message);
              site = site_of st origin;
+             caller = None;
            });
       start st.builder after
   | Echo echoed ->
@@ -1362,9 +1332,9 @@ and dead st local =
     (fun cleanups ->
       match Hashtbl.find_opt frame.lent local with
       | None -> drop_scope st { kind = Statement; owned = cleanups }
-      | Some { ran = flag; skipped = inlined_locals } ->
+      | Some flag ->
           (* Where the call may not have run, the rest of the method runs
-             only if it did. On the other way the call's values are
+             only if it did. On the other way the statement's values are
              dropped, which drop elaboration removes where they hold
              nothing. *)
           let ran = block st.builder and skipped = block st.builder and after = block st.builder in
@@ -1379,7 +1349,6 @@ and dead st local =
               | Drop_value place -> emit st.builder (Drop place)
               | Finish_lend _ | Free_pointed _ | Free_blocks _ | Write_back _ | Join_group _ -> ())
             cleanups;
-          List.iter (fun place -> emit st.builder (Drop place)) inlined_locals;
           finish st.builder (Goto after);
           start st.builder after)
     (Hashtbl.find_opt frame.ends local);
@@ -1561,7 +1530,7 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin
                   Intrinsics.Place (operand_place st operand)
                 else Intrinsics.Value (value st operand))
               operands)
-           ~destination:(Some destination) ~site:(failure_site st origin))
+           ~destination:(Some destination) ~site:(site_of st origin))
   | Compare { comparison; left; right } ->
       assign (Binary (binary comparison, value st left, value st right))
   | Not inner -> assign (Unary (Not, value st inner))
@@ -1666,15 +1635,7 @@ and expression_into ?(arguments = []) st (expression : Core.expression) (destina
   let frame =
     frame_of_body ~returns_into:destination ~lambdas:expression_mir.lambdas expression_mir.body
   in
-  st.frame <-
-    {
-      caller with
-      on_yield = None;
-      yield_into = None;
-      lent_into = None;
-      exit = Some (exit, List.length st.scopes);
-      mir = Some frame;
-    };
+  st.frame <- { caller with exit = Some (exit, List.length st.scopes); mir = Some frame };
   List.iter2 (bind_local st) expression_mir.body.parameters (List.map snd arguments);
   let enclosing_loops = st.active_loops in
   st.active_loops <- [];
@@ -1823,9 +1784,7 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
    method, runs as [part] ends. *)
 and lend st part (call : Mir.call) ~origin =
   let scope = open_scope st Statement in
-  let enclosing_owned = st.inlined_owned in
-  st.inlined_owned <- [];
-  let call_site = failure_site st origin in
+  let call_site = site_of st origin in
   let lent =
     match call.callee with
     | Intrinsic { operation; type_arguments } -> (
@@ -1836,190 +1795,69 @@ and lend st part (call : Mir.call) ~origin =
         | None -> bug "a lent place from an intrinsic that does not lend")
     | callee -> (
         match resolve_callee st callee with
-        | Some (path, type_arguments) ->
-            let arguments = arguments_to_inline st path type_arguments call.arguments in
-            inline_lending st path type_arguments ~arguments ~call_site
+        | Some (method_, type_arguments) ->
+            lend_from_method st { method_; type_arguments } call.arguments ~call_site
         | None -> bug "a lending call that resolves to no method")
   in
   pop_scope st scope;
-  let inlined = st.inlined_owned in
-  st.inlined_owned <- inlined @ enclosing_owned;
   at_end st part scope.owned;
   Option.iter
-    (fun (conditional : conditional_lend) ->
-      conditional.skipped <- inlined;
-      emit st.builder (Assign (at conditional.ran, Use (Constant (Bool true)))))
+    (fun ran -> emit st.builder (Assign (at ran, Use (Constant (Bool true)))))
     (Hashtbl.find_opt (mir st).lent part);
   bind_local st part lent
 
-(* Inlines a lending or yielding method with its parameters bound to
-   [arguments], each by its parameter's index. Each [yield] in the method
-   calls [on_yield]. A parameter with no argument takes its default,
-   evaluated here. *)
-and inline ?(several = false) ?enclosing st path type_arguments ~arguments ~call_site ~on_yield =
-  if List.exists (Path.equal path) st.frame.inlined then
-    unsupported ~at:call_site "%s, which lends through a call to itself" (Path.show path);
-  let method_mir = mir_of st.context path in
-  let parameters, _ = core_of st.context path in
-  let exit = block st.builder in
-  let caller = st.frame in
-  st.frame <-
-    {
-      code = code_of st.context path type_arguments;
-      self_place = None;
-      on_yield = Some on_yield;
-      yield_into = None;
-      lent_into = None;
-      inlined = path :: caller.inlined;
-      reported =
-        (if Path.package path = Path.standard_package then
-           Some (Option.value caller.reported ~default:call_site)
-         else None);
-      exit = Some (exit, List.length st.scopes);
-      mir = None;
-    };
-  let owner = open_scope st Bindings in
-  let frame = frame_of_body ~owner ~lambdas:method_mir.lambdas method_mir.body in
-  st.frame <- { st.frame with mir = Some frame };
-  let lent_into =
-    Option.map
-      (fun lent -> (at (local st.builder ~borrowed:true (Value (Lent lent))), lent))
-      (lent_type st)
+(* A lending method's call, through its state, which the caller holds: its
+   [Lend_begin] runs it up to its [yield] and gives the part, and its
+   [Lend_finish], which the innermost scope runs where the part ends, runs
+   the rest of it. *)
+and lend_from_method st (lending : Ground.yielding) (arguments : Mir.argument list) ~call_site :
+    Lir.place =
+  let signature = signature_of st.context lending.method_ in
+  let substitution = bind signature.generics lending.type_arguments in
+  let arguments, mask = evaluate_arguments st signature substitution arguments in
+  let state = at (local st.builder ~borrowed:true (Value (Cursor lending))) in
+  (* A standard library method holds the position its checks report. *)
+  let site =
+    if reports_at_caller lending.method_ then Some (caller_site_operand st call_site) else None
   in
-  (* A value the method makes to lend is the caller's statement's to drop,
-     after the method has resumed, whichever [yield] made it. *)
-  let yield_into =
-    if several && lent_into = None then begin
-      pop_scope st owner;
-      let slot = temporary st (yielded_type_of_frame st) in
-      st.scopes <- owner :: st.scopes;
-      Some slot
-    end
-    else None
+  cursor_into ?site st ~path:lending.method_ ~type_arguments:lending.type_arguments ~signature
+    ~arguments ~mask state;
+  let part_type = lend_part_type st.context lending in
+  let part = local st.builder ~borrowed:true part_type in
+  let evidence = List.map (evidence_of st) (cursor_evidence st.context lending) in
+  let state_pointer : Lir.operand = Address { place = state; writable = true } in
+  let parameters =
+    Lir.Pointer { target = Value (Cursor lending); writable = true }
+    :: List.map (fun _ -> Convention.evidence) evidence
   in
-  st.frame <- { st.frame with lent_into; yield_into };
-  make_owned_locals st;
-  List.iteri
-    (fun index local ->
-      let place =
-        match
-          ( List.find_opt (fun (position, _, _, _) -> position = index) arguments,
-            (List.nth parameters index).default )
-        with
-        | Some (_, _, _, place), _ -> place
-        | None, Some default ->
-            (* The method owns a default's value and drops it, whatever the
-               parameter's mode. *)
-            let default_ty = ground st (info st local).type_ in
-            let place = binding st default_ty in
-            in_statement st (fun () -> expression_into st default place);
-            place
-        | None, None -> bug "%s is given no argument for parameter %d" (Path.show path) index
-      in
-      bind_local st local place)
-    method_mir.body.parameters;
-  let enclosing_loops = st.active_loops in
-  st.active_loops <- [];
-  lower_body ?enclosing st frame;
-  st.active_loops <- enclosing_loops;
-  finish st.builder Unreachable;
-  pop_scope st owner;
-  start st.builder exit;
-  st.frame <- caller
-
-(* Inlines a lending method up to its [yield] and returns the place it
-   lends. The rest of the method, its code after the [yield] and the drops
-   of its owned values, runs as the caller's statement ends, on every way
-   out of it, so the innermost scope owns the lend. Where nothing is left,
-   as for an index into a [List], the method ends at its [yield]. *)
-and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
-  let body = (mir_of st.context path).body in
-  let yields = yield_count body in
-  let several = yields > 1 in
-  let depth = List.length st.scopes in
-  let goes_on = block st.builder in
-  (* A method with a [yield] on each of several paths lends whichever it
-     reaches, so the caller reads through the address of the lent part,
-     and the method resumes from the [yield] it reached. *)
-  let ty = yielded_type st path type_arguments in
-  let through =
-    if several && not (is_zero_size st ty) then
-      let writable =
-        match (signature_of st.context path).output with Lends (Mut, _) -> true | _ -> false
-      in
-      Some (local st.builder (Pointer { target = Value ty; writable }), writable)
-    else None
-  in
-  let reached = local st.builder (Raw (Integer UInt32)) in
-  let lent = ref None and waiting = ref [] in
-  (* The places the method's own scopes owned at each [yield] the caller
-     resumed from. *)
-  let owned_at_a_yield = ref [] in
-  inline ~several st path type_arguments ~arguments ~call_site
-    ~on_yield:(fun place ~owned:_ ~resume ->
-      (match through with
-      | Some (pointer, writable) when st.frame.lent_into = None ->
-          emit st.builder (Assign (at pointer, Use (Address { place = whole st place; writable })));
-          lent := Some (at pointer / Deref)
-      | _ -> lent := Some place);
-      let scopes =
-        List.filteri (fun position _ -> List.length st.scopes - position > depth) st.scopes
-      in
-      let owns_nothing = List.for_all (fun (scope : scope) -> scope.owned = []) scopes in
-      if (not several) && each_yield_is_last body && owns_nothing then
-        finish st.builder (Goto resume)
-      else begin
-        List.iter
-          (fun (scope : scope) ->
-            List.iter
-              (function
-                | Drop_value place when not (List.mem place !owned_at_a_yield) ->
-                    owned_at_a_yield := place :: !owned_at_a_yield
-                | _ -> ())
-              scope.owned)
-          scopes;
-        emit st.builder
-          (Assign (at reached, Use (Constant (Integer (UInt32, Z.of_int (List.length !waiting))))));
-        waiting := resume :: !waiting;
-        finish st.builder (Goto goes_on)
-      end);
-  (match List.rev !waiting with
-  | [] -> ()
-  | resumes ->
-      let resume =
-        match resumes with
-        | [ only ] -> only
-        | _ ->
-            let chosen = block st.builder in
-            in_block st.builder chosen (fun () ->
-                finish st.builder
-                  (Switch
-                     {
-                       value = Copy (at reached);
-                       cases = List.mapi (fun index resume -> (Z.of_int index, resume)) resumes;
-                       default = None;
-                     }));
-            chosen
-      in
-      let scope = innermost_scope st in
-      scope.owned <-
-        Finish_lend
-          {
-            resume;
-            finished = current st.builder;
-            selector = local st.builder (Raw (Integer UInt32));
-            ways = [];
-            owned = !owned_at_a_yield;
-          }
-        :: scope.owned;
-      start st.builder goes_on);
-  match !lent with
-  | Some place -> place
-  | None when yields = 0 ->
-      (* The method has no [yield], so it never returns, and the code after
-         the call never runs. The place is never read. *)
-      temporary st ty
-  | None -> bug "a lending method that lends nothing"
+  emit st.builder
+    (Call
+       {
+         target =
+           Direct
+             {
+               function_ = Instance (Lend_begin lending);
+               signature = { parameters; result = Some part_type; returns = true };
+             };
+         arguments = state_pointer :: evidence;
+         result = Returned (at part);
+       });
+  let scope = innermost_scope st in
+  scope.owned <-
+    Finish_lend
+      (Call
+         {
+           target =
+             Direct
+               {
+                 function_ = Instance (Lend_finish lending);
+                 signature = { parameters; result = None; returns = true };
+               };
+           arguments = state_pointer :: evidence;
+           result = Discarded;
+         })
+    :: scope.owned;
+  match part_type with Pointer _ -> at part / Deref | _ -> at part
 
 (* Builds a [yield]'s lent part into [destination], a lent value of type
    [lent]. A field that holds an address is given the address of a place,
@@ -2105,6 +1943,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
              message = Constant (Bytes message);
              length = usize (String.length message);
              site = site_of st origin;
+             caller = None;
            });
       start st.builder (block st.builder)
   | Return returned ->
@@ -2154,23 +1993,28 @@ and terminator st region (ending : Mir.terminator) ~origin =
       goto st region after
 
 and yield st region ~mode ~part ~resume ~origin =
-  match st.frame.on_yield with
-  | Some on_yield ->
-      let place, owned =
-        match (st.frame.lent_into, part, st.frame.yield_into) with
-        | Some (slot, lent), _, _ ->
+  match st.form with
+  | Pulled when lends_part st ->
+      (* A lending method's [yield] stays in the code, and its [Lend_begin]
+         gives the part where it is: the address of the place, which may be
+         in the method's state, or the lent value the [yield] builds. The
+         method always goes on from its [yield]. *)
+      let value : Lir.operand =
+        (* Where any of the method's [yield]s builds a lent value, every one
+           gives one, as its [Lend_begin]'s type says. *)
+        match (lent_type st, part) with
+        | Some lent, _ ->
+            let slot = at (local st.builder ~borrowed:true (Value (Lent lent))) in
             lend_into st lent part ~destination:slot;
-            (slot, false)
-        | None, Part (Borrow { place = written; _ }), _ -> (place st written, mode = Types.Own)
-        | None, Part part, Some slot ->
-            write_operand st part slot;
-            (slot, true)
-        | None, Part part, None -> (operand_place st part, true)
-        | None, Built _, _ -> bug "a yielded constructor with no lent value to build it in"
+            Copy slot
+        | None, Built _ -> bug "a lent constructor with no lent value"
+        | None, Part (Borrow { place = written; _ }) ->
+            Address { place = whole st (place st written); writable = mode = Types.Mut }
+        | None, Part part -> Address { place = whole st (operand_place st part); writable = false }
       in
-      on_yield place ~owned ~resume:(jump st region resume);
+      finish st.builder (Yield { value; resume = jump st region resume; stop = None });
       start st.builder (block st.builder)
-  | None when is_pulled st ->
+  | Pulled ->
       (* In the pulled version of a method a [yield] stays in the code, and
          yield lowering makes it a state of the cursor. [next] gives its
          caller a value of its own: a value the method made, or a copy of a
@@ -2202,45 +2046,43 @@ and yield st region ~mode ~part ~resume ~origin =
       leave_to st 0;
       finish st.builder (Return None);
       start st.builder (block st.builder)
-  | None -> (
-      match st.form with
-      | Looped { body; chunked } ->
-          (* In the loop form a [yield] calls the caller's body with the
+  | Looped { body; chunked } ->
+      (* In the loop form a [yield] calls the caller's body with the
              part, as the body's type passes it, and the method goes on
              where the body says so. On the [stop] path the body has left
              the loop, so the method drops its owned values and returns. *)
-          let ty =
-            match body.parameters with
-            | [ (_, ty) ] -> ty
-            | _ -> bug "a loop body that does not take one part"
-          in
-          let yielded =
-            match (part, lent_type st) with
-            | Built _, Some lent ->
-                let slot = at (local st.builder ~borrowed:true (Value (Lent lent))) in
-                lend_into st lent part ~destination:slot;
-                slot
-            | Built _, None -> bug "a yielded constructor with no lent value"
-            | Part (Borrow { place = written; _ }), _ -> whole st (place st written)
-            | Part part, _ -> operand_place st part
-          in
-          let value =
-            match pass st mode ty yielded with Some value -> value | None -> Lir.Constant Null
-          in
-          let resume = jump st region resume in
-          if chunked then
-            (* The body of a [parallel for] cannot leave it, so it always
+      let ty =
+        match body.parameters with
+        | [ (_, ty) ] -> ty
+        | _ -> bug "a loop body that does not take one part"
+      in
+      let yielded =
+        match (lent_type st, part) with
+        | Some lent, _ ->
+            let slot = at (local st.builder ~borrowed:true (Value (Lent lent))) in
+            lend_into st lent part ~destination:slot;
+            slot
+        | None, Built _ -> bug "a yielded constructor with no lent value"
+        | None, Part (Borrow { place = written; _ }) -> whole st (place st written)
+        | None, Part part -> operand_place st part
+      in
+      let value =
+        match pass st mode ty yielded with Some value -> value | None -> Lir.Constant Null
+      in
+      let resume = jump st region resume in
+      if chunked then
+        (* The body of a [parallel for] cannot leave it, so it always
                goes on. *)
-            finish st.builder (Yield { value; resume; stop = None })
-          else begin
-            let stop = block st.builder in
-            finish st.builder (Yield { value; resume; stop = Some stop });
-            start st.builder stop;
-            leave_to st 0;
-            leave_function st (Return None)
-          end;
-          start st.builder (block st.builder)
-      | Ordinary | Pulled -> bug "a yield outside a yielding method")
+        finish st.builder (Yield { value; resume; stop = None })
+      else begin
+        let stop = block st.builder in
+        finish st.builder (Yield { value; resume; stop = Some stop });
+        start st.builder stop;
+        leave_to st 0;
+        leave_function st (Return None)
+      end;
+      start st.builder (block st.builder)
+  | Ordinary -> bug "a yield outside a yielding method"
 
 (* Lowers a [for] loop's body as a region of its own, once [value] is the
    place of the element. *)
@@ -2286,15 +2128,12 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~after:loop_afte
     =
   let origin = loop.origin in
   (* A loop over a yielding method's call is a loop region, whose body
-     outlining makes a function the method calls. Where the body yields for
-     a method whose [yield]s cannot call a body, a pulled method's state or
-     an inlined lending method's place, the loop pulls a cursor over the
-     call instead. *)
+     outlining makes a function the method calls. In a pulled method, or a
+     lending one, whose [yield]s are states, a body that yields cannot be
+     such a function, so the loop pulls a cursor over the call instead. *)
   let looped =
     match iteration with
-    | Yielding _
-      when (is_pulled st || st.frame.on_yield <> None) && body_yields st ~body ~after:loop_after ->
-        None
+    | Yielding _ when is_pulled st && body_yields st ~body ~after:loop_after -> None
     | Yielding _ -> Some (fresh_fork st)
     | Range _ | Pull _ -> None
   in
@@ -2384,7 +2223,8 @@ and for_each ?looped st ~origin ~(schedule : schedule) ~(iteration : Mir.iterati
             | Chunked -> yields_by_position st method_
             | Sequential | Spawned _ -> false
           in
-          looped_loop st ~loop ~yielding ~chunked ~mode ~arguments:call.arguments ~each:each_part)
+          looped_loop st ~loop ~yielding ~chunked ~mode ~arguments:call.arguments ~each:each_part
+            ~call_site:(site_of st origin))
   | Pull { cursor; next = None } -> (
       match mir_place_type st cursor with
       | Ground.Cursor yielding -> pull_cursor st yielding (place st cursor) ~each:owned_each
@@ -2401,13 +2241,24 @@ and for_each ?looped st ~origin ~(schedule : schedule) ~(iteration : Mir.iterati
    form: it calls the loop's body, a region of its own that outlining makes
    a function, at each [yield]. The body goes on at its [Loop_next], and
    leaves by an exit of the loop, its [break] one of them. *)
-and looped_loop st ~loop ~(yielding : Ground.yielding) ~chunked ~mode ~arguments ~each =
+and looped_loop st ~loop ~(yielding : Ground.yielding) ~chunked ~mode ~arguments ~each ~call_site =
   in_scope st (fun () ->
       let signature = signature_of st.context yielding.method_ in
       let substitution = bind signature.generics yielding.type_arguments in
       let arguments, mask = evaluate_arguments st signature substitution arguments in
       let lir_signature, _, operands =
         instance_call st ~signature ~substitution ~arguments ~mask ()
+      in
+      (* A standard library method takes the position its checks report,
+         before its body. *)
+      let lir_signature, operands =
+        if reports_at_caller yielding.method_ then
+          ( {
+              lir_signature with
+              parameters = lir_signature.parameters @ [ Lir.Raw (Nullable_pointer Opaque) ];
+            },
+            operands @ [ caller_site_operand st call_site ] )
+        else (lir_signature, operands)
       in
       let body_type = loop_body_type st.context yielding in
       let part_type =

@@ -154,7 +154,7 @@ let () =
       let text value = Lir.Constant (Bytes value) in
       let length value = Lir.Constant (Integer (USize, Z.of_int (String.length value))) in
       let ending failure message =
-        Lir.Fail { failure; message = text message; length = length message; site }
+        Lir.Fail { failure; message = text message; length = length message; site; caller = None }
       in
       let suite name blocks = instance name (function_ [] blocks) in
       let tests =

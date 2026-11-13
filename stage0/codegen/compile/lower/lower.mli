@@ -40,6 +40,9 @@ val instance : context -> Instance.key -> Lir.t
 val loop_body_type : context -> Ground.yielding -> Ground.function_type
 (** The type of the loop body that a yielding method in loop form takes. *)
 
+val lend_part_type : context -> Ground.yielding -> Lir.ty
+(** The type of the part that a lending method's [Lend_begin] gives. *)
+
 (* A constant's static data, where its value folds: literals, operators on
    numbers and on [Bool], other constants that fold, and records, variants,
    strings, lists, and arrays of parts that fold. Otherwise the type of the

@@ -16,6 +16,12 @@ type ty =
       (** Evidence a [provide] builds on the stack, with room for [n] pointers to the evidence its
           implementation captured *)
 
+(* A position within a definition, which the definition's anchor turns into
+   a file and line. It names its definition, rather than taking the
+   instance's, because code can come from another definition: a trait's
+   provided method compiled for an [impl] reports positions in the trait. *)
+type site = { definition : Path.t; line : int; column : int }
+
 (* A place: a local or a constant's static data, then fields, elements, and
    dereferences. *)
 type root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
@@ -50,6 +56,7 @@ and constant =
   | Symbol_address of Instance.key  (** The address of a table *)
   | Size_of of Ground.ty  (** A [USize]: how many bytes a value of the type takes *)
   | Alignment_of of Ground.ty  (** A [USize]: the alignment of a value of the type *)
+  | Site of site  (** The address of a position's static record, for a check that reports it *)
 
 and function_ref =
   | Instance of Instance.key
@@ -175,12 +182,6 @@ type rvalue =
   | Is_variant of place * string  (** Whether a sum type's value holds the variant *)
   | Function_value of { code : function_ref; environment : operand option }
 
-(* A position within a definition, which the definition's anchor turns into
-   a file and line. It names its definition, rather than taking the
-   instance's, because code can come from another definition: a trait's
-   provided method compiled for an [impl] reports positions in the trait. *)
-type site = { definition : Path.t; line : int; column : int }
-
 (* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a
    [todo] that was reached. *)
 type failure = Panic | Assertion | Todo
@@ -246,8 +247,16 @@ type terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable  (** A point the prover has shown is never reached *)
-  | Fail of { failure : failure; message : operand; length : operand; site : site }
-      (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
+  | Fail of {
+      failure : failure;
+      message : operand;
+      length : operand;
+      site : site;
+      caller : operand option;
+    }
+      (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length.
+          [caller], in a method that reports its checks at its caller's position, is the address of
+          that position's record, which takes the place of [site]. *)
   | Yield of { value : operand; resume : block; stop : block option }
       (** Before yield lowering only. [stop] runs when the caller leaves the loop at this [yield]; a
           lending method's [yield] has none, since it always continues. *)

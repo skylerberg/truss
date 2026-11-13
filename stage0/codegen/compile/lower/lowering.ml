@@ -15,31 +15,9 @@ type cleanup =
   | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
       (** Moves the value at [source] into [destination], the place it was moved out of so that the
           caller could change it. *)
-  | Finish_lend of lend  (** Lets a lending method run its code after its [yield]. *)
+  | Finish_lend of Lir.statement
+      (** Calls a lending method's [Lend_finish], which runs its code after its [yield]. *)
   | Join_group of Lir.statement  (** Joins a task group with the call of [Tasks.join]. *)
-
-(* A lending call whose method has more to do once it has lent its part. The
-   method's body is written into the caller up to its [yield]; the rest of
-   it waits at [resume] and ends at [finished]. Each way out of the scope
-   that owns the lend jumps to [resume], with [selector] saying which way it
-   was going, and [finished] sends it on, to one of [ways].
-
-   The caller continues from whichever [yield] the method reached. So a local
-   that the method owns at one [yield] and not at another may or may not
-   hold a value there, and the rest of the method drops it only on the
-   path from its own [yield]. [owned] is every such local, and [finished]
-   drops each. Drop elaboration gives such a drop a flag, so it drops a
-   local only if it still holds a value. Without the drops, a path on
-   which the local may still own a value reaches the function's return,
-   which drop elaboration reports as a leak. *)
-and lend = {
-  resume : Lir.block;
-  finished : Lir.block;
-  selector : Lir.local;
-  mutable ways : Lir.block list;  (** Most recent first, numbered from the first *)
-  owned : Lir.place list;
-      (** The places the method's own scopes owned at each [yield] the caller resumed from *)
-}
 
 (* A scope owns the values dropped as it ends: the scope of a block's names,
    or the scope of one statement, whose temporaries end with it. *)
@@ -49,27 +27,15 @@ type scope = { kind : scope_kind; mutable owned : cleanup list  (** Most recent 
 (* Where [continue] and [break] go, and how many scopes each keeps. *)
 type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; break_depth : int }
 
-(* The code being lowered: the function's own body, or the body of a
-   method inlined into it, each with its own tables and names. *)
+(* The code being lowered: the function's own body, or an expression
+   lowered on its own inside it, each with its own tables and names. *)
 type frame = {
   code : code;
   mutable self_place : Lir.place option;
-  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> unit) option;
-      (** In an inlined lending or yielding method, the action of a [yield] of a place. [owned] is
-          true when the code that the [yield] runs may take the value: the method yields it [own],
-          or computed it for this [yield]. Otherwise the place is borrowed. *)
-  yield_into : Lir.place option;
-      (** In an inlined lending method with a [yield] on each of several paths, where a value the
-          method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
-  lent_into : (Lir.place * Ground.lent) option;
-      (** In an inlined lending or yielding method that yields a constructor of places, the local
-          that every [yield] builds its lent value in, and the value's type *)
-  inlined : Path.t list;  (** The methods inlined around this frame, to refuse recursion *)
-  reported : Lir.site option;
-      (** In the standard library's code that is inlined into a program's, the position of the
-          program's call, where a check that fails in this code is reported *)
+      (** The place of the code's [self], which the evidence of a capability it implements names *)
   exit : (Lir.block * int) option;
-      (** In an inlined method, where its [return] goes and how many scopes that keeps *)
+      (** In an expression lowered on its own, where its [return] goes and how many scopes that
+          keeps *)
   mir : mir_frame option;  (** The MIR being lowered in this frame *)
 }
 
@@ -82,16 +48,16 @@ and mir_frame = {
   ends : (Mir.local, cleanup list) Hashtbl.t;
   conditionally_lent : Mir.local list;
       (** The parts of lending calls whose end some path reaches without the call *)
-  mutable lent : (Mir.local, conditional_lend) Hashtbl.t;
-      (** For each of those parts in the region being lowered, whether the call ran, so that the
-          rest of the method runs only after it. Each region has its own, since tasks run the
-          regions of a [concurrent] block or loop at the same time. *)
+  mutable lent : (Mir.local, Lir.local) Hashtbl.t;
+      (** For each of those parts in the region being lowered, a [Bool] that is true from the call
+          to the part's end, so that the rest of the method runs only after the call. Each region
+          has its own, since tasks run the regions of a [concurrent] block or loop at the same time.
+      *)
   aliases : (Mir.local, int) Hashtbl.t;
       (** The locals bound to a place they do not own, with the number of assignments that bind each
       *)
   owner : scope option;
-      (** In an inlined method, the scope that owns the method's locals, so that an exit from the
-          caller's code at a [yield] drops them *)
+      (** The scope that owns the body's locals, so that every way out of the body drops them *)
   returns_into : Lir.place option;
       (** In an expression lowered on its own, such as a default, where its value is written *)
   forks : (int, int) Hashtbl.t;  (** The fork of the LIR that marks each [parallel] block *)
@@ -104,14 +70,6 @@ and mir_frame = {
   mutable taken : Mir.place list;
       (** The targets of compound assignments whose old value an operator has taken, which hold
           nothing until they are assigned again *)
-}
-
-(* A lending call whose part's end some path reaches without the call. *)
-and conditional_lend = {
-  ran : Lir.local;  (** A [Bool], true from the call to the part's end *)
-  mutable skipped : Lir.place list;
-      (** The locals of the methods inlined for the call, which the path that skips the rest of the
-          method drops, since drop elaboration cannot tell that they hold nothing there *)
 }
 
 (* The early exits of the tasks of one [concurrent] block or loop. An
@@ -184,30 +142,19 @@ type state = {
   mutable forks : int;  (** How many [parallel] statements the function has marked *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable next_range : schedule;
-      (** The schedule of the next range loop, when it is not [Sequential]: a [parallel for] or a
-          [concurrent for] is inlining a method that yields by position, and the next range loop is
-          that method's loop *)
-  mutable inlined_owned : Lir.place list;
-      (** The locals of the methods inlined since the lending call being lowered began, which the
-          path that skips the rest of the method drops *)
+      (** The schedule of the next range loop, when it is not [Sequential]: in the chunked loop form
+          of a method that yields by position, its range loop takes the [parallel for]'s *)
+  mutable caller_site : Lir.local option;
+      (** In a standard library method that reports its checks at its caller's position, the
+          parameter that holds the address of that position, which its own calls of such methods
+          pass on *)
   mutable active_loops : int list;
       (** The loops over methods in loop form whose bodies the code being lowered is in, in its own
           frame, innermost first: a [return] leaves each body by one of its exits *)
 }
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
-let frame_of code ~inlined =
-  {
-    code;
-    self_place = None;
-    on_yield = None;
-    yield_into = None;
-    lent_into = None;
-    inlined;
-    reported = None;
-    exit = None;
-    mir = None;
-  }
+let frame_of code = { code; self_place = None; exit = None; mir = None }
 
 (* The state to write one function in: a builder of its own and the
    function's scope. A lambda shares [nested] with the function around it. *)
@@ -225,20 +172,44 @@ let enter context ?(form = Ordinary) ?(nested = ref []) frame =
     forks = 0;
     tasks = [];
     next_range = Sequential;
-    inlined_owned = [];
     active_loops = [];
+    caller_site = None;
   }
 
 let is_pulled st = st.form = Pulled
 
+(* Whether a lending or yielding method reports its checks at its caller's
+   position: the standard library's do, as their code was once inlined into
+   the caller's, so that an index out of bounds names the program's line. *)
+let reports_at_caller (method_ : Path.t) = Path.package method_ = Path.standard_package
+
+(* The function with each failure at the position in [caller_site]. *)
+let report_at_caller (caller_site : Lir.local) (function_ : Lir.function_) =
+  {
+    function_ with
+    blocks =
+      Array.map
+        (fun (block : Lir.basic_block) ->
+          match block.terminator with
+          | Fail fail ->
+              { block with terminator = Fail { fail with caller = Some (Copy (at caller_site)) } }
+          | _ -> block)
+        function_.blocks;
+  }
+
+(* The address of the position a call at [site] reports a check at: the
+   position this method was given, where it reports at its caller's, or
+   [site]. *)
+let caller_site_operand st (site : Lir.site) : Lir.operand =
+  match st.caller_site with Some local -> Copy (at local) | None -> Constant (Site site)
+
 (* Whether a [parallel] statement's parts are marked here, to become
    functions of their own that the runtime may run at the same time. They
-   are not in a yielding method: in its pulled version, whose code is a
-   state machine, a [yield] is a state, and in its loop form, a [yield] in a
-   part would run the caller's body there, which may stop the method, and a
-   region has one way out. Nor are they in a lending method that is
-   inlined, for the same reason. *)
-let may_fork st = st.form = Ordinary && st.frame.on_yield = None && st.frame.exit = None
+   are not in a yielding or lending method: in its pulled version, whose
+   code is a state machine, a [yield] is a state, and in its loop form, a
+   [yield] in a part would run the caller's body there, which may stop the
+   method, and a region has one way out. *)
+let may_fork st = st.form = Ordinary && st.frame.exit = None
 
 let fresh_fork st =
   st.forks <- st.forks + 1;
@@ -409,31 +380,7 @@ let drop_scope st (scope : scope) =
       | Write_back { destination; source; ty } ->
           emit st.builder
             (Assign (destination, Use (if trivial st ty then Copy source else Move source)))
-      | Finish_lend lend ->
-          (* The method resumes from its [yield] now, and returns here. *)
-          let way = block st.builder in
-          emit st.builder
-            (Assign
-               ( at lend.selector,
-                 Use (Constant (Integer (UInt32, Z.of_int (List.length lend.ways)))) ));
-          lend.ways <- way :: lend.ways;
-          finish st.builder (Goto lend.resume);
-          in_block st.builder lend.finished (fun () ->
-              List.iter (fun place -> emit st.builder (Drop place)) lend.owned;
-              finish st.builder
-                (match lend.ways with
-                | [ only ] -> Goto only
-                | ways ->
-                    Switch
-                      {
-                        value = Copy (at lend.selector);
-                        cases =
-                          List.mapi
-                            (fun position way -> (Z.of_int (List.length ways - 1 - position), way))
-                            ways;
-                        default = None;
-                      }));
-          start st.builder way
+      | Finish_lend call -> emit st.builder call
       | Join_group join -> emit st.builder join)
     scope.owned
 

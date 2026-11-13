@@ -8,6 +8,7 @@ type ty =
   | Environment of int
   | Evidence of int
 
+type site = { definition : Path.t; line : int; column : int }
 type root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
 
 type place = { root : root; projections : projection list }
@@ -36,6 +37,7 @@ and constant =
   | Symbol_address of Instance.key
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
+  | Site of site
 
 and function_ref = Instance of Instance.key | Nested of int
 
@@ -127,7 +129,6 @@ type rvalue =
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-type site = { definition : Path.t; line : int; column : int }
 type failure = Panic | Assertion | Todo
 type destination = Discarded | Returned of place | Written of place
 
@@ -155,7 +156,13 @@ type terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable
-  | Fail of { failure : failure; message : operand; length : operand; site : site }
+  | Fail of {
+      failure : failure;
+      message : operand;
+      length : operand;
+      site : site;
+      caller : operand option;
+    }
   | Yield of { value : operand; resume : block; stop : block option }
   | Loop_call of {
       loop : int;
