@@ -1,62 +1,380 @@
-(* Tests of the MIR: the MIR of a program's functions as text, and the MIR of
-   every definition of the standard library, which must be well formed. *)
+(* Tests of the MIR. Every definition of the standard library has MIR that
+   keeps the builder's promises, which a validator checks, and the MIR of
+   small programs has each construct's structure. The tests read properties
+   of the MIR, never its text, so renumbering blocks or locals breaks none. *)
 
 open Harness
 open Support
 
 let mir_of database key = Query.demand database Mir.mir key
 
-(* Fails unless every jump of a body reaches one of its blocks and every
-   local it names is one of its locals. *)
-let check_body definition (body : Mir.body) =
-  let blocks = Array.length body.blocks and locals = Array.length body.locals in
-  let block index =
-    if index < 0 || index >= blocks then fail "%s: a jump to block %d" definition index
+(* What code reads *)
+
+let place_locals (place : Mir.place) =
+  match place.root with Local local -> [ local ] | Constant _ -> []
+
+let operand_locals : Mir.operand -> Mir.local list = function
+  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> place_locals place
+  | Constant _ -> []
+
+let call_locals (call : Mir.call) =
+  (match call.callee with Indirect callee -> operand_locals callee | _ -> [])
+  @ List.concat_map
+      (function Mir.Passed { value; _ } -> operand_locals value | Default -> [])
+      call.arguments
+
+let rvalue_locals : Mir.rvalue -> Mir.local list = function
+  | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
+      operand_locals value
+  | Operation { operands; _ } | Array operands -> List.concat_map operand_locals operands
+  | Compare { left; right; _ } -> operand_locals left @ operand_locals right
+  | Construct { fields; _ } ->
+      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:operand_locals field) fields
+  | Is_variant { place; _ } -> place_locals place
+  | Lambda { captures; _ } ->
+      List.concat_map (fun (capture : Mir.capture) -> place_locals capture.place) captures
+  | Function_value _ | Value_parameter _ -> []
+
+let rec yielded_locals : Mir.yielded -> Mir.local list = function
+  | Part value -> operand_locals value
+  | Built { fields; _ } ->
+      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:yielded_locals field) fields
+
+(* A write to a whole local gives it a value; a write to a part of one reads
+   the local. *)
+let written (place : Mir.place) =
+  match place with
+  | { root = Local local; projections = [] } -> ([], [ local ])
+  | _ -> (place_locals place, [])
+
+(* The locals a statement reads, the locals it gives values, and the locals
+   it ends. *)
+let effects (statement : Mir.statement) =
+  match statement.kind with
+  | Assign { target; value; _ } ->
+      let read, given = written target in
+      (rvalue_locals value @ read, given, [])
+  | Call { destination; call } ->
+      let read, given = Option.fold ~none:([], []) ~some:written destination in
+      (call_locals call @ read, given, [])
+  | Lend { part; call } -> (call_locals call, [ part ], [])
+  | Slice { destination; base; call } ->
+      let read, given = written destination in
+      (call_locals call @ place_locals base @ read, given, [])
+  | Template { destination; call; _ } ->
+      let read, given = written destination in
+      (call_locals call @ read, given, [])
+  | Pull { destination; cursor } ->
+      let read, given = written destination in
+      (place_locals cursor @ read, given, [])
+  | Live locals -> ([], locals, [])
+  | Dead locals -> ([], [], locals)
+  | Assert { condition = value; _ } | Echo value -> (operand_locals value, [], [])
+  | Provide { provided; _ } ->
+      ( List.concat_map (fun (provided : Mir.provided) -> operand_locals provided.value) provided,
+        [],
+        [] )
+  | Loan_start { borrowed; _ } -> (operand_locals borrowed, [], [])
+  | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [], [])
+
+let terminator_reads : Mir.terminator -> Mir.local list = function
+  | Branch { condition; _ } -> operand_locals condition
+  | Switch_variant { place; _ } -> place_locals place
+  | For { iteration = Yielding call; _ } -> call_locals call
+  | For { iteration = Range { start; stop; _ }; _ } -> operand_locals start @ operand_locals stop
+  | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
+  | Yield { part; _ } -> yielded_locals part
+  | Return (Some value) | Exit_tasks { exit = Exit_return (Some value); _ } -> operand_locals value
+  | Goto _ | Fork _ | Join _ | Iteration_end
+  | Return None
+  | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
+      []
+
+(* The validator *)
+
+(* What may hold for a local or a loan on the paths that reach a point. *)
+let alive = 1
+let ended = 2
+
+(* Checks a body against the builder's promises. Jumps reach blocks of the
+   body, and locals and loans exist. A local is never read where some path
+   has ended it. Leaving scopes ends what they hold: where a function
+   returns, every local is ended but its parameters, captures, loop parts,
+   and returned value, and every loan is ended; where an iteration ends,
+   only what was alive or open when the loop started still is. A loop's
+   blocks and a branch's blocks are closed: control leaves them only by the
+   loop's end, a [Join], or an exit from tasks. *)
+let validate definition (body : Mir.body) =
+  let count = Array.length body.blocks and locals = Array.length body.locals in
+  let problem format = Printf.ksprintf (fun text -> fail "%s: %s" definition text) format in
+  let describe local =
+    let kind =
+      match body.locals.(local).kind with
+      | Source { name; _ } -> "source " ^ Option.value name ~default:"?"
+      | Temporary -> "temporary"
+      | Lent _ -> "lent"
+    in
+    let made =
+      Array.fold_left
+        (fun found (basic : Mir.basic_block) ->
+          List.fold_left
+            (fun found (statement : Mir.statement) ->
+              match (found, statement.kind) with
+              | None, Assign { target = { root = Local l; projections = [] }; value; _ }
+                when l = local ->
+                  Some
+                    (match value with
+                    | Operand (Use _) -> "use"
+                    | Operand (Borrow _) -> "borrow"
+                    | Operand _ -> "operand"
+                    | Operation _ -> "operation"
+                    | Compare _ -> "compare"
+                    | Not _ -> "not"
+                    | Construct _ -> "construct"
+                    | Array _ -> "array"
+                    | Is_variant _ -> "is_variant"
+                    | Convert _ -> "convert"
+                    | To_any _ -> "to_any"
+                    | Copy _ -> "copy"
+                    | Function_value _ -> "function"
+                    | Lambda _ -> "lambda"
+                    | Value_parameter _ -> "value_parameter")
+              | None, Call { destination = Some { root = Local l; projections = [] }; _ }
+                when l = local ->
+                  Some "call"
+              | None, Lend { part; _ } when part = local -> Some "lend"
+              | _ -> found)
+            found basic.statements)
+        None body.blocks
+    in
+    kind ^ " " ^ Option.value made ~default:"unassigned"
   in
-  let local index = if index < 0 || index >= locals then fail "%s: local _%d" definition index in
-  let place (place : Mir.place) =
-    match place.root with Local found -> local found | Constant _ -> ()
-  in
-  let operand : Mir.operand -> unit = function
-    | Use { place = found; _ } | Borrow { place = found; _ } | Take { place = found; _ } ->
-        place found
-    | Constant _ -> ()
+  let block index = if index < 0 || index >= count then problem "a jump to block %d" index in
+  let local index = if index < 0 || index >= locals then problem "local _%d" index in
+  let loans =
+    Array.fold_left
+      (fun most (basic : Mir.basic_block) ->
+        List.fold_left
+          (fun most (statement : Mir.statement) ->
+            match statement.kind with Loan_start { loan; _ } -> max most (loan + 1) | _ -> most)
+          most basic.statements)
+      0 body.blocks
   in
   Array.iter
     (fun (basic : Mir.basic_block) ->
       List.iter
-        (fun (statement : Mir.statement) ->
-          match statement.kind with
-          | Assign { target; _ } -> place target
-          | Live found | Dead found -> List.iter local found
-          | Lend { part; _ } -> local part
-          | Assert value | Echo value -> operand value
-          | _ -> ())
+        (fun statement ->
+          let read, given, ends = effects statement in
+          List.iter local (read @ given @ ends))
         basic.statements;
+      List.iter local (terminator_reads basic.terminator);
+      List.iter block (Mir.successors basic.terminator);
       match basic.terminator with
-      | Goto target -> block target
-      | Branch { condition; yes; no } ->
-          operand condition;
-          block yes;
-          block no
-      | Switch_variant { place = found; cases } ->
-          place found;
-          List.iter (fun (_, target) -> block target) cases
-      | For { part; body = inside; after; _ } ->
+      | For { part; body = inside; blocks; after; _ } ->
           local part;
-          block inside;
-          block after
-      | Yield { part; resume; _ } ->
-          let rec yielded : Mir.yielded -> unit = function
-            | Part value -> operand value
-            | Built { fields; _ } -> List.iter (fun (_, field) -> Option.iter yielded field) fields
-          in
-          yielded part;
-          block resume
-      | Exit_tasks { exit = Exit_to target; _ } -> block target
-      | Return (Some value) -> operand value
-      | Iteration_end | Return None | Exit_tasks _ | Unreachable | Todo -> ())
-    body.blocks
+          List.iter block (inside :: after :: blocks)
+      | Fork { branches; join; _ } ->
+          List.iter
+            (fun (branch : Mir.branch) -> List.iter block (branch.entry :: branch.blocks))
+            branches;
+          Option.iter block join
+      | _ -> ())
+    body.blocks;
+  (* Closed loops and branches *)
+  let iteration_loops = Mir.iteration_loops body in
+  let parts = ref [] in
+  Array.iteri
+    (fun index (basic : Mir.basic_block) ->
+      (match basic.terminator with
+      | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
+          if not (Hashtbl.mem iteration_loops index) then
+            problem "block %d ends an iteration outside a loop" index
+      | _ -> ());
+      match basic.terminator with
+      | For { part; body = inside; blocks; after; _ } ->
+          parts := part :: !parts;
+          if not (List.mem inside blocks) then
+            problem "a loop's body %d is not among its blocks" inside;
+          List.iter
+            (fun inner ->
+              match body.blocks.(inner).terminator with
+              | Exit_tasks _ -> ()
+              | terminator ->
+                  List.iter
+                    (fun target ->
+                      if target <> after && not (List.mem target blocks) then
+                        problem "block %d of the loop at %d jumps out to %d" inner index target)
+                    (Mir.successors terminator))
+            blocks
+      | Fork { fork; branches; join; _ } ->
+          let entries = List.map (fun (branch : Mir.branch) -> branch.entry) branches in
+          List.iteri
+            (fun position (branch : Mir.branch) ->
+              let next =
+                match List.nth_opt entries (position + 1) with
+                | Some next -> Some next
+                | None -> join
+              in
+              List.iter
+                (fun inner ->
+                  match body.blocks.(inner).terminator with
+                  | Exit_tasks _ -> ()
+                  | Join { fork = joined; next = target } ->
+                      if joined <> fork || Some target <> next then
+                        problem "branch %d of the block at %d joins to %d" position index target
+                  | terminator ->
+                      List.iter
+                        (fun target ->
+                          if not (List.mem target branch.blocks) then
+                            problem "branch %d of the block at %d jumps out to %d" position index
+                              target)
+                        (Mir.successors terminator))
+                branch.blocks)
+            branches
+      | _ -> ())
+    body.blocks;
+  (* The values exits from tasks return, which each holds until it is taken,
+     while the other tasks of its group run on. *)
+  let held_by_exits =
+    Array.fold_left
+      (fun held (basic : Mir.basic_block) ->
+        match basic.terminator with
+        | Exit_tasks { exit = Exit_return (Some value); _ } -> operand_locals value @ held
+        | _ -> held)
+      [] body.blocks
+  in
+  (* Locals and loans, forward from the entry. Node [count + block] is the
+     head of the loop whose [For] ends [block]: the iterations' ends go back
+     to it. *)
+  let locals_in = Array.init (2 * count) (fun _ -> Array.make locals 0)
+  and loans_in = Array.init (2 * count) (fun _ -> Array.make loans 0)
+  and reached = Array.make (2 * count) false in
+  List.iter (fun parameter -> locals_in.(0).(parameter) <- alive) (body.parameters @ body.captures);
+  reached.(0) <- true;
+  let pending = Queue.create () in
+  Queue.add 0 pending;
+  let flow target (state, open_loans) =
+    let changed = ref (not reached.(target)) in
+    reached.(target) <- true;
+    Array.iteri
+      (fun index value ->
+        let merged = locals_in.(target).(index) lor value in
+        if merged <> locals_in.(target).(index) then (
+          locals_in.(target).(index) <- merged;
+          changed := true))
+      state;
+    Array.iteri
+      (fun index value ->
+        let merged = loans_in.(target).(index) lor value in
+        if merged <> loans_in.(target).(index) then (
+          loans_in.(target).(index) <- merged;
+          changed := true))
+      open_loans;
+    if !changed then Queue.add target pending
+  in
+  let entered = Hashtbl.create 4 in
+  (* Runs a block from the state that reaches it, and reports what it
+     breaks where [report] holds. *)
+  let run ~report node =
+    let state = Array.copy locals_in.(node) and open_loans = Array.copy loans_in.(node) in
+    let read at local =
+      if report && state.(local) land ended <> 0 then
+        problem "block %d reads _%d where a path has ended it" at local
+    in
+    let apply at (statement : Mir.statement) =
+      let read_locals, given, ends = effects statement in
+      List.iter (read at) read_locals;
+      List.iter (fun local -> state.(local) <- alive) given;
+      List.iter (fun local -> state.(local) <- ended) ends;
+      match statement.kind with
+      | Loan_start { loan; _ } -> open_loans.(loan) <- alive
+      | Loan_end ended_loans -> List.iter (fun loan -> open_loans.(loan) <- ended) ended_loans
+      | _ -> ()
+    in
+    let still_alive ~kept =
+      List.filter
+        (fun local -> state.(local) land alive <> 0 && not (List.mem local kept))
+        (List.init locals Fun.id)
+    in
+    let still_open ~kept =
+      List.filter
+        (fun loan -> open_loans.(loan) land alive <> 0 && not (List.mem loan kept))
+        (List.init loans Fun.id)
+    in
+    let returns at value =
+      let kept =
+        body.parameters @ body.captures @ !parts @ held_by_exits
+        @ match value with Some value -> operand_locals value | None -> []
+      in
+      if report then begin
+        (match still_alive ~kept with
+        | [] -> ()
+        | local :: _ -> problem "block %d returns with _%d alive (%s)" at local (describe local));
+        match still_open ~kept:[] with
+        | [] -> ()
+        | loan :: _ -> problem "block %d returns with loan %d open" at loan
+      end
+    in
+    let iteration_end at =
+      match Hashtbl.find_opt iteration_loops at with
+      | Some loop ->
+          (if report then
+             match Hashtbl.find_opt entered loop with
+             | Some (alive_then, open_then) -> (
+                 (match still_alive ~kept:(alive_then @ !parts @ held_by_exits) with
+                 | [] -> ()
+                 | local :: _ -> problem "block %d ends an iteration with _%d alive" at local);
+                 match still_open ~kept:open_then with
+                 | [] -> ()
+                 | loan :: _ -> problem "block %d ends an iteration with loan %d open" at loan)
+             | None -> ());
+          flow (count + loop) (state, open_loans)
+      | None -> ()
+    in
+    if node >= count then begin
+      (* A loop's head: an iteration of its body, or its end. *)
+      let loop = node - count in
+      match body.blocks.(loop).terminator with
+      | For { part; body = inside; after; _ } ->
+          let iterating = Array.copy state in
+          iterating.(part) <- alive;
+          flow inside (iterating, open_loans);
+          flow after (state, open_loans)
+      | _ -> ()
+    end
+    else
+      let basic = body.blocks.(node) in
+      List.iter (apply node) basic.statements;
+      (* The other tasks of an exit's group go on from the task's end with
+         the scopes around the task open; the exit ends them once taken. *)
+      (match basic.terminator with
+      | Exit_tasks { tasks = { task_end = Some target; _ } :: _; _ } ->
+          flow target (Array.copy state, Array.copy open_loans)
+      | _ -> ());
+      (match basic.terminator with
+      | Exit_tasks { tasks; _ } ->
+          List.iter (fun (left : Mir.left_task) -> List.iter (apply node) left.ends) tasks
+      | _ -> ());
+      List.iter (read node) (terminator_reads basic.terminator);
+      match basic.terminator with
+      | For _ ->
+          if not (Hashtbl.mem entered node) then
+            Hashtbl.replace entered node (still_alive ~kept:[], still_open ~kept:[]);
+          flow (count + node) (state, open_loans)
+      | Iteration_end -> iteration_end node
+      | Return value -> returns node value
+      | Exit_tasks { exit; _ } -> (
+          match exit with
+          | Exit_return value -> returns node value
+          | Exit_to target -> flow target (state, open_loans)
+          | Exit_iteration -> iteration_end node)
+      | terminator ->
+          List.iter (fun target -> flow target (state, open_loans)) (Mir.successors terminator)
+  in
+  while not (Queue.is_empty pending) do
+    run ~report:false (Queue.pop pending)
+  done;
+  Array.iteri (fun node is_reached -> if is_reached then run ~report:true node) reached
 
 let () =
   let database = setup [] in
@@ -64,7 +382,7 @@ let () =
   List.iter
     (fun ((file : Path.file), _) ->
       test
-        (Printf.sprintf "%s's MIR is well formed" (Path.show_file file))
+        (Printf.sprintf "%s's MIR keeps the builder's promises" (Path.show_file file))
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
@@ -78,16 +396,18 @@ let () =
               with
               | Some mir ->
                   incr built;
-                  check_body definition mir.body;
-                  Array.iter (check_body definition) mir.lambdas
+                  validate definition mir.body;
+                  Array.iter (validate definition) mir.lambdas
               | None -> ())
             (Query.demand database Resolve.Names.declarations_in file)))
     Standard_library.files;
   test "the standard library has MIR" (fun () ->
       if !built < 500 then fail "only %d of its definitions have MIR" !built)
 
-(* The printed MIR of the function [g] of a program. *)
-let printed text =
+(* The structure of constructs *)
+
+(* The MIR of the function [g] of a program, validated. *)
+let mir_of_g text =
   let database = setup [ ("app::main", text) ] in
   match
     List.find_map
@@ -97,395 +417,271 @@ let printed text =
         else None)
       (Query.demand database Resolve.Names.declarations (module_of "app::main"))
   with
-  | Some key -> ( match mir_of database key with Some mir -> Mir.show mir | None -> "no MIR")
-  | None -> "no g"
+  | Some key -> (
+      match mir_of database key with
+      | Some mir ->
+          validate "g" mir.body;
+          Array.iter (validate "g") mir.lambdas;
+          mir
+      | None -> failwith "g has no MIR")
+  | None -> failwith "the program has no g"
 
-let expect name text expected =
-  test name (fun () ->
-      let actual = printed text in
-      if actual <> expected then fail "found:\n%s" actual)
+(* The local a name is bound to. *)
+let named (body : Mir.body) name =
+  let found = ref None in
+  Array.iteri
+    (fun local (info : Mir.local_info) ->
+      match info.kind with
+      | Source { name = Some written; _ } when written = name -> found := Some local
+      | _ -> ())
+    body.locals;
+  match !found with Some local -> local | None -> failwith ("no local is named " ^ name)
+
+(* The blocks reachable from [from], without passing a block in [avoid]. *)
+let reachable (body : Mir.body) ~from ?(avoid = []) () =
+  let seen = Array.make (Array.length body.blocks) false in
+  let rec visit block =
+    if (not seen.(block)) && not (List.mem block avoid) then begin
+      seen.(block) <- true;
+      List.iter visit (Mir.successors body.blocks.(block).terminator)
+    end
+  in
+  List.iter visit from;
+  seen
+
+let statements (body : Mir.body) =
+  List.concat_map (fun (basic : Mir.basic_block) -> basic.statements) (Array.to_list body.blocks)
+
+let terminators (body : Mir.body) =
+  List.mapi
+    (fun index (basic : Mir.basic_block) -> (index, basic.terminator))
+    (Array.to_list body.blocks)
 
 let () =
-  expect "an early exit from concurrent code ends the tasks it leaves"
-    Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves
-    "0:\n\
-    \  for _1 in standard::list::impl Iterable for List[Element].each(read _0) 1 after 18\n\
-     1:\n\
-    \  loan 0: read read _0 for the loop\n\
-    \  live _2\n\
-    \  _2 = read _1\n\
-    \  concurrent branch of #50\n\
-    \  _4 = app::main::fetch(read _2)\n\
-    \  _5 = _4 is Ok\n\
-    \  branch _5 6 2\n\
-     2:\n\
-    \  _7 = _4 is Err\n\
-    \  branch _7 4 3\n\
-     3:\n\
-    \  unreachable\n\
-     4:\n\
-    \  live _8\n\
-    \  _8 = _4.(Err).error\n\
-    \  goto 5\n\
-     5:\n\
-    \  matched\n\
-    \  _9 = Err(error: _8)\n\
-    \  _10 = _9\n\
-    \  dead _8\n\
-    \  dead _7, _9\n\
-    \  dead _3, _4\n\
-    \  exit branch 0 of #50, return _10\n\
-     6:\n\
-    \  live _6\n\
-    \  _6 = _4.(Ok).value\n\
-    \  goto 7\n\
-     7:\n\
-    \  matched\n\
-    \  _3 = _6\n\
-    \  dead _6\n\
-    \  dead _5\n\
-    \  goto 8\n\
-     8:\n\
-    \  _11 = _3\n\
-    \  live _12\n\
-    \  _12 = _11\n\
-    \  goto 9\n\
-     9:\n\
-    \  dead _3, _4, _11\n\
-    \  goto 10\n\
-     10:\n\
-    \  concurrent branch of #50\n\
-    \  _13 = _2\n\
-    \  loan 1: read _13 for the operation\n\
-    \  end loans 1\n\
-    \  _14 = _13 > 3\n\
-    \  branch _14 14 11\n\
-     11:\n\
-    \  dead _13, _14\n\
-    \  goto 12\n\
-     12:\n\
-    \  goto 13\n\
-     13:\n\
-    \  goto 16\n\
-     14:\n\
-    \  dead _13, _14\n\
-    \  goto 15\n\
-     15:\n\
-    \  exit branch 1 of #50, goto 18\n\
-     16:\n\
-    \  end of #50\n\
-    \  goto 17\n\
-     17:\n\
-    \  end loans 0\n\
-    \  dead _2, _12\n\
-    \  next\n\
-     18:\n\
-    \  for _15 in standard::list::impl Iterable for List[Element].each(read _0) 19 after 35\n\
-     19:\n\
-    \  loan 2: read read _0 for the loop\n\
-    \  live _16\n\
-    \  _16 = read _15\n\
-    \  _17 = _16\n\
-    \  loan 3: read _17 for the operation\n\
-    \  end loans 3\n\
-    \  _18 = _17 > 5\n\
-    \  branch _18 33 20\n\
-     20:\n\
-    \  dead _17, _18\n\
-    \  goto 21\n\
-     21:\n\
-    \  goto 22\n\
-     22:\n\
-    \  _19 = _16\n\
-    \  loan 4: read _19 for the operation\n\
-    \  end loans 4\n\
-    \  _20 = _19 > 4\n\
-    \  branch _20 31 23\n\
-     23:\n\
-    \  dead _19, _20\n\
-    \  goto 24\n\
-     24:\n\
-    \  goto 25\n\
-     25:\n\
-    \  _21 = _16\n\
-    \  loan 5: read _21 for the operation\n\
-    \  end loans 5\n\
-    \  _22 = _21 > 3\n\
-    \  branch _22 29 26\n\
-     26:\n\
-    \  dead _21, _22\n\
-    \  goto 27\n\
-     27:\n\
-    \  goto 28\n\
-     28:\n\
-    \  end loans 2\n\
-    \  dead _16\n\
-    \  next\n\
-     29:\n\
-    \  dead _21, _22\n\
-    \  goto 30\n\
-     30:\n\
-    \  _23 = Err(error: _16)\n\
-    \  _24 = _23\n\
-    \  dead _23\n\
-    \  end loans 2\n\
-    \  dead _16\n\
-    \  exit iteration of #95, return _24\n\
-     31:\n\
-    \  dead _19, _20\n\
-    \  goto 32\n\
-     32:\n\
-    \  end loans 2\n\
-    \  dead _16\n\
-    \  next\n\
-     33:\n\
-    \  dead _17, _18\n\
-    \  goto 34\n\
-     34:\n\
-    \  end loans 2\n\
-    \  dead _16\n\
-    \  exit iteration of #95, goto 35\n\
-     35:\n\
-    \  _25 = Ok(value: 0)\n\
-    \  _26 = _25\n\
-    \  dead _25\n\
-    \  return _26";
-  expect
-    "an assignment evaluates its value, then its target, and a compound assignment its operand \
-     first"
-    Fixtures.Mir.assignment_evaluates_its_value_then_its_target_and
-    "0:\n\
-    \  loan 0: read mut _1 for the operation\n\
-    \  end loans 0\n\
-    \  _2 = app::main::step(mut _1, 2)\n\
-    \  loan 1: read _2 for the operation\n\
-    \  loan 2: read mut _0 for the operation\n\
-    \  loan 3: read mut _1 for the operation\n\
-    \  end loans 3\n\
-    \  _3 = app::main::step(mut _1, 1)\n\
-    \  end loans 2\n\
-    \  _4 = lend standard::core::Index.at(mut _0, _3)\n\
-    \  loan 4: mut mut _0 for the statement\n\
-    \  end loans 1\n\
-    \  _4 = _2\n\
-    \  end loans 4\n\
-    \  dead _2, _3, _4\n\
-    \  loan 5: read mut _1 for the operation\n\
-    \  end loans 5\n\
-    \  _5 = app::main::step(mut _1, 4)\n\
-    \  live _6\n\
-    \  _6 = _5\n\
-    \  loan 6: read _6 for the operation\n\
-    \  loan 7: read mut _0 for the operation\n\
-    \  loan 8: read mut _1 for the operation\n\
-    \  end loans 8\n\
-    \  _7 = app::main::step(mut _1, 3)\n\
-    \  end loans 7\n\
-    \  _8 = lend standard::core::Index.at(mut _0, _7)\n\
-    \  loan 9: mut mut _0 for the statement\n\
-    \  end loans 6\n\
-    \  _9 = _6\n\
-    \  _10 = add(take _8, _9)\n\
-    \  _8 = _10\n\
-    \  end loans 9\n\
-    \  dead _5, _6, _7, _8, _9, _10\n\
-    \  return ()";
-  expect "a match tests its arms in order, and a guard that fails ends the arm's bindings"
-    Fixtures.Mir.match_tests_its_arms_in_order_and_a_guard_that
-    "0:\n\
-    \  _2 = _0 is Some\n\
-    \  branch _2 1 5\n\
-     1:\n\
-    \  live _3\n\
-    \  _3 = read _0.(Some).value\n\
-    \  goto 2\n\
-     2:\n\
-    \  matched\n\
-    \  loan 0: read read _0 for the operation\n\
-    \  _4 = _3\n\
-    \  loan 1: read _4 for the operation\n\
-    \  end loans 1\n\
-    \  _5 = _4 > 0\n\
-    \  branch _5 11 3\n\
-     3:\n\
-    \  dead _4, _5\n\
-    \  goto 4\n\
-     4:\n\
-    \  end loans 0\n\
-    \  dead _3\n\
-    \  goto 5\n\
-     5:\n\
-    \  _6 = _0 is Some\n\
-    \  branch _6 9 6\n\
-     6:\n\
-    \  _7 = _0 is None\n\
-    \  branch _7 8 7\n\
-     7:\n\
-    \  unreachable\n\
-     8:\n\
-    \  goto 10\n\
-     9:\n\
-    \  goto 10\n\
-     10:\n\
-    \  matched\n\
-    \  _1 = 0\n\
-    \  dead _6, _7\n\
-    \  goto 13\n\
-     11:\n\
-    \  dead _4, _5\n\
-    \  goto 12\n\
-     12:\n\
-    \  end loans 0\n\
-    \  _1 = _3\n\
-    \  dead _3\n\
-    \  dead _2\n\
-    \  goto 13\n\
-     13:\n\
-    \  _8 = _1\n\
-    \  dead _1\n\
-    \  return _8";
-  expect "a let with an else tests its pattern, and the else leaves the block"
-    Fixtures.Mir.let_with_an_else_tests_its_pattern_and_the_else
-    "0:\n\
-    \  _1 = _0 is Some\n\
-    \  branch _1 2 1\n\
-     1:\n\
-    \  dead _1\n\
-    \  return 1\n\
-     2:\n\
-    \  live _2\n\
-    \  _2 = read _0.(Some).value\n\
-    \  goto 3\n\
-     3:\n\
-    \  dead _1\n\
-    \  _3 = _2\n\
-    \  dead _2\n\
-    \  return _3";
-  expect "a short-circuit operator jumps past its right operand"
-    Fixtures.Mir.short_circuit_operator_jumps_past_its_right
-    "0:\n\
-    \  branch _0 1 3\n\
-     1:\n\
-    \  branch _1 3 2\n\
-     2:\n\
-    \  _2 = true\n\
-    \  goto 4\n\
-     3:\n\
-    \  _2 = false\n\
-    \  goto 4\n\
-     4:\n\
-    \  _3 = _2\n\
-    \  dead _2\n\
-    \  return _3";
-  expect "a range loop copies its counter, steps it at continue, and ends at an inclusive stop"
-    Fixtures.Mir.range_loop_copies_its_counter_steps_it_at_continue
-    "0:\n\
-    \  _1 = 0\n\
-    \  live _2\n\
-    \  _2 = _1\n\
-    \  goto 1\n\
-     1:\n\
-    \  dead _1\n\
-    \  _3 = _0\n\
-    \  for _4 in 0..=_3 3 after 2\n\
-     2:\n\
-    \  dead _3\n\
-    \  _11 = _2\n\
-    \  dead _2\n\
-    \  return _11\n\
-     3:\n\
-    \  live _5\n\
-    \  _5 = _4\n\
-    \  _6 = _5\n\
-    \  loan 0: read _6 for the operation\n\
-    \  end loans 0\n\
-    \  _7 = _6 == 3\n\
-    \  branch _7 7 4\n\
-     4:\n\
-    \  dead _6, _7\n\
-    \  goto 5\n\
-     5:\n\
-    \  goto 6\n\
-     6:\n\
-    \  live _8\n\
-    \  _8 = _5\n\
-    \  loan 1: read _8 for the operation\n\
-    \  end loans 1\n\
-    \  _9 = _8\n\
-    \  _10 = add(take _2, _9)\n\
-    \  _2 = _10\n\
-    \  dead _8, _9, _10\n\
-    \  dead _5\n\
-    \  next\n\
-     7:\n\
-    \  dead _6, _7\n\
-    \  goto 8\n\
-     8:\n\
-    \  dead _5\n\
-    \  next";
-  expect "a loop over a yielding call runs its body for each part"
-    Fixtures.Mir.loop_over_a_yielding_call_runs_its_body_for_each
-    "0:\n\
-    \  _1 = 0\n\
-    \  live _2\n\
-    \  _2 = _1\n\
-    \  goto 1\n\
-     1:\n\
-    \  dead _1\n\
-    \  for _3 in standard::list::impl Iterable for List[Element].each(read _0) 2 after 8\n\
-     2:\n\
-    \  loan 0: read read _0 for the loop\n\
-    \  live _4\n\
-    \  _4 = read _3\n\
-    \  _5 = _4\n\
-    \  loan 1: read _5 for the operation\n\
-    \  end loans 1\n\
-    \  _6 = _5 < 0\n\
-    \  branch _6 6 3\n\
-     3:\n\
-    \  dead _5, _6\n\
-    \  goto 4\n\
-     4:\n\
-    \  goto 5\n\
-     5:\n\
-    \  live _7\n\
-    \  _7 = _4\n\
-    \  loan 2: read _7 for the operation\n\
-    \  end loans 2\n\
-    \  _8 = _7\n\
-    \  _9 = add(take _2, _8)\n\
-    \  _2 = _9\n\
-    \  dead _7, _8, _9\n\
-    \  end loans 0\n\
-    \  dead _4\n\
-    \  next\n\
-     6:\n\
-    \  dead _5, _6\n\
-    \  goto 7\n\
-     7:\n\
-    \  end loans 0\n\
-    \  dead _4\n\
-    \  goto 8\n\
-     8:\n\
-    \  _10 = _2\n\
-    \  dead _2\n\
-    \  return _10";
-  expect "a lambda's captures and parameters are its own locals"
-    Fixtures.Mir.lambdas_captures_and_parameters_are_its_own_locals
-    "0:\n\
-    \  _1 = lambda 0\n\
-    \  _2 = app::main::apply(_1)\n\
-    \  _3 = _2\n\
-    \  dead _1, _2\n\
-    \  return _3\n\n\
-     lambda 0\n\
-     0:\n\
-    \  _2 = _1\n\
-    \  loan 0: read _2 for the operation\n\
-    \  _3 = _0\n\
-    \  end loans 0\n\
-    \  _4 = add(_2, _3)\n\
-    \  _5 = _4\n\
-    \  dead _1\n\
-    \  dead _2, _3, _4\n\
-    \  return _5"
+  test "an assignment evaluates its value, then its target" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.assignment_evaluates_its_value_then_its_target_and in
+      let order =
+        List.filter_map
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Call
+                {
+                  call =
+                    {
+                      callee = Function { path = Top { name = "step"; _ }; _ };
+                      arguments = [ _; Passed { value = Constant { value = Integer next; _ }; _ } ];
+                      _;
+                    };
+                  _;
+                } ->
+                Some (Z.to_int next)
+            | _ -> None)
+          (statements mir.body)
+      in
+      if order <> [ 2; 1; 4; 3 ] then
+        fail "the calls run in the order %s" (String.concat ", " (List.map string_of_int order)));
+  test "a short-circuit operator evaluates its right operand only where the left does not decide"
+    (fun () ->
+      let mir = mir_of_g Fixtures.Mir.short_circuit_operator_jumps_past_its_right in
+      let body = mir.body in
+      let a = named body "a" and b = named body "b" in
+      let negates (basic : Mir.basic_block) =
+        List.exists
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Assign { value = Not value; _ } -> List.mem b (operand_locals value)
+            | _ -> false)
+          basic.statements
+      in
+      match
+        List.find_map
+          (fun (_, terminator) ->
+            match (terminator : Mir.terminator) with
+            | Branch { condition; yes; no; _ } when List.mem a (operand_locals condition) ->
+                Some (yes, no)
+            | _ -> None)
+          (terminators body)
+      with
+      | None -> fail "nothing branches on a"
+      | Some (yes, no) ->
+          let from_yes = reachable body ~from:[ yes ] ()
+          and from_no = reachable body ~from:[ no ] () in
+          Array.iteri
+            (fun index basic ->
+              if negates basic && (from_no.(index) || not from_yes.(index)) then
+                fail "block %d evaluates !b on a path where a is false" index)
+            body.blocks);
+  test "a range loop binds a copy of its counter, and a continue ends the iteration" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.range_loop_copies_its_counter_steps_it_at_continue in
+      let body = mir.body in
+      let i = named body "i" in
+      match
+        List.find_map
+          (fun (_, terminator) ->
+            match (terminator : Mir.terminator) with
+            | For { iteration = Range { inclusive; _ }; part; blocks; _ } ->
+                Some (inclusive, part, blocks)
+            | _ -> None)
+          (terminators body)
+      with
+      | None -> fail "no range loop"
+      | Some (inclusive, part, blocks) ->
+          if not inclusive then fail "the range is not inclusive";
+          if body.locals.(i).kind = Temporary || i = part then fail "i is the loop's counter";
+          let ends =
+            List.filter (fun block -> body.blocks.(block).terminator = Iteration_end) blocks
+          in
+          if List.length ends < 2 then fail "the continue does not end the iteration");
+  test "a loop over a yielding call runs its body for each part, and a break leaves it" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.loop_over_a_yielding_call_runs_its_body_for_each in
+      let body = mir.body in
+      match
+        List.find_map
+          (fun (_, terminator) ->
+            match (terminator : Mir.terminator) with
+            | For { iteration = Yielding _; blocks; after; _ } -> Some (blocks, after)
+            | _ -> None)
+          (terminators body)
+      with
+      | None -> fail "no loop over a yielding call"
+      | Some (blocks, after) ->
+          if
+            not
+              (List.exists
+                 (fun block ->
+                   body.blocks.(block).terminator <> Iteration_end
+                   && List.mem after (Mir.successors body.blocks.(block).terminator))
+                 blocks)
+          then fail "the break does not leave the loop");
+  test "a let with an else binds its pattern only where it matches" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.let_with_an_else_tests_its_pattern_and_the_else in
+      let body = mir.body in
+      let x = named body "x" in
+      let binds (basic : Mir.basic_block) =
+        List.exists
+          (fun (statement : Mir.statement) ->
+            match statement.kind with Live locals -> List.mem x locals | _ -> false)
+          basic.statements
+      in
+      let returns_one = function
+        | Mir.Return (Some (Constant { value = Integer one; _ })) -> Z.equal one Z.one
+        | _ -> false
+      in
+      match List.find_opt (fun (_, terminator) -> returns_one terminator) (terminators body) with
+      | None -> fail "the else does not return 1"
+      | Some (else_return, _) ->
+          let from_entry = reachable body ~from:[ 0 ] () in
+          Array.iteri
+            (fun index basic ->
+              if
+                from_entry.(index) && binds basic
+                && (reachable body ~from:[ index ] ()).(else_return)
+              then fail "block %d binds x on the way to the else" index)
+            body.blocks;
+          if not (Array.exists binds body.blocks) then fail "x is never bound");
+  test "a match guard that fails ends its arm's bindings before the next arm's test" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.match_tests_its_arms_in_order_and_a_guard_that in
+      let body = mir.body in
+      let x = named body "x" in
+      (* x, and the temporaries that hold its value. *)
+      let holding_x =
+        x
+        :: List.filter_map
+             (fun (statement : Mir.statement) ->
+               match statement.kind with
+               | Assign
+                   { target = { root = Local held; projections = [] }; value = Operand value; _ }
+                 when operand_locals value = [ x ] ->
+                   Some held
+               | _ -> None)
+             (statements body)
+      in
+      let guard =
+        List.find_map
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Assign
+                {
+                  target = { root = Local result; projections = [] };
+                  value = Compare { left; _ };
+                  _;
+                }
+              when List.exists (fun local -> List.mem local holding_x) (operand_locals left) ->
+                Some result
+            | _ -> None)
+          (statements body)
+      in
+      let failed =
+        List.find_map
+          (fun (_, terminator) ->
+            match (terminator : Mir.terminator) with
+            | Branch { condition; no; _ }
+              when Some (operand_locals condition) = Option.map (fun g -> [ g ]) guard ->
+                Some no
+            | _ -> None)
+          (terminators body)
+      in
+      match failed with
+      | None -> fail "nothing branches on the guard"
+      | Some failed ->
+          (* Each path from the failed guard ends x before it tests a
+             pattern again. *)
+          let rec walk visited block =
+            if not (List.mem block visited) then
+              let basic = body.blocks.(block) in
+              let rec go = function
+                | [] -> (
+                    match basic.terminator with
+                    | Switch_variant _ -> fail "block %d tests the next arm with x bound" block
+                    | terminator -> List.iter (walk (block :: visited)) (Mir.successors terminator))
+                | (statement : Mir.statement) :: rest -> (
+                    match statement.kind with
+                    | Dead locals when List.mem x locals -> ()
+                    | Assign { value = Is_variant _; _ } ->
+                        fail "block %d tests the next arm with x bound" block
+                    | _ -> go rest)
+              in
+              go basic.statements
+          in
+          walk [] failed);
+  test "a lambda's captures and parameters are locals of its body" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.lambdas_captures_and_parameters_are_its_own_locals in
+      match mir.lambdas with
+      | [| lambda |] ->
+          if lambda.parameters <> [ named lambda "value" ] then
+            fail "the lambda's parameter is not value";
+          if lambda.captures <> [ named lambda "offset" ] then
+            fail "the lambda does not capture offset";
+          let offset = named mir.body "offset" in
+          if
+            not
+              (List.exists
+                 (fun (statement : Mir.statement) ->
+                   match statement.kind with
+                   | Assign { value = Lambda { captures = [ capture ]; _ }; _ } ->
+                       place_locals capture.place = [ offset ]
+                   | _ -> false)
+                 (statements mir.body))
+          then fail "the lambda value does not capture g's offset"
+      | lambdas -> fail "%d lambdas" (Array.length lambdas));
+  test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
+      let exits =
+        List.filter_map
+          (fun (_, terminator) ->
+            match (terminator : Mir.terminator) with
+            | Exit_tasks { tasks = left :: _; exit } ->
+                Some
+                  ( (match left.task with Branch _ -> "branch" | Iteration _ -> "iteration"),
+                    match exit with
+                    | Exit_return _ -> "return"
+                    | Exit_to _ -> "jump"
+                    | Exit_iteration -> "next" )
+            | _ -> None)
+          (terminators mir.body)
+      in
+      List.iter
+        (fun expected ->
+          if not (List.mem expected exits) then
+            fail "no exit from a %s that is a %s" (fst expected) (snd expected))
+        [ ("branch", "return"); ("branch", "jump"); ("iteration", "return"); ("iteration", "jump") ])

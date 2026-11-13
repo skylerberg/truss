@@ -173,12 +173,11 @@ let check context (graph : Graph.t) =
       let at = span context point.origin in
       match point.action with
       | Read place | Mutate place -> check_not_moved index place
-      | Move { place; use; type_; _ } -> (
+      | Move { place; type_; _ } -> (
           check_not_moved index place;
           match verdicts.(index) with
-          | Some Moves -> context.moves <- use :: context.moves
           | Some (Refused refuse) -> refuse context at type_
-          | Some Reads | None -> ())
+          | Some Moves | Some Reads | None -> ())
       | Move_out_of_lent type_ ->
           report context Not_owned at
             ~fixes:
@@ -208,9 +207,10 @@ let check context (graph : Graph.t) =
                 "`%s` is moved out and not reinitialized. The caller owns it, so assign it a value \
                  before the function returns."
                 moved)
-      | Task_end { first; limit } ->
-          check_reinitialized index
-            ~moved_within:(fun point -> first <= point && point < limit)
+      | Task_end { points } ->
+          let within = Hashtbl.create (List.length points) in
+          List.iter (fun point -> Hashtbl.replace within point ()) points;
+          check_reinitialized index ~moved_within:(Hashtbl.mem within)
             ~roots:(fun _ -> true)
             ~at:None
             (fun moved _ ->

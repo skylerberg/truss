@@ -265,7 +265,11 @@ Moving a definition changes only that file.
 
 ## Code run while compiling
 
-A constant that cannot be folded, a tagged template's check, and a call
+A constant folds where running its MIR on static data gives exactly its
+value: literals, other constants, operations on numbers and `Bool`s that
+stay in range, constructors, arrays, pushes onto a storage, and calls of
+functions that fold the same way, to a fixed depth and number of steps. A
+constant that cannot be folded, a tagged template's check, and a call
 whose arguments the prover knows run through this same generator, as
 compiled code, so there is one meaning of Truss code to keep correct. It is
 built for the host with the target's `USize`, so a 32-bit target's results

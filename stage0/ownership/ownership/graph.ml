@@ -34,7 +34,6 @@ type action =
   | Read of Place.t  (** The place is read or borrowed read-only. *)
   | Move of {
       place : Place.t;
-      use : Core.id;  (** The [Use] node that moves the value. *)
       type_ : Types.ty;
       returned : bool;  (** The moved value is the function's return value. *)
       captured : bool;
@@ -48,7 +47,7 @@ type action =
   | Scope_end of Core.local list
       (** These locals go out of scope: a loop's pattern variables after the loop, a [match] arm's
           bindings after the arm, and a lambda's parameters at the end of its body. *)
-  | Task_end of { first : int; limit : int }
+  | Task_end of { points : int list }
       (** The end of a [concurrent] branch, whose points are [first] up to [limit], exclusive. If
           another branch exits the block early, the code after the block does not run. So by this
           point the branch must have reinitialized every place that it moved out of a [mut] borrow.
@@ -87,8 +86,6 @@ type action =
 
 (* The points numbered [first] up to [limit], exclusive. Points are numbered
    in creation order, so the points of one statement are contiguous. *)
-type range = { first : int; limit : int }
-
 type point = {
   action : action;
   origin : Core.origin;
@@ -96,11 +93,11 @@ type point = {
   mutable successors : int list;
 }
 
-type fork_join_block = { keyword : string; branches : range list }
+type fork_join_block = { keyword : string; branches : int list list }
 (** A [parallel] or [concurrent] block: a fork-join of its branches, which may run at the same time.
     [keyword] is "parallel" or "concurrent", for error messages. *)
 
-type fork_join_loop = { keyword : string; body : range; bound : Core.local list }
+type fork_join_loop = { keyword : string; body : int list; bound : Core.local list }
 (** A [parallel for] or [concurrent for]: a fork-join of its iterations, which may run at the same
     time. [body] is the points of the loop body, and [bound] is the locals that the loop's pattern
     binds. *)
@@ -353,20 +350,13 @@ let is_captured builder (place : Place.t) =
   | Constant _ | Environment -> false
 
 (* The value at a place is read: copied, or moved out of it. *)
-let use builder (place : Mir.place) type_ node origin ~returned =
+let use builder (place : Mir.place) type_ origin ~returned =
   match tracked builder place with
   | Some tracked ->
       if builder.plain type_ then emit_ builder (Read tracked) origin
       else
         emit_ builder
-          (Move
-             {
-               place = tracked;
-               use = node;
-               type_;
-               returned;
-               captured = is_captured builder tracked;
-             })
+          (Move { place = tracked; type_; returned; captured = is_captured builder tracked })
           origin
   | None ->
       if is_lent_part builder place && not (builder.plain type_) then
@@ -376,7 +366,7 @@ let use builder (place : Mir.place) type_ node origin ~returned =
    the place. A [mut] borrow starts where its operation runs. *)
 let evaluate builder ?(returned = false) (operand : Mir.operand) =
   match operand with
-  | Use { place; type_; node; origin } -> use builder place type_ node origin ~returned
+  | Use { place; type_; origin; _ } -> use builder place type_ origin ~returned
   | Borrow { place; mode = Read | Own; origin; _ } -> (
       match place.root with
       | Local local when List.mem local builder.aliases -> ()
@@ -705,9 +695,7 @@ let loans_of builder (borrowed : Mir.operand) mode (duration : Mir.loan_duration
   in
   List.map (fun borrowed : loan -> { borrowed; mode; duration }) (operand_borrows builder borrowed)
 
-type fork = { concurrent : bool; mutable branches : range list; mutable first : int }
-
-let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.statement) =
+let statement builder ~is_var (statement : Mir.statement) =
   let origin = statement.origin in
   match statement.kind with
   | Live locals ->
@@ -737,9 +725,9 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
       match (local_info builder local).kind with
       | Temporary -> (
           match value with
-          | Operand (Use { place; type_; node; origin = at })
+          | Operand (Use { place; type_; origin = at; _ })
             when List.mem local builder.returned && Option.is_some (tracked builder place) ->
-              use builder place type_ node at ~returned:true;
+              use builder place type_ at ~returned:true;
               hold builder target { nothing with views = views_of_copy builder place }
           | _ -> hold builder target (rvalue builder value origin))
       | Lent _ -> (
@@ -849,7 +837,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
   | Pull { destination; cursor } ->
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
       hold builder destination { nothing with views = views_of_copy builder cursor }
-  | Assert value | Echo value -> evaluate builder value
+  | Assert { condition = value; _ } | Echo value -> evaluate builder value
   | Provide { provided; _ } ->
       List.iter
         (fun (provided : Mir.provided) ->
@@ -869,30 +857,6 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
       emit_ builder ~starts:(loan, loans) (Bind []) origin;
       if duration = Loop_body then Hashtbl.replace builder.loop_entries builder.block builder.count
   | Loan_end loans -> emit_ builder ~ends:loans (Bind []) origin
-  | Fork_start { fork; concurrent } ->
-      (match Hashtbl.find_opt forks fork with
-      | Some open_fork ->
-          if open_fork.concurrent then
-            emit_ builder (Task_end { first = open_fork.first; limit = builder.count }) origin;
-          open_fork.branches <-
-            open_fork.branches @ [ { first = open_fork.first; limit = builder.count } ];
-          open_fork.first <- builder.count
-      | None -> Hashtbl.replace forks fork { concurrent; branches = []; first = builder.count });
-      emit_ builder (Bind []) origin
-  | Fork_end { fork } -> (
-      match Hashtbl.find_opt forks fork with
-      | Some open_fork ->
-          let limit = builder.count in
-          if open_fork.concurrent then
-            emit_ builder (Task_end { first = open_fork.first; limit }) origin;
-          builder.fork_join_blocks <-
-            {
-              keyword = (if open_fork.concurrent then "concurrent" else "parallel");
-              branches = open_fork.branches @ [ { first = open_fork.first; limit } ];
-            }
-            :: builder.fork_join_blocks;
-          Hashtbl.remove forks fork
-      | None -> ())
   | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
 
 (* The points of a body: one run of points for each block, linked as its
@@ -902,19 +866,20 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
   builder.returned <- returned_temporaries body;
   builder.aliases <- [];
   builder.binding <- [];
-  let forks = Hashtbl.create 4 in
   let blocks = Array.length body.blocks in
   let firsts = Array.make blocks (-1) and lasts = Array.make blocks (-1) in
   let heads = Hashtbl.create 4 in
   let pending_edges = ref [] in
   let task_ends = Hashtbl.create 1 in
+  let task_points = Hashtbl.create 1 in
+  let parallel_loops = ref [] in
   Array.iteri
     (fun index (block : Mir.basic_block) ->
       builder.last <- (if index = 0 then Some entry else None);
       builder.block <- index;
       let first = builder.count in
       if index > 0 then emit_ builder (Bind []) block.terminator_origin;
-      List.iter (statement builder forks ~is_var) block.statements;
+      List.iter (statement builder ~is_var) block.statements;
       (* The other tasks of an early exit's group go on from the task's end,
          with the scopes around the task still open. The exit then ends those
          scopes once each task has ended, before it is taken. *)
@@ -926,7 +891,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       (match block.terminator with
       | Exit_tasks { tasks; _ } ->
           List.iter
-            (fun (left : Mir.left_task) -> List.iter (statement builder forks ~is_var) left.ends)
+            (fun (left : Mir.left_task) -> List.iter (statement builder ~is_var) left.ends)
             tasks
       | _ -> ());
       let origin = block.terminator_origin in
@@ -934,7 +899,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       | Branch { condition; _ } -> evaluate builder condition
       | Switch_variant { place; _ } ->
           Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place)
-      | For { iteration; part; body = inside; after; loop } -> (
+      | For { iteration; part; body = inside; after; loop; _ } -> (
           let part_place = { Mir.root = Local part; projections = [] } in
           (match iteration with
           | Yielding called ->
@@ -953,14 +918,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
           Hashtbl.replace heads index head;
           pending_edges := (head, `Block inside) :: (head, `Block after) :: !pending_edges;
           match loop.schedule with
-          | Parallel_loop | Concurrent_loop ->
-              builder.fork_join_loops <-
-                {
-                  keyword = (if loop.schedule = Parallel_loop then "parallel" else "concurrent");
-                  body = { first = 0; limit = -inside };
-                  bound = [];
-                }
-                :: builder.fork_join_loops
+          | Parallel_loop | Concurrent_loop -> parallel_loops := index :: !parallel_loops
           | Sequential -> ())
       | Yield { mode; part; _ } ->
           (* A constructor built where it is yielded lends each place among
@@ -1026,7 +984,11 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
               | _ -> ())
           | None -> ());
           ending origin
-      | Goto _ | Exit_tasks _ | Iteration_end | Unreachable | Todo -> ());
+      | Join { fork; _ } ->
+          let ended = emit builder (Bind []) origin in
+          Hashtbl.replace task_points (fork, index) ended
+      | Goto _ | Fork _ | Exit_tasks _ | Iteration_end | Unreachable | Written_unreachable | Todo ->
+          ());
       firsts.(index) <- (if index = 0 then entry else first);
       lasts.(index) <- (match builder.last with Some last -> last | None -> first))
     body.blocks;
@@ -1046,25 +1008,60 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
           List.iter (fun target -> link builder from firsts.(target)) (Mir.successors terminator))
     body.blocks;
   Hashtbl.iter (fun _ (before_exit, target) -> link builder before_exit firsts.(target)) task_ends;
-  List.iter (fun (from, `Block target) -> link builder from firsts.(target)) !pending_edges;
-  (* A parallel loop's body is the points of the blocks it runs. *)
-  builder.fork_join_loops <-
-    List.map
-      (fun (loop : fork_join_loop) ->
-        if loop.body.limit < 0 then (
-          let inside = -loop.body.limit in
-          let points = ref [] and visited = Hashtbl.create 8 in
-          let rec visit block =
-            if not (Hashtbl.mem visited block) then begin
-              Hashtbl.replace visited block ();
-              points := firsts.(block) :: lasts.(block) :: !points;
-              match body.blocks.(block).terminator with
-              | Iteration_end -> ()
-              | For { after; _ } -> visit after
-              | terminator -> List.iter visit (Mir.successors terminator)
-            end
+  (* The points of blocks, in order. A block's points are consecutive. *)
+  let points_of ?(from = fun _ -> None) blocks =
+    List.sort_uniq compare
+      (List.concat_map
+         (fun block ->
+           let first =
+             match from block with
+             | Some entered -> max firsts.(block) entered
+             | None -> firsts.(block)
+           in
+           List.init (max 0 (lasts.(block) - first + 1)) (fun offset -> first + offset))
+         blocks)
+  in
+  (* A [parallel] or [concurrent] block's branches are the points of their
+     blocks. A [concurrent] branch's task ends at its [Join], whose point
+     then checks what the branch moved. *)
+  Array.iter
+    (fun (block : Mir.basic_block) ->
+      match block.terminator with
+      | Fork { fork; concurrent; branches; _ } ->
+          let branches =
+            List.map
+              (fun (branch : Mir.branch) ->
+                let points = points_of branch.blocks in
+                if concurrent then
+                  List.iter
+                    (fun block ->
+                      Option.iter
+                        (fun ended ->
+                          let draft = Hashtbl.find builder.drafts ended in
+                          Hashtbl.replace builder.drafts ended
+                            {
+                              draft with
+                              draft_action =
+                                Task_end
+                                  { points = List.filter (fun point -> point < ended) points };
+                            })
+                        (Hashtbl.find_opt task_points (fork, block)))
+                    branch.blocks;
+                points)
+              branches
           in
-          visit inside;
+          builder.fork_join_blocks <-
+            { keyword = (if concurrent then "concurrent" else "parallel"); branches }
+            :: builder.fork_join_blocks
+      | _ -> ())
+    body.blocks;
+  List.iter (fun (from, `Block target) -> link builder from firsts.(target)) !pending_edges;
+  (* A parallel loop's body is the points of the blocks it runs, from where
+     the loop's loan starts. *)
+  List.iter
+    (fun index ->
+      match body.blocks.(index) with
+      | { terminator = For { body = inside; blocks; loop; _ }; _ } ->
           let bound =
             List.concat_map
               (fun (statement : Mir.statement) ->
@@ -1073,15 +1070,19 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
                 | _ -> [])
               body.blocks.(inside).statements
           in
-          let first = List.fold_left min max_int !points in
-          let first =
-            match Hashtbl.find_opt builder.loop_entries inside with
-            | Some entered -> max first entered
-            | None -> first
-          in
-          { loop with body = { first; limit = List.fold_left max 0 !points + 1 }; bound })
-        else loop)
-      builder.fork_join_loops
+          builder.fork_join_loops <-
+            {
+              keyword = (if loop.schedule = Parallel_loop then "parallel" else "concurrent");
+              body =
+                points_of
+                  ~from:(fun block ->
+                    if block = inside then Hashtbl.find_opt builder.loop_entries inside else None)
+                  blocks;
+              bound;
+            }
+            :: builder.fork_join_loops
+      | _ -> ())
+    (List.rev !parallel_loops)
 
 (* The loans live at each point: a forward pass from the entries. *)
 let live_loans builder =

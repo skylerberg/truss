@@ -64,8 +64,6 @@ val statement_exists :
   bool
 (** Whether a statement, or an expression or statement in it, satisfies its test. *)
 
-val tasks_capability : Path.t
-
 (** How code can use [Tasks]. *)
 type tasks_use =
   | Uses_tasks  (** It contains [concurrent] code, or a call in it uses [Tasks]. *)
@@ -81,7 +79,11 @@ val can_use_tasks : ?solved:(int -> Types.capability_set) -> Core.block -> bool
 (** Whether code can use [Tasks]. An implementation that is provided [mut] around such code is a
     monitor. *)
 
-val yields_by_position : Core.block -> bool
-(** Whether a yielding method yields by position: its body is one [for] loop over a range of
-    integers, and the loop body is one [yield]. The iterations share no state, so a [parallel for]
-    or a [concurrent for] over the method can run the range loop's iterations at the same time. *)
+val storage_index : Core.expression -> Core.place option
+(** If an expression is an index of a [List], a [Slice], or an [Array], the collection it indexes.
+    An element of one of these is a place; an index of any other collection is a call of the
+    collection's [at], which lends the element. *)
+
+val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
+(** A callee with what a call through a function value gives changed, such as the core form's
+    operand to the MIR's; [None] where [change] gives none. *)

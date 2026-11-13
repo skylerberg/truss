@@ -1,6 +1,7 @@
 (library
  (name ownership)
  (libraries
+  compiler_bug
   query
   phases
   path

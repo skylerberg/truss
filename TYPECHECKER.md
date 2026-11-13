@@ -217,8 +217,8 @@ prover and code generation read, including those `?` desugars to.
 The ownership check enforces the rules of SPECIFICATION.md on modes, moves,
 and views within each function. It prevents use after move, dangling views,
 changes to a borrowed place, and data races. It runs after the type checker,
-in `stage0/ownership`, and reads the definition's MIR ([MIR.md](MIR.md)) and
-its callees' interfaces.
+in `stage0/ownership`, and reads the definition's MIR ([MIR.md](MIR.md)), its
+callees' interfaces, and the facts their MIR states about their `yield`s.
 
 It builds a graph of points from the MIR, each one action on one place, and
 runs three dataflow analyses: the places that may have been moved, the views

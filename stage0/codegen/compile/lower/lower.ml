@@ -38,33 +38,32 @@ let any_table = Generated.any_table
    may arrive holding nothing: [fill_defaults] gives that one an owner.
    Gives each one's local, if it has one, with its mode, its type, and for
    one with a default, its bit in the mask of defaults passed. *)
-let bind_parameters ?how st (parameters : Core.parameter list) =
+let bind_parameters ?how st (body : Mir.body) =
   let defaults = ref 0 in
   List.map
-    (fun (parameter : Core.parameter) ->
-      let ty = ground st parameter.type_ in
+    (fun local ->
+      let mode, _, type_ = Mir_form.parameter_of body local in
+      let ty = ground st type_ in
       let bit =
         Option.map
           (fun _ ->
             incr defaults;
             !defaults - 1)
-          parameter.default
+          (List.assoc_opt local body.defaults)
       in
       let arrives, place =
-        Lowering.parameter st ?how
-          ~owned:(parameter.mode = Own && bit = None)
-          (Monomorphic.mode parameter.mode) ty
+        Lowering.parameter st ?how ~owned:(mode = Own && bit = None) (Monomorphic.mode mode) ty
       in
-      (arrives, parameter.mode, ty, bit, place))
-    parameters
+      (arrives, mode, ty, bit, place))
+    body.parameters
 
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
    given, with its defaults filled in. Returns the parameters bound, the
    mask, every parameter's local in order, and each parameter's place. *)
-let begin_body ?how st ~(parameters : Core.parameter list) =
+let begin_body ?how st ~(body : Mir.body) =
   let code = st.frame.code in
-  let bound = bind_parameters ?how st parameters in
+  let bound = bind_parameters ?how st body in
   let places = List.map (fun (_, _, _, _, place) -> place) bound in
   let mask =
     if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
@@ -75,9 +74,7 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   let places =
-    match mask with
-    | Some mask -> Mir_form.fill_defaults st mask (List.combine parameters places)
-    | None -> places
+    match mask with Some mask -> Mir_form.fill_defaults st mask body places | None -> places
   in
   ( List.map (fun (arrives, mode, ty, bit, _) -> (arrives, mode, ty, bit)) bound,
     mask,
@@ -93,10 +90,10 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
 let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
-  let parameters, _ = Mir_form.core_of context yielding.method_ in
+  let body = (Mir_form.mir_of context yielding.method_).body in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
   let bound, mask, parameter_locals, places =
-    begin_body st ~how:(Convention.held context.env) ~parameters
+    begin_body st ~how:(Convention.held context.env) ~body
   in
   let owned =
     List.filter_map
@@ -200,11 +197,11 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
 (* Lowers a function or a test that has a body in source. *)
 let source_code context key ~path ~type_arguments : Lir.t =
   let code = code_of context path type_arguments in
-  let parameters, _ = Mir_form.core_of context path in
+  let body = (Mir_form.mir_of context path).body in
   let st = enter context (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
-  let _, _, parameter_locals, places = begin_body st ~parameters in
+  let _, _, parameter_locals, places = begin_body st ~body in
   Mir_form.lower_code st path ~parameters:places;
   {
     key;

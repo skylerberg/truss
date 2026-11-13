@@ -50,26 +50,6 @@ let is_prefix prefix place =
   in
   steps_prefix (prefix.steps, place.steps)
 
-(* A [List], a [Slice], or an [Array]. An element of one of these is a
-   place. An index of any other collection is a call of the collection's
-   [at], which lends the element. *)
-let is_storage type_ =
-  Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_
-
-(* If the expression is an index of a [List], a [Slice], or an [Array],
-   the collection that is indexed. *)
-let storage_index (value : Core.expression) : Core.place option =
-  match value.kind with
-  | Call
-      {
-        callee = Trait_method { trait; name = "at"; self_type; _ };
-        arguments = Passed { value = Place collection; _ } :: _;
-        _;
-      }
-    when Well_known.is Index trait.trait && is_storage self_type ->
-      Some collection
-  | _ -> None
-
 (* The tracked place that a core place denotes. [None] for a temporary and
    for a part that a call lends, other than an element of a [List], a
    [Slice], or an [Array]. *)
@@ -82,7 +62,7 @@ let rec of_core (place : Core.place) : t option =
   | Constant { path; _ } -> Some { root = Constant path; steps = [] }
   | Field { base; field; _ } -> with_step base (Field field)
   | Lent index -> (
-      match storage_index index with
+      match Core_walk.storage_index index with
       | Some collection -> with_step collection (Element { node = index.id; origin = index.origin })
       | None -> None)
   | Temporary _ -> None

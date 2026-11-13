@@ -6,13 +6,13 @@ type borrowed_argument = { place : Place.t; mode : Types.mode; at : Core.origin;
 type action =
   | Enter
   | Read of Place.t
-  | Move of { place : Place.t; use : Core.id; type_ : Types.ty; returned : bool; captured : bool }
+  | Move of { place : Place.t; type_ : Types.ty; returned : bool; captured : bool }
   | Move_out_of_lent of Types.ty
   | Mutate of Place.t
   | Assign of Place.t
   | Bind of Core.local list
   | Scope_end of Core.local list
-  | Task_end of { first : int; limit : int }
+  | Task_end of { points : int list }
   | Yield_point of { mode : Types.mode; lent : Place.t option list; views : view list }
   | Exit
   | Bind_views of { locals : Core.local list; views : view list }
@@ -28,8 +28,6 @@ type action =
       yielded : bool;
     }
 
-type range = { first : int; limit : int }
-
 type point = {
   action : action;
   origin : Core.origin;
@@ -37,8 +35,8 @@ type point = {
   mutable successors : int list;
 }
 
-type fork_join_block = { keyword : string; branches : range list }
-type fork_join_loop = { keyword : string; body : range; bound : Core.local list }
+type fork_join_block = { keyword : string; branches : int list list }
+type fork_join_loop = { keyword : string; body : int list; bound : Core.local list }
 
 type t = {
   points : point array;
