@@ -1,6 +1,8 @@
-(* The documents agree with the parser: every example parses, the grammar of
-   SPECIFICATION.md accepts exactly the inputs the parser accepts, and
-   SPECIFICATION.md lists the words the parser recognizes by spelling. *)
+(* The documents agree with the parser. Every example parses. The grammar of
+   SPECIFICATION.md accepts the documents' examples and every Truss file of the
+   repository that the parser accepts, and it rejects inputs the parser
+   rejects. SPECIFICATION.md lists the words the parser recognizes by
+   spelling. *)
 
 open Harness
 open Parse_support
@@ -71,10 +73,24 @@ let () =
     markdown_files
 
 let () =
-  test "the grammar accepts a file" (fun () ->
-      let text = Fixtures.Parser_documents.the_grammar_accepts_a_file in
-      let tokens, _ = Lexer.lex (source text) in
-      if not (Reference.accepts Reference.file (Array.to_list tokens)) then fail "rejected");
+  (* New syntax added to the parser and not to the grammar fails here, since
+     the standard library or a fixture uses it, even when no document's
+     example does. The fixture parser_documents/the_grammar_accepts_a_file.truss
+     holds syntax that nothing else uses. *)
+  test "the grammar accepts every Truss file of the repository that the parser accepts" (fun () ->
+      List.iter
+        (fun path ->
+          let source =
+            Source.create ~path
+              (In_channel.with_open_bin (workspace_path path) In_channel.input_all)
+          in
+          let tokens, lexer_diagnostics = Lexer.lex source in
+          let _, parser_diagnostics = Parser.parse source tokens in
+          if
+            lexer_diagnostics = [] && parser_diagnostics = []
+            && not (Reference.accepts Reference.file (Array.to_list tokens))
+          then fail "the grammar rejects %s" path)
+        (truss_files ()));
   test "the grammar rejects every input the parser rejects" (fun () ->
       List.iter
         (fun text ->

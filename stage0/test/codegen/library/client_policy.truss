@@ -1,0 +1,156 @@
+use standard::http
+use standard::network
+use standard::simulation
+use standard::tasks
+use standard::url
+
+fn redirect(status: UInt16, location: StringSlice) -> http::Response {
+  var response = http::Response.text("", status: http::Status(code: status))
+  mut response.headers.set("Location", value: location)
+  response
+}
+
+fn described(request: own http::Request) -> String
+  uses Handles, Tasks
+{
+  let method = "${request.method}"
+  let cookie = request.headers.get("Cookie").unwrap_or("-").to_string()
+  let authorization = if request.headers.contains("Authorization") { "auth" } else { "-" }
+  let content_type = if request.headers.contains("Content-Type") { "typed" } else { "-" }
+  let body: List[UInt8] = own request.bytes().unwrap_or([])
+  "${method} ${cookie} ${authorization} ${content_type} ${body.length()}"
+}
+
+fn exercised() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8097)).expect("the port is free")
+  let flaky_hits = tasks::Counter.new()
+  let broken_hits = tasks::Counter.new()
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut listener, handler: fn(request, responder) {
+      let target = request.target.copy()
+      let response = if target == "/start" {
+        var response = redirect(302, location: "/middle")
+        mut response.headers.add("Set-Cookie", value: "session=abc; Path=/")
+        response
+      } else if target == "/middle" {
+        redirect(301, location: "http://localhost:8097/final")
+      } else if target == "/see-other" {
+        redirect(303, location: "/final")
+      } else if target == "/temporary" {
+        redirect(307, location: "/final")
+      } else if target == "/loop" {
+        redirect(302, location: "/loop")
+      } else if target == "/elsewhere" {
+        redirect(302, location: "http://127.0.0.1:8097/final")
+      } else if target == "/flaky" {
+        if flaky_hits.add(1) <= 2 {
+          var response = http::Response.text("busy", status: http::Status(code: 503))
+          mut response.headers.set("Retry-After", value: "0")
+          response
+        } else {
+          http::Response.text("recovered")
+        }
+      } else if target == "/broken" {
+        let _ = broken_hits.add(1)
+        http::Response.text("down", status: http::Status(code: 503))
+      } else {
+        http::Response.text(described(own request))
+      }
+      let _ = mut responder.send(own response)
+    })
+    {
+      var plain = http::Client.new()
+      mut seen.push(match mut plain.get("http://localhost:8097/start") {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(error) => "failed: ${error}"
+      })
+      var keeping = http::Client.new(http::ClientOptions(stores_cookies: true))
+      mut seen.push(match mut keeping.get("http://localhost:8097/start") {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(error) => "failed: ${error}"
+      })
+      mut seen.push(match mut keeping.get("http://localhost:8097/final") {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(error) => "failed: ${error}"
+      })
+      var typed = http::Headers.new()
+      mut typed.set("Content-Type", value: "text/plain")
+      mut typed.set("Authorization", value: "Bearer secret")
+      mut seen.push(match mut plain.send(http::Method.Post, url: url::Url"http://localhost:8097/see-other", headers: typed, body: "hello".bytes().to_list()) {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(error) => "failed: ${error}"
+      })
+      mut seen.push(match mut plain.send(http::Method.Post, url: url::Url"http://localhost:8097/temporary", headers: typed, body: "hello".bytes().to_list()) {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(error) => "failed: ${error}"
+      })
+      mut seen.push(match mut plain.send(http::Method.Get, url: url::Url"http://localhost:8097/elsewhere", headers: typed) {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(error) => "failed: ${error}"
+      })
+      mut seen.push(match mut plain.get("http://localhost:8097/loop") {
+        Ok(response) => "${response.status.code}"
+        Err(error) => "${error == http::Error.TooManyRedirects}"
+      })
+      var stopping = http::Client.new(http::ClientOptions(redirects: 0))
+      mut seen.push(match mut stopping.get("http://localhost:8097/start") {
+        Ok(response) => "${response.status.code} ${response.headers.get("Location").unwrap_or("")}"
+        Err(error) => "failed: ${error}"
+      })
+      var retrying = http::Client.new(http::ClientOptions(retry: http::RetryPolicy(attempts: 3)))
+      mut seen.push(match mut retrying.get("http://localhost:8097/flaky") {
+        Ok(response) => "${response.status.code} ${response.text_body().unwrap_or("")} ${flaky_hits.value()}"
+        Err(error) => "failed: ${error}"
+      })
+      mut seen.push(match mut retrying.get("http://localhost:8097/broken") {
+        Ok(response) => "${response.status.code} ${broken_hits.value()}"
+        Err(error) => "failed: ${error}"
+      })
+      mut seen.push(match mut plain.get("http://localhost:8097/broken") {
+        Ok(response) => "${response.status.code} ${broken_hits.value()}"
+        Err(error) => "failed: ${error}"
+      })
+      return seen
+    }
+  }
+}
+
+test "the client follows redirects, keeps cookies when asked, strips credentials across origins, and retries" {
+  provide simulation::World.new() {
+    let seen = exercised()
+    assert seen == [
+      "GET - - - 0",
+      "GET session=abc - - 0",
+      "GET session=abc - - 0",
+      "GET - auth - 0",
+      "POST - auth typed 5",
+      "GET - - typed 0",
+      "true",
+      "302 /middle",
+      "200 recovered 3",
+      "503 3",
+      "503 4",
+    ]
+  }
+}
+
+test "a Set-Cookie parses its attributes" {
+  match http::Cookie.parse("id=a3fWa; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Max-Age=60; Domain=.Example.com; Path=/docs; Secure; HttpOnly; SameSite=Strict") {
+    Ok(cookie) => {
+      assert cookie.name == "id" && cookie.value == "a3fWa"
+      assert cookie.max_age_seconds == Some(60) && cookie.expires is Some(_)
+      assert cookie.domain == Some("example.com") && cookie.path == Some("/docs")
+      assert cookie.is_secure && cookie.is_http_only && cookie.same_site == http::SameSite.Strict
+    }
+    Err(_) => assert false
+  }
+  match http::Cookie.parse("plain=1") {
+    Ok(cookie) => assert cookie.path == None && !cookie.is_secure && cookie.domain == None
+    Err(_) => assert false
+  }
+  assert http::Cookie.parse("no value") is Err(_)
+  assert http::Cookie.parse("=1") is Err(_)
+}

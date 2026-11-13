@@ -1,3 +1,0 @@
-fn f(items: mut List[Int64]) -> Bool {
-  exists item in items => grow(mut items) && item < 0
-}

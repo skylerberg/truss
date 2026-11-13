@@ -60,11 +60,7 @@ type contract = {
   definition : (part * Core.block) option;
 }
 
-type loop_exits = { mutable breaks : frame list; mutable continues : frame list }
-and leaving = { tasks : Core.task list; at : frame; exit : exit_ }
-and exit_ = Returning of Logic.term option | Breaking | Continuing
-
-and frame = {
+type frame = {
   source : source;
   locals : Logic.term Locals.t;
   types : Types.ty Locals.t;
@@ -76,13 +72,11 @@ and frame = {
   checking : bool;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
-  loop : loop_exits option;
   substitution : Types.substitution;
   self_type : Types.ty option;
   yielded : Logic.term option;
   finished : Logic.term option;
   yielded_so_far : Logic.term option;
-  updating : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
 }
 
@@ -109,10 +103,13 @@ type received = {
   advance : frame -> frame;
 }
 
+type passed_place = { read : frame -> Logic.term; write : frame -> Logic.term -> frame }
+
 type passed = {
   position : int;
   mode : Types.mode;
   operand : Core.operand option;
+  passed_place : passed_place option;
   type_ : Types.ty;
   term : Logic.term;
   run : (Logic.term * Logic.term) option;
@@ -145,7 +142,6 @@ type context = {
   mutable values : (Logic.symbol * string) list;
   local_names : (Core.local, string) Hashtbl.t;
   mutable returns : (frame * Logic.term option) list;
-  mutable leaving : leaving list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
   mutable axiomatizing : Logic.symbol list;
@@ -189,6 +185,7 @@ type context = {
   quantifier_facts : (Logic.term, Logic.term list) Hashtbl.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
+  mutable lambda_bodies : (Core.id * (frame -> Logic.term list -> unit)) list;
 }
 
 and open_axiom = {

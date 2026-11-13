@@ -1,0 +1,5 @@
+type Cell(index: USize)
+
+fn count[Cell](items: List[Cell]) -> USize {
+  items.length()
+}

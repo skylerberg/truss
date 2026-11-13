@@ -29,14 +29,14 @@ val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key l
    does not hold: an index, a slice, arithmetic, a shift, and a call of
    the C library. It evaluates no [requires] clause. A build with checks
    does not wait for proofs. [file_name] names the file of each position the
-   program reports, by its module, and is [Workspace.file_path] unless a
+   program reports, and is [Path.show_file] unless a
    driver shows files another way. [want] is told which instances' keys are
    about to be asked for, and adds them to [roots]. [worked_on] says whether a package is one of the
    project's own, whose code a development build never copies into
    another's file; without it, every package but the standard library is. *)
 val create :
   ?checks:bool ->
-  ?file_name:(Path.module_ -> string) ->
+  ?file_name:(Path.file -> string) ->
   want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
   Query.context ->

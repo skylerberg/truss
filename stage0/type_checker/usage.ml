@@ -217,5 +217,5 @@ let definition_diagnostics =
             context.diagnostics
       | _ -> [])
 
-let diagnostics database module_ =
-  Resolve.Names.per_definition database module_ (Query.demand database definition_diagnostics)
+let diagnostics database file =
+  Resolve.Names.per_definition database file (Query.demand database definition_diagnostics)

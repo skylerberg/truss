@@ -44,7 +44,8 @@ fn total_size(paths: Slice[Path]) -> USize
   messages of two senders interleave in any order.
 - `send` returns `Err(SendError.Closed)` on a closed channel. `receive`
   returns the messages a closed channel still holds, and then `None`.
-  `try_receive` never waits.
+  `try_receive` never waits, and `is_closed` tells whether `close` has been
+  called.
 - In a cancelled task, a `send` that would wait returns
   `Err(SendError.Cancelled)`, and a `receive` that would wait returns `None`.
 

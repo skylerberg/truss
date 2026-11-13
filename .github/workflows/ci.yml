@@ -61,7 +61,7 @@ jobs:
       - name: Build, check formatting and truss.opam, and test the compiler
         env:
           TRUSS_SKIP_SUITES: standard_library_tests,prover_tests,database_tests
-        run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest @grammar/runtest
+        run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest @stage0/reference/runtest
 
       - name: Check that truss.opam matches dune-project
         run: git diff --exit-code truss.opam

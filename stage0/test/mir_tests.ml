@@ -47,7 +47,11 @@ let check_body definition (body : Mir.body) =
           block inside;
           block after
       | Yield { part; resume; _ } ->
-          operand part;
+          let rec yielded : Mir.yielded -> unit = function
+            | Part value -> operand value
+            | Built { fields; _ } -> List.iter (fun (_, field) -> Option.iter yielded field) fields
+          in
+          yielded part;
           block resume
       | Exit_tasks { exit = Exit_to target; _ } -> block target
       | Return (Some value) -> operand value
@@ -58,9 +62,9 @@ let () =
   let database = setup [] in
   let built = ref 0 in
   List.iter
-    (fun ((module_ : Path.module_), _) ->
+    (fun ((file : Path.file), _) ->
       test
-        (Printf.sprintf "%s's MIR is well formed" (Path.show_module module_))
+        (Printf.sprintf "%s's MIR is well formed" (Path.show_file file))
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
@@ -77,8 +81,8 @@ let () =
                   check_body definition mir.body;
                   Array.iter (check_body definition) mir.lambdas
               | None -> ())
-            (Query.demand database Resolve.Names.declarations module_)))
-    Standard_library.modules;
+            (Query.demand database Resolve.Names.declarations_in file)))
+    Standard_library.files;
   test "the standard library has MIR" (fun () ->
       if !built < 500 then fail "only %d of its definitions have MIR" !built)
 
@@ -102,6 +106,150 @@ let expect name text expected =
       if actual <> expected then fail "found:\n%s" actual)
 
 let () =
+  expect "an early exit from concurrent code ends the tasks it leaves"
+    Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves
+    "0:\n\
+    \  for _1 in standard::list::impl Iterable for List[Element].each(read _0) 1 after 18\n\
+     1:\n\
+    \  loan 0: read read _0 for the loop\n\
+    \  live _2\n\
+    \  _2 = read _1\n\
+    \  concurrent branch of #50\n\
+    \  _4 = app::main::fetch(read _2)\n\
+    \  _5 = _4 is Ok\n\
+    \  branch _5 6 2\n\
+     2:\n\
+    \  _7 = _4 is Err\n\
+    \  branch _7 4 3\n\
+     3:\n\
+    \  unreachable\n\
+     4:\n\
+    \  live _8\n\
+    \  _8 = _4.(Err).error\n\
+    \  goto 5\n\
+     5:\n\
+    \  matched\n\
+    \  _9 = Err(error: _8)\n\
+    \  _10 = _9\n\
+    \  dead _8\n\
+    \  dead _7, _9\n\
+    \  dead _3, _4\n\
+    \  exit branch 0 of #50, return _10\n\
+     6:\n\
+    \  live _6\n\
+    \  _6 = _4.(Ok).value\n\
+    \  goto 7\n\
+     7:\n\
+    \  matched\n\
+    \  _3 = _6\n\
+    \  dead _6\n\
+    \  dead _5\n\
+    \  goto 8\n\
+     8:\n\
+    \  _11 = _3\n\
+    \  live _12\n\
+    \  _12 = _11\n\
+    \  goto 9\n\
+     9:\n\
+    \  dead _3, _4, _11\n\
+    \  goto 10\n\
+     10:\n\
+    \  concurrent branch of #50\n\
+    \  _13 = _2\n\
+    \  loan 1: read _13 for the operation\n\
+    \  end loans 1\n\
+    \  _14 = _13 > 3\n\
+    \  branch _14 14 11\n\
+     11:\n\
+    \  dead _13, _14\n\
+    \  goto 12\n\
+     12:\n\
+    \  goto 13\n\
+     13:\n\
+    \  goto 16\n\
+     14:\n\
+    \  dead _13, _14\n\
+    \  goto 15\n\
+     15:\n\
+    \  exit branch 1 of #50, goto 18\n\
+     16:\n\
+    \  end of #50\n\
+    \  goto 17\n\
+     17:\n\
+    \  end loans 0\n\
+    \  dead _2, _12\n\
+    \  next\n\
+     18:\n\
+    \  for _15 in standard::list::impl Iterable for List[Element].each(read _0) 19 after 35\n\
+     19:\n\
+    \  loan 2: read read _0 for the loop\n\
+    \  live _16\n\
+    \  _16 = read _15\n\
+    \  _17 = _16\n\
+    \  loan 3: read _17 for the operation\n\
+    \  end loans 3\n\
+    \  _18 = _17 > 5\n\
+    \  branch _18 33 20\n\
+     20:\n\
+    \  dead _17, _18\n\
+    \  goto 21\n\
+     21:\n\
+    \  goto 22\n\
+     22:\n\
+    \  _19 = _16\n\
+    \  loan 4: read _19 for the operation\n\
+    \  end loans 4\n\
+    \  _20 = _19 > 4\n\
+    \  branch _20 31 23\n\
+     23:\n\
+    \  dead _19, _20\n\
+    \  goto 24\n\
+     24:\n\
+    \  goto 25\n\
+     25:\n\
+    \  _21 = _16\n\
+    \  loan 5: read _21 for the operation\n\
+    \  end loans 5\n\
+    \  _22 = _21 > 3\n\
+    \  branch _22 29 26\n\
+     26:\n\
+    \  dead _21, _22\n\
+    \  goto 27\n\
+     27:\n\
+    \  goto 28\n\
+     28:\n\
+    \  end loans 2\n\
+    \  dead _16\n\
+    \  next\n\
+     29:\n\
+    \  dead _21, _22\n\
+    \  goto 30\n\
+     30:\n\
+    \  _23 = Err(error: _16)\n\
+    \  _24 = _23\n\
+    \  dead _23\n\
+    \  end loans 2\n\
+    \  dead _16\n\
+    \  exit iteration of #95, return _24\n\
+     31:\n\
+    \  dead _19, _20\n\
+    \  goto 32\n\
+     32:\n\
+    \  end loans 2\n\
+    \  dead _16\n\
+    \  next\n\
+     33:\n\
+    \  dead _17, _18\n\
+    \  goto 34\n\
+     34:\n\
+    \  end loans 2\n\
+    \  dead _16\n\
+    \  exit iteration of #95, goto 35\n\
+     35:\n\
+    \  _25 = Ok(value: 0)\n\
+    \  _26 = _25\n\
+    \  dead _25\n\
+    \  return _26";
   expect
     "an assignment evaluates its value, then its target, and a compound assignment its operand \
      first"
@@ -152,6 +300,7 @@ let () =
     \  _3 = read _0.(Some).value\n\
     \  goto 2\n\
      2:\n\
+    \  matched\n\
     \  loan 0: read read _0 for the operation\n\
     \  _4 = _3\n\
     \  loan 1: read _4 for the operation\n\
@@ -178,6 +327,7 @@ let () =
      9:\n\
     \  goto 10\n\
      10:\n\
+    \  matched\n\
     \  _1 = 0\n\
     \  dead _6, _7\n\
     \  goto 13\n\

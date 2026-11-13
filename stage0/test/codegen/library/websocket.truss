@@ -1,0 +1,127 @@
+use standard::http
+use standard::network
+use standard::simulation
+use standard::url
+
+fn chat(request: own http::Request, responder: mut http::Responder)
+  uses Handles, Tasks
+{
+  if request.matches(http::Route"GET /events") is Some(_) {
+    let _ = mut responder.start_events()
+    let _ = mut responder.send_event(http::Event(data: "first"))
+    let _ = mut responder.send_comment("keep the connection alive")
+    let _ = mut responder.send_event(http::Event(data: "two\nlines", name: Some("note"), id: Some("7")))
+    let _ = mut responder.send_event(http::Event(data: "last", retry_milliseconds: Some(500)))
+    let _ = mut responder.finish()
+    return
+  }
+  match http::websocket(own request, responder: mut responder, protocols: ["chat.v1"]) {
+    Ok(opened) => {
+      var socket = own opened
+      while mut socket.receive() is Ok(Some(message)) {
+        let reply = match message {
+          Text(text) => http::Message.Text(text: text.slice().to_ascii_uppercase())
+          Binary(bytes) => http::Message.Binary(bytes: bytes.copy())
+        }
+        if mut socket.send(reply) is Err(_) {
+          return
+        }
+      }
+    }
+    Err(_) => {}
+  }
+}
+
+fn raw_exchange(raw: StringSlice) -> String
+  uses NetworkClient, Handles, Tasks, Panic
+{
+  let connection = network::connect("localhost", port: 8090).expect("the server accepts")
+  let _ = connection.send_all(raw.bytes())
+  var reply: List[UInt8] = []
+  while connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 && !String.from_utf8_lossy(reply.slice()).slice().contains("\r\n\r\n") {}
+  String.from_utf8_lossy(reply.slice())
+}
+
+fn conversation() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8090)).expect("the port is free")
+  concurrent {
+    http::serve(mut listener, handler: chat)
+    {
+      var seen: List[String] = []
+      var client = http::Client.new()
+      let talked = mut client.websocket(url::Url"ws://localhost:8090/chat", session: fn(socket) {
+        var heard: List[String] = []
+        mut heard.push("protocol ${socket.protocol().unwrap_or("none".slice())}")
+        let _ = mut socket.send_text("hello")
+        match mut socket.receive() {
+          Ok(Some(Text(text))) => mut heard.push(own text)
+          _ => mut heard.push("no text")
+        }
+        let _ = mut socket.send_binary([1, 2, 3])
+        match mut socket.receive() {
+          Ok(Some(Binary(bytes))) => mut heard.push("${bytes.length()} bytes")
+          _ => mut heard.push("no bytes")
+        }
+        let long = "x".slice().repeated(70000)
+        let _ = mut socket.send_text(long.slice())
+        match mut socket.receive() {
+          Ok(Some(Text(text))) => mut heard.push("${text.length()} ${text.slice().starts_with("XXX")}")
+          _ => mut heard.push("no long text")
+        }
+        mut heard.push("closed ${mut socket.close() is Ok(_)}")
+        heard
+      }, protocols: ["chat.v1"])
+      match own talked {
+        Ok(heard) => mut seen.append(own heard)
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let handshake = raw_exchange("GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
+      mut seen.push("${handshake.slice().starts_with("HTTP/1.1 101 Switching Protocols")} ${handshake.slice().contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")}")
+      match http::get("http://localhost:8090/chat") {
+        Ok(response) => mut seen.push("${response.status.code}")
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let events = mut client.stream(http::Method.Get, url: url::Url"http://localhost:8090/events", receive: fn(_, headers, body) {
+        var found: List[String] = [headers.get("content-type").unwrap_or("none".slice()).to_string()]
+        var parser = http::EventParser.new()
+        while mut parser.next(mut body) is Ok(Some(event)) {
+          let name = match event.name {
+            Some(name) => name.copy()
+            None => "message"
+          }
+          let id = match event.id {
+            Some(id) => id.copy()
+            None => "-"
+          }
+          mut found.push("${name}|${id}|${event.data}|${event.retry_milliseconds.unwrap_or(0)}")
+        }
+        found
+      })
+      match own events {
+        Ok(found) => mut seen.append(own found)
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      return own seen
+    }
+  }
+}
+
+test "a WebSocket client and server exchange text, binary, and long messages, then close" {
+  provide simulation::World.new() {
+    let seen = conversation()
+    assert seen.length() == 11
+    assert seen[0] == "protocol chat.v1"
+    assert seen[1] == "HELLO"
+    assert seen[2] == "3 bytes"
+    assert seen[3] == "70000 true"
+    assert seen[4] == "closed true"
+    assert seen[5] == "true true"
+    assert seen[6] == "400"
+    assert seen[7] == "text/event-stream"
+    assert seen[8] == "message|-|first|0"
+    assert seen[9] == "note|7|two\nlines|0"
+    assert seen[10] == "message|7|last|500"
+  }
+}

@@ -11,7 +11,7 @@ let changes ?(usize_bits = (32, 32)) before after =
     let database = setup [] in
     Database.load_package ~usize_bits:bits (Engine.of_context database)
       ~name:{ owner = None; name = "lib" } ~dependencies:[]
-      [ (module_of "lib::shapes", text) ];
+      [ (file_of "lib::shapes", text) ];
     database
   in
   Compatibility.compare

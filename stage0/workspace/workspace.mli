@@ -1,12 +1,9 @@
 (** The inputs of a build, and the queries that parse them.
 
-    The driver sets each package, with its manifest and the modules it has, and the text of each
-    module's file. Everything else is a query, so changing one file re-parses that file alone, and a
-    definition whose tree comes out the same, as one that only moved does, changes nothing that
-    reads it. *)
-
-val file_path : Path.module_ -> string
-(** [weather/forecast/hourly.truss], as in diagnostics. *)
+    The driver sets each package, with its manifest and its files, and the text of each file. A
+    module is a directory of a package, and its files share one namespace. Everything else is a
+    query, so changing one file re-parses that file alone, and a definition whose tree comes out the
+    same, as one that only moved does, changes nothing that reads it. *)
 
 type file = {
   source : Source.t;
@@ -16,11 +13,14 @@ type file = {
   diagnostics : Diagnostic.t list;  (** The lexer's and the parser's, in the file's offsets. *)
 }
 
-val file : (Path.module_, file) Query.query
-(** A module's file, lexed and parsed. Raises [Not_found] if the module has no text. *)
+val file : (Path.file, file) Query.query
+(** A file, lexed and parsed. Raises [Not_found] if it has no text. *)
 
 val modules : (Path.package, Path.module_ list) Query.query
 (** A package's modules, and none for a package there is not. *)
+
+val files : (Path.module_, Path.file list) Query.query
+(** A module's files, in order. *)
 
 val dependencies : (Path.package, Manifest.dependency list) Query.query
 (** A package's dependencies, each with its grants. *)

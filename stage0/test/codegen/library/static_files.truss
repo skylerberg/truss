@@ -1,0 +1,97 @@
+use standard::http
+use standard::network
+use standard::simulation
+
+fn site(request: own http::Request, responder: mut http::Responder)
+  uses FileRead, Handles, Tasks
+{
+  let _ = http::serve_directory(request, responder: mut responder, root: Path.new("/site"), prefix: "/static")
+}
+
+fn exchange(raw: StringSlice) -> String
+  uses NetworkClient, Handles, Tasks, Panic
+{
+  let connection = network::connect("localhost", port: 8092).expect("the server accepts")
+  let _ = connection.send_all(raw.bytes())
+  var reply: List[UInt8] = []
+  let _ = connection.receive_to_end(mut reply)
+  String.from_utf8_lossy(reply.slice())
+}
+
+fn get(path: StringSlice, extra: StringSlice = "") -> String
+  uses NetworkClient, Handles, Tasks, Panic
+{
+  exchange("GET ${path} HTTP/1.1\r\nHost: x\r\n${extra}Connection: close\r\n\r\n".slice())
+}
+
+fn header_of(reply: StringSlice, name: StringSlice) -> String {
+  for line in reply.split("\r\n") {
+    if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ".slice()) {
+      return line.part(name.length() + 2, to: line.length()).to_string()
+    }
+  }
+  "none"
+}
+
+fn body_of(reply: StringSlice) -> String {
+  match reply.find("\r\n\r\n") {
+    Some(at) => reply.part(at + 4, to: reply.length()).to_string()
+    None => ""
+  }
+}
+
+fn browse() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8092)).expect("the port is free")
+  concurrent {
+    http::serve(mut listener, handler: site)
+    {
+      var seen: List[String] = []
+      let index = get("/static/")
+      mut seen.push("${index.slice().starts_with("HTTP/1.1 200")} ${header_of(index.slice(), name: "Content-Type")} ${body_of(index.slice())}")
+      let moved = get("/static/docs")
+      mut seen.push("${moved.slice().starts_with("HTTP/1.1 301")} ${header_of(moved.slice(), name: "Location")}")
+      let first = get("/static/data.bin")
+      let tag = header_of(first.slice(), name: "ETag")
+      let again = get("/static/data.bin", extra: "If-None-Match: ${tag}\r\n".slice())
+      mut seen.push("${first.slice().starts_with("HTTP/1.1 200")} ${header_of(first.slice(), name: "Content-Length")} ${again.slice().starts_with("HTTP/1.1 304")}")
+      let part = get("/static/data.bin", extra: "Range: bytes=10-19\r\n")
+      mut seen.push("${part.slice().starts_with("HTTP/1.1 206")} ${header_of(part.slice(), name: "Content-Range")} ${body_of(part.slice()).length()}")
+      let beyond = get("/static/data.bin", extra: "Range: bytes=2000-\r\n")
+      mut seen.push("${beyond.slice().starts_with("HTTP/1.1 416")} ${header_of(beyond.slice(), name: "Content-Range")}")
+      let packed = get("/static/app.js", extra: "Accept-Encoding: gzip\r\n")
+      mut seen.push("${header_of(packed.slice(), name: "Content-Encoding")} ${body_of(packed.slice())}")
+      mut seen.push("${get("/static/../secret.txt").slice().starts_with("HTTP/1.1 404")} ${get("/static/%2e%2e/secret.txt").slice().starts_with("HTTP/1.1 404")}")
+      let posted = exchange("POST /static/ HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+      mut seen.push("${posted.slice().starts_with("HTTP/1.1 405")} ${header_of(posted.slice(), name: "Allow")}")
+      let head = exchange("HEAD /static/data.bin HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+      mut seen.push("${head.slice().starts_with("HTTP/1.1 200")} ${header_of(head.slice(), name: "Content-Length")} ${body_of(head.slice()).length()}")
+      return own seen
+    }
+  }
+}
+
+test "a directory is served with index pages, validators, ranges, compressed siblings, and no escapes" {
+  let data = "0123456789".slice().repeated(100)
+  let setup = simulation::Setup.new()
+    .with_file(Path.new("/site/index.html"), contents: "<h1>home</h1>")
+    .with_file(Path.new("/site/docs/index.html"), contents: "<h1>docs</h1>")
+    .with_file(Path.new("/site/data.bin"), contents: data.slice())
+    .with_file(Path.new("/site/app.js"), contents: "console.log('plain')")
+    .with_file(Path.new("/site/app.js.gz"), contents: "PRECOMPRESSED")
+    .with_file(Path.new("/secret.txt"), contents: "secret")
+  provide simulation::World.from(own setup) {
+    let seen = browse()
+    assert seen.length() == 9
+    assert seen[0] == "true text/html; charset=utf-8 <h1>home</h1>"
+    assert seen[1] == "true /static/docs/"
+    assert seen[2] == "true 1000 true"
+    assert seen[3] == "true bytes 10-19/1000 10"
+    assert seen[4] == "true bytes */1000"
+    assert seen[5] == "gzip PRECOMPRESSED"
+    assert seen[6] == "true true"
+    assert seen[7] == "true GET, HEAD"
+    assert seen[8] == "true 1000 0"
+  }
+}

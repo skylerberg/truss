@@ -126,7 +126,7 @@ let check database (key : Resolve.Names.key) : result option =
         match
           (form.definition, lowered.interface, Query.demand database Resolve.Names.definition key)
         with
-        | ( Function { body = Some body; _ },
+        | ( Function { body = Some _; _ },
             Function_interface { output = Lends _; _ },
             Some
               {
@@ -134,7 +134,9 @@ let check database (key : Resolve.Names.key) : result option =
                   Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ };
                 _;
               } ) ->
-            Yield_rules.check_yields_once context body ~name:name.span
+            Option.iter
+              (fun (mir : Mir.t) -> Yield_rules.check_yields_once context mir.body ~name:name.span)
+              (Query.demand database Mir.mir key)
         | _ -> ()
       end;
       Some
@@ -161,8 +163,8 @@ let ownership =
       Some { Query.path = key.path; part = Some "ownership" })
     check
 
-let diagnostics database module_ =
-  Resolve.Names.per_definition database module_ (fun key ->
+let diagnostics database file =
+  Resolve.Names.per_definition database file (fun key ->
       match Query.demand database ownership key with
       | Some result -> result.diagnostics
       | None -> [])

@@ -577,23 +577,11 @@ let rvalue builder (value : Mir.rvalue) origin : held =
       { nothing with views = views_of_operand builder operand; temporaries }
   | Construct { fields; _ } ->
       let given = List.filter_map snd fields in
-      List.iter
-        (fun field -> match field with Mir.Borrow _ -> () | _ -> evaluate builder field)
-        given;
+      List.iter (evaluate builder) given;
       {
         nothing with
-        views =
-          List.concat_map
-            (fun (field : Mir.operand) ->
-              match field with
-              | Borrow { place; type_; _ } -> views_of_borrow builder place type_
-              | _ -> views_of_part builder field)
-            given;
-        temporaries =
-          List.concat_map
-            (fun field ->
-              match field with Mir.Borrow _ -> [] | _ -> owned_temporaries builder Own field)
-            given;
+        views = List.concat_map (views_of_part builder) given;
+        temporaries = List.concat_map (owned_temporaries builder Own) given;
         lent = List.concat_map (lent_places builder) given;
       }
   | Array elements ->
@@ -604,7 +592,7 @@ let rvalue builder (value : Mir.rvalue) origin : held =
       nothing
   | Lambda { captures; _ } -> (
       List.iter
-        (fun (capture : Core.capture) ->
+        (fun (capture : Mir.capture) ->
           emit_ builder (Read { root = Local capture.local; steps = [] }) origin)
         captures;
       match captures with
@@ -616,7 +604,7 @@ let rvalue builder (value : Mir.rvalue) origin : held =
             views =
               { place = { root = Environment; steps = [] }; copied_out = false }
               :: List.map
-                   (fun (capture : Core.capture) ->
+                   (fun (capture : Mir.capture) ->
                      { place = { root = Local capture.local; steps = [] }; copied_out = false })
                    captures;
           })
@@ -693,6 +681,7 @@ let returned_temporaries (body : Mir.body) =
                 {
                   target = { root = Local target; projections = [] };
                   value = Operand (Use { place = { root = Local source; projections = [] }; _ });
+                  _;
                 }
               when List.mem target !returned
                    && body.locals.(source).kind = Temporary
@@ -737,7 +726,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
           builder.keeps_lent;
       let core = List.filter_map (source builder) locals in
       if core <> [] then emit_ builder (Scope_end core) origin
-  | Assign { target = { root = Local local; projections = [] } as target; value }
+  | Assign { target = { root = Local local; projections = [] } as target; value; _ }
     when List.mem local builder.binding
          ||
          match (local_info builder local).kind with
@@ -769,7 +758,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
           | _ -> hold builder target result)
       | Source { local = core; _ } ->
           bound_value builder local core value origin ~is_var:(is_var core))
-  | Assign { target; value } -> (
+  | Assign { target; value; _ } -> (
       let result = rvalue builder value origin in
       match tracked builder target with
       | Some place -> (
@@ -861,7 +850,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
       hold builder destination { nothing with views = views_of_copy builder cursor }
   | Assert value | Echo value -> evaluate builder value
-  | Provide provided ->
+  | Provide { provided; _ } ->
       List.iter
         (fun (provided : Mir.provided) ->
           evaluate builder provided.value;
@@ -904,7 +893,7 @@ let statement builder (forks : (int, fork) Hashtbl.t) ~is_var (statement : Mir.s
             :: builder.fork_join_blocks;
           Hashtbl.remove forks fork
       | None -> ())
-  | Provide_end | Ghost_assert _ | Proof _ -> ()
+  | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
 
 (* The points of a body: one run of points for each block, linked as its
    terminator jumps. *)
@@ -918,6 +907,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
   let firsts = Array.make blocks (-1) and lasts = Array.make blocks (-1) in
   let heads = Hashtbl.create 4 in
   let pending_edges = ref [] in
+  let task_ends = Hashtbl.create 1 in
   Array.iteri
     (fun index (block : Mir.basic_block) ->
       builder.last <- (if index = 0 then Some entry else None);
@@ -925,6 +915,20 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       let first = builder.count in
       if index > 0 then emit_ builder (Bind []) block.terminator_origin;
       List.iter (statement builder forks ~is_var) block.statements;
+      (* The other tasks of an early exit's group go on from the task's end,
+         with the scopes around the task still open. The exit then ends those
+         scopes once each task has ended, before it is taken. *)
+      (match block.terminator with
+      | Exit_tasks { tasks = { task_end = Some target; _ } :: _; _ } ->
+          Hashtbl.replace task_ends index
+            ((match builder.last with Some last -> last | None -> first), target)
+      | _ -> ());
+      (match block.terminator with
+      | Exit_tasks { tasks; _ } ->
+          List.iter
+            (fun (left : Mir.left_task) -> List.iter (statement builder forks ~is_var) left.ends)
+            tasks
+      | _ -> ());
       let origin = block.terminator_origin in
       (match block.terminator with
       | Branch { condition; _ } -> evaluate builder condition
@@ -959,12 +963,24 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
                 :: builder.fork_join_loops
           | Sequential -> ())
       | Yield { mode; part; _ } ->
+          (* A constructor built where it is yielded lends each place among
+             its leaves, and its other leaves are values. *)
+          let rec leaves : Mir.yielded -> Mir.operand list = function
+            | Part operand -> [ operand ]
+            | Built { fields; _ } ->
+                List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
+          in
           (match part with
-          | Use { place = { root = Local local; projections = [] }; _ }
+          | Part (Use { place = { root = Local local; projections = [] }; _ })
             when (local_info builder local).kind = Temporary ->
               ()
-          | _ -> evaluate builder part);
-          let lent = lent_places builder part in
+          | Part operand -> evaluate builder operand
+          | Built _ ->
+              List.iter
+                (fun (leaf : Mir.operand) ->
+                  match leaf with Borrow _ -> () | _ -> evaluate builder leaf)
+                (leaves part));
+          let lent = List.concat_map (lent_places builder) (leaves part) in
           if mode = Mut then begin
             List.iter
               (fun lent -> Option.iter (fun place -> emit_ builder (Mutate place) origin) lent)
@@ -982,9 +998,19 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
               emit_ builder (Arguments { places; views = []; yielded = true }) origin
           end;
           let views =
-            match operand_type part with
-            | Some type_ when builder.is_view type_ -> views_of_operand builder part
-            | _ -> []
+            match part with
+            | Part operand -> (
+                match operand_type operand with
+                | Some type_ when builder.is_view type_ -> views_of_operand builder operand
+                | _ -> [])
+            | Built { type_; _ } when builder.is_view type_ ->
+                List.concat_map
+                  (fun (leaf : Mir.operand) ->
+                    match leaf with
+                    | Borrow { place; type_; _ } -> views_of_borrow builder place type_
+                    | _ -> views_of_part builder leaf)
+                  (leaves part)
+            | Built _ -> []
           in
           emit_ builder (Yield_point { mode; lent; views }) origin
       | Return value | Exit_tasks { exit = Exit_return value; _ } ->
@@ -1004,26 +1030,7 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       firsts.(index) <- (if index = 0 then entry else first);
       lasts.(index) <- (match builder.last with Some last -> last | None -> first))
     body.blocks;
-  (* The innermost [For] whose body reaches each [Iteration_end]. *)
-  let each_of = Hashtbl.create 4 in
-  Array.iteri
-    (fun index (block : Mir.basic_block) ->
-      match block.terminator with
-      | For { body = inside; after; _ } ->
-          let visited = Hashtbl.create 8 in
-          let rec visit block =
-            if block <> after && not (Hashtbl.mem visited block) then begin
-              Hashtbl.replace visited block ();
-              match body.blocks.(block).terminator with
-              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
-                  Hashtbl.replace each_of block index
-              | For { after = inner_after; _ } -> visit inner_after
-              | terminator -> List.iter visit (Mir.successors terminator)
-            end
-          in
-          visit inside
-      | _ -> ())
-    body.blocks;
+  let each_of = Mir.iteration_loops body in
   Array.iteri
     (fun index (block : Mir.basic_block) ->
       let from = lasts.(index) in
@@ -1033,9 +1040,12 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
           match Hashtbl.find_opt each_of index with
           | Some each -> link builder from (Hashtbl.find heads each)
           | None -> ())
+      | Exit_tasks { exit = Exit_to target; _ } -> link builder from firsts.(target)
+      | Exit_tasks _ -> ()
       | terminator ->
           List.iter (fun target -> link builder from firsts.(target)) (Mir.successors terminator))
     body.blocks;
+  Hashtbl.iter (fun _ (before_exit, target) -> link builder before_exit firsts.(target)) task_ends;
   List.iter (fun (from, `Block target) -> link builder from firsts.(target)) !pending_edges;
   (* A parallel loop's body is the points of the blocks it runs. *)
   builder.fork_join_loops <-

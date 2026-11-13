@@ -51,6 +51,9 @@ val markdown_documents : unit -> string list
 (** The paths of the Markdown documents at the root of the repository and under [standard/], in
     order. *)
 
+val truss_files : unit -> string list
+(** The paths of the Truss files under [standard/] and [stage0/test/fixtures/], in order. *)
+
 val workspace_path : string -> string
 (** The path of a file of the repository, given from the workspace root, such as
     ["SPECIFICATION.md"], whatever directory the executable runs in. *)

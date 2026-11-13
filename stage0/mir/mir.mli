@@ -39,7 +39,7 @@ type operand =
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
       (** The old value of a compound assignment's target, which the operator takes as owned. The
           statement assigns the target again before any other code runs. *)
-  | Constant of constant
+  | Constant of { value : constant; type_ : Types.ty }
 
 type callee =
   | Function of { path : Path.t; type_arguments : Types.argument list }
@@ -67,9 +67,18 @@ type call = {
   node : Core.id;  (** The core form's [Call]. *)
 }
 
+type capture = { local : Core.local; type_ : Types.ty; place : place }
+(** A local that a lambda captures: its core local, its type, and its place in the enclosing body.
+*)
+
 type rvalue =
   | Operand of operand
-  | Operation of { operation : Intrinsic.operation; operands : operand list }
+  | Operation of {
+      operation : Intrinsic.operation;
+      type_arguments : Types.argument list;
+          (** The intrinsic's type arguments: for an operator, the types of its operands. *)
+      operands : operand list;
+    }
       (** A primitive operation on built-in types, written as an operator or as a call of the
           intrinsic. *)
   | Compare of { comparison : Core.comparison; left : operand; right : operand }
@@ -83,9 +92,23 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand  (** A [copy()] that the compiler implements. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : Core.capture list }
-      (** A function value made from a lambda. [body] indexes {!t.lambdas}. *)
+  | Lambda of { body : int; captures : capture list }
+      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
+          the order of its body's {!body.captures}. *)
   | Value_parameter of Types.parameter
+
+(** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
+    place: it is built where it is yielded, and is no value of its own. *)
+type yielded =
+  | Part of operand
+  | Built of {
+      variant : string option;
+      fields : (string * yielded option) list;
+      type_ : Types.ty;
+      node : Core.id;
+    }
+      (** A constructor of [type_], with every field in evaluation order. [None] takes the field's
+          default. [node] is its core node. *)
 
 type provided = {
   mode : Types.mode;
@@ -107,7 +130,9 @@ type loan_duration =
 type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
-  | Assign of { target : place; value : rvalue }
+  | Assign of { target : place; value : rvalue; node : Core.id option }
+      (** [node] is the core expression whose value the assignment computes, where it computes one,
+          for the prover's messages. *)
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
       (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
@@ -121,15 +146,21 @@ and statement_kind =
   | Dead of local list  (** These locals hold nothing from here on. *)
   | Assert of operand  (** An [assert] that can run. *)
   | Echo of operand
-  | Provide of provided list
+  | Provide of { provided : provided list; can_use_tasks : bool }
+      (** The start of a [provide] block. [can_use_tasks] says whether its body can use [Tasks], so
+          that tasks may call a [mut] implementation at the same time. *)
   | Provide_end
-  | Fork_start of { fork : int; concurrent : bool }
-      (** The start of a branch of a [parallel] or [concurrent] block. *)
-  | Fork_end of { fork : int }  (** The end of the block's last branch. *)
+  | Fork_start of { fork : Core.origin; concurrent : bool }
+      (** The start of a branch of a [parallel] or [concurrent] block, which [fork] names by its
+          statement's origin. *)
+  | Fork_end of { fork : Core.origin }  (** The end of the block's last branch. *)
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
+  | Matched of { patterns : Core.origin list }
+      (** An arm of a [match] whose patterns, by their origins, matched here, before its guard. Only
+          the prover reads it, to tell which arm a counterexample takes. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
 type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
@@ -151,6 +182,18 @@ type task_exit =
   | Exit_to of block
   | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
+type left_task = {
+  task : Core.task;
+  ends : statement list;
+      (** The ends of the scopes between it and the next task, or the exit's target, which run in
+          the code around the task once it has ended *)
+  task_end : block option;
+      (** Where the task's code ends, which the other tasks of its group go on from: the start of
+          the next branch of a [concurrent] block, or the block's end. An iteration of a
+          [concurrent for] has none. *)
+}
+(** A task an early exit leaves. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
@@ -160,22 +203,31 @@ type terminator =
           {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
           [loop]'s schedule says. *)
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
-  | Yield of { mode : Types.mode; part : operand; resume : block }
+  | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
-  | Exit_tasks of { tasks : Core.task list; exit : task_exit }
-      (** An early exit from [concurrent] code: these tasks end, then the exit is taken. *)
+  | Exit_tasks of { tasks : left_task list; exit : task_exit }
+      (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
+          taken. The exit ends the scopes inside the innermost task before it. *)
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
+
+type natural_loop = { loop : loop; body : block; after : block }
+(** A [while] loop, which its header block carries: its clauses, the first block of its body, which
+    the loop's condition goes to where it holds, and the block it exits to where the condition does
+    not hold or a [break] leaves. *)
 
 type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
-  header : loop option;  (** The clauses of the natural loop this block heads. *)
+  header : natural_loop option;  (** The [while] loop this block heads. *)
 }
 
 type body = {
   parameters : local list;
+  captures : local list;
+      (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
+          order. *)
   locals : local_info array;
   blocks : basic_block array;  (** The entry is block 0. *)
 }
@@ -184,6 +236,28 @@ type t = { body : body; lambdas : body array }
 
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)
+
+val conditional_lends : body -> local list
+(** The parts of lending calls whose {!Dead} some path from the entry reaches without passing the
+    {!Lend}, as a lend in one arm of a [match] does. A consumer runs the lend's end only where the
+    lend ran. *)
+
+val iteration_loops : body -> (block, block) Hashtbl.t
+(** For each block whose terminator ends an iteration, an {!Iteration_end} or an {!Exit_tasks} to
+    {!Exit_iteration}, the block of the innermost {!For} whose body it ends. *)
+
+val of_definition : Core.definition -> t option
+(** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. *)
+
+val of_path : (Path.t, (t * Types.substitution) option) Query.query
+(** The MIR of the function or method at a path that has code to run, with the substitution to apply
+    to it, as [Infer.core_of_path] gives the core form: a method of a derived [impl], or one that an
+    [impl] inherits from its trait, has the MIR of its generated or inherited core form. *)
+
+val of_expression : ?parameters:Core.parameter list -> Core.expression -> t
+(** The MIR of one expression that runs on its own, such as a default or a constant's value: a body
+    that returns the expression's value. [parameters] are the locals of the code around that the
+    expression reads, such as the template a [requires] clause of a tag's [from_template] checks. *)
 
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs. The body of a function for specifications only never

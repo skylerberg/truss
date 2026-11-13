@@ -1,0 +1,86 @@
+use standard::base32
+use standard::otp
+use standard::simulation
+
+test "Base32 encodes and decodes the examples of RFC 4648" {
+  assert base32::encode("".bytes()) == ""
+  assert base32::encode("f".bytes()) == "MY======"
+  assert base32::encode("fo".bytes()) == "MZXQ===="
+  assert base32::encode("foo".bytes()) == "MZXW6==="
+  assert base32::encode("foob".bytes()) == "MZXW6YQ="
+  assert base32::encode("fooba".bytes()) == "MZXW6YTB"
+  assert base32::encode("foobar".bytes()) == "MZXW6YTBOI======"
+  assert base32::encode("foobar".bytes(), padding: false) == "MZXW6YTBOI"
+  assert base32::decode("MZXW6YTBOI======") == Ok("foobar".bytes().to_list())
+  assert base32::decode("mzxw6ytboi") == Ok("foobar".bytes().to_list())
+  assert base32::decode("MZXW6YQ=") == Ok("foob".bytes().to_list())
+  assert base32::decode("") == Ok([])
+}
+
+test "Base32 round-trips every length, and rejects bad lengths, padding, and symbols" {
+  let source: List[UInt8] = [0, 255, 37, 74, 111, 148, 185, 222, 3, 40, 77, 114, 151, 188, 225, 6, 43, 80, 117, 154, 191, 228, 9, 46]
+  for length in 0..source.length() {
+    let bytes = source[..length]
+    assert base32::decode(base32::encode(bytes).slice()) == Ok(bytes.to_list())
+    assert base32::decode(base32::encode(bytes, padding: false).slice()) == Ok(bytes.to_list())
+  }
+  assert base32::decode("MZXW6YTBO") == Err(base32::DecodeError.InvalidLength)
+  assert base32::decode("MZX") == Err(base32::DecodeError.InvalidLength)
+  assert base32::decode("MZ======") == Err(base32::DecodeError.InvalidPadding)
+  assert base32::decode("MY=====") == Err(base32::DecodeError.InvalidPadding)
+  assert base32::decode("MZXW6YTB========") == Err(base32::DecodeError.InvalidPadding)
+  assert base32::decode("M1======") == Err(base32::DecodeError.InvalidCharacter(offset: 1))
+}
+
+test "HOTP gives the codes of RFC 4226's appendix D" {
+  let secret = "12345678901234567890".bytes()
+  let expected = ["755224", "287082", "359152", "969429", "338314", "254676", "287922", "162583", "399871", "520489"]
+  var counter: UInt64 = 0
+  for code in expected {
+    assert otp::hotp(secret, counter: counter) == code.copy()
+    counter += 1
+  }
+}
+
+test "TOTP gives the codes of RFC 6238's appendix B for SHA-1, SHA-256, and SHA-512" {
+  let sha1 = otp::Totp(secret: "12345678901234567890".bytes().to_list(), digits: 8)
+  let sha256 = otp::Totp(secret: "12345678901234567890123456789012".bytes().to_list(), digits: 8, algorithm: otp::Algorithm.Sha256)
+  let sha512 = otp::Totp(
+    secret: "1234567890123456789012345678901234567890123456789012345678901234".bytes().to_list(),
+    digits: 8,
+    algorithm: otp::Algorithm.Sha512,
+  )
+  assert sha1.code_at(59) == "94287082" && sha256.code_at(59) == "46119246" && sha512.code_at(59) == "90693936"
+  assert sha1.code_at(1111111109) == "07081804" && sha256.code_at(1111111109) == "68084774" && sha512.code_at(1111111109) == "25091201"
+  assert sha1.code_at(1111111111) == "14050471" && sha256.code_at(1111111111) == "67062674" && sha512.code_at(1111111111) == "99943326"
+  assert sha1.code_at(1234567890) == "89005924" && sha256.code_at(1234567890) == "91819424" && sha512.code_at(1234567890) == "93441116"
+  assert sha1.code_at(2000000000) == "69279037" && sha256.code_at(2000000000) == "90698825" && sha512.code_at(2000000000) == "38618901"
+  assert sha1.code_at(20000000000) == "65353130" && sha256.code_at(20000000000) == "77737706" && sha512.code_at(20000000000) == "47863826"
+}
+
+test "TOTP verification accepts a code within the window once, and refuses a replayed step" {
+  let totp = otp::Totp(secret: "12345678901234567890".bytes().to_list())
+  let now: Int64 = 1111111111
+  let step = now / 30
+  let code = totp.code_at(now)
+  assert totp.verify_at(code.slice(), unix_seconds: now) == Some(step)
+  assert totp.verify_at(code.slice(), unix_seconds: now + 30) == Some(step)
+  assert totp.verify_at(code.slice(), unix_seconds: now - 30) == Some(step)
+  assert totp.verify_at(code.slice(), unix_seconds: now + 30, window: 0) == None
+  assert totp.verify_at(code.slice(), unix_seconds: now + 90) == None
+  assert totp.verify_at(code.slice(), unix_seconds: now, last_step: Some(step)) == None
+  assert totp.verify_at(code.slice(), unix_seconds: now, last_step: Some(step - 1)) == Some(step)
+  assert totp.verify_at("abcdef", unix_seconds: now) == None
+  assert totp.verify_at("", unix_seconds: now) == None
+}
+
+test "a generated TOTP has a secret of the hash's length, and its URI names every parameter" {
+  provide simulation::World.new() {
+    let generated = otp::Totp.generate(algorithm: otp::Algorithm.Sha256)
+    assert generated.secret.length() == 32 && generated.is_valid()
+  }
+  let totp = otp::Totp(secret: "12345678901234567890".bytes().to_list())
+  assert totp.uri(issuer: "Example Co", account: "ada@example.com")
+    == "otpauth://totp/Example%20Co:ada%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Example%20Co&algorithm=SHA1&digits=6&period=30"
+  assert !otp::Totp(secret: [1, 2, 3]).is_valid()
+}

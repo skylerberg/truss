@@ -31,25 +31,24 @@ let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
         dependencies)
 
 (* A package given by itself, as a root of its own: its manifest and its
-   modules' files. *)
-let set_package engine ~root ~usize_bits ~name ~dependencies
-    (modules : (Path.module_ * string) list) =
+   files. *)
+let set_package engine ~root ~usize_bits ~name ~dependencies (files : (Path.file * string) list) =
   set_root engine root
     (("truss.toml", manifest_text ~usize_bits ~name ~dependencies)
-    :: List.map (fun (module_, text) -> (Project.module_path ~directory:"" module_, text)) modules);
+    :: List.map (fun (file, text) -> (Project.file_path ~directory:"" file, text)) files);
   add_root engine root
 
-let load_package ?(usize_bits = 32) engine ~name ~dependencies modules =
-  set_package engine ~root:(Project.package_root name) ~usize_bits ~name ~dependencies modules
+let load_package ?(usize_bits = 32) engine ~name ~dependencies files =
+  set_package engine ~root:(Project.package_root name) ~usize_bits ~name ~dependencies files
 
 (* The standard library holds the code for each platform, and its bounds of
    [USize] are its target's, so it is checked with the target's width. *)
-let set_standard engine modules =
+let set_standard engine files =
   set_package engine
     ~root:(Project.package_root Path.standard_package)
-    ~usize_bits:64 ~name:Path.standard_package ~dependencies:[] modules
+    ~usize_bits:64 ~name:Path.standard_package ~dependencies:[] files
 
-let load_standard engine = set_standard engine Standard_library.modules
+let load_standard engine = set_standard engine Standard_library.files
 
 (* The standard library, checked whole in an engine of its own. Its sources
    never change, so the engine is frozen as a fixed base, which every state
@@ -60,13 +59,13 @@ let check_standard engine =
   load_standard engine;
   let rendered =
     List.concat_map
-      (fun (module_, _) ->
-        match Engine.get engine Type_checker.file_diagnostics module_ with
+      (fun (file, _) ->
+        match Engine.get engine Type_checker.file_diagnostics file with
         | [] -> []
         | diagnostics ->
-            let source = (Engine.get engine Workspace.file module_).source in
+            let source = (Engine.get engine Workspace.file file).source in
             List.map (Diagnostic.render source) diagnostics)
-      Standard_library.modules
+      Standard_library.files
   in
   if rendered <> [] then
     Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
@@ -236,7 +235,7 @@ let scan (files : Files.t) session =
   let observer = Session.observer session in
   let before = demand session Project.registry () in
   let was = held_files session in
-  let was_modules = (own_layout session).modules in
+  let was_files = (own_layout session).files in
   let present = Hashtbl.create 64 in
   List.iter
     (fun (path, stamp) ->
@@ -257,10 +256,10 @@ let scan (files : Files.t) session =
         Engine.remove engine Project.text (Project.project_root, path);
         Engine.remove engine stamps path;
         Session.note_file session path None;
-        (* A module that is gone has no diagnostics to maintain, so they
+        (* A file that is gone has no diagnostics to maintain, so they
            are no longer a root. *)
-        match List.find_opt (fun (file, _, _) -> file = path) was_modules with
-        | Some (_, _, module_) -> Engine.unroot engine Type_checker.file_diagnostics module_
+        match List.find_opt (fun (written, _, _) -> written = path) was_files with
+        | Some (_, _, file) -> Engine.unroot engine Type_checker.file_diagnostics file
         | None -> ()
       end)
     was;
@@ -386,6 +385,11 @@ let package_modules session name =
   | Some package -> package.modules
   | None -> []
 
+let package_files session name =
+  match Query.demand (Session.context session) Project.package name with
+  | Some package -> package.files
+  | None -> []
+
 (* Sessions as the command line sees them *)
 
 let root session =
@@ -411,31 +415,30 @@ let manifest_problems session names =
            with Not_found -> []))
     (packages session)
 
-(* A module's file, from the project's root: where it is, or for a module
-   the project does not have, where it would be. *)
-let module_file session (module_ : Path.module_) =
-  match demand session Project.place module_.package with
+(* A file's path from the project's root: where it is, or for a file the
+   project does not have, as messages show it. *)
+let file_path session (file : Path.file) =
+  match demand session Project.place file.module_.package with
   | Some { root; directory; _ } when root = Project.project_root ->
-      Project.module_path ~directory module_
-  | _ -> Workspace.file_path module_
+      Project.file_path ~directory file
+  | _ -> Path.show_file file
 
 let time_limit session = (own_layout session).time_limit
 let registry_packages session = demand session Project.registry ()
 let lock_fix session = (demand session Project.selection ()).lock_fix
 
-let diagnostics session module_ =
-  try Engine.get (Session.engine session) Type_checker.file_diagnostics module_
-  with Not_found -> []
+let diagnostics session file =
+  try Engine.get (Session.engine session) Type_checker.file_diagnostics file with Not_found -> []
 
 let diagnostics_of session packages =
   List.concat_map
     (fun (_, name) ->
       List.filter_map
-        (fun module_ ->
-          match diagnostics session module_ with
+        (fun file ->
+          match diagnostics session file with
           | [] -> None
-          | module_diagnostics -> Some (module_, module_diagnostics))
-        (package_modules session name))
+          | file_diagnostics -> Some (file, file_diagnostics))
+        (package_files session name))
     packages
 
 let open_session directory =
@@ -640,12 +643,12 @@ let trial session changes = trial_over session (Files.with_changes (project sess
 let library_prefix = Printf.sprintf "library-%s-" (String.sub Compiler_version.digest 0 16)
 let () = Session.allow_reading Compiler_version.digest
 
-(* The inputs of the [standard] package, set from sources: its modules'
-   files. The file of a module that the sources no longer have is removed. *)
-let set_library (modules : (Path.module_ * string) list) session =
-  set_standard (Session.engine session) modules
+(* The inputs of the [standard] package, set from sources: its files. A file
+   that the sources no longer have is removed. *)
+let set_library (files : (Path.file * string) list) session =
+  set_standard (Session.engine session) files
 
-let open_library ?(modules = Standard_library.modules) name =
+let open_library ?(files = Standard_library.files) name =
   match
     Session.open_ ~key:("library:" ^ name) ~pointer:(library_prefix ^ name)
       ~version:Compiler_version.digest
@@ -657,12 +660,7 @@ let open_library ?(modules = Standard_library.modules) name =
   | Ok (session, _) ->
       Session.attach session
         (Project
-           {
-             kind = Library;
-             update = set_library modules;
-             files = Files.of_texts [];
-             retried = true;
-           });
+           { kind = Library; update = set_library files; files = Files.of_texts []; retried = true });
       (* A process that opens the state pays its size already, so this is
          when its differences are folded into one whole state. *)
       Session.compact session;
@@ -817,10 +815,10 @@ let merge_preview session other =
           let merged = trial_over session (Files.of_texts texts) in
           let keys session =
             List.concat_map
-              (fun (module_, diagnostics) ->
+              (fun (file, diagnostics) ->
                 List.map
                   (fun (candidate : Diagnostic.t) ->
-                    (module_, Diagnostic.Code.name candidate.code, candidate.message))
+                    (file, Diagnostic.Code.name candidate.code, candidate.message))
                   diagnostics)
               (diagnostics_of session (packages session))
           in
@@ -834,9 +832,8 @@ let merge_preview session other =
           in
           Ok
             (List.filter_map
-               (fun ((module_, code, message) as key) ->
-                 if List.mem key sides then None
-                 else Some (module_file merged module_, code, message))
+               (fun ((file, code, message) as key) ->
+                 if List.mem key sides then None else Some (file_path merged file, code, message))
                (List.sort_uniq compare (keys merged))))
 
 let recovering = Session.recovering
@@ -889,17 +886,17 @@ module For_testing = struct
   let prepare_store = prepare_store
   let open_library = open_library
 
-  (* Gives one module of a package given by itself another text. *)
-  let set_text engine (module_ : Path.module_) text =
-    let root = Project.package_root module_.package in
-    let path = Project.module_path ~directory:"" module_ in
+  (* Gives one file of a package given by itself another text. *)
+  let set_text engine (file : Path.file) text =
+    let root = Project.package_root file.module_.package in
+    let path = Project.file_path ~directory:"" file in
     Engine.set engine Project.text (root, path) text;
     let files = Option.value (Query.find (Engine.observer engine) Project.tree root) ~default:[] in
     if not (List.mem path files) then
       Engine.set engine Project.tree root (List.sort compare (path :: files))
 
   (* Gives a package given by itself another manifest, and leaves its
-     modules as they are. *)
+     files as they are. *)
   let set_manifest ?(usize_bits = 32) engine ~name ~dependencies =
     let root = Project.package_root name in
     Engine.set engine Project.text (root, "truss.toml")

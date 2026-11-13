@@ -1,0 +1,271 @@
+use standard::compression
+use standard::streams
+use standard::url
+
+public type StaticOptions(index: String = "index.html", max_age_seconds: Int64 = 0, compress: Bool = true)
+  derives Equal
+
+let extensions: Array[String, 34] = ["html", "htm", "css", "js", "mjs", "json", "map", "txt", "md", "csv", "xml", "svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "wasm", "pdf", "zip", "gz", "mp4", "webm", "mp3", "ogg", "wav", "woff", "woff2", "ttf", "otf", "yaml", "toml"]
+
+let media_types: Array[String, 34] = [
+  "text/html; charset=utf-8",
+  "text/html; charset=utf-8",
+  "text/css; charset=utf-8",
+  "text/javascript; charset=utf-8",
+  "text/javascript; charset=utf-8",
+  "application/json",
+  "application/json",
+  "text/plain; charset=utf-8",
+  "text/markdown; charset=utf-8",
+  "text/csv; charset=utf-8",
+  "application/xml",
+  "image/svg+xml",
+  "image/png",
+  "image/jpeg",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/x-icon",
+  "application/wasm",
+  "application/pdf",
+  "application/zip",
+  "application/gzip",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
+  "font/woff",
+  "font/woff2",
+  "font/ttf",
+  "font/otf",
+  "application/yaml",
+  "application/toml",
+]
+
+public fn media_type_of(file: Path) -> StringSlice {
+  let extension = match file.extension() {
+    Some(extension) => extension.to_ascii_lowercase()
+    None => return "application/octet-stream".slice()
+  }
+  let count: USize = 34
+  for index in 0..count {
+    if extensions[index] == extension {
+      return media_types[index].slice()
+    }
+  }
+  "application/octet-stream".slice()
+}
+
+fn is_compressible_type(media_type: StringSlice) -> Bool {
+  media_type.starts_with("text/") || media_type.starts_with("application/json") || media_type.starts_with("application/xml")
+    || media_type.starts_with("image/svg+xml") || media_type.starts_with("application/wasm")
+    || media_type.starts_with("application/yaml") || media_type.starts_with("application/toml")
+}
+
+type Span(start: UInt64, end: UInt64, length: UInt64)
+
+type Ranged = Whole | Part(span: Span) | Unsatisfiable
+
+fn range_of(header: Option[StringSlice], length: UInt64) -> Ranged {
+  let value = match header {
+    Some(value) => value.trim()
+    None => return Ranged.Whole
+  }
+  if !value.starts_with("bytes=") || value.contains(",") {
+    return Ranged.Whole
+  }
+  let spec = value.part(6, to: value.length()).trim()
+  let dash = match spec.find("-") {
+    Some(at) => at
+    None => return Ranged.Whole
+  }
+  let first = spec.part(0, to: dash).trim()
+  let last = spec.part(dash + 1, to: spec.length()).trim()
+  if first.is_empty() {
+    let suffix = match UInt64.parse(last) {
+      Ok(suffix) => suffix
+      Err(_) => return Ranged.Whole
+    }
+    if suffix == 0 || length == 0 {
+      return Ranged.Unsatisfiable
+    }
+    let size = if suffix > length { length } else { suffix }
+    return Ranged.Part(span: Span(start: length - size, end: length - 1, length: size))
+  }
+  let start = match UInt64.parse(first) {
+    Ok(start) => start
+    Err(_) => return Ranged.Whole
+  }
+  if start >= length {
+    return Ranged.Unsatisfiable
+  }
+  let end = if last.is_empty() {
+    length - 1
+  } else {
+    match UInt64.parse(last) {
+      Ok(end) => if end >= length { length - 1 } else { end }
+      Err(_) => return Ranged.Whole
+    }
+  }
+  if end < start {
+    return Ranged.Whole
+  }
+  Ranged.Part(span: Span(start: start, end: end, length: end - start + 1))
+}
+
+fn matches_tag(header: StringSlice, tag: StringSlice) -> Bool {
+  for part in header.split(",") {
+    let candidate = part.trim()
+    let bare = if candidate.starts_with("W/") { candidate.part(2, to: candidate.length()) } else { candidate }
+    if candidate == "*".slice() || bare == tag {
+      return true
+    }
+  }
+  false
+}
+
+fn is_unchanged(request: Request, tag: StringSlice, modified: Instant) -> Bool {
+  match request.headers.get("If-None-Match") {
+    Some(header) => return matches_tag(header, tag: tag)
+    None => {}
+  }
+  match request.headers.get("If-Modified-Since") {
+    Some(header) => match parse_date(header) {
+      Some(since) => modified.unix_seconds() <= since.unix_seconds()
+      None => false
+    }
+    None => false
+  }
+}
+
+public fn serve_file(request: Request, responder: mut Responder, file: Path, options: StaticOptions = StaticOptions()) -> Result[Unit, Error]
+  uses FileRead, Handles, Tasks
+{
+  let metadata = match FileRead.metadata(file) {
+    Ok(metadata) => metadata
+    Err(_) => return mut responder.send(Response.text("not found", status: Status.not_found))
+  }
+  if !metadata.is_file() {
+    return mut responder.send(Response.text("not found", status: Status.not_found))
+  }
+  let length = metadata.length
+  let tag = "\"${length.format(radix: 16)}-${metadata.modified.unix_seconds().format(radix: 16)}\""
+  var headers = Headers.new()
+  mut headers.add("ETag", value: tag.slice())
+  mut headers.add("Last-Modified", value: format_date(metadata.modified).slice())
+  mut headers.add("Cache-Control", value: if options.max_age_seconds > 0 { "public, max-age=${options.max_age_seconds}".slice() } else { "no-cache".slice() })
+  if is_unchanged(request, tag: tag.slice(), modified: metadata.modified) {
+    return mut responder.send(Response(status: Status(code: 304), headers: own headers))
+  }
+  let media_type = media_type_of(file)
+  mut headers.add("Content-Type", value: media_type)
+  mut headers.add("Accept-Ranges", value: "bytes")
+  let is_range_allowed = match request.headers.get("If-Range") {
+    Some(condition) => condition.trim() == tag.slice()
+    None => true
+  }
+  let ranged = if is_range_allowed { range_of(request.headers.get("Range"), length: length) } else { Ranged.Whole }
+  match ranged {
+    Unsatisfiable => {
+      mut headers.add("Content-Range", value: "bytes */${length}".slice())
+      return mut responder.send(Response(status: Status(code: 416), headers: own headers))
+    }
+    Part(span) => {
+      mut headers.add("Content-Range", value: "bytes ${span.start}-${span.end}/${length}".slice())
+      mut headers.add("Content-Length", value: "${span.length}".slice())
+      var reader = system(FileRead.open(file))?
+      let _ = system(mut reader.seek(streams::Position.FromStart(offset: span.start)))?
+      var limited = streams::Limited.new(own reader, limit: span.length)
+      return mut responder.stream(mut limited, status: Status(code: 206), headers: headers)
+    }
+    Whole => {}
+  }
+  let is_wanted = options.compress && is_compressible_type(media_type) && accepts_coding(request.headers.get("Accept-Encoding"), coding: "gzip")
+  if is_wanted {
+    mut headers.add("Vary", value: "Accept-Encoding")
+    let sibling = Path.new("${file}.gz".slice())
+    match FileRead.metadata(sibling) {
+      Ok(compressed) => {
+        if compressed.is_file() {
+          mut headers.add("Content-Encoding", value: "gzip")
+          mut headers.add("Content-Length", value: "${compressed.length}".slice())
+          var reader = system(FileRead.open(sibling))?
+          return mut responder.stream(mut reader, headers: headers)
+        }
+      }
+      Err(_) => {}
+    }
+    if length <= 1048576 {
+      let plain = system(FileRead.read(file))?
+      let packed = compression::compress(plain.slice(), format: compression::Format.Gzip, level: compression::Level.Fastest)
+      mut headers.add("Content-Encoding", value: "gzip")
+      return mut responder.send(Response(status: Status.ok, headers: own headers, body: own packed))
+    }
+  }
+  mut headers.add("Content-Length", value: "${length}".slice())
+  var reader = system(FileRead.open(file))?
+  mut responder.stream(mut reader, headers: headers)
+}
+
+public fn serve_directory(
+  request: Request,
+  responder: mut Responder,
+  root: Path,
+  prefix: StringSlice = "/",
+  options: StaticOptions = StaticOptions(),
+) -> Result[Unit, Error]
+  uses FileRead, Handles, Tasks
+{
+  if request.method != Method.Get && request.method != Method.Head {
+    let refused = Response.text("only GET and HEAD are allowed", status: Status(code: 405)).with_header("Allow", value: "GET, HEAD")
+    return mut responder.send(own refused)
+  }
+  let path = request.path()
+  if !path.starts_with(prefix) {
+    return mut responder.send(Response.text("not found", status: Status.not_found))
+  }
+  let relative = path.part(prefix.length(), to: path.length())
+  let decoded = match url::decode_component(relative) {
+    Ok(decoded) => own decoded
+    Err(_) => return mut responder.send(Response.text("not found", status: Status.not_found))
+  }
+  if decoded.slice().contains("\u{0}") {
+    return mut responder.send(Response.text("not found", status: Status.not_found))
+  }
+  var trimmed = decoded.slice()
+  while trimmed.starts_with("/") {
+    trimmed = trimmed.part(1, to: trimmed.length())
+  }
+  let target = if trimmed.is_empty() {
+    root.copy()
+  } else {
+    match root.join_confined(Path.new(trimmed)) {
+      Ok(target) => own target
+      Err(_) => return mut responder.send(Response.text("not found", status: Status.not_found))
+    }
+  }
+  match FileRead.metadata(target) {
+    Ok(metadata) => {
+      if metadata.is_directory() {
+        if !path.ends_with("/") {
+          var location = path.to_string()
+          mut location.push("/")
+          match request.query() {
+            Some(query) => {
+              mut location.push("?")
+              mut location.push(query)
+            }
+            None => {}
+          }
+          let moved = Response(status: Status(code: 301)).with_header("Location", value: location.slice())
+          return mut responder.send(own moved)
+        }
+        return serve_file(request, responder: mut responder, file: target.join(options.index.slice()), options: options)
+      }
+      serve_file(request, responder: mut responder, file: target, options: options)
+    }
+    Err(_) => mut responder.send(Response.text("not found", status: Status.not_found))
+  }
+}

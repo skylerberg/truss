@@ -10,4 +10,4 @@ type type_check_result = {
 }
 
 val type_check_result : (Expressions.Names.key, type_check_result option) Query.query
-val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.file -> Diagnostic.t list

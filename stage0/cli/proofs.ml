@@ -17,14 +17,14 @@ let evaluator (project : Project.t) =
   Evaluator.of_compiler ~results:(Compiler.test_results ())
     (lazy (Compiler.create project Development))
 
-(* The prover's diagnostics of each of the modules, and the state of each
-   of its obligations, which a language server shows. A module is proven
+(* The prover's diagnostics of each of the files, and the state of each
+   of its obligations, which a language server shows. A file is proven
    only once no other stage reports a diagnostic in it, since the prover
-   reads the type checker's output; any other module has neither. The
-   queries of every proven module are sent to the solver together, before
-   the first module's results are read. *)
-let checked (project : Project.t) modules =
-  match List.filter (fun module_ -> Database.diagnostics project.session module_ = []) modules with
+   reads the type checker's output; any other file has neither. The
+   queries of every proven file are sent to the solver together, before
+   the first file's results are read. *)
+let checked (project : Project.t) files =
+  match List.filter (fun file -> Database.diagnostics project.session file = []) files with
   | [] -> fun _ -> ([], [])
   | provable ->
       let solver = Lazy.force solver and evaluator = evaluator project in
@@ -34,27 +34,27 @@ let checked (project : Project.t) modules =
           responses
       in
       Prover.solve_ahead ~evaluator ~record project.context solver provable;
-      fun module_ ->
-        if List.mem module_ provable then
-          ( Prover.diagnostics ~evaluator ~record project.context solver module_,
-            Prover.states ~evaluator ~record project.context solver module_ )
+      fun file ->
+        if List.mem file provable then
+          ( Prover.diagnostics ~evaluator ~record project.context solver file,
+            Prover.states ~evaluator ~record project.context solver file )
         else ([], [])
 
-let diagnostics (project : Project.t) modules =
-  let checked = checked project modules in
-  fun module_ -> fst (checked module_)
+let diagnostics (project : Project.t) files =
+  let checked = checked project files in
+  fun file -> fst (checked file)
 
 (* Each definition that [main] reaches and whose proofs have a hole. A
    program with such a definition cannot be built. *)
 let holes_reached (project : Project.t) main =
   let reached = List.hd (Database.reachable project.session [ main ]) in
   List.concat_map
-    (fun module_ ->
+    (fun file ->
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match Query.demand project.context Prover.proof (Resolve.Names.key_of declaration) with
           | Obligations { holes = _ :: _; _ } when Path.Set.mem declaration.path reached ->
               Some declaration.path
           | _ -> None)
-        (Query.demand project.context Resolve.Names.declarations module_))
-    (Project.program_modules project)
+        (Query.demand project.context Resolve.Names.declarations_in file))
+    (Project.program_files project)

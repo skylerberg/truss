@@ -1,0 +1,4 @@
+fn twice(count: Integer) -> Integer {
+  var total = count
+  total + count
+}

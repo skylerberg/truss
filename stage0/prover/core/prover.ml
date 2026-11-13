@@ -711,22 +711,22 @@ let rerun_changed (evaluator : evaluator) database keys =
           None
       | Some _ | None -> Some (request_key (Run run), run_response evaluator run code_key))
 
-(* Each definition of the modules decided: the runs whose code changed are
+(* Each definition of the files decided: the runs whose code changed are
    run again, the definitions' outcomes are asked for together, their
    pending requests are sent to the oracles together, and so on until none
    is pending, which takes a round or two, since a query waits for the runs
    whose values it holds, and a counterexample asks again for the values of
    the locals. *)
-let solve_ahead ?(evaluator = no_evaluator) ~record database solver modules =
+let solve_ahead ?(evaluator = no_evaluator) ~record database solver files =
   let keys =
     List.concat_map
-      (fun module_ ->
+      (fun file ->
         List.filter_map
           (fun declaration ->
             let key = Names.key_of declaration in
             match Query.demand database Names.base key with Some _ -> Some key | None -> None)
-          (Query.demand database Names.declarations module_))
-      modules
+          (Query.demand database Names.declarations_in file))
+      files
   in
   (match rerun_changed evaluator database keys with [] -> () | changed -> record changed);
   let rec round keys =
@@ -753,45 +753,46 @@ let decided database key =
 
 (* Each definition's states, in the file's offsets. A failure of a clause
    that another definition of the file states has a note at that clause. *)
-let file_states ?evaluator ~record database solver module_ =
-  solve_ahead ?evaluator ~record database solver [ module_ ];
+let file_states ?evaluator ~record database solver file =
+  solve_ahead ?evaluator ~record database solver [ file ];
   List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
-      let base_of key = Option.map snd (Query.demand database Names.base key) in
+      let base_of key = Query.demand database Names.base key in
       match base_of key with
-      | Some base ->
+      | Some (_, base) ->
           Some
             (List.map
                (fun (state, cited) ->
                  let note =
                    match cited with
-                   | Some ((cited : Names.key), span) when cited.module_ = module_ ->
-                       Option.map
-                         (fun offset ->
-                           ( Span.to_source ~base:offset (clamp_to_definition database cited span),
-                             "This is the clause that must hold." ))
-                         (base_of cited)
+                   | Some (cited, span) -> (
+                       match base_of cited with
+                       | Some (cited_file, offset) when cited_file = file ->
+                           Some
+                             ( Span.to_source ~base:offset (clamp_to_definition database cited span),
+                               "This is the clause that must hold." )
+                       | _ -> None)
                    | _ -> None
                  in
                  (* A clause in another file is named by where it is, since a
                     note is in the diagnostic's own file. *)
                  let elsewhere =
                    match cited with
-                   | Some ((cited : Names.key), span) when cited.module_ <> module_ -> (
-                       match
-                         ( base_of cited,
-                           try Some (Query.demand database Workspace.file cited.module_)
-                           with Not_found -> None )
-                       with
-                       | Some offset, Some file ->
-                           let start =
-                             (Span.to_source ~base:offset (clamp_to_definition database cited span))
-                               .start
-                           in
-                           let line, _ = Source.position file.source start in
-                           Printf.sprintf " The clause that must hold is at `%s:%d`."
-                             (Source.path file.source) line
+                   | Some (cited, span) -> (
+                       match base_of cited with
+                       | Some (cited_file, offset) when cited_file <> file -> (
+                           match Query.demand database Workspace.file cited_file with
+                           | parsed ->
+                               let start =
+                                 (Span.to_source ~base:offset
+                                    (clamp_to_definition database cited span))
+                                   .start
+                               in
+                               let line, _ = Source.position parsed.source start in
+                               Printf.sprintf " The clause that must hold is at `%s:%d`."
+                                 (Source.path parsed.source) line
+                           | exception Not_found -> "")
                        | _ -> "")
                    | _ -> ""
                  in
@@ -810,7 +811,7 @@ let file_states ?evaluator ~record database solver module_ =
                  })
                (decided database key))
       | None -> None)
-    (Query.demand database Names.declarations module_)
+    (Query.demand database Names.declarations_in file)
 
 let sorted_diagnostics list =
   List.sort
@@ -818,14 +819,14 @@ let sorted_diagnostics list =
       compare (left.span, left.code) (right.span, right.code))
     list
 
-let states ?evaluator ~record database solver module_ =
-  List.concat (file_states ?evaluator ~record database solver module_)
+let states ?evaluator ~record database solver file =
+  List.concat (file_states ?evaluator ~record database solver file)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
 (* The failures among the states. The same failure on another path of one
    definition, as a second index into the same list with the same index
    is, is reported once. *)
-let diagnostics ?evaluator ~record database solver module_ =
+let diagnostics ?evaluator ~record database solver file =
   List.concat_map
     (fun states ->
       List.fold_left
@@ -836,5 +837,5 @@ let diagnostics ?evaluator ~record database solver module_ =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (file_states ?evaluator ~record database solver module_)
+    (file_states ?evaluator ~record database solver file)
   |> sorted_diagnostics

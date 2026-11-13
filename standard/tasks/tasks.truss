@@ -1,0 +1,752 @@
+use standard::intrinsic
+use standard::random
+
+public type SendError = Closed | Cancelled
+  derives Equal
+
+impl Display for SendError {
+  fn display(self, output: mut TextBuilder) {
+    match self {
+      Closed => mut output.write("the channel is closed")
+      Cancelled => mut output.write("the task was cancelled")
+    }
+  }
+}
+
+type Queue[Message](
+  incoming: List[Message],
+  outgoing: List[Message],
+  capacity: USize,
+  enqueued_count: UInt64,
+  dequeued_count: UInt64,
+  closed: Bool,
+)
+
+type EnqueueOutcome[Message] =
+  | Buffered
+  | Offered(position: UInt64)
+  | Full(message: Message)
+  | Refused(message: Message)
+
+type DequeueOutcome[Message](message: Option[Message], closed: Bool)
+
+type Offer = Accepted | Pending | Withdrawn
+
+fn Queue[Message].enqueue(mut self, message: own Message) -> EnqueueOutcome[Message] {
+  if self.closed {
+    return EnqueueOutcome.Refused(message: own message)
+  }
+  let limit = if self.capacity == 0 { 1 } else { self.capacity }
+  if self.incoming.length().saturating_add(self.outgoing.length()) >= limit {
+    return EnqueueOutcome.Full(message: own message)
+  }
+  mut self.incoming.push(own message)
+  self.enqueued_count = self.enqueued_count.saturating_add(1)
+  if self.capacity == 0 { EnqueueOutcome.Offered(position: self.enqueued_count) } else { EnqueueOutcome.Buffered }
+}
+
+fn Queue[Message].dequeue(mut self) -> DequeueOutcome[Message] {
+  if self.outgoing.is_empty() {
+    mut self.incoming.reverse()
+    self.outgoing = own self.incoming
+    self.incoming = []
+  }
+  let message = mut self.outgoing.pop()
+  if message is Some(_) {
+    self.dequeued_count = self.dequeued_count.saturating_add(1)
+  }
+  DequeueOutcome(message: own message, closed: self.closed)
+}
+
+fn Queue[Message].check_offer(mut self, position: UInt64, withdraw: Bool) -> Offer {
+  if self.dequeued_count >= position {
+    return Offer.Accepted
+  }
+  if !withdraw && !self.closed {
+    return Offer.Pending
+  }
+  let _ = mut self.incoming.pop()
+  self.enqueued_count = self.enqueued_count.saturating_subtract(1)
+  Offer.Withdrawn
+}
+
+public opaque type Channel[Message: Storable](queue: intrinsic::Shared[Queue[Message]])
+  derives Copyable
+
+public fn Channel[Message: Storable].new(capacity: USize = 0) -> Channel[Message] {
+  Channel(
+    queue: intrinsic::shared_new(
+      Queue(incoming: [], outgoing: [], capacity: capacity, enqueued_count: 0, dequeued_count: 0, closed: false),
+    ),
+  )
+}
+
+public fn Channel[Message: Storable].send(self, message: own Message) -> Result[Unit, SendError]
+  uses Tasks
+{
+  let key = intrinsic::shared_key(self.queue)
+  var unsent = own message
+  while true {
+    let ticket = Tasks.watch(key)
+    match intrinsic::shared_update(self.queue, input: own unsent, change: fn(queue, offered) {
+      mut queue.enqueue(own offered)
+    }) {
+      Buffered => {
+        Tasks.wake(key)
+        return Ok(Unit)
+      }
+      Offered(position) => {
+        Tasks.wake(key)
+        return self.await_receiver(position)
+      }
+      Refused(_) => return Err(SendError.Closed)
+      Full(rejected) => {
+        if Tasks.cancelled() {
+          return Err(SendError.Cancelled)
+        }
+        unsent = own rejected
+        Tasks.wait(key, ticket: ticket, reason: "sending to a full channel")
+      }
+    }
+  }
+}
+
+fn Channel[Message: Storable].await_receiver(self, position: UInt64) -> Result[Unit, SendError]
+  uses Tasks
+{
+  let key = intrinsic::shared_key(self.queue)
+  while true {
+    let ticket = Tasks.watch(key)
+    let cancelled = Tasks.cancelled()
+    match intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+      mut queue.check_offer(position, withdraw: cancelled)
+    }) {
+      Accepted => return Ok(Unit)
+      Withdrawn => {
+        Tasks.wake(key)
+        return Err(if cancelled { SendError.Cancelled } else { SendError.Closed })
+      }
+      Pending => Tasks.wait(key, ticket: ticket, reason: "sending to a channel that no task is receiving from")
+    }
+  }
+}
+
+public fn Channel[Message: Storable].receive(self) -> Option[Message]
+  uses Tasks
+{
+  let key = intrinsic::shared_key(self.queue)
+  while true {
+    let ticket = Tasks.watch(key)
+    let dequeue = intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+      mut queue.dequeue()
+    })
+    match own dequeue.message {
+      Some(message) => {
+        Tasks.wake(key)
+        return Some(own message)
+      }
+      None => {}
+    }
+    if dequeue.closed || Tasks.cancelled() {
+      return None
+    }
+    Tasks.wait(key, ticket: ticket, reason: "receiving from an empty channel")
+  }
+}
+
+public fn Channel[Message: Storable].try_receive(self) -> Option[Message]
+  uses Tasks
+{
+  let dequeue = intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+    mut queue.dequeue()
+  })
+  if dequeue.message is Some(_) {
+    Tasks.wake(intrinsic::shared_key(self.queue))
+  }
+  own dequeue.message
+}
+
+public fn Channel[Message: Storable].close(self)
+  uses Tasks
+{
+  intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+    queue.closed = true
+  })
+  Tasks.wake(intrinsic::shared_key(self.queue))
+}
+
+public fn Channel[Message: Storable].is_closed(self) -> Bool
+  uses Tasks
+{
+  intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+    queue.closed
+  })
+}
+
+public fn Channel[Message: Storable].messages(self) yields own Message
+  uses Tasks
+{
+  while self.receive() is Some(message) {
+    yield own message
+  }
+}
+
+public fn with_timeout[Output, capability Granted](limit: Duration, work: (fn() -> Output uses Granted)) -> Option[Output]
+  uses Tasks, Clock, Granted
+{
+  concurrent {
+    return Some(work())
+    {
+      Clock.sleep(limit)
+      return None
+    }
+  }
+}
+
+public opaque type Cell[Value: Storable](state: intrinsic::Shared[Value])
+  derives Copyable
+
+public fn Cell[Value: Storable].new(value: own Value) -> Cell[Value] {
+  Cell(state: intrinsic::shared_new(own value))
+}
+
+public fn Cell[Value: Storable].update[Output: Storable](self, change: fn(mut Value) -> Output) -> Output
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(value, _) {
+    change(mut value)
+  })
+}
+
+public fn Cell[Value: Storable].read[Output: Storable](self, view: fn(Value) -> Output) -> Output
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(value, _) {
+    view(value)
+  })
+}
+
+public opaque type Counter(count: Cell[Int64])
+  derives Copyable
+
+public fn Counter.new(start: Int64 = 0) -> Counter {
+  Counter(count: Cell.new(start))
+}
+
+public fn Counter.add(self, amount: Int64 = 1) -> Int64
+  uses Tasks
+{
+  self.count.update(fn(count) {
+    count = count.wrapping_add(amount)
+    count
+  })
+}
+
+public fn Counter.value(self) -> Int64
+  uses Tasks
+{
+  self.count.read(fn(count) { count })
+}
+
+type Permit()
+
+public opaque type Limiter(permits: Channel[Permit])
+  derives Copyable
+
+public fn Limiter.new(permits: USize) -> Limiter
+  requires permits > 0
+{
+  Limiter(permits: Channel[Permit].new(capacity: permits))
+}
+
+public fn Limiter.hold[Output, capability Granted](self, work: (fn() -> Output uses Granted)) -> Option[Output]
+  uses Tasks, Granted
+{
+  if self.permits.send(Permit()) is Err(_) {
+    return None
+  }
+  let output = work()
+  let _ = self.permits.try_receive()
+  Some(own output)
+}
+
+type Status =
+  | Ready
+  | Finished
+  | Joining(task_group: UInt64)
+  | Waiting(reason: String)
+  | Locking(mutex: UInt64)
+  | Sleeping(deadline: Duration)
+
+type Task(
+  coroutine: USize,
+  task_group: UInt64,
+  status: Status,
+  cancelled: Bool,
+  watched_key: UInt64,
+  ticket: UInt64,
+  woken: Bool,
+)
+
+type TaskGroup(identifier: UInt64, parent: UInt64, cancelled: Bool)
+
+type Decision =
+  | Proceed
+  | Suspend
+  | Resume(coroutine: USize)
+  | Deadlock(report: String)
+
+let root_task: USize = 0
+
+type Scheduler(
+  generator: random::Generator,
+  tasks: List[Task],
+  groups: List[TaskGroup],
+  locked: List[UInt64],
+  running: USize,
+  next: Option[USize],
+  groups_opened: UInt64,
+  tickets_issued: UInt64,
+  elapsed: Duration,
+)
+  invariant running < tasks.length()
+  invariant !(next is Some(task) && task >= tasks.length())
+
+internal fn Scheduler.new(seed: UInt64) -> Scheduler {
+  Scheduler(
+    generator: random::Generator.seeded(seed),
+    tasks: [
+      Task(
+        coroutine: 0,
+        task_group: 0,
+        status: Status.Ready,
+        cancelled: false,
+        watched_key: 0,
+        ticket: 0,
+        woken: false,
+      ),
+    ],
+    groups: [],
+    locked: [],
+    running: root_task,
+    next: None,
+    groups_opened: 0,
+    tickets_issued: 0,
+    elapsed: Duration.zero,
+  )
+}
+
+internal fn Scheduler.open(mut self) -> UInt64 {
+  self.groups_opened = self.groups_opened.saturating_add(1)
+  mut self.groups.push(
+    TaskGroup(identifier: self.groups_opened, parent: self.tasks[self.running].task_group, cancelled: false),
+  )
+  self.groups_opened
+}
+
+internal fn Scheduler.group_index(self, task_group: UInt64) -> Option[USize]
+  ensures !(result is Some(index) && index >= self.groups.length())
+{
+  self.groups.slice().find_index(fn(group) { group.identifier == task_group })
+}
+
+internal fn Scheduler.accepts_tasks(self, task_group: UInt64) -> Bool {
+  match self.group_index(task_group) {
+    Some(index) => !self.groups[index].cancelled
+    None => false
+  }
+}
+
+internal fn Scheduler.add_task(mut self, task_group: UInt64, coroutine: USize) {
+  let task = Task(
+    coroutine: coroutine,
+    task_group: task_group,
+    status: Status.Ready,
+    cancelled: self.tasks[self.running].cancelled,
+    watched_key: 0,
+    ticket: 0,
+    woken: false,
+  )
+  match self.tasks.slice().find_index(fn(other) { other.status is Finished }) {
+    Some(finished) => self.tasks[finished] = own task
+    None => mut self.tasks.push(own task)
+  }
+}
+
+internal fn Scheduler.has_unfinished_task(self, task_group: UInt64) -> Bool {
+  for task in self.tasks {
+    if task.task_group == task_group && !(task.status is Finished) {
+      return true
+    }
+  }
+  false
+}
+
+internal fn Scheduler.join(mut self, task_group: UInt64) -> Bool {
+  if self.has_unfinished_task(task_group) {
+    self.tasks[self.running].status = Status.Joining(task_group: task_group)
+    return false
+  }
+  if self.group_index(task_group) is Some(index) {
+    let _ = mut self.groups.swap_remove(index)
+  }
+  true
+}
+
+internal fn Scheduler.cancel(mut self, task_group: UInt64) -> Bool {
+  let index = match self.group_index(task_group) {
+    Some(index) => index
+    None => return false
+  }
+  if self.groups[index].cancelled {
+    return false
+  }
+  self.groups[index].cancelled = true
+  let count = self.tasks.length()
+  var worklist: List[UInt64] = [task_group]
+  while mut worklist.pop() is Some(group)
+    invariant self.tasks.length() == count
+    invariant self.running < count
+    invariant !(self.next is Some(task) && task >= count)
+  {
+    for task in 0..count
+      invariant self.tasks.length() == count
+      invariant self.running < count
+      invariant !(self.next is Some(other) && other >= count)
+    {
+      if self.tasks[task].task_group == group {
+        self.tasks[task].cancelled = true
+      }
+    }
+    for nested in self.groups {
+      if nested.parent == group {
+        mut worklist.push(nested.identifier)
+      }
+    }
+  }
+  true
+}
+
+internal fn Scheduler.watch(mut self, key: UInt64) -> UInt64 {
+  self.tickets_issued = self.tickets_issued.wrapping_add(1)
+  self.tasks[self.running].watched_key = key
+  self.tasks[self.running].ticket = self.tickets_issued
+  self.tasks[self.running].woken = false
+  self.tickets_issued
+}
+
+internal fn Scheduler.wait(mut self, key: UInt64, ticket: UInt64, reason: own String) -> Bool {
+  if self.tasks[self.running].cancelled
+    || self.tasks[self.running].woken
+    || self.tasks[self.running].watched_key != key
+    || self.tasks[self.running].ticket != ticket
+  {
+    return false
+  }
+  self.tasks[self.running].status = Status.Waiting(reason: own reason)
+  true
+}
+
+internal fn Scheduler.wake(mut self, key: UInt64) {
+  let count = self.tasks.length()
+  for task in 0..count
+    invariant self.tasks.length() == count
+    invariant self.running < count
+    invariant !(self.next is Some(other) && other >= count)
+  {
+    if self.tasks[task].watched_key == key {
+      self.tasks[task].woken = true
+    }
+  }
+}
+
+internal fn Scheduler.lock(mut self, mutex: UInt64) -> Bool {
+  if self.locked.contains(mutex) {
+    self.tasks[self.running].status = Status.Locking(mutex: mutex)
+    return false
+  }
+  mut self.locked.push(mutex)
+  true
+}
+
+internal fn Scheduler.unlock(mut self, mutex: UInt64) {
+  if self.locked.index_of(mutex) is Some(index) {
+    let _ = mut self.locked.swap_remove(index)
+  }
+}
+
+internal fn Scheduler.sleep(mut self, duration: Duration) -> Bool {
+  if self.tasks[self.running].cancelled || duration <= Duration.zero {
+    return false
+  }
+  self.tasks[self.running].status = Status.Sleeping(deadline: self.elapsed + duration)
+  true
+}
+
+internal fn Scheduler.advance(mut self, by: Duration) {
+  if by > Duration.zero {
+    self.elapsed = self.elapsed + by
+  }
+}
+
+internal fn Scheduler.earliest_deadline(self) -> Option[Duration] {
+  var earliest: Option[Duration] = None
+  for task in self.tasks {
+    if task.status is Sleeping(deadline) {
+      if !(earliest is Some(other) && other <= deadline) {
+        earliest = Some(deadline)
+      }
+    }
+  }
+  earliest
+}
+
+internal fn Scheduler.can_run(self, task: USize) -> Bool
+  requires task < self.tasks.length()
+{
+  match self.tasks[task].status {
+    Ready => true
+    Finished => false
+    Joining(task_group) => !self.has_unfinished_task(task_group)
+    Waiting(_) => self.tasks[task].woken || self.tasks[task].cancelled
+    Locking(mutex) => !self.locked.contains(mutex)
+    Sleeping(deadline) => deadline <= self.elapsed || self.tasks[task].cancelled
+  }
+}
+
+internal fn Scheduler.runnable_count(self) -> USize {
+  var count: USize = 0
+  for task in 0..self.tasks.length() {
+    if self.can_run(task) {
+      count = count.saturating_add(1)
+    }
+  }
+  count
+}
+
+internal fn Scheduler.pick_runnable(mut self) -> Option[USize]
+  ensures !(result is Some(task) && task >= self.tasks.length())
+{
+  var runnable = self.runnable_count()
+  if runnable == 0 {
+    match self.earliest_deadline() {
+      Some(deadline) if deadline > self.elapsed => self.elapsed = deadline
+      _ => return None
+    }
+    runnable = self.runnable_count()
+    if runnable == 0 {
+      return None
+    }
+  }
+  var skipped = mut self.generator.index(runnable)
+  for task in 0..self.tasks.length() {
+    if self.can_run(task) {
+      if skipped == 0 {
+        return Some(task)
+      }
+      skipped -= 1
+    }
+  }
+  None
+}
+
+internal fn Scheduler.deadlock_report(self) -> String {
+  var report = "Deadlock: no task can run."
+  for task in 0..self.tasks.length() {
+    match self.tasks[task].status {
+      Joining(_) => mut report.push("\n  Task ${task} is waiting for the tasks that it spawned.")
+      Waiting(reason) => mut report.push("\n  Task ${task} is ${reason}.")
+      Locking(_) => mut report.push("\n  Task ${task} is blocked on the mutex of a `mut` capability implementation.")
+      _ => {}
+    }
+  }
+  report
+}
+
+internal fn Scheduler.choose_next(mut self) -> Decision {
+  let caller = self.running
+  let chosen = match self.next {
+    Some(task) => task
+    None => match mut self.pick_runnable() {
+      Some(task) => task
+      None => return Decision.Deadlock(report: self.deadlock_report())
+    }
+  }
+  if chosen != caller && caller != root_task {
+    self.next = Some(chosen)
+    return Decision.Suspend
+  }
+  self.next = None
+  self.tasks[chosen].status = Status.Ready
+  self.running = chosen
+  if chosen == caller { Decision.Proceed } else { Decision.Resume(coroutine: self.tasks[chosen].coroutine) }
+}
+
+internal fn Scheduler.return_to_root(mut self, suspended: Bool) {
+  if !suspended {
+    self.tasks[self.running].status = Status.Finished
+  }
+  self.running = root_task
+}
+
+fn switch_task(scheduler: intrinsic::Shared[Scheduler])
+  uses Tasks, Panic
+{
+  while true {
+    let decision = intrinsic::shared_update(scheduler, input: 0, change: fn(state, _) {
+      mut state.choose_next()
+    })
+    match decision {
+      Proceed => return
+      Suspend => {
+        intrinsic::coroutine_suspend()
+        return
+      }
+      Resume(coroutine) => {
+        let suspended = intrinsic::coroutine_resume(coroutine)
+        intrinsic::shared_update(scheduler, input: 0, change: fn(state, _) {
+          mut state.return_to_root(suspended)
+        })
+      }
+      Deadlock(report) => Panic.crash(report)
+    }
+  }
+}
+
+public opaque type SeededTasks(scheduler: intrinsic::Shared[Scheduler])
+
+public fn SeededTasks.new(seed: UInt64) -> SeededTasks {
+  SeededTasks(scheduler: intrinsic::shared_new(Scheduler.new(seed)))
+}
+
+internal fn SeededTasks.elapsed(self) -> Duration
+  uses Tasks
+{
+  intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    scheduler.elapsed
+  })
+}
+
+internal fn SeededTasks.advance(self, by: Duration)
+  uses Tasks
+{
+  intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    mut scheduler.advance(by)
+  })
+}
+
+internal fn SeededTasks.sleep(self, duration: Duration)
+  uses Tasks, Panic
+{
+  let blocked = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    mut scheduler.sleep(duration)
+  })
+  if blocked {
+    switch_task(self.scheduler)
+  }
+}
+
+impl Tasks for SeededTasks
+  uses Panic
+{
+  fn open(self) -> UInt64 {
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      mut scheduler.open()
+    })
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    let accepted = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      scheduler.accepts_tasks(task_group)
+    })
+    if !accepted {
+      return false
+    }
+    let coroutine = intrinsic::coroutine_start(work, item: item)
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      mut scheduler.add_task(task_group, coroutine: coroutine)
+    })
+    let switch = switch_task
+    switch(self.scheduler)
+    true
+  }
+
+  fn join(self, task_group: UInt64) {
+    while true {
+      let joined = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+        mut scheduler.join(task_group)
+      })
+      if joined {
+        return
+      }
+      let switch = switch_task
+      switch(self.scheduler)
+    }
+  }
+
+  fn cancel(self, task_group: UInt64) -> Bool {
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      mut scheduler.cancel(task_group)
+    })
+  }
+
+  fn cancelled(self) -> Bool {
+    let switch = switch_task
+    switch(self.scheduler)
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      scheduler.tasks[scheduler.running].cancelled
+    })
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    let switch = switch_task
+    switch(self.scheduler)
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      mut scheduler.watch(key)
+    })
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+    let blocked = intrinsic::shared_update(
+      self.scheduler,
+      input: reason.to_string(),
+      change: fn(scheduler, description) {
+        mut scheduler.wait(key, ticket: ticket, reason: own description)
+      },
+    )
+    if blocked {
+      let switch = switch_task
+      switch(self.scheduler)
+    }
+  }
+
+  fn wake(self, key: UInt64) {
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      mut scheduler.wake(key)
+    })
+  }
+
+  fn lock(self, mutex: UInt64) {
+    while true {
+      let switch = switch_task
+      switch(self.scheduler)
+      let locked = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+        mut scheduler.lock(mutex)
+      })
+      if locked {
+        return
+      }
+    }
+  }
+
+  fn unlock(self, mutex: UInt64) {
+    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      mut scheduler.unlock(mutex)
+    })
+  }
+
+  fn yield_now(self) {
+    let switch = switch_task
+    switch(self.scheduler)
+  }
+}

@@ -15,15 +15,14 @@ open Pattern_typing
 (* [?] takes a [Result] whose error type is the function's error type, or an
    [Option] in a function that returns an [Option]. *)
 let rec try_ state env (value : expression) (inner : expression) =
+  reject_in_formula state env value.span "`?`";
   let inner_type = normalize state (expression state env inner) in
   let output =
     match env.output with Some (Returns output) -> Some (normalize state output) | _ -> None
   in
   register_expression state value (fun () ->
       match output with
-      | Some output ->
-          Form.try_ state value inner ~output:(final_type state output)
-            ~exited_tasks:(tasks_exited_by Return_exit env.enclosing)
+      | Some output -> Form.try_ state value inner ~output:(final_type state output)
       | None -> bug "`?` where nothing is returned");
   match (inner_type, output) with
   | ( Types.Named { path; arguments = [ Types.Type ok; Types.Type error ] },

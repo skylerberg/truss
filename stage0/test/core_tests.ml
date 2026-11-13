@@ -7,14 +7,14 @@ open Support
 (* The printed core form of the definition [name] of the program [text]. *)
 let printed_definition text name =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
+  let file = file_of "app::main" in
   (match
      List.map
        (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
-       (parse_errors database module_)
-     @ Resolve.diagnostics database module_
-     @ Interface.diagnostics database module_
-     @ Infer.diagnostics database module_
+       (parse_errors database file)
+     @ Resolve.diagnostics database file
+     @ Interface.diagnostics database file
+     @ Infer.diagnostics database file
    with
   | [] -> ()
   | actual ->
@@ -27,7 +27,7 @@ let printed_definition text name =
         let key = Resolve.Names.key_of declaration in
         if Path.show key.path = "app::main::" ^ name then Query.demand database Infer.core key
         else None)
-      (Query.demand database Resolve.Names.declarations module_)
+      (Query.demand database Resolve.Names.declarations_in file)
   in
   match actual with
   | Some form -> Core_print.show form
@@ -305,17 +305,6 @@ let () =
      Cursor.skip for the cursor of standard::list::impl Iterable for List[Element].each by derived \
      standard::core::Cursor for standard::list::impl Iterable for List[Element].each(own \
      standard::list::impl Iterable for List[Element].each[Int64](place items), 1)) }";
-  expect_body "an early exit from concurrent code names the tasks that it ends"
-    Fixtures.Core.early_exit_from_concurrent_code_names_the_tasks
-    "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
-     items) { concurrent #1 { let own first = match app::main::fetch(place item) { Ok(value: own \
-     value) => { value } Err(error: own error) => { task_exit branch 0 of #1 { return \
-     Result[Int64, Int64].Err(error: error) } } }; if (item > 3) { task_exit branch 1 of #1 { \
-     break } } }; let _ = place first }; concurrent #2 for item in yielding_call \
-     standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
-     task_exit an iteration of #2 { break } }; if (item > 4) { continue }; if (item > 3) { \
-     task_exit an iteration of #2 { return Result[Int64, Int64].Err(error: item) } } }; \
-     Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
     Fixtures.Core.assignment_through_an_index_calls_assign_where_the
     "{ let var own ports = { let var own map = standard::map::Map.with_capacity[String, Int64](1); \
@@ -555,11 +544,11 @@ let () =
   let database = setup [] in
   let forms = ref 0 in
   List.iter
-    (fun ((module_ : Path.module_), _) ->
+    (fun ((file : Path.file), _) ->
       test
-        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_module module_))
-        (fun () -> forms := !forms + check_module_core_invariants database module_))
-    Standard_library.modules;
+        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
+        (fun () -> forms := !forms + check_file_core_invariants database file))
+    Standard_library.files;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
 

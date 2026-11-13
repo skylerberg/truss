@@ -1,0 +1,108 @@
+use standard::http
+use standard::network
+use standard::simulation
+
+fn routes(request: own http::Request, responder: mut http::Responder)
+  uses Handles, Tasks
+{
+  if request.matches(http::Route"POST /small") is Some(_) {
+    let limited = own request.with_body_limit(10)
+    let reply = match own limited.bytes() {
+      Ok(bytes) => http::Response.text("${bytes.length()}".slice())
+      Err(BodyTooLarge) => http::Response.text("too large", status: http::Status.content_too_large)
+      Err(_) => http::Response.text("failed", status: http::Status.bad_request)
+    }
+    let _ = mut responder.send(own reply)
+    return
+  }
+  if request.matches(http::Route"GET /custom") is Some(_) {
+    let custom = http::Response.text("custom").with_header("Content-Security-Policy", value: "default-src *")
+    let _ = mut responder.send(own custom)
+    return
+  }
+  let _ = mut responder.send(http::Response.text("hello"))
+}
+
+fn policy() -> http::CorsPolicy {
+  http::CorsPolicy(origins: ["https://app.test"], exposed: ["x-request-id"])
+}
+
+fn application(request: own http::Request, responder: mut http::Responder)
+  uses Handles, Tasks, Clock, Log, Random
+{
+  http::request_id(own request, responder: mut responder, next: fn(identified, identified_responder) {
+    http::log_requests(own identified, responder: mut identified_responder, next: fn(logged, logged_responder) {
+      http::secure_headers(own logged, responder: mut logged_responder, next: fn(secured, secured_responder) {
+        http::cors(own secured, responder: mut secured_responder, policy: policy(), next: routes)
+      })
+    })
+  })
+}
+
+fn exchange(raw: StringSlice) -> String
+  uses NetworkClient, Handles, Tasks, Panic
+{
+  let connection = network::connect("localhost", port: 8093).expect("the server accepts")
+  let _ = connection.send_all(raw.bytes())
+  var reply: List[UInt8] = []
+  let _ = connection.receive_to_end(mut reply)
+  String.from_utf8_lossy(reply.slice())
+}
+
+fn header_of(reply: StringSlice, name: StringSlice) -> String {
+  for line in reply.split("\r\n") {
+    if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ".slice()) {
+      return line.part(name.length() + 2, to: line.length()).to_string()
+    }
+  }
+  "none"
+}
+
+fn visit() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Log, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8093)).expect("the port is free")
+  concurrent {
+    http::serve(mut listener, handler: application)
+    {
+      var seen: List[String] = []
+      let preflight = exchange("OPTIONS /items HTTP/1.1\r\nHost: x\r\nOrigin: https://app.test\r\nAccess-Control-Request-Method: POST\r\nConnection: close\r\n\r\n")
+      mut seen.push("${preflight.slice().starts_with("HTTP/1.1 204")} ${header_of(preflight.slice(), name: "Access-Control-Allow-Origin")} ${header_of(preflight.slice(), name: "Access-Control-Allow-Methods")}")
+      let allowed = exchange("GET /items HTTP/1.1\r\nHost: x\r\nOrigin: https://app.test\r\nX-Request-ID: abc-123\r\nConnection: close\r\n\r\n")
+      mut seen.push("${header_of(allowed.slice(), name: "Access-Control-Allow-Origin")} ${header_of(allowed.slice(), name: "Vary")} ${header_of(allowed.slice(), name: "X-Request-ID")} ${header_of(allowed.slice(), name: "Access-Control-Expose-Headers")}")
+      let denied = exchange("GET /items HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.test\r\nConnection: close\r\n\r\n")
+      mut seen.push("${header_of(denied.slice(), name: "Access-Control-Allow-Origin")} ${denied.slice().ends_with("hello")}")
+      mut seen.push("${header_of(denied.slice(), name: "X-Content-Type-Options")} ${header_of(denied.slice(), name: "X-Frame-Options")} ${header_of(denied.slice(), name: "Content-Security-Policy")}")
+      mut seen.push("${header_of(denied.slice(), name: "X-Request-ID").length()}")
+      let custom = exchange("GET /custom HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+      mut seen.push(header_of(custom.slice(), name: "Content-Security-Policy"))
+      let small = exchange("POST /small HTTP/1.1\r\nHost: x\r\nContent-Length: 20\r\nConnection: close\r\n\r\n01234567890123456789")
+      mut seen.push("${small.slice().starts_with("HTTP/1.1 413")}")
+      return own seen
+    }
+  }
+}
+
+test "middleware adds CORS, security headers, request IDs, logs, and body limits" {
+  let world = simulation::World.new()
+  provide world {
+    let seen = visit()
+    assert seen.length() == 7
+    assert seen[0] == "true https://app.test GET, HEAD, POST, PUT, PATCH, DELETE"
+    assert seen[1] == "https://app.test Origin abc-123 x-request-id"
+    assert seen[2] == "none true"
+    assert seen[3] == "nosniff DENY default-src 'self'"
+    assert seen[4] == "16"
+    assert seen[5] == "default-src *"
+    assert seen[6] == "true"
+    let records = world.records()
+    var logged: List[String] = []
+    for record in records {
+      if record.message == "request" {
+        mut logged.push("${record.fields.length()}")
+      }
+    }
+    assert logged.length() == 5
+    assert logged[1] == "6"
+  }
+}

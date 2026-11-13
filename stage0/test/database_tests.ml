@@ -68,7 +68,7 @@ let errors directory =
   let actual =
     List.concat_map
       (fun (_, name) ->
-        List.concat_map (Database.diagnostics session) (Database.package_modules session name))
+        List.concat_map (Database.diagnostics session) (Database.package_files session name))
       packages
   in
   Database.save_session session;
@@ -88,7 +88,7 @@ let checked directory = computed directory Infer.type_check_result
 let top = Support.top_key
 
 let shapes_method name : Resolve.Names.key =
-  let module_ = Support.module_of "app::shapes" in
+  let module_ = Support.module_of "app" in
   {
     module_;
     path =
@@ -202,14 +202,14 @@ let () =
         Fixtures.Database.editing_one_functions_body_checks_only_that_body_3;
       expect_errors directory 0;
       let again = checked directory in
-      if List.mem (top "app::main" "double") again then fail "checked double again";
-      if not (List.mem (top "app::other" "triple") again) then fail "did not check triple");
+      if List.mem (top "app" "double") again then fail "checked double again";
+      if not (List.mem (top "app" "triple") again) then fail "did not check triple");
   test "reordering a type's fields checks no reader of the type again" (fun () ->
       fresh_store ();
       let directory = package () in
       let point fields = "internal type Point(" ^ fields ^ ")\n" in
-      write directory "point.truss" (point "x: Int64, y: Int64");
-      write directory "reader.truss"
+      write directory "point/point.truss" (point "x: Int64, y: Int64");
+      write directory "reader/reader.truss"
         Fixtures.Database.reordering_a_types_fields_checks_no_reader_of_the;
       expect_errors directory 0;
       let width = top "app::reader" "width" in
@@ -217,7 +217,7 @@ let () =
       if not (List.mem width (checked directory)) then fail "never checked width";
       if not (List.mem width (lowered directory)) then fail "never lowered width's interface";
       clear directory;
-      write directory "point.truss" (point "y: Int64, x: Int64");
+      write directory "point/point.truss" (point "y: Int64, x: Int64");
       expect_errors directory 0;
       if List.mem width (checked directory) then fail "checked width again";
       if List.mem width (lowered directory) then fail "lowered width's interface again");
@@ -288,16 +288,15 @@ let () =
             ("other.truss", None);
           ]
       in
-      let modules session =
-        List.sort compare (Database.package_modules session { owner = None; name = "app" })
+      let files session =
+        List.sort compare (Database.package_files session { owner = None; name = "app" })
       in
-      let named name : Path.module_ =
-        { package = { owner = None; name = "app" }; modules = [ name ] }
+      let named name : Path.file =
+        { module_ = { package = { owner = None; name = "app" }; modules = [] }; name }
       in
-      if modules trial <> [ named "added"; named "main" ] then fail "the trial's modules";
+      if files trial <> [ named "added"; named "main" ] then fail "the trial's files";
       if Database.diagnostics trial (named "main") = [] then fail "the trial did not see the change";
-      if modules session <> [ named "main"; named "other" ] then
-        fail "the session's modules changed";
+      if files session <> [ named "main"; named "other" ] then fail "the session's files changed";
       if Database.diagnostics session (named "main") <> [] then fail "the session saw the change");
   test "a manifest added below a package gives the files under it to a new package" (fun () ->
       fresh_store ();
@@ -315,11 +314,11 @@ let () =
       let after, _ = session directory in
       if
         Database.package_modules after { owner = None; name = "app" }
-        <> [ { package = { owner = None; name = "app" }; modules = [ "main" ] } ]
+        <> [ { package = { owner = None; name = "app" }; modules = [] } ]
       then fail "the first package still has the file";
       if
         Database.package_modules after { owner = None; name = "tools" }
-        <> [ { package = { owner = None; name = "tools" }; modules = [ "helper" ] } ]
+        <> [ { package = { owner = None; name = "tools" }; modules = [] } ]
       then fail "the new package does not have the file");
   test "a malformed manifest is a problem, at its line" (fun () ->
       fresh_store ();
@@ -366,8 +365,8 @@ let () =
         (program ^ Fixtures.Database.new_worktree_starts_from_the_nearest_saved_state);
       expect_errors second 0;
       let again = checked second in
-      if List.mem (top "app::main" "double") again then fail "checked double again";
-      if not (List.mem (top "app::main" "extra") again) then fail "did not check extra");
+      if List.mem (top "app" "double") again then fail "checked double again";
+      if not (List.mem (top "app" "extra") again) then fail "did not check extra");
   test "a new worktree's state is a difference over the state it started from" (fun () ->
       fresh_store ~empty:true ();
       (* Eight modules, of which the second worktree changes one. *)
@@ -406,18 +405,10 @@ let () =
       | _ -> fail "no sessions")
 
 let double : Path.t =
-  Top
-    {
-      module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
-      name = "double";
-    }
+  Top { module_ = { package = { owner = None; name = "app" }; modules = [] }; name = "double" }
 
 let doubling : Path.t =
-  Test
-    {
-      module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
-      name = "doubling";
-    }
+  Test { module_ = { package = { owner = None; name = "app" }; modules = [] }; name = "doubling" }
 
 let test_body_reads_signature : Graph_types.edge =
   {
@@ -448,11 +439,7 @@ let () =
       let session, _ = session directory in
       ignore (errors directory);
       let keep : Path.t =
-        Top
-          {
-            module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
-            name = "keep";
-          }
+        Top { module_ = { package = { owner = None; name = "app" }; modules = [] }; name = "keep" }
       in
       let dependencies = Database.dependencies session [ keep ] in
       if dependencies = [] then fail "keep depends on nothing";
@@ -585,7 +572,7 @@ let () =
           let quadruple : Path.t =
             Top
               {
-                module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
+                module_ = { package = { owner = None; name = "app" }; modules = [] };
                 name = "quadruple";
               }
           in
@@ -667,54 +654,55 @@ let () =
 
 (* The layers stay apart *)
 
-let library_module name : Path.module_ = { package = Path.standard_package; modules = [ name ] }
+let library_file name : Path.file =
+  { module_ = { package = Path.standard_package; modules = [ name ] }; name }
 
 let library_function name =
   Printf.sprintf "internal fn %s(value: Int64) -> Int64 {\n  value\n}\n" name
 
-let open_library modules =
-  match Database.For_testing.open_library ~modules "tests" with
+let open_library files =
+  match Database.For_testing.open_library ~files "tests" with
   | Ok library -> library
   | Error message -> failwith message
 
-let check_library library modules =
+let check_library library files =
   List.iter
-    (fun (module_, _) ->
-      ignore
-        (Engine.get (Database.For_testing.engine library) Type_checker.file_diagnostics module_))
-    modules;
+    (fun (file, _) ->
+      ignore (Engine.get (Database.For_testing.engine library) Type_checker.file_diagnostics file))
+    files;
   Database.save_session library
 
 let () =
   test "a library state opened again after an edit recomputes only the edit's dependents" (fun () ->
       fresh_store ~empty:true ();
-      let first = (library_module "first", library_function "first") in
-      let second = (library_module "second", library_function "second") in
+      let first = (library_file "first", library_function "first") in
+      let second = (library_file "second", library_function "second") in
       check_library (open_library [ first; second ]) [ first; second ];
       Database.reset ();
-      let second = (library_module "second", library_function "other") in
+      let second = (library_file "second", library_function "other") in
       let library = open_library [ first; second ] in
       let engine = Database.For_testing.engine library in
       Engine.For_testing.clear_log engine;
       check_library library [ first; second ];
       let checked = Engine.For_testing.computed engine Infer.type_check_result in
-      let in_module (module_, _) =
-        List.exists (fun (key : Resolve.Names.key) -> key.module_ = module_) checked
+      let in_module ((file : Path.file), _) =
+        List.exists (fun (key : Resolve.Names.key) -> key.module_ = file.module_) checked
       in
       if not (in_module second) then fail "the edited module was not checked again";
       if in_module first then fail "the unchanged module was checked again");
-  test "a library state drops the text of a module that is gone from the sources" (fun () ->
+  test "a library state drops the text of a file that is gone from the sources" (fun () ->
       fresh_store ~empty:true ();
-      let first = (library_module "first", library_function "first") in
-      let second = (library_module "second", library_function "second") in
+      let first = (library_file "first", library_function "first") in
+      let second = (library_file "second", library_function "second") in
       check_library (open_library [ first; second ]) [ first; second ];
       Database.reset ();
       let library = open_library [ first ] in
       let context = Engine.context (Database.For_testing.engine library) in
-      if Query.demand context Project.module_text (fst second) <> None then
-        fail "the module's text is still set";
-      if List.mem (fst second) (Query.demand context Workspace.modules Path.standard_package) then
-        fail "the package still has the module")
+      if Query.demand context Project.file_text (fst second) <> None then
+        fail "the file's text is still set";
+      if
+        List.mem (fst second).module_ (Query.demand context Workspace.modules Path.standard_package)
+      then fail "the package still has the module")
 
 let () =
   test "a query cannot be declared once the database has opened its store" (fun () ->

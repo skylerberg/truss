@@ -1,0 +1,79 @@
+use standard::http
+use standard::simulation
+
+fn request_with(cookie: StringSlice) -> http::Request {
+  var headers = http::Headers.new()
+  mut headers.add("Cookie", value: cookie)
+  http::Request(method: http::Method.Get, target: "/", headers: own headers)
+}
+
+fn key_of(seed: UInt8) -> http::CookieKey
+  uses Panic
+{
+  let secret: List[UInt8] = List.filled(seed, count: 32)
+  http::CookieKey.new(secret).expect("a key")
+}
+
+test "a cookie is written with secure defaults and rejects bytes it cannot carry" {
+  let plain = http::Cookie(name: "sid", value: "abc")
+  assert plain.header() == Ok("sid=abc; Path=/; Secure; HttpOnly; SameSite=Lax")
+  let cross = http::Cookie(name: "track", value: "1", path: None, max_age_seconds: Some(60), is_secure: false, is_http_only: false, same_site: http::SameSite.Cross)
+  assert cross.header() == Ok("track=1; Max-Age=60; Secure; SameSite=None")
+  assert http::Cookie(name: "bad", value: "a b").header() is Err(_)
+  assert http::Cookie(name: "bad name", value: "x").header() is Err(_)
+  assert http::Cookie.removal("sid").header() == Ok("sid=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax")
+}
+
+test "cookies are read from the Cookie header" {
+  let request = request_with("a=1; b=\"two\"; c=3")
+  assert request.cookies().length() == 3
+  assert request.cookie("b") == Some("two")
+  assert request.cookie("c") == Some("3")
+  assert request.cookie("d") is None
+}
+
+test "signed cookies verify, reject tampering and other keys, and survive key rotation" {
+  let old_key = key_of(1)
+  let new_key = key_of(2)
+  let signed = old_key.sign(http::Cookie(name: "user", value: "ada; admin=false"))
+  assert http::verify_cookie([old_key.copy()], name: "user", value: signed.value.slice()) == Some("ada; admin=false")
+  assert http::verify_cookie([new_key.copy()], name: "user", value: signed.value.slice()) is None
+  assert http::verify_cookie([new_key.copy(), old_key.copy()], name: "user", value: signed.value.slice()) == Some("ada; admin=false")
+  assert http::verify_cookie([old_key.copy()], name: "other", value: signed.value.slice()) is None
+  var tampered = signed.value.copy()
+  mut tampered.push("x")
+  assert http::verify_cookie([old_key.copy()], name: "user", value: tampered.slice()) is None
+  let request = request_with("user=${signed.value}".slice())
+  assert request.signed_cookie([old_key.copy()], name: "user") == Some("ada; admin=false")
+}
+
+test "sealed cookies hide their value and open only with the key and the name" {
+  provide simulation::World.new() {
+    let key = key_of(3)
+    let sealed = key.seal(http::Cookie(name: "secret", value: "the plan"))
+    assert !sealed.value.slice().contains("plan")
+    assert http::open_cookie([key.copy()], name: "secret", value: sealed.value.slice()) == Some("the plan")
+    assert http::open_cookie([key.copy()], name: "other", value: sealed.value.slice()) is None
+    assert http::open_cookie([key_of(4)], name: "secret", value: sealed.value.slice()) is None
+    assert sealed.header() is Ok(_)
+  }
+}
+
+test "a session keeps its values in a sealed cookie and expires after its age" {
+  provide simulation::World.new() {
+    let key = key_of(5)
+    var session = http::Session.new()
+    mut session.set("user", value: "ada")
+    mut session.set("theme", value: "dark & bright")
+    mut session.set("user", value: "grace")
+    assert session.is_changed()
+    let cookie = session.cookie(key)
+    let request = request_with("session=${cookie.value}".slice())
+    let loaded = http::Session.load(request, keys: [key.copy()])
+    assert loaded.get("user") == Some("grace".slice())
+    assert loaded.get("theme") == Some("dark & bright".slice())
+    assert !loaded.is_changed()
+    let expired = http::Session.load(request, keys: [key.copy()], max_age_seconds: -1)
+    assert expired.get("user") is None
+  }
+}

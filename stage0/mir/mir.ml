@@ -34,7 +34,7 @@ type operand =
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
       (** The old value of a compound assignment's target, which the operator takes as owned. The
           statement assigns the target again before any other code runs. *)
-  | Constant of constant
+  | Constant of { value : constant; type_ : Types.ty }
 
 type callee =
   | Function of { path : Path.t; type_arguments : Types.argument list }
@@ -62,9 +62,18 @@ type call = {
   node : Core.id;  (** The core form's [Call]. *)
 }
 
+type capture = { local : Core.local; type_ : Types.ty; place : place }
+(** A local that a lambda captures: its core local, its type, and its place in the enclosing body.
+*)
+
 type rvalue =
   | Operand of operand
-  | Operation of { operation : Intrinsic.operation; operands : operand list }
+  | Operation of {
+      operation : Intrinsic.operation;
+      type_arguments : Types.argument list;
+          (** The intrinsic's type arguments: for an operator, the types of its operands. *)
+      operands : operand list;
+    }
       (** A primitive operation on built-in types, written as an operator or as a call of the
           intrinsic. *)
   | Compare of { comparison : Core.comparison; left : operand; right : operand }
@@ -78,9 +87,23 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand  (** A [copy()] that the compiler implements. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : Core.capture list }
-      (** A function value made from a lambda. [body] indexes {!t.lambdas}. *)
+  | Lambda of { body : int; captures : capture list }
+      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
+          the order of its body's {!body.captures}. *)
   | Value_parameter of Types.parameter
+
+(** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
+    place: it is built where it is yielded, and is no value of its own. *)
+type yielded =
+  | Part of operand
+  | Built of {
+      variant : string option;
+      fields : (string * yielded option) list;
+      type_ : Types.ty;
+      node : Core.id;
+    }
+      (** A constructor of [type_], with every field in evaluation order. [None] takes the field's
+          default. [node] is its core node. *)
 
 type provided = {
   mode : Types.mode;
@@ -102,7 +125,7 @@ type loan_duration =
 type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
-  | Assign of { target : place; value : rvalue }
+  | Assign of { target : place; value : rvalue; node : Core.id option }
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
       (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
@@ -116,15 +139,16 @@ and statement_kind =
   | Dead of local list  (** These locals hold nothing from here on. *)
   | Assert of operand  (** An [assert] that can run. *)
   | Echo of operand
-  | Provide of provided list
+  | Provide of { provided : provided list; can_use_tasks : bool }
   | Provide_end
-  | Fork_start of { fork : int; concurrent : bool }
+  | Fork_start of { fork : Core.origin; concurrent : bool }
       (** The start of a branch of a [parallel] or [concurrent] block. *)
-  | Fork_end of { fork : int }  (** The end of the block's last branch. *)
+  | Fork_end of { fork : Core.origin }  (** The end of the block's last branch. *)
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
   | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
+  | Matched of { patterns : Core.origin list }
   | Proof of Core.block  (** Only the prover reads it. *)
 
 type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
@@ -146,6 +170,18 @@ type task_exit =
   | Exit_to of block
   | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
+type left_task = {
+  task : Core.task;
+  ends : statement list;
+      (** The ends of the scopes between it and the next task, or the exit's target, which run in
+          the code around the task once it has ended *)
+  task_end : block option;
+      (** Where the task's code ends, which the other tasks of its group go on from: the start of
+          the next branch of a [concurrent] block, or the block's end. An iteration of a
+          [concurrent for] has none. *)
+}
+(** A task an early exit leaves. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
@@ -155,22 +191,27 @@ type terminator =
           {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
           [loop]'s schedule says. *)
   | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
-  | Yield of { mode : Types.mode; part : operand; resume : block }
+  | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
-  | Exit_tasks of { tasks : Core.task list; exit : task_exit }
-      (** An early exit from [concurrent] code: these tasks end, then the exit is taken. *)
+  | Exit_tasks of { tasks : left_task list; exit : task_exit }
   | Unreachable  (** A point the prover shows is never reached. *)
   | Todo  (** A [todo] that is reached stops the program. *)
+
+type natural_loop = { loop : loop; body : block; after : block }
+(** A [while] loop, which its header block carries: its clauses, the first block of its body, which
+    the loop's condition goes to where it holds, and the block it exits to where the condition does
+    not hold or a [break] leaves. *)
 
 type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
-  header : loop option;  (** The clauses of the natural loop this block heads. *)
+  header : natural_loop option;  (** The [while] loop this block heads. *)
 }
 
 type body = {
   parameters : local list;
+  captures : local list;
   locals : local_info array;
   blocks : basic_block array;  (** The entry is block 0. *)
 }
@@ -184,7 +225,7 @@ let bug format = Compiler_bug.bug ~stage:"MIR" format
 type pending = {
   mutable statements : statement list;  (** In reverse. *)
   mutable ending : (terminator * Core.origin) option;
-  mutable heading : loop option;
+  mutable heading : natural_loop option;
 }
 
 (* A scope that a jump out of must end: a block's bindings, or a statement.
@@ -208,7 +249,13 @@ type scope = {
    alone. *)
 type condition_lends = For_statement | For_block | For_condition
 type target = Jump of block | Next_iteration
-type enclosing_loop = { break_ : block; continue_ : target; depth : int }
+
+type enclosing_loop = {
+  break_ : block;
+  continue_ : target;
+  depth : int;
+  tasks_around : int;  (** The number of tasks around the loop. *)
+}
 
 type builder = {
   infos : (local, local_info) Hashtbl.t;
@@ -221,17 +268,23 @@ type builder = {
   mutable scopes : scope list;  (** Innermost first. *)
   mutable loops : enclosing_loop list;
   mutable compound_target : place option;
-  mutable yield_mode : Types.mode;
   lambdas : body list ref;  (** In reverse, shared by the bodies of a definition. *)
-  forks : int ref;
   mutable loan_count : int;
   mutable deferred : local list option;
       (** While a [let] binds, the locals it binds, which join the scope after its [else]. *)
   mutable binds_into : frame;
       (** The frame new bindings belong to: a block's, or for [is], the statement around it. *)
+  mutable tasks : (Core.task * (int * block option)) list;
+      (** The tasks around the code being built, innermost first, each with the number of scopes
+          around its start and, for a branch of a [concurrent] block, the block where it ends. *)
+  task_exits : (block, (Core.task * (scope * int list) list) list) Hashtbl.t;
+      (** For each block that an early exit from tasks ends: each task with the scopes between it
+          and the next task or the exit's target, and the loans of each at the exit. The scopes'
+          ends are read once the body is built, since a later branch can still bind a local in one.
+      *)
 }
 
-let create ~lambdas ~forks =
+let create ~lambdas =
   {
     infos = Hashtbl.create 16;
     local_count = 0;
@@ -242,12 +295,12 @@ let create ~lambdas ~forks =
     scopes = [];
     loops = [];
     compound_target = None;
-    yield_mode = Read;
     lambdas;
-    forks;
     loan_count = 0;
     deferred = None;
     binds_into = Bindings;
+    tasks = [];
+    task_exits = Hashtbl.create 1;
   }
 
 let new_local b kind type_ origin =
@@ -292,27 +345,33 @@ let terminate b terminator origin =
   b.current <- None
 
 let goto b target origin = terminate b (Goto target) origin
-let assign b target value origin = emit b (Assign { target; value }) origin
+let assign ?node b target value origin = emit b (Assign { target; value; node }) origin
 
 (* A new temporary that holds a value, or [None] where control does not
-   reach. *)
-let hold b type_ origin value =
+   reach. [node] is the core expression whose value it is. *)
+let hold ?node b type_ origin value =
   match b.current with
   | None -> None
   | Some _ ->
       let local = temporary b type_ origin in
-      assign b (at local) value origin;
-      Some (Use { place = at local; type_; node = origin; origin })
+      assign ?node b (at local) value origin;
+      Some (Use { place = at local; type_; node = Option.value node ~default:origin; origin })
 
 let source b (local : Core.local) =
   match Hashtbl.find_opt b.sources local with
   | Some found -> found
   | None -> bug "a local that nothing binds"
 
+(* Makes a binding dead where its scope ends: the innermost scope of the
+   frame it binds into, or for an [is] in a block's value, which no
+   statement encloses, the innermost scope around the condition. *)
 let register_binding b local =
-  match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
-  | Some scope -> scope.bound <- local :: scope.bound
-  | None -> ()
+  let scope =
+    match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
+    | Some scope -> Some scope
+    | None -> List.find_opt (fun scope -> scope.frame <> Condition) b.scopes
+  in
+  Option.iter (fun scope -> scope.bound <- local :: scope.bound) scope
 
 (* The local a core local is bound to. Each alternative of a pattern binds
    the same locals, and a loop binds its pattern again on each iteration, so
@@ -346,11 +405,16 @@ let end_loans b loans origin =
   end
 
 (* What leaving a scope ends. *)
+let scope_ends scope origin =
+  List.map
+    (fun kind -> { kind; origin })
+    ((if scope.loans <> [] then [ Loan_end (List.rev scope.loans) ] else [])
+    @ (if scope.bound <> [] then [ Dead (List.rev scope.bound) ] else [])
+    @ (if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
+    @ if scope.provides then [ Provide_end ] else [])
+
 let end_scope b scope origin =
-  if scope.loans <> [] then emit b (Loan_end (List.rev scope.loans)) origin;
-  if scope.bound <> [] then emit b (Dead (List.rev scope.bound)) origin;
-  if scope.temporaries <> [] then emit b (Dead (List.rev scope.temporaries)) origin;
-  if scope.provides then emit b Provide_end origin
+  List.iter (fun (ended : statement) -> emit b ended.kind ended.origin) (scope_ends scope origin)
 
 (* Runs [f] in a new scope, and ends the scope's bindings where control
    leaves it normally. The scope also ends [held]: what a condition before it
@@ -363,6 +427,17 @@ let in_scope ?(provides = false) ?(held = ([], [], [])) b origin f =
   b.scopes <- List.tl b.scopes;
   end_scope b scope origin;
   result
+
+(* The scopes inside the [outer] outermost and among the [inner] outermost,
+   innermost first, each with its loans now. *)
+let scopes_between b ~outer ~inner =
+  let count = List.length b.scopes in
+  List.concat
+    (List.mapi
+       (fun position scope ->
+         let depth = count - position in
+         if depth > outer && depth <= inner then [ (scope, scope.loans) ] else [])
+       b.scopes)
 
 (* Ends the scopes inside the [depth] outermost, before a jump out of them. *)
 let leave_scopes b ~depth origin =
@@ -438,15 +513,15 @@ let exit_depth b (exit : task_exit) =
 
 let rec expression b (node : Core.expression) : operand option =
   let origin = node.origin in
-  let hold value = hold b node.type_ origin value in
+  let hold value = hold ~node:node.id b node.type_ origin value in
   match b.current with
   | None -> None
   | Some _ -> (
       match node.kind with
-      | Integer value -> Some (Constant (Integer value))
-      | Float value -> Some (Constant (Float value))
-      | Boolean value -> Some (Constant (Boolean value))
-      | String value -> Some (Constant (String value))
+      | Integer value -> Some (Constant { value = Integer value; type_ = node.type_ })
+      | Float value -> Some (Constant { value = Float value; type_ = node.type_ })
+      | Boolean value -> Some (Constant { value = Boolean value; type_ = node.type_ })
+      | String value -> Some (Constant { value = String value; type_ = node.type_ })
       | Template { literals; call = { kind = Call called; _ } } ->
           let* call = call_of b called ~node:node.id in
           let local = temporary b node.type_ origin in
@@ -463,7 +538,20 @@ let rec expression b (node : Core.expression) : operand option =
       | Value_parameter parameter -> hold (Value_parameter parameter)
       | Lambda { parameters; captures; body; _ } ->
           let index = lambda b parameters captures body in
-          hold (Lambda { body = index; captures })
+          hold
+            (Lambda
+               {
+                 body = index;
+                 captures =
+                   List.map
+                     (fun (capture : Core.capture) ->
+                       {
+                         local = capture.local;
+                         type_ = capture.type_;
+                         place = at (source b capture.local);
+                       })
+                     captures;
+               })
       | Construct { variant; fields } ->
           let* fields = construct_fields b fields in
           hold (Construct { variant; fields })
@@ -496,7 +584,10 @@ let rec expression b (node : Core.expression) : operand option =
       | Call called -> call_value b node called
       | Operator { operation; arguments } ->
           let* operands = operands b arguments in
-          hold (Operation { operation; operands })
+          let type_arguments =
+            List.map (fun (argument : Core.expression) -> Types.Type argument.type_) arguments
+          in
+          hold (Operation { operation; type_arguments; operands })
       | Compare { comparison; left; right } -> (
           let* compared = operands b [ left; right ] in
           match compared with
@@ -505,7 +596,7 @@ let rec expression b (node : Core.expression) : operand option =
       | Not inner ->
           let* inner = expression b inner in
           hold (Not inner)
-      | And _ | Or _ | Matches _ -> truth b node
+      | And _ | Or _ | Implies _ | Matches _ -> truth b node
       | Cursor_next cursor ->
           let* cursor = place b cursor in
           let local = temporary b node.type_ origin in
@@ -567,7 +658,7 @@ let rec expression b (node : Core.expression) : operand option =
                 })
               implementations values
           in
-          emit b (Provide provided) origin;
+          emit b (Provide { provided; can_use_tasks = Core_walk.can_use_tasks body }) origin;
           scoped_block ~provides:true b body origin ~loans:(fun () ->
               List.iter
                 (fun (provided : provided) ->
@@ -579,60 +670,49 @@ let rec expression b (node : Core.expression) : operand option =
                            Provide_body provided.origin)
                   | _ -> ())
                 provided)
-      | Return None ->
-          return_ b None origin;
-          None
-      | Return (Some returned) ->
-          Option.iter (fun value -> return_ b (Some value) origin) (expression b returned);
-          None
+      | Return returned -> (
+          match tasks_left b `Return with
+          | [] ->
+              (match returned with
+              | None -> return_ b None origin
+              | Some returned ->
+                  Option.iter (fun value -> return_ b (Some value) origin) (expression b returned));
+              None
+          | tasks ->
+              let exit =
+                match returned with
+                | Some returned ->
+                    Option.map (fun value -> Exit_return (Some value)) (expression b returned)
+                | None -> Some (Exit_return None)
+              in
+              Option.iter (fun exit -> leave_tasks b tasks exit origin) exit;
+              None)
       | Break -> (
-          match b.loops with
-          | loop :: _ ->
+          match (b.loops, tasks_left b `Break) with
+          | loop :: _, [] ->
               leave_scopes b ~depth:loop.depth origin;
               goto b loop.break_ origin;
               None
-          | [] -> bug "a `break` outside a loop")
+          | loop :: _, tasks ->
+              leave_tasks b tasks (Exit_to loop.break_) origin;
+              None
+          | [], _ -> bug "a `break` outside a loop")
       | Continue -> (
-          match b.loops with
-          | loop :: _ ->
+          match (b.loops, tasks_left b `Continue) with
+          | loop :: _, [] ->
               leave_scopes b ~depth:loop.depth origin;
               (match loop.continue_ with
               | Jump block -> goto b block origin
               | Next_iteration -> terminate b Iteration_end origin);
               None
-          | [] -> bug "a `continue` outside a loop")
-      | Task_exit { tasks; exit } ->
-          let task_exit =
-            match exit.kind with
-            | Return returned -> (
-                match returned with
-                | Some returned ->
-                    Option.map (fun value -> Exit_return (Some value)) (expression b returned)
-                | None -> Some (Exit_return None))
-            | Break -> (
-                match b.loops with
-                | loop :: _ -> Some (Exit_to loop.break_)
-                | [] -> bug "a `break` outside a loop")
-            | Continue -> (
-                match b.loops with
-                | { continue_ = Jump block; _ } :: _ -> Some (Exit_to block)
-                | { continue_ = Next_iteration; _ } :: _ -> Some Exit_iteration
-                | [] -> bug "a `continue` outside a loop")
-            | _ -> bug "a task's exit that is not a `return`, `break`, or `continue`"
-          in
-          Option.iter
-            (fun exit ->
-              let exit =
-                match exit with
-                | Exit_return value -> Exit_return (Option.map (held_past_scopes b origin) value)
-                | Exit_to _ | Exit_iteration -> exit
-              in
-              (match (exit, exit_depth b exit) with
-              | _, Some depth -> leave_scopes b ~depth origin
-              | _, None -> ());
-              terminate b (Exit_tasks { tasks; exit }) origin)
-            task_exit;
-          None
+          | loop :: _, tasks ->
+              leave_tasks b tasks
+                (match loop.continue_ with
+                | Jump block -> Exit_to block
+                | Next_iteration -> Exit_iteration)
+                origin;
+              None
+          | [], _ -> bug "a `continue` outside a loop")
       | Todo ->
           terminate b Todo origin;
           None
@@ -663,7 +743,7 @@ let rec expression b (node : Core.expression) : operand option =
           quantifier_loop b node quantifier pattern body (fun ~each ->
               each_loop b ~origin ~pattern ~called ~node:call.id ~loop:(no_clauses origin) ~each)
       | Collection_literal { construction = Specification_only; _ }
-      | Map_literal _ | Implies _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _
+      | Map_literal _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _
       | Specification_function _ | Method_time _ ->
           bug "a specification's expression in code that runs")
 
@@ -730,8 +810,7 @@ and held b (value : operand) type_ origin =
       assign b (at local) (Operand value) origin;
       Borrow { place = at local; type_; mode; origin }
 
-(* The fields of a constructor, in evaluation order. A field that is a place
-   lends it to the value, with the enclosing [yield]'s mode. *)
+(* The fields of a constructor, in evaluation order. *)
 and construct_fields b fields =
   let given =
     List.filter_map (fun (name, field) -> Option.map (fun field -> (name, field)) field) fields
@@ -742,16 +821,7 @@ and construct_fields b fields =
          (fun (_, (field : Core.operand)) ->
            ( (fun () ->
                match field with
-               | Place written ->
-                   let* lent = place b written in
-                   Some
-                     (Borrow
-                        {
-                          place = lent;
-                          type_ = Core_walk.place_type written;
-                          mode = b.yield_mode;
-                          origin = Core_walk.place_origin written;
-                        })
+               | Place _ -> bug "a constructor field that is a place, outside a yield"
                | Value value -> expression b value),
              operand_type field,
              operand_origin field ))
@@ -770,6 +840,46 @@ and construct_fields b fields =
                  (name, Some value)
              | [] -> bug "a constructor with fewer values than fields"))
        fields)
+
+(* What a [yield] yields, with its mode. A constructor that has a place
+   among its fields, to any depth, is built where it is yielded: its leaves,
+   each place it lends and each value, are evaluated in order. *)
+and yielded b (mode : Types.mode) (part : Core.operand) : yielded option =
+  let rec lends : Core.operand -> bool = function
+    | Place _ -> true
+    | Value { kind = Construct { fields; _ }; _ } ->
+        List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends field) fields
+    | Value _ -> false
+  in
+  match part with
+  | Value { kind = Construct _; _ } when lends part ->
+      let rec leaves (field : Core.operand) =
+        match field with
+        | Value { kind = Construct { fields; _ }; _ } when lends field ->
+            List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
+        | _ -> [ ((fun () -> operand b mode field), operand_type field, operand_origin field) ]
+      in
+      let* values = in_order b (leaves part) in
+      let remaining = ref values in
+      let rec rebuild (field : Core.operand) =
+        match field with
+        | Value ({ kind = Construct { variant; fields }; _ } as node) when lends field ->
+            Built
+              {
+                variant;
+                fields = List.map (fun (name, field) -> (name, Option.map rebuild field)) fields;
+                type_ = node.type_;
+                node = node.id;
+              }
+        | _ -> (
+            match !remaining with
+            | value :: rest ->
+                remaining := rest;
+                Part value
+            | [] -> bug "a yielded constructor with fewer values than fields")
+      in
+      Some (rebuild part)
+  | _ -> Option.map (fun value -> Part value) (operand b mode part)
 
 (* An operand passed with a mode: a place is borrowed, and a value is
    evaluated. *)
@@ -862,7 +972,7 @@ and call_of b (called : Core.call) ~node : call option =
 and call_value b (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
   match called.callee with
-  | Intrinsic { operation; _ } when Intrinsic.primitive operation ->
+  | Intrinsic { operation; type_arguments } when Intrinsic.primitive operation ->
       let* operands =
         in_order b
           (List.map
@@ -872,7 +982,7 @@ and call_value b (node : Core.expression) (called : Core.call) =
                | Default -> bug "a primitive operation with a default argument")
              called.arguments)
       in
-      hold b node.type_ origin (Operation { operation; operands })
+      hold ~node:node.id b node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->
       let* call = call_of b called ~node:node.id in
       if diverges node.type_ then begin
@@ -882,7 +992,7 @@ and call_value b (node : Core.expression) (called : Core.call) =
       end
       else if is_unit node.type_ then begin
         emit b (Call { destination = None; call }) origin;
-        Some (Constant Unit)
+        Some (Constant { value = Unit; type_ = Types.unit })
       end
       else
         let local = temporary b node.type_ origin in
@@ -895,10 +1005,10 @@ and truth b (node : Core.expression) =
   let yes = new_block b and no = new_block b and joined = new_block b in
   condition b node ~yes ~no;
   start b yes;
-  assign b (at local) (Operand (Constant (Boolean true))) node.origin;
+  assign b (at local) (Operand (Constant { value = Boolean true; type_ = Types.bool })) node.origin;
   goto b joined node.origin;
   start b no;
-  assign b (at local) (Operand (Constant (Boolean false))) node.origin;
+  assign b (at local) (Operand (Constant { value = Boolean false; type_ = Types.bool })) node.origin;
   goto b joined node.origin;
   start b joined;
   Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
@@ -916,6 +1026,14 @@ and condition b (node : Core.expression) ~yes ~no =
   | Or (left, right) ->
       let middle = new_block b in
       condition b left ~yes ~no:middle;
+      start b middle;
+      condition b right ~yes ~no
+  | Implies (left, right) ->
+      (* A [requires] clause that a template's check evaluates while compiling
+         may hold [==>]. Its right operand is evaluated only where its left
+         holds, since it may be defined only there. *)
+      let middle = new_block b in
+      condition b left ~yes:middle ~no:yes;
       start b middle;
       condition b right ~yes ~no
   | Not inner -> condition b inner ~yes:no ~no:yes
@@ -996,7 +1114,8 @@ and result_of b (node : Core.expression) result =
   | None, _ -> None
   | Some _, Some local ->
       Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
-  | Some _, None -> if diverges node.type_ then None else Some (Constant Unit)
+  | Some _, None ->
+      if diverges node.type_ then None else Some (Constant { value = Unit; type_ = Types.unit })
 
 (* A branch of an [if] or a [match]: its block, its value written to
    [result], then a jump to [joined]. *)
@@ -1007,26 +1126,39 @@ and branch_into ?held b result (body : Core.block) joined origin =
       | _ -> ());
   goto b joined origin
 
-(* A block in a scope of its own: its value is held past the end of its
-   bindings, for the enclosing statement. *)
+(* A block in a scope of its own: its value outlives the block's bindings
+   and temporaries, for the enclosing statement. A temporary that holds it
+   moves to the enclosing scope, and a binding's value is copied into a
+   temporary there. *)
 and scoped_block ?provides ?(loans = ignore) b (body : Core.block) origin =
   in_scope ?provides b origin (fun () ->
       loans ();
       let value = block b body in
-      let bound_here local =
-        match b.scopes with scope :: _ -> List.mem local scope.bound | [] -> false
-      in
-      match (value, body.value) with
-      | Some (Use { place = { root = Local local; _ }; _ } as read), Some written
-        when bound_here local ->
-          hold b written.type_ origin (Operand read)
+      match (value, b.scopes) with
+      | ( Some (Use { place = { root = Local local; _ }; type_; node; _ } as read),
+          scope :: enclosing :: _ ) ->
+          if List.mem local scope.temporaries then begin
+            scope.temporaries <- List.filter (fun temporary -> temporary <> local) scope.temporaries;
+            enclosing.temporaries <- local :: enclosing.temporaries;
+            value
+          end
+          else if List.mem local scope.bound then begin
+            let held = new_local b Temporary type_ origin in
+            enclosing.temporaries <- held :: enclosing.temporaries;
+            assign b (at held) (Operand read) origin;
+            Some (Use { place = at held; type_; node; origin })
+          end
+          else value
       | _ -> value)
 
 and block b (body : Core.block) : operand option =
   List.iter (statement b) body.statements;
   match body.value with
   | Some value -> expression b value
-  | None -> ( match b.current with Some _ -> Some (Constant Unit) | None -> None)
+  | None -> (
+      match b.current with
+      | Some _ -> Some (Constant { value = Unit; type_ = Types.unit })
+      | None -> None)
 
 (* Patterns *)
 
@@ -1254,6 +1386,14 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
           in_scope b current.origin (fun () ->
               match_patterns b current.patterns places ~fail:next ~matched:body current.origin;
               start b body;
+              if current.patterns <> [] then
+                emit b
+                  (Matched
+                     {
+                       patterns =
+                         List.map (fun (pattern : Core.pattern) -> pattern.origin) current.patterns;
+                     })
+                  current.origin;
               match current.guard with
               | None -> arm current
               | Some guard ->
@@ -1310,7 +1450,7 @@ and statement b (node : Core.statement) =
               List.iter (register_binding b) (List.rev bound);
               start b matched)
       | Evaluate value -> ignore (expression b value)
-      | Assign { target; value = written } -> (
+      | Assign { target; value = written; _ } -> (
           match expression b written with
           | Some value -> (
               (* The value is evaluated before the target, and what it
@@ -1360,9 +1500,13 @@ and statement b (node : Core.statement) =
       | For { pattern; iteration; clauses; body; mode } -> (
           let loop = { clauses; schedule = mode; origin } in
           let each ~bind_part =
+            let is_task = mode = Concurrent_loop in
+            if is_task then
+              b.tasks <- (Core.Iteration { loop = origin }, (List.length b.scopes, None)) :: b.tasks;
             in_scope b origin (fun () ->
                 bind_part ();
-                ignore (block b body))
+                ignore (block b body));
+            if is_task then b.tasks <- List.tl b.tasks
           in
           match iteration with
           | Integer_range { start; stop; inclusive } ->
@@ -1378,7 +1522,8 @@ and statement b (node : Core.statement) =
       | While { condition = tested; clauses; body; binds_lent_part } ->
           let header = new_block b and inside = new_block b and after = new_block b in
           goto b header origin;
-          (Hashtbl.find b.pending header).heading <- Some { clauses; schedule = Sequential; origin };
+          (Hashtbl.find b.pending header).heading <-
+            Some { loop = { clauses; schedule = Sequential; origin }; body = inside; after };
           start b header;
           let held =
             scoped_condition b tested ~yes:inside ~no:after
@@ -1391,25 +1536,31 @@ and statement b (node : Core.statement) =
           start b after
       | Parallel branches | Concurrent branches ->
           let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
-          let fork = !(b.forks) in
-          incr b.forks;
-          List.iter
-            (fun (branch : Core.statement) ->
-              emit b (Fork_start { fork; concurrent }) branch.origin;
-              statement b branch)
+          List.iteri
+            (fun index (branch : Core.statement) ->
+              emit b (Fork_start { fork = origin; concurrent }) branch.origin;
+              if concurrent then begin
+                (* The branch ends at the start of the next one, which runs
+                   whether or not this one leaves early. *)
+                let branch_end = new_block b in
+                b.tasks <-
+                  (Core.Branch { block = origin; index }, (List.length b.scopes, Some branch_end))
+                  :: b.tasks;
+                statement b branch;
+                b.tasks <- List.tl b.tasks;
+                goto b branch_end branch.origin;
+                start b branch_end
+              end
+              else statement b branch)
             branches;
-          emit b (Fork_end { fork }) origin
+          emit b (Fork_end { fork = origin }) origin
       | Proof proof -> emit b (Proof proof) origin
       | Assert { condition = { value; executable = true }; _ } -> (
           match expression b value with Some value -> emit b (Assert value) origin | None -> ())
       | Assert { condition = { value; executable = false }; _ } ->
           emit b (Ghost_assert value) origin
       | Yield { mode; part } -> (
-          let enclosing = b.yield_mode in
-          b.yield_mode <- mode;
-          let part = operand b mode part in
-          b.yield_mode <- enclosing;
-          match part with
+          match yielded b mode part with
           | Some part ->
               let resume = new_block b in
               terminate b (Yield { mode; part; resume }) origin;
@@ -1417,9 +1568,73 @@ and statement b (node : Core.statement) =
           | None -> ()))
 
 and looping b ~break_ ~continue_ f =
-  b.loops <- { break_; continue_; depth = List.length b.scopes } :: b.loops;
+  b.loops <-
+    { break_; continue_; depth = List.length b.scopes; tasks_around = List.length b.tasks }
+    :: b.loops;
   f ();
   b.loops <- List.tl b.loops
+
+(* The tasks an early exit ends, innermost first. A [return] ends every
+   enclosing task. A [break] or [continue] ends the tasks inside its loop,
+   and a [break] of a [concurrent for] also ends the iteration, which a
+   [continue] of it only finishes. *)
+and tasks_left b exit =
+  match exit with
+  | `Return -> List.map fst b.tasks
+  | (`Break | `Continue) as exit -> (
+      match b.loops with
+      | loop :: _ ->
+          List.filteri (fun index _ -> index < List.length b.tasks - loop.tasks_around) b.tasks
+          |> List.filter_map (fun (task, _) ->
+              match (task, exit) with Core.Iteration _, `Continue -> None | _ -> Some task)
+      | [] -> bug "a loop exit outside a loop")
+
+(* An early exit from [tasks], which takes effect once they have ended. *)
+and leave_tasks b tasks exit origin =
+  let exit =
+    match exit with
+    | Exit_return value -> Exit_return (Option.map (held_past_scopes b origin) value)
+    | Exit_to _ | Exit_iteration -> exit
+  in
+  (* The task ends the scopes inside it. The scopes outside it
+       are the enclosing code's, which ends them once the task has
+       ended. *)
+  let starts =
+    List.map
+      (fun task ->
+        match List.assoc_opt task b.tasks with
+        | Some (start, _) -> start
+        | None -> bug "an exit from a task that does not enclose it")
+      tasks
+  in
+  let target_depth =
+    match (exit_depth b exit, List.rev starts) with
+    | Some depth, _ -> depth
+    | None, outermost :: _ -> outermost
+    | None, [] -> List.length b.scopes
+  in
+  let rec around = function
+    | inner :: (outer :: _ as rest) -> scopes_between b ~outer ~inner :: around rest
+    | [ inner ] -> [ scopes_between b ~outer:target_depth ~inner ]
+    | [] -> []
+  in
+  (match starts with
+  | innermost :: _ -> leave_scopes b ~depth:innermost origin
+  | [] -> leave_scopes b ~depth:target_depth origin);
+  Option.iter
+    (fun block -> Hashtbl.replace b.task_exits block (List.combine tasks (around starts)))
+    b.current;
+  terminate b
+    (Exit_tasks
+       {
+         tasks =
+           List.map
+             (fun task ->
+               { task; ends = []; task_end = Option.bind (List.assoc_opt task b.tasks) snd })
+             tasks;
+         exit;
+       })
+    origin
 
 (* A loop over an integer range: a counter from the start, tested at the
    header against the stop, and stepped at the end of each iteration. An
@@ -1487,7 +1702,9 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
   let origin = node.origin in
   let result = temporary b Types.bool origin in
   let deciding = quantifier = Exists in
-  assign b (at result) (Operand (Constant (Boolean (not deciding)))) origin;
+  assign b (at result)
+    (Operand (Constant { value = Boolean (not deciding); type_ = Types.bool }))
+    origin;
   let after = new_block b in
   run ~each:(fun bind_part ->
       in_scope b origin (fun () ->
@@ -1496,7 +1713,9 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
           if deciding then condition b body ~yes:decided ~no:undecided
           else condition b body ~yes:undecided ~no:decided;
           start b decided;
-          assign b (at result) (Operand (Constant (Boolean deciding))) origin;
+          assign b (at result)
+            (Operand (Constant { value = Boolean deciding; type_ = Types.bool }))
+            origin;
           (match b.loops with loop :: _ -> goto b loop.break_ origin | [] -> goto b after origin);
           start b undecided));
   goto b after origin;
@@ -1506,12 +1725,17 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
 (* Lambdas *)
 
 and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (body : Core.block) =
-  let inner = create ~lambdas:b.lambdas ~forks:b.forks in
-  List.iter
-    (fun (capture : Core.capture) ->
-      Hashtbl.replace inner.sources capture.local
-        (new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0))
-    captures;
+  let inner = create ~lambdas:b.lambdas in
+  let capture_locals =
+    List.map
+      (fun (capture : Core.capture) ->
+        let local =
+          new_local inner (Source { local = capture.local; mode = Read }) capture.type_ 0
+        in
+        Hashtbl.replace inner.sources capture.local local;
+        local)
+      captures
+  in
   let entry = new_block inner in
   start inner entry;
   let parameter_locals =
@@ -1531,16 +1755,37 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
         Option.iter (fun value -> return_ inner (Some value) 0) (block inner body);
         locals)
   in
-  let body = finish inner ~parameters:parameter_locals in
+  let body = finish inner ~parameters:parameter_locals ~captures:capture_locals in
   b.lambdas := body :: !(b.lambdas);
   List.length !(b.lambdas) - 1
 
-and finish b ~parameters : body =
+and finish ?(captures = []) b ~parameters : body =
   let blocks =
     Array.init b.block_count (fun index ->
         let pending = Hashtbl.find b.pending index in
         let terminator, terminator_origin =
           match pending.ending with Some ending -> ending | None -> (Unreachable, 0)
+        in
+        let terminator =
+          match (terminator, Hashtbl.find_opt b.task_exits index) with
+          | Exit_tasks { exit; tasks = left }, Some tasks ->
+              Exit_tasks
+                {
+                  tasks =
+                    List.map2
+                      (fun (left : left_task) (_, scopes) ->
+                        {
+                          left with
+                          ends =
+                            List.concat_map
+                              (fun (scope, loans) ->
+                                scope_ends { scope with loans } terminator_origin)
+                              scopes;
+                        })
+                      left tasks;
+                  exit;
+                }
+          | _ -> terminator
         in
         {
           statements = List.rev pending.statements;
@@ -1551,6 +1796,7 @@ and finish b ~parameters : body =
   in
   {
     parameters;
+    captures;
     locals = Array.init b.local_count (Hashtbl.find b.infos);
     blocks = canonical blocks;
   }
@@ -1577,13 +1823,29 @@ and canonical (blocks : basic_block array) =
           { place; cases = List.map (fun (variant, block) -> (variant, target block)) cases }
     | For loop -> For { loop with body = target loop.body; after = target loop.after }
     | Yield yielded -> Yield { yielded with resume = target yielded.resume }
-    | Exit_tasks { tasks; exit = Exit_to block } ->
-        Exit_tasks { tasks; exit = Exit_to (target block) }
-    | (Iteration_end | Return _ | Exit_tasks _ | Unreachable | Todo) as other -> other
+    | Exit_tasks { tasks; exit } ->
+        Exit_tasks
+          {
+            tasks =
+              List.map
+                (fun (left : left_task) -> { left with task_end = Option.map target left.task_end })
+                tasks;
+            exit = (match exit with Exit_to block -> Exit_to (target block) | other -> other);
+          }
+    | (Iteration_end | Return _ | Unreachable | Todo) as other -> other
   in
   Array.of_list
     (List.map
-       (fun block -> { (blocks.(block)) with terminator = renumber blocks.(block).terminator })
+       (fun block ->
+         {
+           (blocks.(block)) with
+           terminator = renumber blocks.(block).terminator;
+           header =
+             Option.map
+               (fun (natural : natural_loop) ->
+                 { natural with body = target natural.body; after = target natural.after })
+               blocks.(block).header;
+         })
        !order)
 
 and successors = function
@@ -1592,8 +1854,80 @@ and successors = function
   | Switch_variant { cases; _ } -> List.map snd cases
   | For { body; after; _ } -> [ body; after ]
   | Yield { resume; _ } -> [ resume ]
-  | Exit_tasks { exit = Exit_to block; _ } -> [ block ]
-  | Iteration_end | Return _ | Exit_tasks _ | Unreachable | Todo -> []
+  | Exit_tasks { exit; tasks } -> (
+      (match exit with Exit_to block -> [ block ] | Exit_return _ | Exit_iteration -> [])
+      @ match tasks with innermost :: _ -> Option.to_list innermost.task_end | [] -> [])
+  | Iteration_end | Return _ | Unreachable | Todo -> []
+
+(* The innermost [For] whose body each [Iteration_end] ends: the one that
+   reaches it from its body without passing a [For] nested in that body. *)
+let iteration_loops (body : body) =
+  let loops = Hashtbl.create 4 in
+  Array.iteri
+    (fun index (block : basic_block) ->
+      match block.terminator with
+      | For { body = inside; after; _ } ->
+          let visited = Hashtbl.create 8 in
+          let rec visit block =
+            if block <> after && not (Hashtbl.mem visited block) then begin
+              Hashtbl.replace visited block ();
+              match body.blocks.(block).terminator with
+              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
+                  Hashtbl.replace loops block index
+              | For { after = inner_after; _ } -> visit inner_after
+              | terminator -> List.iter visit (successors terminator)
+            end
+          in
+          visit inside
+      | _ -> ())
+    body.blocks;
+  loops
+
+(* The parts of lending calls whose [Dead] some path from the entry reaches
+   without passing the [Lend]: a temporary lives to its statement's end, so
+   a lend in one arm of a [match], or on one side of [&&], leaves a path to
+   the part's end that never lent it. Its lend's end then runs only where the
+   lend did. *)
+let conditional_lends (body : body) =
+  let ends_of part (statement : statement) =
+    match statement.kind with Dead locals -> List.mem part locals | _ -> false
+  in
+  let ends_in part (block : basic_block) =
+    List.exists (ends_of part) block.statements
+    ||
+    match block.terminator with
+    | Exit_tasks { tasks; _ } ->
+        List.exists (fun (left : left_task) -> List.exists (ends_of part) left.ends) tasks
+    | _ -> false
+  in
+  let lends = ref [] in
+  Array.iteri
+    (fun index (block : basic_block) ->
+      List.iteri
+        (fun position (statement : statement) ->
+          match statement.kind with
+          | Lend { part; _ } -> lends := (part, index, position) :: !lends
+          | _ -> ())
+        block.statements)
+    body.blocks;
+  List.filter_map
+    (fun (part, lending, position) ->
+      let ended_before =
+        List.exists (ends_of part)
+          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
+      in
+      let visited = Array.make (Array.length body.blocks) false in
+      let rec reaches block =
+        block <> lending
+        && (not visited.(block))
+        && begin
+          visited.(block) <- true;
+          ends_in part body.blocks.(block)
+          || List.exists reaches (successors body.blocks.(block).terminator)
+        end
+      in
+      if ended_before || reaches 0 then Some part else None)
+    !lends
 
 let of_definition (definition : Core.definition) =
   let code =
@@ -1605,7 +1939,7 @@ let of_definition (definition : Core.definition) =
   in
   Option.map
     (fun ((parameters : Core.parameter list), (body : Core.block), returns) ->
-      let b = create ~lambdas:(ref []) ~forks:(ref 0) in
+      let b = create ~lambdas:(ref []) in
       let parameters =
         List.map
           (fun (parameter : Core.parameter) ->
@@ -1643,11 +1977,11 @@ let show_operand = function
   | Use { place; _ } -> show_place place
   | Take { place; _ } -> "take " ^ show_place place
   | Borrow { place; mode; _ } -> Printf.sprintf "%s %s" (show_mode mode) (show_place place)
-  | Constant Unit -> "()"
-  | Constant (Integer value) -> Z.to_string value
-  | Constant (Float value) -> Printf.sprintf "%h" value
-  | Constant (Boolean value) -> string_of_bool value
-  | Constant (String value) -> Printf.sprintf "%S" value
+  | Constant { value = Unit; _ } -> "()"
+  | Constant { value = Integer value; _ } -> Z.to_string value
+  | Constant { value = Float value; _ } -> Printf.sprintf "%h" value
+  | Constant { value = Boolean value; _ } -> string_of_bool value
+  | Constant { value = String value; _ } -> Printf.sprintf "%S" value
 
 let show_operands operands = String.concat ", " (List.map show_operand operands)
 
@@ -1675,7 +2009,7 @@ let show_comparison : Core.comparison -> string = function
 
 let show_rvalue = function
   | Operand value -> show_operand value
-  | Operation { operation; operands } ->
+  | Operation { operation; operands; _ } ->
       Printf.sprintf "%s(%s)" (Intrinsic.operation_name operation) (show_operands operands)
   | Compare { comparison; left; right } ->
       Printf.sprintf "%s %s %s" (show_operand left) (show_comparison comparison)
@@ -1704,7 +2038,7 @@ let show_locals locals = String.concat ", " (List.map (Printf.sprintf "_%d") loc
 
 let show_statement (statement : statement) =
   match statement.kind with
-  | Assign { target; value } -> Printf.sprintf "%s = %s" (show_place target) (show_rvalue value)
+  | Assign { target; value; _ } -> Printf.sprintf "%s = %s" (show_place target) (show_rvalue value)
   | Call { destination = Some destination; call } ->
       Printf.sprintf "%s = %s" (show_place destination) (show_call call)
   | Call { destination = None; call } -> show_call call
@@ -1719,7 +2053,7 @@ let show_statement (statement : statement) =
   | Dead locals -> Printf.sprintf "dead %s" (show_locals locals)
   | Assert value -> "assert " ^ show_operand value
   | Echo value -> "echo " ^ show_operand value
-  | Provide provided ->
+  | Provide { provided; _ } ->
       Printf.sprintf "provide %s"
         (show_operands (List.map (fun (p : provided) -> p.value) provided))
   | Provide_end -> "provide end"
@@ -1735,7 +2069,20 @@ let show_statement (statement : statement) =
         | Operand_evaluation -> "the operation")
   | Loan_end loans -> "end loans " ^ String.concat ", " (List.map string_of_int loans)
   | Ghost_assert _ -> "ghost assert"
+  | Matched _ -> "matched"
   | Proof _ -> "proof"
+
+let rec show_yielded = function
+  | Part operand -> show_operand operand
+  | Built { variant; fields; _ } ->
+      Printf.sprintf "%s(%s)"
+        (match variant with Some variant -> variant | None -> "record")
+        (String.concat ", "
+           (List.map
+              (fun (name, field) ->
+                Printf.sprintf "%s: %s" name
+                  (match field with Some field -> show_yielded field | None -> "default"))
+              fields))
 
 let show_terminator = function
   | Goto block -> Printf.sprintf "goto %d" block
@@ -1757,13 +2104,22 @@ let show_terminator = function
         body after
   | Iteration_end -> "next"
   | Yield { mode; part; resume } ->
-      Printf.sprintf "yield %s %s %d" (show_mode mode) (show_operand part) resume
+      Printf.sprintf "yield %s %s %d" (show_mode mode) (show_yielded part) resume
   | Return None -> "return"
   | Return (Some value) -> "return " ^ show_operand value
-  | Exit_tasks { exit = Exit_return value; _ } -> (
-      "exit tasks, return" ^ match value with Some value -> " " ^ show_operand value | None -> "")
-  | Exit_tasks { exit = Exit_iteration; _ } -> "exit tasks, next"
-  | Exit_tasks { exit = Exit_to block; _ } -> Printf.sprintf "exit tasks, goto %d" block
+  | Exit_tasks { tasks; exit } ->
+      let show_task ({ task; _ } : left_task) =
+        match task with
+        | Branch { block; index } -> Printf.sprintf "branch %d of #%d" index block
+        | Iteration { loop } -> Printf.sprintf "iteration of #%d" loop
+      in
+      Printf.sprintf "exit %s, %s"
+        (String.concat ", " (List.map show_task tasks))
+        (match exit with
+        | Exit_return (Some value) -> "return " ^ show_operand value
+        | Exit_return None -> "return"
+        | Exit_iteration -> "next"
+        | Exit_to block -> Printf.sprintf "goto %d" block)
   | Unreachable -> "unreachable"
   | Todo -> "todo"
 
@@ -1783,6 +2139,27 @@ let show (mir : t) =
     :: List.mapi
          (fun index body -> Printf.sprintf "lambda %d\n%s" index (show_body body))
          (Array.to_list mir.lambdas))
+
+let of_expression ?(parameters = []) (written : Core.expression) =
+  let b = create ~lambdas:(ref []) in
+  let parameters =
+    List.map
+      (fun (parameter : Core.parameter) ->
+        bind_source b parameter.local parameter.mode parameter.type_ 0)
+      parameters
+  in
+  start b (new_block b);
+  in_scope b written.origin (fun () ->
+      in_statement b written.origin (fun () ->
+          Option.iter (fun value -> return_ b (Some value) written.origin) (expression b written)));
+  let body = finish b ~parameters in
+  { body; lambdas = Array.of_list (List.rev !(b.lambdas)) }
+
+let of_path =
+  Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->
+      Option.bind (Query.demand database Infer.core_of_path path)
+        (fun ((form : Core.t), substitution) ->
+          Option.map (fun mir -> (mir, substitution)) (of_definition form.definition)))
 
 let mir =
   Query.query ~name:"mir" ~phase:Phases.bodies ~show:Resolve.Names.show_key (fun database key ->

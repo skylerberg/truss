@@ -124,31 +124,31 @@ let check ~root encoding (buffers : (string * string) list) =
       session = trial;
       context = Database.context trial;
       packages;
-      files = Project.module_files trial packages;
+      files = Project.file_paths trial packages;
     }
   in
-  let module_of path =
+  let file_of path =
     List.find_map
-      (fun (module_, file) -> if Project.normalize file = path then Some module_ else None)
+      (fun (file, written) -> if Project.normalize written = path then Some file else None)
       project.files
   in
   let opened =
     List.map
-      (fun (uri, path, text) -> (uri, Source.create ~path text, module_of (Project.normalize path)))
+      (fun (uri, path, text) -> (uri, Source.create ~path text, file_of (Project.normalize path)))
       buffers
   in
-  let proofs = Proofs.checked project (List.filter_map (fun (_, _, module_) -> module_) opened) in
+  let proofs = Proofs.checked project (List.filter_map (fun (_, _, file) -> file) opened) in
   Json.Object
     [
       ( "files",
         Json.List
           (List.map
-             (fun (uri, source, module_) ->
+             (fun (uri, source, file) ->
                let diagnostics, states =
-                 match module_ with
-                 | Some module_ ->
-                     let proven, states = proofs module_ in
-                     (Diagnostic.shown (Database.diagnostics trial module_ @ proven), states)
+                 match file with
+                 | Some file ->
+                     let proven, states = proofs file in
+                     (Diagnostic.shown (Database.diagnostics trial file @ proven), states)
                  | None -> ([], [])
                in
                Json.Object

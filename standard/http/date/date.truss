@@ -1,0 +1,116 @@
+use standard::intrinsic
+use standard::time
+
+fn same_name(first: StringSlice, second: StringSlice) -> Bool {
+  first.to_ascii_lowercase() == second.to_ascii_lowercase()
+}
+
+let weekday_names: Array[String, 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+let month_names: Array[String, 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+fn push_two_digits(output: mut String, value: UInt8) {
+  if value < 10 {
+    mut output.push("0")
+  }
+  mut output.push("${value}".slice())
+}
+
+internal fn format(instant: Instant) -> String {
+  let moment = instant.date_time()
+  let date = moment.date
+  let clock = moment.time
+  var output = ""
+  let weekday: USize = intrinsic::convert(date.weekday().number_from_monday())
+  mut output.push(if weekday >= 1 && weekday <= 7 { weekday_names[weekday - 1].slice() } else { "Mon".slice() })
+  mut output.push(", ")
+  push_two_digits(mut output, value: date.day())
+  mut output.push(" ")
+  let month: USize = intrinsic::convert(date.month().number())
+  mut output.push(if month >= 1 && month <= 12 { month_names[month - 1].slice() } else { "Jan".slice() })
+  mut output.push(" ")
+  mut output.push("${date.year()}".slice())
+  mut output.push(" ")
+  push_two_digits(mut output, value: clock.hour())
+  mut output.push(":")
+  push_two_digits(mut output, value: clock.minute())
+  mut output.push(":")
+  push_two_digits(mut output, value: clock.second())
+  mut output.push(" GMT")
+  output
+}
+
+fn month_number(name: StringSlice) -> Option[UInt8] {
+  let count: USize = 12
+  for index in 0..count {
+    if same_name(month_names[index].slice(), second: name) {
+      return Some(intrinsic::convert(index + 1))
+    }
+  }
+  None
+}
+
+fn number_of(text: StringSlice) -> Option[UInt32] {
+  match UInt32.parse(text.trim()) {
+    Ok(number) => Some(number)
+    Err(_) => None
+  }
+}
+
+fn clock_of(text: StringSlice) -> Option[time::TimeOfDay] {
+  let parts: List[StringSlice] = List.collect(text.split(":"))
+  if parts.length() != 3 {
+    return None
+  }
+  match number_of(parts[0]), number_of(parts[1]), number_of(parts[2]) {
+    Some(hour), Some(minute), Some(second) => {
+      if hour > 23 || minute > 59 || second > 60 {
+        return None
+      }
+      time::TimeOfDay.new(intrinsic::convert(hour), minute: intrinsic::convert(minute), second: intrinsic::convert(if second == 60 { 59 } else { second }))
+    }
+    _, _, _ => None
+  }
+}
+
+internal fn parse(text: StringSlice) -> Option[Instant] {
+  let words: List[StringSlice] = List.collect(text.split_whitespace())
+  var day: Option[UInt32] = None
+  var month: Option[UInt8] = None
+  var year: Option[UInt32] = None
+  var clock: Option[time::TimeOfDay] = None
+  if words.length() == 6 && words[5] == "GMT".slice() {
+    day = number_of(words[1])
+    month = month_number(words[2])
+    year = number_of(words[3])
+    clock = clock_of(words[4])
+  } else if words.length() == 4 && words[3] == "GMT".slice() {
+    let parts: List[StringSlice] = List.collect(words[1].split("-"))
+    if parts.length() == 3 {
+      day = number_of(parts[0])
+      month = month_number(parts[1])
+      year = match number_of(parts[2]) {
+        Some(short) => Some(if short < 70 { 2000 + short } else if short < 100 { 1900 + short } else { short })
+        None => None
+      }
+    }
+    clock = clock_of(words[2])
+  } else if words.length() == 5 {
+    month = month_number(words[1])
+    day = number_of(words[2])
+    clock = clock_of(words[3])
+    year = number_of(words[4])
+  }
+  match day, month, year, clock {
+    Some(day_number), Some(month_found), Some(year_number), Some(time_of_day) => {
+      if day_number > 31 || year_number > 9999 {
+        return None
+      }
+      match time::Date.new(intrinsic::convert(year_number), month: month_found, day: intrinsic::convert(day_number)) {
+        Some(date) => date.at(time_of_day).instant(0)
+        None => None
+      }
+    }
+    _, _, _, _ => None
+  }
+}

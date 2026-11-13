@@ -1,0 +1,5 @@
+theorem t(items: List[Int64])
+  ensures items == items
+{
+  for item in items {}
+}

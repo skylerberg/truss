@@ -11,27 +11,6 @@ module Lower = Interface.Lower
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
 (* The context of the code that is being checked. *)
-(* An enclosing construct that an early exit can leave: a loop, or a task
-   of [concurrent] code. An iteration of a [concurrent for] is both. *)
-type enclosing = Loop | Task of Core.task
-type exit = Return_exit | Break_exit | Continue_exit
-
-(* The tasks that an early exit terminates, innermost first, given the
-   enclosing constructs. A [return] terminates every enclosing task. A
-   [break] or a [continue] terminates the tasks between it and its loop. A
-   [break] in a [concurrent for] also terminates the task of its own
-   iteration. A [continue] in one does not: the iteration ends normally. *)
-let tasks_exited_by (exit : exit) (enclosing : enclosing list) : Core.task list =
-  match exit with
-  | Return_exit -> List.filter_map (function Task task -> Some task | Loop -> None) enclosing
-  | Break_exit | Continue_exit ->
-      let rec exited_in_loop = function
-        | [] | Loop :: _ -> []
-        | Task (Iteration _ as task) :: _ -> if exit = Break_exit then [ task ] else []
-        | Task (Branch _ as task) :: rest -> task :: exited_in_loop rest
-      in
-      exited_in_loop enclosing
-
 type env = {
   output : Types.result option;
       (** The result of the enclosing function or lambda. [return] and [yield] are checked against
@@ -47,9 +26,9 @@ type env = {
   compile_time : bool;
       (** The expression is a constant expression, which the compiler evaluates: the value of a
           constant, or a default. *)
-  enclosing : enclosing list;
-      (** The enclosing loops and [concurrent] tasks, innermost first, up to the enclosing function
-          or lambda. *)
+  in_quantifier : bool;
+      (** In a quantifier's body, which the prover reads as a formula in code as in a specification.
+      *)
 }
 
 (* Whether an expression runs in the compiled program. A specification
@@ -182,6 +161,20 @@ let reported state ?notes ?(fixes = []) code (span : span) message =
   Diagnostic.reported diagnostic
 
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
+
+(* Whether the code is read as a formula: a specification, a proof, the
+   body of a function for specifications only, or a quantifier's body. A
+   formula states a fact, so it holds no loop, [var], or early exit, and
+   changes nothing, which would have no meaning in the prover's logic. *)
+let is_formula env = env.specification || env.in_quantifier
+
+let reject_in_formula state env span what =
+  if is_formula env then
+    report state Not_in_specification span
+      (Printf.sprintf
+         "%s runs, so it cannot be part of a specification, a proof, or a quantifier's body, which \
+          the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
+         what)
 
 (* Raises a compiler bug. Used where an earlier stage guarantees that a
    case cannot happen. *)

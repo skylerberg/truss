@@ -1,6 +1,7 @@
 /* The grammar of SPECIFICATION.md, written for Menhir so that it can be checked
-   for conflicts with `menhir --explain truss.mly`. Semantic actions are
-   empty; this file checks the grammar's shape, not its output.
+   for conflicts. Menhir runs with `--strict`, so a conflict that no precedence
+   declaration resolves fails the build. Semantic actions are empty; this file
+   checks the grammar's shape, not its output.
 
    The lexer is assumed to:
    - apply the line-break rule, emitting a single NEWLINE where the token
@@ -10,9 +11,9 @@
      `}`, and items inside braces are separated by NEWLINEs, not ended by
      them;
    - return the cost words (amortized, time, allocations, allocated_bytes,
-     calls, O, finite, and potential) as ordinary LOWER or UPPER names. The
-     rules below accept any name in their positions; the real parser checks
-     the spelling;
+     calls, O, finite, and potential) and the words of `assert ... by
+     bit_vector` as ordinary LOWER or UPPER names. The rules below accept
+     any name in their positions; the real parser checks the spelling;
    - return a whole string literal, interpolations included, as one STRING
      or TAGGED token. */
 
@@ -21,7 +22,7 @@
 %token ANY ASSERT BREAK CAPABILITY CONCURRENT CONTINUE COST DECREASES DERIVES ECHO ELSE
 %token ENSURES EXISTS FALSE FN FOR FORALL IF IMPL IN INDIRECT INTERNAL INVARIANT IS LAW LENDS
 %token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
-%token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRANSPARENT TRUE TYPE UNREACHABLE USE USES
+%token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNREACHABLE USE USES
 %token VAR WHILE WITH YIELD YIELDS
 
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
@@ -29,6 +30,26 @@
 %token EQ PLUSEQ MINUSEQ STAREQ SLASHEQ PERCENTEQ AMPEQ BAREQ CARETEQ SHLEQ SHREQ
 %token PLUS MINUS STAR SLASH PERCENT EQEQ NEQ LT LE GT GE ANDAND OROR IMPLIES
 %token BANG AMP CARET TILDE SHL SHR
+
+/* The three conflicts that SPECIFICATION.md documents in "Ambiguities in the
+   grammar", each resolved by shifting: the lookahead token's level is above
+   the level of the production that would otherwise be reduced.
+
+   - `else` after `if c { }` attaches to that `if`. In `let x = if c { } else
+     { }`, the `else` belongs to the `if`, not to the `let`.
+   - `{` after `return` starts the returned value. In `while return { }`, the
+     block is the operand of `return`, not the body of the loop.
+   - A name after `return` starts the returned value. In `assert return by
+     bit_vector`, `by` is the operand of `return`.
+
+   A token's level also applies to every production whose rightmost terminal
+   is that token, so a new conflict involving `else`, `{`, or a name can be
+   resolved here without a warning. The build of stage0/reference checks that
+   precedence resolves exactly three conflicts. */
+%nonassoc if_without_else
+%nonassoc ELSE
+%nonassoc return_without_value
+%nonassoc LBRACE LOWER
 
 %start <unit> file
 
@@ -109,7 +130,6 @@ visibility_opt:
   | { () }
   | PUBLIC { () }
   | PUBLIC OPAQUE { () }
-  | PUBLIC TRANSPARENT { () }
   | INTERNAL { () }
 
 /* Functions */
@@ -368,6 +388,7 @@ statement:
   | CONCURRENT FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
+  | ASSERT expression LOWER LOWER { () }
   | YIELD expression { () }
 
 annotation_opt:
@@ -392,7 +413,7 @@ loop_clause:
 
 expression:
   | ECHO expression { () }
-  | RETURN { () }
+  | RETURN %prec return_without_value { () }
   | RETURN expression { () }
   | implication { () }
   | bitwise { () }
@@ -577,7 +598,7 @@ lambda:
   | FN LPAREN comma_list(pattern) RPAREN newline_opt block { () }
 
 if_expression:
-  | IF expression newline_opt block { () }
+  | IF expression newline_opt block %prec if_without_else { () }
   | IF expression newline_opt block ELSE block { () }
   | IF expression newline_opt block ELSE if_expression { () }
 

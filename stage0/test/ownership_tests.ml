@@ -305,12 +305,6 @@ let () =
 (* Quantifiers in code that runs *)
 
 let () =
-  let grow = Fixtures.Ownership.grow in
-  test "the body of an executable quantifier cannot mutate the collection that it iterates over"
-    (fun () ->
-      one_diagnostic
-        (grow ^ Fixtures.Ownership.body_of_an_executable_quantifier_cannot_mutate_the)
-        "ownership.changed_while_viewed");
   test "an executable quantifier reads the collection that it iterates over" (fun () ->
       fine Fixtures.Ownership.executable_quantifier_reads_the_collection_that_it)
 
@@ -765,14 +759,14 @@ let () =
 (* How many [Disjoint] obligations a definition leaves to the prover. *)
 let disjoint_obligations text =
   let database = setup [ ("app::main", text) ] in
-  let module_ = module_of "app::main" in
+  let file = file_of "app::main" in
   List.fold_left
     (fun total declaration ->
       match Query.demand database Ownership.ownership (Resolve.Names.key_of declaration) with
       | Some result -> total + List.length result.Ownership.disjoint
       | None -> total)
     0
-    (Query.demand database Resolve.Names.declarations module_)
+    (Query.demand database Resolve.Names.declarations_in file)
 
 let () =
   test "two slices of one list borrowed by one call produce a `Disjoint` obligation" (fun () ->
