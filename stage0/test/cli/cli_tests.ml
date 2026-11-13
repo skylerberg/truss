@@ -463,7 +463,7 @@ let () =
         captured (fun () -> Program_command.build ~directory:root ~output:None ~json:false)
       in
       if outcome <> Outcome.Exit 1 then fail "did not refuse";
-      if not (contains output "main.truss:3:5: `demo::main` has a hole in its proofs") then
+      if not (contains output "main.truss:3:5: `todo` in a proof can be reached") then
         fail "%s" output)
 
 (* The test runner's report *)

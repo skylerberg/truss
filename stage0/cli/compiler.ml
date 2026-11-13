@@ -8,11 +8,12 @@ let configured_c_flags : string option option ref = ref None
 let configure_c_flags flags = configured_c_flags := Some flags
 
 let c_flags () =
-  match !configured_c_flags with
-  | Some told -> Toolchain.split_flags (Option.value told ~default:"")
-  | None ->
-      Toolchain.split_flags
-        (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
+  let value =
+    match !configured_c_flags with
+    | Some told -> told
+    | None -> Sys.getenv_opt Toolchain.added_flags_variable
+  in
+  Toolchain.split_flags (Option.value value ~default:"")
 
 let toolchain () =
   match Toolchain.find () with

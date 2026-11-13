@@ -416,7 +416,7 @@ not running. The process runs the same command-line code, so the result is
 the same as in the client's own process. `truss new` and `truss clean` read
 no code, so they always run in the client's process.
 
-**`TRUSS_CFLAGS`** adds flags, separated by white space, to every command
+**`TRUSS_CFLAGS`** adds flags, separated by spaces, to every command
 that compiles or links C, for working on the compiler. Set to a sanitizer's,
 such as `-fsanitize=address,undefined`, it finds compiler bugs, since a
 memory error or undefined behavior in Truss code can come only from one.

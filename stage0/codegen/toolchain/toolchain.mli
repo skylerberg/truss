@@ -10,7 +10,7 @@ type t = {
 (* The compiler named by [TRUSS_CC], or else [clang], or else [cc]. *)
 val find : unit -> (t, string) result
 
-(* [TRUSS_CFLAGS], whose flags, separated by white space, are added to
+(* [TRUSS_CFLAGS], whose flags, separated by spaces, are added to
    every command that compiles or links, such as a sanitizer's. *)
 val added_flags_variable : string
 val split_flags : string -> string list

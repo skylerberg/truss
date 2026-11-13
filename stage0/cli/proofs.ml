@@ -44,11 +44,9 @@ let diagnostics (project : Project.t) files =
   let checked = checked project files in
   fun file -> fst (checked file)
 
-(* A hole in a proof: a [todo] in it, or a law that an impl leaves
-   unshown. *)
-type hole = { definition : Path.t; file : Path.file; offset : int }
-
-(* Each hole in the proofs of the definitions that [main] reaches. A program
+(* Each hole in the proofs of the definitions that [main] reaches, a [todo]
+   or a law that an impl leaves unshown: the definition, and the hole's
+   file, as the current directory shows it, line, and column. A program
    with one cannot be built. *)
 let holes_reached (project : Project.t) main =
   let reached = List.hd (Database.reachable project.session [ main ]) in
@@ -62,7 +60,9 @@ let holes_reached (project : Project.t) main =
                 (fun (home, (span : Syntax.span)) ->
                   Option.map
                     (fun (file, base) ->
-                      { definition = declaration.path; file; offset = base + span.start })
+                      let source = Project.source project file in
+                      let line, column = Source.position source (base + span.start) in
+                      (declaration.path, Project.shown (Source.path source), line, column))
                     (Query.demand project.context Resolve.Names.base home))
                 holes
           | _ -> [])

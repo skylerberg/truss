@@ -41,101 +41,64 @@ let stop_at_diagnostics ~proofs ~json project =
     raise (Stop 1)
   end
 
-(* What a release build refuses and [main] can reach: a [todo] or an [echo]
-   in code, with the definitions from [main] to the one that holds it, or
-   a hole in the proofs of a definition. *)
-type refusal = {
-  failure : [ `Todo of Path.t list | `Echo of Path.t list | `Proof_hole of Path.t ];
-  file : string;  (** As the current directory shows it *)
-  line : int;
-  column : int;
-}
-
-let refusals project compile main =
+(* Rejects a program whose [main] can reach a [todo] or an [echo] in code,
+   or a hole in a proof, and lists each in order of position with the
+   definitions from [main] to the one that holds it. *)
+let refuse_unshippable ~json project compile main =
   let in_code =
     match Compile.unshippable compile ~main with
     | Error message -> Project.cannot_run "%s" message
     | Ok unshippable ->
         List.map
-          (fun (unshippable : Compile.unshippable) ->
-            {
-              failure =
-                (match unshippable.failure with
-                | `Todo -> `Todo unshippable.way
-                | `Echo -> `Echo unshippable.way);
-              file = Project.shown_workspace_path project unshippable.file;
-              line = unshippable.line;
-              column = unshippable.column;
-            })
+          (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
+            ( Project.shown_workspace_path project file,
+              line,
+              column,
+              (failure :> [ `Todo | `Echo | `Proof_hole ]),
+              way ))
           unshippable
   in
   let in_proofs =
     List.map
-      (fun (hole : Proofs.hole) ->
-        let source = Project.source project hole.file in
-        let line, column = Source.position source hole.offset in
-        {
-          failure = `Proof_hole hole.definition;
-          file = Project.shown (Source.path source);
-          line;
-          column;
-        })
+      (fun (definition, file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
       (Proofs.holes_reached project main)
   in
-  List.sort_uniq
-    (fun left right ->
-      compare
-        (left.file, left.line, left.column, left.failure)
-        (right.file, right.line, right.column, right.failure))
-    (in_code @ in_proofs)
-
-let refusal_json refusal =
-  let kind, detail =
-    match refusal.failure with
-    | `Todo way ->
-        ("todo", ("way", Json.List (List.map (fun path -> Json.String (Path.show path)) way)))
-    | `Echo way ->
-        ("echo", ("way", Json.List (List.map (fun path -> Json.String (Path.show path)) way)))
-    | `Proof_hole definition -> ("proof hole", ("definition", Json.String (Path.show definition)))
-  in
-  Json.Object
-    [
-      ("kind", Json.String kind);
-      ("file", Json.String refusal.file);
-      ("line", Json.Int refusal.line);
-      ("column", Json.Int refusal.column);
-      detail;
-    ]
-
-let print_refusal refusal =
-  let position = Printf.sprintf "%s:%d:%d" refusal.file refusal.line refusal.column in
-  let way path = String.concat " -> " (List.map Path.show path) in
-  match refusal.failure with
-  | `Todo path ->
-      Output.eprintf
-        "%s: `todo` can be reached from `main`, so the program cannot be built.\n    %s\n" position
-        (way path)
-  | `Echo path ->
-      Output.eprintf
-        "%s: `echo` can be reached from `main`, so the program cannot be built.\n    %s\n" position
-        (way path)
-  | `Proof_hole definition ->
-      Output.eprintf
-        "%s: `%s` has a hole in its proofs and can be reached from `main`, so the program cannot \
-         be built.\n"
-        position (Path.show definition)
-
-(* Rejects a program whose [main] reaches a [todo], an [echo], or a hole in
-   a proof, and lists each in order of position. *)
-let refuse_unshippable ~json project compile main =
-  match refusals project compile main with
+  match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
   | refusals ->
+      let kind = function `Todo -> "todo" | `Echo -> "echo" | `Proof_hole -> "proof hole" in
+      let shown = function
+        | `Todo -> "`todo`"
+        | `Echo -> "`echo`"
+        | `Proof_hole -> "`todo` in a proof"
+      in
       if json then
         Json.print
           (Json.document ~diagnostics:[]
-             [ ("unshippable", Json.List (List.map refusal_json refusals)) ])
-      else List.iter print_refusal refusals;
+             [
+               ( "unshippable",
+                 Json.List
+                   (List.map
+                      (fun (file, line, column, failure, way) ->
+                        Json.Object
+                          [
+                            ("kind", Json.String (kind failure));
+                            ("file", Json.String file);
+                            ("line", Json.Int line);
+                            ("column", Json.Int column);
+                            ( "way",
+                              Json.List (List.map (fun path -> Json.String (Path.show path)) way) );
+                          ])
+                      refusals) );
+             ])
+      else
+        List.iter
+          (fun (file, line, column, failure, way) ->
+            Output.eprintf
+              "%s:%d:%d: %s can be reached from `main`, so the program cannot be built.\n    %s\n"
+              file line column (shown failure)
+              (String.concat " -> " (List.map Path.show way)))
+          refusals;
       raise (Stop 1)
 
 (* Builds the package's program to [output]. A release build requires

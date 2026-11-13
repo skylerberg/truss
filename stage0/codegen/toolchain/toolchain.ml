@@ -20,11 +20,7 @@ let find () =
   first [] candidates
 
 let added_flags_variable = "TRUSS_CFLAGS"
-
-let split_flags text =
-  String.map (function '\t' | '\n' | '\r' -> ' ' | character -> character) text
-  |> String.split_on_char ' '
-  |> List.filter (( <> ) "")
+let split_flags text = List.filter (( <> ) "") (String.split_on_char ' ' text)
 
 let required_flags =
   [
