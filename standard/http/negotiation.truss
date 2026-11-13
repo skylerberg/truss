@@ -1,0 +1,190 @@
+use standard::intrinsic
+
+type Preference(name: String, quality: UInt16)
+
+fn quality_value(text: StringSlice) -> Option[UInt16] {
+  let bytes = text.bytes()
+  if bytes.is_empty() || bytes.length() > 5 || (bytes[0] != 48 && bytes[0] != 49) {
+    return None
+  }
+  var value: UInt16 = if bytes[0] == 49 { 1000 } else { 0 }
+  if bytes.length() == 1 {
+    return Some(value)
+  }
+  if bytes[1] != 46 {
+    return None
+  }
+  var scale: UInt16 = 100
+  for index in 2..bytes.length()
+    invariant value + 10 * scale <= 2000
+  {
+    let digit = bytes[index]
+    if digit < 48 || digit > 57 || scale == 0 {
+      return None
+    }
+    let amount: UInt16 = intrinsic::convert(digit - 48)
+    value = value + amount * scale
+    scale = scale / 10
+  }
+  if value > 1000 { None } else { Some(value) }
+}
+
+fn preferences(header: StringSlice) -> List[Preference] {
+  var listed: List[Preference] = []
+  for element in header.split(",") {
+    var parameters: List[StringSlice] = []
+    for parameter in element.split(";") {
+      mut parameters.push(parameter.trim())
+    }
+    if parameters.is_empty() || parameters[0].is_empty() {
+      continue
+    }
+    var quality: UInt16 = 1000
+    var is_valid = true
+    for index in 1..parameters.length() {
+      let parameter = parameters[index]
+      if parameter.starts_with("q=") || parameter.starts_with("Q=") {
+        match quality_value(parameter.strip_prefix("q=").unwrap_or(parameter.strip_prefix("Q=").unwrap_or(parameter))) {
+          Some(value) => quality = value
+          None => is_valid = false
+        }
+      }
+    }
+    if is_valid {
+      mut listed.push(Preference(name: parameters[0].to_ascii_lowercase(), quality: quality))
+    }
+  }
+  listed
+}
+
+fn media_specificity(range: StringSlice, offered_type: StringSlice) -> Option[UInt8] {
+  let offered = match offered_type.find(";") {
+    Some(at) => offered_type.split_at(at).first.trim()
+    None => offered_type
+  }
+  if range == "*/*".slice() {
+    return Some(0)
+  }
+  if range.ends_with("/*") {
+    let prefix = range.strip_suffix("*").unwrap_or(range)
+    return if offered.starts_with(prefix) { Some(1) } else { None }
+  }
+  if range == offered { Some(2) } else { None }
+}
+
+fn language_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt8] {
+  if range == "*".slice() {
+    return Some(0)
+  }
+  if range == offered {
+    return Some(255)
+  }
+  if offered.starts_with(range) && offered.length() > range.length() && offered.bytes()[range.length()] == 45 {
+    let length = range.length()
+    return Some(if length >= 254 { 254 } else { intrinsic::convert(length) })
+  }
+  None
+}
+
+fn coding_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt8] {
+  if range == "*".slice() {
+    Some(0)
+  } else if range == offered {
+    Some(1)
+  } else {
+    None
+  }
+}
+
+fn quality_for(listed: Slice[Preference], offered: StringSlice, specificity: fn(StringSlice, StringSlice) -> Option[UInt8]) -> Option[UInt16] {
+  var best: Option[UInt8] = None
+  var quality: Option[UInt16] = None
+  for preference in listed {
+    match specificity(preference.name.slice(), offered) {
+      Some(level) => {
+        let is_better = match best {
+          Some(current) => level > current
+          None => true
+        }
+        if is_better {
+          best = Some(level)
+          quality = Some(preference.quality)
+        }
+      }
+      None => {}
+    }
+  }
+  quality
+}
+
+fn chosen(header: Option[StringSlice], offered: Slice[String], specificity: fn(StringSlice, StringSlice) -> Option[UInt8], unlisted: UInt16) -> Option[String] {
+  let listed = match header {
+    Some(value) => preferences(value)
+    None => return if offered.is_empty() { None } else { Some(offered[0].copy()) }
+  }
+  var winner: Option[String] = None
+  var winning: UInt16 = 0
+  for option in offered {
+    let name = option.slice().to_ascii_lowercase()
+    let quality = quality_for(listed.slice(), offered: name.slice(), specificity: specificity).unwrap_or(unlisted)
+    if quality > winning {
+      winning = quality
+      winner = Some(option.copy())
+    }
+  }
+  winner
+}
+
+fn identity_quality(listed: Slice[Preference]) -> UInt16 {
+  quality_for(listed, offered: "identity", specificity: coding_specificity).unwrap_or(1)
+}
+
+internal fn accepts_coding(header: Option[StringSlice], coding: StringSlice) -> Bool {
+  match header {
+    Some(value) => {
+      let quality = quality_for(preferences(value).slice(), offered: coding, specificity: coding_specificity)
+      quality is Some(level) && level > 0
+    }
+    None => false
+  }
+}
+
+public fn Request.preferred_type(self, offered: Slice[String]) -> Option[String] {
+  chosen(self.headers.get("Accept"), offered: offered, specificity: media_specificity, unlisted: 0)
+}
+
+public fn Request.preferred_language(self, offered: Slice[String]) -> Option[String] {
+  chosen(self.headers.get("Accept-Language"), offered: offered, specificity: language_specificity, unlisted: 0)
+}
+
+public fn Request.preferred_encoding(self, offered: Slice[String]) -> Option[String] {
+  let header = self.headers.get("Accept-Encoding")
+  match header {
+    Some(value) => {
+      let listed = preferences(value)
+      var winner: Option[String] = None
+      var winning: UInt16 = 0
+      for option in offered {
+        let name = option.slice().to_ascii_lowercase()
+        let quality = if name == "identity" {
+          identity_quality(listed.slice())
+        } else {
+          quality_for(listed.slice(), offered: name.slice(), specificity: coding_specificity).unwrap_or(0)
+        }
+        if quality > winning {
+          winning = quality
+          winner = Some(option.copy())
+        }
+      }
+      winner
+    }
+    None => {
+      for option in offered {
+        if option.slice().to_ascii_lowercase() == "identity" {
+          return Some(option.copy())
+        }
+      }
+      if offered.is_empty() { None } else { Some(offered[0].copy()) }
+    }
+  }
+}

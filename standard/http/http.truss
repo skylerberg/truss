@@ -665,25 +665,6 @@ public fn Response.json[Item: serialization::Serialize](item: Item, status: Stat
   Response(status: status, headers: own headers, body: text.slice().bytes().to_list())
 }
 
-fn accepts_gzip(header: Option[StringSlice]) -> Bool {
-  match header {
-    Some(value) => {
-      for part in value.split(",") {
-        let coding = part.trim()
-        let name = match coding.find(";") {
-          Some(at) => coding.part(0, to: at).trim()
-          None => coding
-        }
-        if same_name(name, second: "gzip") || same_name(name, second: "*") {
-          return !coding.contains("q=0") || coding.contains("q=0.")
-        }
-      }
-      false
-    }
-    None => false
-  }
-}
-
 fn is_compressible(content_type: Option[StringSlice]) -> Bool {
   match content_type {
     Some(value) => value.starts_with("text/") || value.starts_with("application/json")
@@ -696,7 +677,7 @@ fn is_compressible(content_type: Option[StringSlice]) -> Bool {
 public fn Response.compressed(own self, request: Request) -> Response {
   var response = own self
   if response.body.length() < 1024 || response.headers.contains("Content-Encoding")
-    || !accepts_gzip(request.headers.get("Accept-Encoding")) || !is_compressible(response.headers.get("Content-Type"))
+    || !accepts_coding(request.headers.get("Accept-Encoding"), coding: "gzip") || !is_compressible(response.headers.get("Content-Type"))
   {
     return response
   }
