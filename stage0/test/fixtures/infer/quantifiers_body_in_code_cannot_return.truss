@@ -1,0 +1,8 @@
+fn f(items: List[Int64]) -> Bool {
+  forall item in items => {
+    if item < 0 {
+      return false
+    }
+    true
+  }
+}

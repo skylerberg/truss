@@ -4,10 +4,6 @@ module Impls = Interface.Impls
 module Lower = Interface.Lower
 
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
-type enclosing = Loop | Task of Core.task
-type exit = Return_exit | Break_exit | Continue_exit
-
-val tasks_exited_by : exit -> enclosing list -> Core.task list
 
 type env = {
   output : Types.result option;
@@ -16,7 +12,7 @@ type env = {
   self_mode : Types.mode;
   loop_element : Types.ty option;
   compile_time : bool;
-  enclosing : enclosing list;
+  in_quantifier : bool;
 }
 
 val runs : env -> bool
@@ -100,6 +96,8 @@ val report :
   string ->
   unit
 
+val is_formula : env -> bool
+val reject_in_formula : state -> env -> Syntax.span -> string -> unit
 val bug : ('a, unit, string, 'b) format4 -> 'a
 
 val error :

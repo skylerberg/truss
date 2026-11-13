@@ -54,7 +54,9 @@ written.
   `yield` or as a task, the ownership check lends the collection for it, and
   the prover reads the yielding method's contract for each part.
 - **A jump out of scopes ends what it leaves:** loans, bindings,
-  temporaries, and a `provide` block.
+  temporaries, and a `provide` block. An early exit from `concurrent` code
+  also ends the tasks it leaves, which the builder finds from the loops and
+  tasks it is inside, so the core form holds none of this.
 
 ## Evaluation order
 
@@ -95,10 +97,6 @@ specification, and both readings call the same functions, so they give the
 same term.
 
 ## Not built
-
-The builder is built, and the ownership check, code generation, and the
-prover read the MIR. The core form is to lose the forms that only the
-builder reads.
 
 Pattern matching as a decision tree is an improvement of the builder, which
 can come at any time.

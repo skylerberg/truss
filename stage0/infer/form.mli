@@ -74,15 +74,7 @@ val each_of : State.state -> Tables.call -> Types.mode -> Syntax.expression -> C
 val iteration : State.state -> Syntax.statement -> Syntax.expression -> Core.iteration
 val cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
 val loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause
-val early_exit : Core.task list -> State.state -> origin:Core.origin -> Core.kind -> Core.kind
-
-val try_ :
-  State.state ->
-  Syntax.expression ->
-  Syntax.expression ->
-  output:Types.ty ->
-  exited_tasks:Core.task list ->
-  Core.kind
+val try_ : State.state -> Syntax.expression -> Syntax.expression -> output:Types.ty -> Core.kind
 
 val slice :
   State.state ->

@@ -1,6 +1,6 @@
 theorem returns_its_argument(value: Bool)
   ensures apply(fn(x) {
-      var held = apply(fn(_) { x }, value: true)
+      let held = apply(fn(_) { x }, value: true)
       held
     }, value: value) == value
 {

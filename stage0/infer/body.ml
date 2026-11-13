@@ -28,7 +28,7 @@ let no_output : env =
     self_mode = Types.Read;
     loop_element = None;
     compile_time = false;
-    enclosing = [];
+    in_quantifier = false;
   }
 
 (* The environment of a constant expression: the value of a constant, or a
@@ -266,7 +266,7 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       self_mode = self_mode signature;
       loop_element = None;
       compile_time = false;
-      enclosing = [];
+      in_quantifier = false;
     }
   in
   declare_parameters state written.parameters signature;

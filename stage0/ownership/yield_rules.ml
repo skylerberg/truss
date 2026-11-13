@@ -74,7 +74,6 @@ let yield_counts (body : Core.block) : count list =
             continued := counts @ !continued;
             []
         | [] -> counts)
-    | Task_exit { exit; _ } -> expression counts exit
     | Block body -> block counts body
     | _ -> counts
   in

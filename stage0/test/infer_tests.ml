@@ -392,7 +392,7 @@ let () =
         "resolve.unknown_name");
   test "a law's proof cannot assign to a parameter of the law" (fun () ->
       one_diagnostic Fixtures.Infer.laws_proof_cannot_assign_to_a_parameter_of_the_law
-        "types.not_assignable");
+        "types.not_in_specification");
   test "a variant with one field is a function" (fun () ->
       fine Fixtures.Infer.variant_with_one_field_is_a_function);
   test "a variant with several fields is not a function, because fields have no order" (fun () ->
@@ -739,6 +739,27 @@ let () =
         "types.specification_only");
   test "a function for specifications only has a specification for a body" (fun () ->
       fine Fixtures.Infer.function_for_specifications_only_has_a);
+  test "a function for specifications only cannot hold a var" (fun () ->
+      one_diagnostic Fixtures.Infer.function_for_specifications_only_cannot_hold_a_var
+        "types.not_in_specification");
+  test "a theorem cannot hold a loop" (fun () ->
+      one_diagnostic Fixtures.Infer.theorem_cannot_hold_a_loop "types.not_in_specification");
+  test "a proof block cannot hold a loop" (fun () ->
+      one_diagnostic Fixtures.Infer.proof_block_cannot_hold_a_loop "types.not_in_specification");
+  test "a proof block cannot assign to a variable of the program" (fun () ->
+      one_diagnostic Fixtures.Infer.proof_block_cannot_assign_to_a_variable_of_the_program
+        "types.not_in_specification");
+  test "a proof block cannot return" (fun () ->
+      one_diagnostic Fixtures.Infer.proof_block_cannot_return "types.not_in_specification");
+  test "a quantifier's body in code cannot return" (fun () ->
+      one_diagnostic Fixtures.Infer.quantifiers_body_in_code_cannot_return
+        "types.not_in_specification");
+  test "a quantifier's body cannot mark an argument mut" (fun () ->
+      one_diagnostic Fixtures.Infer.quantifiers_body_cannot_mark_an_argument_mut
+        "types.not_in_specification");
+  test "a contract cannot mark an argument mut" (fun () ->
+      one_diagnostic Fixtures.Infer.contract_cannot_mark_an_argument_mut
+        "types.not_in_specification");
   test "a constant in a pattern needs structural equality" (fun () ->
       one_diagnostic Fixtures.Infer.constant_in_a_pattern_needs_structural_equality
         "types.not_structural");

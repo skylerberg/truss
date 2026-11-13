@@ -172,7 +172,9 @@ block in reverse postorder, so its order of evaluation and its scopes are the
 ones code generation compiles. Each computation it names, such as a call or
 a constructor, is read through the same functions as in a specification,
 given its operands' values, so code and specification give the same term.
-Ghost code, a proof and a `proof` block, is read from its core form.
+A specification, a proof, a `proof` block, and a quantifier's body are
+formulas, which the type checker keeps free of loops, assignments, and early
+exits, and are read from the core form.
 
 - **A call** asserts each `requires`, gives each `mut` argument a fresh
   value, keeping its old one for `old`, and assumes each `ensures` and the

@@ -111,15 +111,6 @@ let rec expression names (node : expression) =
       match value with Some value -> "return " ^ expression value | None -> "return")
   | Break -> "break"
   | Continue -> "continue"
-  | Task_exit { tasks; exit } ->
-      Printf.sprintf "task_exit %s { %s }"
-        (String.concat ", "
-           (List.map
-              (function
-                | Branch { block; index } -> Printf.sprintf "branch %d of #%d" index block
-                | Iteration { loop } -> Printf.sprintf "an iteration of #%d" loop)
-              tasks))
-        (expression exit)
   | Todo -> "todo"
   | Unreachable -> "unreachable"
   | Echo inner -> "echo " ^ expression inner

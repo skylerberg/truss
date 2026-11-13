@@ -1,0 +1,8 @@
+fn bump(items: mut List[Int64]) -> Bool {
+  mut items.push(1)
+  true
+}
+
+fn f(items: List[Int64])
+  requires bump(mut items)
+{}

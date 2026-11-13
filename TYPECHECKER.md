@@ -200,6 +200,12 @@ follow the size of a statement.
 - **An `impl` is never chosen from the expected type.**
 - **`todo` takes the expected type,** or the `Hole` type, on which every
   operation is accepted, so the rest of the body is still checked.
+- **A formula holds no code that only runs.** A specification, a proof, the
+  body of a function for specifications only, and a quantifier's body are
+  read by the prover as formulas, so a loop, a `var`, an assignment, a `mut`
+  mark, a `concurrent` or `parallel` block, `yield`, and an early exit in
+  one are `types.not_in_specification`. The prover would otherwise need a
+  second reading of each, besides the MIR's.
 
 **Exhaustiveness uses Maranget's usefulness algorithm** ("Warnings for
 pattern matching", 2007) over the core form, so it checks the patterns the

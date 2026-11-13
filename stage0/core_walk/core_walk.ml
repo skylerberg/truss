@@ -128,7 +128,6 @@ let expression_children visit (node : expression) =
         implementations;
       block visit body
   | Return value -> Option.iter visit.expression value
-  | Task_exit { exit; _ } -> visit.expression exit
   | Quantified { binder; body; _ } ->
       (match binder with
       | Over_type _ -> ()

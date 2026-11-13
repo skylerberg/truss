@@ -8,7 +8,7 @@ fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool
 theorem each_kept(items: List[Bool])
   ensures forall i in 0..items.length() =>
     apply(fn(x) {
-      var held = x
+      let held = x
       held
     }, value: items[i]) == items[i]
 {

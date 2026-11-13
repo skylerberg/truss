@@ -88,11 +88,11 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () -> Unreachable);
       Types.Never
   | Break | Continue ->
-      let (exit : exit), (kind : Core.kind) =
-        match value.kind with Break -> (Break_exit, Break) | _ -> (Continue_exit, Continue)
+      let (kind : Core.kind), word =
+        match value.kind with Break -> (Break, "`break`") | _ -> (Continue, "`continue`")
       in
-      register_expression state value (fun () ->
-          Form.early_exit (tasks_exited_by exit env.enclosing) state ~origin:value.id kind);
+      reject_in_formula state env value.span word;
+      register_expression state value (fun () -> kind);
       Types.Never
   | Self_value -> (
       (* A lambda that reads [self] captures it. In the list of references,
@@ -172,7 +172,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
           declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:Types.Read);
-      check state env body Types.bool;
+      check state { env with in_quantifier = true } body Types.bool;
       register_expression state value (fun () ->
           let binder : Core.binder =
             match binder with
@@ -203,11 +203,8 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () -> Echo (build_expression state inner));
       type_
   | Return inner ->
-      register_expression state value (fun () ->
-          Form.early_exit
-            (tasks_exited_by Return_exit env.enclosing)
-            state ~origin:value.id
-            (Return (Option.map (build_expression state) inner)));
+      reject_in_formula state env value.span "`return`";
+      register_expression state value (fun () -> Return (Option.map (build_expression state) inner));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
       | None, Some (Returns output) ->
