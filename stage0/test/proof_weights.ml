@@ -33,7 +33,7 @@ let weights =
     ("standard::growth", 2);
     ("standard::hex", 21);
     ("standard::html", 102);
-    ("standard::http", 215);
+    ("standard::http", 253);
     ("standard::http::date", 59);
     ("standard::http::flow", 1);
     ("standard::http::hpack", 56);
