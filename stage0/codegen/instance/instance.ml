@@ -10,6 +10,7 @@ type key =
   | Template_check of { from_template : Path.t; texts : string list }
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Cursor_next of Ground.yielding
+  | Looped of Ground.yielding
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
   | Table of { impl : Path.t; type_arguments : Ground.argument list }
@@ -38,6 +39,7 @@ let rank = function
   | Template_check _ -> 16
   | Call_evaluation _ -> 17
   | Locked_entry _ -> 18
+  | Looped _ -> 20
   | Locked_table _ -> 19
 
 let ( >>= ) order next = if order <> 0 then order else next ()
@@ -54,7 +56,8 @@ let rec compare left right =
   | Encode left, Encode right
   | Any_drop left, Any_drop right ->
       Ground.compare left right
-  | Cursor_next left, Cursor_next right -> Ground.compare (Cursor left) (Cursor right)
+  | Cursor_next left, Cursor_next right | Looped left, Looped right ->
+      Ground.compare (Cursor left) (Cursor right)
   | Adapter left, Adapter right ->
       compare left.function_ right.function_ >>= fun () ->
       Ground.compare (Function left.ty) (Function right.ty)
@@ -104,6 +107,7 @@ let rec encode ?(path = Ground.encode_path) key =
           Cbor.Array (List.map (fun number -> Cbor.Text (Z.to_string number)) arguments);
         ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
+  | Looped yielding -> tagged 20 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
   | Any_entry key -> tagged 11 [ encode ~path key ]
@@ -246,6 +250,7 @@ let rec mangle = function
           (List.map (fun number -> marker "Value" ^ text (Z.to_string number)) arguments)
       ^ marker "End"
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
+  | Looped yielding -> marker "Looped" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->
       marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
   | Any_entry key -> marker "Dynamic" ^ mangle key
@@ -288,6 +293,7 @@ let rec to_string = function
       ^ String.concat ", " (List.map Z.to_string arguments)
       ^ ")"
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
+  | Looped yielding -> "looped " ^ Ground.to_string (Cursor yielding)
   | Adapter { function_; _ } -> "adapter " ^ to_string function_
   | Any_entry key -> "any entry " ^ to_string key
   | Any_table { impl; type_arguments } ->

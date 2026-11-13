@@ -15,11 +15,13 @@ let loop_form env ~(body : Ground.function_type) (function_ : Lir.function_) =
       (fun (block : Lir.basic_block) ->
         match block.terminator with
         | Yield { value; resume; stop } ->
+            (* A part of a type with no size is no parameter. *)
+            let arguments = if List.length signature.parameters > 1 then [ value ] else [] in
             let call =
               Lir.Call
                 {
                   target = Indirect { value = Copy (local_place body_local); signature };
-                  arguments = [ value ];
+                  arguments;
                   result = Returned (local_place go_on);
                 }
             in
@@ -93,6 +95,8 @@ let statement_uses_defines (statement : Lir.statement) =
       (target_reads @ List.concat_map operand_reads arguments @ reads, defined)
   | Drop place | Free_block { place; _ } -> (place_reads place, None)
   | Echo { text; length; _ } -> (operand_reads text @ operand_reads length, None)
+  | Loop_body { part; _ } -> ([], part)
+  | Loop_exit _ -> ([], None)
   | Region _ | Regions_end _ | Fork _ | Fork_range _ ->
       bug "a parallel statement in a method that is pulled, which runs its branches in order"
 
@@ -103,7 +107,9 @@ let terminator_reads (terminator : Lir.terminator) =
   | Return value -> Option.fold ~none:[] ~some:operand_reads value
   | Fail { message; length; _ } -> operand_reads message @ operand_reads length
   | Yield { value; _ } -> operand_reads value
-  | Goto _ | Unreachable -> []
+  | Loop_call { target; arguments; _ } ->
+      List.concat_map operand_reads (Lir.target_operands target @ arguments)
+  | Goto _ | Unreachable | Loop_next _ -> []
 
 let live_in (function_ : Lir.function_) =
   let count = Array.length function_.locals in
@@ -405,7 +411,3 @@ let cursor_drop _env ~cursor ~owned ~evidence (function_ : Lir.function_) =
         ];
     environment = [];
   }
-
-module For_testing = struct
-  let loop_form = loop_form
-end

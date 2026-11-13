@@ -224,6 +224,13 @@ type statement =
           out, and the regions of a fork touch no place that another changes. Run in place, in
           order, the regions have the statement's semantics. *)
   | Regions_end of { fork : int }  (** Before outlining only. Where a fork's last region ends. *)
+  | Loop_body of { loop : int; part : local option }
+      (** Before outlining only. Where the body of the loop [loop] starts, each time the method it
+          loops over gives it a part, in [part]: the body's parameter, as its function type passes
+          it. *)
+  | Loop_exit of { loop : int }
+      (** Before outlining only. The start of a block the body of the loop [loop] leaves to, by an
+          exit other than going on: the code after the body's function returns goes on here. *)
   | Fork of { branches : (int * operand) list }
       (** Runs each nested function, given the address of its environment, and continues when all
           have returned. They may run at the same time. *)
@@ -244,6 +251,24 @@ type terminator =
   | Yield of { value : operand; resume : block; stop : block option }
       (** Before yield lowering only. [stop] runs when the caller leaves the loop at this [yield]; a
           lending method's [yield] has none, since it always continues. *)
+  | Loop_call of {
+      loop : int;
+      target : target;
+      arguments : operand list;
+      go_on : ty;
+      body : block;
+      after : block;
+      exit : local;
+    }
+      (** Before outlining only. Calls [target], a method in loop form, with [arguments] and then
+          the body of the loop [loop] as a function value, which returns a [go_on] that is true to
+          go on. The body is the region from [body], whose [Loop_body] starts it: it ends where it
+          goes on, at a [Loop_next], or where it leaves, at a [Loop_exit], and records the exit it
+          took in [exit], a [UInt32]. Run in place, the body runs zero or more times, and the code
+          goes on at [after], or at the exit. *)
+  | Loop_next of { loop : int; body : block; after : block }
+      (** Before outlining only. The end of an iteration of the body of the loop [loop]: run in
+          place, the body runs again from [body], or the loop ends at [after]. *)
 
 type basic_block = { statements : statement list; terminator : terminator }
 

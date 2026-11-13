@@ -63,7 +63,7 @@ let references env (instance : Lir.t) =
                   | _ -> keys)
               | Free_block { place; _ } -> place_keys place keys
               | Echo { text; length; _ } -> operand_keys length (operand_keys text keys)
-              | Region _ | Regions_end _ -> keys
+              | Region _ | Regions_end _ | Loop_body _ | Loop_exit _ -> keys
               | Fork { branches } ->
                   List.fold_left
                     (fun keys (_, lir_operand) -> operand_keys lir_operand keys)
@@ -79,7 +79,17 @@ let references env (instance : Lir.t) =
             Option.fold ~none:keys ~some:(fun lir_operand -> operand_keys lir_operand keys) value
         | Fail { message; length; _ } -> operand_keys length (operand_keys message keys)
         | Yield { value; _ } -> operand_keys value keys
-        | Goto _ | Unreachable -> keys)
+        | Loop_call { target; arguments; _ } ->
+            let keys =
+              match target with
+              | Direct { function_; _ } -> function_ref_keys function_ keys
+              | _ ->
+                  List.fold_left
+                    (fun keys lir_operand -> operand_keys lir_operand keys)
+                    keys (Lir.target_operands target)
+            in
+            List.fold_left (fun keys lir_operand -> operand_keys lir_operand keys) keys arguments
+        | Goto _ | Unreachable | Loop_next _ -> keys)
       keys function_ref.blocks
   in
   let keys = Array.fold_left in_function (in_function [] instance.main) instance.nested in

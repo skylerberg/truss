@@ -173,6 +173,10 @@ let statement_to_string = function
         (place_to_string (local_place function_value))
         (place_to_string (local_place item))
   | Regions_end { fork } -> Printf.sprintf "end of fork %d" fork
+  | Loop_body { loop; part } ->
+      Printf.sprintf "body of loop %d%s" loop
+        (match part with Some part -> " given " ^ place_to_string (local_place part) | None -> "")
+  | Loop_exit { loop } -> Printf.sprintf "exit of loop %d" loop
   | Fork { branches } ->
       "fork "
       ^ String.concat ", "
@@ -216,6 +220,14 @@ let terminator_to_string = function
   | Yield { value; resume; stop } ->
       Printf.sprintf "yield %s resume b%d%s" (operand_to_string value) resume
         (match stop with None -> "" | Some block_index -> Printf.sprintf " stop b%d" block_index)
+  | Loop_call { loop; target; arguments; body; after; exit; _ } ->
+      Printf.sprintf "loop %d: call %s(%s) body b%d after b%d exit %s" loop
+        (target_to_string target)
+        (String.concat ", " (List.map operand_to_string arguments))
+        body after
+        (place_to_string (local_place exit))
+  | Loop_next { loop; body; after } ->
+      Printf.sprintf "next of loop %d body b%d after b%d" loop body after
 
 let function_to_string (function_ : function_) =
   let parameters =

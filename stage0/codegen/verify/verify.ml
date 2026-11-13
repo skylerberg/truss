@@ -165,7 +165,8 @@ let function_ env (instance : Lir.t) label (function_ : Lir.function_) =
                     bug "a call that passes %d arguments to a target that takes %d" passed_count
                       arity)
                 (target_signature instance target)
-          | Region _ | Regions_end _ -> bug "a region that outlining left in place"
+          | Region _ | Regions_end _ | Loop_body _ | Loop_exit _ ->
+              bug "a region that outlining left in place"
           | Fork { branches } ->
               List.iter
                 (fun (nested, _) -> forked nested [ Lir.Raw (Nullable_pointer Opaque) ])
@@ -182,6 +183,7 @@ let function_ env (instance : Lir.t) label (function_ : Lir.function_) =
         (Lir.successors block.terminator);
       match (block.terminator, function_.result) with
       | Yield _, _ -> bug "a yield that yield lowering left in place"
+      | (Loop_call _ | Loop_next _), _ -> bug "a loop that outlining left in place"
       | Return None, Some _ -> bug "a return of nothing from a function with a result"
       | Return (Some _), None -> bug "a return of a value from a function with no result"
       | _ -> ())
@@ -245,8 +247,8 @@ let links env ~find (compiled : Lir.compiled) =
                   | Some (Value ty) -> has (Drop ty) (Convention.drop_signature ty)
                   | Some _ -> bug "a drop of a place that is not a value"
                   | None -> ())
-              | Assign _ | Call _ | Echo _ | Free_block _ | Region _ | Regions_end _ | Fork _
-              | Fork_range _ ->
+              | Assign _ | Call _ | Echo _ | Free_block _ | Region _ | Regions_end _ | Loop_body _
+              | Loop_exit _ | Fork _ | Fork_range _ ->
                   ());
           Array.iter
             (fun (block : Lir.basic_block) -> Lir.visit_terminator visitor block.terminator)

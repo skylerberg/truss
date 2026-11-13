@@ -33,7 +33,10 @@ type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
 
 let environment (instance : Lir.t) nested_index = instance.nested.(nested_index).environment
 
-let elaborate_code (context : Lower.context) (instance : Lir.t) =
+(* An instance's drops elaborated, then its main function given to
+   [yields_lowered], which lowers a method's [yield]s, and its regions and
+   loop bodies outlined. *)
+let elaborate_code ?(yields_lowered = Fun.id) (context : Lower.context) (instance : Lir.t) =
   let needs_drop ty = not (Glue.trivial (Lower.glue context) ty) in
   let elaborate function_ =
     Drops.elaborate (Lower.env context) ~needs_drop ~environment:(environment instance) function_
@@ -43,7 +46,7 @@ let elaborate_code (context : Lower.context) (instance : Lir.t) =
        (Outline.instance (Lower.env context)
           {
             instance with
-            main = elaborate instance.main;
+            main = yields_lowered (elaborate instance.main);
             nested = Array.map elaborate instance.nested;
           }))
 
@@ -89,6 +92,11 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)
+  | Looped yielding ->
+      Compiled
+        (elaborate_code context (Lower.instance context key)
+           ~yields_lowered:
+             (Yields.loop_form (Lower.env context) ~body:(Lower.loop_body_type context yielding)))
   | Constant path -> (
       match Lower.constant context path with
       | Folded data -> Compiled (Data data)

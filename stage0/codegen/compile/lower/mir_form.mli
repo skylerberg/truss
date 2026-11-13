@@ -17,6 +17,10 @@ val fill_defaults :
     gives each parameter's place: a parameter with a default that the function owns has a place of
     its own. *)
 
+val loop_body_type : Definitions.context -> Ground.yielding -> Ground.function_type
+(** The type of the loop body that a yielding method in loop form takes: a function of the part it
+    yields that returns whether to go on. *)
+
 val lower_code : Lowering.state -> Path.t -> parameters:Lir.place list -> unit
 (** Lowers the MIR of the code at the path in the current frame, with the places of its parameters,
     in order. Leaves a block that nothing reaches. *)

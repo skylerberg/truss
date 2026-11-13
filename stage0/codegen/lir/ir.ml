@@ -150,7 +150,8 @@ let visit_statement visitor = function
   | Region { region = Task { function_value; item }; _ } ->
       visit_place visitor (local_place function_value);
       visit_place visitor (local_place item)
-  | Region { region = Branch; _ } | Regions_end _ -> ()
+  | Region { region = Branch; _ } | Regions_end _ | Loop_exit _ -> ()
+  | Loop_body { part; _ } -> Option.iter (fun part -> visit_place visitor (local_place part)) part
   | Fork { branches } ->
       List.iter (fun (_, environment) -> visit_operand visitor environment) branches
   | Fork_range { environment; first; last; _ } ->
@@ -165,7 +166,11 @@ let visit_terminator visitor = function
   | Fail { message; length; _ } ->
       visit_operand visitor message;
       visit_operand visitor length
-  | Goto _ | Unreachable -> ()
+  | Loop_call { target; arguments; exit; _ } ->
+      List.iter (visit_operand visitor) (target_operands target);
+      List.iter (visit_operand visitor) arguments;
+      visit_place visitor (local_place exit)
+  | Goto _ | Unreachable | Loop_next _ -> ()
 
 let successors = function
   | Goto block -> [ block ]
@@ -173,6 +178,7 @@ let successors = function
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Return _ | Unreachable | Fail _ -> []
   | Yield { resume; stop; _ } -> resume :: Option.to_list stop
+  | Loop_call { body; after; _ } | Loop_next { body; after; _ } -> [ body; after ]
 
 (* Blocks in reverse postorder of a depth-first walk that takes successors
    in order. *)
@@ -276,7 +282,19 @@ let map_statement ~place ~block = function
                 Task { function_value = local function_value; item = local item }
             | Branch -> Branch);
         }
-  | (Region { region = Branch; _ } | Regions_end _) as mark -> mark
+  | (Region { region = Branch; _ } | Regions_end _ | Loop_exit _) as mark -> mark
+  | Loop_body { loop; part } ->
+      Loop_body
+        {
+          loop;
+          part =
+            Option.map
+              (fun part ->
+                match place (local_place part) with
+                | { root = Local mapped; projections = [] } -> mapped
+                | _ -> bug "a loop body's part mapped to a place that is not a local")
+              part;
+        }
   | Fork { branches } ->
       Fork
         {
@@ -318,6 +336,22 @@ let map_terminator ~place ~block terminator =
       Fail { failure; message = operand message; length = operand length; site }
   | Yield { value; resume; stop } ->
       Yield { value = operand value; resume = block resume; stop = Option.map block stop }
+  | Loop_call { loop; target; arguments; go_on; body = first; after; exit } ->
+      Loop_call
+        {
+          loop;
+          target = map_target ~place ~block target;
+          arguments = List.map operand arguments;
+          go_on;
+          body = block first;
+          after = block after;
+          exit =
+            (match place (local_place exit) with
+            | { root = Local mapped; projections = [] } -> mapped
+            | _ -> bug "a loop's exit mapped to a place that is not a local");
+        }
+  | Loop_next { loop; body = first; after } ->
+      Loop_next { loop; body = block first; after = block after }
 
 let rename map_local (lir_place : place) =
   match lir_place.root with

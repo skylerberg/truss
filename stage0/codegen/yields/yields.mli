@@ -9,10 +9,6 @@
    it stopped at. Run this after drop elaboration, so the drops on a
    [yield]'s [stop] path are already in place. *)
 
-(* The loop form. [body] is the type of the caller's loop body, whose result
-   is a [Bool]: true to continue. A lending method's [yield] has no [stop], so
-   it calls the body and always continues. *)
-
 (* The fields of a cursor over the method: its state, a [UInt32], then each
    parameter that is not in [evidence], named as
    [Convention.cursor_parameter] names it, and each local live where a
@@ -50,6 +46,8 @@ val cursor_drop :
   Lir.function_ ->
   Lir.function_
 
-module For_testing : sig
-  val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
-end
+(* The loop form. [body] is the type of the caller's loop body, whose result
+   is a [Bool]: true to continue. A [yield] calls the body with its part, and
+   goes on where the body returns true and takes its [stop] path where it
+   returns false. *)
+val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_

@@ -165,6 +165,12 @@ type schedule = Sequential | Chunked | Spawned of spawn_loop
    local it returns, or nowhere. *)
 type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 
+(* How a yielding method's [yield]s are lowered: in its pulled version,
+   where each stays as a state of its cursor, or in its loop form, where
+   each calls the caller's loop body, of type [body], and stops where the
+   body says to. Any other code has no [yield]. *)
+type form = Ordinary | Pulled | Looped of { body : Ground.function_type }
+
 type state = {
   context : context;
   mutable frame : frame;
@@ -174,7 +180,7 @@ type state = {
   mutable result : result_slot;
   nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
-  pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
+  form : form;
   mutable forks : int;  (** How many [parallel] statements the function has marked *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable next_range : schedule;
@@ -202,7 +208,7 @@ let frame_of code ~inlined =
 
 (* The state to write one function in: a builder of its own and the
    function's scope. A lambda shares [nested] with the function around it. *)
-let enter context ?(pulling = false) ?(nested = ref []) frame =
+let enter context ?(form = Ordinary) ?(nested = ref []) frame =
   {
     context;
     frame;
@@ -212,20 +218,23 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     result = No_result;
     nested;
     evidence = [];
-    pulling;
+    form;
     forks = 0;
     tasks = [];
     next_range = Sequential;
     inlined_owned = [];
   }
 
+let is_pulled st = st.form = Pulled
+
 (* Whether a [parallel] statement's parts are marked here, to become
    functions of their own that the runtime may run at the same time. They
-   are not in a method's pulled version, whose code is a state machine, nor
-   in a lending or yielding method that is inlined: a [yield] in a part
-   would run the caller's code there, which may leave, and a region has
-   one way out. *)
-let may_fork st = (not st.pulling) && st.frame.on_yield = None && st.frame.exit = None
+   are not in a yielding method: in its pulled version, whose code is a
+   state machine, a [yield] is a state, and in its loop form, a [yield] in a
+   part would run the caller's body there, which may stop the method, and a
+   region has one way out. Nor are they in a lending method that is
+   inlined, for the same reason. *)
+let may_fork st = st.form = Ordinary && st.frame.on_yield = None && st.frame.exit = None
 
 let fresh_fork st =
   st.forks <- st.forks + 1;

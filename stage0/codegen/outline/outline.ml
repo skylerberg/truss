@@ -415,12 +415,287 @@ let outline_fork env ~first_number (function_ : Lir.function_) =
         ( { function_ with locals = Array.of_list !parent_locals; blocks },
           List.map (fun (_, nested, _, _, _) -> nested) outlined )
 
+(* The first loop whose body running the function reaches, which lies in
+   no other loop's body: its head, the block that calls the method. *)
+let first_loop (function_ : Lir.function_) =
+  List.find_opt
+    (fun block -> match function_.blocks.(block).terminator with Loop_call _ -> true | _ -> false)
+    (Lir.reverse_postorder function_.blocks)
+
+let is_exit loop (block : Lir.basic_block) =
+  match block.statements with Loop_exit { loop = other } :: _ -> other = loop | _ -> false
+
+(* Outlines the body of the function's first loop over a method in loop
+   form. The body becomes a nested function, numbered [number], that takes
+   its environment and its part, and returns whether to go on: it goes on
+   where the body reaches its [Loop_next], and where it leaves by an exit,
+   it records the exit's number, from 1, in the loop's [exit] and stops.
+   The head then calls the method with the body as its last argument, and
+   goes on at [after], where the method ended or the body stopped by
+   [break], or at the exit the body recorded. *)
+let outline_loop env ~number (function_ : Lir.function_) =
+  match first_loop function_ with
+  | None -> None
+  | Some head -> (
+      let blocks = function_.blocks in
+      match blocks.(head).terminator with
+      | Loop_call { loop; target; arguments; go_on; body = entry; after; exit } ->
+          let part =
+            match blocks.(entry).statements with
+            | Loop_body { loop = other; part } :: _ when other = loop -> part
+            | _ -> bug "the body of loop %d does not start where its call says" loop
+          in
+          (* The body's blocks, and the exits it leaves by, in the order
+             first reached. *)
+          let inside = ref Blocks.empty and exits = ref [] in
+          let rec visit block =
+            if not (Blocks.mem block !inside) then begin
+              inside := Blocks.add block !inside;
+              match blocks.(block).terminator with
+              | Return _ | Yield _ -> bug "the body of loop %d returns or yields" loop
+              | Loop_next { loop = other; _ } when other = loop -> ()
+              | terminator ->
+                  List.iter
+                    (fun successor ->
+                      if successor = head then bug "the body of loop %d goes to its head" loop
+                      else if is_exit loop blocks.(successor) then
+                        begin if not (List.mem successor !exits) then
+                          exits := !exits @ [ successor ]
+                        end
+                      else visit successor)
+                    (Lir.successors terminator)
+            end
+          in
+          visit entry;
+          let region = !inside and exits = !exits in
+          let exit_number block =
+            let rec find position = function
+              | [] -> bug "block %d is no exit of loop %d" block loop
+              | exit_block :: _ when exit_block = block -> position
+              | _ :: rest -> find (position + 1) rest
+            in
+            find 1 exits
+          in
+          let outside =
+            List.fold_left
+              (fun locals number ->
+                if Blocks.mem number region then locals
+                else Locals.union (block_locals blocks.(number)) locals)
+              (Locals.add exit (Locals.of_list function_.parameters))
+              (Lir.reverse_postorder blocks)
+          in
+          let named = union_over blocks region block_locals in
+          let locals = ref [] in
+          let local info =
+            locals := info :: !locals;
+            List.length !locals - 1
+          in
+          let plain ty : Lir.local_info = { ty; name = None; borrowed = false } in
+          let arrives =
+            local { (plain (Lir.Raw (Nullable_pointer Opaque))) with name = Some "environment" }
+          in
+          let part_local =
+            Option.map (fun original -> (original, local function_.locals.(original))) part
+          in
+          let environment =
+            local (plain (Lir.Pointer { target = Environment number; writable = false }))
+          in
+          let own = Hashtbl.create 16 in
+          Option.iter (fun (original, mapped) -> Hashtbl.replace own original mapped) part_local;
+          let captured = ref [] in
+          Locals.iter
+            (fun original ->
+              if not (Hashtbl.mem own original) then
+                let info = function_.locals.(original) in
+                if (Locals.mem original outside || original = exit) && not (Lir.erased env info.ty)
+                then
+                  captured :=
+                    (Printf.sprintf "capture%d" (List.length !captured), original) :: !captured
+                else Hashtbl.replace own original (local info))
+            (Locals.add exit named);
+          let captured = List.rev !captured in
+          let place (lir_place : Lir.place) : Lir.place =
+            match lir_place.root with
+            | Static _ -> lir_place
+            | Local original -> (
+                match Hashtbl.find_opt own original with
+                | Some mapped -> { lir_place with root = Local mapped }
+                | None -> (
+                    match List.find_opt (fun (_, local) -> local = original) captured with
+                    | Some (name, _) ->
+                        {
+                          root = Local environment;
+                          projections = [ Lir.Deref; Field name; Deref ] @ lir_place.projections;
+                        }
+                    | None ->
+                        bug "local %d of the body of loop %d is neither its own nor captured"
+                          original loop))
+          in
+          let go_on_value truth = Some (Lir.Constant (Bool truth)) in
+          (* Block 0 reads the environment, then come the body's blocks, then
+             one block for each exit, which records it and stops. *)
+          let numbers = Hashtbl.create 16 in
+          List.iteri
+            (fun position block -> Hashtbl.replace numbers block (position + 1))
+            (Blocks.elements region);
+          let region_count = Blocks.cardinal region in
+          let block target =
+            match Hashtbl.find_opt numbers target with
+            | Some mapped -> mapped
+            | None ->
+                if List.mem target exits then region_count + exit_number target
+                else bug "the body of loop %d goes to block %d, outside it" loop target
+          in
+          let body =
+            List.map
+              (fun original ->
+                let { Lir.statements; terminator } = blocks.(original) in
+                let statements = if original = entry then List.tl statements else statements in
+                {
+                  Lir.statements = List.map (Lir.map_statement ~place ~block) statements;
+                  terminator =
+                    (match terminator with
+                    | Loop_next { loop = other; _ } when other = loop ->
+                        Lir.Return (go_on_value true)
+                    | terminator -> Lir.map_terminator ~place ~block terminator);
+                })
+              (Blocks.elements region)
+          in
+          let exit_blocks =
+            List.map
+              (fun exit_block ->
+                {
+                  Lir.statements =
+                    [
+                      Assign
+                        ( place (at exit),
+                          Use (Constant (Integer (UInt32, Z.of_int (exit_number exit_block)))) );
+                    ];
+                  terminator = Return (go_on_value false);
+                })
+              exits
+          in
+          let entry_block : Lir.basic_block =
+            {
+              statements = [ Assign (at environment, Use (Copy (at arrives))) ];
+              terminator = Goto (block entry);
+            }
+          in
+          let nested : Lir.function_ =
+            {
+              parameters = arrives :: Option.to_list (Option.map snd part_local);
+              written_result = None;
+              result = Some go_on;
+              returns = true;
+              locals = Array.of_list (List.rev !locals);
+              blocks = Array.of_list ((entry_block :: body) @ exit_blocks);
+              environment =
+                List.map
+                  (fun (name, original) ->
+                    (name, Lir.Pointer { target = function_.locals.(original).ty; writable = true }))
+                  captured;
+            }
+          in
+          (* The head fills the environment, calls the method with the body,
+             and goes on where the body says. *)
+          let parent_locals = ref (Array.to_list function_.locals) in
+          let parent_local info =
+            parent_locals := !parent_locals @ [ info ];
+            List.length !parent_locals - 1
+          in
+          let holder = parent_local (plain (Lir.Environment number)) in
+          let body_ty =
+            match target with
+            | Direct { signature; _ } -> (
+                match List.rev signature.parameters with
+                | last :: _ -> last
+                | [] -> bug "a method in loop form that takes no body")
+            | _ -> bug "loop %d calls a method that is not a direct call" loop
+          in
+          let function_value = parent_local (plain body_ty) in
+          let fill =
+            List.map
+              (fun (name, original) ->
+                Lir.Assign
+                  ( { root = Local holder; projections = [ Field name ] },
+                    Use (Address { place = at original; writable = true }) ))
+              captured
+          in
+          let call : Lir.statement list =
+            fill
+            @ [
+                Assign (at exit, Use (Constant (Integer (UInt32, Z.zero))));
+                Assign
+                  ( at function_value,
+                    Function_value
+                      {
+                        code = Nested number;
+                        environment = Some (Address { place = at holder; writable = false });
+                      } );
+                Call
+                  {
+                    target;
+                    arguments = arguments @ [ Copy (at function_value) ];
+                    result = Discarded;
+                  };
+              ]
+          in
+          let blocks = Array.copy blocks in
+          blocks.(head) <-
+            {
+              statements = blocks.(head).statements @ call;
+              terminator =
+                Switch
+                  {
+                    value = Copy (at exit);
+                    cases =
+                      (Z.zero, after)
+                      :: List.map
+                           (fun exit_block -> (Z.of_int (exit_number exit_block), exit_block))
+                           exits;
+                    default = None;
+                  };
+            };
+          List.iter
+            (fun exit_block ->
+              blocks.(exit_block) <-
+                { (blocks.(exit_block)) with statements = List.tl blocks.(exit_block).statements })
+            exits;
+          Some ({ function_ with locals = Array.of_list !parent_locals; blocks }, [ nested ])
+      | _ -> bug "a loop head that does not call")
+
+(* Outlines the function's first fork or loop body, the one running the
+   function reaches first, which lies in no other's region. *)
+let outline_first env ~first_number (function_ : Lir.function_) =
+  let order = Lir.reverse_postorder function_.blocks in
+  let first matches = List.find_opt matches order in
+  let fork_block =
+    first (fun block ->
+        List.exists
+          (function Lir.Region _ -> true | _ -> false)
+          function_.blocks.(block).statements)
+  in
+  let position block =
+    let rec find index = function
+      | [] -> max_int
+      | other :: _ when other = block -> index
+      | _ :: rest -> find (index + 1) rest
+    in
+    find 0 order
+  in
+  match (fork_block, first_loop function_) with
+  | None, None -> None
+  | Some fork, Some loop when position loop < position fork ->
+      outline_loop env ~number:first_number function_
+  | Some _, _ -> outline_fork env ~first_number function_
+  | None, Some _ -> outline_loop env ~number:first_number function_
+
 let instance env (instance : Lir.t) : Lir.t =
   let nested = ref (Array.to_list instance.nested) in
   (* Outlines every fork of a function, each after the forks around it, and
      the forks of each nested function that makes. *)
   let rec whole (function_ : Lir.function_) =
-    match outline_fork env ~first_number:(List.length !nested) function_ with
+    match outline_first env ~first_number:(List.length !nested) function_ with
     | None -> function_
     | Some (without, outlined) ->
         let first = List.length !nested in

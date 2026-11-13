@@ -144,6 +144,8 @@ type statement =
   | Free_block of { place : place; variant : string }
   | Region of { fork : int; region : region }
   | Regions_end of { fork : int }
+  | Loop_body of { loop : int; part : local option }
+  | Loop_exit of { loop : int }
   | Fork of { branches : (int * operand) list }
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
 
@@ -155,6 +157,16 @@ type terminator =
   | Unreachable
   | Fail of { failure : failure; message : operand; length : operand; site : site }
   | Yield of { value : operand; resume : block; stop : block option }
+  | Loop_call of {
+      loop : int;
+      target : target;
+      arguments : operand list;
+      go_on : ty;
+      body : block;
+      after : block;
+      exit : local;
+    }
+  | Loop_next of { loop : int; body : block; after : block }
 
 type basic_block = { statements : statement list; terminator : terminator }
 type local_info = { ty : ty; name : string option; borrowed : bool }

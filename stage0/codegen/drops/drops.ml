@@ -84,7 +84,11 @@ let statement_effect (statement : Lir.statement) =
         dropped = None;
       }
   | Drop place -> { moves = place_index_moves place; init = None; dropped = Some place }
-  | Free_block _ | Region _ | Regions_end _ -> { moves = []; init = None; dropped = None }
+  | Free_block _ | Region _ | Regions_end _ | Loop_exit _ ->
+      { moves = []; init = None; dropped = None }
+  | Loop_body { part; _ } ->
+      (* The method gives the body its part each time it calls it. *)
+      { moves = []; init = Option.map Lir.local_place part; dropped = None }
   | Fork _ | Fork_range _ -> bug "a fork, which outlining makes after drops are elaborated"
   | Echo { text; length; _ } ->
       { moves = operand_moves text @ operand_moves length; init = None; dropped = None }
@@ -95,8 +99,10 @@ let terminator_moves (terminator : Lir.terminator) =
   | Return value -> Option.fold ~none:[] ~some:operand_moves value
   | Fail { message; length; _ } -> operand_moves message @ operand_moves length
   | Yield { value; _ } -> operand_moves value
+  | Loop_call { target; arguments; _ } ->
+      target_moves target @ List.concat_map operand_moves arguments
   | Switch_variant { place; _ } -> place_index_moves place
-  | Goto _ | Unreachable -> []
+  | Goto _ | Unreachable | Loop_next _ -> []
 
 type analysis = {
   env : Memory_layout.env;
@@ -588,7 +594,7 @@ let elaborate env ~needs_drop ~environment (function_ : Lir.function_) =
                     (* An element reached through an index, which always
                        holds a value, since elements are never moved out. *)
                     push builder statement)
-            | Assign _ | Call _ ->
+            | Assign _ | Call _ | Loop_body _ ->
                 (* A write gives a place a value and drops nothing, so
                    whatever replaces a value drops it first. *)
                 let moved = copy_state state in
@@ -604,7 +610,8 @@ let elaborate env ~needs_drop ~environment (function_ : Lir.function_) =
                 push builder statement;
                 apply analysis state statement;
                 update before state
-            | Free_block _ | Echo _ | Region _ | Regions_end _ | Fork _ | Fork_range _ ->
+            | Free_block _ | Echo _ | Region _ | Regions_end _ | Loop_exit _ | Fork _ | Fork_range _
+              ->
                 push builder statement;
                 apply analysis state statement;
                 update before state)

@@ -79,6 +79,7 @@ type spawn_loop = {
 
 type schedule = Sequential | Chunked | Spawned of spawn_loop
 type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
+type form = Ordinary | Pulled | Looped of { body : Ground.function_type }
 
 type state = {
   context : Definitions.context;
@@ -89,7 +90,7 @@ type state = {
   mutable result : result_slot;
   nested : Lir.function_ option list ref;
   mutable evidence : (Path.t * Lir.operand) list;
-  pulling : bool;
+  form : form;
   mutable forks : int;
   mutable tasks : task list;
   mutable next_range : schedule;
@@ -99,8 +100,9 @@ type state = {
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
 
 val enter :
-  Definitions.context -> ?pulling:bool -> ?nested:Lir.function_ option list ref -> frame -> state
+  Definitions.context -> ?form:form -> ?nested:Lir.function_ option list ref -> frame -> state
 
+val is_pulled : state -> bool
 val may_fork : state -> bool
 val fresh_fork : state -> int
 val new_early_exits : state -> early_exits

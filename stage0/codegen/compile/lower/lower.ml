@@ -94,7 +94,7 @@ let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let parameters, _ = Mir_form.core_of context yielding.method_ in
-  let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
+  let st = enter context ~form:Pulled (frame_of code ~inlined:[ yielding.method_ ]) in
   let bound, mask, parameter_locals, places =
     begin_body st ~how:(Convention.held context.env) ~parameters
   in
@@ -212,6 +212,23 @@ let source_code context key ~path ~type_arguments : Lir.t =
     nested = nested_functions st;
   }
 
+(* A yielding method in loop form, before yield lowering: lowered as the
+   method is, with each [yield] calling the loop body that yield lowering
+   adds as its last parameter, and with a [stop] path where the body says
+   to stop. *)
+let looped context key (yielding : Ground.yielding) : Lir.t =
+  let code = code_of context yielding.method_ yielding.type_arguments in
+  let parameters, _ = Mir_form.core_of context yielding.method_ in
+  let body = Mir_form.loop_body_type context yielding in
+  let st = enter context ~form:(Looped { body }) (frame_of code ~inlined:[ yielding.method_ ]) in
+  let _, _, parameter_locals, places = begin_body st ~parameters in
+  Mir_form.lower_code st yielding.method_ ~parameters:places;
+  {
+    key;
+    main = finish_function st ~first:[] ~rest:parameter_locals ();
+    nested = nested_functions st;
+  }
+
 let instance context (key : Instance.key) : Lir.t =
   match key with
   | Entry method_key -> entry context key method_key
@@ -220,7 +237,10 @@ let instance context (key : Instance.key) : Lir.t =
   | Adapter { function_; ty } -> adapter context key ~function_ ~ty
   | Program_main main -> program_main context key main
   | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
+  | Looped yielding -> looped context key yielding
   | _ -> bug "%s is not code from source" (Instance.to_string key)
+
+let loop_body_type = Mir_form.loop_body_type
 
 module For_testing = struct
   let constant_value = constant_value

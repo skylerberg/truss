@@ -26,7 +26,7 @@ let body_type : Ground.function_type =
    to a total, and continues while [continues] says so. *)
 let loop_program continues =
   let env = shape_env () in
-  let method_ = instance "count_to" (Yields.For_testing.loop_form env ~body:body_type count_to) in
+  let method_ = instance "count_to" (Yields.loop_form env ~body:body_type count_to) in
   let total = Lir.Pointer { target = value int32; writable = true } in
   let body =
     function_ ~parameters:[ 0; 1 ] ~result:(value bool)

@@ -258,6 +258,8 @@ let encode_statement instance = function
   | Region { fork; region = Task { function_value; item } } ->
       tagged 10 [ Cbor.int fork; Cbor.int function_value; Cbor.int item ]
   | Regions_end { fork } -> tagged 7 [ Cbor.int fork ]
+  | Loop_body { loop; part } -> tagged 11 [ Cbor.int loop; option Cbor.int part ]
+  | Loop_exit { loop } -> tagged 12 [ Cbor.int loop ]
   | Fork { branches } ->
       tagged 8
         [
@@ -308,6 +310,18 @@ let encode_terminator instance terminator =
           Cbor.int site.column;
         ]
   | Yield { value; resume; stop } -> tagged 6 [ operand value; Cbor.int resume; block stop ]
+  | Loop_call { loop; target; arguments; go_on; body; after; exit } ->
+      tagged 7
+        [
+          Cbor.int loop;
+          encode_target instance target;
+          list operand arguments;
+          encode_ty instance go_on;
+          Cbor.int body;
+          Cbor.int after;
+          Cbor.int exit;
+        ]
+  | Loop_next { loop; body; after } -> tagged 8 [ Cbor.int loop; Cbor.int body; Cbor.int after ]
 
 let encode_function instance (encode_item : function_) =
   Cbor.Array

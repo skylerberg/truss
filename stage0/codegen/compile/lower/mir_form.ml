@@ -720,7 +720,7 @@ let tasks_bool st name places : Lir.operand =
    temporaries are dropped after the join, because a task may still read
    them until then. *)
 let with_group st ~origin (f : Lir.place -> unit) =
-  if st.pulling then
+  if is_pulled st then
     unsupported ~at:(site_of st origin) "`concurrent` code in a yielding method that is pulled";
   let scope = open_scope st Statement in
   let group = at (local st.builder ~name:"group" (Value (Monomorphic.builtin UInt64))) in
@@ -1038,6 +1038,30 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
       in
       emit st.builder (Assign (built, Build { ty = Lent lent; variant; fields })));
   built
+
+(* The type of the loop body that a yielding method in loop form takes: a
+   function of its part that returns whether to go on. The part is what the
+   method yields, with the method's mode, or, where one of its [yield]s is
+   a constructor built from places, the lent value that the [yield] builds. *)
+let loop_body_type context (yielding : Ground.yielding) : Ground.function_type =
+  let code = code_of context yielding.method_ yielding.type_arguments in
+  let st = enter context (frame_of code ~inlined:[]) in
+  let method_mir = mir_of context yielding.method_ in
+  st.frame <-
+    { st.frame with mir = Some (frame_of_body ~lambdas:method_mir.lambdas method_mir.body) };
+  let mode =
+    match code.result with
+    | Yields (mode, _) -> mode
+    | _ -> bug "a loop over %s, which does not yield" (Path.show yielding.method_)
+  in
+  let part =
+    match lent_type st with Some lent -> Ground.Lent lent | None -> yielded_type_of_frame st
+  in
+  {
+    parameters = [ (Monomorphic.mode mode, part) ];
+    result = Returns (Monomorphic.builtin Bool);
+    uses = [];
+  }
 
 (* Lowering *)
 
@@ -1534,7 +1558,7 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin
       | Value number -> assign (Use (constant_of st ty (Integer_value number)))
       | _ -> bug "the value parameter %s is not a number" parameter.name)
   | Lambda { body = index; captures } ->
-      if st.pulling then
+      if is_pulled st then
         unsupported ~at:(site_of st origin) "a lambda in a yielding method that is pulled";
       let function_type =
         match ty with
@@ -2085,7 +2109,7 @@ and yield st region ~mode ~part ~resume ~origin =
       in
       on_yield place ~owned ~resume:(jump st region resume);
       start st.builder (block st.builder)
-  | None when st.pulling ->
+  | None when is_pulled st ->
       (* In the pulled version of a method a [yield] stays in the code, and
          yield lowering makes it a state of the cursor. [next] gives its
          caller a value of its own: a value the method made, or a copy of a
@@ -2117,7 +2141,38 @@ and yield st region ~mode ~part ~resume ~origin =
       leave_to st 0;
       finish st.builder (Return None);
       start st.builder (block st.builder)
-  | None -> bug "a yield outside a yielding method"
+  | None -> (
+      match st.form with
+      | Looped { body } ->
+          (* In the loop form a [yield] calls the caller's body with the
+             part, as the body's type passes it, and the method goes on
+             where the body says so. On the [stop] path the body has left
+             the loop, so the method drops its owned values and returns. *)
+          let ty =
+            match body.parameters with
+            | [ (_, ty) ] -> ty
+            | _ -> bug "a loop body that does not take one part"
+          in
+          let yielded =
+            match (part, lent_type st) with
+            | Built _, Some lent ->
+                let slot = at (local st.builder ~borrowed:true (Value (Lent lent))) in
+                lend_into st lent part ~destination:slot;
+                slot
+            | Built _, None -> bug "a yielded constructor with no lent value"
+            | Part (Borrow { place = written; _ }), _ -> whole st (place st written)
+            | Part part, _ -> operand_place st part
+          in
+          let value =
+            match pass st mode ty yielded with Some value -> value | None -> Lir.Constant Null
+          in
+          let resume = jump st region resume and stop = block st.builder in
+          finish st.builder (Yield { value; resume; stop = Some stop });
+          start st.builder stop;
+          leave_to st 0;
+          finish st.builder (Return None);
+          start st.builder (block st.builder)
+      | Ordinary | Pulled -> bug "a yield outside a yielding method")
 
 (* Lowers a [for] loop's body as a region of its own, once [value] is the
    place of the element. *)
@@ -2453,7 +2508,7 @@ let fill_defaults st mask (parameters : (Core.parameter * Lir.place) list) =
             Lir_builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
           in
           let pulled reason =
-            if st.pulling then
+            if is_pulled st then
               unsupported ~at:(site_of st default.origin)
                 "a default for %s, %s, in a yielding method that is pulled" parameter.name reason
           in

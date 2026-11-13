@@ -304,7 +304,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
              environment = Some (Address { place = environment_local; writable = false });
            } ));
   let inner =
-    enter st.context ~pulling:st.pulling ~nested:st.nested
+    enter st.context ~form:Ordinary ~nested:st.nested
       {
         st.frame with
         on_yield = None;

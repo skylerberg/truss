@@ -37,6 +37,9 @@ val context :
    test, before drop elaboration. *)
 val instance : context -> Instance.key -> Lir.t
 
+val loop_body_type : context -> Ground.yielding -> Ground.function_type
+(** The type of the loop body that a yielding method in loop form takes. *)
+
 (* A constant's static data, where its value folds: literals, operators on
    numbers and on [Bool], other constants that fold, and records, variants,
    strings, lists, and arrays of parts that fold. Otherwise the type of the

@@ -252,7 +252,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
       | Some (text, Value sum) ->
           line "t_runtime_free(%s);" (block_pointer context text sum variant)
       | _ -> bug "a block of a place that is not a sum type")
-  | Region _ | Regions_end _ -> bug "a region that outlining left in place"
+  | Region _ | Regions_end _ | Loop_body _ | Loop_exit _ ->
+      bug "a region that outlining left in place"
   | Fork { branches } ->
       let operand lir_operand =
         match operand_c context fc lir_operand with
@@ -352,6 +353,7 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
         (anchor_c context site.definition)
         site.line site.column
   | Yield _ -> bug "a yield that yield lowering left in place"
+  | Loop_call _ | Loop_next _ -> bug "a loop that outlining left in place"
 
 let function_c context key symbol ~linkage (function_ : Lir.function_) =
   let fc = { symbol = Instance.symbol key; function_ } in
