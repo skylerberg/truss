@@ -547,6 +547,59 @@ let () =
                    && List.mem after (Mir.successors body.blocks.(block).terminator))
                  blocks)
           then fail "the break does not leave the loop");
+  (* The local that a slice's base is, through the alias that holds the
+     base's borrow while the slice's bounds are evaluated. [compare] is
+     given where in the body's statements the base and a named local end. *)
+  let slice_base_ends body name compare =
+    let all = statements body in
+    let rec base_root (local : Mir.local) =
+      match
+        List.find_map
+          (fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Assign
+                {
+                  target = { root = Local target; projections = [] };
+                  value = Operand (Borrow { place = { root = Local borrowed; _ }; _ });
+                  _;
+                }
+              when target = local && body.locals.(local).kind <> Temporary ->
+                Some borrowed
+            | _ -> None)
+          all
+      with
+      | Some borrowed -> base_root borrowed
+      | None -> local
+    in
+    let ended local =
+      List.find_index
+        (fun (statement : Mir.statement) ->
+          match statement.kind with Dead locals -> List.mem local locals | _ -> false)
+        all
+    in
+    match
+      List.find_map
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Slice { base = { root = Local base; _ }; _ } -> Some (base_root base)
+          | _ -> None)
+        all
+    with
+    | None -> fail "no slice"
+    | Some base -> (
+        if body.locals.(base).kind <> Temporary then fail "the slice's base is not a temporary";
+        match (ended base, ended (named body name)) with
+        | Some base_end, Some named_end -> compare base_end named_end
+        | _ -> fail "the base or %s is never ended" name)
+  in
+  test "a let keeps the temporary that the slice it binds views until its bindings end" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.let_keeps_the_base_of_a_slice_it_binds in
+      slice_base_ends mir.body "middle" (fun base_end middle_end ->
+          if base_end < middle_end then fail "the slice's base ends before middle"));
+  test "a let ends a temporary that its bindings do not view with its statement" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.let_ends_the_base_of_a_slice_it_does_not_bind in
+      slice_base_ends mir.body "count" (fun base_end count_end ->
+          if base_end > count_end then fail "the slice's base outlives its statement"));
   test "a let with an else binds its pattern only where it matches" (fun () ->
       let mir = mir_of_g Fixtures.Mir.let_with_an_else_tests_its_pattern_and_the_else in
       let body = mir.body in

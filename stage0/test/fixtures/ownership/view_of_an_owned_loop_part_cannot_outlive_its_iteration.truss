@@ -1,0 +1,11 @@
+fn texts() yields own String {
+  yield "a".copy()
+}
+
+fn f(other: String) -> USize {
+  var outer = other.slice()
+  for text in texts() {
+    outer = text.slice()
+  }
+  outer.length()
+}

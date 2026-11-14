@@ -1,6 +1,9 @@
 (* The places of a core form that the ownership check tracks. *)
 type root =
   | Local of Core.local
+  | Temporary of Mir.local
+      (** A temporary of the MIR that owns a new value, which is dropped where the MIR makes the
+          temporary [Dead]. *)
   | Constant of Path.t
   | Environment
       (** A lambda's environment record, which stores the lambda's captures. It is a local of the

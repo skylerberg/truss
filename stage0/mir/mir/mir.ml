@@ -308,6 +308,9 @@ type builder = {
   mutable loan_count : int;
   mutable deferred : local list option;
       (** While a [let] binds, the locals it binds, which join the scope after its [else]. *)
+  mutable extended : Core.id list;
+      (** While a [let] evaluates its value, the temporaries whose lifetime it extends to the end of
+          its bindings' scope, by the id of their expression. *)
   mutable binds_into : frame;
       (** The frame new bindings belong to: a block's, or for [is], the statement around it. *)
   mutable tasks : (Core.task * (int * block option)) list;
@@ -334,6 +337,7 @@ let create ~lambdas =
     lambdas;
     loan_count = 0;
     deferred = None;
+    extended = [];
     binds_into = Bindings;
     tasks = [];
     task_exits = Hashtbl.create 1;
@@ -400,13 +404,14 @@ let source b (local : Core.local) =
   | Some found -> found
   | None -> bug "a local that nothing binds"
 
+(* The scope that new bindings belong to. *)
+let binding_scope b =
+  match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
+  | Some scope -> Some scope
+  | None -> List.find_opt (fun scope -> scope.frame <> Condition) b.scopes
+
 let register_binding b local =
-  let scope =
-    match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
-    | Some scope -> Some scope
-    | None -> List.find_opt (fun scope -> scope.frame <> Condition) b.scopes
-  in
-  Option.iter (fun scope -> scope.bound <- local :: scope.bound) scope
+  Option.iter (fun scope -> scope.bound <- local :: scope.bound) (binding_scope b)
 
 (* The local a core local is bound to. Each alternative of a pattern binds
    the same locals, and a loop binds its pattern again on each iteration, so
@@ -549,6 +554,36 @@ let rec outlives_body (place : Core.place) =
   | Field { base; _ } -> outlives_body base
   | Lent index -> Option.is_some (Core_walk.storage_index index)
   | Temporary _ -> false
+
+(* The temporaries that a [let] extends to the end of its bindings' scope,
+   by the id of their expression, as Rust and C++ do: the base of a slice
+   that the value is, through fields and nested slices, and the same in the
+   fields of a record or variant that the value constructs, in the updated
+   fields of a record update, and in the elements of an array literal. The
+   binding can then hold a view of the temporary, as in
+   [let middle = make_list()[1..4]], which would dangle if the temporary
+   were dropped where the statement ends. A temporary elsewhere in the
+   value, such as a method's receiver, ends with the statement. *)
+let rec extended_temporaries (value : Core.operand) =
+  match value with Place base -> extended_base base | Value value -> extended_by value
+
+and extended_by (value : Core.expression) =
+  match value.kind with
+  | Slice { call = { kind = Call { arguments = Passed { value = Place base; _ } :: _; _ }; _ } } ->
+      extended_base base
+  | Construct { fields; _ } ->
+      List.concat_map
+        (fun (_, field) -> Option.fold ~none:[] ~some:extended_temporaries field)
+        fields
+  | Record_update { updates; _ } -> List.concat_map (fun (_, update) -> extended_by update) updates
+  | Collection_literal { elements; construction = Array } -> List.concat_map extended_by elements
+  | _ -> []
+
+and extended_base (base : Core.place) =
+  match base with
+  | Temporary written -> written.id :: extended_by written
+  | Field { base; _ } -> extended_base base
+  | Local _ | Constant _ | Lent _ -> []
 
 (* Expressions *)
 
@@ -970,7 +1005,11 @@ and place b (found : Core.place) : place option =
       | Lent _ -> bug "a lent place that is not a call"
       | Temporary written ->
           let* value = expression b written in
-          let local = temporary b written.type_ written.origin in
+          let local = new_local b Temporary written.type_ written.origin in
+          (match binding_scope b with
+          | Some scope when List.mem written.id b.extended ->
+              scope.temporaries <- local :: scope.temporaries
+          | _ -> add_temporary b local);
           assign b (at local) (Operand value) written.origin;
           Some (at local))
 
@@ -1477,7 +1516,11 @@ and statement b (node : Core.statement) =
   in_statement b origin (fun () ->
       match node.kind with
       | Let { pattern; value; else_ } -> (
-          match scrutinee b value with
+          let enclosing = b.extended in
+          b.extended <- extended_temporaries value;
+          let found = scrutinee b value in
+          b.extended <- enclosing;
+          match found with
           | None -> ()
           | Some found ->
               (* The pattern's bindings join the scope after the [else]

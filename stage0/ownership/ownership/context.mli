@@ -22,6 +22,8 @@ val copyable : context -> Types.ty -> bool
 val is_view : context -> Types.ty -> bool
 val holds_function : context -> Types.ty -> bool
 val stores_function : context -> Mir.callee -> int -> bool
+val yields_own : context -> Mir.callee -> bool
+val cursor_yields_own : context -> Types.ty -> bool
 val span : context -> Core.origin -> Syntax.span
 
 val report :

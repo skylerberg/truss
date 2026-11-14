@@ -1,0 +1,6 @@
+type Sized(view: Slice[Int64], count: USize)
+
+fn f() -> USize {
+  let sized = Sized(view: make()[..], count: 0)
+  sized.view.length()
+}

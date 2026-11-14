@@ -38,6 +38,21 @@ let holds_function context type_ =
    parameter. A generic [own] parameter that is instantiated with a function
    type does not count: the callee treats its value as any other view, so
    the view rules track it. *)
+(* The signatures that a callee may have: one for a function or a trait
+   method, and each implementation's for a capability method. *)
+let callee_signatures context (callee : Mir.callee) : Types.signature list =
+  match callee with
+  | Function { path; _ } -> Option.to_list (Interface.Impls.signature context.database path)
+  | Trait_method { trait; name; receiver; _ } ->
+      List.map
+        (fun (method_ : Types.trait_method) -> method_.method_signature)
+        (Option.to_list (Infer.Members.trait_method context.database trait.trait name receiver))
+  | Capability_method { capability; name } ->
+      List.map
+        (fun (method_ : Types.trait_method) -> method_.method_signature)
+        (Infer.Members.trait_methods context.database capability name)
+  | Intrinsic _ | Indirect _ -> []
+
 let stores_function context (callee : Mir.callee) position =
   let declared (signature : Types.signature) =
     let index = if Option.is_some signature.receiver then position - 1 else position in
@@ -46,18 +61,24 @@ let stores_function context (callee : Mir.callee) position =
     | _ -> false
   in
   match callee with
-  | Function { path; _ } ->
-      Option.fold ~none:false ~some:declared (Interface.Impls.signature context.database path)
-  | Trait_method { trait; name; receiver; _ } ->
-      Option.fold ~none:false
-        ~some:(fun (method_ : Types.trait_method) -> declared method_.method_signature)
-        (Infer.Members.trait_method context.database trait.trait name receiver)
-  | Capability_method { capability; name } ->
-      List.exists
-        (fun (method_ : Types.trait_method) -> declared method_.method_signature)
-        (Infer.Members.trait_methods context.database capability name)
-  | Intrinsic _ -> false
   | Indirect _ -> true
+  | _ -> List.exists declared (callee_signatures context callee)
+
+(* Whether a yielding method hands over each part it yields as an owned
+   value, which the loop's iteration drops: [yields own]. A part of any
+   other yield is lent. *)
+let yields_owned_parts (signature : Types.signature) =
+  match signature.output with Yields (Own, _) -> true | Yields _ | Returns _ | Lends _ -> false
+
+let yields_own context (callee : Mir.callee) =
+  List.exists yields_owned_parts (callee_signatures context callee)
+
+let cursor_yields_own context (type_ : Types.ty) =
+  match type_ with
+  | Cursor { method_; _ } ->
+      Option.fold ~none:false ~some:yields_owned_parts
+        (Interface.Impls.signature context.database method_)
+  | _ -> false
 
 let span context (origin : Core.origin) : Syntax.span =
   if origin >= 0 && origin < Array.length context.spans then context.spans.(origin)
@@ -77,11 +98,13 @@ let kind context (root : Place.root) =
   | Constant _ -> Borrowed
   | Environment -> Owned
   | Local local -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds local)
+  | Temporary _ -> Owned
 
 let show_root context (root : Place.root) =
   match root with
   | Local Self -> "self"
   | Local local -> Option.value ~default:"this" (Hashtbl.find_opt context.names local)
+  | Temporary _ -> "temporary"
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> name
   | Constant path -> Path.show path
   | Environment -> "the lambda's captured variables"
