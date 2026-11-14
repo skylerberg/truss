@@ -315,7 +315,7 @@ impl Iterable for List[Element] {
 public fn List[Element].element(mut self, position: USize) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: yielded[0]))
+  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   ensures self.length() == old(self.length())
   cost time O(1)
   cost amortized time O(1)
@@ -507,7 +507,7 @@ impl Iterable for Slice[Element] {
 public fn Slice[Element].element(mut self, position: USize) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: yielded[0]))
+  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   ensures self.length() == old(self.length())
   cost time O(1)
   cost amortized time O(1)
@@ -541,7 +541,7 @@ impl IndexMut for List[Element] {
   fn at(mut self, key: USize) lends mut Element
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
-    ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
+    ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
     cost time O(1)
     cost amortized time O(1)
     cost allocations == 0
@@ -575,7 +575,7 @@ impl IndexMut for Slice[Element] {
   fn at(mut self, key: USize) lends mut Element
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
-    ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
+    ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
     cost time O(1)
     cost amortized time O(1)
     cost allocations == 0

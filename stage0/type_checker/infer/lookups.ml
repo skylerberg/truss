@@ -117,24 +117,18 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       match env.output with
       | Some output -> Types.result_type output
       | None -> bug "`result` is named where nothing is returned")
-  | Old | Identical | Specification_function _ ->
+  | Old | Identical | Final | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
       error state Not_a_value value.span
         (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
-  | Yielded -> (
-      (* The sequence of the parts yielded so far. *)
+  | Visited -> (
+      (* The sequence of the values of the loop's iterations before. *)
       state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Yielded);
-      let part =
-        match (env.loop_element, env.output) with
-        | Some element, _ -> Some element
-        | None, Some (Lends (_, part)) -> Some part
-        | _ -> None
-      in
-      match part with
-      | Some part ->
-          Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }
-      | None -> bug "`yielded` is named where nothing is yielded")
+      match env.loop_element with
+      | Some element ->
+          Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type element ] }
+      | None -> bug "`visited` is named outside a loop's clauses")
   | Unknown report -> Types.Error report
   | Binding | Module _ -> bug "the name `%s` is not resolved" text
 

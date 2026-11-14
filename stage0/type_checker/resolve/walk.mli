@@ -16,7 +16,10 @@ type target =
   | Result_value
   | Old
   | Identical
-  | Yielded
+  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Final
+      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
+          it. *)
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 
@@ -32,7 +35,8 @@ type specification = {
   active : bool;
   names_result : bool;
   cost_bound : bool;
-  names_yielded : bool;
+  names_visited : bool;  (** In the clauses of a [for] loop, where [visited] has its meaning. *)
+  names_final : bool;  (** In the [ensures] of a lending method, where [final] has its meaning. *)
   elements : string list;
 }
 

@@ -3,7 +3,7 @@ fn count_up(value: UInt8) -> UInt8
 {
   var count: UInt8 = 0
   for _ in 0..value
-    invariant count == yielded.length()
+    invariant count == visited.length()
   {
     count += 1
   }

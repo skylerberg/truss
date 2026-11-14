@@ -110,7 +110,8 @@ let describe names base (target : Resolve.target option) =
   | Some Result_value -> "result"
   | Some Old -> "old"
   | Some Identical -> "identical"
-  | Some Yielded -> "yielded"
+  | Some Visited -> "visited"
+  | Some Final -> "final"
   | Some (Specification_function _) -> "specification function"
   | Some (Unknown _) -> "unknown"
 

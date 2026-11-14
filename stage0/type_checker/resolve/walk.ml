@@ -25,9 +25,10 @@ type target =
   | Result_value  (** [result], in [ensures] and [cost]. *)
   | Old  (** [old], in specifications and proofs. *)
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
-  | Yielded
-      (** [yielded]: in a loop's clauses, the values of the iterations before; in a lending method's
-          [ensures], its part as the caller left it. *)
+  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Final
+      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
+          it. *)
   | Specification_function of specification_function
       (** [log], [power], [time], or [calls] in a [cost] bound, or [log] or [power] in another
           specification. *)
@@ -46,9 +47,8 @@ type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
   names_result : bool;
   cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
-  names_yielded : bool;
-      (** In the [ensures] of a lending method, or in the clauses of a [for] loop, where [yielded]
-          has its meaning. *)
+  names_visited : bool;  (** In the clauses of a [for] loop, where [visited] has its meaning. *)
+  names_final : bool;  (** In the [ensures] of a lending method, where [final] has its meaning. *)
   elements : string list;
       (** In the clauses of a [for] loop over a collection or a cursor, the names its pattern binds,
           which hold no value there. *)
@@ -63,7 +63,14 @@ type scope = {
 }
 
 let no_specification =
-  { active = false; names_result = false; cost_bound = false; names_yielded = false; elements = [] }
+  {
+    active = false;
+    names_result = false;
+    cost_bound = false;
+    names_visited = false;
+    names_final = false;
+    elements = [];
+  }
 
 let in_specification = { no_specification with active = true }
 
@@ -295,7 +302,7 @@ and clause state scope (clause : clause) =
       expression state
         {
           specification with
-          specification = { in_specification with names_result = true; names_yielded = scope.lends };
+          specification = { in_specification with names_result = true; names_final = scope.lends };
         }
         value
   | Decreases measures -> List.iter (expression state specification) measures
@@ -327,7 +334,8 @@ and local_value state scope (name : name) =
   | Some (Value_law_parameter index, _) -> set state name (Law_parameter index)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
-      else if scope.specification.names_yielded && text = "yielded" then set state name Yielded
+      else if scope.specification.names_visited && text = "visited" then set state name Visited
+      else if scope.specification.names_final && text = "final" then set state name Final
       else if scope.specification.active && text = "identical" then set state name Identical
       else if scope.specification.names_result && text = "result" then set state name Result_value
       else if List.mem text scope.specification.elements then
@@ -337,7 +345,7 @@ and local_value state scope (name : name) =
                 (Printf.sprintf
                    "`%s` is the loop's element, which is bound only in the loop's body: the loop's \
                     clauses hold before the first element and after the last. Name the elements so \
-                    far with `yielded`."
+                    far with `visited`."
                    text)))
       else
         begin match module_item state text with
@@ -759,17 +767,11 @@ and statement state scope (statement_ : statement) =
 and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop_clause) =
   let scope =
     if for_loop then
-      { scope with specification = { scope.specification with names_yielded = true; elements } }
+      { scope with specification = { scope.specification with names_visited = true; elements } }
     else scope
   in
-  (* [yielded] refers to the nearest loop or method: the values of a [for]
-     loop's iterations, or else, in a lending method, the part that the
-     method lends. *)
   let specification =
-    {
-      scope with
-      specification = { in_specification with names_yielded = for_loop || scope.lends; elements };
-    }
+    { scope with specification = { in_specification with names_visited = for_loop; elements } }
   in
   match written.kind with
   | Invariant value -> expression state specification value

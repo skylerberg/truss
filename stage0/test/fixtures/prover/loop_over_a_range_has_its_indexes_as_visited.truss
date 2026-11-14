@@ -3,7 +3,7 @@ fn f(count: UInt32) -> UInt32
 {
   var seen: UInt32 = 0
   for _ in 0..count
-    invariant seen == yielded.length()
+    invariant seen == visited.length()
   {
     seen += 1
   }

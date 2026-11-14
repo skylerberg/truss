@@ -127,11 +127,13 @@ log power result old by bit_vector
 | `result` | The return value, inside `ensures` and `cost` |
 | `old(e)` | The value of `e` when the function was called, inside a specification |
 | `identical(a, b)` | Whether two values of one type are the same value, inside a specification |
-| `yielded` | In a `for` loop's clauses, the values of the iterations before. In a lending method's `ensures`, the lent part as the caller left it |
+| `visited` | In a `for` loop's clauses, the `Sequence` of the values of the iterations before |
+| `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
 | `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 
-A parameter cannot be named `result`, and no function can be named `old` or
-`identical`. Elsewhere the words are ordinary names: in
+A parameter cannot be named `result`, a parameter of a lending method cannot
+be named `final`, and no function can be named `old` or `identical`.
+Elsewhere the words are ordinary names: in
 `fn wait(time: Duration) cost time O(time.seconds())`, the second `time` is
 the resource and the third the parameter.
 
@@ -1044,7 +1046,7 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
 fn List[Element].element(mut self, position: USize) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: yielded[0]))
+  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
 {
   mut self[position]
 }
@@ -1053,8 +1055,8 @@ fn List[Element].element(mut self, position: USize) lends mut Element
 - **A clause that mentions `result` holds where the method lends,** where
   `result` is the lent part, and the caller may rely on it.
 - **Every other clause holds when the lend ends.**
-- **`yielded[0]` is the part as the caller left it.** `yielded` is a
-  `Sequence` of that one part.
+- **`final(result)` is the part as the caller left it,** as `old(value)` is
+  a value when the method was called.
 
 ### Cursors
 
@@ -1348,16 +1350,17 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
-- In the clauses of any other `for` loop, `yielded` is the `Sequence` of the
-  values of the iterations before. The clauses cannot name the element.
-- In a loop that reads a collection, `yielded[i]` is the value of the
+- In the clauses of any other `for` loop, `visited` is the `Sequence` of the
+  values of the iterations before. The clauses cannot name the element. A
+  local named `visited` hides the word.
+- In a loop that reads a collection, `visited[i]` is the value of the
   collection's `element` at position `i`, so it meets that method's
   `ensures`. Where the collection's `model()` is the `Sequence` of its
-  elements, as a `List`'s is, `yielded` is that model once the loop has
+  elements, as a `List`'s is, `visited` is that model once the loop has
   visited every element.
 - A loop's `cost` bounds the loop's cost so far, at the start of every
   iteration and when it ends. It is never `amortized` or `finite`. Its bound
-  can use the variables in scope at the loop, and `yielded` or a range's
+  can use the variables in scope at the loop, and `visited` or a range's
   index:
 
   ```truss
@@ -1366,7 +1369,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   {
     var total = 0
     for row in rows
-      cost time O(yielded.length() + yielded.sum(fn(cells) { cells.length() }))
+      cost time O(visited.length() + visited.sum(fn(cells) { cells.length() }))
     {
       for cell in row {
         total = total.saturating_add(cell)
