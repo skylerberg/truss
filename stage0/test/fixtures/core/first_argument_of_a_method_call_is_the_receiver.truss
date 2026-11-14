@@ -1,4 +1,0 @@
-fn g(items: mut List[Int64]) -> USize {
-  mut items.push(4)
-  items.length()
-}

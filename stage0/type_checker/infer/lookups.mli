@@ -11,7 +11,7 @@ val marked_receiver : Syntax.expression -> Path.receiver
 val coerce :
   State.state ->
   State.env ->
-  ?argument:bool ->
+  ?argument:Types.mode ->
   Syntax.expression ->
   actual:Types.ty ->
   expected:Types.ty ->

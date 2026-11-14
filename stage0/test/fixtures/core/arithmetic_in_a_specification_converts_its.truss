@@ -1,5 +1,0 @@
-fn g(count: Int64) -> Int64
-  ensures result + 1 > count
-{
-  count
-}

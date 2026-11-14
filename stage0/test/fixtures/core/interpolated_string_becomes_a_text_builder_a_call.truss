@@ -1,3 +1,0 @@
-fn g(name: String, count: Int64) -> String {
-  "${name}: ${count}"
-}

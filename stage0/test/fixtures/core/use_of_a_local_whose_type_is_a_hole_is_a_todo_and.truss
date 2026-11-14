@@ -1,4 +1,0 @@
-fn g() -> Int64 {
-  let value = todo
-  value
-}

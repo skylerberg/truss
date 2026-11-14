@@ -18,4 +18,5 @@
   manifest
   infer
   core
-  core_walk))
+  core_walk
+  core_lint))

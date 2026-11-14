@@ -1,5 +1,0 @@
-fn greet(text: StringSlice) {}
-
-fn g(name: String) {
-  greet(name)
-}

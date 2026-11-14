@@ -180,12 +180,24 @@ val marked_call : state -> Syntax.expression -> Syntax.id option
 val called : Syntax.expression -> Syntax.expression option
 val check_resource : state -> Syntax.resource -> unit
 
+val slice :
+  state ->
+  origin:Core.origin ->
+  viewed:Types.ty ->
+  Core.place ->
+  start:Core.expression option ->
+  stop:Core.expression option ->
+  inclusive:bool ->
+  Core.kind
+(** [base[start..stop]], of the view type [viewed]: a [Slice] that holds the call of the base type's
+    [slice_range], or of its [slice_from] when the stop is missing. *)
+
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
 val convert :
   state ->
   env ->
-  ?argument:bool ->
+  ?argument:Types.mode ->
   ?expression:Core.origin ->
   Syntax.span ->
   actual:Types.ty ->

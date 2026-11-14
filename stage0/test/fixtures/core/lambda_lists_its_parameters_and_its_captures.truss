@@ -1,3 +1,0 @@
-fn g(items: List[Int64], step: Int64) -> List[Int64] {
-  items.map(fn(item) { item + step })
-}

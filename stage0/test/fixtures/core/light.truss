@@ -1,6 +1,0 @@
-type Light =
-  | Off
-  | Dim(level: Int64)
-  | On
-  derives Equal, Hash, Ordered
-

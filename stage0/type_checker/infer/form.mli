@@ -75,16 +75,6 @@ val iteration : State.state -> Syntax.statement -> Syntax.expression -> Core.ite
 val cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
 val loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause
 val try_ : State.state -> Syntax.expression -> Syntax.expression -> output:Types.ty -> Core.kind
-
-val slice :
-  State.state ->
-  Syntax.expression ->
-  Core.place ->
-  start:Core.expression option ->
-  stop:Core.expression option ->
-  inclusive:bool ->
-  Core.kind
-
 val collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
 
 val map_literal :

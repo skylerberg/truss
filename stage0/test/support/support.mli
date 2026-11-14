@@ -21,15 +21,6 @@ val standard : Engine.t Lazy.t
 val parse_errors : Query.context -> Path.file -> string list
 val codes : Diagnostic.t list -> string list
 
-val check_core_invariants : Query.context -> Resolve.Names.key -> Core.t -> unit
-(** Fails the running test if a definition's core form breaks an invariant of the core form: node
-    ids are unique, every type is fully inferred, no generic parameter of a callee appears, every
-    [Lent] place is a call of a lending method, and every argument fits its parameter's mode. *)
-
-val check_file_core_invariants : Query.context -> Path.file -> int
-(** Runs {!check_core_invariants} on every definition of a file that has a core form. Returns the
-    number of such definitions. *)
-
 type core_nodes = {
   expressions : Core.expression list;
   statements : Core.statement list;
@@ -46,7 +37,7 @@ val first_core_nodes : string -> core_nodes
 val no_diagnostics :
   check:(Query.context -> Path.file -> Diagnostic.t list) -> (string * string) list -> unit
 (** Fails the running test if a given module does not parse, has a diagnostic, or has a definition
-    whose core form fails {!check_core_invariants}. *)
+    whose core form fails {!Core_lint.check}. *)
 
 val one_diagnostic :
   check:(Query.context -> Path.file -> Diagnostic.t list) ->

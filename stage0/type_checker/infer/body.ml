@@ -165,7 +165,7 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
                  collection becomes its view. *)
               in_statement state env value.span (fun () ->
                   let actual = expression state env ~expected:info.type_ value in
-                  Lookups.coerce state env ~argument:true value ~actual ~expected:info.type_);
+                  Lookups.coerce state env ~argument:info.mode value ~actual ~expected:info.type_);
               Constant.check state ~default:true value
           | None -> ())
       | _ -> ())

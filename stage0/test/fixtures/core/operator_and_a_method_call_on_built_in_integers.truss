@@ -1,3 +1,0 @@
-fn g(left: Int64, right: Int64) -> Int64 {
-  left + right.multiply(2)
-}

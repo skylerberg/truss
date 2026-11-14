@@ -7,6 +7,12 @@ let () =
     "a derived ordering compares fields in declaration order, and a construction evaluates its \
      fields in the order written"
     Fixtures.Feature.derived_ordering_compares_fields_in_declaration;
+  test "derived methods satisfy the laws of their traits, and a sum type orders by variant"
+    (fun () ->
+      expect_output Fixtures.Feature.derived_methods_satisfy_their_traits_laws
+        (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
+  passes "an assignment through an index inserts a map's key or replaces its value"
+    Fixtures.Feature.assignment_through_an_index_inserts_or_replaces;
   passes "a pulled cursor yields each value and then None"
     Fixtures.Feature.pulled_cursor_yields_each_value_and_then_none;
   passes "a cursor over a method whose receiver has no size keeps its arguments"

@@ -1,3 +1,0 @@
-fn g(first: Meters, second: Meters) -> Bool {
-  first <= second || first != second
-}
