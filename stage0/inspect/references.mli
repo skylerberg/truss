@@ -13,4 +13,4 @@ val uses : (Path.file, (Path.module_ * Source.span) list) Query.query
     offsets. *)
 
 val names_definition : Path.t -> target -> bool
-(** Whether a target is the definition or, for a method, any version of it. *)
+(** Whether a target is the definition or, for a method, any overload of it. *)

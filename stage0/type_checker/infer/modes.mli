@@ -9,12 +9,12 @@ val borrowed : state -> Syntax.expression -> bool
 val scrutinee_mode : state -> Syntax.expression -> Types.mode
 
 type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
-type mutation = Assignment | Mut_mark
+type mutation = Assignment | Passed_mut
 
 val mutate : state -> env -> by:mutation -> Syntax.expression -> unit
 
 type argument_form =
-  | Marked of Types.mode * Syntax.expression
+  | With_mode of Types.mode * Syntax.expression
   | Place
   | Lent of Types.mode
   | Temporary

@@ -2,9 +2,8 @@
 
 This document defines the Truss language: its grammar, and the rules that
 decide a program's semantics and whether it compiles. [DESIGN.md](DESIGN.md)
-gives the reasons for these rules, [PACKAGES.md](PACKAGES.md) defines
-packages, and the Markdown files beside the modules of
-[`standard/`](standard) document the standard library.
+gives the reasons for these rules, and [PACKAGES.md](PACKAGES.md) defines
+packages.
 
 ## Notation
 
@@ -317,11 +316,11 @@ its file or its position in the file.
 
 - A name in a body is looked up in its scope, then among the definitions of
   its module, then in the prelude.
-- A local, a parameter, or a generic parameter cannot hide another of an
+- A local, a parameter, or a generic parameter cannot shadow another of an
   enclosing scope, or a prelude name. `let name = name.trim()` is an error.
-- A local or a parameter may hide a function, a constant, or a theorem of
+- A local or a parameter may shadow a function, a constant, or a theorem of
   its module, so adding a definition to one file breaks no local in another.
-- A generic parameter cannot hide a type, a trait, or a capability of its
+- A generic parameter cannot shadow a type, a trait, or a capability of its
   module. An `impl`'s head declares the names in its brackets, so
   `impl Shown for Box[Marker]` would otherwise mean every `Box` where the
   type `Marker` was meant.
@@ -412,7 +411,7 @@ type Expression =
 ```
 
 - An `indirect` variant keeps its fields on the heap, in one allocation.
-  Building one costs one allocation, which `cost` clauses count; changing or
+  Building one costs one allocation, which `cost` clauses count; mutating or
   moving its fields allocates nothing.
 - Every cycle of types that contain each other passes through an `indirect`
   variant or a collection. A record cannot contain itself.
@@ -459,10 +458,10 @@ bound             = path_type { "+" path_type } ;
 - A `capability` parameter stands for a set of capabilities (see
   [Capability parameters](#capability-parameters)). Only a function, a
   method, or a theorem takes one.
-- Generic code is compiled once for each set of type arguments. So a generic
-  function cannot call itself, or a function in a cycle with it, with a type
-  argument built from its own type parameters, and a generic type cannot
-  contain itself with other arguments.
+- Generic code is monomorphized: it is compiled once for each set of type
+  arguments. So a generic function cannot call itself, or a function in a
+  cycle with it, with a type argument built from its own type parameters, and
+  a generic type cannot contain itself with other arguments.
 
 ### Invariants
 
@@ -483,9 +482,9 @@ public type Interval =
 - Repeated invariants all hold, and each may rely on the ones before it.
 - A function called in an invariant is pure and has a `time` clause.
 - Invariants are proven, never checked when the program runs. An invariant
-  holds wherever other code can see the value: when it is built, directly
-  or with `with`, passed to a call, or returned, and when the function that
-  holds it ends. A `with` is checked after all of its updates.
+  holds wherever other code can observe the value: when it is built,
+  directly or with `with`, passed to a call, or returned, and when the
+  function that holds it ends. A `with` is checked after all of its updates.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. It states its precondition and postcondition with
@@ -503,18 +502,61 @@ public type Interval =
 
 ## Values and ownership
 
-Every variable holds its own value, and no two names refer to one value
-that either can change. There are no stored references and no lifetimes.
+Every variable holds its own value, and no two names alias a value that
+either can mutate. There are no stored references and no lifetimes.
 
 - **A place** is a variable, `self`, or a constant, followed by any number of
   field accesses and indexes: `config.servers`, `scores[0]`. A constant is a
   read-only place.
-- **A temporary** is any other value. It is handed over as owned.
+- **A temporary** is any other value. It is passed as owned.
 - **An owned value is needed** by a `var`, an `own` parameter, a record field,
-  a collection element, and a return value. A place there is marked `own`,
-  which moves it, or copied with `copy()`.
+  a collection element, and a return value. A place there is written with
+  `own`, which moves it, or is copied with `copy()`.
 - **There is no mutable global state.** A top-level `let` is a constant, and
   `var` is allowed only inside functions.
+
+### Parameter modes
+
+A parameter is read-only by default. `mut` lets the function mutate the
+caller's value, and `own` gives the function ownership of it. The call site
+repeats the keyword on a place that it passes to a `mut` or `own`
+parameter. A temporary takes no keyword:
+
+| Call | Meaning |
+|---|---|
+| `sort(mut scores)` | `scores` may be mutated. |
+| `push(mut names, item: own name)` | `name` is moved. |
+| `push(mut names, item: name.copy())` | `push` gets a copy. |
+
+A mode keyword applies to the longest place expression at the start of its
+operand. The first method call after that place takes it as its receiver,
+and the rest of the expression works on the result of that call:
+
+| Expression | Place the keyword applies to |
+|---|---|
+| `mut config.servers.sort()` | `config.servers` |
+| `mut config.load_servers().sort()` | `config`, for `load_servers` |
+| `sort(mut items[..middle])` | `items[..middle]` |
+
+An expression that does not start with a place takes no mode keyword.
+
+`own` can move one field out of a record. The record's other fields stay
+usable, and the whole record is usable once the field is reinitialized. A
+place lent `mut` can be moved out of in the same way:
+
+```truss
+fn Option[Value].take(mut self) -> Option[Value] {
+  let previous = own self
+  self = None
+  previous
+}
+```
+
+- The place is a `mut` parameter, `mut self`, the variable of a `mut` loop, a
+  `mut` binding of a `match`, or a lambda's `mut` parameter, or a field of
+  one.
+- It is reinitialized on every path before the function returns or the
+  iteration or arm ends. Until then it is not read.
 
 ### Copying
 
@@ -544,9 +586,9 @@ let total = middle.sum()
 mut items.push(9)
 ```
 
-While a view is in use, its original cannot be changed or moved. Here `push`
-is allowed because `middle` is not used after it. The compiler checks this
-within each function.
+While a view is live, that is, until its last use, its original cannot be
+mutated or moved. Here `push` is allowed because `middle` is not used after
+it. The compiler checks this within each function.
 
 - **Being a view is a property of a type.** `Slice`, `StringSlice`, and a
   lambda that reads local variables are views, and so is any type that holds
@@ -562,11 +604,11 @@ within each function.
   the parameters themselves.** The caller treats the result as viewing
   everything that its read-only and view arguments view. Arguments that are
   `Plain` lend nothing.
-- **A function keeps only the views it is given:** to keep a view of an
-  argument in a `mut` parameter or `mut self`, it takes the argument as a
-  `Slice`, a `StringSlice`, or a function. A value cannot keep a view of its
-  own part.
-- A `var` can hold a view that never leaves the function.
+- **A function stores only the views it is given.** To store a view of an
+  argument in a `mut` parameter or in `mut self`, the function takes that
+  argument as a `Slice`, a `StringSlice`, or a function. A value cannot
+  hold a view of a part of itself.
+- A `var` can hold a view that never escapes the function.
 - **`mut` access is never stored.** It has a name only as a `mut` parameter,
   a `mut` loop's variable, or a lambda's `mut` parameter, and lasts for that
   call, iteration, or `provide mut` block. Disjoint parts of one `List`,
@@ -605,7 +647,7 @@ public let seconds_per_day: Int64 = 24 * 60 * 60
   random hash key.
 - A constant lives in static memory. Reading it or taking a view of it costs
   nothing, an owned value from it is made with `copy()`, and it is never
-  marked `own` or `mut`.
+  passed `own` or `mut`.
 
 ## Functions
 
@@ -712,7 +754,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
     Some(index) => sorted[index] == target
     None => !contains(sorted, target)
   }
-  cost time O(log(sorted.length()))
+  cost time O(log(sorted.length()) * time(Element.compare))
   cost allocations == 0
 {
   todo
@@ -805,11 +847,11 @@ and `/` and `-` where the result stays at or above zero, and:
   not known for one with `cost time finite`.
 - An operator counts as the method it calls: `==` spends
   `time(Element.equal)`, and `<` spends `time(Element.compare)`. If a name has
-  several versions, the term means the read-only one.
+  several overloads, the term means the read-only one.
 - At a call, the term has the value the type argument gives it: a constant
   for `Int64`, whose `impl Equal` promises `cost time O(1)`.
-- An `impl` that writes a method its trait provides keeps the provided
-  method's bound.
+- An `impl` that overrides a provided method keeps the provided method's
+  bound.
 - `log` and `power` have the same meaning in every specification. The prover
   knows `log` of a number exactly, and that `log` of a value of an integer
   type is at most the type's width. Outside a `cost` bound, a local or a
@@ -837,7 +879,7 @@ fn List[Element].push(mut self, item: own Element)
   parts' potentials, and belongs to that value alone; `copy()` pays for the
   new one.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
-  in the potential of the values the function changes or returns, is within
+  in the potential of the values the function mutates or returns, is within
   `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
 - A function may state a plain and an amortized bound on one resource. A
   caller with an amortized bound counts the amortized one, and any other
@@ -858,12 +900,13 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
 - A function type without `uses` is pure, and one without a `time` clause may
   not terminate. Its `uses` and `cost` clauses cannot mention its inputs.
 - Clauses after a definition's result type belong to the definition.
-- A function type names its inputs exactly when it has a `requires`, which
-  only the type of a definition's parameter, at its top, may have. The
-  `requires` can mention the inputs and the parameters before it. The
-  function meets it at every call through the parameter, a lambda passed for
-  the parameter may rely on it, and a named function passed for it accepts
-  every argument it allows:
+- A function type names its inputs exactly when it has a `requires`. Only
+  the type of a definition's parameter may have one, at the top level of
+  that type. The `requires` can mention the inputs and the parameters before
+  that parameter. The definition proves the `requires` at every call through
+  the parameter. A lambda passed for the parameter may rely on the
+  `requires`, and a named function passed for the parameter accepts every
+  argument that the `requires` allows:
 
   ```truss
   fn List[Element].map[Output](
@@ -878,8 +921,9 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   let picked = indices.map(fn(i) { values[i] })
   ```
 
-- A function-typed parameter can be called but not kept. One declared `own`
-  can be kept, and accepts only functions that read no local variables.
+- A function-typed parameter can be called but not stored. One declared
+  `own` can be stored, and accepts only functions that capture no local
+  variables.
 
 ### Capability parameters
 
@@ -896,49 +940,6 @@ public fn for_each[Item, capability Granted](
 A capability parameter passes on whatever capabilities a callback uses. A
 type that holds a function writes the capabilities in the field's type.
 
-### Parameter modes
-
-A parameter is read-only by default. `mut` lets the function change the
-caller's value, and `own` gives the function ownership of it. A place
-passed to a `mut` or `own` parameter repeats the keyword; a temporary is
-never marked:
-
-| Call | Meaning |
-|---|---|
-| `sort(mut scores)` | `scores` may change. |
-| `push(mut names, item: own name)` | `name` is moved. |
-| `push(mut names, item: name.copy())` | `push` gets a copy. |
-
-A keyword before a longer expression marks the longest place the expression
-starts with. The first method call after that place takes it as its
-receiver, and the rest of the expression works on that call's result:
-
-| Expression | Marked place |
-|---|---|
-| `mut config.servers.sort()` | `config.servers` |
-| `mut config.load_servers().sort()` | `config`, for `load_servers` |
-| `sort(mut items[..middle])` | `items[..middle]` |
-
-An expression that does not start with a place cannot be marked.
-
-`own` can move one field out of a record. The record's other fields stay
-usable, and the whole record is usable again once the field is assigned. A
-place lent `mut` can be moved out of in the same way:
-
-```truss
-fn Option[Value].take(mut self) -> Option[Value] {
-  let previous = own self
-  self = None
-  previous
-}
-```
-
-- The place is a `mut` parameter, `mut self`, the variable of a `mut` loop, a
-  `mut` binding of a `match`, or a lambda's `mut` parameter, or a field of
-  one.
-- It is assigned again on every path before the function returns or the
-  iteration or arm ends. Until then it is not read.
-
 ## Methods
 
 ```truss
@@ -947,7 +948,7 @@ fn List[Element].with_capacity(capacity: USize) -> List[Element]
 fn List[Element].push(mut self, item: own Element)
 
 fn List[Element: Ordered].sort(mut self)
-  cost time O(self.length() * log(self.length()))
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
 
 fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Output]
 ```
@@ -964,18 +965,18 @@ fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Out
   visible. From another module, the type is named with its module:
   `fn hourly::Forecast.summary(self) -> String`.
 
-### Versions by receiver mode
+### Overloads by receiver mode
 
 ```truss
 fn List[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
 fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
 ```
 
-A method can have up to three versions that differ only in the mode of
-`self`. The keyword at the call picks the version, no keyword picks the
-read-only one, and a temporary receiver uses the `own` version if there is
-one. A version may come from a trait that the type implements in its own
-package (see [Method lookup](#method-lookup)). Truss has no other
+A method can have up to three overloads that differ only in the mode of
+`self`. The mode keyword at the call site selects the overload, no keyword
+selects the read-only one, and a temporary receiver takes the `own` overload
+if there is one. An overload may come from a trait that the type implements
+in its own package (see [Method lookup](#method-lookup)). Truss has no other
 overloading.
 
 ### Lending methods
@@ -992,25 +993,25 @@ mut grid.cell(position).visit()
 ```
 
 - `lends Cell` lends read-only access, and `lends mut Cell` lends `mut`
-  access, marked on the place: `mut part`.
+  access, written on the place: `mut part`.
 - **The method lends the value of its body, or of a `return`.** No code of
   the method runs after it lends. The values it still owns are dropped when
   the lend ends.
 - **The part is lent for the rest of the caller's statement,** even if the
-  statement leaves early.
+  statement exits early.
 - **In the condition of an `if` or a `while`, the part is lent for the
   condition alone** when each name the condition binds is a copy: a `Plain`
   name that is not a view and is not bound `mut`. The guarded block can then
-  change the receiver, as in
+  mutate the receiver, as in
   `if counts.get(word) is Some(count) { counts[word] = count + 1 }`. A name
   that is not a copy aliases the part, which stays lent until the then-block
   or the body ends. It is never lent into the `else` block.
 - **For that long, the receiver is lent whole:** the statement makes no other
-  use of a receiver lent `mut`, and does not change one lent read-only. Two
+  use of a receiver lent `mut`, and does not mutate one lent read-only. Two
   indexes or slices of one `List`, `Slice`, or `Array` can be lent together
   when the prover shows that they do not overlap.
-- The `mut` on the receiver chooses the version that lends `mut`, and the
-  part is then changed with no mark of its own.
+- The `mut` on the receiver selects the overload that lends `mut`, and the
+  part is then mutated with no keyword of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,
   stored, or bound with `let`, except by copying it.
 - The part need not be stored in `self`: the method may lend a value it
@@ -1031,9 +1032,9 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
 - An argument of the lent constructor that is a place is lent, with no copy.
   Constructors nest.
 - Every other field is a place, a nested constructor, or a `Plain` value.
-- A `mut` lend marks each place it lends `mut`, and the caller's changes to
-  a marked field reach the place when the lend ends. Two places lent `mut`
-  by one method are different places.
+- A `mut` lend writes `mut` on each place that it lends `mut`, and the
+  caller's mutations of such a field reach the place when the lend ends.
+  Two places lent `mut` by one method are different places.
 - **A place lent `mut` is never inside a variant,** at any depth: the caller
   could replace the variant, and the place would have no value, a use after
   free.
@@ -1197,7 +1198,7 @@ match status_code {
   last.
 - A bare name binds, in every pattern. A constant is written with its module
   or its type, `http::ok` or `Status.teapot`, so adding a constant never
-  changes what a pattern matches. A constant in a pattern has a type with
+  changes the semantics of a pattern. A constant in a pattern has a type with
   structural equality (see [Equality](#equality)).
 - Range patterns match integers and characters.
 - Every alternative of an or-pattern binds the same names, with the same
@@ -1266,7 +1267,7 @@ let production = own config with (server.port: 443, log_level: LogLevel.Warning)
 
 - `base with (updates)` means copying the base into a new variable,
   assigning its fields, and returning it.
-- The base is handed over as an `own` argument is. An owned base is reused
+- The base is passed as an `own` argument is. An owned base is reused
   in place, so the update costs one write per field.
 - `with` works on records, and updates only fields visible at that point.
 
@@ -1285,11 +1286,11 @@ mut scores.update_each(fn(score) { score = score / 2 })
   type it is passed as. Types are inferred from the outside in, never from
   the lambda's body. Where nothing gives a lambda a function type, the `let`
   has a type or the call has type arguments.
-- A lambda reads local variables through views and cannot change them. A
-  lambda that reads local variables is a view; one that reads none can be
+- A lambda captures local variables by view and cannot mutate them. A
+  lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
 - A lambda's capabilities are inferred from its body.
-- `return` and `?` leave the lambda. `break` and `continue` do not reach a
+- `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
 
@@ -1315,7 +1316,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 | Loop | Meaning |
 |---|---|
 | `for score in scores { ... }` | Read each element. |
-| `for score in mut scores { ... }` | Change elements in place. |
+| `for score in mut scores { ... }` | Mutate elements in place. |
 | `for item in own items { ... }` | Move each element out. |
 | `while low < high { ... }` | Loop while a condition holds. |
 
@@ -1325,8 +1326,8 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   count. A type supports `for` by defining `count(self) -> USize` and
   `element(self, position: USize)`, a lending method, as its own methods or
   by implementing `Iterable`.
-- `for item in mut items` is lent each element by the version of `element`
-  that takes `mut self`. A `mut` loop changes elements but does not add or
+- `for item in mut items` is lent each element by the overload of `element`
+  that takes `mut self`. A `mut` loop mutates elements but does not add or
   remove them: each iteration leaves the collection's `count` as it was.
 - `for item in own items` moves each element out: it pulls the cursor that
   `items.cursor()` returns, where `cursor` takes `own self`.
@@ -1339,7 +1340,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   each `Indexed[UInt8]`. The annotation must be the element type: it never
   converts the elements.
 - A `while` whose condition is the literal `true`, and that no `break`
-  leaves, has type `Never`.
+  exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
   never goes below zero. A `while` loop in a function with a `time` clause is
@@ -1351,7 +1352,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `end` where the loop ends, and `end + 1` after `start..=end`.
 - In the clauses of any other `for` loop, `visited` is the `Sequence` of the
   values of the iterations before. The clauses cannot name the element. A
-  local named `visited` hides the word.
+  local named `visited` shadows the word.
 - In a loop that reads a collection, `visited[i]` is the value of the
   collection's `element` at position `i`, so it meets that method's
   `ensures`. Where the collection's `model()` is the `Sequence` of its
@@ -1424,7 +1425,7 @@ map_entry = expression ":" expression ;
 
 - A type supports `[]` by implementing the prelude trait `Index` (see
   [Associated types](#associated-types)), which lends an element read-only.
-- A type whose elements change in place also implements `IndexMut`, whose
+- A type whose elements are mutated in place also implements `IndexMut`, whose
   `at(mut self, key)` lends an element `mut`. `items[i].name = text`,
   `items[i] += 1`, and `mut items[i]` need it.
 - `collection[key] = value` calls `assign` when the type implements
@@ -1554,8 +1555,8 @@ public trait Add[Right] {
 - `a += b` and the other compound assignments are statements whose left side
   is a place. `a += b` means `a = a + b` with the place evaluated and
   checked once.
-- The old value of `a` is handed to the operator as owned, so a version of
-  the trait's method that takes `own self` can update in place.
+- The old value of `a` is passed to the operator as owned, so an overload
+  of the trait's method that takes `own self` can update in place.
 
 #### Evaluation order
 
@@ -1564,7 +1565,7 @@ public trait Add[Right] {
   then stores.
 - `target += operand` evaluates `operand`, then the index keys of `target`,
   once, then takes the old value of `target` and stores the result. A `?`
-  that leaves from `operand` leaves `target` unchanged.
+  that returns from `operand` leaves `target` unchanged.
 - `&&`, `||`, and `==>` evaluate their right side only when the left does
   not decide the result.
 
@@ -1572,7 +1573,7 @@ public trait Add[Right] {
 
 - **No integer operation overflows silently.** An operation that could
   overflow is proven not to, or the code calls the standard library's
-  checked, wrapping, or saturating version.
+  checked, wrapping, or saturating method.
 - `/` rounds toward zero, and `%` has the sign of its left operand.
 - `>>` on a signed integer copies the sign bit, and on an unsigned integer
   shifts in zeros. A shift amount is any unsigned integer type, proven
@@ -1594,8 +1595,8 @@ public trait Add[Right] {
 
 ## Failure
 
-Code stops abruptly only where its signature says it can, except by running
-out of memory or overflowing the stack.
+Code panics only where its signature declares `uses Panic`. Running out of
+memory and overflowing the stack are the exceptions.
 
 Every operation that can fail is a proof obligation: integer overflow,
 division by zero, indexing or slicing out of bounds, a shift that is too
@@ -1604,7 +1605,7 @@ is an error, and one of these makes it compile:
 
 1. Establish the fact locally, as with an `if`.
 2. Require it with `requires`.
-3. Call a version that returns an `Option` or a `Result`.
+3. Call a method that returns an `Option` or a `Result`.
 4. Declare `uses Panic`.
 
 `unreachable` admits only the first.
@@ -1646,10 +1647,10 @@ let rolled = provide LoadedDie(face: 5) {
 - Code calls a capability's methods through its name, as in `Random.next()`,
   and never calls an implementation directly.
 - An implementation is a type with an `impl`. Its methods take `self`, or
-  `mut self` where they change its state.
+  `mut self` where they mutate its state.
 - `provide implementation, ... { body }` runs the body with the given
-  implementations, handed over as arguments are: a place is marked `mut` when
-  its methods change it, and then holds the changes afterward.
+  implementations, passed as arguments are: a place is written with `mut`
+  when its methods mutate it, and it holds the mutations afterward.
 - Providing a type provides every capability it implements.
 - An `impl` with a `uses` clause can use those capabilities, and providing
   it requires them. Otherwise an `impl`'s methods use only the capabilities
@@ -1732,14 +1733,14 @@ fn total_score(players: Slice[Player]) -> Int64
   the same time, and ends when all have ended. A `let` in a branch is in
   scope after the block.
 - **Branches cannot race.** Any branch may read any place, and a place that
-  one branch changes is used by no other branch.
+  one branch mutates is used by no other branch.
 - Branches use no capability but `Panic`, so a function that contains
   `parallel` is still pure.
-- A branch cannot leave the block with `return`, `break`, `continue`, or `?`.
+- A branch cannot exit the block with `return`, `break`, `continue`, or `?`.
 - A `parallel` block has the result of running its branches in order, and
   its `time` is the sum of theirs.
 - `parallel for` runs a loop's iterations at the same time, by the same
-  rules. Its body changes only its own element and its own variables, and
+  rules. Its body mutates only its own element and its own variables, and
   may use `continue`.
 
 ## Concurrency
@@ -1760,12 +1761,12 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   has ended. A `concurrent for` runs each iteration as a task. The enclosing
   function declares `uses Tasks`.
 - Branches follow the rules of `parallel` branches, except that they may use
-  the capabilities of the code around them and may leave the block.
-- **A branch that leaves the block with `?`, `return`, or `break` cancels the
-  other branches,** waits for them to end, and then leaves. A branch that has
-  not started does not start, and the first branch to leave decides where
+  the capabilities of the code around them and may exit the block.
+- **A branch that exits the block with `?`, `return`, or `break` cancels the
+  other branches,** waits for them to end, and then exits. A branch that has
+  not started does not start, and the first branch to exit decides where
   control goes.
-- The code after the block does not run when a branch leaves early, so a
+- The code after the block does not run when a branch exits early, so a
   branch that moves a value out of a place reinitializes it before it ends.
 - **In a cancelled task, a standard capability call that would wait returns
   at once:** an `Err` of `SystemError.Cancelled` where it returns a
@@ -1785,8 +1786,8 @@ advances.
   Another collection's `element` could lend one place to two iterations: a
   data race.
 - **A `concurrent for` over a cursor pulls values that are not views.** The
-  next pull could change or drop what a view from the cursor views, which
-  would leave the task with a dangling view.
+  next pull could mutate or drop the value that a view from the cursor
+  views, which would leave the task with a dangling view.
 
 ### Shared state
 
@@ -1799,13 +1800,12 @@ uses a capability, so its mutexes cannot deadlock. An implementation
 provided without `mut` has no mutex.
 
 The standard library's `tasks` module holds channels, limits on how many
-tasks run at once, and cells that tasks update (see
-[`standard/tasks.md`](standard/tasks.md)).
+tasks run at once, and cells that tasks update.
 
 ## Strings
 
 - A string literal is a `String` in static memory, copied to the heap the
-  first time it is changed. Making one, and `copy()` of one, cost nothing.
+  first time it is mutated. Making one, and `copy()` of one, cost nothing.
 - `StringSlice` is the view of a `String`.
 - There is no concatenation operator: `+` on strings is an error, and
   adjacent literals do not join.
@@ -1825,9 +1825,9 @@ let pattern = Regex"[a-z]+@${domain}"
   and its method `from_template` takes a `Template[Part]`, which holds the
   literal text as `text::Literal` values, which only the compiler makes, and
   the converted values.
-- A tag's `from_template` states the rules for valid literal text with `requires`.
-  The literal text is known when the code is compiled, so the compiler proves
-  the `requires` by running the check, as compiled code. `Regex"[a-z"` is an
+- A tag's `from_template` states the rules for valid literal text with
+  `requires`. The literal text is known when the code is compiled, so the
+  compiler proves the `requires` by running the check, as compiled code. `Regex"[a-z"` is an
   error.
 - `from_template` is the one method whose `requires` may be stronger than its
   trait's, and a call of it through a bound or `any` is an error.
@@ -1894,10 +1894,10 @@ trait Ordered: Equal {
   and a call through a bound or `any` against the trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait cannot
-  redeclare a method of a trait it requires, but can add a version in
+  redeclare a method of a trait it requires, but can add an overload in
   another mode. Traits cannot require each other in a cycle.
 - **A method with a body** is provided to every implementation. An `impl` can
-  replace it only with a version proven to give the same result, and only
+  override it only with a method proven to return the same result, and only
   where the prover reads the body as a definition (see
   [Bodies and contracts in proofs](#bodies-and-contracts-in-proofs)).
 
@@ -1957,7 +1957,7 @@ fn count[Source: Cursor](source: own Source) -> USize
 
 ### Equality
 
-A type's equality is *structural* when two equal values cannot be told apart
+A type's equality is *structural* when two equal values cannot be distinguished
 by any function, so the prover concludes `f(a) == f(b)` from `a == b`. The
 built-in integers, `Bool`, `Character`, `Unit`, `String`, and the types of
 specifications have it, and so does a type that derives `Equal` when all its
@@ -1980,6 +1980,8 @@ type Priority =
 | `Hash` | Combines the hashes of the fields |
 | `Ordered` | Variants in declaration order, then fields in declaration order |
 | `Default` | Each field's default, for a record |
+| `serialization::Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
+| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None` |
 | `Copyable`, `Plain` | Nothing: an opaque type declares that it copies (see [Copying](#copying)) |
 
 - Every field has the trait, and a derived trait's required traits are
@@ -1987,8 +1989,6 @@ type Priority =
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
-- `serialization::Serialize` and `serialization::Deserialize` can be derived
-  too (see [`standard/serialization.md`](standard/serialization.md)).
 - Every type has debug output, which needs no derive.
 
 ### Method lookup
@@ -2001,11 +2001,11 @@ type Priority =
   and a trait it requires are the exception.
 - A type's own method and a trait method it implements are never the same
   name with the same mode. An `impl` in the type's own package may add
-  another version of a name the type has, by writing the method. A method
-  an `impl` leaves to its trait's body, and every method of an `impl` in
-  another package, takes no name the type's methods have.
+  another overload of a name the type has, by writing the method. A provided
+  method that an `impl` does not override, and every method of an `impl` in
+  another package, takes no name that the type's methods have.
 
-### Values of any type with a trait
+### Dynamic dispatch
 
 ```truss
 type Server(handlers: List[any Handler])
@@ -2042,7 +2042,7 @@ test "config loads with defaults" {
 - A test provides every capability its code uses, except `Panic`, unless it
   declares them with `uses`. A test with `uses` is *external*: it gets the
   real implementations of exactly those capabilities, and runs every time the
-  suite runs. Any other test is deterministic, and its result is kept until
+  suite runs. Any other test is deterministic, and its result is cached until
   its code changes.
 - A failed test is never retried.
 - A failed `assert` ends the test as failed, and the rest of the test can
@@ -2088,8 +2088,8 @@ proof Ordered.transitive for Box[Item: Ordered] {
   empty body asks the prover to prove it alone.
 - Calling a theorem makes its `ensures` available. A theorem that calls
   itself on smaller input is a proof by induction.
-- A `proof { }` block in a function body holds the statements a theorem's body holds,
-  and is removed from the compiled program.
+- A `proof { }` block in a function body holds the statements that a
+  theorem's body holds, and is removed from the compiled program.
 - A law proof's body is checked as the law's body is: it names the law's
   read-only parameters, `Self` is its type, and the law's `requires` hold. A
   proof for a generic `impl` names the type as the `impl` does, and is
@@ -2099,14 +2099,14 @@ proof Ordered.transitive for Box[Item: Ordered] {
 
 - A function or a method of a type is known to its callers' proofs by its
   `requires` and `ensures`, in every package. A function whose body is its
-  meaning states it in its `ensures`:
+  definition states the body in its `ensures`:
   `ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])`.
 - A method of a trait or an `impl` is known by its body, where the body is
   functional: `let`, `if`, `match`, `is`, calls, fields, building values,
   `with`, operators, and quantifiers, with no `var`, assignment, or loop, and
   nothing passed `mut` or `own`. A trait's provided method is read in every
   package, and a method an `impl` writes in the `impl`'s package.
-- A clause is read only where everything it reads is visible.
+- A clause applies only where every name that it mentions is visible.
 - A function with a `requires` is defined only where it holds.
 
 ### Writing specifications

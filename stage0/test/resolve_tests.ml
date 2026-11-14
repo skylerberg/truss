@@ -181,31 +181,31 @@ let () =
   test "a local is not in scope after its block" (fun () ->
       one_diagnostic Fixtures.Resolve.local_is_not_in_scope_after_its_block "resolve.unknown_name")
 
-(* No name hides another *)
+(* No name shadows another *)
 
 let () =
-  test "a local cannot hide a local of an enclosing block" (fun () ->
-      one_diagnostic Fixtures.Resolve.local_cannot_hide_a_local_of_an_enclosing_block
-        "resolve.hides_name");
-  test "a local cannot hide a parameter" (fun () ->
-      one_diagnostic Fixtures.Resolve.local_cannot_hide_a_parameter "resolve.hides_name");
-  test "a local may hide a function of its module, and its uses are the local" (fun () ->
-      refers_to_binding Fixtures.Resolve.local_may_hide_a_function_of_its_module ~use:("total", 3)
+  test "a local cannot shadow a local of an enclosing block" (fun () ->
+      one_diagnostic Fixtures.Resolve.local_cannot_shadow_a_local_of_an_enclosing_block
+        "resolve.shadowed_name");
+  test "a local cannot shadow a parameter" (fun () ->
+      one_diagnostic Fixtures.Resolve.local_cannot_shadow_a_parameter "resolve.shadowed_name");
+  test "a local may shadow a function of its module, and its uses are the local" (fun () ->
+      refers_to_binding Fixtures.Resolve.local_may_shadow_a_function_of_its_module ~use:("total", 3)
         ~binding:("total", 2));
-  test "a local may hide a definition in another file of its module" (fun () ->
+  test "a local may shadow a definition in another file of its module" (fun () ->
       no_diagnostics
         [
           ("app::main", "fn f() -> Int64 {\n  let total = 2\n  total\n}\n");
           ("app::main/sums", "fn total() -> Int64 { 0 }\n");
         ]);
   test "a let binds the name of a constant of its module, which its uses then name" (fun () ->
-      refers_to_binding Fixtures.Resolve.let_may_hide_a_constant_of_its_module ~use:("limit", 3)
+      refers_to_binding Fixtures.Resolve.let_may_shadow_a_constant_of_its_module ~use:("limit", 3)
         ~binding:("limit", 2));
-  test "a generic parameter cannot hide a type of its module" (fun () ->
-      one_diagnostic Fixtures.Resolve.generic_parameter_cannot_hide_a_type_of_its_module
-        ~says:"a type of this module" "resolve.hides_name");
-  test "a generic parameter cannot hide a prelude type" (fun () ->
-      one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.hides_name");
+  test "a generic parameter cannot shadow a type of its module" (fun () ->
+      one_diagnostic Fixtures.Resolve.generic_parameter_cannot_shadow_a_type_of_its_module
+        ~says:"a type of this module" "resolve.shadowed_name");
+  test "a generic parameter cannot shadow a prelude type" (fun () ->
+      one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.shadowed_name");
   test "locals in sibling blocks may share a name" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Resolve.locals_in_sibling_blocks_may_share_a_name) ])
 
@@ -327,8 +327,9 @@ let () =
   test "mut before a local's field and method call is a place" (fun () ->
       no_diagnostics
         [ ("app::main", Fixtures.Resolve.mut_before_a_locals_field_and_method_call_is_a) ]);
-  test "a ? after the marked call works on its result" (fun () ->
-      no_diagnostics [ ("app::main", Fixtures.Resolve.after_the_marked_call_works_on_its_result) ]);
+  test "a ? after a call with a mode keyword works on its result" (fun () ->
+      no_diagnostics
+        [ ("app::main", Fixtures.Resolve.after_a_call_with_a_mode_keyword_works_on_its_result) ]);
   test "a ? before any method call does not make a place" (fun () ->
       one_diagnostic Fixtures.Resolve.before_any_method_call_does_not_make_a_place
         "resolve.not_a_place")
@@ -544,14 +545,14 @@ let () =
       no_diagnostics [ ("app::main", Fixtures.Resolve.element_of_a_field_is_a_place) ]);
   test "two parallel branches cannot bind one name" (fun () ->
       one_diagnostic Fixtures.Resolve.two_parallel_branches_cannot_bind_one_name
-        "resolve.hides_name");
+        "resolve.shadowed_name");
   test "two concurrent branches cannot bind one name" (fun () ->
       one_diagnostic Fixtures.Resolve.two_concurrent_branches_cannot_bind_one_name
-        "resolve.hides_name");
+        "resolve.shadowed_name");
   test "a definition cannot take a prelude name" (fun () ->
-      one_diagnostic "type List(count: Int64)\n" "resolve.hides_name");
+      one_diagnostic "type List(count: Int64)\n" "resolve.shadowed_name");
   test "a generic parameter cannot take a prelude variant's name" (fun () ->
-      one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.hides_name");
+      one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.shadowed_name");
   test "a trait whose header did not parse is not resolved" (fun () ->
       let database =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]

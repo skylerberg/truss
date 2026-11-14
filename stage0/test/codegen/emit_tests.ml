@@ -916,7 +916,7 @@ let () =
               emit builder (Assign (at first, Binary (Add, Copy (at first), Copy (at last))));
               first);
         ]);
-  test "elements are changed through a view of storage, which is first given its own buffer"
+  test "elements are mutated through a view of storage, which is first given its own buffer"
     (fun () ->
       let open Emit_c.Builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in

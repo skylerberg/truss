@@ -514,7 +514,7 @@ let () =
               blocks
           in
           if List.length ends < 2 then fail "the continue does not end the iteration");
-  test "a loop over a collection runs its body for each element, and a break leaves it" (fun () ->
+  test "a loop over a collection runs its body for each element, and a break exits it" (fun () ->
       let mir = mir_of_g Fixtures.Mir.loop_over_a_collection_runs_its_body_for_each in
       let body = mir.body in
       match

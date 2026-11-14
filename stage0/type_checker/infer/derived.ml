@@ -150,7 +150,7 @@ let form database (path : Path.t) : Core.t option =
               {
                 mode = Read;
                 value = Value (node (Types.named (Well_known.path String_slice) []) (String text));
-                mark = None;
+                mode_keyword = None;
               }
           in
           let count_argument count : Core.argument =
@@ -158,11 +158,11 @@ let form database (path : Path.t) : Core.t option =
               {
                 mode = Read;
                 value = Value (node (Types.builtin USize) (Integer (Z.of_int count)));
-                mark = None;
+                mode_keyword = None;
               }
           in
           let read place : Core.argument =
-            Passed { mode = Read; value = Place place; mark = None }
+            Passed { mode = Read; value = Place place; mode_keyword = None }
           in
           let variants =
             match shape with
@@ -300,7 +300,7 @@ let form database (path : Path.t) : Core.t option =
                   | _ -> bug "a hasher that is not a named type"
                 in
                 let changed : Core.argument =
-                  Passed { mode = Mut; value = Place hasher; mark = None }
+                  Passed { mode = Mut; value = Place hasher; mode_keyword = None }
                 in
                 let write number =
                   statement
@@ -325,7 +325,7 @@ let form database (path : Path.t) : Core.t option =
                                        value =
                                          Value
                                            (node (Types.builtin UInt64) (Integer (Z.of_int number)));
-                                       mark = None;
+                                       mode_keyword = None;
                                      };
                                  ];
                                lends = None;
@@ -493,7 +493,7 @@ let form database (path : Path.t) : Core.t option =
                   | [] -> bug "`serialize` takes a serializer"
                 in
                 let sink_argument : Core.argument =
-                  Passed { mode = Mut; value = Place sink; mark = None }
+                  Passed { mode = Mut; value = Place sink; mode_keyword = None }
                 in
                 let serializer = Well_known.path Serializer in
                 let call name arguments =
@@ -543,7 +543,7 @@ let form database (path : Path.t) : Core.t option =
                   | _ -> bug "`deserialize` takes a deserializer"
                 in
                 let source_argument mode : Core.argument =
-                  Passed { mode; value = Place source; mark = None }
+                  Passed { mode; value = Place source; mode_keyword = None }
                 in
                 let deserializer = Well_known.path Deserializer in
                 let error_type =

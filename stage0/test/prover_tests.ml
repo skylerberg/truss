@@ -78,8 +78,8 @@ let () =
       not_proven Fixtures.Prover.ensures_holds_at_an_early_return "prover.ensures");
   test "a callee's ensures is a fact after the call" (fun () ->
       proven Fixtures.Prover.callees_ensures_is_a_fact_after_the_call);
-  test "a mut argument changes only through the callee's ensures" (fun () ->
-      not_proven Fixtures.Prover.mut_argument_changes_only_through_the_callees "prover.ensures")
+  test "a mut argument is mutated only through the callee's ensures" (fun () ->
+      not_proven Fixtures.Prover.mut_argument_is_mutated_only_through_the_callees "prover.ensures")
 
 (* Loops and recursion *)
 
@@ -249,16 +249,16 @@ let () =
   let tagged ensures =
     Fixtures.Prover.ensures ^ ensures ^ "{\n  Tagged(tag: 0, value: mut self.second)\n}\n"
   in
-  test "a constructor lent `mut` does not change a field of `self` that it does not lend" (fun () ->
+  test "a constructor lent `mut` does not mutate a field of `self` that it does not lend" (fun () ->
       proven (tagged "  ensures self.first == old(self.first)\n"));
-  test "a caller's change to a constructor lent `mut` is written to the lent field" (fun () ->
+  test "a caller's mutation of a constructor lent `mut` is written to the lent field" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
   test "a caller of a method that lends a constructor `mut` can rely on its `ensures`" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"
         ^ Fixtures.Prover.caller_of_a_method_that_lends_a_constructor_mut));
-  test "a caller's change to a part lent `mut` is its `final(result)`" (fun () ->
-      proven Fixtures.Prover.callers_change_to_a_part_lent_mut_is_its_final_value);
+  test "a caller's mutation of a part lent `mut` is its `final(result)`" (fun () ->
+      proven Fixtures.Prover.callers_mutation_of_a_part_lent_mut_is_its_final_value);
   test "a lending method that lends a part it does not promise" (fun () ->
       not_proven Fixtures.Prover.lending_method_that_lends_a_part_it_does_not_promise
         "prover.ensures");
@@ -299,10 +299,10 @@ let () =
        not_proven
          (samples ^ Fixtures.Prover.assignment_through_an_index_to_a_key_the_collection_does)
          "prover.requires"));
-  test "a later arm sees an earlier arm's guard's changes" (fun () ->
-      proven Fixtures.Prover.later_arm_sees_an_earlier_arms_guards_changes);
-  test "assigning an element changes only that element" (fun () ->
-      proven Fixtures.Prover.assigning_an_element_changes_only_that_element);
+  test "a later arm sees an earlier arm's guard's mutations" (fun () ->
+      proven Fixtures.Prover.later_arm_sees_an_earlier_arms_guards_mutations);
+  test "assigning an element mutates only that element" (fun () ->
+      proven Fixtures.Prover.assigning_an_element_mutates_only_that_element);
   test "a compound assignment to an element" (fun () ->
       proven Fixtures.Prover.compound_assignment_to_an_element);
   let digit = Fixtures.Prover.digit in
@@ -566,8 +566,8 @@ let () =
       proven Fixtures.Prover.set_contains_its_inserted_elements);
   test "inserting an element a set contains leaves it unchanged" (fun () ->
       proven Fixtures.Prover.inserting_an_element_a_set_contains_leaves_it);
-  test "inserting into a set may change it" (fun () ->
-      not_proven Fixtures.Prover.inserting_into_a_set_may_change_it "prover.ensures");
+  test "inserting into a set may mutate it" (fun () ->
+      not_proven Fixtures.Prover.inserting_into_a_set_may_mutate_it "prover.ensures");
   test "a map holds an inserted value under its key" (fun () ->
       proven Fixtures.Prover.map_holds_an_inserted_value_under_its_key);
   test "a map keeps its other keys' values" (fun () ->
@@ -613,27 +613,27 @@ let () =
         "prover.disjoint");
   test "two different elements can be lent together" (fun () ->
       proven (swap ^ Fixtures.Prover.two_different_elements_can_be_lent_together));
-  test "parallel branches that change elements must change different ones" (fun () ->
+  test "parallel branches that mutate elements must mutate different ones" (fun () ->
       not_proven Fixtures.Prover.parallel_branches_that_change_elements_must_change
         "prover.disjoint")
 
 (* Where paths join *)
 
 let () =
-  test "self changed on one path is joined with the other" (fun () ->
-      not_proven Fixtures.Prover.self_changed_on_one_path_is_joined_with_the_other "prover.ensures");
+  test "self mutated on one path is joined with the other" (fun () ->
+      not_proven Fixtures.Prover.self_mutated_on_one_path_is_joined_with_the_other "prover.ensures");
   test "a lending method's `ensures` holds for the part lent on each path" (fun () ->
       not_proven Fixtures.Prover.lending_methods_ensures_holds_for_the_part_lent_on "prover.ensures")
 
 (* Loop changes *)
 
 let () =
-  test "a loop forgets a list it changes through a method" (fun () ->
-      not_proven Fixtures.Prover.loop_forgets_a_list_it_changes_through_a_method "prover.assertion");
+  test "a loop forgets a list it mutates through a method" (fun () ->
+      not_proven Fixtures.Prover.loop_forgets_a_list_it_mutates_through_a_method "prover.assertion");
   test "a loop forgets a record whose field it assigns" (fun () ->
       not_proven Fixtures.Prover.loop_forgets_a_record_whose_field_it_assigns "prover.assertion");
-  test "a loop forgets self when it changes it" (fun () ->
-      not_proven Fixtures.Prover.loop_forgets_self_when_it_changes_it "prover.assertion")
+  test "a loop forgets self when it mutates it" (fun () ->
+      not_proven Fixtures.Prover.loop_forgets_self_when_it_mutates_it "prover.assertion")
 
 (* Costs *)
 
@@ -745,7 +745,7 @@ let () =
   test "a loop that pushes into a record's list is amortized linear" (fun () ->
       proven (encoder ^ Fixtures.Prover.loop_that_pushes_into_a_records_list_is_amortized));
   let bag = Fixtures.Prover.bag in
-  test "a method that lends a part `mut` is not charged for the caller's changes to it" (fun () ->
+  test "a method that lends a part `mut` is not charged for the caller's mutations of it" (fun () ->
       proven bag);
   test "a caller that raises a lent part's potential pays for it" (fun () ->
       let actual =
@@ -825,16 +825,16 @@ let () =
       if holes text <> 2 then fail "%d holes" (holes text));
   test "each impl of a trait with arguments keeps its own laws" (fun () ->
       not_proven Fixtures.Prover.each_impl_of_a_trait_with_arguments_keeps_its_own "prover.law");
-  test "an element changed through a lend meets its invariant when the lend ends" (fun () ->
-      not_proven Fixtures.Prover.element_changed_through_a_lend_meets_its_invariant
+  test "an element mutated through a lend meets its invariant when the lend ends" (fun () ->
+      not_proven Fixtures.Prover.element_mutated_through_a_lend_meets_its_invariant
         "prover.invariant");
-  test "an element changed through a lend that keeps its invariant proves" (fun () ->
-      proven Fixtures.Prover.element_changed_through_a_lend_that_keeps_its);
+  test "an element mutated through a lend that keeps its invariant proves" (fun () ->
+      proven Fixtures.Prover.element_mutated_through_a_lend_that_keeps_its);
   test "a lent part meets its invariant" (fun () ->
       not_proven Fixtures.Prover.lent_part_meets_its_invariant "prover.invariant");
-  test "a loop keeps the validity of each value it changes" (fun () ->
-      proven Fixtures.Prover.loop_keeps_the_validity_of_each_value_it_changes);
-  test "an iteration must keep the validity of each value the loop changes" (fun () ->
+  test "a loop keeps the validity of each value it mutates" (fun () ->
+      proven Fixtures.Prover.loop_keeps_the_validity_of_each_value_it_mutates);
+  test "an iteration must keep the validity of each value the loop mutates" (fun () ->
       not_proven Fixtures.Prover.iteration_must_keep_the_validity_of_each_value_the
         "prover.invariant")
 
@@ -846,7 +846,7 @@ let () =
         "prover.termination");
   test "a mut slice's bounds are evaluated once" (fun () ->
       not_proven Fixtures.Prover.mut_slices_bounds_are_evaluated_once "prover.ensures");
-  test "a while condition's mut argument changes the loop's state" (fun () ->
+  test "a while condition's mut argument mutates the loop's state" (fun () ->
       not_proven Fixtures.Prover.while_conditions_mut_argument_changes_the_loops "prover.ensures");
   test "a match mut binding is written back to the scrutinee" (fun () ->
       not_proven Fixtures.Prover.match_mut_binding_is_written_back_to_the_scrutinee "prover.ensures");
@@ -1201,7 +1201,7 @@ let early_return ensures =
 let () =
   test "an early exit from a concurrent block waits for the other branches" (fun () ->
       proven (early_return "  ensures second == old(second) + 1\n"));
-  test "an early exit from a concurrent block sees the other branches' changes" (fun () ->
+  test "an early exit from a concurrent block sees the other branches' mutations" (fun () ->
       not_proven (early_return "  ensures second == old(second)\n") "prover.ensures");
   test "a concurrent block with no early exit is read as its branches in order" (fun () ->
       proven Fixtures.Prover.concurrent_block_with_no_early_exit_is_read_as_its)
@@ -1280,11 +1280,11 @@ let () =
       proven Fixtures.Prover.log_of_a_bounded_integer_is_at_most_its_width);
   test "power of two numbers is their power" (fun () ->
       proven Fixtures.Prover.power_of_two_numbers_is_their_power);
-  test "a slice changed through a call changes its run of the list" (fun () ->
-      proven ("" ^ Fixtures.Prover.slice_changed_through_a_call_changes_its_run_of));
-  test "a slice changed through a call changes nothing more than it says" (fun () ->
+  test "a slice mutated through a call mutates its run of the list" (fun () ->
+      proven ("" ^ Fixtures.Prover.slice_mutated_through_a_call_mutates_its_run_of));
+  test "a slice mutated through a call mutates nothing more than it says" (fun () ->
       not_proven
-        ("" ^ Fixtures.Prover.slice_changed_through_a_call_changes_nothing_more)
+        ("" ^ Fixtures.Prover.slice_mutated_through_a_call_mutates_nothing_more)
         "prover.ensures");
   test "an unsigned left shift that fits multiplies by a power of two" (fun () ->
       proven Fixtures.Prover.unsigned_left_shift_that_fits_multiplies_by_a);
@@ -1292,8 +1292,8 @@ let () =
       proven Fixtures.Prover.unsigned_right_shift_divides_by_a_power_of_two);
   test "a left shift that may not fit is not known to multiply" (fun () ->
       not_proven Fixtures.Prover.left_shift_that_may_not_fit_is_not_known_to "prover.ensures");
-  test "a loop that changes a slice of any elements under a cost clause" (fun () ->
-      proven Fixtures.Prover.loop_that_changes_a_slice_of_any_elements_under_a);
+  test "a loop that mutates a slice of any elements under a cost clause" (fun () ->
+      proven Fixtures.Prover.loop_that_mutates_a_slice_of_any_elements_under_a);
   test "a quantifier's body must be well defined" (fun () ->
       not_proven Fixtures.Prover.quantifiers_body_must_be_well_defined "prover.requires");
   test "a quantifier's body within its range is well defined" (fun () ->
@@ -1382,8 +1382,8 @@ let () =
 let () =
   test "a slice of a whole array is within it" (fun () ->
       proven Fixtures.Prover.slice_of_a_whole_array_is_within_it);
-  test "a loop that changes an array's elements keeps their potentials" (fun () ->
-      proven Fixtures.Prover.loop_that_changes_an_arrays_elements_keeps_their);
+  test "a loop that mutates an array's elements keeps their potentials" (fun () ->
+      proven Fixtures.Prover.loop_that_mutates_an_arrays_elements_keeps_their);
   test "a slice of an array is within it only as far as its count" (fun () ->
       not_proven Fixtures.Prover.slice_of_an_array_is_within_it_only_as_far_as_its "prover.requires")
 
@@ -1566,11 +1566,11 @@ let () =
 let bump = Fixtures.Prover.bump
 
 let () =
-  test "a change on the right of && happens only where the left holds" (fun () ->
-      proven (bump ^ Fixtures.Prover.change_on_the_right_of_happens_only_where_the_left));
-  test "a change on the right of || is not known to have happened" (fun () ->
+  test "a mutation on the right of && happens only where the left holds" (fun () ->
+      proven (bump ^ Fixtures.Prover.mutation_on_the_right_of_happens_only_where_the_left));
+  test "a mutation on the right of || is not known to have happened" (fun () ->
       not_proven
-        (bump ^ Fixtures.Prover.change_on_the_right_of_is_not_known_to_have)
+        (bump ^ Fixtures.Prover.mutation_on_the_right_of_is_not_known_to_have)
         "prover.ensures")
 
 (* Function values in the logic *)

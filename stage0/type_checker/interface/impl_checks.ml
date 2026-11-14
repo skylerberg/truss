@@ -285,7 +285,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
           report state Extra_member name.span
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
       | Some declared ->
-          let replaceable (signature : Types.signature) =
+          let overridable (signature : Types.signature) =
             signature.uses = Types.no_capabilities
             && signature.terminates
             && List.for_all
@@ -293,16 +293,17 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                  signature.parameters
             && match signature.receiver with Some (Mut, _) -> false | _ -> true
           in
-          if declared.provided && not (replaceable declared.method_signature) then
-            report state Not_replaceable name.span
+          if declared.provided && not (overridable declared.method_signature) then
+            report state Not_overridable name.span
               (Printf.sprintf
-                 "`%s` gives `%s` a body, which an `impl` can replace only by a version proven to \
-                  give the same result, and so only when the provided one is pure, has a `time` \
-                  clause, and changes none of its arguments, so that its body is its definition."
+                 "`%s` gives `%s` a body, which an `impl` can override only with a method proven \
+                  to return the same result, and so only when the provided method is pure, has a \
+                  `time` clause, and mutates none of its arguments, so that its body is its \
+                  definition."
                  shown_trait name.text);
           if trait.is_capability && not (receiver = Read || receiver = Mut) then
             report state Wrong_receiver name.span
-              "A capability's implementation takes `self`, or `mut self` if it changes its own \
+              "A capability's implementation takes `self`, or `mut self` if it mutates its own \
                state."
           else begin
             (* The method's own generic parameters and [uses], after the

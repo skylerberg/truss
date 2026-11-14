@@ -3,7 +3,7 @@
 (** Looking up a member, the name after a dot. *)
 module Members : sig
   val trait_methods : Query.context -> Path.t -> string -> Types.trait_method list
-  (** The versions of a trait method: one for each receiver mode. *)
+  (** The overloads of a trait method: one for each receiver mode. *)
 
   val trait_method : Query.context -> Path.t -> string -> Path.receiver -> Types.trait_method option
 

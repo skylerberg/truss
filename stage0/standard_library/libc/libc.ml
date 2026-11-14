@@ -969,7 +969,7 @@ let describe function_ =
           ]
   | Tcgetattr ->
       (* A terminal's settings, a [struct termios] as bytes, which the
-         standard library reads and changes at the offsets the table's
+         standard library reads and mutates at the offsets the table's
          numbers give. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
