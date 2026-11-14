@@ -6,6 +6,9 @@ open Emit_c.Builder
 
 type cleanup =
   | Drop_value of Lowered.place  (** Drops the place's value, if the place still owns it. *)
+  | Drop_where of { place : Lowered.place; holds : Lowered.place }
+      (** Drops the place's value where the [Bool] at [holds] is true, for a place that only some
+          paths give a value. *)
   | Free_pointed of Lowered.place
       (** Frees the heap block that the pointer at the place points to, after the block's contents
           are dropped. *)
@@ -192,6 +195,16 @@ let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
 (* A local that lasts as long as the names around it. *)
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
+(* A local that lasts as long as the names around it, and whose value is
+   dropped where the [Bool] at [holds] is true. *)
+let binding_where st ?name ty ~holds =
+  let place = at (local st.builder ?name (Value ty)) in
+  if not (trivial st ty) then begin
+    let scope = binding_scope st.scopes in
+    scope.owned <- Drop_where { place; holds } :: scope.owned
+  end;
+  place
+
 let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let how = Option.value how ~default:(Convention.parameter st.context.env) in
   let own place = if in_scope && owned && not (trivial st ty) then own_in_scope st place in
@@ -242,6 +255,9 @@ let drop_scope st (scope : scope) =
   List.iter
     (function
       | Drop_value place -> if not (List.mem place st.moved) then emit st.builder (Drop place)
+      | Drop_where { place; holds } ->
+          if not (List.mem place st.moved) then
+            when_ st.builder (Copy holds) (fun () -> emit st.builder (Drop place))
       | Free_pointed pointer ->
           emit st.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })

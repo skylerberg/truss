@@ -176,6 +176,9 @@ type passes =
       (** Storage: the address of its first element, for a function that reads the elements the
           storage has and writes some of them *)
   | Written of scalar * string list
+      (** The address of a structure of numbers that the function writes, one for each name: each is
+          a [mut] argument of the Truss call, copied into the structure before the call and back
+          after it, so that it keeps its value where the function writes nothing *)
   | Always of int
       (** A number that is no argument of the Truss call: the function always gets it *)
   | Fixed of number

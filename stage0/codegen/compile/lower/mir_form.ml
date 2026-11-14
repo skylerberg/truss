@@ -190,7 +190,11 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     moves;
     flags =
       List.map
-        (fun (path : Moves.path) -> (path, held st ~name:"owned" (Raw Bool)))
+        (fun (path : Moves.path) ->
+          (* A flag is written only where its path's state changes, so it
+             starts zeroed: false, for a path that holds nothing. A flag of
+             a path that holds a value on entry is set true there. *)
+          (path, at (local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool))))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
   }
@@ -673,9 +677,11 @@ let call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~des
     ~signature ~substitution ~arguments ~destination ()
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
-   order. An omitted argument gets a local that holds nothing, and which
-   nothing drops: the callee makes the default its own. The returned mask has one bit for each
-   parameter with a default, set where the call passes an argument. *)
+   order. An omitted argument gets a zeroed local, which nothing drops: the
+   callee makes the default its own and never reads the argument, but C
+   must be passed a value, since passing an uninitialized one is undefined.
+   The returned mask has one bit for each parameter with a default, set
+   where the call passes an argument. *)
 let evaluate_arguments st (signature : Types.signature) substitution (arguments : Mir.argument list)
     =
   let parameters = interface_parameters signature in
@@ -697,7 +703,7 @@ let evaluate_arguments st (signature : Types.signature) substitution (arguments 
           else None
         in
         match argument with
-        | Default -> (mode, ty, at (local st.builder (Value ty)))
+        | Default -> (mode, ty, at (local st.builder ~is_zeroed:true (Value ty)))
         | Passed { value; _ } ->
             Option.iter (fun bit -> mask := !mask lor (1 lsl bit)) bit;
             (mode, ty, operand_place st value))
@@ -2059,18 +2065,29 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
               owned_here
             end
             else begin
+              (* A default lent to the function is a value of its own, which
+                 only the path that omits the argument builds, so it is
+                 dropped only there. *)
+              let default_value =
+                if trivial st ty then fun () -> binding st ty
+                else begin
+                  let is_omitted = local builder (Raw Bool) in
+                  emit builder (Assign (at is_omitted, Unary (Not, Copy (at is_passed))));
+                  fun () -> binding_where st ty ~holds:(at is_omitted)
+                end
+              in
               unless_passed after;
               start builder fill;
               in_statement st (fun () ->
                   match arrived with
                   | { projections = [ Deref ]; root = Local pointer } ->
-                      let value = binding st ty in
+                      let value = default_value () in
                       mir_into st default value;
                       emit builder
                         (Assign (at pointer, Use (Address { place = value; writable = true })))
                   | place when mode = Own || trivial st ty -> mir_into st default place
                   | place ->
-                      let value = binding st ty in
+                      let value = default_value () in
                       mir_into st default value;
                       emit builder (Assign (place, Use (Copy value))));
               arrived

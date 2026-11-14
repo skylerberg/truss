@@ -197,17 +197,26 @@ let compiler =
    as for [pipe]'s two descriptors. The two are one type in C, and GCC 15
    reports the difference in spelling. [-Wtype-limits] is asked for by
    name: GCC's [-Wextra] has it and Clang's does not, so without it a
-   comparison that only GCC rejects passes wherever the tests use Clang. *)
+   comparison that only GCC rejects passes wherever the tests use Clang.
+   A local read before any write is an error, but not a local that the
+   compiler finds unwritten on some path: the code can take a path that no
+   run takes, such as the code after a [concurrent] block whose every
+   branch returns. Each compiler names that warning its own way, and Clang
+   rejects GCC's name. *)
 let strict =
-  [
-    "-Wall";
-    "-Wextra";
-    "-Wtype-limits";
-    "-Werror";
-    "-Wno-unused-parameter";
-    "-Wno-unused-but-set-variable";
-    "-Wno-array-parameter";
-  ]
+  lazy
+    [
+      "-Wall";
+      "-Wextra";
+      "-Wtype-limits";
+      "-Werror";
+      "-Wno-unused-parameter";
+      "-Wno-unused-but-set-variable";
+      "-Wno-array-parameter";
+      (if Substring.contains (Lazy.force compiler).identity "clang" then
+         "-Wno-sometimes-uninitialized"
+       else "-Wno-maybe-uninitialized");
+    ]
 
 let counter = ref 0
 
@@ -221,8 +230,8 @@ let cache = lazy (Build.cache (Database.objects_directory ()))
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
-let settings : Build.settings =
-  { build = Development; optimization = O1; extra = strict @ added_flags }
+let settings : Build.settings Lazy.t =
+  lazy { build = Development; optimization = O1; extra = Lazy.force strict @ added_flags }
 
 (* The thread counts that a program on threads is run with. More threads
    than cores makes them interleave more. A sanitizer slows a program
@@ -245,7 +254,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : instance 
     ]
   in
   match
-    Build.program (Lazy.force compiler) (Lazy.force cache) env settings
+    Build.program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
       ~files:[ List.map (fun instance -> Emit_c.fragment env (Code (instance env))) instances ]
       ~sources ~output
   with
@@ -286,7 +295,7 @@ let load_files ?results files =
       ~want:(fun lowering wanted ->
         Engine.set (Engine.of_context database) Compile.roots lowering
           (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
-      database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
+      database target_64 (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
 
 let load ?results text = load_files ?results [ (example_file, text) ]
 

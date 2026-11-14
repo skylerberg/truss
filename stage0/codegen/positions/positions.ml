@@ -15,7 +15,7 @@ let c_string text =
   Buffer.contents buffer
 
 let anchors_file target anchors =
-  Emit_c.runtime_declarations target
+  Emit_c.integer_typedefs target ^ Emit_c.anchor_struct
   ^ String.concat ""
       (List.map
          (fun anchor ->

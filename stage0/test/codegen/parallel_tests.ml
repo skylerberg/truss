@@ -105,7 +105,7 @@ let () =
          its own. *)
       List.iter
         (fun text -> if not (contains c text) then fail "no %s in:\n%s" text c)
-        [ "f_capture0"; "f_capture1"; "l6_own = 0;" ];
+        [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
       if contains c "f_capture2" then fail "a function reaches three locals:\n%s" c;
       expect_status 20 [ printed instance ])
 

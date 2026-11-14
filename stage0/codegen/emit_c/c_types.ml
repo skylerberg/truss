@@ -68,7 +68,8 @@ type context = {
   mutable prototypes : (string * string) list;  (** Symbol and declaration, most recent first *)
   mutable anchors : (string * Path.t) list;
   mutable references : key list option;  (** While defining a key, the keys its text names *)
-  mutable helpers_used : string list;
+  mutable declarations_used : string list;
+      (** The runtime's declarations and helpers the code names *)
   mutable statics : string list;
       (** Static arrays and blocks that data refers to, most recent first *)
   mutable instances : Instance.key list;  (** The instances the code names, most recent first *)
@@ -89,7 +90,7 @@ let new_context env prefix =
     prototypes = [];
     anchors = [];
     references = None;
-    helpers_used = [];
+    declarations_used = [];
     statics = [];
     instances = [];
     called = [];
@@ -102,9 +103,11 @@ let refer context key =
   if not (List.exists (Instance.equal key) context.instances) then
     context.instances <- key :: context.instances
 
-let use_helper context name =
-  if not (List.mem name context.helpers_used) then
-    context.helpers_used <- name :: context.helpers_used;
+(* Records that the code names one of the runtime's declarations or helpers,
+   and gives its name. *)
+let use_declaration context name =
+  if not (List.mem name context.declarations_used) then
+    context.declarations_used <- name :: context.declarations_used;
   name
 
 let register context key =
@@ -268,11 +271,11 @@ and define_text context key =
         (Printf.sprintf "typedef %s (*%s)(%s);\n" result (key_name key)
            (signature_parameters context "" signature.parameters None))
   | Evidence nested_index ->
+      let evidence = use_declaration context "struct t_evidence" in
       Struct
         {
           body =
-            Printf.sprintf "  struct t_evidence evidence;\n  const struct t_evidence *outer[%d];\n"
-              nested_index;
+            Printf.sprintf "  %s evidence;\n  const %s *outer[%d];\n" evidence evidence nested_index;
           holds = [];
         }
   | Environment _ ->

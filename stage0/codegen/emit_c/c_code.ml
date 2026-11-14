@@ -13,13 +13,15 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
   in
   let all = String.concat ", " (List.map fst arguments) in
   let float_builtin name = if scalar 0 = Float32 then name ^ "f" else name in
+  let runtime symbol = use_declaration context symbol ^ "(" ^ all ^ ")" in
+  let evidence () = use_declaration context "struct t_evidence" in
   match intrinsic with
-  | Allocate -> "t_runtime_allocate(" ^ all ^ ")"
-  | Reallocate -> "t_runtime_reallocate(" ^ all ^ ")"
-  | Free -> "t_runtime_free(" ^ all ^ ")"
+  | Allocate -> runtime "t_runtime_allocate"
+  | Reallocate -> runtime "t_runtime_reallocate"
+  | Free -> runtime "t_runtime_free"
   | Copy_bytes -> "__builtin_memcpy(" ^ all ^ ")"
   | Move_bytes -> "__builtin_memmove(" ^ all ^ ")"
-  | Compare_bytes -> use_helper context "t_compare_bytes" ^ "(" ^ all ^ ")"
+  | Compare_bytes -> runtime "t_compare_bytes"
   | Add_overflow -> "((uint8_t)__builtin_add_overflow(" ^ all ^ "))"
   | Subtract_overflow -> "((uint8_t)__builtin_sub_overflow(" ^ all ^ "))"
   | Multiply_overflow -> "((uint8_t)__builtin_mul_overflow(" ^ all ^ "))"
@@ -61,49 +63,35 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
   | Round_even -> Printf.sprintf "%s(%s)" (float_builtin "__builtin_roundeven") all
   | Float_bits ->
       Printf.sprintf "%s(%s)"
-        (use_helper context (if scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
+        (use_declaration context
+           (if scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
         all
   | Float_from_bits ->
       Printf.sprintf "%s(%s)"
-        (use_helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
+        (use_declaration context
+           (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
-  | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
+  | Run_test -> runtime "t_runtime_run_test"
   | Coroutine_start ->
-      Printf.sprintf
-        "t_runtime_coroutine_start((void (*)(void *, uint64_t))%s.f_code, (void \
-         *)%s.f_environment, %s)"
+      Printf.sprintf "%s((void (*)(void *, uint64_t))%s.f_code, (void *)%s.f_environment, %s)"
+        (use_declaration context "t_runtime_coroutine_start")
         (argument 0) (argument 0) (argument 1)
-  | Coroutine_resume -> "t_runtime_coroutine_resume(" ^ all ^ ")"
-  | Coroutine_suspend -> "t_runtime_coroutine_suspend()"
+  | Coroutine_resume -> runtime "t_runtime_coroutine_resume"
+  | Coroutine_suspend -> runtime "t_runtime_coroutine_suspend"
   | Tasks_spawn ->
-      Printf.sprintf
-        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t))%s.f_code, (void \
-         *)%s.f_environment, %s)"
+      Printf.sprintf "%s(%s, (void (*)(void *, uint64_t))%s.f_code, (void *)%s.f_environment, %s)"
+        (use_declaration context "t_runtime_tasks_spawn")
         (argument 0) (argument 1) (argument 1) (argument 2)
-  | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
-    as shared ->
-      (* Declared in the C files that call them, so that the C of every
-         other instance stays the same. *)
-      let symbol, result, parameters =
-        match shared with
-        | Shared_allocate ->
-            ("t_runtime_shared_allocate", "void *", "t_usize size, t_usize alignment")
-        | Shared_retain -> ("t_runtime_shared_retain", "void ", "void *value")
-        | Shared_release -> ("t_runtime_shared_release", "uint8_t ", "void *value")
-        | Shared_free -> ("t_runtime_shared_free", "void ", "void *value")
-        | Shared_lock -> ("t_runtime_shared_lock", "void ", "void *value")
-        | _ -> ("t_runtime_shared_unlock", "void ", "void *value")
-      in
-      declare_prototype context symbol (Printf.sprintf "%s%s(%s);\n" result symbol parameters);
-      symbol ^ "(" ^ all ^ ")"
-  | (Blocking_begin | Blocking_end) as blocking ->
-      let symbol =
-        if blocking = Blocking_begin then "t_runtime_blocking_begin" else "t_runtime_blocking_end"
-      in
-      declare_prototype context symbol (Printf.sprintf "void %s(void);\n" symbol);
-      symbol ^ "()"
-  | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
-  | Live_blocks -> "t_runtime_live_blocks()"
+  | Shared_allocate -> runtime "t_runtime_shared_allocate"
+  | Shared_retain -> runtime "t_runtime_shared_retain"
+  | Shared_release -> runtime "t_runtime_shared_release"
+  | Shared_free -> runtime "t_runtime_shared_free"
+  | Shared_lock -> runtime "t_runtime_shared_lock"
+  | Shared_unlock -> runtime "t_runtime_shared_unlock"
+  | Blocking_begin -> runtime "t_runtime_blocking_begin"
+  | Blocking_end -> runtime "t_runtime_blocking_end"
+  | Report_tests_to -> runtime "t_runtime_report_tests_to"
+  | Live_blocks -> runtime "t_runtime_live_blocks"
   | Environment ->
       declare_prototype context "environ" "extern char **environ;\n";
       "((void *)environ)"
@@ -113,7 +101,7 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
       let outer =
         List.mapi
           (fun position (text, _) ->
-            Printf.sprintf "%s->outer[%d] = (const struct t_evidence *)%s, " slot position text)
+            Printf.sprintf "%s->outer[%d] = (const %s *)%s, " slot position (evidence ()) text)
           (List.filteri (fun position _ -> position >= 3) arguments)
       in
       Printf.sprintf
@@ -121,11 +109,10 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
          %s%s->evidence.outer = %s->outer)"
         slot (argument 1) slot (argument 2) (String.concat "" outer) slot slot
   | Evidence_implementation ->
-      Printf.sprintf "((const struct t_evidence *)%s)->implementation" (argument 0)
+      Printf.sprintf "((const %s *)%s)->implementation" (evidence ()) (argument 0)
   | Program_argument -> Printf.sprintf "((void *)((char **)%s)[%s])" (argument 0) (argument 1)
   | Evidence_outer ->
-      Printf.sprintf "((void *)((const struct t_evidence *)%s)->outer[%s])" (argument 0)
-        (argument 1)
+      Printf.sprintf "((void *)((const %s *)%s)->outer[%s])" (evidence ()) (argument 0) (argument 1)
 
 let call_c context fc (target : Lowered.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in
@@ -203,8 +190,9 @@ let call_c context fc (target : Lowered.target) arguments =
       let result =
         match signature.result with None -> "void" | Some ty -> c_ty context fc.symbol ty
       in
-      Printf.sprintf "((%s (*)(%s))((const struct t_evidence *)%s)->table[%d])(%s)" result
+      Printf.sprintf "((%s (*)(%s))((const %s *)%s)->table[%d])(%s)" result
         (signature_parameters context fc.symbol signature.parameters None)
+        (use_declaration context "struct t_evidence")
         evidence slot
         (String.concat ", " (evidence :: List.map fst arguments))
 
@@ -242,7 +230,9 @@ let statement_c context fc buffer (statement : Lowered.statement) =
           | Some (Allocating { block; fill; value }) ->
               let name = key_name block in
               line "{";
-              line "  %s *block = t_runtime_allocate(sizeof(%s), _Alignof(%s));" name name name;
+              line "  %s *block = %s(sizeof(%s), _Alignof(%s));" name
+                (use_declaration context "t_runtime_allocate")
+                name name;
               line "  *block = %s;" fill;
               line "  %s = %s;" target (value "block");
               line "}"))
@@ -285,13 +275,17 @@ let statement_c context fc buffer (statement : Lowered.statement) =
         | Some (text, _) -> text
         | None -> bug "an echo of nothing"
       in
-      line "t_runtime_echo(%s, %s, %s, %d, %d);" (operand text) (operand length)
+      line "%s(%s, %s, %s, %d, %d);"
+        (use_declaration context "t_runtime_echo")
+        (operand text) (operand length)
         (anchor_c context site.definition)
         site.line site.column
   | Free_block { place; variant } -> (
       match place_c context fc place with
       | Some (text, Value sum) ->
-          line "t_runtime_free(%s);" (block_pointer context text sum variant)
+          line "%s(%s);"
+            (use_declaration context "t_runtime_free")
+            (block_pointer context text sum variant)
       | _ -> bug "a block of a place that is not a sum type")
   | Fork { branches } ->
       let operand argument =
@@ -300,7 +294,9 @@ let statement_c context fc buffer (statement : Lowered.statement) =
         | None -> bug "an environment of zero size"
       in
       line "{";
-      line "  const struct t_branch branches[%d] = { %s };" (List.length branches)
+      line "  const %s branches[%d] = { %s };"
+        (use_declaration context "struct t_branch")
+        (List.length branches)
         (String.concat ", "
            (List.map
               (fun (nested, environment) ->
@@ -308,7 +304,9 @@ let statement_c context fc buffer (statement : Lowered.statement) =
                   (function_ref_symbol fc (Nested nested))
                   (operand environment))
               branches));
-      line "  t_runtime_parallel(branches, %d);" (List.length branches);
+      line "  %s(branches, %d);"
+        (use_declaration context "t_runtime_parallel")
+        (List.length branches);
       line "}"
   | Fork_range { body; environment; first; last } ->
       let operand argument =
@@ -316,13 +314,14 @@ let statement_c context fc buffer (statement : Lowered.statement) =
         | Some (text, _) -> text
         | None -> bug "an operand of zero size"
       in
-      line "t_runtime_parallel_range(&%s, (void *)%s, %s, %s);"
+      line "%s(&%s, (void *)%s, %s, %s);"
+        (use_declaration context "t_runtime_parallel_range")
         (function_ref_symbol fc (Nested body))
         (operand environment) (operand first) (operand last)
 
-let unreachable_c _ = "T_UNREACHABLE();"
+let unreachable_c context = use_declaration context "T_UNREACHABLE" ^ "();"
 
-let terminator_c context fc buffer (terminator : Lowered.terminator) =
+let terminator_c context fc ~label buffer (terminator : Lowered.terminator) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
@@ -332,17 +331,18 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
     | None -> bug "an operand of zero size"
   in
   let default = function
-    | Some block -> Printf.sprintf "goto b%d;" block
+    | Some block -> Printf.sprintf "goto %s;" (label block)
     | None -> unreachable_c context
   in
   match terminator with
-  | Goto block -> line "goto b%d;" block
+  | Goto block -> line "goto %s;" (label block)
   | Switch { value; cases; default = otherwise } ->
       let text, ty = operand value in
       let c_type = scalar_c context (scalar_of context ty) in
       line "switch (%s) {" text;
       List.iter
-        (fun (value, block) -> line "case (%s)%sULL: goto b%d;" c_type (Z.to_string value) block)
+        (fun (value, block) ->
+          line "case (%s)%sULL: goto %s;" c_type (Z.to_string value) (label block))
         cases;
       line "default: %s" (default otherwise);
       line "}"
@@ -350,7 +350,7 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
       match place_c context fc place with
       | None -> (
           match cases with
-          | (_, block) :: _ -> line "goto b%d;" block
+          | (_, block) :: _ -> line "goto %s;" (label block)
           | [] -> line "%s" (default otherwise))
       | Some (text, Value sum) -> (
           let layout = layout context sum in
@@ -360,7 +360,7 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
               List.iter
                 (fun (variant, block) ->
                   match Memory_layout.discriminant layout variant with
-                  | Tag_value value -> line "case %sULL: goto b%d;" (Z.to_string value) block
+                  | Tag_value value -> line "case %sULL: goto %s;" (Z.to_string value) (label block)
                   | _ -> bug "a tag")
                 cases;
               line "default: %s" (default otherwise);
@@ -368,7 +368,7 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
           | _ ->
               List.iter
                 (fun (variant, block) ->
-                  line "if (%s) goto b%d;" (is_variant_c context text sum variant) block)
+                  line "if (%s) goto %s;" (is_variant_c context text sum variant) (label block))
                 cases;
               line "%s" (default otherwise))
       | Some _ -> bug "a variant switch on a place that is not a value")
@@ -384,10 +384,11 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
           (Todo, { definition = site.definition; line = site.line; column = site.column })
           :: context.failures;
       line "%s(%s, %s, %s, %d, %d);"
-        (match failure with
-        | Panic -> "t_runtime_panic"
-        | Assertion -> "t_runtime_assertion_failed"
-        | Todo -> "t_runtime_todo")
+        (use_declaration context
+           (match failure with
+           | Panic -> "t_runtime_panic"
+           | Assertion -> "t_runtime_assertion_failed"
+           | Todo -> "t_runtime_todo"))
         (fst (operand message))
         (fst (operand length))
         (anchor_c context site.definition)
