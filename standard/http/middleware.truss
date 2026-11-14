@@ -302,3 +302,71 @@ public fn rate_limit[capability Granted](
     }
   }
 }
+
+public type CsrfPolicy(trusted_origins: List[String] = [])
+  derives Equal
+
+fn is_safe_method(method: Method) -> Bool {
+  method == Method.Get || method == Method.Head || method == Method.Options
+}
+
+fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
+  for trusted in policy.trusted_origins {
+    if same_name(trusted.slice(), second: origin) {
+      return true
+    }
+  }
+  false
+}
+
+fn host_of_origin(origin: StringSlice) -> Option[StringSlice] {
+  let rest = match origin.find("://") {
+    Some(at) => origin.split_at(at).second.strip_prefix("://").unwrap_or("")
+    None => return None
+  }
+  if rest.is_empty() || rest.contains("/") { None } else { Some(rest) }
+}
+
+fn is_cross_origin(request: Request, policy: CsrfPolicy) -> Bool {
+  if is_safe_method(request.method) {
+    return false
+  }
+  match request.header("Sec-Fetch-Site") {
+    Some(site) => {
+      if same_name(site, second: "same-origin") || same_name(site, second: "none") {
+        return false
+      }
+      return match request.header("Origin") {
+        Some(origin) => !is_trusted_origin(policy, origin: origin)
+        None => true
+      }
+    }
+    None => {}
+  }
+  let origin = match request.header("Origin") {
+    Some(origin) => origin
+    None => return false
+  }
+  if is_trusted_origin(policy, origin: origin) {
+    return false
+  }
+  match host_of_origin(origin), request.header("Host") {
+    Some(origin_host), Some(host) => !same_name(origin_host, second: host)
+    _, _ => true
+  }
+}
+
+public fn csrf[capability Granted](
+  request: own Request,
+  responder: mut Responder,
+  policy: CsrfPolicy,
+  next: (fn(own Request, mut Responder) uses Granted),
+)
+  uses Tasks, Granted
+{
+  if is_cross_origin(request, policy: policy) {
+    let _ = mut responder.send(Response.text("cross-origin request refused", status: Status.forbidden))
+    return
+  }
+  next(own request, mut responder)
+}
