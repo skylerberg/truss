@@ -1,0 +1,658 @@
+use standard::checksum
+use standard::intrinsic
+
+type BitWriter(bytes: List[UInt8], pending: UInt64, count: UInt32)
+
+fn BitWriter.write(mut self, value: UInt32, bits: UInt32)
+  requires bits <= 32
+{
+  let used = self.count & 7
+  let mask: UInt64 = (1 << intrinsic::convert[UInt32, UInt64](bits)) - 1
+  var pending = (self.pending & 255) | ((intrinsic::convert[UInt32, UInt64](value) & mask) << intrinsic::convert[UInt32, UInt64](used))
+  var count = used + bits
+  while count >= 8
+    invariant count <= 39
+    decreases count
+  {
+    mut self.bytes.push(intrinsic::convert(pending & 255))
+    pending = pending >> 8
+    count -= 8
+  }
+  self.pending = pending & 255
+  self.count = count
+}
+
+fn BitWriter.finish(own self) -> List[UInt8] {
+  var bytes = own self.bytes
+  let marker: UInt64 = 1 << intrinsic::convert[UInt32, UInt64](self.count & 7)
+  mut bytes.push(intrinsic::convert((self.pending | marker) & 255))
+  own bytes
+}
+
+type FseEncoder(table: FseTable, sources: List[UInt16], size: USize)
+
+let no_source: UInt16 = 65535
+
+fn encoder_of(counts: Slice[Int16], log: UInt32) -> Option[FseEncoder] {
+  let table = match build_fse(counts, log: log) {
+    Ok(table) => own table
+    Err(_) => return None
+  }
+  let size = table.entries.length()
+  var sources: List[UInt16] = List.filled(no_source, count: counts.length().saturating_multiply(size))
+  for state in 0..size {
+    let entry = table.entries[state]
+    let symbol: USize = intrinsic::convert(entry.symbol)
+    let width: USize = 1 << intrinsic::convert[UInt32, USize](entry.bits)
+    let baseline: USize = intrinsic::convert(entry.baseline)
+    for step in 0..width {
+      let target = baseline.saturating_add(step)
+      let slot = symbol.saturating_multiply(size).saturating_add(target)
+      if target < size && slot < sources.length() && state < 65535 {
+        sources[slot] = intrinsic::convert(state)
+      }
+    }
+  }
+  Some(FseEncoder(table: own table, sources: own sources, size: size))
+}
+
+fn FseEncoder.source(self, symbol: USize, target: USize) -> Option[USize] {
+  let slot = symbol.saturating_multiply(self.size).saturating_add(target)
+  if target >= self.size || slot >= self.sources.length() || self.sources[slot] == no_source {
+    return None
+  }
+  Some(intrinsic::convert(self.sources[slot]))
+}
+
+fn FseEncoder.start(self, symbol: USize) -> Option[USize] {
+  self.source(symbol, target: 0)
+}
+
+fn FseEncoder.step(self, symbol: USize, next: USize, writer: mut BitWriter) -> Option[USize] {
+  let state = self.source(symbol, target: next)?
+  if state >= self.table.entries.length() {
+    return None
+  }
+  let entry = self.table.entries[state]
+  let baseline: USize = intrinsic::convert(entry.baseline)
+  if next < baseline || next - baseline > 65535 {
+    return None
+  }
+  mut writer.write(intrinsic::convert(next - baseline), bits: entry.bits)
+  Some(state)
+}
+
+type LzSequence(literal_length: USize, match_length: USize, offset_value: USize)
+
+type Code(symbol: USize, extra: UInt32, bits: UInt32)
+
+fn code_of(value: USize, baselines: Slice[UInt32], extra_bits: Slice[UInt32]) -> Option[Code] {
+  var symbol = baselines.length()
+  for index in 0..baselines.length() {
+    if intrinsic::convert[UInt32, USize](baselines[index]) <= value {
+      symbol = index
+    }
+  }
+  if symbol >= baselines.length() || symbol >= extra_bits.length() {
+    return None
+  }
+  let bits = extra_bits[symbol]
+  let baseline: USize = intrinsic::convert(baselines[symbol])
+  if baseline > value || value - baseline >= 65536 || bits > 16 {
+    return None
+  }
+  let extra = value - baseline
+  if extra >= 65536 {
+    return None
+  }
+  Some(Code(symbol: symbol, extra: intrinsic::convert(extra), bits: bits))
+}
+
+fn offset_code_of(offset_value: USize) -> Option[Code] {
+  if offset_value == 0 || offset_value >= 536870912 {
+    return None
+  }
+  let symbol = highest_bit(intrinsic::convert(offset_value))
+  let base: USize = 1 << intrinsic::convert[UInt32, USize](symbol)
+  if base > offset_value {
+    return None
+  }
+  Some(Code(symbol: intrinsic::convert(symbol), extra: intrinsic::convert(offset_value - base), bits: symbol))
+}
+
+type Codes(literal: Code, matched: Code, offset: Code)
+
+type Encoders(literal: FseEncoder, matched: FseEncoder, offset: FseEncoder)
+
+fn encoders() -> Option[Encoders] {
+  Some(Encoders(
+    literal: encoder_of(literal_length_default[..], log: 6)?,
+    matched: encoder_of(match_length_default[..], log: 6)?,
+    offset: encoder_of(offset_default[..], log: 5)?,
+  ))
+}
+
+fn codes_of(sequence: LzSequence) -> Option[Codes] {
+  Some(Codes(
+    literal: code_of(sequence.literal_length, baselines: literal_length_baselines[..], extra_bits: literal_length_bits[..])?,
+    matched: code_of(sequence.match_length, baselines: match_length_baselines[..], extra_bits: match_length_bits[..])?,
+    offset: offset_code_of(sequence.offset_value)?,
+  ))
+}
+
+fn encode_sequences(sequences: Slice[LzSequence], encoders: Encoders) -> Option[List[UInt8]] {
+  if sequences.is_empty() {
+    return None
+  }
+  var codes: List[Codes] = []
+  for sequence in sequences {
+    mut codes.push(codes_of(sequence)?)
+  }
+  if codes.is_empty() {
+    return None
+  }
+  var writer = BitWriter(bytes: [], pending: 0, count: 0)
+  let last = codes[codes.length() - 1]
+  var literal_state = encoders.literal.start(last.literal.symbol)?
+  var match_state = encoders.matched.start(last.matched.symbol)?
+  var offset_state = encoders.offset.start(last.offset.symbol)?
+  var index = codes.length()
+  while index > 0
+    invariant index <= codes.length()
+    decreases index
+  {
+    index -= 1
+    let code = codes[index]
+    if code.literal.bits > 16 || code.matched.bits > 16 || code.offset.bits > 31 {
+      return None
+    }
+    if index + 1 < codes.length() {
+      offset_state = encoders.offset.step(code.offset.symbol, next: offset_state, writer: mut writer)?
+      match_state = encoders.matched.step(code.matched.symbol, next: match_state, writer: mut writer)?
+      literal_state = encoders.literal.step(code.literal.symbol, next: literal_state, writer: mut writer)?
+    }
+    mut writer.write(code.literal.extra, bits: code.literal.bits)
+    mut writer.write(code.matched.extra, bits: code.matched.bits)
+    mut writer.write(code.offset.extra, bits: code.offset.bits)
+  }
+  if match_state >= 65536 || offset_state >= 65536 || literal_state >= 65536 {
+    return None
+  }
+  mut writer.write(intrinsic::convert(match_state), bits: encoders.matched.table.log)
+  mut writer.write(intrinsic::convert(offset_state), bits: encoders.offset.table.log)
+  mut writer.write(intrinsic::convert(literal_state), bits: encoders.literal.table.log)
+  Some(own writer.finish())
+}
+
+type Parse(sequences: List[LzSequence], literals: List[UInt8], last_offset: USize)
+
+let hash_bits: UInt32 = 15
+
+let match_minimum: USize = 4
+
+let window_size: USize = 1048576
+
+let chain_depth: USize = 16
+
+fn hash_at(input: Slice[UInt8], at: USize) -> USize
+  ensures result < 32768
+{
+  let word: UInt32 = intrinsic::convert(u32_at(input, at: at))
+  intrinsic::convert((word.wrapping_multiply(2654435761) >> (32 - hash_bits)) & 32767)
+}
+
+fn matching_length(input: Slice[UInt8], earlier: USize, later: USize, end: USize) -> USize {
+  var length: USize = 0
+  while later.saturating_add(length) < end && later.saturating_add(length) < input.length() && earlier.saturating_add(length) < later
+    decreases end - later.saturating_add(length)
+  {
+    if input[earlier + length] != input[later + length] {
+      break
+    }
+    length += 1
+  }
+  length
+}
+
+type MatchFinder(heads: List[USize], chain: List[USize])
+
+fn finder_for(input: Slice[UInt8]) -> MatchFinder {
+  let chain_size = if input.length() < window_size { input.length() } else { window_size }
+  MatchFinder(heads: List.filled(0, count: 32768), chain: List.filled(0, count: chain_size))
+}
+
+fn MatchFinder.insert(mut self, input: Slice[UInt8], position: USize) {
+  let hash = hash_at(input, at: position)
+  if hash < self.heads.length() && !self.chain.is_empty() {
+    let slot = position % self.chain.length()
+    if slot < self.chain.length() {
+      self.chain[slot] = self.heads[hash]
+    }
+    self.heads[hash] = position.saturating_add(1)
+  }
+}
+
+type Candidate(length: USize, offset: USize)
+
+fn MatchFinder.longest(self, input: Slice[UInt8], position: USize, end: USize) -> Candidate {
+  let hash = hash_at(input, at: position)
+  var best = Candidate(length: 0, offset: 0)
+  if hash >= self.heads.length() || self.chain.is_empty() {
+    return best
+  }
+  var next = self.heads[hash]
+  var depth: USize = 0
+  while next > 0 && depth < chain_depth
+    decreases chain_depth - depth
+  {
+    depth += 1
+    let earlier = next - 1
+    if earlier >= position || position - earlier >= window_size {
+      break
+    }
+    let length = matching_length(input, earlier: earlier, later: position, end: end)
+    if length > best.length {
+      best = Candidate(length: length, offset: position - earlier)
+    }
+    let slot = earlier % self.chain.length()
+    next = if slot < self.chain.length() { self.chain[slot] } else { 0 }
+  }
+  best
+}
+
+fn parse_block(input: Slice[UInt8], start: USize, end: USize, finder: mut MatchFinder, last_offset: USize) -> Parse {
+  var sequences: List[LzSequence] = []
+  var literals: List[UInt8] = []
+  var repeated = last_offset
+  var position = start
+  var anchor = start
+  while position.saturating_add(match_minimum) <= end && end <= input.length()
+    invariant anchor <= position
+    decreases end - position
+  {
+    let candidate = finder.longest(input, position: position, end: end)
+    mut finder.insert(input, position: position)
+    if candidate.length < match_minimum || candidate.offset == 0 {
+      position += 1
+      continue
+    }
+    if position.saturating_add(1 + match_minimum) <= end {
+      let later = finder.longest(input, position: position + 1, end: end)
+      if later.length > candidate.length {
+        position += 1
+        continue
+      }
+    }
+    mut literals.append_slice(input[anchor..position])
+    let literal_length = position - anchor
+    let offset_value = if literal_length > 0 && candidate.offset == repeated { 1 } else { candidate.offset.saturating_add(3) }
+    repeated = candidate.offset
+    mut sequences.push(LzSequence(literal_length: literal_length, match_length: candidate.length, offset_value: offset_value))
+    let next = position.saturating_add(candidate.length)
+    var inserted = position.saturating_add(1)
+    while inserted < next && inserted.saturating_add(match_minimum) <= end
+      decreases next - inserted
+    {
+      mut finder.insert(input, position: inserted)
+      inserted += 1
+    }
+    position = if next > end { end } else { next }
+    anchor = position
+  }
+  if anchor < end && end <= input.length() {
+    mut literals.append_slice(input[anchor..end])
+  }
+  Parse(sequences: own sequences, literals: own literals, last_offset: repeated)
+}
+
+fn write_literals_header(output: mut List[UInt8], size: USize) {
+  if size < 32 {
+    mut output.push(intrinsic::convert((size << 3) & 255))
+  } else if size < 4096 {
+    mut output.push(intrinsic::convert(((size << 4) | 4) & 255))
+    mut output.push(intrinsic::convert((size >> 4) & 255))
+  } else {
+    mut output.push(intrinsic::convert(((size << 4) | 12) & 255))
+    mut output.push(intrinsic::convert((size >> 4) & 255))
+    mut output.push(intrinsic::convert((size >> 12) & 255))
+  }
+}
+
+fn write_sequence_count(output: mut List[UInt8], count: USize) {
+  if count < 128 {
+    mut output.push(intrinsic::convert(count))
+  } else if count < 0x7F00 {
+    mut output.push(intrinsic::convert(((count >> 8) + 128) & 255))
+    mut output.push(intrinsic::convert(count & 255))
+  } else {
+    let rest = count.saturating_subtract(0x7F00)
+    mut output.push(255)
+    mut output.push(intrinsic::convert(rest & 255))
+    mut output.push(intrinsic::convert((rest >> 8) & 255))
+  }
+}
+
+fn compressed_block(parse: Parse, encoders: Encoders) -> Option[List[UInt8]] {
+  var block: List[UInt8] = []
+  write_literals_header(mut block, size: parse.literals.length())
+  mut block.append_slice(parse.literals.slice())
+  if parse.literals.length() >= 64 {
+    if huffman_literals(parse.literals.slice()) is Some(coded) && coded.length() < block.length() {
+      block = coded.copy()
+    }
+  }
+  write_sequence_count(mut block, count: parse.sequences.length())
+  if !parse.sequences.is_empty() {
+    mut block.push(0)
+    mut block.append_slice(encode_sequences(parse.sequences.slice(), encoders: encoders)?.slice())
+  }
+  Some(own block)
+}
+
+fn write_little_endian(output: mut List[UInt8], value: UInt64, count: USize) {
+  for index in 0..count {
+    if index < 8 {
+      mut output.push(intrinsic::convert((value >> (8 * intrinsic::convert[USize, UInt64](index))) & 255))
+    }
+  }
+}
+
+fn write_block_header(output: mut List[UInt8], size: USize, kind: USize, is_last: Bool) {
+  let header: UInt64 = (intrinsic::convert[USize, UInt64](size & 0x1FFFFF) << 3) | (intrinsic::convert[USize, UInt64](kind & 3) << 1) | (if is_last { 1 } else { 0 })
+  write_little_endian(mut output, value: header, count: 3)
+}
+
+fn is_one_byte(bytes: Slice[UInt8]) -> Bool {
+  for byte in bytes {
+    if byte != bytes[0] {
+      return false
+    }
+  }
+  true
+}
+
+public fn compress(input: Slice[UInt8]) -> List[UInt8] {
+  var output: List[UInt8] = []
+  write_little_endian(mut output, value: intrinsic::convert(frame_magic), count: 4)
+  let size: UInt64 = intrinsic::convert(input.length())
+  let size_flag: UInt64 = if size < 256 { 0 } else if size < 65792 { 1 } else if size <= 4294967295 { 2 } else { 3 }
+  mut output.push(intrinsic::convert(((size_flag << 6) | 32 | 4) & 255))
+  if size_flag == 0 {
+    write_little_endian(mut output, value: size, count: 1)
+  } else if size_flag == 1 {
+    write_little_endian(mut output, value: size - 256, count: 2)
+  } else if size_flag == 2 {
+    write_little_endian(mut output, value: size, count: 4)
+  } else {
+    write_little_endian(mut output, value: size, count: 8)
+  }
+  if input.is_empty() {
+    write_block_header(mut output, size: 0, kind: 0, is_last: true)
+  }
+  let tables = encoders()
+  var finder = finder_for(input)
+  var last_offset: USize = 1
+  var start: USize = 0
+  while start < input.length()
+    decreases input.length() - start
+  {
+    let end = if input.length() - start > block_maximum { start + block_maximum } else { input.length() }
+    let is_last = end == input.length()
+    let content = input[start..end]
+    if content.length() > 1 && is_one_byte(content) {
+      write_block_header(mut output, size: content.length(), kind: 1, is_last: is_last)
+      mut output.push(content[0])
+    } else {
+      let parse = parse_block(input, start: start, end: end, finder: mut finder, last_offset: last_offset)
+      let block = match tables {
+        Some(encoders) => compressed_block(parse, encoders: encoders)
+        None => None
+      }
+      match block {
+        Some(compressed) if compressed.length() < content.length() => {
+          write_block_header(mut output, size: compressed.length(), kind: 2, is_last: is_last)
+          mut output.append_slice(compressed.slice())
+          last_offset = parse.last_offset
+        }
+        _ => {
+          write_block_header(mut output, size: content.length(), kind: 0, is_last: is_last)
+          mut output.append_slice(content)
+        }
+      }
+    }
+    start = end
+  }
+  write_little_endian(mut output, value: checksum::xxh64(input) & 0xFFFFFFFF, count: 4)
+  own output
+}
+
+let huffman_maximum_bits: UInt32 = 11
+
+let direct_weight_symbols: USize = 128
+
+fn tree_lengths(counts: Slice[UInt64]) -> List[UInt32] {
+  var weights: List[UInt64] = []
+  var parents: List[USize] = []
+  var is_alive: List[Bool] = []
+  for count in counts {
+    mut weights.push(count)
+    mut parents.push(USize.maximum)
+    mut is_alive.push(count > 0)
+  }
+  var alive: USize = 0
+  for count in counts {
+    if count > 0 {
+      alive = alive.saturating_add(1)
+    }
+  }
+  var rounds: USize = 0
+  while alive > 1 && rounds < counts.length()
+    decreases counts.length() - rounds
+  {
+    rounds += 1
+    var first = USize.maximum
+    var second = USize.maximum
+    for node in 0..weights.length() {
+      if node < is_alive.length() && is_alive[node] {
+        if first >= weights.length() || weights[node] < weights[first] {
+          second = first
+          first = node
+        } else if second >= weights.length() || weights[node] < weights[second] {
+          second = node
+        }
+      }
+    }
+    if first >= weights.length() || second >= weights.length() || first >= is_alive.length() || second >= is_alive.length() || first >= parents.length() || second >= parents.length() {
+      break
+    }
+    let joined = weights.length()
+    mut weights.push(weights[first].saturating_add(weights[second]))
+    mut parents.push(USize.maximum)
+    mut is_alive.push(true)
+    parents[first] = joined
+    parents[second] = joined
+    is_alive[first] = false
+    is_alive[second] = false
+    alive -= 1
+  }
+  var lengths: List[UInt32] = []
+  for symbol in 0..counts.length() {
+    var depth: UInt32 = 0
+    var node = symbol
+    while node < parents.length() && parents[node] < parents.length() && depth < 64
+      decreases 64 - depth
+    {
+      node = parents[node]
+      depth += 1
+    }
+    mut lengths.push(if counts[symbol] > 0 && depth == 0 { 1 } else { depth })
+  }
+  lengths
+}
+
+fn limited_lengths(counts: Slice[UInt64]) -> List[UInt32] {
+  var scaled = counts.to_list()
+  var rounds: USize = 0
+  while rounds < 64
+    decreases 64 - rounds
+  {
+    rounds += 1
+    let lengths = tree_lengths(scaled.slice())
+    var deepest: UInt32 = 0
+    for length in lengths {
+      if length > deepest {
+        deepest = length
+      }
+    }
+    if deepest <= huffman_maximum_bits {
+      return lengths
+    }
+    var halved: List[UInt64] = []
+    for count in scaled {
+      mut halved.push(if count > 0 { (count >> 1) | 1 } else { 0 })
+    }
+    scaled = own halved
+  }
+  []
+}
+
+type HuffmanCode(value: UInt32, length: UInt32)
+
+type HuffmanEncoding(description: List[UInt8], codes: List[HuffmanCode])
+
+fn huffman_encoding(literals: Slice[UInt8]) -> Option[HuffmanEncoding] {
+  var counts: List[UInt64] = List.filled(0, count: 256)
+  for literal in literals {
+    let index: USize = intrinsic::convert(literal)
+    if index < counts.length() {
+      counts[index] = counts[index].saturating_add(1)
+    }
+  }
+  var last: USize = 0
+  var distinct: USize = 0
+  for symbol in 0..counts.length() {
+    if counts[symbol] > 0 {
+      last = symbol
+      distinct = distinct.saturating_add(1)
+    }
+  }
+  if distinct < 2 || last > direct_weight_symbols || last >= counts.length() {
+    return None
+  }
+  let lengths = limited_lengths(counts[..last + 1])
+  if lengths.length() != last + 1 {
+    return None
+  }
+  var deepest: UInt32 = 0
+  for length in lengths {
+    if length > deepest {
+      deepest = length
+    }
+  }
+  if deepest == 0 || deepest > huffman_maximum_bits {
+    return None
+  }
+  var weights: List[UInt32] = []
+  for length in lengths {
+    mut weights.push(if length == 0 || length > deepest { 0 } else { deepest + 1 - length })
+  }
+  var description: List[UInt8] = []
+  mut description.push(intrinsic::convert((127 + last) & 255))
+  var index: USize = 0
+  while index < last
+    decreases last - index
+  {
+    let high = if index < weights.length() { weights[index] } else { 0 }
+    let low = if index + 1 < last && index + 1 < weights.length() { weights[index + 1] } else { 0 }
+    mut description.push(intrinsic::convert(((high << 4) | low) & 255))
+    index += 2
+  }
+  var ranks: List[USize] = List.filled(0, count: 13)
+  for weight in weights {
+    let slot: USize = intrinsic::convert(weight)
+    if slot < ranks.length() {
+      ranks[slot] = ranks[slot].saturating_add(1)
+    }
+  }
+  var starts: List[USize] = List.filled(0, count: 13)
+  var position: USize = 0
+  for weight in 1..13 {
+    if weight < starts.length() && weight < ranks.length() {
+      starts[weight] = position
+      position = position.saturating_add(ranks[weight].saturating_multiply(1 << (weight - 1)))
+    }
+  }
+  var codes: List[HuffmanCode] = []
+  for symbol in 0..weights.length() {
+    let weight: USize = intrinsic::convert(weights[symbol])
+    if weight == 0 || weight >= starts.length() || weight > 12 {
+      mut codes.push(HuffmanCode(value: 0, length: 0))
+    } else {
+      let start = starts[weight]
+      starts[weight] = start.saturating_add(1 << (weight - 1))
+      let value = start >> (weight - 1)
+      if value > 4095 {
+        return None
+      }
+      mut codes.push(HuffmanCode(value: intrinsic::convert(value), length: (deepest + 1).saturating_subtract(intrinsic::convert[USize, UInt32](weight))))
+    }
+  }
+  Some(HuffmanEncoding(description: own description, codes: own codes))
+}
+
+fn huffman_stream(literals: Slice[UInt8], codes: Slice[HuffmanCode]) -> Option[List[UInt8]] {
+  var writer = BitWriter(bytes: [], pending: 0, count: 0)
+  var index = literals.length()
+  while index > 0
+    invariant index <= literals.length()
+    decreases index
+  {
+    index -= 1
+    let symbol: USize = intrinsic::convert(literals[index])
+    if symbol >= codes.length() {
+      return None
+    }
+    let code = codes[symbol]
+    if code.length == 0 || code.length > 11 {
+      return None
+    }
+    mut writer.write(code.value, bits: code.length)
+  }
+  Some(own writer.finish())
+}
+
+fn huffman_literals(literals: Slice[UInt8]) -> Option[List[UInt8]] {
+  let encoding = huffman_encoding(literals)?
+  var section = encoding.description.copy()
+  let regenerated = literals.length()
+  if regenerated <= 1023 {
+    mut section.append_slice(huffman_stream(literals, codes: encoding.codes.slice())?.slice())
+  } else {
+    let each = (regenerated + 3) / 4
+    let first = huffman_stream(literals[..each], codes: encoding.codes.slice())?
+    let second = huffman_stream(literals[each..2 * each], codes: encoding.codes.slice())?
+    let third = huffman_stream(literals[2 * each..3 * each], codes: encoding.codes.slice())?
+    let fourth = huffman_stream(literals[3 * each..], codes: encoding.codes.slice())?
+    if first.length() > 65535 || second.length() > 65535 || third.length() > 65535 {
+      return None
+    }
+    write_little_endian(mut section, value: intrinsic::convert(first.length()), count: 2)
+    write_little_endian(mut section, value: intrinsic::convert(second.length()), count: 2)
+    write_little_endian(mut section, value: intrinsic::convert(third.length()), count: 2)
+    mut section.append_slice(first.slice())
+    mut section.append_slice(second.slice())
+    mut section.append_slice(third.slice())
+    mut section.append_slice(fourth.slice())
+  }
+  let compressed = section.length()
+  let format: UInt64 = if regenerated <= 1023 { 0 } else if regenerated <= 16383 && compressed <= 16383 { 2 } else { 3 }
+  if (format == 0 && compressed > 1023) || compressed > 262143 || regenerated > 262143 {
+    return None
+  }
+  let size_bits: UInt64 = if format == 0 { 10 } else if format == 2 { 14 } else { 18 }
+  let header: UInt64 = 2 | (format << 2) | (intrinsic::convert[USize, UInt64](regenerated) << 4) | (intrinsic::convert[USize, UInt64](compressed) << (4 + size_bits))
+  var output: List[UInt8] = []
+  write_little_endian(mut output, value: header, count: if format == 0 { 3 } else if format == 2 { 4 } else { 5 })
+  mut output.append_slice(section.slice())
+  Some(own output)
+}

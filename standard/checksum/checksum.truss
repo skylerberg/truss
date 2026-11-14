@@ -136,3 +136,102 @@ public fn Crc32.finish(self) -> UInt32
 {
   self.state
 }
+
+let xxh_prime_1: UInt64 = 11400714785074694791
+let xxh_prime_2: UInt64 = 14029467366897019727
+let xxh_prime_3: UInt64 = 1609587929392839161
+let xxh_prime_4: UInt64 = 9650029242287828579
+let xxh_prime_5: UInt64 = 2870177450012600261
+
+fn little_endian_64(bytes: Slice[UInt8], at: USize) -> UInt64
+  requires at <= bytes.length() && bytes.length() - at >= 8
+  cost time O(1)
+{
+  var value: UInt64 = 0
+  let count: USize = 8
+  for index in 0..count {
+    let byte: UInt64 = intrinsic::convert(bytes[at + index])
+    value = value | (byte << (8 * intrinsic::convert[USize, UInt64](index)))
+  }
+  value
+}
+
+fn xxh_round(accumulator: UInt64, input: UInt64) -> UInt64
+  cost time O(1)
+{
+  let mixed = intrinsic::wrapping_add(accumulator, right: intrinsic::wrapping_multiply(input, right: xxh_prime_2))
+  intrinsic::wrapping_multiply(intrinsic::rotate_left(mixed, amount: 31), right: xxh_prime_1)
+}
+
+fn xxh_merge(hash: UInt64, value: UInt64) -> UInt64
+  cost time O(1)
+{
+  intrinsic::wrapping_add(intrinsic::wrapping_multiply(hash ^ xxh_round(0, input: value), right: xxh_prime_1), right: xxh_prime_4)
+}
+
+public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
+  cost time O(bytes.length())
+{
+  let length = bytes.length()
+  var index: USize = 0
+  var hash: UInt64 = 0
+  if length >= 32 {
+    var first = intrinsic::wrapping_add(intrinsic::wrapping_add(seed, right: xxh_prime_1), right: xxh_prime_2)
+    var second = intrinsic::wrapping_add(seed, right: xxh_prime_2)
+    var third = seed
+    var fourth = intrinsic::wrapping_subtract(seed, right: xxh_prime_1)
+    while length - index >= 32
+      invariant index <= length
+      decreases length - index
+    {
+      first = xxh_round(first, input: little_endian_64(bytes, at: index))
+      second = xxh_round(second, input: little_endian_64(bytes, at: index + 8))
+      third = xxh_round(third, input: little_endian_64(bytes, at: index + 16))
+      fourth = xxh_round(fourth, input: little_endian_64(bytes, at: index + 24))
+      index += 32
+    }
+    hash = intrinsic::wrapping_add(
+      intrinsic::wrapping_add(intrinsic::rotate_left(first, amount: 1), right: intrinsic::rotate_left(second, amount: 7)),
+      right: intrinsic::wrapping_add(intrinsic::rotate_left(third, amount: 12), right: intrinsic::rotate_left(fourth, amount: 18)),
+    )
+    hash = xxh_merge(hash, value: first)
+    hash = xxh_merge(hash, value: second)
+    hash = xxh_merge(hash, value: third)
+    hash = xxh_merge(hash, value: fourth)
+  } else {
+    hash = intrinsic::wrapping_add(seed, right: xxh_prime_5)
+  }
+  hash = intrinsic::wrapping_add(hash, right: intrinsic::convert(length))
+  while length - index >= 8
+    invariant index <= length
+    decreases length - index
+  {
+    hash = hash ^ xxh_round(0, input: little_endian_64(bytes, at: index))
+    hash = intrinsic::wrapping_add(intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 27), right: xxh_prime_1), right: xxh_prime_4)
+    index += 8
+  }
+  if length - index >= 4 {
+    var word: UInt64 = 0
+    let count: USize = 4
+    for offset in 0..count {
+      let byte: UInt64 = intrinsic::convert(bytes[index + offset])
+      word = word | (byte << (8 * intrinsic::convert[USize, UInt64](offset)))
+    }
+    hash = hash ^ intrinsic::wrapping_multiply(word, right: xxh_prime_1)
+    hash = intrinsic::wrapping_add(intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 23), right: xxh_prime_2), right: xxh_prime_3)
+    index += 4
+  }
+  while index < length
+    decreases length - index
+  {
+    let byte: UInt64 = intrinsic::convert(bytes[index])
+    hash = hash ^ intrinsic::wrapping_multiply(byte, right: xxh_prime_5)
+    hash = intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 11), right: xxh_prime_1)
+    index += 1
+  }
+  hash = hash ^ (hash >> 33)
+  hash = intrinsic::wrapping_multiply(hash, right: xxh_prime_2)
+  hash = hash ^ (hash >> 29)
+  hash = intrinsic::wrapping_multiply(hash, right: xxh_prime_3)
+  hash ^ (hash >> 32)
+}

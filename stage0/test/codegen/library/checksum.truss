@@ -30,3 +30,8 @@ test "adler32 stays in range over many large bytes" {
   }
   assert checksum::adler32(bytes) == 0xA49759EA
 }
+
+test "xxh64 gives the reference values" {
+  assert checksum::xxh64([]) == 0xEF46DB3751D8E999
+  assert checksum::xxh64("abc".bytes()) == 0x44BC2CF5AD770999
+}
