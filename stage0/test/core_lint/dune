@@ -13,4 +13,5 @@
   intrinsic
   intrinsic_signatures
   well_known
+  syntax
   zarith))

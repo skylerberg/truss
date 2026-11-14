@@ -13,8 +13,37 @@ let callee_name : Core.callee -> string = function
 type context = {
   database : Query.context;
   wrong : 'a. ('a, unit, string, unit) format4 -> 'a;
+  at : Core.origin option ref;  (** The origin of the node being checked, which [wrong] quotes. *)
   bounds : Interface.Impls.bounds;
 }
+
+(* A visitor that records the origin of each node in [at] before it checks
+   the node. *)
+let located at (visit : Core_walk.visit) : Core_walk.visit =
+  {
+    visit with
+    expression =
+      (fun (node : Core.expression) ->
+        at := Some node.origin;
+        visit.expression node);
+    statement =
+      (fun (node : Core.statement) ->
+        at := Some node.origin;
+        visit.statement node);
+    pattern =
+      (fun (node : Core.pattern) ->
+        at := Some node.origin;
+        visit.pattern node);
+  }
+
+(* The first line of a node's source text, cut to a length that fits in a
+   message. *)
+let excerpt text =
+  let line =
+    match String.index_opt text '\n' with Some stop -> String.sub text 0 stop | None -> text
+  in
+  let line = String.trim line in
+  if String.length line > 60 then String.sub line 0 57 ^ "..." else line
 
 let operand_type (operand : Core.operand) =
   match operand with Place place -> Core_walk.place_type place | Value value -> value.type_
@@ -351,75 +380,98 @@ let check_semantics context (form : Core.t) =
   | Function { contract; _ } -> List.iter (executable "a `requires` clause") contract.requires
   | _ -> ());
   Core_walk.definition
-    {
-      Core_walk.ignore_all with
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | Assert { condition; _ } -> executable "an `assert`" condition
-          | _ -> ());
-      expression =
-        (fun (node : Core.expression) ->
-          match node.kind with
-          | Call call -> (
-              call_types context node call;
-              match call.callee with
-              | Trait_method { trait; self_type; _ }
-                when List.exists
-                       (fun known -> Well_known.is known trait.trait)
-                       [ Add; Subtract; Multiply; Divide; Remainder; Negate ]
-                     && Option.is_some (Types.builtin_of self_type) ->
-                  context.wrong "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
-                    (Types.show self_type) (callee_name call.callee)
-              | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
-                  context.wrong "a call of `%s` on an `any` value is not dynamic"
-                    (callee_name call.callee)
-              | Trait_method { self_type; evidence = Dynamic; _ }
-                when match self_type with Any _ -> false | _ -> true ->
-                  context.wrong "a call of `%s` on `%s` is dynamic" (callee_name call.callee)
-                    (Types.show self_type)
-              | _ -> ())
-          | To_any { evidence = Dynamic; _ } ->
-              context.wrong "a conversion to `any` has dynamic evidence"
-          | Operator { operation; arguments } -> operator_types context node operation arguments
-          | Compare { left; right; _ } -> compare_types context left right
-          | Construct { variant; fields } -> construct_fields context node variant fields
-          | Lambda { parameters; captures; body; _ } ->
-              let free = free_locals parameters body in
-              if List.map (fun (capture : Core.capture) -> capture.local) captures <> free then
-                context.wrong
-                  "a lambda captures %d locals, and its body reads %d of the enclosing function's"
-                  (List.length captures) (List.length free)
-          | Quantified { binder = Over_each _; _ } when Hashtbl.mem in_specification node.id ->
-              context.wrong "a quantifier in a specification runs as a loop (`Over_each`)"
-          | Quantified { binder = Over_collection _; _ }
-            when not (Hashtbl.mem in_specification node.id) ->
-              context.wrong "a quantifier in executable code is over a mathematical collection"
-          | Slice { call = { kind = Call ({ arguments; _ } as call); _ } } ->
-              let name = callee_name call.callee in
-              let ends suffix =
-                String.length name >= String.length suffix
-                && String.sub name
-                     (String.length name - String.length suffix)
-                     (String.length suffix)
-                   = suffix
-              in
-              if
-                not
-                  (match List.length arguments with
-                  | 3 -> ends ".slice_range"
-                  | 2 -> ends ".slice_from"
-                  | _ -> false)
-              then
-                context.wrong "a `Slice` with %d arguments calls `%s`" (List.length arguments) name
-          | _ -> ());
-    }
+    (located context.at
+       {
+         Core_walk.ignore_all with
+         statement =
+           (fun (node : Core.statement) ->
+             match node.kind with
+             | Assert { condition; _ } -> executable "an `assert`" condition
+             | _ -> ());
+         expression =
+           (fun (node : Core.expression) ->
+             match node.kind with
+             | Call call -> (
+                 call_types context node call;
+                 match call.callee with
+                 | Trait_method { trait; self_type; _ }
+                   when List.exists
+                          (fun known -> Well_known.is known trait.trait)
+                          [ Add; Subtract; Multiply; Divide; Remainder; Negate ]
+                        && Option.is_some (Types.builtin_of self_type) ->
+                     context.wrong
+                       "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
+                       (Types.show self_type) (callee_name call.callee)
+                 | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
+                     context.wrong "a call of `%s` on an `any` value is not dynamic"
+                       (callee_name call.callee)
+                 | Trait_method { self_type; evidence = Dynamic; _ }
+                   when match self_type with Any _ -> false | _ -> true ->
+                     context.wrong "a call of `%s` on `%s` is dynamic" (callee_name call.callee)
+                       (Types.show self_type)
+                 | _ -> ())
+             | To_any { evidence = Dynamic; _ } ->
+                 context.wrong "a conversion to `any` has dynamic evidence"
+             | Operator { operation; arguments } -> operator_types context node operation arguments
+             | Compare { left; right; _ } -> compare_types context left right
+             | Construct { variant; fields } -> construct_fields context node variant fields
+             | Lambda { parameters; captures; body; _ } ->
+                 let free = free_locals parameters body in
+                 if List.map (fun (capture : Core.capture) -> capture.local) captures <> free then
+                   context.wrong
+                     "a lambda captures %d locals, and its body reads %d of the enclosing \
+                      function's"
+                     (List.length captures) (List.length free)
+             | Quantified { binder = Over_each _; _ } when Hashtbl.mem in_specification node.id ->
+                 context.wrong "a quantifier in a specification runs as a loop (`Over_each`)"
+             | Quantified { binder = Over_collection _; _ }
+               when not (Hashtbl.mem in_specification node.id) ->
+                 context.wrong "a quantifier in executable code is over a mathematical collection"
+             | Slice { call = { kind = Call ({ arguments; _ } as call); _ } } ->
+                 let name = callee_name call.callee in
+                 let ends suffix =
+                   String.length name >= String.length suffix
+                   && String.sub name
+                        (String.length name - String.length suffix)
+                        (String.length suffix)
+                      = suffix
+                 in
+                 if
+                   not
+                     (match List.length arguments with
+                     | 3 -> ends ".slice_range"
+                     | 2 -> ends ".slice_from"
+                     | _ -> false)
+                 then
+                   context.wrong "a `Slice` with %d arguments calls `%s`" (List.length arguments)
+                     name
+             | _ -> ());
+       })
     form.definition
 
 let check database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
+  let at = ref None in
+  let source =
+    lazy
+      (match
+         ( Query.demand database Resolve.Names.spans key,
+           Query.demand database Resolve.Names.text key )
+       with
+      | Some spans, Some text -> Some (spans, text)
+      | _ -> None)
+  in
+  let quoted () =
+    match (!at, Lazy.force source) with
+    | Some origin, Some (spans, text) when origin >= 0 && origin < Array.length spans ->
+        let span : Syntax.span = spans.(origin) in
+        Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
+    | _ -> ""
+  in
   let wrong format =
-    Printf.ksprintf (fun message -> fail "%s: %s" (Resolve.Names.show_key key) message) format
+    Printf.ksprintf
+      (fun message -> fail "%s: %s%s" (Resolve.Names.show_key key) message (quoted ()))
+      format
   in
   let own =
     let of_generics = List.map (fun (generic : T.generic) -> generic.generic) in
@@ -585,20 +637,21 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
   | Trait laws -> List.iter (fun (law : Core.law) -> parameters law.parameters) laws
   | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
   Core_walk.definition
-    {
-      Core_walk.ignore_all with
-      expression =
-        (fun (node : Core.expression) ->
-          match node.kind with
-          | Quantified { binder = Over_type { local; type_; _ }; _ } ->
-              Hashtbl.replace local_types local type_
-          | _ -> ());
-      pattern =
-        (fun (node : Core.pattern) ->
-          match node.kind with
-          | Bind { local; _ } -> Hashtbl.replace local_types local node.type_
-          | _ -> ());
-    }
+    (located at
+       {
+         Core_walk.ignore_all with
+         expression =
+           (fun (node : Core.expression) ->
+             match node.kind with
+             | Quantified { binder = Over_type { local; type_; _ }; _ } ->
+                 Hashtbl.replace local_types local type_
+             | _ -> ());
+         pattern =
+           (fun (node : Core.pattern) ->
+             match node.kind with
+             | Bind { local; _ } -> Hashtbl.replace local_types local node.type_
+             | _ -> ());
+       })
     form.definition;
   let rec place (core_place : Core.place) =
     match core_place with
@@ -654,16 +707,17 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
             (T.show value.type_)
   in
   Core_walk.definition
-    {
-      Core_walk.ignore_all with
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | Yield { mode; part = Value { kind = Construct _; _ } as part } ->
-              yielded_operand ~lends:(Core_walk.lent_places part <> []) mode part
-          | Yield { mode; part } -> yielded_operand ~lends:false mode part
-          | _ -> ());
-    }
+    (located at
+       {
+         Core_walk.ignore_all with
+         statement =
+           (fun (node : Core.statement) ->
+             match node.kind with
+             | Yield { mode; part = Value { kind = Construct _; _ } as part } ->
+                 yielded_operand ~lends:(Core_walk.lent_places part <> []) mode part
+             | Yield { mode; part } -> yielded_operand ~lends:false mode part
+             | _ -> ());
+       })
     form.definition;
   let rec bindings (pattern : Core.pattern) : (Core.local * T.ty * T.mode) list =
     match pattern.kind with
@@ -682,167 +736,177 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
     | Place _ -> ()
   in
   Core_walk.definition
-    {
-      expression =
-        (fun (node : Core.expression) ->
-          unique node.id;
-          type_ "an expression" node.type_;
-          match node.kind with
-          | Use core_place -> place core_place
-          | Quantified { binder = Over_each { call; _ }; _ } -> (
-              match call.kind with
-              | Call { arguments = [ Passed { mode = Read; _ } ]; _ } -> ()
-              | _ -> wrong "an `Over_each` does not hold a read-only call with one argument")
-          | Construct { fields; _ } ->
-              List.iter
-                (fun (_, (field : Core.operand option)) ->
-                  match field with
-                  | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
-                      wrong "a construct that no `yield` yields has a field that is a place"
-                  | _ -> ())
-                fields
-          | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
-          | Slice { call } -> (
-              Hashtbl.replace slice_calls call.id ();
-              match call.kind with
-              | Call
-                  {
-                    arguments =
-                      Passed { value = Place base; _ } :: Passed { value = Value _; _ } :: rest;
-                    _;
-                  }
-                when List.length rest <= 1 ->
-                  place base
-              | _ -> wrong "the call of a `Slice` does not take its base and then its bounds")
-          | Matches { value; pattern } -> binds_own "an `is`" value pattern
-          | Match { scrutinees; arms; _ } ->
-              List.iter
-                (fun (arm : Core.arm) ->
-                  if List.length arm.patterns <> List.length scrutinees then
-                    wrong "a `match` arm does not have one pattern per scrutinee";
-                  List.iter2 (binds_own "a `match`") scrutinees arm.patterns)
-                arms
-          | Function_value { type_arguments; _ } ->
-              List.iter (argument "a function value's type argument") type_arguments
-          | Value_parameter named -> parameter "a value" named
-          | Method_time method_ -> callee method_
-          | Lambda { result; captures; _ } ->
-              type_ "a lambda's result" result;
-              List.iter
-                (fun ({ local; type_ } : Core.capture) ->
-                  place (Local { local; type_; origin = node.origin }))
-                captures
-          | To_any { trait = reference; _ } -> trait "a conversion to `any`" reference
-          | Provide { implementations; _ } ->
-              List.iter
-                (fun (implementation : Core.implementation) ->
-                  type_ "an implementation" implementation.type_;
-                  match (implementation.mode, implementation.value) with
-                  | Mut, Place core_place -> mutable_place "a `provide`" core_place
-                  | _, value -> operand value)
-                implementations
-          | Current_target -> incr current_targets
-          | Call call ->
-              arguments_fit call;
-              callee call.callee;
-              capabilities "a call's `uses`" call.uses;
-              (match call.callee with Indirect function_value -> operand function_value | _ -> ());
-              List.iter
-                (function
-                  | Core.Passed
-                      {
-                        mode = Mut;
-                        value =
-                          Value
-                            {
-                              kind =
-                                Slice
-                                  {
-                                    call =
-                                      {
-                                        kind =
-                                          Call
-                                            { arguments = Passed { value = Place base; _ } :: _; _ };
-                                        _;
-                                      };
-                                  };
-                              _;
-                            };
-                        _;
-                      } ->
-                      mutable_place "a slice passed `mut`" base
-                  | Core.Passed { mode = Mut; value = Value _; _ } ->
-                      wrong "a `mut` parameter receives a value that is not a slice"
-                  | Passed { mode = Mut; value = Place core_place; _ } ->
-                      mutable_place "a `mut` argument" core_place
-                  | Passed { mode = Own; value = Place _; _ } ->
-                      wrong "an `own` parameter receives a place"
-                  | Passed { mode = Read; value = Value { kind = Use _; _ }; _ }
-                    when not (Hashtbl.mem slice_calls node.id) ->
-                      wrong
-                        "a read-only parameter of `%s` receives a `Use`, which moves or copies the \
-                         place"
-                        (callee_name call.callee)
-                  | Passed { value; _ } -> operand value
-                  | Default -> ())
-                call.arguments
-          | _ -> ());
-      statement =
-        (fun (node : Core.statement) ->
-          unique node.id;
-          match node.kind with
-          | Assign { target; _ } -> mutable_place "an assignment" target
-          | Compound_assign { target; value; _ } -> (
-              mutable_place "an assignment" target;
-              incr compound_assignments;
-              match value.kind with
-              | Operator { arguments = { kind = Current_target; _ } :: _; _ }
-              | Call
-                  { arguments = Passed { value = Value { kind = Current_target; _ }; _ } :: _; _ }
-                ->
-                  ()
-              | _ ->
-                  wrong "a compound assignment's new value is not an operation on `Current_target`")
-          | Let { pattern; value; _ } -> (
-              binds_own "a `let`" value pattern;
-              match (pattern.kind, value) with
-              | Bind { is_var = true; _ }, Place _ ->
-                  wrong "a `let` that binds a mutable local receives a place"
-              | _ -> ())
-          | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
-          | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
-              let output =
-                match callee with
-                | Function { path; _ } ->
-                    Option.map
-                      (fun (signature : T.signature) -> signature.output)
-                      (Interface.Impls.signature database path)
-                | Trait_method { trait = reference; name; receiver; _ } ->
-                    Option.map
-                      (fun (method_ : T.trait_method) -> method_.method_signature.output)
-                      (Infer.Members.trait_method database reference.trait name receiver)
-                | Capability_method _ | Intrinsic _ | Indirect _ -> None
-              in
-              match output with
-              | Some (Yields _) -> ()
-              | _ -> wrong "a `Yielding_call` calls a method that does not yield")
-          | For { iteration = Yielding_call _; _ } -> wrong "a `Yielding_call` is not a call"
-          | _ -> ());
-      pattern =
-        (fun (node : Core.pattern) ->
-          unique node.id;
-          type_ "a pattern" node.type_;
-          match node.kind with
-          | Alternatives (first :: rest) ->
-              let bound alternative = List.sort compare (bindings alternative) in
-              let expected = bound first in
-              if List.exists (fun alternative -> bound alternative <> expected) rest then
-                wrong "the alternatives of a pattern do not bind the same locals"
-          | _ -> ());
-      callee;
-      place = ignore;
-    }
+    (located at
+       {
+         expression =
+           (fun (node : Core.expression) ->
+             unique node.id;
+             type_ "an expression" node.type_;
+             match node.kind with
+             | Use core_place -> place core_place
+             | Quantified { binder = Over_each { call; _ }; _ } -> (
+                 match call.kind with
+                 | Call { arguments = [ Passed { mode = Read; _ } ]; _ } -> ()
+                 | _ -> wrong "an `Over_each` does not hold a read-only call with one argument")
+             | Construct { fields; _ } ->
+                 List.iter
+                   (fun (_, (field : Core.operand option)) ->
+                     match field with
+                     | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
+                         wrong "a construct that no `yield` yields has a field that is a place"
+                     | _ -> ())
+                   fields
+             | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
+             | Slice { call } -> (
+                 Hashtbl.replace slice_calls call.id ();
+                 match call.kind with
+                 | Call
+                     {
+                       arguments =
+                         Passed { value = Place base; _ } :: Passed { value = Value _; _ } :: rest;
+                       _;
+                     }
+                   when List.length rest <= 1 ->
+                     place base
+                 | _ -> wrong "the call of a `Slice` does not take its base and then its bounds")
+             | Matches { value; pattern } -> binds_own "an `is`" value pattern
+             | Match { scrutinees; arms; _ } ->
+                 List.iter
+                   (fun (arm : Core.arm) ->
+                     if List.length arm.patterns <> List.length scrutinees then
+                       wrong "a `match` arm does not have one pattern per scrutinee";
+                     List.iter2 (binds_own "a `match`") scrutinees arm.patterns)
+                   arms
+             | Function_value { type_arguments; _ } ->
+                 List.iter (argument "a function value's type argument") type_arguments
+             | Value_parameter named -> parameter "a value" named
+             | Method_time method_ -> callee method_
+             | Lambda { result; captures; _ } ->
+                 type_ "a lambda's result" result;
+                 List.iter
+                   (fun ({ local; type_ } : Core.capture) ->
+                     place (Local { local; type_; origin = node.origin }))
+                   captures
+             | To_any { trait = reference; _ } -> trait "a conversion to `any`" reference
+             | Provide { implementations; _ } ->
+                 List.iter
+                   (fun (implementation : Core.implementation) ->
+                     type_ "an implementation" implementation.type_;
+                     match (implementation.mode, implementation.value) with
+                     | Mut, Place core_place -> mutable_place "a `provide`" core_place
+                     | _, value -> operand value)
+                   implementations
+             | Current_target -> incr current_targets
+             | Call call ->
+                 arguments_fit call;
+                 callee call.callee;
+                 capabilities "a call's `uses`" call.uses;
+                 (match call.callee with
+                 | Indirect function_value -> operand function_value
+                 | _ -> ());
+                 List.iter
+                   (function
+                     | Core.Passed
+                         {
+                           mode = Mut;
+                           value =
+                             Value
+                               {
+                                 kind =
+                                   Slice
+                                     {
+                                       call =
+                                         {
+                                           kind =
+                                             Call
+                                               {
+                                                 arguments = Passed { value = Place base; _ } :: _;
+                                                 _;
+                                               };
+                                           _;
+                                         };
+                                     };
+                                 _;
+                               };
+                           _;
+                         } ->
+                         mutable_place "a slice passed `mut`" base
+                     | Core.Passed { mode = Mut; value = Value _; _ } ->
+                         wrong "a `mut` parameter receives a value that is not a slice"
+                     | Passed { mode = Mut; value = Place core_place; _ } ->
+                         mutable_place "a `mut` argument" core_place
+                     | Passed { mode = Own; value = Place _; _ } ->
+                         wrong "an `own` parameter receives a place"
+                     | Passed { mode = Read; value = Value { kind = Use _; _ }; _ }
+                       when not (Hashtbl.mem slice_calls node.id) ->
+                         wrong
+                           "a read-only parameter of `%s` receives a `Use`, which moves or copies \
+                            the place"
+                           (callee_name call.callee)
+                     | Passed { value; _ } -> operand value
+                     | Default -> ())
+                   call.arguments
+             | _ -> ());
+         statement =
+           (fun (node : Core.statement) ->
+             unique node.id;
+             match node.kind with
+             | Assign { target; _ } -> mutable_place "an assignment" target
+             | Compound_assign { target; value; _ } -> (
+                 mutable_place "an assignment" target;
+                 incr compound_assignments;
+                 match value.kind with
+                 | Operator { arguments = { kind = Current_target; _ } :: _; _ }
+                 | Call
+                     {
+                       arguments = Passed { value = Value { kind = Current_target; _ }; _ } :: _;
+                       _;
+                     } ->
+                     ()
+                 | _ ->
+                     wrong
+                       "a compound assignment's new value is not an operation on `Current_target`")
+             | Let { pattern; value; _ } -> (
+                 binds_own "a `let`" value pattern;
+                 match (pattern.kind, value) with
+                 | Bind { is_var = true; _ }, Place _ ->
+                     wrong "a `let` that binds a mutable local receives a place"
+                 | _ -> ())
+             | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
+             | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
+                 let output =
+                   match callee with
+                   | Function { path; _ } ->
+                       Option.map
+                         (fun (signature : T.signature) -> signature.output)
+                         (Interface.Impls.signature database path)
+                   | Trait_method { trait = reference; name; receiver; _ } ->
+                       Option.map
+                         (fun (method_ : T.trait_method) -> method_.method_signature.output)
+                         (Infer.Members.trait_method database reference.trait name receiver)
+                   | Capability_method _ | Intrinsic _ | Indirect _ -> None
+                 in
+                 match output with
+                 | Some (Yields _) -> ()
+                 | _ -> wrong "a `Yielding_call` calls a method that does not yield")
+             | For { iteration = Yielding_call _; _ } -> wrong "a `Yielding_call` is not a call"
+             | _ -> ());
+         pattern =
+           (fun (node : Core.pattern) ->
+             unique node.id;
+             type_ "a pattern" node.type_;
+             match node.kind with
+             | Alternatives (first :: rest) ->
+                 let bound alternative = List.sort compare (bindings alternative) in
+                 let expected = bound first in
+                 if List.exists (fun alternative -> bound alternative <> expected) rest then
+                   wrong "the alternatives of a pattern do not bind the same locals"
+             | _ -> ());
+         callee;
+         place = ignore;
+       })
     form.definition;
+  at := None;
   if !current_targets <> !compound_assignments then
     wrong "`Current_target` appears %d times in %d compound assignments" !current_targets
       !compound_assignments;
@@ -855,7 +919,8 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
     of_key key
     @ Option.fold ~none:[] ~some:of_key (Query.demand database Resolve.Names.container key)
   in
-  check_semantics { database; wrong; bounds } form
+  at := None;
+  check_semantics { database; wrong; at; bounds } form
 
 let check_file database (file : Path.file) =
   List.fold_left
