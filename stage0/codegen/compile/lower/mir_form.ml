@@ -899,17 +899,11 @@ let task_function_type st : Lowered.ty =
    [parts]. Every
    exit from the task jumps to [end_block], where the task returns. Gives
    the task's function value, for [Tasks.spawn]. *)
-let task_body st ~(id : Core.task) ~group ~early_exits ~parts (f : task -> unit) : Lowered.rvalue =
+let task_body st ~(id : Core.task) ~group ~parts (f : task -> unit) : Lowered.rvalue =
   let nested, environment =
     outlined st ~parts (fun () ->
         let task =
-          {
-            id;
-            group;
-            early_exits;
-            end_block = block st.builder;
-            scope_depth = List.length st.scopes;
-          }
+          { id; group; end_block = block st.builder; scope_depth = List.length st.scopes }
         in
         st.tasks <- task :: st.tasks;
         f task;
@@ -949,90 +943,33 @@ let locked_evidence st ~(tasks : Lowered.operand) (evidence : (Path.t * Lowered.
       (capability, Lowered.Address { place = at slot; writable = false }))
     evidence
 
-(* Lowers an early exit that still has to end [tasks], the enclosing tasks
-   it leaves, innermost first. [value] holds the return value of a
-   [return] that has one.
-
-   With no task left, this is the plain exit. Otherwise the innermost task
+(* Lowers an early exit from [task], the innermost task around it. The task
    cancels its group. If it is the first to cancel, it records the exit's
-   number and the return value for the code that joins the group;
-   otherwise it drops the return value. The task then ends, whether or not
-   it was first. *)
-let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit : Mir.task_exit)
-    ~(value : Lowered.place option) =
-  match (tasks, st.tasks) with
-  | [], _ -> (
-      match exit with
-      | Exit_return _ ->
-          (match (value, result_place st, returned_type st) with
-          | Some value, Some result, Some ty ->
-              emit st.builder (Assign (result, Use (owned st value ty)))
-          | _ -> ());
-          return_from_frame st
-      | Exit_to target -> goto st region target
-      | Exit_iteration _ -> continue_loop st)
-  | (id, ends) :: remaining, task :: _ when id = task.id ->
-      let exits = task.early_exits in
-      exits.exits <- { ends; remaining; exit; state = Moves.copy (mir st).state } :: exits.exits;
-      let number = List.length exits.exits in
+   [number] in [winner] and moves the value it returns, if any, into the
+   exit's local, for the code after the group; otherwise it drops the
+   value. The task then ends, whether or not it was first. *)
+let cancel st ~(task : Core.task) ~winner ~number ~value =
+  match st.tasks with
+  | current :: _ when current.id = task ->
       let won = block st.builder and lost = block st.builder and after = block st.builder in
-      Emit_c.Builder.branch st.builder (tasks_bool st "cancel" [ task.group ]) ~yes:won ~no:lost;
+      Emit_c.Builder.branch st.builder (tasks_bool st "cancel" [ current.group ]) ~yes:won ~no:lost;
       start st.builder won;
-      emit st.builder (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
-      (match (value, returned_type st) with
-      | Some value, Some ty ->
-          let return_value =
-            match exits.return_value with
-            | Some return_value -> return_value
-            | None ->
-                let return_value = owned_local st ~name:"return_value" exits.scope ty in
-                exits.return_value <- Some return_value;
-                return_value
-          in
-          (* Only one exit wins, so [return_value] is empty here. *)
-          emit st.builder (Assign (return_value, Use (owned st value ty)))
-      | _ -> ());
+      emit st.builder (Assign (local_place st winner, Use (constant_int UInt32 (Z.of_int number))));
+      Option.iter
+        (fun (value, ty, slot) ->
+          emit st.builder (Assign (local_place st slot, Use (owned st value ty))))
+        value;
       finish st.builder (Goto after);
-      (* A task that does not win drops the value it would have returned. *)
       start st.builder lost;
-      (match (value, returned_type st) with
-      | Some value, Some ty when not (trivial st ty) -> emit st.builder (Drop value)
-      | _ -> ());
+      Option.iter
+        (fun (value, ty, _) -> if not (trivial st ty) then emit st.builder (Drop value))
+        value;
       finish st.builder (Goto after);
       start st.builder after;
-      leave_to st task.scope_depth;
-      finish st.builder (Goto task.end_block);
+      leave_to st current.scope_depth;
+      finish st.builder (Goto current.end_block);
       start st.builder (block st.builder)
   | _ -> bug "an early exit leaves a task that is not the innermost enclosing task"
-
-let resume_early_exit st region ~lower_ends (exits : early_exits) =
-  match List.rev exits.exits with
-  | [] -> ()
-  | recorded ->
-      let after = block st.builder in
-      let targets = List.map (fun _ -> block st.builder) recorded in
-      finish st.builder
-        (Switch
-           {
-             value = Copy exits.winner;
-             cases = List.mapi (fun index target -> (Z.of_int (index + 1), target)) targets;
-             default = Some after;
-           });
-      let evidence = st.evidence and provides = (mir st).provides in
-      List.iter2
-        (fun target (recorded : early_exit) ->
-          st.evidence <- evidence;
-          (mir st).provides <- provides;
-          start st.builder target;
-          (mir st).state <- Moves.copy recorded.state;
-          lower_ends recorded.ends;
-          let value = match recorded.exit with Exit_return _ -> exits.return_value | _ -> None in
-          early_exit st region ~tasks:recorded.remaining ~exit:recorded.exit ~value;
-          finish st.builder (Goto after))
-        targets recorded;
-      st.evidence <- evidence;
-      (mir st).provides <- provides;
-      start st.builder after
 
 (* Spawns one iteration of a [concurrent for] loop as a task. [f] lowers
    the iteration's body, and the task's argument is the current value of
@@ -1046,7 +983,7 @@ let spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : un
        ( at function_value,
          task_body st
            ~id:(Iteration { loop = loop.origin })
-           ~group:loop.group ~early_exits:loop.early_exits ~parts:[ loop.item ]
+           ~group:loop.group ~parts:[ loop.item ]
            (fun task ->
              (* A [continue] of the loop ends the task. A [break] of the loop
                 never jumps: it is an early exit that ends the task. *)
@@ -1275,18 +1212,17 @@ and concurrent_block st region ~fork ~(branches : Mir.branch list) ~join =
   let function_type = task_function_type st in
   let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
   emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
-  let tasks = List.map (fun branch -> (branch, new_early_exits st)) branches in
   with_group st ~origin:fork (fun group ->
       let functions =
         List.mapi
-          (fun index ((branch : Mir.branch), early_exits) ->
+          (fun index (branch : Mir.branch) ->
             task_body st
               ~id:(Branch { block = fork; index })
-              ~group ~early_exits ~parts:[ item ]
+              ~group ~parts:[ item ]
               (fun task ->
                 let inner = new_region st ~enclosing:region ~ending:(fork, task.end_block) in
                 run_region st inner ~entry:(branch.entry, 0)))
-          tasks
+          branches
       in
       (* [spawn] returns false once the group is cancelled, and the branch
          then never runs. *)
@@ -1296,9 +1232,6 @@ and concurrent_block st region ~fork ~(branches : Mir.branch list) ~join =
           emit st.builder (Assign (function_value, code));
           ignore (tasks_bool st "spawn" [ group; function_value; at item ]))
         functions);
-  List.iter
-    (fun (_, early_exits) -> resume_early_exit st region ~lower_ends:(lower_ends st) early_exits)
-    tasks;
   match join with Some join -> goto st region join | None -> unreachable_block st
 
 and lower_statement st (statement : Mir.statement) =
@@ -1361,16 +1294,6 @@ and lower_statement st (statement : Mir.statement) =
 
 (* Lowers the ends of scopes that a task's early exit leaves, once the task
    has ended. *)
-and lower_ends st ends =
-  List.iter
-    (fun (statement : Mir.statement) ->
-      let frame = mir st in
-      let before = Moves.copy frame.state in
-      in_statement st (fun () -> lower_statement st statement);
-      Moves.apply frame.moves frame.state statement;
-      update_flags st ~before)
-    ends
-
 and dead st local = drop_local st local
 
 and provide st (provided : Mir.provided list) ~can_use_tasks =
@@ -1921,14 +1844,12 @@ and terminator st region (ending : Mir.terminator) ~origin =
       | _ -> ());
       return_from_frame st
   | Iteration_end _ -> continue_loop st
-  | Exit_tasks { tasks = left; exit } ->
-      let tasks = List.map (fun (left : Mir.left_task) -> (left.task, left.ends)) left in
-      let task_end = match left with innermost :: _ -> innermost.task_end | [] -> None in
+  | Cancel { task; task_end; winner; number; returned } ->
       Option.iter
         (fun target ->
           let rec branch_region (around : region) =
-            match (around.ending, tasks, around.enclosing) with
-            | Some (fork, _), (Branch { block; _ }, _) :: _, _ when fork = block -> around
+            match (around.ending, task, around.enclosing) with
+            | Some (fork, _), Branch { block; _ }, _ when fork = block -> around
             | _, _, Some enclosing -> branch_region enclosing
             | _, _, None -> bug "an early exit from a branch outside its block"
           in
@@ -1940,14 +1861,26 @@ and terminator st region (ending : Mir.terminator) ~origin =
          the first to cancel moves its value out, and the others drop
          theirs. *)
       let value =
-        match (exit, st.frame.exit, returned_type st) with
-        | Exit_return (Some returned), None, Some ty ->
+        Option.map
+          (fun (returned, slot) ->
+            let ty = ground st (info st slot).type_ in
             let value = at (local st.builder ~name:"returned" (Value ty)) in
             write_operand st returned value;
-            Some value
-        | _ -> None
+            (value, ty, slot))
+          returned
       in
-      early_exit st region ~tasks ~exit ~value
+      cancel st ~task ~winner ~number ~value
+  | Resume { winner; exits; next } ->
+      (* The group has ended: the exit that won goes on. *)
+      let cases =
+        List.mapi
+          (fun index (exit : Mir.early_exit) -> (Z.of_int (index + 1), jump st region exit.resume))
+          exits
+      in
+      finish st.builder
+        (Switch
+           { value = Copy (local_place st winner); cases; default = Some (jump st region next) });
+      start st.builder (block st.builder)
   | Yield { mode; part; resume } -> yield st region ~mode ~part ~resume ~origin
   | For { iteration; part; body; blocks; after; loop } ->
       claim st region after;
@@ -2053,19 +1986,16 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~blocks ~(loop :
   | Concurrent_loop ->
       (* The enclosing code runs the iteration and spawns one task for each
          value. *)
-      let early_exits = new_early_exits st in
       with_group st ~origin (fun group ->
           let spawning =
             {
               origin;
               group;
-              early_exits;
               item = local st.builder ~name:"item" (Value (Monomorphic.builtin UInt64));
               element = ground st (info st part).type_;
             }
           in
-          for_each st ~kept ~schedule:(Spawned spawning) ~iteration ~each);
-      resume_early_exit st region ~lower_ends:(lower_ends st) early_exits
+          for_each st ~kept ~schedule:(Spawned spawning) ~iteration ~each)
   | Parallel_loop -> for_each st ~kept ~schedule:Chunked ~iteration ~each
   | Core.Sequential -> for_each st ~kept ~schedule:Sequential ~iteration ~each
 

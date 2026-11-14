@@ -66,36 +66,10 @@ and mir_frame = {
   mutable state : Moves.state;
 }
 
-(* The early exits of the tasks of one [concurrent] block or loop. An
-   early exit is a [return], [break], or [continue] that leaves a task
-   before its end. The task calls [Tasks.cancel] on its group, and the
-   first task to cancel wins: it stores its exit's number, counted from 1
-   in [exits], in [winner], and the value of a [return] in [return_value].
-   The code that joins the group then switches on [winner] and performs
-   that exit. Each branch of a block has its own record, because each
-   branch is a separate region. The iterations of a loop share one. *)
-type early_exits = {
-  winner : Lowered.place;  (** A [UInt32], 0 while no exit has won *)
-  mutable return_value : Lowered.place option;
-  scope : scope;  (** The scope enclosing the block or loop, which owns [return_value] *)
-  mutable exits : early_exit list;  (** Most recent first *)
-}
-
-(* An early exit that a task of a group took, which the code that joins
-   the group performs. *)
-and early_exit = {
-  ends : Mir.statement list;
-  remaining : (Core.task * Mir.statement list) list;
-      (** The enclosing tasks that the exit has yet to end, innermost first *)
-  exit : Mir.task_exit;
-  state : Moves.state;
-}
-
 (* A task whose body is being lowered. *)
 type task = {
   id : Core.task;
   group : Lowered.place;
-  early_exits : early_exits;
   end_block : Lowered.block;  (** Every exit from the task jumps here *)
   scope_depth : int;  (** The number of scopes enclosing the task *)
 }
@@ -104,7 +78,6 @@ type task = {
 type spawn_loop = {
   origin : Core.origin;
   group : Lowered.place;
-  early_exits : early_exits;
   item : Lowered.local;  (** A [UInt64]: the argument of the next task *)
   element : Ground.ty;
 }
@@ -184,14 +157,6 @@ let outlined st ~parts body =
   incr st.nested;
   let holder = Emit_c.Builder.outline st.builder ~nested ~parts body in
   (nested, Lowered.Address { place = at holder; writable = false })
-
-(* A record for the early exits of a block's branch or a loop's
-   iterations. The current scope owns the return value, so the value
-   outlives the tasks. *)
-let new_early_exits st =
-  let winner = at (local st.builder ~name:"winner" (Raw (Integer UInt32))) in
-  emit st.builder (Assign (winner, Use (Constant (Integer (UInt32, Z.zero)))));
-  { winner; return_value = None; scope = List.hd st.scopes; exits = [] }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let trivial st ty = Glue.trivial st.context.glue ty

@@ -161,7 +161,6 @@ type context = {
   mutable equalities : Logic.term list;
   mutable known_calls : known_call list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
-  mutable iteration_returns : (Core.origin * Types.ty option) list;
   mutable entry : Logic.symbol list;
   mutable cursors : (Logic.term * cursor) list;
   mutable proving : bool;

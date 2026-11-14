@@ -79,8 +79,7 @@ type action =
           lists each argument of a view type: its position, its views, and its origin. If [yielded],
           the places are those that a yielded constructor lends, and [views] is empty. *)
 
-(* A position in a block: one of its statements, then the ends an exit from
-   tasks runs on its way out, then its terminator. *)
+(* A position in a block: one of its statements, then its terminator. *)
 type position = { block : Mir.block; index : int }
 type step = { action : action; origin : Core.origin }
 
@@ -540,11 +539,8 @@ let returned_temporaries (body : Mir.body) =
     (fun (block : Mir.basic_block) ->
       match block.terminator with
       | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
-      | Exit_tasks
-          {
-            exit = Exit_return (Some (Use { place = { root = Local local; projections = [] }; _ }));
-            _;
-          }
+      | Cancel
+          { returned = Some (Use { place = { root = Local local; projections = [] }; _ }, _); _ }
         when body.locals.(local).kind = Temporary ->
           returned := local :: !returned
       | _ -> ())
@@ -780,6 +776,21 @@ let pull builder (iteration : Mir.iteration) origin =
 let terminator builder ~returns (basic : Mir.basic_block) =
   let origin = basic.terminator_origin in
   let uses = Moves.terminator_uses builder.moves basic in
+  let returning value =
+    read_uses builder
+      ~returned:(fun (use : Moves.use) ->
+        match use.operand with
+        | Some (Use { place; _ }) -> not (is_temporary builder place)
+        | _ -> false)
+      uses;
+    match value with
+    | Some value -> (
+        match operand_type value with
+        | Some type_ when returns && is_view builder.context type_ ->
+            emit_ builder (Return_view (views_of_operand builder value)) origin
+        | _ -> ())
+    | None -> ()
+  in
   match basic.terminator with
   | Branch _ | Switch_variant _ -> read_uses builder uses
   | For { iteration; part; _ } -> (
@@ -856,25 +867,15 @@ let terminator builder ~returns (basic : Mir.basic_block) =
         | Built _ -> []
       in
       emit_ builder (Yield_point { mode; lent; views }) origin
-  | Return value | Exit_tasks { exit = Exit_return value; _ } -> (
-      read_uses builder
-        ~returned:(fun (use : Moves.use) ->
-          match use.operand with
-          | Some (Use { place; _ }) -> not (is_temporary builder place)
-          | _ -> false)
-        uses;
-      match value with
-      | Some value -> (
-          match operand_type value with
-          | Some type_ when returns && is_view builder.context type_ ->
-              emit_ builder (Return_view (views_of_operand builder value)) origin
-          | _ -> ())
-      | None -> ())
-  | Iteration_end { loop } | Exit_tasks { exit = Exit_iteration { loop }; _ } -> (
+  (* An early exit that returns a value hands it to the code after its
+     group, which returns it. *)
+  | Return value -> returning value
+  | Cancel { returned; _ } -> returning (Option.map fst returned)
+  | Iteration_end { loop } -> (
       match builder.body.blocks.(loop).terminator with
       | For { iteration; _ } -> pull builder iteration origin
       | _ -> ())
-  | Join _ | Goto _ | Fork _ | Exit_tasks _ | Unreachable | Written_unreachable | Todo -> ()
+  | Join _ | Goto _ | Fork _ | Resume _ | Unreachable | Written_unreachable | Todo -> ()
 
 (* The fork-joins of a body: a [parallel] or [concurrent] block, whose
    branches may run at the same time, and a [parallel for] or [concurrent
@@ -904,7 +905,7 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
   builder.binding <- [];
   Hashtbl.reset builder.loop_entries;
   let shape =
-    Array.map (fun (basic : Mir.basic_block) -> List.length basic.statements + 2) body.blocks
+    Array.map (fun (basic : Mir.basic_block) -> List.length basic.statements + 1) body.blocks
   in
   let steps = Array.map (fun count -> Array.make count []) shape in
   let write position body =
@@ -918,15 +919,9 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
       List.iteri
         (fun index statement' -> write { block; index } (fun () -> statement builder statement'))
         basic.statements;
-      let count = List.length basic.statements in
-      write { block; index = count } (fun () ->
-          match basic.terminator with
-          | Exit_tasks { tasks; _ } ->
-              List.iter
-                (fun (left : Mir.left_task) -> List.iter (statement builder) left.ends)
-                tasks
-          | _ -> ());
-      write { block; index = count + 1 } (fun () -> terminator builder ~returns basic))
+      write
+        { block; index = List.length basic.statements }
+        (fun () -> terminator builder ~returns basic))
     body.blocks;
   let positions_of ?(from = fun _ -> None) blocks =
     List.concat_map
@@ -1131,9 +1126,7 @@ let join (after : state) ~(into : state) =
         loans = into.loans @ loans;
       }
 
-(* The state before each action of each position that some path reaches.
-   An exit from tasks runs its ends on its own way out: the other tasks of
-   the group go on to their end from before them. *)
+(* The state before each action of each position that some path reaches. *)
 let forward context (actions : actions) =
   let blocks = Array.length actions.steps in
   let entries = Array.make blocks None and pending = Queue.create () in
@@ -1146,23 +1139,14 @@ let forward context (actions : actions) =
   in
   while not (Queue.is_empty pending) do
     let block = Queue.pop pending in
-    let positions = actions.steps.(block) in
-    let ends = Array.length positions - 2 in
-    let state = ref (Option.get entries.(block))
-    and before_ends = ref (Option.get entries.(block)) in
-    Array.iteri
-      (fun index steps ->
-        if index = ends then before_ends := !state;
-        state := through steps !state)
-      positions;
-    let task_end =
-      match actions.body.blocks.(block).terminator with
-      | Exit_tasks { tasks = { task_end; _ } :: _; _ } -> task_end
-      | _ -> None
+    let after =
+      Array.fold_left
+        (fun state steps -> through steps state)
+        (Option.get entries.(block))
+        actions.steps.(block)
     in
     List.iter
       (fun successor ->
-        let after = if Some successor = task_end then !before_ends else !state in
         match entries.(successor) with
         | None ->
             entries.(successor) <- Some after;
@@ -1288,13 +1272,11 @@ let check_body context (actions : actions) moves : task_hazard option =
       | Source { local = core; _ } -> Hashtbl.replace mir_local core local
       | Temporary | Lent _ -> ())
     actions.body.locals;
-  (* The position of the move analysis's liveness after an action at
-     [index]: after a statement, or after the block's terminator for the
-     ends of an exit from tasks and for the terminator. *)
+  (* Whether a local is live after the action at a position: the move
+     analysis's position after it. *)
   let is_live { block; index } core =
-    let statements = Array.length actions.steps.(block) - 2 in
     match Hashtbl.find_opt mir_local core with
-    | Some local -> live block (if index < statements then index + 1 else statements + 1) local
+    | Some local -> live block (index + 1) local
     | None -> false
   in
   (* Runs [f] on each action at [positions] that some path reaches, with

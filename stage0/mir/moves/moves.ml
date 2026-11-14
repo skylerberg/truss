@@ -115,11 +115,13 @@ let terminator_uses ~moving (basic : Mir.basic_block) =
   | For { iteration = Pull { cursor; _ }; _ } -> [ read ~origin cursor ]
   | For { iteration = Yielding call; _ } -> call_uses ~moving call
   | Yield { part; _ } -> yielded_uses ~moving part
-  | Return (Some operand) | Exit_tasks { exit = Exit_return (Some operand); _ } ->
+  | Return (Some operand) | Cancel { returned = Some (operand, _); _ } ->
       operand_use ~moving ~by_value:true operand
+  | Resume { winner; _ } -> [ read ~origin { root = Local winner; projections = [] } ]
   | Goto _ | Fork _ | Join _ | Iteration_end _
   | Return None
-  | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
+  | Cancel { returned = None; _ }
+  | Unreachable | Written_unreachable | Todo ->
       []
 
 let moved uses =
@@ -141,12 +143,6 @@ let inits (statement : Mir.statement) : Mir.place list =
 
 let ends (statement : Mir.statement) = match statement.kind with Dead locals -> locals | _ -> []
 let terminator_moves ~moving basic = moved (terminator_uses ~moving basic)
-
-(* The locals a terminator's exit from tasks ends on its way out. *)
-let terminator_ends : Mir.terminator -> Mir.local list = function
-  | Exit_tasks { tasks; _ } ->
-      List.concat_map (fun (left : Mir.left_task) -> List.concat_map ends left.ends) tasks
-  | _ -> []
 
 (* The analysis *)
 
@@ -365,12 +361,14 @@ let into analysis state (terminator : Mir.terminator) successor =
       let state = copy state in
       set_holds state (affected_local analysis part);
       state
-  | Exit_tasks { exit = Exit_to target; _ } when successor = target ->
-      let state = copy state in
-      List.iter
-        (fun local -> set_empty state (affected_local analysis local))
-        (terminator_ends terminator);
-      state
+  | Resume { exits; _ } -> (
+      (* The exit that won left the value it returns in its local. *)
+      match List.find_opt (fun (exit : Mir.early_exit) -> exit.resume = successor) exits with
+      | Some { returned = Some local; _ } ->
+          let state = copy state in
+          set_holds state (affected_local analysis local);
+          state
+      | _ -> state)
   | _ -> state
 
 (* Which locals own their values and which are another owner's places
@@ -467,9 +465,10 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
           List.iter consider_local (ends statement))
         basic.statements;
       List.iter (fun (place, _) -> consider place) (terminator_moves basic);
-      List.iter consider_local (terminator_ends basic.terminator);
       match basic.terminator with
       | For { iteration = Pull _; part; _ } -> consider_local part
+      | Resume { exits; _ } ->
+          List.iter (fun (exit : Mir.early_exit) -> Option.iter consider_local exit.returned) exits
       | _ -> ())
     body.blocks;
   let paths =
@@ -624,9 +623,8 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
         List.iter
           (fun (place, origin) -> set_empty ~origin state (affected analysis place))
           (terminator_moves basic);
-        List.iter drop_local (terminator_ends basic.terminator);
         match basic.terminator with
-        | Return _ | Exit_tasks { exit = Exit_return _; _ } -> List.iter drop_local parameters
+        | Return _ -> List.iter drop_local parameters
         | Yield _ ->
             Array.iteri
               (fun position path ->
