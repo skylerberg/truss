@@ -4,7 +4,9 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 
-type version = Own_version of Path.t | Trait_version of Types.trait_reference * Types.trait_method
+type overload =
+  | Type_overload of Path.t
+  | Trait_overload of Types.trait_reference * Types.trait_method
 
 val marked_receiver : Syntax.expression -> Path.receiver
 
@@ -51,11 +53,11 @@ val trait_static_method :
 
 val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
 
-val versions :
+val overloads :
   State.state ->
   Types.ty ->
   State.Names.String_map.key ->
-  ((Path.receiver * version) list, Types.trait_reference list) Result.t
+  ((Path.receiver * overload) list, Types.trait_reference list) Result.t
 
 val elements_calls :
   State.state ->

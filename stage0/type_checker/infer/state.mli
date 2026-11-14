@@ -178,7 +178,7 @@ val reported_mismatch :
 val mismatched : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
 val mismatch : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> unit
 val is_place : state -> Syntax.expression -> bool
-val marked_call : state -> Syntax.expression -> Syntax.id option
+val call_with_mode_keyword : state -> Syntax.expression -> Syntax.id option
 val check_resource : state -> Syntax.resource -> unit
 
 val slice :

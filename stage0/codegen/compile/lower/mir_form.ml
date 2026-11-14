@@ -333,7 +333,7 @@ and copied_lent st (lent : Ground.lent) (source : Lowered.place) : Lowered.place
   if lent.writable then
     begin match variants_of st ty with
     | [ (None, _) ] -> ()
-    | _ -> bug "%s is lent to be changed" (Ground.to_string (Lent lent))
+    | _ -> bug "%s is lent to be mutated" (Ground.to_string (Lent lent))
     end;
   each_variant st ty source (fun variant fields ->
       let fields =

@@ -1041,7 +1041,7 @@ let curly_quoted_string cursor ~opening_length ~closing =
             character >= ' ' && character <> '"' && character <> '\\' && character <> '$')
           value
       in
-      report cursor ~code:Lookalike_character
+      report cursor ~code:Confusable_character
         ~fixes:
           (if exact then
              [

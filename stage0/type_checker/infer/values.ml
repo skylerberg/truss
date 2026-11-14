@@ -49,7 +49,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       arguments =
         List.mapi
           (fun index (written : expression) ->
-            { Tables.expression = written.id; parameter_index = index; mode; mark = None })
+            { Tables.expression = written.id; parameter_index = index; mode; mode_keyword = None })
           arguments;
       omitted_defaults = [];
       uses = Types.no_capabilities;

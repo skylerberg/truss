@@ -161,13 +161,13 @@ and statement state env (written : statement) ~last : unit =
                         Tables.expression = written_target.id;
                         parameter_index = 0;
                         mode = Types.Read;
-                        mark = None;
+                        mode_keyword = None;
                       };
                       {
                         Tables.expression = value.id;
                         parameter_index = 1;
                         mode = Types.Read;
-                        mark = None;
+                        mode_keyword = None;
                       };
                     ]
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
@@ -214,8 +214,10 @@ and statement state env (written : statement) ~last : unit =
       reject_in_formula state env written.span "A `for` loop";
       let mode, inner =
         match iterable.kind with
-        | Mode (Mut, inner) when Option.is_none (marked_call state inner) -> (Types.Mut, inner)
-        | Mode (Own, inner) when Option.is_none (marked_call state inner) -> (Types.Own, inner)
+        | Mode (Mut, inner) when Option.is_none (call_with_mode_keyword state inner) ->
+            (Types.Mut, inner)
+        | Mode (Own, inner) when Option.is_none (call_with_mode_keyword state inner) ->
+            (Types.Own, inner)
         | _ -> (Types.Read, iterable)
       in
       (* The types in the loop's header are inferred before the body is
@@ -245,7 +247,7 @@ and statement state env (written : statement) ~last : unit =
              match state.tables.types.(inner.id) with
              | Some type_ -> record state iterable type_
              | None -> ());
-          if mode = Types.Mut then mutate state env ~by:Mut_mark inner;
+          if mode = Types.Mut then mutate state env ~by:Passed_mut inner;
           binding_pattern state env written_pattern element ~is_var:false ~mode:variable_mode);
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
@@ -332,7 +334,12 @@ and assigns_through_index state env (written : statement) (target : expression) 
           in
           record state call Types.unit;
           let argument (argument_expression : expression) position mode : Tables.argument =
-            { expression = argument_expression.id; parameter_index = position; mode; mark = None }
+            {
+              expression = argument_expression.id;
+              parameter_index = position;
+              mode;
+              mode_keyword = None;
+            }
           in
           state.tables.calls.(written.id) <-
             Some
@@ -439,7 +446,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                         (Types.show type_)
                   | Mut ->
                       Printf.sprintf
-                        "A `for` loop cannot change the elements of `%s`: it has no `element` that \
+                        "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \
                          takes `mut self`."
                         (Types.show type_)
                   | Own ->

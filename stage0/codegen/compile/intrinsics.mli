@@ -11,7 +11,7 @@
    such storage a buffer of its own, so static bytes are never written. *)
 
 (* An argument: a place, for an operation on [Storage] or [View], which reads
-   or changes it there, or a value. *)
+   or mutates it there, or a value. *)
 type argument = Place of Lowered.place | Value of Lowered.operand
 
 (* The ground types the lowering needs. *)

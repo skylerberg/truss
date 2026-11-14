@@ -35,7 +35,7 @@ type builtin =
   | Shared
       (** [Shared[Value: Storable]]: a reference to a heap block that holds one value, a reference
           count, and a mutex. A copy increments the count and refers to the same value, and the last
-          drop drops the value. The value is read and changed only through [shared_update], which
+          drop drops the value. The value is read and mutated only through [shared_update], which
           holds the mutex. It is [Copyable], never [Plain], and not a view type. *)
 
 val builtins : builtin list
@@ -122,19 +122,19 @@ type operation =
       (** [array_view(array)]: a view of an array's elements, in order, which is valid for as long
           as the array is *)
   | Array_at_mut
-      (** [array_at_mut(mut array, index)]: lends the element at an index, to change. The index is
+      (** [array_at_mut(mut array, index)]: lends the element at an index, to mutate. The index is
           less than the array's length. *)
   | Storage_at
   | Storage_at_mut
   | Storage_view
   | Storage_view_mut
-      (** [storage_view_mut(mut storage)]: a view of the storage's elements to change them through,
+      (** [storage_view_mut(mut storage)]: a view of the storage's elements to mutate them through,
           with [view_at_mut] and [view_swap]. Storage whose elements are static gets a buffer of its
           own first, as it does before any other change. *)
   | View_length
   | View_at
   | View_at_mut
-      (** [view_at_mut(mut view, index)]: lends the element at an index, to change. The index is
+      (** [view_at_mut(mut view, index)]: lends the element at an index, to mutate. The index is
           less than the view's length, and the view is of elements that may be changed: it came from
           [storage_view_mut] or from an array held [mut]. *)
   | View_swap
@@ -142,7 +142,7 @@ type operation =
           may be changed. Each index is less than the view's length. *)
   | Storage_take_view
       (** [storage_take_view(mut storage, view, start)]: says that the storage's elements from
-          [start] are the view's, where the view was made from this storage to change them through.
+          [start] are the view's, where the view was made from this storage to mutate them through.
           In memory they already are, so it does nothing; the prover gives the storage's model the
           view's elements. A checked build stops if the view is not of those elements. *)
   | View_take_view  (** [view_take_view(mut view, part, start)]: the same for a view of a view *)

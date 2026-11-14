@@ -20,7 +20,7 @@ let inputs database (key : Resolve.Names.key) =
           bounds =
             (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
           spans;
-          marks = Hashtbl.create 8;
+          mode_keywords = Hashtbl.create 8;
           names = Hashtbl.create 32;
           kinds = Hashtbl.create 32;
           types = Hashtbl.create 32;

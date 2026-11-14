@@ -69,12 +69,12 @@ let rec expression cursor context (value : expression) =
       report cursor Echo_in_specification value.span
         "`echo` is not allowed in specifications, which never run."
   | Try _ when context.in_parallel ->
-      report cursor Leaves_parallel (last_byte value.span)
-        "`?` cannot leave a `parallel` block or a `parallel for`; return a `Result` from the \
-         branch and use `?` after it."
+      report cursor Exits_parallel (last_byte value.span)
+        "`?` cannot exit a `parallel` block or a `parallel for`; return a `Result` from the branch \
+         and use `?` after it."
   | Return _ when context.in_parallel ->
-      report cursor Leaves_parallel value.span
-        "`return` cannot leave a `parallel` block or a `parallel for`."
+      report cursor Exits_parallel value.span
+        "`return` cannot exit a `parallel` block or a `parallel for`."
   | Break | Continue -> loop_exit cursor context value
   | _ -> ());
   match value.kind with
@@ -98,10 +98,10 @@ and loop_exit cursor context (value : expression) =
       report cursor Misplaced_loop_exit value.span
         (Printf.sprintf "`%s` cannot reach a loop outside the lambda it is in." word)
   | Parallel_body, _ ->
-      report cursor Leaves_parallel value.span
-        "`break` cannot leave a `parallel for`; `continue` can."
+      report cursor Exits_parallel value.span
+        "`break` cannot exit a `parallel for`; `continue` can."
   | Branch, _ ->
-      report cursor Leaves_parallel value.span
+      report cursor Exits_parallel value.span
         (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block." word)
 
 and block cursor context (body : block) = List.iter (statement cursor context) body.statements

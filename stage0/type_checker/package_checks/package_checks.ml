@@ -141,7 +141,7 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
 
 (* A method is its name and how it takes [self]. An [impl] in a type's own
-   package may write another version of a method the type has: one name,
+   package may write another overload of a method the type has: one name,
    taking [self] another way. Nothing else may use a name the type's methods
    have: not an [impl] in another package, and not a method an [impl] leaves
    to its trait's body, since either can arrive in an upgrade that the
@@ -373,16 +373,16 @@ let check_recursion database (declaration : Names.declaration) (definition : def
                 diagnostic_at database key Needs_indirect span
                   ~fixes:
                     [
-                      Diagnostic.fix "Mark the variant `indirect`."
+                      Diagnostic.fix "Declare the variant `indirect`."
                         [ Diagnostic.insert (Span.zero_width span.start) "indirect " ];
                     ]
-                  "This type contains itself in place, so it would be infinitely large. Mark the \
-                   variant `indirect` to keep its fields on the heap."
+                  "This type contains itself in place, so it would be infinitely large. Declare \
+                   the variant `indirect` to keep its fields on the heap."
             | None ->
                 diagnostic_at database key Needs_indirect (header_span definition)
                   "This record contains itself in place, so it would be infinitely large. A record \
-                   has no variant to mark `indirect`; use a sum type with an `indirect` variant, \
-                   or a collection.")
+                   has no variant to declare `indirect`; use a sum type with an `indirect` \
+                   variant, or a collection.")
       in
       let function_input =
         Option.bind (first Function_input) (fun field ->

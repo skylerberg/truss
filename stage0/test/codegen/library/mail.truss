@@ -1,0 +1,159 @@
+use standard::mail
+use standard::network
+use standard::simulation
+use standard::tasks
+
+fn read_line(connection: network::Connection, inbox: mut List[UInt8]) -> Option[String]
+  uses Handles, Tasks
+{
+  while true {
+    for index in 1..inbox.length() {
+      if inbox[index] == 10 && inbox[index - 1] == 13 {
+        let rest = mut inbox.split_off(index + 1)
+        let line = String.from_utf8_lossy(inbox[..index - 1])
+        inbox = own rest
+        return Some(own line)
+      }
+    }
+    match connection.receive(mut inbox, limit: 4096) {
+      Ok(count) => if count == 0 { return None }
+      Err(_) => return None
+    }
+  }
+}
+
+fn reply(connection: network::Connection, text: StringSlice)
+  uses Handles, Tasks
+{
+  let _ = connection.send_all("${text}\r\n".slice().bytes())
+}
+
+fn serve_once(listener: mut network::Listener, transcript: tasks::Cell[List[String]])
+  uses Handles, Tasks
+{
+  let connection = match mut listener.accept() {
+    Ok(connection) => own connection
+    Err(_) => return
+  }
+  var inbox: List[UInt8] = []
+  reply(connection, text: "220 mail.example.test ready")
+  while true {
+    let line = match read_line(connection, inbox: mut inbox) {
+      Some(line) => own line
+      None => return
+    }
+    let recorded = line.copy()
+    transcript.update(fn(listed) { mut listed.push(recorded.copy()) })
+    if line.slice().starts_with("EHLO") {
+      reply(connection, text: "250-mail.example.test")
+      reply(connection, text: "250-AUTH PLAIN LOGIN")
+      reply(connection, text: "250 8BITMIME")
+    } else if line.slice().starts_with("AUTH PLAIN") {
+      reply(connection, text: "235 accepted")
+    } else if line == "DATA" {
+      reply(connection, text: "354 go ahead")
+      var data = ""
+      while true {
+        let body_line = match read_line(connection, inbox: mut inbox) {
+          Some(text) => own text
+          None => break
+        }
+        if body_line == "." {
+          break
+        }
+        mut data.push(body_line.slice())
+        mut data.push("\n")
+      }
+      let content = data.copy()
+      transcript.update(fn(listed) { mut listed.push("DATA:${content}") })
+      reply(connection, text: "250 queued")
+    } else if line == "QUIT" {
+      reply(connection, text: "221 bye")
+      return
+    } else {
+      reply(connection, text: "250 ok")
+    }
+  }
+}
+
+fn sent() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 2525)).expect("the port is free")
+  let transcript = tasks::Cell[List[String]].new([])
+  var outcome = ""
+  concurrent {
+    serve_once(mut listener, transcript: transcript)
+    {
+      let message = mail::Message(
+        from: mail::Address(email: "ada@example.test", name: Some("Ada Lovelace")),
+        to: [mail::Address(email: "grace@example.test")],
+        subject: "Résumé attached",
+        text: Some("Hello Grace,\n.hidden line\nSee the attachment."),
+        html: Some("<p>Hello Grace</p>"),
+        cc: [mail::Address(email: "alan@example.test", name: Some("Zoë"))],
+        bcc: [mail::Address(email: "hidden@example.test")],
+        attachments: [mail::Attachment(filename: "notes.txt", content_type: "text/plain", bytes: "plain notes".bytes().to_list())],
+      )
+      outcome = match mail::send(message, options: mail::SmtpOptions(
+        host: "localhost",
+        port: 2525,
+        security: mail::Security.Plain,
+        username: Some("ada"),
+        password: Some("secret"),
+      )) {
+        Ok(_) => "sent"
+        Err(error) => "failed: ${error}"
+      }
+    }
+  }
+  var seen: List[String] = [own outcome]
+  for line in transcript.read(fn(listed) { listed.copy() }) {
+    mut seen.push(line.copy())
+  }
+  seen
+}
+
+test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stuffed MIME message" {
+  provide simulation::World.new() {
+    let seen = sent()
+    assert seen.length() == 10
+    assert seen[9] == "QUIT"
+    assert seen[0] == "sent"
+    assert seen[1] == "EHLO localhost"
+    assert seen[2] == "AUTH PLAIN AGFkYQBzZWNyZXQ="
+    assert seen[3] == "MAIL FROM:<ada@example.test>"
+    assert seen[4] == "RCPT TO:<grace@example.test>"
+    assert seen[5] == "RCPT TO:<alan@example.test>"
+    assert seen[6] == "RCPT TO:<hidden@example.test>"
+    assert seen[7] == "DATA"
+    let data = seen[8].slice()
+    assert data.contains("From: \"Ada Lovelace\" <ada@example.test>\n")
+    assert data.contains("To: <grace@example.test>\n")
+    assert data.contains("Cc: =?UTF-8?B?Wm/Dqw==?= <alan@example.test>\n")
+    assert data.contains("Subject: =?UTF-8?B?UsOpc3Vtw6kgYXR0YWNoZWQ=?=\n")
+    assert !data.contains("hidden@example.test")
+    assert data.contains("MIME-Version: 1.0\n")
+    assert data.contains("Content-Type: multipart/mixed; boundary=")
+    assert data.contains("Content-Type: multipart/alternative; boundary=")
+    assert data.contains("..hidden line")
+    assert data.contains("Content-Disposition: attachment; filename=\"notes.txt\"\n")
+    assert data.contains("cGxhaW4gbm90ZXM=\n")
+  }
+}
+
+test "a message refuses a line break in a header field, which would let a caller add headers" {
+  provide simulation::World.new() {
+    let injected = mail::Message(
+      from: mail::Address(email: "ada@example.test"),
+      to: [mail::Address(email: "grace@example.test")],
+      subject: "Hello\r\nBcc: victim@example.test",
+      text: Some("hi"),
+    )
+    assert injected.encode() is Err(Malformed(_))
+    let bad_address = mail::Message(from: mail::Address(email: "not an address"), to: [mail::Address(email: "grace@example.test")], subject: "Hi")
+    assert bad_address.encode() is Err(Malformed(_))
+    let nobody = mail::Message(from: mail::Address(email: "ada@example.test"), to: [], subject: "Hi")
+    assert nobody.encode() is Err(Malformed(_))
+  }
+}
