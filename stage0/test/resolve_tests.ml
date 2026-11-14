@@ -66,7 +66,7 @@ let one_diagnostic = Support.one_diagnostic ~setup ~check:Resolve.diagnostics
    resolved form of the definition it is in. *)
 let name_at database name text occurrence =
   let file = file_of name in
-  let source = Source.text (Query.demand database Workspace.file file).source in
+  let source = Source.text (Query.demand database Packages.source file) in
   let offset = Option.get (Substring.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let located =
@@ -381,7 +381,7 @@ let () =
           @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
       in
       let file = file_of "app::main" in
-      if (Query.demand database Workspace.file file).diagnostics = [] then fail "parsed";
+      if (Query.demand database Parsed.file file).diagnostics = [] then fail "parsed";
       match Resolve.diagnostics database file with
       | [] -> ()
       | reported -> fail "reported %s" (String.concat "; " (codes reported)));
@@ -430,7 +430,7 @@ let () =
         setup [ ("app::main", Fixtures.Resolve.body_the_parser_could_not_read_is_not_resolved) ]
       in
       let file = file_of "app::main" in
-      if (Query.demand database Workspace.file file).diagnostics = [] then fail "parsed";
+      if (Query.demand database Parsed.file file).diagnostics = [] then fail "parsed";
       match Resolve.diagnostics database file with
       | [] -> ()
       | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))

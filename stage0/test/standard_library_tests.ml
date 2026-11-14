@@ -219,7 +219,7 @@ let () =
           timed (Path.show_module module_) (fun () ->
               List.iter
                 (fun (file, errors) ->
-                  let source = (Query.demand database Workspace.file file).source in
+                  let source = Query.demand database Packages.source file in
                   List.iter
                     (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
                     (match errors with

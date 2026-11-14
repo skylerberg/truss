@@ -25,7 +25,7 @@ let declarations context packages =
           List.filter
             (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
             (try Query.demand context Names.declarations module_ with Not_found -> []))
-        (Query.demand context Workspace.modules name))
+        (Query.demand context Packages.modules name))
     packages
 
 (* Each definition that changed, was added, or was removed, in order. *)

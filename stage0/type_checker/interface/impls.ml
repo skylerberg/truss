@@ -53,7 +53,7 @@ let for_type =
               (fun (head, impl) ->
                 if Option.equal Path.equal head (Some type_) then Some impl else None)
               (Query.demand database Names.impl_types module_))
-          (Query.demand database Workspace.modules package)
+          (Query.demand database Packages.modules package)
         |> List.fold_left
              (fun impls impl ->
                if List.exists (Path.equal impl) impls then impls else impl :: impls)

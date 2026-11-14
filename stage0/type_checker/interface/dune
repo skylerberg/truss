@@ -9,7 +9,7 @@
   well_known
   intrinsic
   types
-  workspace
+  packages
   syntax
   resolve
   diagnostic

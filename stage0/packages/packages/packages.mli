@@ -1,19 +1,10 @@
-(** The inputs of a build, and the queries that parse them.
+(** The packages of a build, as the compiler's stages see them: each package's modules, files,
+    dependencies, and width of [USize], and each file's text. The project's own packages, the
+    standard library, and registry packages are alike here. The driver's view, with the files'
+    inputs, the manifests' layout, and the registry, is {!Project}'s. *)
 
-    The driver sets each package, with its manifest and its files, and the text of each file. A
-    module is a directory of a package, and its files share one namespace. Everything else is a
-    query, so changing one file re-parses that file alone, and a definition whose tree comes out the
-    same, as one that only moved does, changes nothing that reads it. *)
-
-type file = {
-  source : Source.t;
-  uses : Syntax.path Syntax.item list;
-  definitions : Syntax.definition Syntax.item list;
-  diagnostics : Diagnostic.t list;  (** The lexer's and the parser's, in the file's offsets. *)
-}
-
-val file : (Path.file, file) Query.query
-(** A file, lexed and parsed. Raises [Not_found] if it has no text. *)
+val source : (Path.file, Source.t) Query.query
+(** A file's text, with its table of lines. Raises [Not_found] if it has no text. *)
 
 val modules : (Path.package, Path.module_ list) Query.query
 (** A package's modules, and none for a package there is not. *)

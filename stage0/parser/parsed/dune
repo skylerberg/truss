@@ -1,0 +1,3 @@
+(library
+ (name parsed)
+ (libraries query phases path diagnostic lexer syntax parser packages))

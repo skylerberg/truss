@@ -358,10 +358,10 @@ let compare ~before ~after package =
         new_impls
   in
   let targets =
-    Query.demand before Workspace.exists package
-    && Query.demand after Workspace.exists package
-    && Query.demand before Workspace.usize_bits package = 32
-    && Query.demand after Workspace.usize_bits package = 64
+    Query.demand before Packages.exists package
+    && Query.demand after Packages.exists package
+    && Query.demand before Packages.usize_bits package = 32
+    && Query.demand after Packages.usize_bits package = 64
   in
   (definitions @ added @ impl_changes, targets)
 

@@ -1511,7 +1511,7 @@ let law_proofs database package (trait : Types.trait_reference) (for_type : Type
               | _ -> None)
           | _ -> None)
         (Query.demand database Names.declarations module_))
-    (Query.demand database Workspace.modules package)
+    (Query.demand database Packages.modules package)
 
 (* Whether an [impl] writes a method whose body holds a [todo]. Its laws
    are about its methods' results, so they wait, as the methods'

@@ -272,8 +272,9 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
       match Query.demand compiler.database Names.base key with
       | None -> None
       | Some (file, base) ->
-          let parsed = Query.demand compiler.database Workspace.file file in
-          let line, _ = Source.position parsed.source base in
+          let line, _ =
+            Source.position (Query.demand compiler.database Packages.source file) base
+          in
           Some { definition = path; path = compiler.file_name file; first_line = line })
 
 (* A value read back from its binary form, as [Glue.encode] writes it, as

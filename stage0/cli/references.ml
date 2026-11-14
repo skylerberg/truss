@@ -137,7 +137,7 @@ let uses session packages (target_module : Path.module_) =
             let first = match path.modules with first :: _ -> first | [] -> path.last in
             Some (file, Source.span (item.base + first.span.start) (item.base + path.last.span.stop))
           else None)
-        (Query.demand (Database.context session) Workspace.file file).uses)
+        (Query.demand (Database.context session) Parsed.file file).uses)
     (Command_packages.files session packages)
 
 (* Whether an occurrence refers to a definition or, for a method, to any

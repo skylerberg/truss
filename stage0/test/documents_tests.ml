@@ -12,7 +12,7 @@ let solver = Lazy.force Support.solver
 let markdown_files = Harness.markdown_documents ()
 
 (* The codes that mean the block needs context it does not have. *)
-let source_of database file = (Query.demand database Workspace.file file).source
+let source_of database file = Query.demand database Packages.source file
 
 let excerpt_codes =
   [
@@ -30,7 +30,7 @@ let () =
         (fun index text ->
           let database = Support.setup [ ("example", text) ] in
           let file = Support.file_of "example" in
-          if (Query.demand database Workspace.file file).diagnostics = [] then
+          if (Query.demand database Parsed.file file).diagnostics = [] then
             test
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))

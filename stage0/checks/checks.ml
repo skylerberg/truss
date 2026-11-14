@@ -24,7 +24,7 @@ let through last database file =
   stage_diagnostics stages
 
 let diagnostics database file =
-  let parsed = Query.demand database Workspace.file file in
+  let parsed = Query.demand database Parsed.file file in
   List.sort_uniq
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))

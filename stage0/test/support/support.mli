@@ -1,4 +1,4 @@
-(** Setting up a workspace with the real standard library, for the type checker's tests, and
+(** Setting up a database with the real standard library, for the type checker's tests, and
     asserting one diagnostic with its fix. *)
 
 val module_of : string -> Path.module_
