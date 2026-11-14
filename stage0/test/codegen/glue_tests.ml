@@ -98,7 +98,7 @@ let () =
       in
       if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
         fail "the copy does not allocate and copy once:\n%s" c);
-  test "a copy of storage keeps its values when the original changes" (fun () ->
+  test "a copy of storage keeps its values when the original is mutated" (fun () ->
       let ty = storage int32 in
       expect_status 20
         [

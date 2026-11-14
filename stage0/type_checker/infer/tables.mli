@@ -24,7 +24,8 @@ type callee =
 
 type argument = {
   expression : Syntax.id;
-  mark : Core.mark option;  (** The argument's [mut] or [own], where it is written with one. *)
+  mode_keyword : Core.mode_keyword option;
+      (** The argument's [mut] or [own], where it is written with one. *)
   parameter_index : int;
   mode : Types.mode;
 }

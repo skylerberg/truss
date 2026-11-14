@@ -44,22 +44,22 @@ let () =
      borrow" (fun () ->
       fine (functions ^ Fixtures.Ownership.view_of_another_place_and_a_value_copied_out_of));
   rejected "a later argument cannot mutate a place that an earlier argument borrows"
-    "  show(items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
+    "  show(items[0], count: grow(mut items))\n" "ownership.mutated_while_viewed";
   rejected "a later argument cannot mutate a place that an earlier argument borrows `mut`"
-    "  change(mut items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
+    "  change(mut items[0], count: grow(mut items))\n" "ownership.mutated_while_viewed";
   rejected "a later argument cannot mutate the place that an earlier argument views"
-    "  count_of(items[..1], count: grow(mut items))\n" "ownership.changed_while_viewed";
+    "  count_of(items[..1], count: grow(mut items))\n" "ownership.mutated_while_viewed";
   rejected "a later argument cannot mutate the place that an earlier view argument views"
     "  var part = items.slice()\n  count_of(part, count: grow(mut items))\n"
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "an index key cannot mutate the indexed collection" "  let _ = items[grow(mut items)]\n"
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "a slice bound cannot mutate the sliced collection"
-    "  let _ = items[..grow(mut items)]\n" "ownership.changed_while_viewed";
+    "  let _ = items[..grow(mut items)]\n" "ownership.mutated_while_viewed";
   test "a later field cannot mutate the place that an earlier field views" (fun () ->
       one_diagnostic
         (functions ^ Fixtures.Ownership.later_field_cannot_mutate_the_place_that_an)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "the fields of a constructor are evaluated in the order written" (fun () ->
       fine (functions ^ Fixtures.Ownership.fields_of_a_constructor_are_evaluated_in_the_order));
   test "an operand that is a copy does not borrow its place" (fun () ->
@@ -70,7 +70,7 @@ let () =
 let () =
   let shelf = Fixtures.Ownership.shelf in
   let lends name signature body = shelf ^ "fn Shelf." ^ name ^ signature ^ " {\n" ^ body ^ "}\n" in
-  test "a lent constructor lends a place without a mark" (fun () ->
+  test "a lent constructor lends a place without a mode keyword" (fun () ->
       fine
         (lends "get" "(self, index: USize) lends Option[String]"
            "  if index < self.books.length() {\n\
@@ -78,7 +78,7 @@ let () =
            \  } else {\n\
            \    None\n\
            \  }\n"
-        ^ Fixtures.Ownership.lent_constructor_lends_a_place_without_a_mark));
+        ^ Fixtures.Ownership.lent_constructor_lends_a_place_without_a_mode_keyword));
   test "a constructor nested in a lent constructor lends places too" (fun () ->
       fine
         (lends "first" "(self) lends Option[First]"
@@ -108,20 +108,20 @@ let () =
         (lends "first" "(mut self) lends mut Option[Numbered]"
            "  Some(Numbered(index: 0, title: mut self.books[0]))\n")
         "ownership.lent_mut_in_variant");
-  test "a constructor lent `mut` lends the places marked `mut`" (fun () ->
+  test "a constructor lent `mut` lends the places passed `mut`" (fun () ->
       fine
         (lends "numbered" "(mut self, index: USize) lends mut Numbered"
            "  Numbered(index: index, title: mut self.books[index])\n"
         ^ Fixtures.Ownership.constructor_lent_mut_lends_the_places_marked));
-  test "a place in a constructor lent `mut` needs the `mut` mark" (fun () ->
+  test "a place in a constructor lent `mut` needs the `mut` keyword" (fun () ->
       one_diagnostic
         (lends "numbered" "(mut self) lends mut Numbered"
            "  Numbered(index: 0, title: self.books[0])\n")
-        "types.missing_mark");
-  test "a place in a constructor lent read-only takes no `mut` mark" (fun () ->
+        "types.missing_mode");
+  test "a place in a constructor lent read-only takes no `mut` keyword" (fun () ->
       one_diagnostic
         (lends "numbered" "(self) lends Numbered" "  Numbered(index: 0, title: mut self.books[0])\n")
-        "types.redundant_mark");
+        "types.redundant_mode");
   test "a lent constructor is not lent one place `mut` twice" (fun () ->
       one_diagnostic
         (lends "both" "(mut self) lends mut Both"
@@ -182,10 +182,10 @@ let () =
   let accepted name body = test name (fun () -> fine (types ^ body)) in
   rejected "a borrow of a value that owns data and stores a view views the value"
     Fixtures.Ownership.borrow_of_a_value_that_owns_data_and_stores_a_view
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "a slice of a part of a value that owns data and stores a view views the value"
     Fixtures.Ownership.slice_of_a_part_of_a_value_that_owns_data_and
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "a borrow of an `own` parameter cannot be returned"
     Fixtures.Ownership.borrow_of_an_own_parameter_cannot_be_returned "ownership.view_escapes";
   accepted "a view copied out of an `own` parameter can be returned"
@@ -194,33 +194,33 @@ let () =
     Fixtures.Ownership.any_that_stores_a_view_of_a_local_cannot_be "ownership.view_escapes";
   rejected "the place that an `any` views cannot be mutated while the `any` is live"
     Fixtures.Ownership.place_that_an_any_views_cannot_be_mutated_while
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   accepted "an `any` made from owned data can be returned"
     Fixtures.Ownership.any_made_from_owned_data_can_be_returned;
   rejected "a capturing lambda cannot be returned as a wider function type"
     Fixtures.Ownership.capturing_lambda_cannot_be_returned_as_a_wider "ownership.view_escapes";
   rejected "the value of an `if` has the views of its branches' tail expressions"
     Fixtures.Ownership.value_of_an_if_has_the_views_of_its_branches_tail
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "the value of a `match` has the views of its arms' tail expressions"
     Fixtures.Ownership.value_of_a_match_has_the_views_of_its_arms_tail
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "the value of a block has the views of its tail expression"
-    Fixtures.Ownership.value_of_a_block_has_the_views_of_its_tail "ownership.changed_while_viewed";
+    Fixtures.Ownership.value_of_a_block_has_the_views_of_its_tail "ownership.mutated_while_viewed";
   rejected "a view of a local cannot be returned through an `if` and a local"
     Fixtures.Ownership.view_of_a_local_cannot_be_returned_through_an_if "ownership.view_escapes";
   rejected "a copy of a view has the same views"
-    Fixtures.Ownership.copy_of_a_view_has_the_same_views "ownership.changed_while_viewed";
+    Fixtures.Ownership.copy_of_a_view_has_the_same_views "ownership.mutated_while_viewed";
   rejected "a record built by `with` has the views of its new fields"
     Fixtures.Ownership.record_built_by_with_has_the_views_of_its_new
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   rejected "a view copied out of a loop variable views the collection that the loop iterates over"
-    Fixtures.Ownership.view_copied_out_of_a_loop_variable_views_the "ownership.changed_while_viewed";
+    Fixtures.Ownership.view_copied_out_of_a_loop_variable_views_the "ownership.mutated_while_viewed";
   accepted "a `Plain` loop variable is a copy, so the collection can be mutated after the loop"
     Fixtures.Ownership.plain_loop_variable_is_a_copy_so_the_collection;
   rejected "a place cannot be mutated while a `match` binding of it is live"
     Fixtures.Ownership.place_cannot_be_mutated_while_a_match_binding_of
-    "ownership.changed_while_viewed";
+    "ownership.mutated_while_viewed";
   accepted "a place can be mutated in an arm once the `match` bindings are dead"
     Fixtures.Ownership.place_can_be_mutated_in_an_arm_once_the_match
 
@@ -240,7 +240,7 @@ let () =
       call follows the last iteration. *)
    rejected "a view of an element lent `mut` cannot be used in the next iteration"
      (chunks ^ Fixtures.Ownership.view_of_an_element_lent_mut_cannot_be_used_in_the_next)
-     "ownership.changed_while_viewed";
+     "ownership.mutated_while_viewed";
    accepted "a view of the last element lent `mut` can be used after the loop"
      (chunks ^ Fixtures.Ownership.view_of_the_last_element_lent_mut_can_be_used_after);
    accepted "a view of an element lent `mut` to an iteration can be used in that iteration"
@@ -261,7 +261,7 @@ let () =
   test "the body of a `provide` cannot mutate a place that the block borrows" (fun () ->
       one_diagnostic
         (counter ^ Fixtures.Ownership.body_of_a_provide_cannot_mutate_a_place_that_the)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "the body of a `provide` can read a place that the block borrows read-only" (fun () ->
       fine (counter ^ Fixtures.Ownership.body_of_a_provide_can_read_a_place_that_the_block));
   test "a place that a `provide` block borrows is usable again after the block" (fun () ->
@@ -347,7 +347,7 @@ let () =
         "ownership.view_escapes");
   test "a place cannot be mutated while a view of its `match` binding is live" (fun () ->
       one_diagnostic Fixtures.Ownership.place_cannot_be_mutated_while_a_view_of_its_match
-        "ownership.changed_while_viewed")
+        "ownership.mutated_while_viewed")
 
 (* Concurrent code *)
 
@@ -388,14 +388,14 @@ let () =
       one_diagnostic ~says:"`parallel for`"
         (pair ^ Fixtures.Ownership.parallel_for_cannot_change_the_elements_of_a)
         "ownership.data_race");
-  test "a `concurrent for` can change the elements of a `List`" (fun () ->
-      fine (pair ^ Fixtures.Ownership.concurrent_for_can_change_the_elements_of_a_list));
+  test "a `concurrent for` can mutate the elements of a `List`" (fun () ->
+      fine (pair ^ Fixtures.Ownership.concurrent_for_can_mutate_the_elements_of_a_list));
   test "a `concurrent for` can read the elements of any collection" (fun () ->
       fine (pair ^ Fixtures.Ownership.concurrent_for_can_read_the_elements_of_any));
   test "a `concurrent for` cannot iterate over a cursor of views" (fun () ->
       one_diagnostic ~says:"`Slice[Int64]` is a view"
         (pair ^ Fixtures.Ownership.concurrent_for_cannot_iterate_over_a_cursor_of)
-        "ownership.task_keeps_view");
+        "ownership.task_outlives_view");
   test "a `concurrent for` can iterate over a cursor of owned values or of `Plain` copies"
     (fun () -> fine (pair ^ Fixtures.Ownership.concurrent_for_can_iterate_over_a_cursor_of_owned))
 
@@ -406,7 +406,7 @@ let () =
   test "a guard cannot mutate the scrutinee" (fun () ->
       one_diagnostic
         (bump ^ Fixtures.Ownership.guard_cannot_mutate_the_scrutinee)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a guard can mutate another place, and an arm's body can mutate the scrutinee" (fun () ->
       fine (bump ^ Fixtures.Ownership.guard_can_mutate_another_place_and_an_arms_body))
 
@@ -427,10 +427,10 @@ let () =
         "ownership.not_owned" );
       ( "passing a constant to an `own` parameter",
         keep ^ names ^ Fixtures.Ownership.passing_a_constant_to_an_own_parameter,
-        "types.missing_mark" );
+        "types.missing_mode" );
       ( "passing a type's constant to an `own` parameter",
         keep ^ config ^ Fixtures.Ownership.passing_a_types_constant_to_an_own_parameter,
-        "types.missing_mark" );
+        "types.missing_mode" );
       ( "binding a constant with `var`",
         names ^ Fixtures.Ownership.binding_a_constant_with_var,
         "ownership.needs_owned" );
@@ -449,13 +449,13 @@ let () =
   test "a constant can be read, viewed, copied, and returned as a view" (fun () ->
       fine (keep ^ names ^ Fixtures.Ownership.constant_can_be_read_viewed_copied_and_returned_as));
   let bag = Fixtures.Ownership.bag in
-  test "a compound assignment's operand may change the target, because it runs first" (fun () ->
-      fine (bag ^ Fixtures.Ownership.compound_assignments_operand_may_change_the_target));
-  test "a compound assignment's borrowed operand cannot be changed by the target's index keys"
+  test "a compound assignment's operand may mutate the target, because it runs first" (fun () ->
+      fine (bag ^ Fixtures.Ownership.compound_assignments_operand_may_mutate_the_target));
+  test "a compound assignment's borrowed operand cannot be mutated by the target's index keys"
     (fun () ->
       one_diagnostic
         (bag ^ Fixtures.Ownership.compound_assignments_borrowed_operand_cannot_be)
-        "ownership.changed_while_viewed")
+        "ownership.mutated_while_viewed")
 
 let () =
   test "the default of a parameter of a view type views a value that lasts for the call" (fun () ->
@@ -530,7 +530,7 @@ let () =
         "ownership.conflicting_loan");
   test "a place cannot be mutated while a view of it is live" (fun () ->
       one_diagnostic Fixtures.Ownership.place_cannot_be_mutated_while_a_view_of_it_is_live
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a place can be mutated once the view of it is dead" (fun () ->
       fine Fixtures.Ownership.place_can_be_mutated_once_the_view_of_it_is_dead);
   test "a function cannot return a view of its own local" (fun () ->
@@ -587,10 +587,10 @@ let () =
   test "a loop body cannot mutate the collection that the loop iterates over, even inside a branch"
     (fun () ->
       one_diagnostic Fixtures.Ownership.loop_body_cannot_mutate_the_collection_that_the
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a loop body cannot borrow `mut` the collection that the loop iterates over" (fun () ->
       one_diagnostic Fixtures.Ownership.loop_body_cannot_borrow_mut_the_collection_that
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a `parallel for` cannot borrow `mut` a place from outside the loop" (fun () ->
       one_diagnostic Fixtures.Ownership.parallel_for_cannot_borrow_mut_a_place_from
         "ownership.data_race");
@@ -602,7 +602,7 @@ let () =
       fine Fixtures.Ownership.parallel_for_can_mutate_its_own_element_and_locals);
   test "a call cannot take a view of a place that another argument moves" (fun () ->
       one_diagnostic Fixtures.Ownership.call_cannot_take_a_view_of_a_place_that_another
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a Plain place passed own is copied, so the call may use it twice" (fun () ->
       fine Fixtures.Ownership.plain_place_passed_own_is_copied_so_the_call_may)
 
@@ -671,7 +671,7 @@ let () =
       fine Fixtures.Ownership.assigning_a_var_a_new_view_ends_its_view_of_the_old_place);
   test "assigning a field a new view keeps the record's other views" (fun () ->
       one_diagnostic Fixtures.Ownership.assigning_a_field_a_new_view_keeps_the_records_other_views
-        "ownership.changed_while_viewed")
+        "ownership.mutated_while_viewed")
 
 (* Loops over a collection's elements *)
 
@@ -682,8 +682,8 @@ let () =
 let () =
   test "is on a temporary binds its parts as owned, as match does" (fun () ->
       fine Fixtures.Ownership.is_on_a_temporary_binds_its_parts_as_owned_as);
-  test "a let of a marked call's result binds it owned" (fun () ->
-      fine Fixtures.Ownership.let_of_a_marked_calls_result_binds_it_owned);
+  test "a let of the result of a call with a mode keyword binds it owned" (fun () ->
+      fine Fixtures.Ownership.let_of_the_result_of_a_call_with_a_mode_keyword_binds_it_owned);
   test "is on a place binds views of its parts" (fun () ->
       one_diagnostic Fixtures.Ownership.is_on_a_place_binds_views_of_its_parts "ownership.not_owned")
 
@@ -718,12 +718,12 @@ let () =
     "the then-block cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       one_diagnostic Fixtures.Ownership.then_block_cannot_mutate_the_lender_while_a_name_the
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test
     "a `while` body cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       one_diagnostic Fixtures.Ownership.while_body_cannot_mutate_the_lender_while_a_name_the
-        "ownership.changed_while_viewed")
+        "ownership.mutated_while_viewed")
 
 (* The prover's part *)
 
@@ -771,7 +771,7 @@ let counter = Fixtures.Ownership.counter_2
 let tally = Fixtures.Ownership.tally
 
 let () =
-  test "a part lent `mut` is changed through its `mut self` method, with no mark of its own"
+  test "a part lent `mut` is mutated through its `mut self` method, with no mode keyword of its own"
     (fun () -> fine (grid ^ Fixtures.Ownership.part_lent_mut_is_changed_through_its_mut_self));
   test "a part lent `mut` is assigned to" (fun () ->
       fine (grid ^ Fixtures.Ownership.part_lent_mut_is_assigned_to));
@@ -782,15 +782,15 @@ let () =
   test "a part lent read-only is not passed `mut`" (fun () ->
       one_diagnostic
         (grid ^ Fixtures.Ownership.part_lent_read_only_is_not_passed_mut)
-        "types.wrong_mark");
+        "types.wrong_mode");
   test "a lent part cannot be moved" (fun () ->
-      one_diagnostic (grid ^ Fixtures.Ownership.lent_part_cannot_be_moved) "types.missing_mark");
+      one_diagnostic (grid ^ Fixtures.Ownership.lent_part_cannot_be_moved) "types.missing_mode");
   test "a lent part cannot be returned" (fun () ->
       one_diagnostic (grid ^ Fixtures.Ownership.lent_part_cannot_be_returned) "ownership.not_owned");
   test "a `let` cannot bind a lent part" (fun () ->
       one_diagnostic
         (grid ^ Fixtures.Ownership.let_cannot_bind_a_lent_part)
-        "ownership.keeps_lent_part");
+        "ownership.lent_part_escapes");
   test "a `let` copies a `Plain` lent part" (fun () ->
       fine (counter ^ Fixtures.Ownership.let_copies_a_plain_lent_part));
   test "a `match` on a lent part binds views of it, which cannot be moved" (fun () ->
@@ -806,12 +806,12 @@ let () =
   test "a place and a part that it lends `mut` cannot be passed to one call" (fun () ->
       one_diagnostic
         (grid ^ Fixtures.Ownership.place_and_a_part_that_it_lends_mut_cannot_be)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a receiver that a lending call borrows read-only cannot be mutated in the same statement"
     (fun () ->
       one_diagnostic
         (tally ^ Fixtures.Ownership.receiver_that_a_lending_call_borrows_read_only)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "two parts of a place are lent read-only in one statement" (fun () ->
       fine (tally ^ Fixtures.Ownership.two_parts_of_a_place_are_lent_read_only_in_one));
   test "a lending call's loan ends with its statement" (fun () ->
@@ -832,19 +832,19 @@ let window = "type Window(view: Slice[Int64])\n\n"
 let () =
   test "a `mut` list argument stores the call's view arguments" (fun () ->
       one_diagnostic Fixtures.Ownership.mut_list_argument_stores_the_calls_view_arguments
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "the views stored in a `mut` list argument end when the list is dead" (fun () ->
       fine Fixtures.Ownership.views_stored_in_a_mut_list_argument_end_when_the);
   test "a `mut` argument of a function stores the function's view arguments" (fun () ->
       one_diagnostic Fixtures.Ownership.mut_argument_of_a_function_stores_the_functions
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a view stored in a place inside a branch is still stored after the branch" (fun () ->
       one_diagnostic Fixtures.Ownership.view_stored_in_a_place_inside_a_branch_is_still
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a record whose field is assigned a view has the value's views" (fun () ->
       one_diagnostic
         (window ^ Fixtures.Ownership.record_whose_field_is_assigned_a_view_has_the)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a `mut` argument cannot store a view of a temporary" (fun () ->
       one_diagnostic Fixtures.Ownership.mut_argument_cannot_store_a_view_of_a_temporary
         "ownership.views_temporary");
@@ -860,7 +860,7 @@ let () =
   test "a place that a `mut` parameter views cannot be mutated in the rest of the function"
     (fun () ->
       one_diagnostic Fixtures.Ownership.place_that_a_mut_parameter_views_cannot_be_mutated
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a `mut self` method cannot store a view of a local in `self`" (fun () ->
       one_diagnostic
         (window ^ Fixtures.Ownership.mut_self_method_cannot_store_a_view_of_a_local_in)
@@ -879,10 +879,10 @@ let () =
   test "the receiver of a `mut self` method stores the method's view arguments" (fun () ->
       one_diagnostic
         (window ^ Fixtures.Ownership.receiver_of_a_mut_self_method_stores_the_methods)
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a call's result views its `mut` arguments" (fun () ->
       one_diagnostic Fixtures.Ownership.calls_result_views_its_mut_arguments
-        "ownership.changed_while_viewed");
+        "ownership.mutated_while_viewed");
   test "a function cannot return a view of an `own` parameter" (fun () ->
       one_diagnostic Fixtures.Ownership.function_cannot_return_a_view_of_an_own_parameter
         "ownership.view_escapes");

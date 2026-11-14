@@ -41,21 +41,21 @@ let rec expression state env ?expected (value : expression) : Types.ty =
 
 (* A tail expression of a lending method: the part the method lends. A
    place in it is lent, not moved or copied, and a part lent [mut] is
-   mutated, so an index in it uses the [mut self] version of [at]. *)
+   mutated, so an index in it uses the [mut self] overload of [at]. *)
 and lent_part state env (value : expression) : Types.ty =
   Hashtbl.remove state.lent_tails value.id;
   match env.output with
   | Some (Lends (mode, part)) ->
       let inner =
         match value.kind with
-        | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
+        | Mode (_, inner) when Option.is_none (call_with_mode_keyword state inner) -> inner
         | _ -> value
       in
       Hashtbl.replace state.yielded inner.id (match mode with Mut -> Mut | Read | Own -> Read);
       let actual = expression state env ~expected:part inner in
       if inner != value then alias_expression state value inner;
       check_lent_value state env inner;
-      if mode = Mut then mutate state env ~by:Mut_mark inner;
+      if mode = Mut then mutate state env ~by:Passed_mut inner;
       coerce state env inner ~actual ~expected:part;
       actual
   | _ -> expression_kind state env value
@@ -142,14 +142,14 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   | With (base, updates) -> with_ state env value base updates
   | Prefix (operator, inner) -> prefix state env ?expected value operator inner
   | Mode (mode, inner) ->
-      (match marked_call state inner with
+      (match call_with_mode_keyword state inner with
       | Some call_id ->
           state.receiver_modes <-
             (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.receiver_modes
       | None -> ());
       let type_ = expression state env ?expected inner in
-      if mode = Mut && Option.is_none (marked_call state inner) then
-        mutate state env ~by:Mut_mark inner;
+      if mode = Mut && Option.is_none (call_with_mode_keyword state inner) then
+        mutate state env ~by:Passed_mut inner;
       alias_expression state value inner;
       type_
   | Any inner -> any_ state env ?expected value inner
@@ -403,8 +403,18 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                           };
                       arguments =
                         [
-                          { expression = base.id; parameter_index = 0; mode = Read; mark = None };
-                          { expression = key.id; parameter_index = 1; mode = Read; mark = None };
+                          {
+                            expression = base.id;
+                            parameter_index = 0;
+                            mode = Read;
+                            mode_keyword = None;
+                          };
+                          {
+                            expression = key.id;
+                            parameter_index = 1;
+                            mode = Read;
+                            mode_keyword = None;
+                          };
                         ];
                       omitted_defaults = [];
                       uses = Types.no_capabilities;

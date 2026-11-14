@@ -35,7 +35,7 @@ let check context (mir : Mir.t) =
                 _;
               } -> (
               let keyword = if schedule = Parallel_loop then "parallel" else "concurrent" in
-              (* A data race. Each iteration is lent an element to change, so
+              (* A data race. Each iteration is lent an element to mutate, so
                  the elements must be different places. An index of a [List],
                  a [Slice], or an [Array] is one for each position. Any other
                  collection's [element] could lend one place to two
@@ -48,7 +48,7 @@ let check context (mir : Mir.t) =
                       report context Data_race (span context origin)
                         (Printf.sprintf
                            "Data race: the iterations of a `%s for` run at the same time, and each \
-                            is lent an element of %s to change. Only a `List`, a `Slice`, or an \
+                            is lent an element of %s to mutate. Only a `List`, a `Slice`, or an \
                             `Array` lends its elements to iterations that run at the same time: \
                             its elements at different positions are different places. Loop over a \
                             `mut Slice` of the collection's storage, or use a `for` loop."
@@ -58,17 +58,17 @@ let check context (mir : Mir.t) =
                            | None -> "the collection")))
               | _ -> ());
               (* A dangling view. A task keeps the value it is given after the
-                 loop pulls the cursor again, and a pull may change or drop
+                 loop pulls the cursor again, and a pull may mutate or drop
                  what a view from the cursor views. *)
               match (schedule, iteration) with
               | Concurrent_loop, Pull _ when is_view context body.locals.(part).type_ ->
-                  report context Task_keeps_view
+                  report context Task_outlives_view
                     (span context block.terminator_origin)
                     (Printf.sprintf
                        "Each iteration of a `concurrent for` runs as a task that outlives the pull \
                         that started it. The element type `%s` is a view, and the next pull could \
-                        change or drop what it views, which would leave the task with a dangling \
-                        view. Use a `for` loop, or pull owned values."
+                        mutate or drop the value that it views, which would leave the task with a \
+                        dangling view. Use a `for` loop, or pull owned values."
                        (Types.show body.locals.(part).type_))
               | _ -> ())
           | _ -> ())

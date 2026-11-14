@@ -1618,7 +1618,7 @@ and loop_clauses cursor =
                (if cost.bound = Finite then
                   "A loop shows that it ends with `decreases`, not with `time finite`."
                 else
-                  "Potential belongs to the values the loop changes, which the function's own \
+                  "Potential belongs to the values the loop mutates, which the function's own \
                    `cost` accounts for."));
         loop
           (({

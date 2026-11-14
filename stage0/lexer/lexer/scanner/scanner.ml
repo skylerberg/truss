@@ -263,8 +263,8 @@ let rec scan cursor ~inline ~nesting =
         in
         (* A character that looks like ASCII punctuation is reported, and
            lexes as the token that its fix writes. *)
-        let lookalike ~replacement ~name =
-          report cursor ~code:Lookalike_character
+        let confusable ~replacement ~name =
+          report cursor ~code:Confusable_character
             ~fixes:
               [
                 Diagnostic.fix
@@ -277,14 +277,14 @@ let rec scan cursor ~inline ~nesting =
           cursor.position <- start + length;
           cursor.line_is_blank <- false
         in
-        match Lookalikes.find value with
+        match Confusables.find value with
         | Some Space ->
-            lookalike ~replacement:" " ~name:"the space character";
+            confusable ~replacement:" " ~name:"the space character";
             again ()
         | Some (Spelled spelling) -> (
-            match Lookalikes.token spelling with
+            match Confusables.token spelling with
             | Some kind ->
-                lookalike ~replacement:spelling ~name:("`" ^ spelling ^ "`");
+                confusable ~replacement:spelling ~name:("`" ^ spelling ^ "`");
                 token kind
             | None -> unused ())
         | Some (Opening_quote closing) -> (

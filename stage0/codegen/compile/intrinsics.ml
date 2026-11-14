@@ -883,7 +883,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           (* A checked build checks the prover's preconditions for each
              call: a view has the elements that the function reads, and a
              storage has the room that it writes into, or the elements that
-             it changes. A function that reads up to a zero is given
+             it mutates. A function that reads up to a zero is given
              elements that end with one. *)
           if checks then begin
             let position = ref 0 in
@@ -942,7 +942,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                       (fun count ->
                         panic_if
                           (Binary (Greater, count, length (place (argument index))))
-                          "a call of the C library with fewer elements than it changes")
+                          "a call of the C library with fewer elements than it mutates")
                       (counted extent)
                 | Some (Elements (element, extent)) -> (
                     let view = place (argument index) in

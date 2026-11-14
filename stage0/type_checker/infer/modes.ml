@@ -11,7 +11,7 @@ let note_lending state (value : expression) (output : Types.result) =
   | Returns _ -> ()
 
 (* The mode with which an expression is lent, if it is the result of a
-   lending call, or a field or an element of one. A mark before the
+   lending call, or a field or an element of one. A mode keyword before the
    expression belongs to the receiver of the lending call. *)
 let rec lent state (value : expression) : Types.mode option =
   match value.kind with
@@ -19,7 +19,7 @@ let rec lent state (value : expression) : Types.mode option =
   | Member (base, _) | Parenthesized base -> lent state base
   | Bracket (base, _) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
       lent state base
-  | Mode (_, inner) when Option.is_some (marked_call state inner) -> lent state inner
+  | Mode (_, inner) when Option.is_some (call_with_mode_keyword state inner) -> lent state inner
   | _ -> None
 
 (* Whether an expression is a slice, such as [items[1..3]]. A slice is
@@ -37,15 +37,18 @@ let borrowed state (value : expression) =
   (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
 
 (* The mode in which a pattern's bindings bind the parts of the scrutinee of
-   a [match] or an [is]. A scrutinee marked [own] or [mut] has that mode. An
-   unmarked place or lent part is borrowed, so the bindings are [Read]. Any
-   other scrutinee is a value that the match consumes, so the bindings are
-   [Own]. A mark that belongs to the receiver of a method call, as in [mut
-   cursor.next()], is not a mark on the scrutinee. *)
+   a [match] or an [is]. A scrutinee written with [own] or [mut] has that
+   mode. A place with no mode keyword, or a lent part, is borrowed, so the
+   bindings are [Read]. Any other scrutinee is a value that the match
+   consumes, so the bindings are [Own]. A mode keyword that belongs to the
+   receiver of a method call, as in [mut cursor.next()], is not a mode
+   keyword on the scrutinee. *)
 let scrutinee_mode state (scrutinee : expression) : Types.mode =
   match scrutinee.kind with
-  | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
-  | Mode (Mut, inner) when Option.is_none (marked_call state inner) && not (is_slice inner) -> Mut
+  | Mode (Own, inner) when Option.is_none (call_with_mode_keyword state inner) -> Own
+  | Mode (Mut, inner)
+    when Option.is_none (call_with_mode_keyword state inner) && not (is_slice inner) ->
+      Mut
   | _ -> if borrowed state scrutinee then Read else Own
 
 (* Why a place cannot be mutated. *)
@@ -83,7 +86,8 @@ let rec immutable state env (value : expression) : immutable option =
       else if env.self_mode = Types.Mut then None
       else Some (Read_only "self")
   | Member (base, _) | Bracket (base, _) | Parenthesized base -> immutable state env base
-  | Mode (Mut, inner) when Option.is_some (marked_call state inner) -> immutable state env inner
+  | Mode (Mut, inner) when Option.is_some (call_with_mode_keyword state inner) ->
+      immutable state env inner
   | Call _ -> (
       match lent state value with
       | Some Types.Mut -> None
@@ -94,8 +98,8 @@ let rec immutable state env (value : expression) : immutable option =
 (* Records that a place is mutated: every index expression in the place
    is a call of [IndexMut.at], which lends its element [mut]. A collection
    whose type implements [Index] alone lends each element read-only, so an
-   element of it cannot be changed in place. That is reported with [code]
-   where the place is otherwise one that can change. *)
+   element of it cannot be mutated in place. That is reported with [code]
+   where the place is otherwise one that can be mutated. *)
 let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) (value : expression)
     =
   match value.kind with
@@ -137,7 +141,7 @@ let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) 
                   in
                   report state code value.span
                     (Printf.sprintf
-                       "An element of `%s` cannot be changed in place: `%s` implements `Index`, \
+                       "An element of `%s` cannot be mutated in place: `%s` implements `Index`, \
                         which lends an element read-only, and not `IndexMut`.%s"
                        (show state self_type) (show state self_type)
                        (if assigns then " Assign the whole element with `=`." else "")))
@@ -148,44 +152,44 @@ let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) 
 
 type mutation =
   | Assignment
-  | Mut_mark  (** The place is passed [mut], is a [mut] receiver, or is lent or yielded [mut]. *)
+  | Passed_mut  (** The place is passed [mut], is a [mut] receiver, or is lent or yielded [mut]. *)
 
 (* Checks that a place may be mutated, and records that it is. Every
    construct that mutates a place calls this. *)
 let mutate state env ~(by : mutation) (value : expression) =
   let code : Diagnostic.Code.types =
-    match by with Assignment -> Not_assignable | Mut_mark -> Wrong_mark
+    match by with Assignment -> Not_assignable | Passed_mut -> Wrong_mode
   in
   (match (immutable state env value, by) with
   | _ when is_formula env ->
       report state Not_in_specification value.span
         (Printf.sprintf
            "Nothing in a specification, a proof, or a quantifier's body can be %s: the prover \
-            reads them as formulas, which change nothing."
-           (match by with Assignment -> "assigned" | Mut_mark -> "marked `mut`"))
+            reads them as formulas, which mutate nothing."
+           (match by with Assignment -> "assigned" | Passed_mut -> "passed `mut`"))
   | None, _ -> ()
   | Some (Captured name), _ ->
       report state code value.span
         (Printf.sprintf
-           "A lambda cannot change its captures, and `%s` is from outside it. Return the new value \
+           "A lambda cannot mutate its captures, and `%s` is from outside it. Return the new value \
             instead, or use a loop."
            name)
   | Some (Read_only name), _ ->
       report state code value.span
         (Printf.sprintf
-           "`%s` cannot change here: only a `var`, a `mut` parameter, or `mut self`, and their \
+           "`%s` cannot be mutated here: only a `var`, a `mut` parameter, or `mut self`, and their \
             parts, can be %s."
            name
-           (match by with Assignment -> "assigned" | Mut_mark -> "marked `mut`"))
+           (match by with Assignment -> "assigned" | Passed_mut -> "passed `mut`"))
   | Some Lent_read_only, Assignment ->
       report state code value.span
-        ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
-        "This part is lent read-only, so it cannot change. Mark the place it is lent from `mut`, \
-         so that it is lent `mut`."
+        ~fixes:[ fix "Pass it `mut`." [ insert value.span.start "mut " ] ]
+        "This part is lent read-only, so it cannot be mutated. Pass the place it is lent from \
+         `mut`, so that it is lent `mut`."
   | Some Not_a_place, Assignment ->
       report state code value.span
         "Only a place, such as a variable, a field, or an element, can be assigned."
-  | Some (Lent_read_only | Not_a_place), Mut_mark -> ());
+  | Some (Lent_read_only | Not_a_place), Passed_mut -> ());
   use_mutable_indexes state value
     ~report_with:
       (match immutable state env value with
@@ -200,12 +204,12 @@ let rec is_part_of_constant state (value : expression) =
   | Bracket (base, _) | Parenthesized base -> is_part_of_constant state base
   | _ -> false
 
-type argument_form = Marked of Types.mode * expression | Place | Lent of Types.mode | Temporary
+type argument_form = With_mode of Types.mode * expression | Place | Lent of Types.mode | Temporary
 
 let argument_form state (value : expression) =
   match value.kind with
-  | Mode (mode, inner) when Option.is_none (marked_call state inner) ->
-      Marked ((match mode with Mut -> Mut | Own -> Own), inner)
+  | Mode (mode, inner) when Option.is_none (call_with_mode_keyword state inner) ->
+      With_mode ((match mode with Mut -> Mut | Own -> Own), inner)
   | _ -> (
       match lent state value with
       | Some mode -> Lent mode
@@ -216,46 +220,46 @@ let argument_form state (value : expression) =
    takes its value, as a field of any other constructor does. [type_] is
    the type of [value]. A method that lends read-only lends every place
    read-only, except a [Plain] place, which is copied. A method that lends
-   [mut] lends the places that are marked [mut]. A slice is a value, so it
+   [mut] lends the places that are passed [mut]. A slice is a value, so it
    is taken. *)
 let lent_field state (value : expression) type_ : Types.mode option =
   match (Hashtbl.find_opt state.yielded value.id, argument_form state value) with
   | _ when is_slice value -> None
-  | Some Read, Marked (Mut, _) -> Some Read
+  | Some Read, With_mode (Mut, _) -> Some Read
   | Some Read, (Place | Lent _) when not (plain state type_) -> Some Read
-  | Some Mut, Marked (Mut, _) -> Some Mut
+  | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
-let mark_span (value : expression) (inner : expression) =
+let mode_keyword_span (value : expression) (inner : expression) =
   Span.make value.span.start inner.span.start
 
 let check_mode state env (value : expression) (parameter : Types.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, argument_form state value) with
   | Read, (Place | Temporary | Lent _) -> ()
-  | Read, Marked (_, inner) ->
-      report state Redundant_mark value.span
+  | Read, With_mode (_, inner) ->
+      report state Redundant_mode value.span
         ~fixes:
           [
-            fix "Remove the mark."
+            fix "Remove the keyword."
               [ Diagnostic.delete (Span.make value.span.start inner.span.start) ];
           ]
-        (Printf.sprintf "`%s` only reads its argument, so it takes no mark." name)
-  | Mut, Marked (Mut, inner) -> mutate state env ~by:Mut_mark inner
+        (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." name)
+  | Mut, With_mode (Mut, inner) -> mutate state env ~by:Passed_mut inner
   | Mut, Place ->
-      report state Missing_mark value.span
-        ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
-        (Printf.sprintf "`%s` may change its argument, so the call marks it `mut`." name)
-  | Mut, Lent Mut -> mutate state env ~by:Mut_mark value
+      report state Missing_mode value.span
+        ~fixes:[ fix "Pass it `mut`." [ insert value.span.start "mut " ] ]
+        (Printf.sprintf "`%s` may mutate its argument, so the call site passes it `mut`." name)
+  | Mut, Lent Mut -> mutate state env ~by:Passed_mut value
   | Mut, Lent (Read | Own) ->
-      report state Wrong_mark value.span
+      report state Wrong_mode value.span
         (Printf.sprintf
-           "`%s` may change its argument, and this part is lent read-only. Mark the place it is \
+           "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
             lent from `mut`, so that it is lent `mut`."
            name)
   | Own, Lent _ ->
       if not (plain state type_) then
-        report state Missing_mark value.span
+        report state Missing_mode value.span
           ~fixes:
             (if copyable state type_ then
                [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
@@ -264,19 +268,19 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
              "`%s` takes ownership of its argument, and a part that is lent cannot be moved. Pass \
               a copy."
              name)
-  | Mut, (Temporary | Marked (Own, _)) ->
-      report state Wrong_mark value.span
-        (Printf.sprintf "`%s` changes its argument in place, so it must be a place marked `mut`."
+  | Mut, (Temporary | With_mode (Own, _)) ->
+      report state Wrong_mode value.span
+        (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
-  | Own, Marked (Own, inner) ->
+  | Own, With_mode (Own, inner) ->
       if plain state type_ then
-        report state Redundant_mark value.span
-          ~fixes:[ fix "Remove the mark." [ Diagnostic.delete (mark_span value inner) ] ]
+        report state Redundant_mode value.span
+          ~fixes:[ fix "Remove the keyword." [ Diagnostic.delete (mode_keyword_span value inner) ] ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (show state type_))
   | Own, Temporary -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       if not (plain state type_) then
-        report state Missing_mark value.span
+        report state Missing_mode value.span
           ~fixes:
             (fix "Lend it `mut`." [ insert value.span.start "mut " ]
             ::
@@ -284,12 +288,12 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
                [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
              else []))
           (Printf.sprintf
-             "`%s` is a field of a value that is lent `mut`. Mark the place `mut` to lend it too, \
+             "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it too, \
               or pass a copy."
              name)
   | Own, Place when is_part_of_constant state value ->
       if not (plain state type_) then
-        report state Missing_mark value.span
+        report state Missing_mode value.span
           ~fixes:
             (if copyable state type_ then
                [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
@@ -299,7 +303,7 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
              name)
   | Own, Place ->
       if not (plain state type_) then
-        report state Missing_mark value.span
+        report state Missing_mode value.span
           ~fixes:
             (fix "Move it with `own`." [ insert value.span.start "own " ]
             ::
@@ -308,18 +312,18 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
              else []))
           (Printf.sprintf
              "`%s` takes ownership of its argument. Move the place with `own`, or pass a copy." name)
-  | Own, Marked (Mut, _) ->
-      report state Wrong_mark value.span
-        (Printf.sprintf "`%s` takes ownership of its argument, so it is marked `own`, not `mut`."
+  | Own, With_mode (Mut, _) ->
+      report state Wrong_mode value.span
+        (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
            name)
-  | (Mut | Own), Marked (Read, _) -> ()
+  | (Mut | Own), With_mode (Read, _) -> ()
 
 (* A lent constructor that lends a place owns nothing, so nothing drops
    it when the lend ends. Each of its other fields must then have nothing
    to drop: the field is a constructor too, or its type is [Plain].
 
    A place lent [mut] is not inside a variant's constructor at any depth.
-   The caller could change the variant, as [mut pair.maybe() = None] does,
+   The caller could replace the variant, as [mut pair.maybe() = None] does,
    and the place would be left without a value: a use after free.
    [operand] is the part that the method lends. *)
 let check_lent_value state env (operand : expression) =
@@ -346,7 +350,7 @@ let check_lent_value state env (operand : expression) =
                       Diagnostic.make ~code:(Ownership Lent_mut_in_variant) argument.value.span
                         (Printf.sprintf
                            "This place is lent `mut` inside the variant `%s`. The caller could \
-                            change the variant, and the place would be left without a value. Lend \
+                            replace the variant, and the place would be left without a value. Lend \
                             the place itself, and give the caller another method that says whether \
                             the place is there."
                            variant)
@@ -383,9 +387,9 @@ let check_lent_value state env (operand : expression) =
 (* Checks a value where an owned value is required and no parameter
    receives it: the initializer of a [var], the value of an assignment, an
    element of a collection literal, or a part of a tagged string. A place
-   there must be marked [own] or copied, unless its type is [Plain]. This
+   there must be passed [own] or copied, unless its type is [Plain]. This
    is a rule of ownership. The type checker reports it because only the
-   syntax tree has the marks. *)
+   syntax tree has the mode keywords. *)
 let check_owned state env (value : expression) type_ =
   if runs env then
     defer state (fun () ->
@@ -410,7 +414,7 @@ let check_owned state env (value : expression) type_ =
                 else
                   ( fix "Move it with `own`." [ insert value.span.start "own " ] :: copy,
                     Printf.sprintf
-                      "An owned value is needed here, and `%s` is a place. Mark it `own` to move \
+                      "An owned value is needed here, and `%s` is a place. Pass it `own` to move \
                        it, or copy it."
                       place )
               in

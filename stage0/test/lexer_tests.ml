@@ -335,8 +335,8 @@ let () =
   test "Swift's interpolation becomes ${...}" (fun () ->
       error {|"Hello \(user.name)"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"Hello ${user.name}"|});
   test "curly quotes become straight quotes" (fun () ->
-      error "\u{201C}text\u{201D}" ~code:Lookalike_character ~at:"\u{201C}" ~fixed:{|"text"|};
-      error "\u{2018}text\u{2019}" ~code:Lookalike_character ~at:"\u{2018}" ~fixed:{|"text"|};
+      error "\u{201C}text\u{201D}" ~code:Confusable_character ~at:"\u{201C}" ~fixed:{|"text"|};
+      error "\u{2018}text\u{2019}" ~code:Confusable_character ~at:"\u{2018}" ~fixed:{|"text"|};
       equal_lists Fun.id "tokens" [ {|"text"|}; "NL" ] (tokens_of "\u{201C}text\u{201D}"));
   test "quotes touching a name are not a character literal" (fun () ->
       equal_lists Fun.id "codes"
@@ -481,10 +481,10 @@ let () =
       tokens "a |> b" [ "a"; "|>"; "b"; "NL" ];
       tokens "a\n  |> b" [ "a"; "|>"; "b"; "NL" ]);
   test "a character that looks like punctuation becomes it" (fun () ->
-      error "f\u{FF08}x)" ~code:Lookalike_character ~at:"\u{FF08}" ~fixed:"f(x)";
-      error "a \u{2264} b" ~code:Lookalike_character ~at:"\u{2264}" ~fixed:"a <= b";
-      error "a\u{00A0}b" ~code:Lookalike_character ~at:"\u{00A0}" ~fixed:"a b";
-      error "\u{2200} x" ~code:Lookalike_character ~at:"\u{2200}" ~fixed:"forall x";
+      error "f\u{FF08}x)" ~code:Confusable_character ~at:"\u{FF08}" ~fixed:"f(x)";
+      error "a \u{2264} b" ~code:Confusable_character ~at:"\u{2264}" ~fixed:"a <= b";
+      error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
+      error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
       equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"))
 
 (* Layout *)

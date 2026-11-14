@@ -24,7 +24,7 @@ let own_constant database owner name =
     (fun (key : Names.key) -> match key.path with Member_constant _ -> Some key.path | _ -> None)
     (Query.demand database Names.members (owner, name))
 
-(* The versions of a trait method: one for each receiver mode. *)
+(* The overloads of a trait method: one for each receiver mode. *)
 let trait_methods database trait name =
   match Query.demand database Environment.trait_interface trait with
   | Some interface ->

@@ -778,10 +778,10 @@ let statement builder (statement : Mir.statement) =
   | Loan_end loans -> emit_ builder (End_loans loans) origin
   | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
 
-(* A pull of a cursor calls its [next], which may change the cursor. A pull
+(* A pull of a cursor calls its [next], which may mutate the cursor. A pull
    happens before the first iteration and at the end of each, whether or
    not another follows, so a view of the cursor kept from one iteration is
-   in use where the pull after it changes the cursor. *)
+   in use where the pull after it mutates the cursor. *)
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with
   | Pull { cursor; _ } ->
@@ -1338,7 +1338,7 @@ let check_body context (actions : actions) moves =
     | Some (loan, viewed), _ ->
         report context Conflicting_loan at (loan_message context loan ~viewed place ~verb)
     | None, (loan, viewed) :: _ ->
-        report context Changed_while_viewed at (loan_message context loan ~viewed place ~verb)
+        report context Mutated_while_viewed at (loan_message context loan ~viewed place ~verb)
     | None, [] ->
         List.iter
           (fun ((holder : Place.root), viewed) ->
@@ -1350,8 +1350,8 @@ let check_body context (actions : actions) moves =
             in
             if in_use && List.exists (fun (viewed : view) -> overlaps viewed.place place) viewed
             then
-              report context Changed_while_viewed at
-                (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still in use."
+              report context Mutated_while_viewed at
+                (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still live."
                    (show context place) verb (show_root context holder)))
           here.views
   in
@@ -1389,7 +1389,8 @@ let check_body context (actions : actions) moves =
                     let exclusive, also =
                       if first.mode = Mut then (first, second) else (second, first)
                     in
-                    report context Conflicting_loan (with_mark context second.at)
+                    report context Conflicting_loan
+                      (with_mode_keyword context second.at)
                       (Printf.sprintf
                          (if yielded then
                             format_of_string
@@ -1414,7 +1415,8 @@ let check_body context (actions : actions) moves =
                          (fun (viewed : view) -> surely_overlap context viewed.place passed.place)
                          viewed
                   then
-                    report context Conflicting_loan (with_mark context view_at)
+                    report context Conflicting_loan
+                      (with_mode_keyword context view_at)
                       (Printf.sprintf
                          "`%s` is borrowed `mut` by this call, so the call cannot also take a view \
                           of it."
@@ -1473,7 +1475,7 @@ let check_body context (actions : actions) moves =
               | _ -> ())
             dropped
       | Bind_lent_part type_ ->
-          report context Keeps_lent_part at
+          report context Lent_part_escapes at
             ~fixes:(Move_rules.copy_fix context "Copy it." type_ at)
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
              it in this statement, or copy it."
@@ -1639,7 +1641,7 @@ let check_body context (actions : actions) moves =
      uses. A use of a view uses the places that it views, and a write
      through a slice mutates the places that the slice views. *)
   let effects positions =
-    let changes = ref [] and uses = ref [] in
+    let mutations = ref [] and uses = ref [] in
     each_step positions (fun here (step : step) ->
         let viewed place =
           List.map
@@ -1650,17 +1652,17 @@ let check_body context (actions : actions) moves =
         | Read place -> uses := (place :: viewed place) @ !uses
         | Mutate place ->
             uses := (place :: viewed place) @ !uses;
-            changes := (place, here.origin) :: !changes
+            mutations := (place, here.origin) :: !mutations
         | Write_through place ->
-            changes := List.map (fun viewed -> (viewed, here.origin)) (viewed place) @ !changes
-        | Assign place -> changes := (place, here.origin) :: !changes
+            mutations := List.map (fun viewed -> (viewed, here.origin)) (viewed place) @ !mutations
+        | Assign place -> mutations := (place, here.origin) :: !mutations
         | Move { place; type_; returned; captured; _ } -> (
             uses := place :: !uses;
             match Move_rules.verdict context place ~type_ ~returned ~captured with
-            | Moves -> changes := (place, here.origin) :: !changes
+            | Moves -> mutations := (place, here.origin) :: !mutations
             | Reads | Refused _ -> ())
         | _ -> ());
-    (!changes, !uses)
+    (!mutations, !uses)
   in
   (* Data races between the branches of a [parallel] or [concurrent] block:
      a place that one branch mutates must not overlap a place that another
@@ -1670,7 +1672,7 @@ let check_body context (actions : actions) moves =
     (fun ({ keyword; branches } : fork_join_block) ->
       let branches = List.map effects branches in
       List.iteri
-        (fun index (changes, _) ->
+        (fun index (mutations, _) ->
           List.iteri
             (fun other (other_changes, other_uses) ->
               if other <> index then
@@ -1683,7 +1685,7 @@ let check_body context (actions : actions) moves =
                            "Data race: one branch of this `%s` block mutates `%s`, and another \
                             branch uses it."
                            keyword (show context place)))
-                  changes)
+                  mutations)
             branches)
         branches)
     actions.fork_join_blocks;
