@@ -132,41 +132,36 @@ let point session pointer artifact =
   Store.write_pointer pointer (print_record { version = session.version; artifact; files });
   session.pointed <- true
 
+(* Whether this process is the background process, which keeps its
+   sessions open after a command. *)
+let serving = ref false
+
 (* Writes a session's state's changes since it was last written, as a
    difference over the artifact it was opened from or last wrote, and points
-   its name at it. *)
+   its name at it. Opening a state reads its whole chain, so once the
+   differences reach half the whole state, the state is written whole. The
+   background process then opens it again, so that its trials and later
+   differences are over the new whole state, not the one it was opened from;
+   a process that serves one command ends instead. *)
 let save session =
   match session.pointer with
   | Some pointer when Engine.unwritten session.engine || not session.pointed ->
-      point session pointer (Engine.write session.engine)
+      let chain_size = Engine.chain_size session.engine in
+      if chain_size.differences > max (chain_size.whole / 2) 256 then begin
+        let artifact = Engine.write ~full:true session.engine in
+        point session pointer artifact;
+        if !serving then
+          Option.iter
+            (fun engine -> session.engine <- engine)
+            (open_state (current ()) ~version:session.version ~bases:session.bases artifact)
+      end
+      else point session pointer (Engine.write session.engine)
   | _ -> Engine.record_facts session.engine
 
 let stabilize session =
   let change = Engine.stabilize session.engine in
   save session;
   change
-
-(* A chain of differences is folded into one whole state once the
-   differences reach half its size, which costs the state's size. So the
-   background process folds while no request is waiting, and makes a command
-   wait for it only once the differences are several times that. A process
-   that serves one command folds as it opens the state, which costs it the
-   state's size already. *)
-let serving = ref false
-
-let compact ?(waited_for = false) session =
-  match session.pointer with
-  | Some pointer ->
-      let chain_size = Engine.chain_size session.engine in
-      let limit = max (chain_size.whole / 2) 256 in
-      if chain_size.differences > if waited_for && !serving then 4 * limit else limit then begin
-        let artifact = Engine.write ~full:true session.engine in
-        point session pointer artifact;
-        Option.iter
-          (fun engine -> session.engine <- engine)
-          (open_state (current ()) ~version:session.version ~bases:session.bases artifact)
-      end
-  | None -> ()
 
 (* A file's fingerprint, for telling which saved state a set of files is
    nearest to. *)

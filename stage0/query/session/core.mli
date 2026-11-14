@@ -37,7 +37,6 @@ type record = { version : string; artifact : string; files : (string * string) l
 val save : t -> unit
 val stabilize : t -> Engine.change
 val serving : bool ref
-val compact : ?waited_for:bool -> t -> unit
 val fingerprint : string -> string
 val note_file : t -> string -> string option -> unit
 

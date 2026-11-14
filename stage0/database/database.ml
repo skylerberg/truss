@@ -86,8 +86,21 @@ type kind =
   | Library  (** The standard library as a state of its own *)
   | Published  (** A published package with the packages it was published with *)
 
-(* The database's state for a session of the session layer. *)
-type project = { kind : kind; update : Session.t -> unit; files : Files.t; mutable retried : bool }
+(* A file read before the session's first scan, to find the saved state
+   nearest to its files: its stamp when read, its text, and its fingerprint. *)
+type read_file = { stamp : string; text : string; print : string }
+
+(* The database's state for a session of the session layer. [read_ahead]
+   holds the files read to open the session, which its first scan takes
+   instead of reading them again. *)
+type project = {
+  kind : kind;
+  update : Session.t -> unit;
+  files : Files.t;
+  mutable retried : bool;
+  mutable read_ahead : (string, read_file) Hashtbl.t;
+}
+
 type Session.attachment += Project of project
 type session = Session.t
 
@@ -210,6 +223,15 @@ let resolve_registry session ~before =
 
 let scan (files : Files.t) session =
   let engine = Session.engine session in
+  let project = project session in
+  let read_ahead = project.read_ahead in
+  project.read_ahead <- Hashtbl.create 0;
+  (* A file read ahead whose stamp has changed since is read again. *)
+  let read path stamp =
+    match Hashtbl.find_opt read_ahead path with
+    | Some file when file.stamp = stamp -> Some (file.text, file.print)
+    | Some _ | None -> Option.map (fun text -> (text, Session.fingerprint text)) (files.read path)
+  in
   let observer = Session.observer session in
   let before = demand session Project.registry () in
   let was = held_files session in
@@ -220,12 +242,12 @@ let scan (files : Files.t) session =
       match Query.find observer stamps path with
       | Some old when old = stamp -> Hashtbl.replace present path ()
       | _ -> (
-          match files.read path with
-          | Some text ->
+          match read path stamp with
+          | Some (text, print) ->
               Hashtbl.replace present path ();
               Engine.set engine Project.text (Project.project_root, path) text;
               Engine.set engine stamps path stamp;
-              Session.note_file session path (Some (Session.fingerprint text))
+              Session.note_file session path (Some print)
           | None -> ()))
     (files.list ());
   List.iter
@@ -247,14 +269,21 @@ let scan (files : Files.t) session =
   resolve_registry session ~before
 
 (* Each file's fingerprint, by which the saved state nearest to a set of
-   files is found. *)
-let fingerprints (files : Files.t) () =
+   files is found. Each file read is kept in [read_ahead]. Its stamp is taken
+   before its text is read, so a file that changes after is read again. *)
+let fingerprints (files : Files.t) read_ahead () =
   List.filter_map
-    (fun (path, _) -> Option.map (fun text -> (path, Session.fingerprint text)) (files.read path))
+    (fun (path, stamp) ->
+      Option.map
+        (fun text ->
+          let print = Session.fingerprint text in
+          Hashtbl.replace read_ahead path { stamp; text; print };
+          (path, print))
+        (files.read path))
     (files.list ())
 
-let attach_project session ~kind (files : Files.t) =
-  Session.attach session (Project { kind; update = scan files; files; retried = false })
+let attach_project ?(read_ahead = Hashtbl.create 0) session ~kind (files : Files.t) =
+  Session.attach session (Project { kind; update = scan files; files; retried = false; read_ahead })
 
 (* The session for a set of files: its own state if it has one, else the
    nearest saved state, else a new one over the standard library. This is
@@ -263,14 +292,15 @@ let open_files ~key ?pointer ?home ~kind (files : Files.t) =
   match Session.find key with
   | Some session -> Ok session
   | None -> (
+      let read_ahead = Hashtbl.create 64 in
       match
         Session.open_ ~key ?pointer ?home ~version:(Session.identity ())
           ~bases:(fun () -> [ Lazy.force !standard ])
-          ~fingerprints:(fingerprints files) ()
+          ~fingerprints:(fingerprints files read_ahead) ()
       with
       | Error () -> Error ()
       | Ok (session, start) ->
-          attach_project session ~kind files;
+          attach_project ~read_ahead session ~kind files;
           if start = Session.Near then
             List.iter (fun path -> Session.remove session stamps path) (held_files session);
           Ok session)
@@ -430,7 +460,6 @@ let open_session directory =
         | Error message -> Error message
         | Ok session ->
             Session.touch session;
-            Session.compact ~waited_for:true session;
             update session;
             (* The state is written when the command is done, with the
                command's results, so that a first write holds a whole state. *)
@@ -639,8 +668,13 @@ let open_library ?(files = Standard_library.files) name =
   | Ok (session, _) ->
       Session.attach session
         (Project
-           { kind = Library; update = set_library files; files = Files.of_texts []; retried = true });
-      Session.compact session;
+           {
+             kind = Library;
+             update = set_library files;
+             files = Files.of_texts [];
+             retried = true;
+             read_ahead = Hashtbl.create 0;
+           });
       update session;
       Ok session
 
@@ -846,10 +880,10 @@ let server_key directory = Option.value (root_of directory) ~default:""
 
 (* A process serves one project, and ends when the project's directory is
    gone. *)
-let serve ~key ~handle =
-  Session.Server.serve ~key
+let serve ~key ?socket ~handle () =
+  Session.Server.serve ~key ?socket
     ~alive:(fun () -> key = "" || Sys.file_exists key)
-    ~idle:watch ~keep:standard_artifacts ~handle
+    ~idle:watch ~answered:save_opened ~keep:standard_artifacts ~handle ()
 
 let call ?program ?start_server ?key ~progress request =
   let key = match key with Some key -> key | None -> server_key (Sys.getcwd ()) in
@@ -884,6 +918,7 @@ module For_testing = struct
   let logging = Session.logging
   let standard_base = standard_base
   let collect_store () = Session.collect ~keep:(fun () -> [])
+  let listen = Session.Server.listen
 
   let session_engine directory =
     Option.bind (root_of directory) (fun root -> Option.map Session.engine (Session.find root))
