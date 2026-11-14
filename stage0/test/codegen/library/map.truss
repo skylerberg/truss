@@ -105,9 +105,7 @@ test "a map's entries, keys, and values are walked, and its values changed in pl
     sum += entry.value
   }
   assert seen == "bac" && sum == 6
-  for position in 0..table.count() {
-    mut table.value_at(position) *= 2
-  }
+  mut table.update_values(fn(value) { value *= 2 })
   assert total(table) == 12 && table.get("c") == Some(6)
   var owned = ""
   for entry in own table {

@@ -50,8 +50,8 @@ let check context (mir : Mir.t) =
                            "Data race: the iterations of a `%s for` run at the same time, and each \
                             is lent an element of %s to change. Only a `List`, a `Slice`, or an \
                             `Array` lends its elements to iterations that run at the same time: \
-                            its elements at different positions are different places. Use a `for` \
-                            loop."
+                            its elements at different positions are different places. Loop over a \
+                            `mut Slice` of the collection's storage, or use a `for` loop."
                            keyword
                            (match collection with
                            | Some collection -> Printf.sprintf "`%s`" (Types.show collection)

@@ -727,6 +727,22 @@ public fn collections::SortedMap[Key: Ordered, Value].value_at(mut self, positio
   mut self.entries[position].value
 }
 
+public fn collections::SortedMap[Key: Ordered, Value].update_values[capability Granted](
+  mut self,
+  change: (fn(mut Value) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.length() == old(self.length())
+  cost calls(change) == self.length()
+  cost time O(self.length() * time(change))
+{
+  for position in 0..self.length()
+    invariant self.length() == old(self.length())
+  {
+    change(mut self.value_at(position))
+  }
+}
+
 impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
   fn equal(self, other: collections::SortedMap[Key, Value]) -> Bool
     ensures result == (self.entries.length() == other.entries.length()
