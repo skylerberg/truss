@@ -62,6 +62,7 @@ val homes : unit -> (string * string) list
 val sessions : unit -> (string * int) list
 val all : unit -> t list
 val directory : string -> string
+val cache_directory : string -> string
 val results : kind:string -> (string -> string option) * (string -> string -> unit)
 val find_result : kind:string -> key:string -> string option
 val flush : unit -> unit

@@ -130,28 +130,29 @@ jobs:
       # The codegen tests include running the prover on templates.
       - uses: ./.github/actions/z3
 
-      # The objects of the C that the tests generate, each kept by the text
-      # of its C, the compiler, and its flags. A run starts from main's and
-      # compiles only the C that main did not.
+      # The objects of the C that the tests generate, which the code
+      # database's store keeps by the text of the C, the C compiler, and its
+      # flags. A run starts from main's and compiles only the C that main
+      # did not.
       - uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/caches/objects
           key: objects-${{ github.sha }}
           restore-keys: objects-
 
       - name: Test generated code
-        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @stage0/test/codegen/runtest
+        run: opam exec -- dune build @stage0/test/codegen/runtest
 
       # An object compiled more than two weeks ago is dropped, and compiled
       # again by the next run that needs it, so the cache holds the objects
       # that are still built and not every one that was.
       - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+        run: mkdir -p ~/.cache/truss/caches/objects && find ~/.cache/truss/caches/objects -type f -mtime +14 -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/caches/objects
           key: objects-${{ github.sha }}
 
   # The standard library's proofs: the longest test, and the one that grows
@@ -181,50 +182,35 @@ jobs:
 
       - uses: ./.github/actions/z3
 
-      # The solver's answers, each kept by the text of its query, the
-      # solver's version, and its limit. A run starts from main's and solves
-      # only the queries main did not. Each share keeps its own answers, and
-      # one with none yet starts from any share's, which is how a new share
-      # begins with the answers of the ones it was split from.
-      - uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cache/truss-solver
-          key: solver-share-${{ matrix.share }}-${{ github.sha }}
-          restore-keys: |
-            solver-share-${{ matrix.share }}-
-            solver-
-
-      # The state the last run on main saved for this share, kept in the
-      # code database's store, so that a run recomputes only the dependents
-      # of an edit to the library. A state is read only by the compiler that wrote it,
-      # so the key names the compiler's sources, and a change to them starts
-      # from nothing and leaves the old states behind.
+      # The code database's store for this share. It holds the solver's
+      # answers, each kept by the text of its query, the solver's version,
+      # and its limit, which hold for every compiler; and the state the
+      # last run saved, which only the compiler that wrote it reads. The key
+      # names the compiler's sources, so a run starts from its own
+      # compiler's store, and else from the newest store of any compiler,
+      # for its answers. A share with no store yet starts from another
+      # share's, which is how a new share begins with the answers of the
+      # ones it was split from.
       - uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/truss-proofs
           key: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-${{ github.sha }}
-          restore-keys: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-
+          restore-keys: |
+            proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-
+            proofs-share-${{ matrix.share }}-
+            proofs-
 
       - name: Prove a share of the standard library
+        # The run collects the store once it has saved its state, which
+        # drops the states of other compilers once the store is past this
+        # budget, so the cache does not keep a state for every compiler.
         env:
-          TRUSS_SOLVER_CACHE: /home/runner/.cache/truss-solver
           TRUSS_CACHE: /home/runner/.cache/truss-proofs
+          TRUSS_CACHE_SIZE: 104857600
         run: |
           opam exec -- dune build ./stage0/test/standard_library_tests.exe
           cd _build/default/stage0/test
           "$GITHUB_WORKSPACE/.github/scripts/prove-share.sh" ${{ matrix.share }} ${{ strategy.job-total }}
-
-      # An answer no run has asked for in two weeks is dropped, so the cache
-      # holds the queries that are still asked and not every one that was. A
-      # run gives each answer it finds the present time.
-      - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-solver && find ~/.cache/truss-solver -type f -mtime +14 -delete
-
-      - if: github.event_name == 'push'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cache/truss-solver
-          key: solver-share-${{ matrix.share }}-${{ github.sha }}
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
@@ -264,7 +250,7 @@ jobs:
       # of its own again.
       - uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/caches/objects
           key: sanitized-objects-${{ github.sha }}
           restore-keys: sanitized-objects-
 
@@ -272,15 +258,15 @@ jobs:
         env:
           TRUSS_CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
           ASAN_OPTIONS: detect_leaks=0
-        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
+        run: opam exec -- dune test --force stage0/test/codegen
 
       - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+        run: mkdir -p ~/.cache/truss/caches/objects && find ~/.cache/truss/caches/objects -type f -mtime +14 -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/caches/objects
           key: sanitized-objects-${{ github.sha }}
 
   # The programs that run on several threads, again under ThreadSanitizer,
@@ -313,7 +299,7 @@ jobs:
       # were one job.
       - uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/caches/objects
           key: thread-sanitized-objects-${{ github.sha }}
           restore-keys: |
             thread-sanitized-objects-
@@ -322,7 +308,6 @@ jobs:
       - name: Test programs on threads under ThreadSanitizer
         env:
           TRUSS_CFLAGS: -fsanitize=thread -fno-omit-frame-pointer
-          TRUSS_OBJECT_CACHE: /home/runner/.cache/truss-objects
         run: |
           opam exec -- dune build stage0/test/codegen/parallel_tests.exe stage0/test/codegen/shared_tests.exe stage0/test/codegen/concurrent_tests.exe
           cd _build/default/stage0/test/codegen
@@ -331,10 +316,10 @@ jobs:
           TRUSS_TEST="on threads" ./concurrent_tests.exe
 
       - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+        run: mkdir -p ~/.cache/truss/caches/objects && find ~/.cache/truss/caches/objects -type f -mtime +14 -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/caches/objects
           key: thread-sanitized-objects-${{ github.sha }}

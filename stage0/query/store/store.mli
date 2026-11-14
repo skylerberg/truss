@@ -46,8 +46,13 @@ val find_result : t -> kind:string -> key:string -> string option
 val add_result : t -> kind:string -> key:string -> string -> unit
 
 val files : t -> string -> string
+(** A directory of the store for files that must stay until they are removed, such as a fetched
+    package's sources. *)
+
+val cache_files : t -> string -> string
 (** A directory of the store for results that must be files, such as object files, which a linker
-    reads by path. *)
+    reads by path. Its files count toward {!size}, and {!collect} removes each one not modified in
+    the last week, so a reader that reuses a file sets its modification time. *)
 
 (** {1 Pointers} *)
 
@@ -79,9 +84,10 @@ val compact : t -> unit
     there are many, so that a lookup searches fewer. Every record is kept. *)
 
 val size : t -> int
-(** The bytes the store's segments take. *)
+(** The bytes the store's segments and cache files take. *)
 
 val collect : t -> budget:int -> live:(string -> bool) -> unit
-(** When the segments take more than [budget] bytes, copies into a new segment every value [live]
-    names, and every result read or added by this process or added in the last week, and deletes the
-    segments copied from. Segments that another running process is still writing are left alone. *)
+(** When the store takes more than [budget] bytes, as {!size} counts them, copies into a new segment
+    every value [live] names, and every result read or added by this process or added in the last
+    week, and deletes the segments copied from. Segments that another running process is still
+    writing are left alone. It also removes each cache file not modified in the last week. *)

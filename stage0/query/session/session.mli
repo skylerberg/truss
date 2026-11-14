@@ -105,13 +105,22 @@ val allow_reading : string -> unit
     collection keeps their nodes. *)
 
 val directory : string -> string
-(** A directory of the store, for results that must be files. *)
+(** A directory of the store, for files that must stay until they are removed. *)
+
+val cache_directory : string -> string
+(** A directory of the store, for results that must be files. Collection removes each file not
+    modified in the last week. *)
 
 val results : kind:string -> (string -> string option) * (string -> string -> unit)
 (** Finding and keeping the results of one kind, each under a key. *)
 
 val find_result : kind:string -> key:string -> string option
 val flush : unit -> unit
+
+val collect : keep:(unit -> (string * string) list) -> unit
+(** Keeps the store within its budget, [$TRUSS_CACHE_SIZE] bytes or else 20 GiB. The states of the
+    versions this program can read are kept, and so are those [keep] names, each as its version and
+    artifact. *)
 
 val on_close : (unit -> unit) -> unit
 (** Runs a function whenever every state is closed or discarded, for a client to let go of its data

@@ -235,4 +235,8 @@ module For_testing : sig
 
   val logging : bool ref
   (** Whether new sessions keep a log of the queries they compute. *)
+
+  val collect_store : unit -> unit
+  (** Keeps the store within its budget, as the background process does, for a run that saves a
+      state and starts no background process. *)
 end

@@ -446,7 +446,7 @@ let refresh session =
   | Commit _ | Library | Published -> ()
 
 let save_session = Session.save
-let objects_directory () = Session.directory "objects"
+let objects_directory () = Session.cache_directory "objects"
 let programs_directory () = Session.directory "programs"
 let results = Session.results
 let flush_store = Session.flush
@@ -883,6 +883,7 @@ module For_testing = struct
   let engine = Session.engine
   let logging = Session.logging
   let standard_base = standard_base
+  let collect_store () = Session.collect ~keep:(fun () -> [])
 
   let session_engine directory =
     Option.bind (root_of directory) (fun root -> Option.map Session.engine (Session.find root))

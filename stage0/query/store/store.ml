@@ -401,6 +401,32 @@ let files store name =
   File_system.make_directory path;
   path
 
+let caches_directory store = Filename.concat store.root "caches"
+
+let cache_files store name =
+  let path = Filename.concat (caches_directory store) name in
+  File_system.make_directory path;
+  path
+
+(* Each file in the cache directories: its path, its size, and when it was
+   last modified. *)
+let files_in_caches store =
+  let rec walk directory files =
+    match Sys.readdir directory with
+    | exception Sys_error _ -> files
+    | names ->
+        Array.fold_left
+          (fun files name ->
+            let path = Filename.concat directory name in
+            match Unix.lstat path with
+            | { st_kind = S_DIR; _ } -> walk path files
+            | { st_kind = S_REG; st_size; st_mtime; _ } -> (path, st_size, st_mtime) :: files
+            | _ -> files
+            | exception Unix.Unix_error _ -> files)
+          files names
+  in
+  walk (caches_directory store) []
+
 type pointer = {
   store : t;
   pointer_path : string;
@@ -493,6 +519,7 @@ let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 let size store =
   refresh store;
   List.fold_left (fun total segment -> total + file_size segment.path) 0 store.segments
+  + List.fold_left (fun total (_, size, _) -> total + size) 0 (files_in_caches store)
   + match store.writer with Some writer -> writer.size | None -> 0
 
 (* Whether a segment's writer has gone: its lock can be taken. *)
@@ -567,7 +594,11 @@ let collect store ~budget ~live =
     rewrite store candidates ~keep:(fun segment kind key ->
         match kind with
         | 'v' -> live key
-        | _ -> Hashtbl.find young segment.path || Hashtbl.mem store.used key)
+        | _ -> Hashtbl.find young segment.path || Hashtbl.mem store.used key);
+    List.iter
+      (fun (path, _, modified) ->
+        if Unix.time () -. modified >= week then try Sys.remove path with Sys_error _ -> ())
+      (files_in_caches store)
   end
 
 (* Every process that writes leaves a segment, and a lookup searches each

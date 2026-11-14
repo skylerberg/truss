@@ -1297,28 +1297,51 @@ let () =
 (* Queries *)
 
 let () =
-  test "an answer read from the cache is marked as asked now" (fun () ->
-      let directory = Filename.temp_dir "truss-answers" "" in
-      let now = Logic.Symbol.Variable { label = "asked.now"; numbers = [] } in
-      let query =
+  (* A query of one integer whose goal compares it with itself. A query's
+     text names its symbols canonically, so two of these differ only in
+     their operators, and each test of the cache uses an operator no other
+     test does, so that no other test has solved its query in this
+     process. *)
+  let compared_with_itself operator =
+    let symbol = Logic.Symbol.Variable { label = "compared"; numbers = [] } in
+    {
+      Logic.declarations = [ Logic.Constant (symbol, Logic.Int) ];
+      facts = [];
+      goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
+    }
+  in
+  test "an answer in the cache is read, and the solver is not run" (fun () ->
+      let query = compared_with_itself ">=" in
+      let request = Solver.request query in
+      let cache =
         {
-          Logic.declarations = [ Logic.Constant (now, Logic.Int) ];
-          facts = [];
-          goal = Logic.Operation (">=", [ Logic.Symbol now; Logic.Symbol now ]);
+          Solver.find =
+            (fun key -> if key = Solver.request_key request then Some "proven\n" else None);
+          add = (fun _ _ -> fail "kept an answer the cache already had");
         }
       in
-      let file = Filename.concat directory (Solver.For_testing.key query) in
-      Out_channel.with_open_bin file (fun channel -> output_string channel "proven\n");
-      Unix.utimes file 1. 1.;
-      match Solver.find ~cache:directory () with
+      match Solver.find ~cache () with
       | Error message -> fail "%s" message
-      | Ok cached ->
-          let request = Solver.request query in
+      | Ok solver ->
           if
-            Solver.read request (List.hd (Solver.solve_all cached [ (request, query) ]))
+            Solver.read request (List.hd (Solver.solve_all solver [ (request, query) ]))
             <> Solver.Proven
-          then fail "expected the stored answer";
-          if (Unix.stat file).st_mtime < 2. then fail "the answer's file was not marked as read");
+          then fail "expected the cached answer";
+          if Solver.queries_run solver <> 0 then fail "ran the solver");
+  test "a solved answer is added to the cache under its request's key" (fun () ->
+      let query = compared_with_itself "<=" in
+      let request = Solver.request query in
+      let cached_answers = Hashtbl.create 1 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match Solver.find ~cache () with
+      | Error message -> fail "%s" message
+      | Ok solver ->
+          ignore (Solver.solve_all solver [ (request, query) ]);
+          if Solver.queries_run solver <> 1 then fail "did not run the solver";
+          if Hashtbl.find_opt cached_answers (Solver.request_key request) <> Some "proven\n" then
+            fail "the cache does not have the answer");
   test "a query's text names nothing by its Truss name" (fun () ->
       let database =
         Support.setup [ ("app::main", Fixtures.Prover.querys_text_names_nothing_by_its_truss_name) ]
