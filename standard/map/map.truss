@@ -567,6 +567,22 @@ public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: USize) le
   mut self.entries[position].value
 }
 
+public fn Map[Key: Hash + Ordered, Value].update_values[capability Granted](
+  mut self,
+  change: (fn(mut Value) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.length() == old(self.length())
+  cost calls(change) == self.length()
+  cost time O(self.length() * time(change))
+{
+  for position in 0..self.length()
+    invariant self.length() == old(self.length())
+  {
+    change(mut self.value_at(position))
+  }
+}
+
 internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, other: Map[Key, Value]) -> Bool
   ensures result == (forall i in 0..self.entries.length() => exists j in 0..other.entries.length() =>
     self.entries.model()[i].key == other.entries.model()[j].key
