@@ -439,7 +439,9 @@ impl Index for Map[Key: Hash + Ordered, Value] {
   {
     self.entries[self.index_of(key)].value
   }
+}
 
+impl IndexMut for Map[Key: Hash + Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(self.length() * time(Key.equal))
@@ -450,6 +452,14 @@ impl Index for Map[Key: Hash + Ordered, Value] {
 }
 
 impl core::IndexAssign for Map[Key: Hash + Ordered, Value] {
+  fn accepts_key(self, key: Key) -> Bool
+    ensures result
+    cost time O(1)
+    cost allocations == 0
+  {
+    true
+  }
+
   fn assign(mut self, key: own Key, value: own Value)
     ensures exists other: Key =>
       self.model().contains_key(other) && other == key && identical(self.model().get(other), value)

@@ -701,7 +701,8 @@ let statement builder (statement : Mir.statement) =
         match (called.callee, called.arguments) with
         | ( Trait_method { trait; name = "at"; self_type; _ },
             Passed { value = Borrow { place = collection; type_ = collection_type; _ }; _ } :: _ )
-          when Well_known.is Index trait.trait && is_storage self_type ->
+          when (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
+               && is_storage self_type ->
             element_of collection collection_type
         (* A loop over a [List], a [Slice], or an [Array] lends each iteration
            the element at its position, as an index does. *)

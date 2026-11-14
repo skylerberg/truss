@@ -1,0 +1,10 @@
+impl IndexAssign for Readings {
+  fn accepts_key(self, key: USize) -> Bool {
+    key < self.values.length()
+  }
+
+  fn assign(mut self, key: own USize, value: own Int64) {
+    self.values[key] = value
+  }
+}
+

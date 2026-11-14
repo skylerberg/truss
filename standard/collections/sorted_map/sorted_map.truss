@@ -638,7 +638,9 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
   {
     self.entries[self.position_of(key)].value
   }
+}
 
+impl IndexMut for collections::SortedMap[Key: Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(log(self.length()) * time(Key.compare))
@@ -664,6 +666,14 @@ fn collections::SortedMap[Key: Ordered, Value].position_of(self, key: Key) -> US
 }
 
 impl core::IndexAssign for collections::SortedMap[Key: Ordered, Value] {
+  fn accepts_key(self, key: Key) -> Bool
+    ensures result
+    cost time O(1)
+    cost allocations == 0
+  {
+    true
+  }
+
   fn assign(mut self, key: own Key, value: own Value)
     ensures self.contains(key)
     cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))

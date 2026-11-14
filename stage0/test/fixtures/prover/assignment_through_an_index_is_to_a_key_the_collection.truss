@@ -1,0 +1,5 @@
+fn store(samples: mut Samples, position: USize)
+  requires position < samples.values.length()
+{
+  samples[position] = 1
+}

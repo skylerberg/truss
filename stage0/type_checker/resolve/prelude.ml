@@ -40,6 +40,7 @@ let types =
             "Remainder";
             "Negate";
             "Index";
+            "IndexMut";
             "IndexAssign";
             "Model";
             "Iterable";

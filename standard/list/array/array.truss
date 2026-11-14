@@ -102,7 +102,9 @@ impl Index for Array[Element, count: USize] {
   {
     intrinsic::view_at(intrinsic::array_view(self), index: key)
   }
+}
 
+impl IndexMut for Array[Element, count: USize] {
   fn at(mut self, key: USize) lends mut Element
     requires key < count
     ensures identical(result, old(self.model())[key])

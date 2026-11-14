@@ -1,0 +1,3 @@
+fn f(readings: mut Readings) {
+  raise(mut readings[0])
+}

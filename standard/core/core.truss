@@ -234,13 +234,19 @@ public trait Index {
 
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
+}
 
+public trait IndexMut: Index {
   fn at(mut self, key: Self.Key) lends mut Self.Output
     requires self.contains_key(key)
 }
 
 public trait IndexAssign: Index {
+  fn accepts_key(self, key: Self.Key) -> Bool
+    cost time finite
+
   fn assign(mut self, key: own Self.Key, value: own Self.Output)
+    requires self.accepts_key(key)
 }
 
 public trait Iterable {

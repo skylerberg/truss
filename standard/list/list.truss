@@ -535,7 +535,9 @@ impl Index for List[Element] {
   {
     intrinsic::storage_at(self.storage, index: key)
   }
+}
 
+impl IndexMut for List[Element] {
   fn at(mut self, key: USize) lends mut Element
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
@@ -567,7 +569,9 @@ impl Index for Slice[Element] {
   {
     intrinsic::view_at(self.elements, index: key)
   }
+}
 
+impl IndexMut for Slice[Element] {
   fn at(mut self, key: USize) lends mut Element
     requires key < self.length()
     ensures identical(result, old(self.model())[key])

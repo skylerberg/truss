@@ -1,0 +1,3 @@
+fn store(samples: mut Samples, position: USize) {
+  samples[position] = 1
+}

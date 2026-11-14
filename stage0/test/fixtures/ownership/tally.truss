@@ -11,7 +11,9 @@ impl Index for Tally {
   fn at(self, key: USize) lends Int64 {
     self.cells[key]
   }
+}
 
+impl IndexMut for Tally {
   fn at(mut self, key: USize) lends mut Int64 {
     mut self.cells[key]
   }

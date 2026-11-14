@@ -104,12 +104,6 @@ impl Index for Sequence[Element] {
   {
     todo
   }
-
-  fn at(mut self, key: Integer) lends mut Element
-    requires 0 <= key && key < self.length()
-  {
-    todo
-  }
 }
 
 public opaque type FiniteSet[Element] = todo
