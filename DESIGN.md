@@ -21,10 +21,9 @@ behind these decisions, see [GOALS.md](GOALS.md).
   a definition within it or to another file of its module changes nothing
   that depends on it. See
   [Definition identity](#definition-identity).
-- **Code refers to other code by name, never by its content.** Unison refers
-  to code by hash, so changing one body changes the hash of everything that
-  reaches it. A Truss definition names its dependencies by module path and
-  name, so changing a body changes nothing about its dependents.
+- **Code refers to other code by name, never by its content.** A definition
+  names its dependencies by module path and name, so changing a body changes
+  nothing about its dependents.
 - **A function's signature and body are apart.** Type checking and proofs in
   callers depend only on the signature, so changing a body, such as filling
   in a `todo`, re-checks no callers. The signature is itself two parts: its
@@ -55,8 +54,7 @@ behind these decisions, see [GOALS.md](GOALS.md).
   keyed by scope and name, such as the members of `List` named `length`, and
   a lookup that found nothing is depended on too. When a definition is added,
   removed, or renamed, only the lookups with its scope and name are made
-  again. Swift's incremental builds keyed such lookups by name alone, and
-  rebuilt far too much. Truss's rules keep each lookup to a few places:
+  again. Truss's rules keep each lookup to a few places:
   methods live with their type, an `impl` lives with its trait, its type, or
   a type its trait's arguments name, and an unqualified constant comes only
   from the same module.
@@ -183,9 +181,8 @@ write those languages' syntax by habit.
   own.
 - **Constants are evaluated when compiling, from literals only.** Constants
   appear in types, as in `Array[UInt8, digest_size]`, and keeping them free
-  of calls means type checking never waits for code to run. Rust started
-  with similarly limited constants and widened them without breaking code,
-  and Truss can do the same.
+  of calls means type checking never waits for code to run. Constants can
+  be widened later without breaking code.
 - **Code run while compiling is compiled code.** Tagged-template checks and
   the tables of constant maps run Truss code while compiling. It is compiled
   and run the way tests are, rather than by a separate interpreter, so there
@@ -248,10 +245,8 @@ declared the way parameters are, built the way a function is called, and
 matched in the same shape.
 
 - **Arguments after the first are named.** Two arguments of one type can be
-  swapped by accident: Google found swapped arguments to be a recurring bug
-  in production Java ("Detecting Argument Selection Defects", OOPSLA 2017).
-  A single-field record helps only when the types differ; labels also tell
-  `source: Path` from `destination: Path`.
+  swapped by accident. A single-field record helps only when the types
+  differ; labels also tell `source: Path` from `destination: Path`.
 - **The first argument may be bare.** A function's name usually identifies
   its first argument, as in `sqrt(area)`, so a label would repeat it.
 - **A variable with the parameter's name needs no label.** Labels then cost
@@ -263,9 +258,8 @@ matched in the same shape.
   its label, so how to call a function depends on its author's choices. In
   Truss the rule is the same for every function, and parameter names are
   part of the API.
-- **Calling through a function value is positional.** Swift removed labels
-  from function types (SE-0111) because they created confusing conversions
-  between otherwise identical types.
+- **Calling through a function value is positional.** Labels in function
+  types would make types that differ only in labels convert into each other.
 - **Records differ in two ways.** Field order has no meaning, so a bare first
   argument would make it part of the record's API, and only a record with
   one field takes a bare value.
@@ -301,10 +295,9 @@ values and the arms are on the screen together.
   conditions in specifications, and combinations with other conditions,
   where Rust needed three forms, `if let`, `while let`, and let-chains. A
   name bound by `is` can be used only where the test is known to be true.
-- **`let ... else` leaves early when a pattern does not match.** C# instead
-  keeps a name bound by `is` usable after `if (!(v is T x)) return;`, which
-  lets a name outlive the `if` that introduced it. In Truss a name's scope
-  follows blocks.
+- **`let ... else` leaves early when a pattern does not match.** A name
+  bound by `is` is never usable after the `if` that bound it, so a name's
+  scope follows blocks.
 - **Float literals are not patterns.** `-0.0 == 0.0`, so a pattern `0.0`
   would quietly match both. A guard says so.
 
@@ -324,9 +317,7 @@ values and the arms are on the screen together.
   half-updated value is ever observed.
 - **A private method that takes `mut self` is a step of an update,** so
   `insert` can call a helper while the list is half sorted. The helper states
-  its needs with `requires` and `ensures`. Ada's type invariants bind only
-  the subprograms that code outside the package can call; Truss draws the
-  line narrower, at methods private to a file, and only for `self`.
+  its needs with `requires` and `ensures`.
 - **Functions called in an invariant are pure and terminate.** A function
   that might not return has no result to reason about, and allowing one would
   let the prover derive false statements.
@@ -350,9 +341,7 @@ collector and no runtime beyond libc.
   read loses nothing, but flushing a buffered writer can fail, and losing its
   data would go unnoticed, which is how Rust's `BufWriter` loses writes when
   it is dropped. So a writer is only lent, inside a scope, and user code
-  never owns one it could drop unfinished. Linear types could instead let a
-  writer be owned and stored, but every `?` while one is open would drop it,
-  and generic code would need to say which type parameters it never drops.
+  never owns one it could drop unfinished.
 - **There is no mutable global state.** Everything that changes lives in a
   variable, a parameter, or a capability implementation, so all the state a
   function can touch is visible in its signature, and many tests can share
@@ -402,22 +391,16 @@ views are second-class, as in Hylo:
   the result as viewing every read-only and view argument, so it needs no
   annotation. Rust names which input a result borrows from with lifetimes;
   Truss's rule is coarser but needs none, and `Plain` arguments such as
-  indexes lend nothing, so it rarely holds more than it must. A rule that
-  only views of `self` can be returned would not be enough: `unwrap_or`
-  returns a value of its parameter's type, which is a view whenever the
-  `Option` holds one.
+  indexes lend nothing, so it rarely holds more than it must.
 - **`mut` access is never stored,** so there is no mutable reference to track
   across statements.
 - **The compiler checks each function on its own,** from its body and the
   signatures it calls, which keeps checking fast and incremental.
 
 **Constants are read-only places.** An owned value from a constant is made
-with `copy()`, so its allocation is written and counted. Swift instead copies
-on the first write to any collection, so every in-place change, such as
-`items[i] = x`, would check for static memory and might allocate, and no
-`cost allocations == 0` could be proven for code that changes a collection
-it was given. A string literal is the exception that costs nothing: only
-methods that write bytes change a `String`, and those may allocate anyway.
+with `copy()`, so its allocation is written and counted. A string literal
+is the exception that costs nothing: only methods that write bytes change
+a `String`, and those may allocate anyway.
 
 ### Lending and yielding methods
 
@@ -493,8 +476,6 @@ A lambda that reads local variables holds views of them:
   spelling. `it` and `$0` are not whole words, and a trailing lambda is a
   second way to pass an argument.
 
-This needs none of Rust's `move` closures or its three closure traits.
-
 ## Methods
 
 - **Methods live with their type,** in its package, so a method is easy to
@@ -541,11 +522,8 @@ This needs none of Rust's `move` closures or its three closure traits.
   for now.
 - **Trait methods need no import,** since forgetting one is a common error
   where they do.
-- **Only traits from nearby packages are found by a dot.** Swift let
-  extension members leak to every module that imported their module, even
-  indirectly, so a change deep in the dependency graph could break distant
-  calls, and SE-0444 limited them to direct imports. Truss uses the manifest
-  for the same limit.
+- **Only traits from the packages a manifest lists are found by a dot,**
+  so a change deep in the dependency graph cannot break distant calls.
 - **A clash between names is always an error, never a silent choice.** Where
   a type's own method wins over a trait's, as in Rust, adding a method can
   silently change an existing call. In Truss an upgrade can break a call only
@@ -601,8 +579,7 @@ This needs none of Rust's `move` closures or its three closure traits.
   two traits that both require `Equal` share it.
 - **Every `impl` is written out, and none overlap.** An `impl` that covers
   every type matching a bound makes it hard to tell which implementation
-  applies, and overlapping impls are the source of Rust's long-stalled
-  specialization. Starting strict leaves room to relax the rule later.
+  applies. Starting strict leaves room to relax the rule later.
 - **A provided method can be replaced only by a version proven to give the
   same result.** So `a != b` always means `!(a == b)`, the prover reasons from
   the trait alone, and adding an `impl` never changes a provided method's
@@ -660,10 +637,9 @@ combination needs parentheses.
   `0..(count - 1)`.
 - **`+=` exists, and `++` and `--` do not.** `+=` writes a place once, so a
   long place is not mistyped the second time and an index is proven once.
-  As expressions, `++` and `--` were confusing and rarely clearer than
-  `+= 1`, which is why Swift removed them. The old value goes to the operator
-  as owned, so `matrix += other` can work in place without separate traits
-  such as Rust's `AddAssign`.
+  As expressions, `++` and `--` are confusing and rarely clearer than
+  `+= 1`. The old value goes to the operator as owned, so `matrix += other`
+  can work in place without separate traits such as Rust's `AddAssign`.
 - **An assignment evaluates its right side before its target.** A compound
   assignment's target holds no value until the result is stored, so
   evaluating the operand first keeps all other code out of that window: a
@@ -829,10 +805,9 @@ chooses the implementations.
   Otherwise `Cursor.next` would use no capability for every implementation,
   and a cursor that reads a file could not be passed to `zip` or `to_list`.
   Swift's `AsyncIteratorProtocol` leaves its error type to each
-  implementation the same way. Effect variables on every function type, as in
-  Koka, are more general, but a capability parameter already covers their
-  main use, a callback. `any` fixes such a set to the empty set, because code
-  that holds the value cannot name the capabilities of the type it hides.
+  implementation the same way. `any` fixes such a set to the empty set,
+  because code that holds the value cannot name the capabilities of the
+  type it hides.
 - **A function type puts its clauses after its result, in parentheses.**
   Truss has whole clauses, not one or two effect keywords, so they come in
   the same order as in a definition, and the parentheses mark where they end.
@@ -857,17 +832,9 @@ chooses the implementations.
 - **Capabilities layer instead of inheriting.** `ReadDatabase` is implemented
   with `NetworkClient`, and the network shows where the implementation is
   provided, so a dependency granted `ReadDatabase` alone never touches the
-  network. Truss leaves out bundles, such as
-  `capability FileSystem: FileRead + FileWrite`: a reviewer reading
-  `uses FileSystem` would have to look up its members, and grants would get
-  coarser, to save typing that LLMs mostly do.
+  network.
 - **Signatures and narrowing do different jobs.** A signature limits which
   capabilities code has, and narrowing limits a capability's reach.
-
-This is deliberately simpler than algebraic effect handlers, which can pause,
-abandon, or repeat a computation for async code, generators, and
-backtracking. Truss waits with blocking calls (see
-[Concurrency](#concurrency)), so it does not need them.
 
 ### Dependencies
 
@@ -919,8 +886,7 @@ network capabilities could not open a socket even through a compiler bug.
   machines.
 - **`O(f)` holds for every input, not just large ones.** The textbook
   definition is about limits, which a prover handles poorly, and it gives
-  wrong answers for bounds in several variables (Howell, "On Asymptotic
-  Notation with Multiple Variables", 2008).
+  wrong answers for bounds in several variables.
 - **Bounds can depend on the result,** since output-sensitive bounds, such as
   that of a function that returns its matches, are common and otherwise
   impossible to state.
@@ -980,8 +946,7 @@ Everything a program promises is proven at compile time.
   as in Dafny, and the programmer writes a proof only where it gets stuck.
 - **Proofs use the language's own syntax:** theorems, proof blocks, and law
   proofs are written with calls, `match`, `if`, and `assert`, which
-  programmers and LLMs already know. A tactic language, as in Lean, checks
-  proofs very predictably but is a second language to learn.
+  programmers and LLMs already know.
 - **Reviewers can trust proofs instead of reading them,** and read only
   signatures and contracts. A proof is a result of its own, so editing one
   re-checks proofs without rebuilding the program or rerunning tests.
@@ -1054,7 +1019,7 @@ Saying that `push` adds an element at the end through `length()` and
 indexing alone takes a quantifier for every statement, and a hand-written
 `Equal` is not even structural. So the prelude has mathematical collections
 that exist only in specifications, and a type gives its value in their terms
-through `Model`. Verus, Creusot, SPARK, and Dafny each converged on this.
+through `Model`.
 
 - **An opaque type's model is how other packages reason about it** without
   seeing its fields.
@@ -1064,9 +1029,7 @@ through `Model`. Verus, Creusot, SPARK, and Dafny each converged on this.
   element is a given value whatever its type, and `==` cannot: it is the
   type's `Equal`, which `List[Element]` does not require, and for a set
   stored as an unsorted list it is an equivalence rather than identity. So
-  `==` keeps one meaning everywhere. Verus instead gives `==` a different
-  meaning in specifications than in code, which would let a contract on a set
-  mean identical representations where its author meant the same set.
+  `==` keeps one meaning everywhere.
 
 ## Unfinished code
 
@@ -1147,9 +1110,7 @@ code that does it declares `uses Tasks`.
   data races in `parallel` rules them out here too.
 - **A task never outlives the block that started it,** as in structured
   concurrency, such as Trio's nurseries. So a branch can read the places
-  around it without lifetimes. A task started with Go's `go` can outlive
-  everything it was given, so it could be given neither places nor
-  capabilities.
+  around it without lifetimes.
 - **Blocking calls, no async.** Code waits by calling a capability method
   that returns when the result is ready. `uses` already separates code that
   can wait from code that cannot, and a second mark for the same fact, such
@@ -1166,7 +1127,7 @@ code that does it declares `uses Tasks`.
   at the call, or dropping a computation at whichever `await` it had reached,
   would abandon the computation partway, which Truss never does.
 - **A time limit and a race are ordinary code,** two branches each of which
-  returns, so nothing like Go's `select` is needed.
+  returns.
 - **State that tasks share lives in a capability implementation,** since two
   tasks cannot share a variable that either changes. `uses Sessions` then
   marks every function that can touch a shared table of sessions.
@@ -1178,17 +1139,17 @@ code that does it declares `uses Tasks`.
   capabilities provided outside it, so every task acquires locks from the
   innermost implementation outward. A callback that uses a capability could
   acquire one out of order, which is why such a method is not allowed.
-- **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change the
-  value of a read-only place, which mutable value semantics rules out, and
-  two tasks that take two of them in different orders deadlock.
+- **A mutex is not a value.** Locking one changes a read-only place, which
+  mutable value semantics rules out, and two tasks that take two mutexes in
+  opposite orders deadlock.
 - **Data races cannot happen, and waiting forever can.** A task can wait for
   a message no task will send.
 - **Tests stay deterministic.** A test's `Tasks` runs one task at a time,
   chosen by a seed, and switches only at capability calls. Tasks share no
   memory that changes, so the orders of those calls are all the orders there
-  are, and a race is a failure that one seed repeats, not a flaky one.
-  FoundationDB tests this way. A test's clock moves when every task waits,
-  so a test of a timeout takes no real time.
+  are, and a race is a failure that one seed repeats, not a flaky one. A
+  test's clock moves when every task waits, so a test of a timeout takes no
+  real time.
 
 ## Collections
 
@@ -1199,8 +1160,8 @@ code that does it declares `uses Tasks`.
   and the expected type is always written nearby.
 - **`Array[Element, count]` holds a fixed number of elements in place,** so a
   digest or a lookup table needs no heap and copies like an integer.
-  Arithmetic on its length inside types is left out for now: Rust has worked
-  on it for years without settling it, and it can be added later.
+  Arithmetic on its length inside types is left out for now, and can be
+  added later.
 - **Literal allocation is counted.** A non-empty list literal counts as one
   allocation, whether or not the compiler keeps it in static memory, so cost
   clauses do not depend on an optimization.
@@ -1214,11 +1175,10 @@ code that does it declares `uses Tasks`.
 - **`Map` and `Set` iterate in insertion order,** which never varies from run
   to run, so tests stay deterministic and their results can be cached.
 - **Maps resist hash flooding deterministically.** Keys chosen to collide can
-  turn each operation into a scan of the whole map, which stalled servers in
-  many languages in 2011. A random hash key per process, the usual defense,
-  is randomness no signature shows: it would change timing and allocation
-  counts from run to run, and make a test near its time limit flaky. Truss
-  instead does as Java 8 does: a bucket that fills up becomes a balanced
+  turn each operation into a scan of the whole map. A random hash key per
+  process, the usual defense, is randomness no signature shows: it would
+  change timing and allocation counts from run to run, and make a test near
+  its time limit flaky. Instead, a bucket that fills up becomes a balanced
   tree, so the worst case is O(log n), which cost clauses can promise. This is
   why keys are `Ordered` as well as `Hash`.
 - **Random hashing is available through a capability,** for code that must
@@ -1233,8 +1193,7 @@ code that does it declares `uses Tasks`.
 - **A young ecosystem grows by being written in Truss.** If packages could
   call C, the quickest way to get a library would be to wrap one, and LLMs
   would take that shortcut every time, leaving an ecosystem over C code that
-  no proof, capability, or cost clause covers. Elm made the same choice in
-  0.19.
+  no proof, capability, or cost clause covers.
 - **Foreign code would escape every guarantee.** A C function can do
   anything, so its capabilities, contracts, and costs could only be assumed,
   and Truss has no `assume`.
@@ -1260,17 +1219,14 @@ trusts.
   toolchain that can build it. Packages written for different versions build
   together, as Rust's editions allow.
 - **The standard library never breaks.** A module that must break gets a
-  successor beside it, named with `_v2`, as Go added `math/rand/v2`. Python's
-  standard library modules went stale because they could be neither fixed
-  nor removed; a successor fixes a module without removing it.
+  successor beside it, named with `_v2`, which fixes the module without
+  removing it.
 - **It holds the modules most programs would otherwise take from a package:** code
   that needs the compiler or the operating system, types that packages share
   to interoperate, such as `Path` and `http::Request`, implementations of
   published standards, such as JSON, TLS, and the cryptographic algorithms,
-  and the protocols of a network service. Go's `net/http` shows that a
-  standard library can hold protocols that still evolve. Cryptographic
-  primitives need processor instructions, which only the standard library
-  can reach.
+  and the protocols of a network service. Cryptographic primitives need
+  processor instructions, which only the standard library can reach.
 - **Clients for a product are approved packages,** owned by `truss` on the
   registry, such as `truss::postgres`. They follow a product's releases, not a
   published standard, and few programs need any one of them. They are
@@ -1323,7 +1279,6 @@ not, because a package may want that name.
   test of error handling is only as good as the errors the fake can produce.
 - **`simulation::World` fakes every capability at once,** because one provider
   must implement `Handles` for every handle, as the operating system does.
-  FoundationDB tests its database this way.
 
 ## Visibility
 
@@ -1365,8 +1320,8 @@ in [PACKAGES.md](PACKAGES.md).
 - **A project lists no members.** A list is one more file that every agent
   adding a package must edit, and so one more place for two agents to
   collide.
-- **Packages find each other by name, never by a path.** Cargo's
-  `path = "../geometry"` breaks when a directory moves.
+- **Packages find each other by name, never by a path,** so moving a
+  directory breaks no dependency.
 - **A project's package takes the place of the registry's package of the same
   name,** which is how a dependency is fixed ahead of its owner, with the
   copy in the repository for a reviewer to see.
@@ -1412,8 +1367,7 @@ in [PACKAGES.md](PACKAGES.md).
 ### The registry
 
 - **A package is published as its source,** so the code a reviewer reads in
-  the registry is the code that compiles. A release whose published files
-  differed from its repository is how the xz backdoor shipped.
+  the registry is the code that compiles.
 - **Content is checked against a public log,** as Go's checksum database
   does, so the registry cannot give two users different code under one
   version.
@@ -1459,9 +1413,9 @@ in [PACKAGES.md](PACKAGES.md).
   join, because a missing comma in `["a" "b", "c"]` would silently merge two
   elements.
 - **Text that contains `${` opens the string with more `$`s,** the fix Truss
-  already uses for text that contains `"""`: a longer delimiter. C# 11 and
-  Kotlin 2.2 both moved to it. A fixed escape such as `$${` would make one
-  sequence special in an otherwise raw string.
+  already uses for text that contains `"""`: a longer delimiter. A fixed
+  escape such as `$${` would make one sequence special in an otherwise raw
+  string.
 - **Line endings are always `\n`,** so a string means and hashes the same
   whatever the file's line endings.
 - **A `Character` is a Unicode scalar value.** It has a fixed size, so it
@@ -1549,15 +1503,12 @@ different files.
 **A module is a directory, and its files share one namespace,** as a package
 is in Go and a module in Swift. A file names the definitions of its
 module's other files as it names its own, so splitting a module into files
-is a choice of layout and costs no prefixes. Where each file is a module, as
-in Rust and Python, and imports bring in only modules, a program written as
-several files names its own modules everywhere: a Sudoku solver of 1,950
-lines in eleven files wrote 380 `module::` prefixes, every one to a file of
-its own package. Rust avoids that with imports of names, which Truss does
-not have. Each file keeps its own `use` lines, so a file shows the modules
-it reaches. Lookups stay cheap: a module's names are one index built from
-its files' names, and an edit inside a body changes no file's names, so it
-reaches no lookup.
+is a choice of layout and costs no prefixes. Where each file is a module
+and imports bring in only modules, a program of several files writes a
+prefix at every use of its own code. Each file keeps its own `use` lines,
+so a file shows the modules it reaches. Lookups stay cheap: a module's
+names are one index built from its files' names, and an edit inside a body
+changes no file's names, so it reaches no lookup.
 
 **A local may hide a definition of its module, and nothing else.** Hiding a
 local of an enclosing scope loses an update or reads a stale value, as an
