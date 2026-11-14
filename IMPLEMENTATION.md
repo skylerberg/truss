@@ -52,10 +52,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   longest suites runners of their own. The workflow's comments say why each
   job is laid out as it is; when the proofs' jobs become the longest again,
   add a runner to their list.
-- **A pull request that takes out a recent merge fails** before anything is
+- **A pull request that reverts a recent merge fails** before anything is
   built (`.github/scripts/reverts.sh`). Several sessions fetch into one
   repository, so `origin/main` can move between a branch's merge of it and a
-  squash onto it, and the squashed commit then undoes every merge its older
+  squash onto it, and the squashed commit then reverts every merge its older
   tree lacks, with no conflict. To squash safely, read `origin/main` once
   into a variable, merge that commit, and squash onto that commit. A pull
   request that means to revert has a title that starts with "Revert".
@@ -66,7 +66,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   must not see its consumer's dependencies.** Code that one library alone uses
   is a module of that library, so that nothing else can come to depend on
   it. It stays a library of its own when its short dependency list
-  keeps it apart from a layer, as `session` knows no compiler stage and the
+  keeps it independent of a layer, as `session` knows no compiler stage and the
   move analysis, `moves`, knows nothing of code generation.
 - **Each library belongs to one area of stage0,** a directory under
   `stage0`, and the dependency graph that `stage0/tools/docs/build.sh`
@@ -84,7 +84,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `ownership`, `prover`, `codegen` | The MIR's three consumers |
   | `tools`, `test` | Executables that are not shipped, and the tests |
 
-  The libraries at the top of `stage0` put the areas together: `checks`
+  The libraries at the top of `stage0` compose the areas: `checks`
   runs every check before the prover, `database` is the project's layer over
   sessions, `evaluator` gives the prover code generation, `inspect` indexes
   definitions for the tools, and `cli` is the
