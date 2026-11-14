@@ -2769,73 +2769,385 @@ internal fn aes256_round_keys(key: Array[UInt8, 32]) -> Array[UInt8, 240]
   keys
 }
 
-internal fn aes_add_round_key(state: mut Array[UInt8, 16], keys: Array[UInt8, 240], round: USize)
-  requires round <= 14
+internal fn aes_sliced_substitute(q: Array[UInt64, 8]) -> Array[UInt64, 8]
   cost time O(1)
   cost allocations == 0
 {
-  let count: USize = 16
-  for index in 0..count
-    cost allocations == 0
-  {
-    state[index] = state[index] ^ keys[16 * round + index]
-  }
+  let x0 = q[7]
+  let x1 = q[6]
+  let x2 = q[5]
+  let x3 = q[4]
+  let x4 = q[3]
+  let x5 = q[2]
+  let x6 = q[1]
+  let x7 = q[0]
+  let y14 = x3 ^ x5
+  let y13 = x0 ^ x6
+  let y9 = x0 ^ x3
+  let y8 = x0 ^ x5
+  let t0 = x1 ^ x2
+  let y1 = t0 ^ x7
+  let y4 = y1 ^ x3
+  let y12 = y13 ^ y14
+  let y2 = y1 ^ x0
+  let y5 = y1 ^ x6
+  let y3 = y5 ^ y8
+  let t1 = x4 ^ y12
+  let y15 = t1 ^ x5
+  let y20 = t1 ^ x1
+  let y6 = y15 ^ x7
+  let y10 = y15 ^ t0
+  let y11 = y20 ^ y9
+  let y7 = x7 ^ y11
+  let y17 = y10 ^ y11
+  let y19 = y10 ^ y8
+  let y16 = t0 ^ y11
+  let y21 = y13 ^ y16
+  let y18 = x0 ^ y16
+  let t2 = y12 & y15
+  let t3 = y3 & y6
+  let t4 = t3 ^ t2
+  let t5 = y4 & x7
+  let t6 = t5 ^ t2
+  let t7 = y13 & y16
+  let t8 = y5 & y1
+  let t9 = t8 ^ t7
+  let t10 = y2 & y7
+  let t11 = t10 ^ t7
+  let t12 = y9 & y11
+  let t13 = y14 & y17
+  let t14 = t13 ^ t12
+  let t15 = y8 & y10
+  let t16 = t15 ^ t12
+  let t17 = t4 ^ t14
+  let t18 = t6 ^ t16
+  let t19 = t9 ^ t14
+  let t20 = t11 ^ t16
+  let t21 = t17 ^ y20
+  let t22 = t18 ^ y19
+  let t23 = t19 ^ y21
+  let t24 = t20 ^ y18
+  let t25 = t21 ^ t22
+  let t26 = t21 & t23
+  let t27 = t24 ^ t26
+  let t28 = t25 & t27
+  let t29 = t28 ^ t22
+  let t30 = t23 ^ t24
+  let t31 = t22 ^ t26
+  let t32 = t31 & t30
+  let t33 = t32 ^ t24
+  let t34 = t23 ^ t33
+  let t35 = t27 ^ t33
+  let t36 = t24 & t35
+  let t37 = t36 ^ t34
+  let t38 = t27 ^ t36
+  let t39 = t29 & t38
+  let t40 = t25 ^ t39
+  let t41 = t40 ^ t37
+  let t42 = t29 ^ t33
+  let t43 = t29 ^ t40
+  let t44 = t33 ^ t37
+  let t45 = t42 ^ t41
+  let z0 = t44 & y15
+  let z1 = t37 & y6
+  let z2 = t33 & x7
+  let z3 = t43 & y16
+  let z4 = t40 & y1
+  let z5 = t29 & y7
+  let z6 = t42 & y11
+  let z7 = t45 & y17
+  let z8 = t41 & y10
+  let z9 = t44 & y12
+  let z10 = t37 & y3
+  let z11 = t33 & y4
+  let z12 = t43 & y13
+  let z13 = t40 & y5
+  let z14 = t29 & y2
+  let z15 = t42 & y9
+  let z16 = t45 & y14
+  let z17 = t41 & y8
+  let t46 = z15 ^ z16
+  let t47 = z10 ^ z11
+  let t48 = z5 ^ z13
+  let t49 = z9 ^ z10
+  let t50 = z2 ^ z12
+  let t51 = z2 ^ z5
+  let t52 = z7 ^ z8
+  let t53 = z0 ^ z3
+  let t54 = z6 ^ z7
+  let t55 = z16 ^ z17
+  let t56 = z12 ^ t48
+  let t57 = t50 ^ t53
+  let t58 = z4 ^ t46
+  let t59 = z3 ^ t54
+  let t60 = t46 ^ t57
+  let t61 = z14 ^ t57
+  let t62 = t52 ^ t58
+  let t63 = t49 ^ t58
+  let t64 = z4 ^ t59
+  let t65 = t61 ^ t62
+  let t66 = z1 ^ t63
+  let s0 = t59 ^ t63
+  let s6 = t56 ^ (t62 ^ 0xffffffffffffffff)
+  let s7 = t48 ^ (t60 ^ 0xffffffffffffffff)
+  let t67 = t64 ^ t65
+  let s3 = t53 ^ t66
+  let s4 = t51 ^ t66
+  let s5 = t47 ^ t65
+  let s1 = t64 ^ (s3 ^ 0xffffffffffffffff)
+  let s2 = t55 ^ (t67 ^ 0xffffffffffffffff)
+  [s7, s6, s5, s4, s3, s2, s1, s0]
 }
 
-internal fn aes_substitute_and_shift(state: Array[UInt8, 16]) -> Array[UInt8, 16]
+internal fn aes_swap(low: UInt64, high: UInt64, even: UInt64, odd: UInt64, shift: UInt64) -> AesPair
+  requires shift >= 1 && shift <= 4
   cost time O(1)
   cost allocations == 0
 {
-  var shifted: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 16
+  AesPair(
+    first: (low & even) | ((high & even) << shift),
+    second: ((low & odd) >> shift) | (high & odd),
+  )
+}
+
+internal type AesPair(first: UInt64, second: UInt64)
+
+internal fn aes_ortho(words: Array[UInt64, 8]) -> Array[UInt64, 8]
+  cost time O(1)
+  cost allocations == 0
+{
+  var q = words
+  let pairs: Array[USize, 24] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 4, 6, 5, 7, 0, 4, 1, 5, 2, 6, 3, 7]
+  let evens: Array[UInt64, 3] = [0x5555555555555555, 0x3333333333333333, 0x0f0f0f0f0f0f0f0f]
+  let odds: Array[UInt64, 3] = [0xaaaaaaaaaaaaaaaa, 0xcccccccccccccccc, 0xf0f0f0f0f0f0f0f0]
+  let shifts: Array[UInt64, 3] = [1, 2, 4]
+  let count: USize = 12
+  for step in 0..count
+    cost allocations == 0
+  {
+    let level = step / 4
+    let swapped = aes_swap(q[pairs[2 * step]], high: q[pairs[2 * step + 1]], even: evens[level], odd: odds[level], shift: shifts[level])
+    q[pairs[2 * step]] = swapped.first
+    q[pairs[2 * step + 1]] = swapped.second
+  }
+  q
+}
+
+internal fn aes_spread(word: UInt32) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  var spread: UInt64 = intrinsic::convert(word)
+  spread = (spread | (spread << 16)) & 0x0000ffff0000ffff
+  (spread | (spread << 8)) & 0x00ff00ff00ff00ff
+}
+
+internal fn aes_interleave_in(words: Array[UInt32, 4]) -> AesPair
+  cost time O(1)
+  cost allocations == 0
+{
+  AesPair(
+    first: aes_spread(words[0]) | (aes_spread(words[2]) << 8),
+    second: aes_spread(words[1]) | (aes_spread(words[3]) << 8),
+  )
+}
+
+internal fn aes_gather(spread: UInt64) -> UInt32
+  cost time O(1)
+  cost allocations == 0
+{
+  var packed = spread & 0x00ff00ff00ff00ff
+  packed = (packed | (packed >> 8)) & 0x0000ffff0000ffff
+  intrinsic::convert((packed | (packed >> 16)) & 0xffffffff)
+}
+
+internal fn aes_interleave_out(first: UInt64, second: UInt64) -> Array[UInt32, 4]
+  cost time O(1)
+  cost allocations == 0
+{
+  [aes_gather(first), aes_gather(second), aes_gather(first >> 8), aes_gather(second >> 8)]
+}
+
+internal fn aes_sliced_shift_rows(q: Array[UInt64, 8]) -> Array[UInt64, 8]
+  cost time O(1)
+  cost allocations == 0
+{
+  var shifted = q
+  let count: USize = 8
   for index in 0..count
     cost allocations == 0
   {
-    let row = index % 4
-    let column = index / 4
-    shifted[index] = aes_substitute(state[4 * ((column + row) % 4) + row])
+    let word = q[index]
+    shifted[index] = (word & 0x000000000000ffff)
+      | ((word & 0x00000000fff00000) >> 4)
+      | ((word & 0x00000000000f0000) << 12)
+      | ((word & 0x0000ff0000000000) >> 8)
+      | ((word & 0x000000ff00000000) << 8)
+      | ((word & 0xf000000000000000) >> 12)
+      | ((word & 0x0fff000000000000) << 4)
   }
   shifted
 }
 
-internal fn aes_mix_columns(state: Array[UInt8, 16]) -> Array[UInt8, 16]
+internal fn aes_rotate_32(word: UInt64) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  var mixed: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let columns: USize = 4
-  for column in 0..columns
-    cost allocations == 0
-  {
-    let first = state[4 * column]
-    let second = state[4 * column + 1]
-    let third = state[4 * column + 2]
-    let fourth = state[4 * column + 3]
-    let all = first ^ second ^ third ^ fourth
-    mixed[4 * column] = first ^ all ^ gf256_double(first ^ second)
-    mixed[4 * column + 1] = second ^ all ^ gf256_double(second ^ third)
-    mixed[4 * column + 2] = third ^ all ^ gf256_double(third ^ fourth)
-    mixed[4 * column + 3] = fourth ^ all ^ gf256_double(fourth ^ first)
-  }
-  mixed
+  (word << 32) | (word >> 32)
 }
 
-internal fn aes_encrypt_block(keys: AesKeys, block: Array[UInt8, 16]) -> Array[UInt8, 16]
+internal fn aes_sliced_mix_columns(q: Array[UInt64, 8]) -> Array[UInt64, 8]
   cost time O(1)
   cost allocations == 0
 {
-  var state = block
-  aes_add_round_key(mut state, keys: keys.bytes, round: 0)
-  let middle = keys.rounds - 1
-  for round in 0..middle
+  let r0 = (q[0] >> 16) | (q[0] << 48)
+  let r1 = (q[1] >> 16) | (q[1] << 48)
+  let r2 = (q[2] >> 16) | (q[2] << 48)
+  let r3 = (q[3] >> 16) | (q[3] << 48)
+  let r4 = (q[4] >> 16) | (q[4] << 48)
+  let r5 = (q[5] >> 16) | (q[5] << 48)
+  let r6 = (q[6] >> 16) | (q[6] << 48)
+  let r7 = (q[7] >> 16) | (q[7] << 48)
+  [
+    q[7] ^ r7 ^ r0 ^ aes_rotate_32(q[0] ^ r0),
+    q[0] ^ r0 ^ q[7] ^ r7 ^ r1 ^ aes_rotate_32(q[1] ^ r1),
+    q[1] ^ r1 ^ r2 ^ aes_rotate_32(q[2] ^ r2),
+    q[2] ^ r2 ^ q[7] ^ r7 ^ r3 ^ aes_rotate_32(q[3] ^ r3),
+    q[3] ^ r3 ^ q[7] ^ r7 ^ r4 ^ aes_rotate_32(q[4] ^ r4),
+    q[4] ^ r4 ^ r5 ^ aes_rotate_32(q[5] ^ r5),
+    q[5] ^ r5 ^ r6 ^ aes_rotate_32(q[6] ^ r6),
+    q[6] ^ r6 ^ r7 ^ aes_rotate_32(q[7] ^ r7),
+  ]
+}
+
+internal type AesSliced(words: Array[UInt64, 120], rounds: USize)
+  invariant rounds == 10 || rounds == 14
+
+internal fn aes_word(bytes: Array[UInt8, 240], at: USize) -> UInt32
+  requires at <= 236
+  cost time O(1)
+  cost allocations == 0
+{
+  let first: UInt32 = intrinsic::convert(bytes[at])
+  let second: UInt32 = intrinsic::convert(bytes[at + 1])
+  let third: UInt32 = intrinsic::convert(bytes[at + 2])
+  let fourth: UInt32 = intrinsic::convert(bytes[at + 3])
+  first | (second << 8) | (third << 16) | (fourth << 24)
+}
+
+internal fn aes_slice_keys(keys: AesKeys) -> AesSliced
+  cost time O(1)
+  cost allocations == 0
+{
+  var words: Array[UInt64, 120] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  for round in 0..keys.rounds + 1
     cost allocations == 0
   {
-    state = aes_mix_columns(aes_substitute_and_shift(state))
-    aes_add_round_key(mut state, keys: keys.bytes, round: round + 1)
+    let at = 16 * round
+    let halves = aes_interleave_in([aes_word(keys.bytes, at: at), aes_word(keys.bytes, at: at + 4), aes_word(keys.bytes, at: at + 8), aes_word(keys.bytes, at: at + 12)])
+    let sliced = aes_ortho([halves.first, halves.first, halves.first, halves.first, halves.second, halves.second, halves.second, halves.second])
+    let width: USize = 8
+    for index in 0..width
+      cost allocations == 0
+    {
+      words[8 * round + index] = sliced[index]
+    }
   }
-  state = aes_substitute_and_shift(state)
-  aes_add_round_key(mut state, keys: keys.bytes, round: keys.rounds)
-  state
+  AesSliced(words: words, rounds: keys.rounds)
+}
+
+internal fn aes_add_sliced_key(q: Array[UInt64, 8], keys: AesSliced, round: USize) -> Array[UInt64, 8]
+  requires round <= keys.rounds
+  cost time O(1)
+  cost allocations == 0
+{
+  var added = q
+  let width: USize = 8
+  for index in 0..width
+    cost allocations == 0
+  {
+    added[index] = q[index] ^ keys.words[8 * round + index]
+  }
+  added
+}
+
+internal fn aes_encrypt_sliced(keys: AesSliced, q: Array[UInt64, 8]) -> Array[UInt64, 8]
+  cost time O(1)
+  cost allocations == 0
+{
+  var state = aes_add_sliced_key(q, keys: keys, round: 0)
+  for round in 1..keys.rounds
+    cost allocations == 0
+  {
+    state = aes_add_sliced_key(aes_sliced_mix_columns(aes_sliced_shift_rows(aes_sliced_substitute(state))), keys: keys, round: round)
+  }
+  aes_add_sliced_key(aes_sliced_shift_rows(aes_sliced_substitute(state)), keys: keys, round: keys.rounds)
+}
+
+internal fn aes_block_words(block: Array[UInt8, 16]) -> Array[UInt32, 4]
+  cost time O(1)
+  cost allocations == 0
+{
+  var words: Array[UInt32, 4] = [0, 0, 0, 0]
+  let count: USize = 4
+  for index in 0..count
+    cost allocations == 0
+  {
+    let first: UInt32 = intrinsic::convert(block[4 * index])
+    let second: UInt32 = intrinsic::convert(block[4 * index + 1])
+    let third: UInt32 = intrinsic::convert(block[4 * index + 2])
+    let fourth: UInt32 = intrinsic::convert(block[4 * index + 3])
+    words[index] = first | (second << 8) | (third << 16) | (fourth << 24)
+  }
+  words
+}
+
+internal fn aes_encrypt_four(keys: AesSliced, blocks: Array[Array[UInt8, 16], 4]) -> Array[UInt8, 64]
+  cost time O(1)
+  cost allocations == 0
+{
+  var q: Array[UInt64, 8] = [0, 0, 0, 0, 0, 0, 0, 0]
+  let count: USize = 4
+  for index in 0..count
+    cost allocations == 0
+  {
+    let halves = aes_interleave_in(aes_block_words(blocks[index]))
+    q[index] = halves.first
+    q[index + 4] = halves.second
+  }
+  let encrypted = aes_ortho(aes_encrypt_sliced(keys, q: aes_ortho(q)))
+  var output: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  for index in 0..count
+    cost allocations == 0
+  {
+    let words = aes_interleave_out(encrypted[index], second: encrypted[index + 4])
+    for word in 0..count
+      cost allocations == 0
+    {
+      let value = words[word]
+      output[16 * index + 4 * word] = intrinsic::convert(value & 255)
+      output[16 * index + 4 * word + 1] = intrinsic::convert((value >> 8) & 255)
+      output[16 * index + 4 * word + 2] = intrinsic::convert((value >> 16) & 255)
+      output[16 * index + 4 * word + 3] = intrinsic::convert((value >> 24) & 255)
+    }
+  }
+  output
+}
+
+internal fn aes_encrypt_block(keys: AesSliced, block: Array[UInt8, 16]) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  let zero: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let encrypted = aes_encrypt_four(keys, blocks: [block, zero, zero, zero])
+  var output = zero
+  let count: USize = 16
+  for index in 0..count
+    cost allocations == 0
+  {
+    output[index] = encrypted[index]
+  }
+  output
 }
 
 internal type Block128(high: UInt64, low: UInt64)
@@ -2868,31 +3180,80 @@ internal fn Block128.byte(self, index: USize) -> UInt8
   }
 }
 
+internal fn ghash_bit_multiply(first: UInt64, second: UInt64) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  let x0 = first & 0x1111111111111111
+  let x1 = first & 0x2222222222222222
+  let x2 = first & 0x4444444444444444
+  let x3 = first & 0x8888888888888888
+  let y0 = second & 0x1111111111111111
+  let y1 = second & 0x2222222222222222
+  let y2 = second & 0x4444444444444444
+  let y3 = second & 0x8888888888888888
+  let z0 = intrinsic::wrapping_multiply(x0, right: y0) ^ intrinsic::wrapping_multiply(x1, right: y3)
+    ^ intrinsic::wrapping_multiply(x2, right: y2) ^ intrinsic::wrapping_multiply(x3, right: y1)
+  let z1 = intrinsic::wrapping_multiply(x0, right: y1) ^ intrinsic::wrapping_multiply(x1, right: y0)
+    ^ intrinsic::wrapping_multiply(x2, right: y3) ^ intrinsic::wrapping_multiply(x3, right: y2)
+  let z2 = intrinsic::wrapping_multiply(x0, right: y2) ^ intrinsic::wrapping_multiply(x1, right: y1)
+    ^ intrinsic::wrapping_multiply(x2, right: y0) ^ intrinsic::wrapping_multiply(x3, right: y3)
+  let z3 = intrinsic::wrapping_multiply(x0, right: y3) ^ intrinsic::wrapping_multiply(x1, right: y2)
+    ^ intrinsic::wrapping_multiply(x2, right: y1) ^ intrinsic::wrapping_multiply(x3, right: y0)
+  (z0 & 0x1111111111111111) | (z1 & 0x2222222222222222) | (z2 & 0x4444444444444444) | (z3 & 0x8888888888888888)
+}
+
+internal fn ghash_reverse(word: UInt64) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  var reversed = word
+  reversed = ((reversed & 0x5555555555555555) << 1) | ((reversed >> 1) & 0x5555555555555555)
+  reversed = ((reversed & 0x3333333333333333) << 2) | ((reversed >> 2) & 0x3333333333333333)
+  reversed = ((reversed & 0x0f0f0f0f0f0f0f0f) << 4) | ((reversed >> 4) & 0x0f0f0f0f0f0f0f0f)
+  reversed = ((reversed & 0x00ff00ff00ff00ff) << 8) | ((reversed >> 8) & 0x00ff00ff00ff00ff)
+  reversed = ((reversed & 0x0000ffff0000ffff) << 16) | ((reversed >> 16) & 0x0000ffff0000ffff)
+  (reversed << 32) | (reversed >> 32)
+}
+
 internal fn gf128_multiply(first: Block128, second: Block128) -> Block128
   cost time O(1)
   cost allocations == 0
 {
-  var product_high: UInt64 = 0
-  var product_low: UInt64 = 0
-  var high = second.high
-  var low = second.low
-  let bits: USize = 128
-  for index in 0..bits
-    cost allocations == 0
-  {
-    let bit: UInt64 = if index < 64 {
-      (first.high >> (63 - index)) & 1
-    } else {
-      (first.low >> (127 - index)) & 1
-    }
-    let selected = intrinsic::wrapping_subtract(0, right: bit)
-    product_high = product_high ^ (high & selected)
-    product_low = product_low ^ (low & selected)
-    let reduce = intrinsic::wrapping_subtract(0, right: low & 1)
-    low = (low >> 1) | intrinsic::wrapping_multiply(high & 1, right: 0x8000000000000000)
-    high = (high >> 1) ^ (0xe100000000000000 & reduce)
-  }
-  Block128(high: product_high, low: product_low)
+  let y1 = first.high
+  let y0 = first.low
+  let h1 = second.high
+  let h0 = second.low
+  let h0r = ghash_reverse(h0)
+  let h1r = ghash_reverse(h1)
+  let h2 = h0 ^ h1
+  let h2r = h0r ^ h1r
+  let y0r = ghash_reverse(y0)
+  let y1r = ghash_reverse(y1)
+  let y2 = y0 ^ y1
+  let y2r = y0r ^ y1r
+  let z0 = ghash_bit_multiply(y0, second: h0)
+  let z1 = ghash_bit_multiply(y1, second: h1)
+  let z2 = ghash_bit_multiply(y2, second: h2) ^ z0 ^ z1
+  let z0r = ghash_bit_multiply(y0r, second: h0r)
+  let z1r = ghash_bit_multiply(y1r, second: h1r)
+  let z2r = ghash_bit_multiply(y2r, second: h2r) ^ z0r ^ z1r
+  let z0h = ghash_reverse(z0r) >> 1
+  let z1h = ghash_reverse(z1r) >> 1
+  let z2h = ghash_reverse(z2r) >> 1
+  let v0 = z0
+  let v1 = z0h ^ z2
+  let v2 = z1 ^ z2h
+  let v3 = z1h
+  let w3 = (v3 << 1) | (v2 >> 63)
+  let w2 = (v2 << 1) | (v1 >> 63)
+  let w1 = (v1 << 1) | (v0 >> 63)
+  let w0 = v0 << 1
+  let u2 = w2 ^ w0 ^ (w0 >> 1) ^ (w0 >> 2) ^ (w0 >> 7)
+  let u1 = w1 ^ (w0 << 63) ^ (w0 << 62) ^ (w0 << 57)
+  let u3 = w3 ^ u1 ^ (u1 >> 1) ^ (u1 >> 2) ^ (u1 >> 7)
+  let final2 = u2 ^ (u1 << 63) ^ (u1 << 62) ^ (u1 << 57)
+  Block128(high: u3, low: final2)
 }
 
 internal type Ghash(key: Block128, digest: Block128, block: Array[UInt8, 16], block_length: USize)
@@ -2985,7 +3346,7 @@ internal fn aes_gcm_counter_block(nonce: Array[UInt8, 12], counter: UInt32) -> A
 internal fn aes_gcm_xor(
   output: mut intrinsic::Storage[UInt8],
   input: Slice[UInt8],
-  keys: AesKeys,
+  keys: AesSliced,
   nonce: Array[UInt8, 12],
 )
   requires intrinsic::storage_length(output) + input.length() <= intrinsic::storage_capacity(output)
@@ -2996,22 +3357,31 @@ internal fn aes_gcm_xor(
 {
   let start = intrinsic::storage_length(output)
   let capacity = intrinsic::storage_capacity(output)
-  var block: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  var stream: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   for index in 0..input.length()
     invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) == capacity
     cost allocations == 0
   {
-    if index % 16 == 0 {
-      let number: UInt32 = intrinsic::convert((index / 16 + 2) % 4294967296)
-      block = aes_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: number))
+    if index % 64 == 0 {
+      let base = index / 16 + 2
+      let first: UInt32 = intrinsic::convert(base % 4294967296)
+      let second: UInt32 = intrinsic::convert((base + 1) % 4294967296)
+      let third: UInt32 = intrinsic::convert((base + 2) % 4294967296)
+      let fourth: UInt32 = intrinsic::convert((base + 3) % 4294967296)
+      stream = aes_encrypt_four(keys, blocks: [
+        aes_gcm_counter_block(nonce, counter: first),
+        aes_gcm_counter_block(nonce, counter: second),
+        aes_gcm_counter_block(nonce, counter: third),
+        aes_gcm_counter_block(nonce, counter: fourth),
+      ])
     }
-    intrinsic::storage_push(mut output, value: input[index] ^ block[index % 16])
+    intrinsic::storage_push(mut output, value: input[index] ^ stream[index % 64])
   }
 }
 
 internal fn aes_gcm_tag(
-  keys: AesKeys,
+  keys: AesSliced,
   nonce: Array[UInt8, 12],
   associated_data: Slice[UInt8],
   ciphertext: Slice[UInt8],
@@ -3048,7 +3418,7 @@ internal fn aes256_gcm_seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  let keys = AesKeys(bytes: aes256_round_keys(key), rounds: 14)
+  let keys = aes_slice_keys(AesKeys(bytes: aes256_round_keys(key), rounds: 14))
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
   aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
   let tag = aes_gcm_tag(
@@ -3074,7 +3444,7 @@ internal fn aes256_gcm_open(
   }
   cost time O(sealed.length() + associated_data.length())
 {
-  let keys = AesKeys(bytes: aes256_round_keys(key), rounds: 14)
+  let keys = aes_slice_keys(AesKeys(bytes: aes256_round_keys(key), rounds: 14))
   let length = sealed.length() - 16
   let ciphertext = sealed[..length]
   let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
@@ -3096,7 +3466,7 @@ internal fn aes128_gcm_seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  let keys = aes128_round_keys(key)
+  let keys = aes_slice_keys(aes128_round_keys(key))
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
   aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
   let tag = aes_gcm_tag(
@@ -3122,7 +3492,7 @@ internal fn aes128_gcm_open(
   }
   cost time O(sealed.length() + associated_data.length())
 {
-  let keys = aes128_round_keys(key)
+  let keys = aes_slice_keys(aes128_round_keys(key))
   let length = sealed.length() - 16
   let ciphertext = sealed[..length]
   let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
