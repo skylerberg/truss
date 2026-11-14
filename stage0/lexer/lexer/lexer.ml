@@ -163,45 +163,58 @@ let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
   in
   walk (tokens written) (tokens fixed)
 
+let fix_edits (diagnostic : Diagnostic.t) =
+  match diagnostic.fixes with [ fix ] -> fix.edits | _ -> []
+
+(* The tokens and diagnostics of the text with [applied]'s fixes, and the
+   spans where a fix joined or split a neighboring token. *)
+let attempt_fixes source tokens applied =
+  let edits = List.concat_map fix_edits applied in
+  let fixed_tokens, remaining =
+    scan
+      (Source.create ~path:(Source.path source) (Diagnostic.apply_edits (Source.text source) edits))
+  in
+  let fixed_tokens = Array.map (original_token (placed_edits edits)) fixed_tokens in
+  ( fixed_tokens,
+    remaining,
+    joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens )
+
+(* A fix that joins or splits a neighboring token, or adds an error, is
+   withheld, and the file is lexed again without it. *)
 let rec recover source tokens diagnostics =
   match Diagnostic.machine_applicable diagnostics with
   | [] -> (tokens, diagnostics)
   | applied -> (
-      let edits =
-        List.concat_map
-          (fun (diagnostic : Diagnostic.t) ->
-            match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-          applied
+      let others applied =
+        List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics
       in
-      let fixed_tokens, remaining =
-        scan
-          (Source.create ~path:(Source.path source)
-             (Diagnostic.apply_edits (Source.text source) edits))
+      let works applied =
+        let fixed_tokens, remaining, joined = attempt_fixes source tokens applied in
+        if joined = [] && Diagnostic.adds_none ~before:(others applied) ~after:remaining then
+          Ok fixed_tokens
+        else Error joined
       in
-      let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
-      let fixed_tokens = Array.map (original_token (placed_edits edits)) fixed_tokens in
-      (* A fix that joins or splits a neighboring token is withheld. *)
-      match
-        joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens
-      with
-      | [] ->
-          if Diagnostic.adds_none ~before:others ~after:remaining then (fixed_tokens, diagnostics)
-          else (tokens, diagnostics)
-      | joined ->
+      match works applied with
+      | Ok fixed_tokens -> (fixed_tokens, diagnostics)
+      | Error joined ->
           let touches (edit : Diagnostic.span Diagnostic.edit) =
             List.exists
               (fun (span : Source.span) ->
                 span.start <= edit.span.stop && edit.span.start <= span.stop)
               joined
           in
-          recover source tokens
-            (List.map
-               (fun (diagnostic : Diagnostic.t) ->
-                 match diagnostic.fixes with
-                 | [ fix ] when List.memq diagnostic applied && List.exists touches fix.edits ->
-                     { diagnostic with fixes = [] }
-                 | _ -> diagnostic)
-               diagnostics))
+          let wrong =
+            match List.filter (fun d -> List.exists touches (fix_edits d)) applied with
+            | [] -> List.filter (fun d -> Result.is_error (works [ d ])) applied
+            | touching -> touching
+          in
+          if wrong = [] then (tokens, diagnostics)
+          else
+            recover source tokens
+              (List.map
+                 (fun diagnostic ->
+                   if List.memq diagnostic wrong then { diagnostic with fixes = [] } else diagnostic)
+                 diagnostics))
 
 let lex source =
   let tokens, diagnostics = scan source in
