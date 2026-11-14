@@ -9,36 +9,37 @@ type file = { file : Path.file; source : Source.t; diagnostics : Diagnostic.t li
    prints every other diagnostic before it waits for the solver. *)
 type t = { checked : file list; proven : file list Lazy.t; problems : string list }
 
-let shown (project : Project.t) file diagnostics =
+let shown session packages file diagnostics =
   match Diagnostic.shown diagnostics with
   | [] -> None
-  | diagnostics -> Some { file; source = Project.source project file; diagnostics }
+  | diagnostics ->
+      Some { file; source = Command_packages.source session packages file; diagnostics }
 
-(* The diagnostics of every file of [Project.program_files], in package
+(* The diagnostics of every file of [Command_packages.program_files], in package
    order, and with [proofs], the prover's too. Such a dependency is checked
    because the program is built from it: code generation cannot lower a
    body that does not type-check, and a release build omits the run-time
    checks that the dependency's proofs replace. Files without a diagnostic
    are left out, and each file lists at most [Diagnostic.limit]. *)
-let gather ?(proofs = false) (project : Project.t) =
-  let files = Project.program_files project in
+let gather ?(proofs = false) session packages =
+  let files = Command_packages.program_files session packages in
   {
     checked =
       List.filter_map
-        (fun file -> shown project file (Database.diagnostics project.session file))
+        (fun file -> shown session packages file (Database.diagnostics session file))
         files;
     proven =
       (if proofs then
          lazy
-           (let proven = Proofs.diagnostics project files in
-            List.filter_map (fun file -> shown project file (proven file)) files)
+           (let proven = Proofs.diagnostics session packages files in
+            List.filter_map (fun file -> shown session packages file (proven file)) files)
        else Lazy.from_val []);
     problems =
-      Database.problems project.session
+      Database.problems session
       @ List.map
           (fun (file, package, problem) ->
             Printf.sprintf "%s: %s" file (Checks.manifest_sentence ~package problem))
-          (Project.manifest_problems project);
+          (Database.manifest_problems session packages);
   }
 
 let of_files files = { checked = files; proven = Lazy.from_val []; problems = [] }

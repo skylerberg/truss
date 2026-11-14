@@ -116,28 +116,29 @@ let of_definition database (key : Names.key) =
   | _ -> []
 
 (* Every occurrence in the package's code, in order of file and position. *)
-let all (project : Project.t) =
+let all session packages =
   List.concat_map
     (fun file ->
       List.concat_map
-        (fun declaration -> of_definition project.context (Names.key_of declaration))
-        (Query.demand project.context Names.declarations_in file))
-    (Project.files project)
+        (fun declaration -> of_definition (Database.context session) (Names.key_of declaration))
+        (Query.demand (Database.context session) Names.declarations_in file))
+    (Command_packages.files session packages)
 
 (* The [use] declarations of each file that name a module, with the span of
    the path in offsets of the file. *)
-let uses (project : Project.t) (target_module : Path.module_) =
+let uses session packages (target_module : Path.module_) =
   List.concat_map
     (fun (file : Path.file) ->
       List.filter_map
         (fun (item : Syntax.path Syntax.item) ->
           let path = item.value in
-          if Names.used_module project.context ~from:file.module_ path = target_module then
+          if Names.used_module (Database.context session) ~from:file.module_ path = target_module
+          then
             let first = match path.modules with first :: _ -> first | [] -> path.last in
             Some (file, Source.span (item.base + first.span.start) (item.base + path.last.span.stop))
           else None)
-        (Project.parsed project file).uses)
-    (Project.files project)
+        (Query.demand (Database.context session) Workspace.file file).uses)
+    (Command_packages.files session packages)
 
 (* Whether an occurrence refers to a definition or, for a method, to any
    version of it. *)

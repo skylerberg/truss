@@ -13,8 +13,8 @@ type hole = {
   mutable blocks : string list;
 }
 
-let of_definition (project : Project.t) source (declaration : Names.declaration) =
-  let context = project.context in
+let of_definition session source (declaration : Names.declaration) =
+  let context = Database.context session in
   let key = Names.key_of declaration in
   match
     ( Query.demand context Names.definition key,
@@ -38,25 +38,25 @@ let of_definition (project : Project.t) source (declaration : Names.declaration)
         (Inspect.holes definition resolved tables)
   | _ -> []
 
-let gather (project : Project.t) paths =
+let gather session packages paths =
   List.concat_map
     (fun file ->
-      let source = Project.source project file in
+      let source = Command_packages.source session packages file in
       List.concat_map
         (fun (declaration : Names.declaration) ->
-          if declaration.ordinal = 0 then of_definition project source declaration else [])
-        (Query.demand project.context Names.declarations_in file))
-    (Project.selected project paths)
+          if declaration.ordinal = 0 then of_definition session source declaration else [])
+        (Query.demand (Database.context session) Names.declarations_in file))
+    (Command_packages.selected session packages paths)
 
 (* The blocked roots of each hole: [main] and every test that reaches the
    hole's definition transitively. *)
-let fill_blocks (project : Project.t) holes =
+let fill_blocks session packages holes =
   if holes <> [] then begin
     let roots =
-      (match Program_command.mains project with [ main ] -> [ ("main", main) ] | _ -> [])
+      (match Program_command.mains session packages with [ main ] -> [ ("main", main) ] | _ -> [])
       @ List.map
           (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
-          (Test_command.select project ~paths:[] ~match_:None)
+          (Test_command.select session packages ~paths:[] ~match_:None)
     in
     List.iter2
       (fun (label, _) reached ->
@@ -65,7 +65,7 @@ let fill_blocks (project : Project.t) holes =
             if Path.Set.mem hole.definition reached then hole.blocks <- hole.blocks @ [ label ])
           holes)
       roots
-      (Database.reachable project.session (List.map snd roots))
+      (Database.reachable session (List.map snd roots))
   end
 
 let to_json hole =
@@ -98,10 +98,10 @@ let print hole =
   if hole.blocks <> [] then Output.printf "    blocks: %s\n" (String.concat "; " hole.blocks)
 
 let run ~paths =
-  let project = Project.current () in
-  let report = Report.gather project in
-  let holes = gather project paths in
-  fill_blocks project holes;
+  let session, packages = Command_packages.current () in
+  let report = Report.gather session packages in
+  let holes = gather session packages paths in
+  fill_blocks session packages holes;
   if Output.json () then
     Json.print (Report.document report [ ("holes", Json.List (List.map to_json holes)) ])
   else begin

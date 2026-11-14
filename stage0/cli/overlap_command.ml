@@ -99,25 +99,25 @@ let with_other_worktrees session =
     (fun other ->
       match Database.overlap_with session other with
       | Ok (_ :: _ as overlaps) ->
-          Some { other = Project.shown (Database.root other); overlaps; merged = []; error = None }
+          Some
+            { other = Shown_path.shown (Database.root other); overlaps; merged = []; error = None }
       | _ -> None)
     (Database.other_worktrees session)
 
 let run ~with_ ~merge =
-  let project = Project.current () in
-  let session = project.session in
+  let session, _ = Command_packages.current () in
   let others =
     match with_ with
     | Some branch -> (
         match Database.base_commit session (Some branch) with
-        | None -> Project.cannot_run "No commit is named %s." branch
+        | None -> Outcome.cannot_run "No commit is named %s." branch
         | Some commit -> (
             match Database.open_commit_of session commit with
             | Ok other -> [ (branch, other) ]
-            | Error message -> Project.cannot_run "%s" message))
+            | Error message -> Outcome.cannot_run "%s" message))
     | None ->
         List.map
-          (fun other -> (Project.shown (Database.root other), other))
+          (fun other -> (Shown_path.shown (Database.root other), other))
           (Database.other_worktrees session)
   in
   let comparisons = List.map (compare_with ~merge session) others in

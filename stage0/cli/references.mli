@@ -11,6 +11,6 @@ type occurrence = {
 }
 
 val declared_name : Syntax.definition -> Syntax.name option
-val all : Project.t -> occurrence list
-val uses : Project.t -> Path.module_ -> (Path.file * Source.span) list
+val all : Database.session -> Path.package list -> occurrence list
+val uses : Database.session -> Path.package list -> Path.module_ -> (Path.file * Source.span) list
 val names_definition : Path.t -> occurrence -> bool

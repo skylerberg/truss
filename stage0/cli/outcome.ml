@@ -6,3 +6,9 @@ type t = Exit of int | Run_program of { program : string; arguments : string lis
 
 exception Stop of int
 (** The command has reported why it ends, and exits with this status. *)
+
+exception Cannot_run of string
+(** The command cannot run: no manifest, a session that another process holds, or an unreadable
+    file. It exits with status 2. *)
+
+let cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run message)) format

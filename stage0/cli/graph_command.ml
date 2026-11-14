@@ -4,14 +4,14 @@
 type direction = References | Dependencies
 
 let run ~direction ~name =
-  let project = Project.current () in
-  match Database.find_definitions project.session name with
-  | [] -> Project.cannot_run "No definition named %s in this worktree." name
+  let session, _ = Command_packages.current () in
+  match Database.find_definitions session name with
+  | [] -> Outcome.cannot_run "No definition named %s in this worktree." name
   | targets ->
       let edges =
         match direction with
-        | References -> Database.dependents project.session targets
-        | Dependencies -> Database.dependencies project.session targets
+        | References -> Database.dependents session targets
+        | Dependencies -> Database.dependencies session targets
       in
       if Output.json () then
         Json.print

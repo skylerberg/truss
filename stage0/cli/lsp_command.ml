@@ -104,40 +104,25 @@ let check ~root encoding (buffers : (string * string) list) =
       (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (path_of_uri uri))
       buffers
   in
-  let project = Project.load root in
-  let base = Database.root project.session in
+  let session, _ = Command_packages.load root in
+  let base = Database.root session in
   let trial =
-    Database.trial project.session
-      (List.map (fun (_, path, text) -> (Project.relative ~from:base path, Some text)) buffers)
+    Database.trial session
+      (List.map (fun (_, path, text) -> (Shown_path.relative ~from:base path, Some text)) buffers)
   in
-  let packages =
-    List.map
-      (fun (relative, name) ->
-        {
-          Project.name;
-          directory = (if relative = "" then base else Filename.concat base relative);
-        })
-      (Database.packages trial)
-  in
-  let project : Project.t =
-    {
-      session = trial;
-      context = Database.context trial;
-      packages;
-      files = Project.file_paths trial packages;
-    }
-  in
+  let packages = List.map snd (Database.packages trial) in
   let file_of path =
-    List.find_map
-      (fun (file, written) -> if Project.normalize written = path then Some file else None)
-      project.files
+    List.find_opt
+      (fun file -> Shown_path.normalize (Command_packages.path trial file) = path)
+      (Command_packages.files trial packages)
   in
   let opened =
     List.map
-      (fun (uri, path, text) -> (uri, Source.create ~path text, file_of (Project.normalize path)))
+      (fun (uri, path, text) ->
+        (uri, Source.create ~path text, file_of (Shown_path.normalize path)))
       buffers
   in
-  let proofs = Proofs.checked project (List.filter_map (fun (_, _, file) -> file) opened) in
+  let proofs = Proofs.checked trial packages (List.filter_map (fun (_, _, file) -> file) opened) in
   Json.Object
     [
       ( "files",

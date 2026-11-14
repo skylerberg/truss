@@ -8,13 +8,13 @@ let c_flags () =
 let toolchain () =
   match Toolchain.find () with
   | Ok toolchain -> toolchain
-  | Error message -> Project.cannot_run "%s" message
+  | Error message -> Outcome.cannot_run "%s" message
 
 (* Stage0 builds programs for the system it runs on. *)
 let target () =
   match Libc.host with
   | Some system -> Memory_layout.target_64 system
-  | None -> Project.cannot_run "Stage0 builds programs only for Linux and macOS."
+  | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 (* Adds the instances a compiler asks keys for to the session's roots. *)
 let want session context lowering wanted =
@@ -37,7 +37,7 @@ let lowering_only session context =
    build compiles at -O2 with link-time optimization. A build checks every
    fallible primitive operation at run time unless [checks] is false, which
    is sound only when every obligation the program reaches is proven. *)
-let create ?(checks = true) (project : Project.t) build =
+let create ?(checks = true) session packages build =
   let toolchain = toolchain () in
   let extra = c_flags () in
   let settings : Build.settings =
@@ -54,14 +54,15 @@ let create ?(checks = true) (project : Project.t) build =
      as diagnostics do. A release build names them relative to the
      package root, so the program is identical wherever it is built. *)
   let file_name file =
-    match (build, List.assoc_opt file project.files) with
-    | Development, Some path -> Project.shown path
+    match build with
+    | Development when List.mem file.Path.module_.package packages ->
+        Shown_path.shown (Command_packages.path session file)
     | _ -> Path.show_file file
   in
-  let own = List.map snd (Database.packages project.session) in
+  let own = List.map snd (Database.packages session) in
   Compile.create ~checks ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
-    ~want:(want project.session project.context)
+    ~want:(want session (Database.context session))
     ~worked_on:(fun package -> List.mem package own)
-    project.context (target ()) toolchain
+    (Database.context session) (target ()) toolchain
     (Build.cache (Database.objects_directory ()))
     settings

@@ -12,21 +12,25 @@ let parse_position text =
       match (int_of_string_opt line, int_of_string_opt column) with
       | Some line, Some column when line > 0 && column > 0 ->
           (String.concat ":" (List.rev file), line, column)
-      | _ -> Project.cannot_run "`%s` is not FILE:LINE:COLUMN." text)
-  | _ -> Project.cannot_run "`%s` is not FILE:LINE:COLUMN." text
+      | _ -> Outcome.cannot_run "`%s` is not FILE:LINE:COLUMN." text)
+  | _ -> Outcome.cannot_run "`%s` is not FILE:LINE:COLUMN." text
 
 let run ~position =
   let json = Output.json () in
   let file, line, column = parse_position position in
-  let project = Project.worktree () in
-  let path = Project.real file in
-  match List.find_opt (fun (_, file_path) -> file_path = path) project.files with
-  | None -> Project.cannot_run "%s is not a file of a package in this worktree." file
-  | Some (written, _) -> (
-      let context = project.context in
+  let session, packages = Command_packages.worktree () in
+  let path = Shown_path.real file in
+  match
+    List.find_opt
+      (fun written -> Command_packages.path session written = path)
+      (Command_packages.files session packages)
+  with
+  | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
+  | Some written -> (
+      let context = Database.context session in
       let offset =
-        Source.offset Source.Scalar_values (Project.parsed project written).source ~line:(line - 1)
-          ~column:(column - 1)
+        Source.offset Source.Scalar_values (Query.demand context Workspace.file written).source
+          ~line:(line - 1) ~column:(column - 1)
       in
       let symbol_at =
         List.find_map

@@ -15,7 +15,7 @@ let contains = Substring.contains
 let directory files =
   let root = Harness.scratch "package" in
   Harness.write_files root files;
-  Project.normalize root
+  Shown_path.normalize root
 
 let manifest_of name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
 let manifest = ("truss.toml", manifest_of "demo")
@@ -97,19 +97,25 @@ let () =
 
 (* Finding the package *)
 
-let names (project : Project.t) =
-  List.sort compare
-    (List.map (fun (package : Project.package) -> Path.show_package package.name) project.packages)
+(* The result of [Command_packages.load]: a session and the packages a
+   command acts on. *)
+let names (_, packages) = List.sort compare (List.map Path.show_package packages)
+let modules (session, packages) = Command_packages.modules session packages
+let files (session, packages) = Command_packages.files session packages
+let gather ?proofs (session, packages) = Report.gather ?proofs session packages
+let select (session, packages) = Test_command.select session packages
+let mains (session, packages) = Program_command.mains session packages
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
       let root = package [ ("forecast/hourly.truss", "") ] in
-      expect_strings ~expected:[ "demo" ] (names (Project.load (Filename.concat root "forecast"))));
+      expect_strings ~expected:[ "demo" ]
+        (names (Command_packages.load (Filename.concat root "forecast"))));
   test "a directory with no manifest at or above it cannot run a command" (fun () ->
       let root = directory [ ("main.truss", "") ] in
       (* The temporary directory is not inside a package. *)
-      match Project.load root with
-      | exception Project.Cannot_run _ -> ()
+      match Command_packages.load root with
+      | exception Outcome.Cannot_run _ -> ()
       | _ -> fail "found a package");
   test "a project's root is about every package under it" (fun () ->
       let root =
@@ -120,8 +126,9 @@ let () =
             ("libraries/two/truss.toml", manifest_of "two");
           ]
       in
-      expect_strings ~expected:[ "one"; "two" ] (names (Project.load root));
-      expect_strings ~expected:[ "two" ] (names (Project.load (Filename.concat root "libraries"))));
+      expect_strings ~expected:[ "one"; "two" ] (names (Command_packages.load root));
+      expect_strings ~expected:[ "two" ]
+        (names (Command_packages.load (Filename.concat root "libraries"))));
   test "a package under a project's root is in the project, whichever directory a command is in"
     (fun () ->
       let root =
@@ -135,9 +142,9 @@ let () =
               Fixtures.package_under_a_projects_root_is_in_the_project_numbers );
           ]
       in
-      let project = Project.load (Filename.concat root "one") in
+      let project = Command_packages.load (Filename.concat root "one") in
       expect_strings ~expected:[ "one" ] (names project);
-      if not (Report.clean (Report.gather project)) then fail "has diagnostics");
+      if not (Report.clean (gather project)) then fail "has diagnostics");
   test "a dependency's failed proof is the program's" (fun () ->
       let root =
         directory
@@ -175,15 +182,15 @@ let () =
             ("two/truss.toml", manifest_of "two");
           ]
       in
-      let project = Project.load (Filename.concat root "one") in
+      let project = Command_packages.load (Filename.concat root "one") in
       if
         not
           (List.exists
              (fun problem -> contains problem "`two` is not a package of this project")
-             (Database.problems project.session))
-      then fail "problems: %s" (String.concat "; " (Database.problems project.session));
-      match Project.load root with
-      | exception Project.Cannot_run _ -> ()
+             (Database.problems (fst project)))
+      then fail "problems: %s" (String.concat "; " (Database.problems (fst project)));
+      match Command_packages.load root with
+      | exception Outcome.Cannot_run _ -> ()
       | _ -> fail "found a project above the two");
   test "a directory with its own manifest is another package's, not modules of this one" (fun () ->
       let root =
@@ -195,9 +202,9 @@ let () =
             ("vendor/x.truss", "");
           ]
       in
-      let project = Project.load root in
+      let project = Command_packages.load root in
       expect_strings ~expected:[ "demo"; "other" ]
-        (List.sort compare (List.map Path.show_module (Project.modules project))));
+        (List.sort compare (List.map Path.show_module (modules project))));
   test "a directory with its own [project] is another project's, and so is all under it" (fun () ->
       let root =
         directory
@@ -210,8 +217,9 @@ let () =
           ]
       in
       expect_strings ~expected:[ "demo" ]
-        (List.map Path.show_module (Project.modules (Project.load root)));
-      expect_strings ~expected:[ "hello" ] (names (Project.load (Filename.concat root "examples"))));
+        (List.map Path.show_module (modules (Command_packages.load root)));
+      expect_strings ~expected:[ "hello" ]
+        (names (Command_packages.load (Filename.concat root "examples"))));
   test "under a package that is a project by itself, a directory with a manifest is no part of it"
     (fun () ->
       let root =
@@ -219,21 +227,22 @@ let () =
           [ ("main.truss", ""); ("vendor/truss.toml", manifest_of "other"); ("vendor/x.truss", "") ]
       in
       expect_strings ~expected:[ "demo" ]
-        (List.map Path.show_module (Project.modules (Project.load root)));
-      expect_strings ~expected:[ "other" ] (names (Project.load (Filename.concat root "vendor"))));
+        (List.map Path.show_module (modules (Command_packages.load root)));
+      expect_strings ~expected:[ "other" ]
+        (names (Command_packages.load (Filename.concat root "vendor"))));
   test "a directory whose name starts with a dot is not read" (fun () ->
       let root = package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
       expect_strings ~expected:[ "demo" ]
-        (List.map Path.show_module (Project.modules (Project.load root))));
+        (List.map Path.show_module (modules (Command_packages.load root))));
   test "a path is shown relative to the directory it is read from" (fun () ->
       expect_string ~expected:"../weather/forecast.truss"
-        (Project.relative ~from:"/code/app" "/code/weather/forecast.truss"))
+        (Shown_path.relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
 (* Errors between manifests *)
 
 let problems files =
-  let project = Project.load (directory files) in
-  Database.problems project.session
+  let project = Command_packages.load (directory files) in
+  Database.problems (fst project)
 
 (* The manifest problems in a report, as its JSON document lists them. *)
 let report_problems report =
@@ -249,7 +258,7 @@ let expect_problem files part =
 
 (* The same, of a directory that is there already. *)
 let expect_problem_in root part =
-  let problems_reported = report_problems (Report.gather (Project.load root)) in
+  let problems_reported = report_problems (gather (Command_packages.load root)) in
   if not (List.exists (fun problem -> contains problem part) problems_reported) then
     fail "problems: [%s]" (String.concat "; " problems_reported)
 
@@ -313,7 +322,7 @@ let () =
           ]
       in
       let app = Filename.concat root "app" in
-      let problems = report_problems (Report.gather (Project.load app)) in
+      let problems = report_problems (gather (Command_packages.load app)) in
       if
         not
           (List.exists
@@ -341,9 +350,9 @@ let owned =
 let () =
   test "a project's package with an owner in its name is named by both in a path" (fun () ->
       let root = directory owned in
-      let project = Project.load root in
+      let project = Command_packages.load root in
       expect_strings ~expected:[ "acme::geometry"; "app" ] (names project);
-      if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics");
+      if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
   test "show finds a definition of a package with an owner by its full path" (fun () ->
       match shown (directory owned) "acme::geometry::vector::double" with
       | [ text ] ->
@@ -362,11 +371,11 @@ let () =
             ("one/truss.toml", manifest_of "one");
           ]
       in
-      let project = Project.load (Filename.concat root "one") in
-      let limit = Database.time_limit project.session in
+      let project = Command_packages.load (Filename.concat root "one") in
+      let limit = Database.time_limit (fst project) in
       if limit <> 3 then fail "got %d" limit);
   test "a project without a time limit gives tests 10 seconds" (fun () ->
-      let limit = Database.time_limit (Project.load (package [])).session in
+      let limit = Database.time_limit (fst (Command_packages.load (package []))) in
       if limit <> 10 then fail "got %d" limit);
   test "a time limit in a package's manifest that is not its project's is a problem" (fun () ->
       let root =
@@ -376,14 +385,14 @@ let () =
             ("one/truss.toml", manifest_of "one" ^ "[test]\ntime_limit = 3\n");
           ]
       in
-      let project = Project.load root in
+      let project = Command_packages.load root in
       if
         not
           (List.exists
              (fun problem ->
                contains problem "one/truss.toml: A test's time limit is its project's")
-             (Database.problems project.session))
-      then fail "problems: %s" (String.concat "; " (Database.problems project.session)));
+             (Database.problems (fst project)))
+      then fail "problems: %s" (String.concat "; " (Database.problems (fst project))));
   test "a time limit of 0 is malformed, at its line" (fun () ->
       match Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
       | exception Manifest.Malformed (4, _) -> ()
@@ -480,19 +489,19 @@ let suite = Fixtures.suite
 
 let () =
   test "--match keeps the tests whose names contain the text" (fun () ->
-      let project = Project.load (package [ ("main.truss", suite) ]) in
+      let project = Command_packages.load (package [ ("main.truss", suite) ]) in
       expect_strings
         ~expected:[ "doubles two"; "doubles three" ]
         (List.map
            (fun (test : Test_command.test) -> test.name)
-           (Test_command.select project ~paths:[] ~match_:(Some "doubles"))));
+           (select project ~paths:[] ~match_:(Some "doubles"))));
   test "a file narrows the tests to those defined in it" (fun () ->
       let root = package [ ("main.truss", suite); ("other.truss", "test \"elsewhere\" {\n}\n") ] in
-      let project = Project.load root in
+      let project = Command_packages.load root in
       expect_strings ~expected:[ "elsewhere" ]
         (List.map
            (fun (test : Test_command.test) -> test.name)
-           (Test_command.select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
+           (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
 
 (* Signatures *)
 
@@ -547,24 +556,22 @@ let () =
 
 (* Building *)
 
-let lowering (project : Project.t) = Compiler.lowering_only project.session project.context
+let lowering (session, _) = Compiler.lowering_only session (Database.context session)
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
       let project =
-        Project.load
+        Command_packages.load
           (package [ ("main.truss", Fixtures.todo_main_can_reach_is_refused_with_the_way_from) ])
       in
-      match
-        Compile.unshippable (lowering project) ~main:(List.hd (Program_command.mains project))
-      with
+      match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
       | Ok [ { failure = `Todo; line = 6; way; _ } ] ->
           expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
       | Ok reached -> fail "found %d" (List.length reached)
       | Error message -> fail "%s" message);
   test "a todo in a capability's method counts only where the method is called" (fun () ->
       let program called =
-        Project.load
+        Command_packages.load
           (package
              [
                ( "main.truss",
@@ -596,9 +603,7 @@ let () =
       in
       let reached_from called =
         let project = program called in
-        match
-          Compile.unshippable (lowering project) ~main:(List.hd (Program_command.mains project))
-        with
+        match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
         | Ok unshippable -> unshippable
         | Error message -> failwith message
       in
@@ -613,27 +618,24 @@ let () =
       | unshippable -> fail "found %d" (List.length unshippable));
   test "a package's program is the main of its root module, and of no other" (fun () ->
       let main_text = Fixtures.main_text in
-      let with_main = Project.load (package [ ("main.truss", main_text) ]) in
-      expect_strings ~expected:[ "demo::main" ]
-        (List.map Path.show (Program_command.mains with_main));
-      let elsewhere = Project.load (package [ ("start/start.truss", main_text) ]) in
-      if Program_command.mains elsewhere <> [] then fail "took a main from another module");
+      let with_main = Command_packages.load (package [ ("main.truss", main_text) ]) in
+      expect_strings ~expected:[ "demo::main" ] (List.map Path.show (mains with_main));
+      let elsewhere = Command_packages.load (package [ ("start/start.truss", main_text) ]) in
+      if mains elsewhere <> [] then fail "took a main from another module");
   test "a function named main outside the root module is an ordinary function" (fun () ->
       let project =
-        Project.load
+        Command_packages.load
           (package
              [
                ("menu/menu.truss", Fixtures.function_named_main_outside_the_root_module_is_an_menu);
              ])
       in
-      if not (Report.clean (Report.gather project)) then fail "has diagnostics");
+      if not (Report.clean (gather project)) then fail "has diagnostics");
   test "an echo main can reach is refused" (fun () ->
       let project =
-        Project.load (package [ ("main.truss", Fixtures.echo_main_can_reach_is_refused) ])
+        Command_packages.load (package [ ("main.truss", Fixtures.echo_main_can_reach_is_refused) ])
       in
-      match
-        Compile.unshippable (lowering project) ~main:(List.hd (Program_command.mains project))
-      with
+      match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
       | Ok [ { failure = `Echo; line = 2; _ } ] -> ()
       | Ok reached -> fail "found %d" (List.length reached)
       | Error message -> fail "%s" message)
@@ -961,7 +963,7 @@ let expect_versions root expected =
     fail "the lock file has [%s]"
       (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) listed))
 
-let clean root = Report.clean (Report.gather (Project.load root))
+let clean root = Report.clean (gather (Command_packages.load root))
 
 let () =
   test "adding a package writes its entry, and a line for it and for each package it brings"
@@ -1083,11 +1085,11 @@ let () =
       if add app [ "acme::geometry" ] <> 0 then fail "not added";
       expect_versions root [ ("acme::geometry", "1.0.0") ];
       if not (clean root) then fail "has diagnostics";
-      let project = Project.load root in
+      let project = Command_packages.load root in
       if
         not
           (List.mem "units/lengths/lengths.truss"
-             (List.map (Database.file_path project.session) (Project.files project)))
+             (List.map (Database.file_path (fst project)) (files project)))
       then fail "the project's package is not the one in the build")
 
 (* Upgrading *)
@@ -1352,7 +1354,7 @@ let () =
       in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (Report.clean (Report.gather ~proofs:true (Project.load user))) then
+      if not (Report.clean (gather ~proofs:true (Command_packages.load user))) then
         fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = registry () in
@@ -1445,14 +1447,14 @@ let () =
   test "a new package with an owner is made in a directory named without it" (fun () ->
       let root = directory [] in
       if quietly [ "new"; "-C"; root; "acme::weather" ] <> 0 then fail "not made";
-      let project = Project.load (Filename.concat root "weather") in
+      let project = Command_packages.load (Filename.concat root "weather") in
       expect_strings ~expected:[ "acme::weather" ] (names project);
-      if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics");
+      if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
   test "a new package checks cleanly" (fun () ->
       let root = directory [] in
       if quietly [ "new"; "-C"; root; "weather" ] <> 0 then fail "not made";
-      let project = Project.load (Filename.concat root "weather") in
-      if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics")
+      let project = Command_packages.load (Filename.concat root "weather") in
+      if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics")
 
 (* The language server *)
 

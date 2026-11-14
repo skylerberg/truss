@@ -24,8 +24,8 @@ let package_modules database package = Query.demand database Workspace.modules p
 
 (* Whether a definition is visible from the command's packages: every
    definition in them, and only public definitions elsewhere. *)
-let visible (project : Project.t) (declaration : Names.declaration) =
-  Project.is_own project declaration.file.module_ || Names.is_public declaration.visibility
+let visible packages (declaration : Names.declaration) =
+  List.mem declaration.file.module_.package packages || Names.is_public declaration.visibility
 
 let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
@@ -37,8 +37,8 @@ let impl_of_type (path : Path.t) name =
   match path with Impl { for_type; _ } -> for_type.type_name = name | _ -> false
 
 (* The definitions a path names, in printing order. *)
-let resolve (project : Project.t) text =
-  let database = project.context in
+let resolve session packages text =
+  let database = Database.context session in
   let argument = Path_argument.parse text in
   let in_package package =
     List.concat_map (declarations database) (package_modules database package)
@@ -50,7 +50,7 @@ let resolve (project : Project.t) text =
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
         (in_package package)
-  | _, Some module_, _ -> List.filter (visible project) (declarations database module_)
+  | _, Some module_, _ -> List.filter (visible packages) (declarations database module_)
   | _, None, member -> (
       match (as_module database (Path_argument.prefix argument), List.rev argument.names) with
       | None, _ | _, [] -> []
@@ -76,8 +76,8 @@ let resolve (project : Project.t) text =
                   @ List.filter
                       (fun (declaration : Names.declaration) -> impl_of_type declaration.path last)
                       package
-                  |> List.filter (visible project)
-              | declarations -> List.filter (visible project) declarations)
+                  |> List.filter (visible packages)
+              | declarations -> List.filter (visible packages) declarations)
           | Some member ->
               let owner : Path.t = Top { module_; name = last } in
               in_package module_.package
@@ -87,32 +87,32 @@ let resolve (project : Project.t) text =
                   | Member_constant { owner = owning_path; name } ->
                       Path.equal owning_path owner && name = member
                   | _ -> false)
-              |> List.filter (visible project)))
+              |> List.filter (visible packages)))
 
-let find (project : Project.t) ~body text =
+let find session packages ~body text =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       let key = Names.key_of declaration in
       let opaque =
         declaration.visibility = Public_opaque
-        && not (Project.is_own project declaration.file.module_)
+        && not (List.mem declaration.file.module_.package packages)
       in
-      match Signatures.text project.context ~body ~opaque key with
+      match Signatures.text (Database.context session) ~body ~opaque key with
       | None -> None
       | Some signature ->
           let file, line =
-            match Query.demand project.context Names.base key with
+            match Query.demand (Database.context session) Names.base key with
             | Some (written, base) ->
-                let source = Project.source project written in
+                let source = Command_packages.source session packages written in
                 (Source.path source, fst (Source.position source base))
             | None -> ("", 0)
           in
           Some { declaration; file; line; text = signature })
-    (resolve project text)
+    (resolve session packages text)
 
 let run ~paths ~body =
-  let project = Project.current () in
-  let results = List.map (fun path -> (path, find project ~body path)) paths in
+  let session, packages = Command_packages.current () in
+  let results = List.map (fun path -> (path, find session packages ~body path)) paths in
   let missing = List.filter (fun (_, definitions) -> definitions = []) results in
   if Output.json () then
     Json.print
