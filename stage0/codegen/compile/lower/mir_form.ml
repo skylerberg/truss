@@ -87,14 +87,14 @@ let is_kept st local = List.mem local (mir st).kept
 
 (* A new C local for a local of the MIR. A temporary that a [return]
    returns is the result's slot. *)
-let rec fresh_place st local : Lir.place =
+let rec fresh_place st local : Lowered.place =
   match result_slot st with
   | Some slot when List.mem local (mir st).returned ->
       bind_local st local slot;
       slot
   | _ -> new_place st local
 
-and new_place st local : Lir.place =
+and new_place st local : Lowered.place =
   let frame = mir st in
   let ty = ground st (info st local).type_ in
   let name = match core_local st local with Some _ -> Some "binding" | None -> None in
@@ -116,12 +116,12 @@ and new_place st local : Lir.place =
 
 (* The place of a local of the MIR: made when it first holds a value. A
    parameter and a capture are bound before the code runs. *)
-let local_place st local : Lir.place =
+let local_place st local : Lowered.place =
   match Hashtbl.find_opt (mir st).places local with
   | Some place -> place
   | None -> fresh_place st local
 
-let binary : Core.comparison -> Lir.binary = function
+let binary : Core.comparison -> Lowered.binary = function
   | Equal -> Equal
   | Not_equal -> Not_equal
   | Less -> Less
@@ -140,7 +140,7 @@ let split_arguments st type_arguments =
 
 (* Places *)
 
-let place st (written : Mir.place) : Lir.place =
+let place st (written : Mir.place) : Lowered.place =
   let root =
     match written.root with
     | Local local -> local_place st local
@@ -299,7 +299,7 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
 (* Writes [build] for each variant that the value at [source], of type
    [ty], may have, with the variant's fields: once for a record, and for a
    sum type in a case of a switch on the variant. *)
-let each_variant st ty (source : Lir.place) build =
+let each_variant st ty (source : Lowered.place) build =
   match variants_of st ty with
   | [ (None, fields) ] -> build None fields
   | variants ->
@@ -317,12 +317,12 @@ let each_variant st ty (source : Lir.place) build =
       finish st.builder (Switch_variant { place = source; cases; default = None });
       start st.builder after
 
-let field_of variant field : Lir.projection =
+let field_of variant field : Lowered.projection =
   match variant with Some variant -> Variant_field { variant; field } | None -> Field field
 
 (* The value at a place as a value of its type. A lent value there is
    copied into one. *)
-let rec whole st (source : Lir.place) : Lir.place =
+let rec whole st (source : Lowered.place) : Lowered.place =
   match lent_at st source with Some lent -> copied_lent st lent source | None -> source
 
 (* A lent value copied into a value of its type, which owns nothing: a
@@ -331,7 +331,7 @@ let rec whole st (source : Lir.place) : Lir.place =
    its place instead, and moved back as the scope ends, on every way out,
    so the caller's changes reach the place. The checker allows this only
    for a record, so the variant cannot change. *)
-and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+and copied_lent st (lent : Ground.lent) (source : Lowered.place) : Lowered.place =
   let ty = lent.base in
   let copy = at (local st.builder (Value ty)) in
   let scope = innermost_scope st in
@@ -358,7 +358,7 @@ and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
                 :: scope.owned;
               (name, owned st field_place field_ty)
             end
-            else (name, Lir.Copy field_place))
+            else (name, Lowered.Copy field_place))
           fields
       in
       emit st.builder (Assign (copy, Build { ty; variant; fields })));
@@ -390,7 +390,7 @@ let operand_types_ty (operand : Mir.operand) =
 (* The type an operand's value has in this instance. *)
 let operand_type st operand = ground st (operand_types_ty operand)
 
-let constant st ty (value : Mir.constant) : Lir.operand =
+let constant st ty (value : Mir.constant) : Lowered.operand =
   match value with
   | Unit -> bug "a unit constant as a value"
   | Integer number -> constant_of st ty (Integer_value number)
@@ -400,7 +400,7 @@ let constant st ty (value : Mir.constant) : Lir.operand =
 
 (* An operand as a value: copied, moved, or a constant. A string literal is
    written into a temporary first. *)
-let value st (operand : Mir.operand) : Lir.operand =
+let value st (operand : Mir.operand) : Lowered.operand =
   let ty = operand_type st operand in
   match operand with
   | Constant { value = String text; _ } ->
@@ -414,7 +414,7 @@ let value st (operand : Mir.operand) : Lir.operand =
 
 (* An operand as a place: where a borrowed place is, or a place that holds
    the value. *)
-let operand_place st (operand : Mir.operand) : Lir.place =
+let operand_place st (operand : Mir.operand) : Lowered.place =
   let ty = operand_type st operand in
   match operand with
   | Borrow { place = written; _ } -> whole st (place st written)
@@ -441,13 +441,13 @@ let operand_place st (operand : Mir.operand) : Lir.place =
 
 (* An operand as a place that may hold a lent value: a borrowed place as
    the code names it. *)
-let operand_part st (operand : Mir.operand) : Lir.place =
+let operand_part st (operand : Mir.operand) : Lowered.place =
   match operand with
   | Borrow { place = written; _ } -> place st written
   | _ -> operand_place st operand
 
 (* Writes an operand's value to [destination], which holds nothing. *)
-let write_operand st (operand : Mir.operand) (destination : Lir.place) =
+let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   let ty = operand_type st operand in
   match operand with
   | Constant { value = Unit; _ } -> ()
@@ -464,13 +464,16 @@ let discarded st = temporary st (Monomorphic.builtin Unit)
 
 (* The state a block of the MIR starts in, which every jump to it shares:
    the evidence in force and the [provide]s around it. *)
-type entry = { evidence : (Path.t * Lir.operand) list; provides : (Path.t * Lir.operand) list list }
+type entry = {
+  evidence : (Path.t * Lowered.operand) list;
+  provides : (Path.t * Lowered.operand) list list;
+}
 
 type region = {
   region_frame : frame;  (** The frame whose code the region is *)
   region_body : mir_frame;
-  lowered : (Mir.block, Lir.block) Hashtbl.t;
-  mutable pending : (Mir.block * Lir.block * entry) list;
+  lowered : (Mir.block, Lowered.block) Hashtbl.t;
+  mutable pending : (Mir.block * Lowered.block * entry) list;
       (** The blocks reached and not yet lowered. The region lowers the first of them in the MIR's
           order, which is reverse postorder, so that every block is lowered after the blocks that
           jump to it, other than by a loop's back edge. A block's code can then read what an earlier
@@ -478,7 +481,7 @@ type region = {
   depth : int;  (** The number of scopes the region's blocks are lowered in *)
   start : entry;  (** The state the region's code starts in *)
   enclosing : region option;
-  ending : (int * Lir.block) option;
+  ending : (int * Lowered.block) option;
       (** For a branch of a [concurrent] block: the block's fork, and the block its {!Mir.Join} goes
           to *)
 }
@@ -509,7 +512,7 @@ let rec owner_of region body block =
 
 (* The C block a jump from [region] to a block of the MIR goes to. A jump
    to a block of an enclosing region leaves the scopes between. *)
-let jump ?entry st region target : Lir.block =
+let jump ?entry st region target : Lowered.block =
   match owner_of region region.region_body target with
   | Some owner when owner == region -> Hashtbl.find region.lowered target
   | Some owner ->
@@ -704,7 +707,7 @@ let drop_parameters st = List.iter (drop_local st) (mir st).body.parameters
 (* Drops what a place holds before it is given a value: by what a path of
    an owning local holds, and otherwise, for a place another owner's value
    is in, all of it. *)
-let overwritten st (target : Mir.place) (destination : Lir.place) ty =
+let overwritten st (target : Mir.place) (destination : Lowered.place) ty =
   match Moves.path_of_place target with
   | Some path when Moves.status (mir st).moves (mir st).state { path with steps = [] } <> None ->
       drop_path st path
@@ -714,7 +717,7 @@ let overwritten st (target : Mir.place) (destination : Lir.place) ty =
    expression lowered on its own, jumps to its end instead. *)
 (* A pulled method's state: 0 before it starts, 1 once it has returned, and
    [k + 1] after its [k]th [yield]. *)
-let cursor_state (cursor : cursor) : Lir.place =
+let cursor_state (cursor : cursor) : Lowered.place =
   { root = Local cursor.pointer; projections = [ Deref; Field Convention.cursor_state ] }
 
 let set_cursor_state st cursor state =
@@ -722,7 +725,7 @@ let set_cursor_state st cursor state =
 
 (* Ends a call of a pulled method's [next], which gives [value] in [Some],
    or [None]. *)
-let give_option st (value : Lir.operand option) =
+let give_option st (value : Lowered.operand option) =
   (match (result_place st, returned_type st) with
   | Some result, Some ty ->
       emit st.builder
@@ -821,7 +824,7 @@ let result_type st (callee : Mir.callee) =
 
 (* Calls a function or a method with arguments that are already in places,
    one for each parameter in order. *)
-let call_with_places st (callee : Mir.callee) (places : Lir.place list) ~destination =
+let call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~destination =
   let path, type_arguments, signature, substitution = resolved st callee in
   let arguments =
     List.map2
@@ -888,7 +891,7 @@ let shared_update st ~shared ~input ~change ~destination =
     | (_, value_ty) :: _, Returns result_ty -> (value_ty, result_ty)
     | _ -> bug "shared_update with a function that takes no value or returns none"
   in
-  let pointer = Lir.Copy (shared / Field "value") in
+  let pointer = Lowered.Copy (shared / Field "value") in
   emit st.builder
     (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
   let typed = local st.builder (Pointer { target = Value value_ty; writable = true }) in
@@ -953,15 +956,15 @@ let field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
 
 (* A call of the [Tasks] method [name]. [places] holds one argument for
    each parameter, and the call writes its return value to [result]. *)
-let tasks_call st name ?result (places : Lir.place list) : Lir.statement =
+let tasks_call st name ?result (places : Lowered.place list) : Lowered.statement =
   let capability = Well_known.path Tasks in
   let slot, signature = capability_method st.context capability name in
-  let lir_signature, convention = entry_signature st.context signature in
+  let c_signature, convention = entry_signature st.context signature in
   Call
     {
       target =
         Evidence_call
-          { evidence = evidence_of st capability; capability; slot; signature = lir_signature };
+          { evidence = evidence_of st capability; capability; slot; signature = c_signature };
       arguments =
         List.filter_map Fun.id
           (List.map2
@@ -976,7 +979,7 @@ let tasks_call st name ?result (places : Lir.place list) : Lir.statement =
     }
 
 (* Calls a [Tasks] method that returns a [Bool], and gives the result. *)
-let tasks_bool st name places : Lir.operand =
+let tasks_bool st name places : Lowered.operand =
   let result = at (local st.builder (Value st.context.bool)) in
   emit st.builder (tasks_call st name ~result places);
   Copy result
@@ -985,7 +988,7 @@ let tasks_bool st name places : Lir.operand =
    join, so an early exit from [f] joins the group too. The scope's other
    temporaries are dropped after the join, because a task may still read
    them until then. *)
-let with_group st ~origin (f : Lir.place -> unit) =
+let with_group st ~origin (f : Lowered.place -> unit) =
   if st.cursor <> None then
     unsupported ~at:(site_of st origin) "`concurrent` code in a yielding method that is pulled";
   let scope = open_scope st Statement in
@@ -1000,7 +1003,7 @@ let with_group st ~origin (f : Lir.place -> unit) =
   close_scope st scope
 
 (* The type of the function value that [Tasks.spawn] takes. *)
-let task_function_type st : Lir.ty =
+let task_function_type st : Lowered.ty =
   let _, signature = capability_method st.context (Well_known.path Tasks) "spawn" in
   match signature.parameters with
   | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
@@ -1010,7 +1013,7 @@ let task_function_type st : Lir.ty =
    [parts]. Every
    exit from the task jumps to [end_block], where the task returns. Gives
    the task's function value, for [Tasks.spawn]. *)
-let task_body st ~(id : Core.task) ~group ~early_exits ~parts (f : task -> unit) : Lir.rvalue =
+let task_body st ~(id : Core.task) ~group ~early_exits ~parts (f : task -> unit) : Lowered.rvalue =
   let nested, environment =
     outlined st ~parts (fun () ->
         let task =
@@ -1037,7 +1040,7 @@ let task_body st ~(id : Core.task) ~group ~early_exits ~parts (f : task -> unit)
    capability's locking table, the mutex's address as its implementation
    pointer, and the implementation's own evidence and the evidence for
    [Tasks] as its outer evidence. *)
-let locked_evidence st ~(tasks : Lir.operand) (evidence : (Path.t * Lir.operand) list) =
+let locked_evidence st ~(tasks : Lowered.operand) (evidence : (Path.t * Lowered.operand) list) =
   let mutex = at (local st.builder ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
   emit st.builder (Assign (mutex, Use (constant_int UInt64 Z.zero)));
   List.map
@@ -1057,7 +1060,7 @@ let locked_evidence st ~(tasks : Lir.operand) (evidence : (Path.t * Lir.operand)
                ];
              result = Discarded;
            });
-      (capability, Lir.Address { place = at slot; writable = false }))
+      (capability, Lowered.Address { place = at slot; writable = false }))
     evidence
 
 (* Lowers an early exit that still has to end [tasks], the enclosing tasks
@@ -1070,7 +1073,7 @@ let locked_evidence st ~(tasks : Lir.operand) (evidence : (Path.t * Lir.operand)
    otherwise it drops the return value. The task then ends, whether or not
    it was first. *)
 let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit : Mir.task_exit)
-    ~(value : Lir.place option) =
+    ~(value : Lowered.place option) =
   match (tasks, st.tasks) with
   | [], _ -> (
       match exit with
@@ -1185,15 +1188,15 @@ let spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : un
    and drops it. Otherwise the bytes are a bitwise copy of a borrowed
    place, and the task never drops them: the place still owns the memory
    they point to, and it outlives the task. *)
-let spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
-    ~(each : Lir.place -> unit) =
+let spawn_with_item st (loop : spawn_loop) (value : Lowered.place) ~owned:is_owned
+    ~(each : Lowered.place -> unit) =
   let ty = loop.element in
   let item = at loop.item in
   let boxed = not (is_zero_size st ty) in
-  let move_or_copy place : Lir.operand = if is_owned then owned st place ty else Copy place in
+  let move_or_copy place : Lowered.operand = if is_owned then owned st place ty else Copy place in
   (* The block's address, read back from the item, and the value's place
      in the block. *)
-  let block_of () : Lir.local * Lir.place =
+  let block_of () : Lowered.local * Lowered.place =
     let pointer = local st.builder (Raw (Pointer Opaque)) in
     emit st.builder (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
     let typed = local st.builder (Pointer { target = Value ty; writable = true }) in
@@ -1203,7 +1206,7 @@ let spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
   (* Takes the value out of the block into a local and frees the block.
      Where [dropped_here], the enclosing scope drops an owned value; a task
      binds the loop's part to it, which the MIR ends. *)
-  let unbox ~dropped_here : Lir.place =
+  let unbox ~dropped_here : Lowered.place =
     if boxed then begin
       let unboxed =
         if is_owned && dropped_here then binding st ty else at (local st.builder (Value ty))
@@ -1294,13 +1297,13 @@ let rec built_lent st ~writable ty (values : Mir.rvalue list) : Ground.lent =
 
 (* The value at [source] as a lent value of type [lent], which lends its
    parts. *)
-let rec lent_from st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+let rec lent_from st (lent : Ground.lent) (source : Lowered.place) : Lowered.place =
   match lent_at st source with
   | Some existing when Ground.compare (Lent existing) (Lent lent) = 0 -> source
   | Some existing -> lend_fields st lent (copied_lent st existing source)
   | None -> lend_fields st lent source
 
-and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+and lend_fields st (lent : Ground.lent) (source : Lowered.place) : Lowered.place =
   let built = at (local st.builder (Value (Lent lent))) in
   each_variant st lent.base source (fun variant fields ->
       let fields =
@@ -1308,7 +1311,8 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
           (fun (name, _) ->
             let field_place = source / field_of variant name in
             match lent_field lent variant name with
-            | Some Address -> (name, Lir.Address { place = field_place; writable = lent.writable })
+            | Some Address ->
+                (name, Lowered.Address { place = field_place; writable = lent.writable })
             | Some (Nested inner) -> (name, Copy (lent_from st inner field_place))
             | None -> (name, Copy field_place))
           fields
@@ -1516,7 +1520,7 @@ and provide st (provided : Mir.provided list) ~can_use_tasks =
           | value -> operand_place st value
         in
         let pointer =
-          if is_zero_size st (ground st implementation.type_) then Lir.Constant Null
+          if is_zero_size st (ground st implementation.type_) then Lowered.Constant Null
           else Address { place; writable = true }
         in
         ( implementation.mode,
@@ -1644,7 +1648,7 @@ and build_part st part (value : Mir.rvalue) =
               | None -> fst (field_default_place st lent.base ~variant ~field:name)
             in
             match lent_field lent variant name with
-            | Some (Nested inner) -> (name, Lir.Copy (lent_from st inner (evaluated ())))
+            | Some (Nested inner) -> (name, Lowered.Copy (lent_from st inner (evaluated ())))
             | Some Address ->
                 (name, Address { place = whole st (evaluated ()); writable = lent.writable })
             | None -> (name, Copy (whole st (evaluated ()))))
@@ -1679,7 +1683,7 @@ and reads (value : Mir.rvalue) local =
    the place, whose address a view may take. The checker keeps the place
    unchanged while the binding lives. A binding that several patterns bind,
    from different parts, is kept behind a pointer that each pattern sets. *)
-and alias st local (source : Lir.place) ~writable =
+and alias st local (source : Lowered.place) ~writable =
   let ty = ground st (info st local).type_ in
   if Hashtbl.find (mir st).aliases local > 1 then begin
     let frame = mir st in
@@ -1713,7 +1717,7 @@ and alias st local (source : Lir.place) ~writable =
 (* Evaluates an rvalue and writes its value, of type [ty], to
    [destination], which holds nothing. [types_ty] is the type before it is
    made ground, where the destination is a local. *)
-and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lir.place) ty ~origin =
+and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~origin =
   let assign built = emit st.builder (Assign (destination, built)) in
   match rvalue with
   | Operand operand -> write_operand st operand destination
@@ -1831,14 +1835,15 @@ and field_default_place st ty ~variant ~field =
 (* Evaluates a core expression that runs on its own, such as a default, and
    writes its value to [destination], from the expression's MIR. [arguments]
    are the parameters it reads, with their places. *)
-and expression_into ?(arguments = []) st (expression : Core.expression) (destination : Lir.place) =
+and expression_into ?(arguments = []) st (expression : Core.expression)
+    (destination : Lowered.place) =
   mir_into st
     (Mir.of_expression ~parameters:(List.map fst arguments) expression)
     ~arguments:(List.map snd arguments) destination
 
 (* Lowers the MIR of one expression, with its parameters bound to
    [arguments], into [destination]. *)
-and mir_into ?(arguments = []) st (expression_mir : Mir.t) (destination : Lir.place) =
+and mir_into ?(arguments = []) st (expression_mir : Mir.t) (destination : Lowered.place) =
   let expression_mir =
     Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined expression_mir
   in
@@ -1893,10 +1898,10 @@ and call_into st (call : Mir.call) destination ~origin =
                  ~site:(site_of st origin))
         | _ -> bug "Panic.crash takes one message"
       else begin
-        let lir_signature, result = entry_signature st.context signature in
+        let c_signature, result = entry_signature st.context signature in
         let target =
-          Lir.Evidence_call
-            { evidence = evidence_of st capability; capability; slot; signature = lir_signature }
+          Lowered.Evidence_call
+            { evidence = evidence_of st capability; capability; slot; signature = c_signature }
         in
         emit st.builder
           (Call
@@ -1906,7 +1911,7 @@ and call_into st (call : Mir.call) destination ~origin =
                  List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments;
                result = Convention.destination result destination;
              });
-        if not lir_signature.returns then unreachable_block st
+        if not c_signature.returns then unreachable_block st
       end
   | None, Trait_method { trait; name; self_type; _ } -> (
       (* Through an [any] value, which is the receiver. *)
@@ -2190,7 +2195,7 @@ and yield st region ~mode ~part ~resume ~origin =
 
 (* Lowers a [for] loop's body as a region of its own, once [value] is the
    place of the element. *)
-and loop_body st region ~part ~body (value : Lir.place) =
+and loop_body st region ~part ~body (value : Lowered.place) =
   let caller = st.frame in
   st.frame <- region.region_frame;
   bind_local st part value;
@@ -2200,7 +2205,7 @@ and loop_body st region ~part ~body (value : Lir.place) =
 
 (* A loop over the cursor of a yielding method's call: the pulled method's
    [next] is called until it gives [None]. *)
-and pull_cursor st ~kept (yielding : Ground.yielding) cursor ~(each : Lir.place -> unit) =
+and pull_cursor st ~kept (yielding : Ground.yielding) cursor ~(each : Lowered.place -> unit) =
   pull_loop st ~kept
     ~option:(cursor_result st.context yielding)
     ~call_next:(fun destination -> call_next st yielding cursor destination)
@@ -2241,7 +2246,7 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~blocks ~(loop :
    place of one value. The loop is the innermost loop for the body: the end
    of an iteration starts the next one. *)
 and for_each st ~kept ~(schedule : schedule) ~(iteration : Mir.iteration)
-    ~(each : Lir.place -> unit) =
+    ~(each : Lowered.place -> unit) =
   let schedule = match schedule with Chunked when not (may_fork st) -> Sequential | own -> own in
   (* How an iteration receives a value that the loop owns, such as one
      that a cursor's [next] returned. *)
@@ -2273,7 +2278,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
      characters. *)
   let element = operand_type st low in
   let scalar = scalar_of st element in
-  let constant value : Lir.operand =
+  let constant value : Lowered.operand =
     match scalar with
     | Integer integer -> constant_int integer (Z.of_int value)
     | Character -> Constant (Character value)
@@ -2283,12 +2288,12 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
   let both first second =
     let answer = local st.builder (Raw Bool) in
     emit st.builder (Assign (at answer, Binary (Bit_and, first, second)));
-    Lir.Copy (at answer)
+    Lowered.Copy (at answer)
   in
   let compare op left right =
     let answer = local st.builder (Raw Bool) in
     emit st.builder (Assign (at answer, Binary (op, left, right)));
-    Lir.Copy (at answer)
+    Lowered.Copy (at answer)
   in
   match schedule with
   | Chunked ->
@@ -2296,7 +2301,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
          range's indexes, counted from 0 as [UInt64], so that a range of any
          integer type has as many indexes as fit. The runtime runs it for
          parts of them at the same time. *)
-      let wide = Lir.Raw (Integer UInt64) in
+      let wide = Lowered.Raw (Integer UInt64) in
       let one = constant_int UInt64 Z.one in
       let first_value = binding st ~name:"start" element in
       let last_value = binding st element in
@@ -2430,7 +2435,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
    takes the argument or the default. A parameter that is a view is pointed
    at the default's value, or given its bits, and the function owns that
    value. *)
-let fill_defaults st (mask : Lir.place) (body : Mir.body) (places : Lir.place list) =
+let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.place list) =
   let builder = st.builder in
   let bit = ref (-1) in
   List.map2

@@ -1,9 +1,9 @@
 (* The statements' types, and the queries over them. *)
 
-include Ir_types
+include Lowered_types
 
 let local_place local = { root = Local local; projections = [] }
-let bug format = Compiler_bug.bug ~stage:"Lir" format
+let bug format = Compiler_bug.bug ~stage:"Lowered" format
 
 (* A cursor always holds its state, which lets code over a cursor that holds
    another be lowered before the cursor's fields are known. *)

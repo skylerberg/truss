@@ -8,6 +8,6 @@
   instance
   memory_layout
   libc
-  lir
+  lowered
   convention
   zarith))

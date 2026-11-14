@@ -15,9 +15,12 @@ val trait_method_key :
   evidence:Core.evidence ->
   Instance.key
 
-val pass : Lowering.state -> Types.mode -> Ground.ty -> Lir.place -> Lir.operand option
+val pass : Lowering.state -> Types.mode -> Ground.ty -> Lowered.place -> Lowered.operand option
 val capability_method : Definitions.context -> Path.t -> string -> int * Types.signature
-val entry_signature : Definitions.context -> Types.signature -> Lir.signature * Convention.result
+
+val entry_signature :
+  Definitions.context -> Types.signature -> Lowered.signature * Convention.result
+
 val any_methods : Definitions.context -> Path.t -> Types.trait_method list
 val dynamic_slot : Definitions.context -> Path.t -> string -> int * Types.signature
 
@@ -26,46 +29,46 @@ val any_entry_signature :
   any:Types.trait_reference ->
   trait:Path.t ->
   Types.signature ->
-  Lir.signature * Convention.result * Path.t list
+  Lowered.signature * Convention.result * Path.t list
 
 val implementation_evidence :
   Lowering.state ->
   impl:Path.t ->
   type_arguments:Ground.argument list ->
-  implementation:Lir.operand ->
-  Lir.operand
+  implementation:Lowered.operand ->
+  Lowered.operand
 
-val evidence_of : Lowering.state -> Path.t -> Lir.operand
+val evidence_of : Lowering.state -> Path.t -> Lowered.operand
 
 val cursor_into :
   Lowering.state ->
   path:Path.t ->
   type_arguments:Ground.argument list ->
   signature:Types.signature ->
-  arguments:(Types.mode * Ground.ty * Lir.place) list ->
+  arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   mask:int ->
-  Lir.place ->
+  Lowered.place ->
   unit
 
 val nested_function :
   Lowering.state ->
   function_type:Ground.function_type ->
   output:Types.result option ->
-  captures:(Lir.place * Ground.ty) list ->
+  captures:(Lowered.place * Ground.ty) list ->
   body:
     (Lowering.state ->
-    captures:Lir.place list ->
-    (Lir.place * Ground.mode * Ground.ty) list ->
+    captures:Lowered.place list ->
+    (Lowered.place * Ground.mode * Ground.ty) list ->
     unit) ->
-  Lir.place ->
+  Lowered.place ->
   unit
 
 val call_indirect :
   Lowering.state ->
   function_type:Ground.function_type ->
-  value:Lir.place ->
-  Lir.place list ->
-  Lir.place ->
+  value:Lowered.place ->
+  Lowered.place list ->
+  Lowered.place ->
   unit
 
 val call_through_any :
@@ -73,13 +76,13 @@ val call_through_any :
   any_type:Types.trait_reference ->
   trait:Path.t ->
   name:string ->
-  any:Lir.place ->
-  arguments:(Types.mode * Ground.ty * Lir.place) list ->
-  Lir.place ->
+  any:Lowered.place ->
+  arguments:(Types.mode * Ground.ty * Lowered.place) list ->
+  Lowered.place ->
   unit
 
 val in_type_definition : Lowering.state -> Ground.ty -> (unit -> 'a) -> 'a
-val echo : Lowering.state -> Lir.place -> Ground.ty -> site:Lir.site -> unit
+val echo : Lowering.state -> Lowered.place -> Ground.ty -> site:Lowered.site -> unit
 
 val any_into :
   Lowering.state ->
@@ -87,32 +90,32 @@ val any_into :
   inner_ty:Ground.ty ->
   impl:Path.t ->
   type_arguments:Ground.argument list ->
-  value:Lir.place ->
-  Lir.place ->
+  value:Lowered.place ->
+  Lowered.place ->
   unit
 
 val provided_evidence :
   Lowering.state ->
-  implementation:Lir.operand ->
+  implementation:Lowered.operand ->
   ('a * Path.t * Types.substitution) list ->
-  ('a * Lir.operand) list
+  ('a * Lowered.operand) list
 
 val call_instance :
   Lowering.state ->
   Instance.key ->
   signature:Types.signature ->
   substitution:Types.substitution ->
-  arguments:(Types.mode * Ground.ty * Lir.place) list ->
+  arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   ?mask:int ->
-  destination:Lir.place ->
+  destination:Lowered.place ->
   unit ->
   unit
 
 type literal = Integer_value of Z.t | Float_value of float
 
-val constant_of : Lowering.state -> Ground.ty -> literal -> Lir.operand
-val string_literal : Lowering.state -> Ground.ty -> string -> destination:Lir.place -> unit
-val static_constant : Lowering.state -> Path.t -> Lir.place
+val constant_of : Lowering.state -> Ground.ty -> literal -> Lowered.operand
+val string_literal : Lowering.state -> Ground.ty -> string -> destination:Lowered.place -> unit
+val static_constant : Lowering.state -> Path.t -> Lowered.place
 
 val list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
 (** A [List]'s storage field, the storage's type, and the element type. *)
@@ -121,19 +124,19 @@ val template_value :
   Lowering.state ->
   Ground.ty ->
   string list ->
-  site:Lir.site ->
-  parts:(Lir.place -> unit) list ->
-  Lir.place
+  site:Lowered.site ->
+  parts:(Lowered.place -> unit) list ->
+  Lowered.place
 
 val cursor_result : Definitions.context -> Ground.yielding -> Ground.ty
-val call_next : Lowering.state -> Ground.yielding -> Lir.place -> Lir.place -> unit
+val call_next : Lowering.state -> Ground.yielding -> Lowered.place -> Lowered.place -> unit
 
 val pull_loop :
   Lowering.state ->
   kept:bool ->
   option:Ground.ty ->
-  call_next:(Lir.place -> unit) ->
-  body:(Lir.place -> unit) ->
+  call_next:(Lowered.place -> unit) ->
+  body:(Lowered.place -> unit) ->
   unit
 
-val boxed_cursor : Lowering.state -> kept:bool -> Ground.yielding -> Lir.place
+val boxed_cursor : Lowering.state -> kept:bool -> Ground.yielding -> Lowered.place

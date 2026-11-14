@@ -108,14 +108,14 @@ let usize = named "USize"
 
 (* A function written by hand: its locals and blocks, in the order a
    builder numbers them, block 0 first. *)
-type local_info = { ty : Lir.ty; name : string option }
-type block = { statements : Lir.statement list; terminator : Lir.terminator }
+type local_info = { ty : Lowered.ty; name : string option }
+type block = { statements : Lowered.statement list; terminator : Lowered.terminator }
 
 type function_ = {
-  parameters : Lir.local list;
-  result : Lir.ty option;
+  parameters : Lowered.local list;
+  result : Lowered.ty option;
   returns : bool;
-  environment : (string * Lir.ty) list;
+  environment : (string * Lowered.ty) list;
   locals : local_info list;
   blocks : block list;
 }
@@ -125,11 +125,11 @@ type function_ = {
 type instance = Memory_layout.env -> Emit_c.Builder.instance
 
 let local ?name ty = { ty; name }
-let value ty = Lir.Value ty
-let at ?(projections = []) local : Lir.place = { root = Local local; projections }
-let copy ?projections local = Lir.Copy (at ?projections local)
-let constant_int32 number = Lir.Constant (Integer (Int32, Z.of_int number))
-let constant_int64 number = Lir.Constant (Integer (Int64, Z.of_int number))
+let value ty = Lowered.Value ty
+let at ?(projections = []) local : Lowered.place = { root = Local local; projections }
+let copy ?projections local = Lowered.Copy (at ?projections local)
+let constant_int32 number = Lowered.Constant (Integer (Int32, Z.of_int number))
+let constant_int64 number = Lowered.Constant (Integer (Int64, Z.of_int number))
 let block statements terminator = { statements; terminator }
 
 let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) locals blocks =
@@ -169,7 +169,8 @@ let printed instance : instance = fun _ -> instance
 let entry ?nested locals blocks =
   instance ?nested "entry" (function_ ~result:(value int32) locals blocks)
 
-let call name ?(result = Some (value int32)) ?(parameters = []) arguments place : Lir.statement =
+let call name ?(result = Some (value int32)) ?(parameters = []) arguments place : Lowered.statement
+    =
   Call
     {
       target =

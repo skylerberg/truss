@@ -4,7 +4,7 @@ open C_runtime
 open C_types
 open C_values
 
-let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.ty) list) =
+let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * Lowered.ty) list) =
   let argument position = fst (List.nth arguments position) in
   let scalar position = scalar_of context (snd (List.nth arguments position)) in
   let width position = bit_width context (scalar position) in
@@ -127,7 +127,7 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       Printf.sprintf "((void *)((const struct t_evidence *)%s)->outer[%s])" (argument 0)
         (argument 1)
 
-let call_c context fc (target : Lir.target) arguments =
+let call_c context fc (target : Lowered.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in
   let texts = String.concat ", " (List.map fst arguments) in
   (* A call passes its target's leading argument, then each argument that
@@ -225,10 +225,10 @@ let anchor_c context definition =
    of a record or of one variant, or if one path is the other followed by a
    dereference, which leads to another object. Two elements are assumed to
    overlap unless their indexes are written the same way. *)
-let may_alias (first : Lir.place) (second : Lir.place) =
-  let rec overlap (first : Lir.projection list) (second : Lir.projection list) =
+let may_alias (first : Lowered.place) (second : Lowered.place) =
+  let rec overlap (first : Lowered.projection list) (second : Lowered.projection list) =
     match (first, second) with
-    | [], rest | rest, [] -> not (List.mem Lir.Deref rest)
+    | [], rest | rest, [] -> not (List.mem Lowered.Deref rest)
     | Field left :: first, Field right :: second -> left = right && overlap first second
     | Variant_field left :: first, Variant_field right :: second ->
         left.variant <> right.variant || (left.field = right.field && overlap first second)
@@ -238,7 +238,7 @@ let may_alias (first : Lir.place) (second : Lir.place) =
   in
   first.root = second.root && overlap first.projections second.projections
 
-let statement_c context fc buffer (statement : Lir.statement) =
+let statement_c context fc buffer (statement : Lowered.statement) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
@@ -261,7 +261,7 @@ let statement_c context fc buffer (statement : Lir.statement) =
       (* Every pointer a callee is given is [restrict], so the place it
          writes its result to is none it is also given to read. *)
       List.iter
-        (fun (argument : Lir.operand) ->
+        (fun (argument : Lowered.operand) ->
           match argument with
           | (Address { place = passed; _ } | Moved_address passed) when may_alias place passed ->
               bug "a call that writes its result to a place it is also given"
@@ -291,8 +291,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
       context.failures <-
         (Echo, { definition = site.definition; line = site.line; column = site.column })
         :: context.failures;
-      let operand lir_operand =
-        match operand_c context fc lir_operand with
+      let operand argument =
+        match operand_c context fc argument with
         | Some (text, _) -> text
         | None -> bug "an echo of nothing"
       in
@@ -305,8 +305,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
           line "t_runtime_free(%s);" (block_pointer context text sum variant)
       | _ -> bug "a block of a place that is not a sum type")
   | Fork { branches } ->
-      let operand lir_operand =
-        match operand_c context fc lir_operand with
+      let operand argument =
+        match operand_c context fc argument with
         | Some (text, _) -> text
         | None -> bug "an environment of zero size"
       in
@@ -322,8 +322,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
       line "  t_runtime_parallel(branches, %d);" (List.length branches);
       line "}"
   | Fork_range { body; environment; first; last } ->
-      let operand lir_operand =
-        match operand_c context fc lir_operand with
+      let operand argument =
+        match operand_c context fc argument with
         | Some (text, _) -> text
         | None -> bug "an operand of zero size"
       in
@@ -335,12 +335,12 @@ let statement_c context fc buffer (statement : Lir.statement) =
    that reports a compiler bug, or a promise to the C compiler. *)
 let unreachable_c _ = "T_UNREACHABLE();"
 
-let terminator_c context fc buffer (terminator : Lir.terminator) =
+let terminator_c context fc buffer (terminator : Lowered.terminator) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
-  let operand lir_operand =
-    match operand_c context fc lir_operand with
+  let operand argument =
+    match operand_c context fc argument with
     | Some expression -> expression
     | None -> bug "an operand of zero size"
   in
@@ -392,7 +392,7 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
       | Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
   | Fail { failure; message; length; site } ->
-      if match failure with Lir.Todo -> true | Panic | Assertion -> false then
+      if match failure with Lowered.Todo -> true | Panic | Assertion -> false then
         context.failures <-
           (Todo, { definition = site.definition; line = site.line; column = site.column })
           :: context.failures;

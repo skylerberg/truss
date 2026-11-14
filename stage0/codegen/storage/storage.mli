@@ -32,28 +32,32 @@ val length_field : string
 val capacity_field : string
 
 (* The parts of a storage at a place, and its element at an index. *)
-val buffer : Lir.place -> Lir.place
-val length : Lir.place -> Lir.place
-val capacity : Lir.place -> Lir.place
-val at : Lir.place -> Lir.operand -> Lir.place
+val buffer : Lowered.place -> Lowered.place
+val length : Lowered.place -> Lowered.place
+val capacity : Lowered.place -> Lowered.place
+val at : Lowered.place -> Lowered.operand -> Lowered.place
 
 (* The parts of a view at a place, and its element at an index. *)
-val view_elements : Lir.place -> Lir.place
-val view_length : Lir.place -> Lir.place
-val view_at : Lir.place -> Lir.operand -> Lir.place
+val view_elements : Lowered.place -> Lowered.place
+val view_length : Lowered.place -> Lowered.place
+val view_at : Lowered.place -> Lowered.operand -> Lowered.place
 
 (* An empty storage, of a storage type. Its buffer points at nothing, and is
    not null, so an [Option] of a storage has a niche. *)
-val empty : Ground.ty -> Lir.rvalue
+val empty : Ground.ty -> Lowered.rvalue
 
 (* A static storage, of a storage type: [length] elements at [elements],
    which it does not own. *)
-val static : Ground.ty -> elements:Lir.operand -> length:Lir.operand -> Lir.rvalue
+val static : Ground.ty -> elements:Lowered.operand -> length:Lowered.operand -> Lowered.rvalue
 
 (* An owning storage, of a storage type: a buffer on the heap with room for
    [capacity] elements, of which the first [length] are there. *)
 val owning :
-  Ground.ty -> buffer:Lir.operand -> length:Lir.operand -> capacity:Lir.operand -> Lir.rvalue
+  Ground.ty ->
+  buffer:Lowered.operand ->
+  length:Lowered.operand ->
+  capacity:Lowered.operand ->
+  Lowered.rvalue
 
 (* A view, of a view type, of [length] elements at [elements]. *)
-val view : Ground.ty -> elements:Lir.operand -> length:Lir.operand -> Lir.rvalue
+val view : Ground.ty -> elements:Lowered.operand -> length:Lowered.operand -> Lowered.rvalue

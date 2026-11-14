@@ -15,7 +15,7 @@ let named_program ~entry_name ~helper_name returned =
   let main =
     instance entry_name
       (function_ ~result:(value int32)
-         [ local (Lir.Value int32) ]
+         [ local (Lowered.Value int32) ]
          [ block [ call helper_name [] (Some (at 0)) ] (Return (Some (copy 0))) ])
   in
   [ main; helper ]
@@ -53,7 +53,7 @@ let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   let calls name callees =
     instance name
       (function_ ~result:(value int32)
-         [ local (Lir.Value int32) ]
+         [ local (Lowered.Value int32) ]
          [
            block
              (List.map (fun callee -> call callee [] (Some (at 0))) callees)
@@ -116,7 +116,7 @@ let () =
       let again =
         instance "again"
           (function_ ~result:(value int32)
-             [ local (Lir.Value int32) ]
+             [ local (Lowered.Value int32) ]
              [ block [ call "again" [] (Some (at 0)) ] (Return (Some (copy 0))) ])
       in
       let actual = Reachable.groups ~edges:(references [ again ]) [ key "again" ] in
@@ -139,13 +139,13 @@ let () =
          allocated, which no source compiles to. They report positions in a
          definition of a module that is loaded. *)
       let _, compile = load "fn suite() {\n}\n" in
-      let site : Lir.site =
+      let site : Lowered.site =
         { definition = Top { module_ = example; name = "suite" }; line = 2; column = 3 }
       in
-      let text value = Lir.Constant (Bytes value) in
-      let length value = Lir.Constant (Integer (USize, Z.of_int (String.length value))) in
+      let text value = Lowered.Constant (Bytes value) in
+      let length value = Lowered.Constant (Integer (USize, Z.of_int (String.length value))) in
       let ending failure message =
-        Lir.Fail { failure; message = text message; length = length message; site }
+        Lowered.Fail { failure; message = text message; length = length message; site }
       in
       let suite name blocks = instance name (function_ [] blocks) in
       let tests =

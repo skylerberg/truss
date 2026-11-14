@@ -5,17 +5,17 @@ open Definitions
 open Emit_c.Builder
 
 type cleanup =
-  | Drop_value of Lir.place  (** Drops the place's value, if the place still owns it. *)
-  | Free_pointed of Lir.place
+  | Drop_value of Lowered.place  (** Drops the place's value, if the place still owns it. *)
+  | Free_pointed of Lowered.place
       (** Frees the heap block that the pointer at the place points to, after the block's contents
           are dropped. *)
-  | Free_blocks of { place : Lir.place; variants : string list }
+  | Free_blocks of { place : Lowered.place; variants : string list }
       (** Frees the block of the value at [place] where its variant is one of [variants], without
           dropping the block's contents. *)
-  | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
+  | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
       (** Moves the value at [source] into [destination], the place it was moved out of so that the
           caller could change it. *)
-  | Join_group of Lir.statement  (** Joins a task group with the call of [Tasks.join]. *)
+  | Join_group of Lowered.statement  (** Joins a task group with the call of [Tasks.join]. *)
 
 (* A scope owns the values dropped as it ends: the scope of a block's names,
    or the scope of one statement, whose temporaries end with it. *)
@@ -23,19 +23,24 @@ type scope_kind = Bindings | Statement
 type scope = { kind : scope_kind; mutable owned : cleanup list  (** Most recent first *) }
 
 (* Where [continue] and [break] go, and how many scopes each keeps. *)
-type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; break_depth : int }
+type loop = {
+  continue_ : Lowered.block;
+  continue_depth : int;
+  break_ : Lowered.block;
+  break_depth : int;
+}
 
 (* The code being lowered: the function's own, or a method's inlined into
    it, whose blocks carry it, each with its own tables and names. *)
 type frame = {
   code : code;
-  mutable self_place : Lir.place option;
+  mutable self_place : Lowered.place option;
   inlined : Path.t list;
       (** The code's own method and those it is inlined into, whose cursors the code boxes *)
-  reported : Lir.site option;
+  reported : Lowered.site option;
       (** In the standard library's code that is inlined into a program's, the position of the
           program's call, where a check that fails in this code is reported *)
-  exit : (Lir.block * int) option;
+  exit : (Lowered.block * int) option;
       (** In an expression lowered on its own, where its [return] goes and how many scopes that
           keeps *)
   mir : mir_frame option;  (** The MIR being lowered in this frame *)
@@ -45,7 +50,7 @@ type frame = {
 and mir_frame = {
   body : Mir.body;
   lambdas : Mir.body array;  (** The bodies of the definition's lambdas *)
-  places : (Mir.local, Lir.place) Hashtbl.t;
+  places : (Mir.local, Lowered.place) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
       (** The locals bound to a place they do not own, with the number of assignments that bind each
       *)
@@ -54,9 +59,9 @@ and mir_frame = {
           with each value assigned to them *)
   owner : scope option;
       (** The scope that owns the body's locals, which drops them on each way out *)
-  returns_into : Lir.place option;
+  returns_into : Lowered.place option;
       (** In an expression lowered on its own, such as a default, where its value is written *)
-  mutable provides : (Path.t * Lir.operand) list list;
+  mutable provides : (Path.t * Lowered.operand) list list;
       (** The evidence that each [provide] around the code being lowered replaced, innermost first
       *)
   returned : Mir.local list;
@@ -67,7 +72,7 @@ and mir_frame = {
           nothing until they are assigned again *)
   moves : Moves.t;  (** Which places may hold a value at each point *)
   kept : Mir.local list;  (** In a pulled method, the locals its cursor holds *)
-  flags : (Moves.path * Lir.place) list;
+  flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
 }
@@ -81,8 +86,8 @@ and mir_frame = {
    that exit. Each branch of a block has its own record, because each
    branch is a separate region. The iterations of a loop share one. *)
 type early_exits = {
-  winner : Lir.place;  (** A [UInt32], 0 while no exit has won *)
-  mutable return_value : Lir.place option;
+  winner : Lowered.place;  (** A [UInt32], 0 while no exit has won *)
+  mutable return_value : Lowered.place option;
   scope : scope;  (** The scope enclosing the block or loop, which owns [return_value] *)
   mutable exits : early_exit list;  (** Most recent first *)
 }
@@ -101,30 +106,30 @@ and early_exit = {
 (* A task whose body is being lowered. *)
 type task = {
   id : Core.task;
-  group : Lir.place;
+  group : Lowered.place;
   early_exits : early_exits;
-  end_block : Lir.block;  (** Every exit from the task jumps here *)
+  end_block : Lowered.block;  (** Every exit from the task jumps here *)
   scope_depth : int;  (** The number of scopes enclosing the task *)
 }
 
 (* A [concurrent for] loop whose iterations are being spawned. *)
 type spawn_loop = {
   origin : Core.origin;
-  group : Lir.place;
+  group : Lowered.place;
   early_exits : early_exits;
-  item : Lir.local;  (** A [UInt64]: the argument of the next task *)
+  item : Lowered.local;  (** A [UInt64]: the argument of the next task *)
   element : Ground.ty;  (** The type of the value that the loop's pattern matches *)
 }
 
 (* The cursor of a pulled method: [next] keeps in it the values it needs
    from one call to the next, and its drop function drops them. *)
 type cursor = {
-  pointer : Lir.local;  (** [next]'s parameter, and the drop function's, that points to it *)
+  pointer : Lowered.local;  (** [next]'s parameter, and the drop function's, that points to it *)
   drop : Emit_c.Builder.separate;  (** The cursor's drop function *)
-  fields : (string * Lir.ty) list ref;  (** Its fields but its state, most recent first *)
-  mutable resumes : Lir.block list;
+  fields : (string * Lowered.ty) list ref;  (** Its fields but its state, most recent first *)
+  mutable resumes : Lowered.block list;
       (** Where [next] goes on in each state after the first, most recent first *)
-  mutable stops : Lir.block list;
+  mutable stops : Lowered.block list;
       (** Where the drop function starts in each state after the first, most recent first *)
 }
 
@@ -134,7 +139,7 @@ type schedule = Sequential | Chunked | Spawned of spawn_loop
 
 (* Where a function's result goes: through the pointer it is given, into a
    local it returns, or nowhere. *)
-type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
+type result_slot = Through of Lowered.local | Returned_in of Lowered.local | No_result
 
 type state = {
   context : context;
@@ -144,11 +149,12 @@ type state = {
   mutable loops : loop list;
   mutable result : result_slot;
   nested : int ref;  (** How many nested functions, lambdas and outlined code, the instance has *)
-  mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
+  mutable evidence : (Path.t * Lowered.operand) list;
+      (** The evidence for each capability available *)
   cursor : cursor option;
       (** In a yielding method's pulled version, the cursor it keeps values in *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
-  mutable moved : Lir.place list;
+  mutable moved : Lowered.place list;
       (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
           of, so that the scope that owns one drops it only if it holds a value *)
 }
@@ -182,13 +188,13 @@ let enter context ?cursor ?(nested = ref 0) ~builder frame =
 let may_fork st = st.cursor = None && st.frame.exit = None
 
 (* A field of the cursor, with the place it is at. *)
-let cursor_field (cursor : cursor) name ty : Lir.place =
+let cursor_field (cursor : cursor) name ty : Lowered.place =
   if not (List.mem_assoc name !(cursor.fields)) then cursor.fields := (name, ty) :: !(cursor.fields);
   { root = Local cursor.pointer; projections = [ Deref; Field name ] }
 
 (* A place that holds a value [kept] across a [yield]: a new field of the
    cursor in a pulled method, or else a new local. *)
-let held st ~kept ?name ty : Lir.place =
+let held st ~kept ?name ty : Lowered.place =
   match st.cursor with
   | Some cursor when kept ->
       cursor_field cursor (Printf.sprintf "held%d" (List.length !(cursor.fields))) ty
@@ -201,7 +207,7 @@ let outlined st ~parts body =
   let nested = !(st.nested) in
   incr st.nested;
   let holder = Emit_c.Builder.outline st.builder ~nested ~parts body in
-  (nested, Lir.Address { place = at holder; writable = false })
+  (nested, Lowered.Address { place = at holder; writable = false })
 
 (* A record for the early exits of a block's branch or a loop's
    iterations. The current scope owns the return value, so the value
@@ -215,7 +221,7 @@ let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.subst
 let trivial st ty = Glue.trivial st.context.glue ty
 let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
-let site st (span : Syntax.span) : Lir.site =
+let site st (span : Syntax.span) : Lowered.site =
   let text = st.frame.code.text in
   let line = ref 0 and column = ref 1 in
   String.iteri
@@ -229,7 +235,7 @@ let site st (span : Syntax.span) : Lir.site =
     text;
   { definition = st.frame.code.anchor; line = !line; column = !column }
 
-type unsupported = { construct : string; at : Lir.site option }
+type unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
@@ -253,7 +259,7 @@ let innermost_scope st = match st.scopes with scope :: _ -> scope | [] -> bug "n
    owns it, then does not drop. *)
 let moved st place =
   if not (List.mem place st.moved) then st.moved <- place :: st.moved;
-  Lir.Move place
+  Lowered.Move place
 
 (* Has the scope of the names around own the value at a place. *)
 let own_in_scope st place =
@@ -285,9 +291,9 @@ let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let own place = if in_scope && owned && not (trivial st ty) then own_in_scope st place in
   match how mode ty with
   | None -> (None, temporary st ty)
-  | Some (Lir.Pointer _ as pointer) ->
+  | Some (Lowered.Pointer _ as pointer) ->
       let arrives = local st.builder pointer in
-      let place : Lir.place = { root = Local arrives; projections = [ Deref ] } in
+      let place : Lowered.place = { root = Local arrives; projections = [ Deref ] } in
       own place;
       (Some arrives, place)
   | Some passed ->
@@ -305,7 +311,7 @@ let evidence_parameters st capabilities =
   in
   st.evidence <-
     List.map
-      (fun (capability, evidence_local) -> (capability, Lir.Copy (at evidence_local)))
+      (fun (capability, evidence_local) -> (capability, Lowered.Copy (at evidence_local)))
       arriving;
   List.map snd arriving
 
@@ -319,7 +325,7 @@ let result_slot st (convention : Convention.result) =
     | Nothing -> No_result)
 
 (* Where the function's result is written, if it has one with a size. *)
-let result_place st : Lir.place option =
+let result_place st : Lowered.place option =
   match st.result with
   | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
   | Returned_in local -> Some (at local)
@@ -334,7 +340,7 @@ let returned_type st =
       | _ -> None)
   | No_result -> None
 
-let return_result st : Lir.terminator =
+let return_result st : Lowered.terminator =
   Return (match st.result with Returned_in local -> Some (Move (at local)) | _ -> None)
 
 let drop_scope st (scope : scope) =
@@ -423,12 +429,12 @@ let unreachable_block st =
 (* An operand for an owned position: a [var], an [own] argument, a field, a
    returned value. The type checker has made sure a place there is a
    temporary or was marked [own], or copies implicitly. *)
-let owned st place ty = if trivial st ty then Lir.Copy place else moved st place
+let owned st place ty = if trivial st ty then Lowered.Copy place else moved st place
 
 (* Gives [destination], which holds nothing, the value at a place as its
    own: moved out of the place, or for a constant's static data, which
    nothing moves from, copied. *)
-let take st (place : Lir.place) ty ~destination =
+let take st (place : Lowered.place) ty ~destination =
   match place.root with
   | Static _ when not (trivial st ty) ->
       Glue.copy_into st.context.glue st.builder ~destination ~source:place ty
@@ -436,19 +442,19 @@ let take st (place : Lir.place) ty ~destination =
 
 (* A place whose indexes are fixed now, so that an alias of it refers to the
    same element however the index variables change later. *)
-let snapshot st ~kept (place : Lir.place) =
+let snapshot st ~kept (place : Lowered.place) =
   {
     place with
     projections =
       List.map
         (function
-          | Lir.Index (Copy index_place) ->
+          | Lowered.Index (Copy index_place) ->
               let fixed =
                 if kept then held st ~kept (Value st.context.types.usize)
                 else binding st st.context.types.usize
               in
               emit st.builder (Assign (fixed, Use (Copy index_place)));
-              Lir.Index (Copy fixed)
+              Lowered.Index (Copy fixed)
           | projection -> projection)
         place.projections;
   }
@@ -462,13 +468,13 @@ let looping st ~continue_ ~break_ ~depth body =
 
 (* The type of a place in the function being written, or [None] where it has
    zero size or is reached through a lambda's environment. *)
-let place_type st (place : Lir.place) =
+let place_type st (place : Lowered.place) =
   let environment _ = bug "a place in an environment, whose type lowering does not track" in
-  let rec projected (ty : Lir.ty) = function
+  let rec projected (ty : Lowered.ty) = function
     | [] -> Some ty
     | _ :: _ when match ty with Environment _ | Evidence _ -> true | _ -> false -> None
     | projection :: rest ->
-        Option.bind (Lir.projection_type st.context.env ~environment ty projection) (fun ty ->
+        Option.bind (Lowered.projection_type st.context.env ~environment ty projection) (fun ty ->
             projected ty rest)
   in
   match (st.cursor, place) with
@@ -480,12 +486,12 @@ let place_type st (place : Lir.place) =
       | None when field = Convention.cursor_state -> projected (Raw (Integer UInt32)) rest
       | None -> bug "the cursor has no field %s" field)
   | _ ->
-      let root : Lir.ty =
+      let root : Lowered.ty =
         match place.root with
         | Local local -> local_type st.builder local
         | Static { ty; _ } -> Value ty
       in
-      if Lir.erased st.context.env root then None else projected root place.projections
+      if Lowered.erased st.context.env root then None else projected root place.projections
 
 (* The lent value at a place, if the place holds one. *)
 let lent_at st place =
@@ -493,7 +499,7 @@ let lent_at st place =
 
 (* A field or a variant's field of a place. A field of a lent value that
    holds an address is the place it points at. *)
-let project st (place : Lir.place) (projection : Lir.projection) =
+let project st (place : Lowered.place) (projection : Lowered.projection) =
   let projected = place / projection in
   let variant, field =
     match projection with
@@ -510,7 +516,7 @@ let project st (place : Lir.place) (projection : Lir.projection) =
       projected / Deref
   | _ -> projected
 
-let constant_int integer value = Lir.Constant (Integer (integer, value))
+let constant_int integer value = Lowered.Constant (Integer (integer, value))
 
 let scalar_of st ty =
   match (Memory_layout.of_type st.context.env ty).form with

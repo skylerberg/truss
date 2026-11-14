@@ -6,7 +6,7 @@ open Lowering
 open Targets
 open Generated
 
-type unsupported = Lowering.unsupported = { construct : string; at : Lir.site option }
+type unsupported = Lowering.unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported = Lowering.Unsupported
 
@@ -19,7 +19,7 @@ let constant_value (context : context) = context.constant
 let context = Definitions.context
 let test_key = Definitions.test_key
 
-type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
+type constant = Constants.constant = Folded of Lowered.data | Run of Ground.ty
 
 let constant = Constants.constant
 let evaluator = Constants.evaluator
@@ -96,7 +96,7 @@ type pulled = {
   fields : (string * Memory_layout.member) list;
 }
 
-let member : Lir.ty -> Memory_layout.member = function
+let member : Lowered.ty -> Memory_layout.member = function
   | Value ty -> Typed ty
   | Raw scalar -> Raw scalar
   | Pointer { target = Value ty; _ } -> Raw (Pointer (Data ty))
@@ -259,7 +259,7 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.
             let constant =
               match scalar_of st ty with
               | Integer integer -> constant_int integer value
-              | Bool -> Lir.Constant (Bool (not (Z.equal value Z.zero)))
+              | Bool -> Lowered.Constant (Bool (not (Z.equal value Z.zero)))
               | _ -> bug "an evaluated call's argument of type %s" (Ground.to_string ty)
             in
             emit st.builder (Assign (place, Use constant));

@@ -55,21 +55,22 @@ val encode : t -> Ground.ty -> Emit_c.Builder.instance
 (* Writes, with the builder, a call to the encode function of the type on
    the value at the place, to append to [output]; nothing for a type of
    zero size. *)
-val encode_call : t -> Emit_c.Builder.t -> output:Lir.operand -> Ground.ty -> Lir.place -> unit
+val encode_call :
+  t -> Emit_c.Builder.t -> output:Lowered.operand -> Ground.ty -> Lowered.place -> unit
 
 (* Writes, with the builder, a copy of the value at [source] to
    [destination], both of the type: a memory copy for a trivial type, and
    otherwise a call to its copy function. *)
 val copy_into :
-  t -> Emit_c.Builder.t -> destination:Lir.place -> source:Lir.place -> Ground.ty -> unit
+  t -> Emit_c.Builder.t -> destination:Lowered.place -> source:Lowered.place -> Ground.ty -> unit
 
 (* The debug output function of a type: [Instance.Debug ty], which takes a
    read-only pointer to the value, unless the type has zero size, and the
    output, and appends the value's text with the standard library's
    functions that write numbers and quoted text. *)
 val debug : t -> Ground.ty -> Emit_c.Builder.instance
-val debug_signature : t -> Ground.ty -> Lir.signature
+val debug_signature : t -> Ground.ty -> Lowered.signature
 
 module For_testing : sig
-  val copy_signature : t -> Ground.ty -> Lir.signature
+  val copy_signature : t -> Ground.ty -> Lowered.signature
 end

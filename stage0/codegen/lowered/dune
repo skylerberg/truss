@@ -1,3 +1,3 @@
 (library
- (name lir)
+ (name lowered)
  (libraries compiler_bug path ground instance memory_layout libc zarith))

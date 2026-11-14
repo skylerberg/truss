@@ -170,25 +170,25 @@ val check_template :
    known integers, or [Bool]s as 0 or 1, by running it: its result as static
    data. *)
 val evaluate_call :
-  t -> function_:Path.t -> arguments:Z.t list -> (Lir.static_value ran, string) result
+  t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
 
 (** Code generation's own passes, for their tests. *)
 module For_testing : sig
   module Lower : sig
     type context
-    type constant = Lower.constant = Folded of Lir.data | Run of Ground.ty
+    type constant = Lower.constant = Folded of Lowered.data | Run of Ground.ty
 
     val context :
       ?checks:bool ->
       cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
-      constant:(context -> Path.t -> Lir.static_value option) ->
+      constant:(context -> Path.t -> Lowered.static_value option) ->
       Query.context ->
       Memory_layout.target ->
       context
 
     val constant : context -> Path.t -> constant
 
-    val constant_value : context -> Path.t -> Lir.static_value option
+    val constant_value : context -> Path.t -> Lowered.static_value option
     (** Another constant's value, where it folds. *)
   end
 

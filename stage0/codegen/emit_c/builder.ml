@@ -7,7 +7,7 @@ let bug format = Compiler_bug.bug ~stage:"Builder" format
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
-type local_info = { ty : Lir.ty; name : string option }
+type local_info = { ty : Lowered.ty; name : string option }
 type instance = C_instance.t
 
 open C_instance
@@ -20,10 +20,10 @@ type function_ = {
   code : instance;  (** The instance it is part of *)
   nested : int option;  (** Its number among the instance's nested functions *)
   parent : int;  (** The function it is written in; -1 for the builder's own *)
-  parts : Lir.local list;  (** The locals of [parent] it takes as parameters *)
-  holder : Lir.local option;  (** The local of [parent] that holds its environment *)
-  environment : Lir.local option;  (** Its local that points to its environment *)
-  entry : Lir.block;
+  parts : Lowered.local list;  (** The locals of [parent] it takes as parameters *)
+  holder : Lowered.local option;  (** The local of [parent] that holds its environment *)
+  environment : Lowered.local option;  (** Its local that points to its environment *)
+  entry : Lowered.block;
   prologue : Buffer.t;  (** Statements that run before its entry block *)
   mutable mentioned : Locals.t;  (** The locals its prologue names *)
   mutable returns : bool list;  (** For each [return], whether it gives a value *)
@@ -46,10 +46,10 @@ type t = {
   locals : local_info Dynarray.t;
   texts : string option Dynarray.t;  (** Each block's C, once it is finished *)
   mentions : Locals.t Dynarray.t;  (** The locals each block's code names *)
-  successors : Lir.block list Dynarray.t;  (** The blocks each block goes to *)
+  successors : Lowered.block list Dynarray.t;  (** The blocks each block goes to *)
   facts : facts Dynarray.t;  (** What each block's code names *)
   owners : int Dynarray.t;  (** The function each block is written in, -1 until it starts *)
-  mutable current : Lir.block;
+  mutable current : Lowered.block;
   mutable pending : Buffer.t;  (** The C of the current block's statements *)
   functions : function_ Dynarray.t;
   mutable function_ : int;  (** The function being written *)
@@ -181,7 +181,7 @@ let emit builder statement =
   in_block_facts builder function_.code.context (fun () ->
       statement_c function_.code.context (block_context builder function_) builder.pending statement)
 
-let finish builder (terminator : Lir.terminator) =
+let finish builder (terminator : Lowered.terminator) =
   let function_ = current_function builder in
   let context = function_.code.context and fc = block_context builder function_ in
   (match terminator with
@@ -191,7 +191,7 @@ let finish builder (terminator : Lir.terminator) =
       in
       function_.returns <- gives :: function_.returns
   | _ -> ());
-  Dynarray.set builder.successors builder.current (Lir.successors terminator);
+  Dynarray.set builder.successors builder.current (Lowered.successors terminator);
   function_.size <- function_.size + 2;
   in_block_facts builder context (fun () -> terminator_c context fc builder.pending terminator);
   Dynarray.set builder.texts builder.current (Some (Buffer.contents builder.pending));
@@ -204,12 +204,12 @@ let in_block builder block body =
   builder.current <- current;
   builder.pending <- pending
 
-let at = Lir.local_place
+let at = Lowered.local_place
 
-let ( / ) (place : Lir.place) projection : Lir.place =
+let ( / ) (place : Lowered.place) projection : Lowered.place =
   { place with projections = place.projections @ [ projection ] }
 
-let usize number = Lir.Constant (Integer (USize, Z.of_int number))
+let usize number = Lowered.Constant (Integer (USize, Z.of_int number))
 
 let branch builder value ~yes ~no =
   finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
@@ -224,7 +224,7 @@ let when_ builder condition then_ =
   start builder after
 
 let loop builder ?(integer = Memory_layout.USize) ~index_type ~count body =
-  let constant number = Lir.Constant (Integer (integer, Z.of_int number)) in
+  let constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
   let index = local builder ~name:"index" index_type in
   let going = local builder (Raw Bool) in
   let test = block builder in
@@ -382,7 +382,7 @@ let build ?(returns = true) builder ~parameters ~result =
   let is_own number local =
     List.mem local (parameters_of number)
     || Hashtbl.find_opt home local = Some number
-    || Lir.erased builder.env (local_type builder local)
+    || Lowered.erased builder.env (local_type builder local)
   in
   (* The locals each function reaches through its environment: those that
      it, or a function outlined from it, names, and that a function around
@@ -418,7 +418,7 @@ let build ?(returns = true) builder ~parameters ~result =
               (Environment (Instance.symbol function_.code.key, nested))
               (List.map
                  (fun (local, field) ->
-                   (field, Lir.Pointer { target = local_type builder local; writable = true }))
+                   (field, Lowered.Pointer { target = local_type builder local; writable = true }))
                  captures)
               context.environments
       | None, None, (local, _) :: _ ->

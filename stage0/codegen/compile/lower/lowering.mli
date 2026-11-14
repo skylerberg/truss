@@ -1,46 +1,52 @@
 type cleanup =
-  | Drop_value of Lir.place
-  | Free_pointed of Lir.place
-  | Free_blocks of { place : Lir.place; variants : string list }
-  | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
-  | Join_group of Lir.statement
+  | Drop_value of Lowered.place
+  | Free_pointed of Lowered.place
+  | Free_blocks of { place : Lowered.place; variants : string list }
+  | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
+  | Join_group of Lowered.statement
 
 type scope_kind = Bindings | Statement
 type scope = { kind : scope_kind; mutable owned : cleanup list }
-type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; break_depth : int }
+
+type loop = {
+  continue_ : Lowered.block;
+  continue_depth : int;
+  break_ : Lowered.block;
+  break_depth : int;
+}
 
 type frame = {
   code : Definitions.code;
-  mutable self_place : Lir.place option;
+  mutable self_place : Lowered.place option;
   inlined : Path.t list;
-  reported : Lir.site option;
-  exit : (Lir.block * int) option;
+  reported : Lowered.site option;
+  exit : (Lowered.block * int) option;
   mir : mir_frame option;
 }
 
 and mir_frame = {
   body : Mir.body;
   lambdas : Mir.body array;
-  places : (Mir.local, Lir.place) Hashtbl.t;
+  places : (Mir.local, Lowered.place) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
   built : (Mir.local, Mir.rvalue list) Hashtbl.t;
       (** The locals that hold no value of their own that some assignment constructs around places,
           with each value assigned to them *)
   owner : scope option;
-  returns_into : Lir.place option;
-  mutable provides : (Path.t * Lir.operand) list list;
+  returns_into : Lowered.place option;
+  mutable provides : (Path.t * Lowered.operand) list list;
   returned : Mir.local list;
   mutable taken : Mir.place list;
   moves : Moves.t;  (** Which places may hold a value at each point *)
   kept : Mir.local list;
-  flags : (Moves.path * Lir.place) list;
+  flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
 }
 
 type early_exits = {
-  winner : Lir.place;
-  mutable return_value : Lir.place option;
+  winner : Lowered.place;
+  mutable return_value : Lowered.place option;
   scope : scope;
   mutable exits : early_exit list;
 }
@@ -54,30 +60,30 @@ and early_exit = {
 
 type task = {
   id : Core.task;
-  group : Lir.place;
+  group : Lowered.place;
   early_exits : early_exits;
-  end_block : Lir.block;
+  end_block : Lowered.block;
   scope_depth : int;
 }
 
 type spawn_loop = {
   origin : Core.origin;
-  group : Lir.place;
+  group : Lowered.place;
   early_exits : early_exits;
-  item : Lir.local;
+  item : Lowered.local;
   element : Ground.ty;
 }
 
 type cursor = {
-  pointer : Lir.local;
+  pointer : Lowered.local;
   drop : Emit_c.Builder.separate;
-  fields : (string * Lir.ty) list ref;
-  mutable resumes : Lir.block list;
-  mutable stops : Lir.block list;
+  fields : (string * Lowered.ty) list ref;
+  mutable resumes : Lowered.block list;
+  mutable stops : Lowered.block list;
 }
 
 type schedule = Sequential | Chunked | Spawned of spawn_loop
-type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
+type result_slot = Through of Lowered.local | Returned_in of Lowered.local | No_result
 
 type state = {
   context : Definitions.context;
@@ -87,10 +93,10 @@ type state = {
   mutable loops : loop list;
   mutable result : result_slot;
   nested : int ref;
-  mutable evidence : (Path.t * Lir.operand) list;
+  mutable evidence : (Path.t * Lowered.operand) list;
   cursor : cursor option;
   mutable tasks : task list;
-  mutable moved : Lir.place list;
+  mutable moved : Lowered.place list;
       (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
           of, so that the scope that owns one drops it only if it holds a value *)
 }
@@ -108,47 +114,47 @@ val enter :
 val may_fork : state -> bool
 
 (* A field of the cursor, with the place it is at. *)
-val cursor_field : cursor -> string -> Lir.ty -> Lir.place
+val cursor_field : cursor -> string -> Lowered.ty -> Lowered.place
 
 (* A place that holds a value [kept] across a [yield]: a new field of the
    cursor in a pulled method, or else a new local. *)
-val held : state -> kept:bool -> ?name:string -> Lir.ty -> Lir.place
+val held : state -> kept:bool -> ?name:string -> Lowered.ty -> Lowered.place
 
 (* Writes code with [body] as an outlined function, nested in the instance,
    given [parts] as its parameters. Gives the function's number and the
    operand for its environment. *)
-val outlined : state -> parts:Lir.local list -> (unit -> unit) -> int * Lir.operand
+val outlined : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
 val new_early_exits : state -> early_exits
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
-val site : state -> Syntax.span -> Lir.site
+val site : state -> Syntax.span -> Lowered.site
 
-type unsupported = { construct : string; at : Lir.site option }
+type unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
-val unsupported : ?at:Lir.site -> ('a, unit, string, 'b) format4 -> 'a
+val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
 val source : state -> Syntax.span -> string
 val innermost_scope : state -> scope
-val owned_local : state -> ?name:string -> scope -> Ground.ty -> Lir.place
-val temporary : state -> ?name:string -> Ground.ty -> Lir.place
-val binding : state -> ?name:string -> Ground.ty -> Lir.place
+val owned_local : state -> ?name:string -> scope -> Ground.ty -> Lowered.place
+val temporary : state -> ?name:string -> Ground.ty -> Lowered.place
+val binding : state -> ?name:string -> Ground.ty -> Lowered.place
 
 val parameter :
   state ->
-  ?how:(Ground.mode -> Ground.ty -> Lir.ty option) ->
+  ?how:(Ground.mode -> Ground.ty -> Lowered.ty option) ->
   ?in_scope:bool ->
   owned:bool ->
   Ground.mode ->
   Ground.ty ->
-  Lir.local option * Lir.place
+  Lowered.local option * Lowered.place
 
-val evidence_parameters : state -> Path.t list -> Lir.local list
+val evidence_parameters : state -> Path.t list -> Lowered.local list
 val result_slot : state -> Convention.result -> unit
-val result_place : state -> Lir.place option
+val result_place : state -> Lowered.place option
 val returned_type : state -> Ground.ty option
-val return_result : state -> Lir.terminator
+val return_result : state -> Lowered.terminator
 val leave_to : state -> int -> unit
 val open_scope : state -> scope_kind -> scope
 val close_scope : state -> scope -> unit
@@ -156,24 +162,24 @@ val in_scope : state -> (unit -> 'a) -> 'a
 val in_statement : state -> (unit -> 'a) -> 'a
 
 val finish_function :
-  state -> ?returns:bool -> first:Lir.local list -> rest:Lir.local list -> unit -> unit
+  state -> ?returns:bool -> first:Lowered.local list -> rest:Lowered.local list -> unit -> unit
 
 (* The instance written: its function, which [finish_function] ends with
    [rest] as its parameters, and the nested functions it made. *)
 val finish_instance :
-  state -> ?returns:bool -> rest:Lir.local list -> unit -> Emit_c.Builder.instance
+  state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.Builder.instance
 
 val unreachable_block : state -> unit
-val moved : state -> Lir.place -> Lir.operand
-val owned : state -> Lir.place -> Ground.ty -> Lir.operand
-val take : state -> Lir.place -> Ground.ty -> destination:Lir.place -> unit
-val snapshot : state -> kept:bool -> Lir.place -> Lir.place
+val moved : state -> Lowered.place -> Lowered.operand
+val owned : state -> Lowered.place -> Ground.ty -> Lowered.operand
+val take : state -> Lowered.place -> Ground.ty -> destination:Lowered.place -> unit
+val snapshot : state -> kept:bool -> Lowered.place -> Lowered.place
 
 val looping :
-  state -> continue_:Lir.block -> break_:Lir.block -> depth:int -> (unit -> unit) -> unit
+  state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit
 
-val place_type : state -> Lir.place -> Lir.ty option
-val lent_at : state -> Lir.place -> Ground.lent option
-val project : state -> Lir.place -> Lir.projection -> Lir.place
-val constant_int : Memory_layout.integer -> Z.t -> Lir.operand
+val place_type : state -> Lowered.place -> Lowered.ty option
+val lent_at : state -> Lowered.place -> Ground.lent option
+val project : state -> Lowered.place -> Lowered.projection -> Lowered.place
+val constant_int : Memory_layout.integer -> Z.t -> Lowered.operand
 val scalar_of : state -> Ground.ty -> Memory_layout.scalar

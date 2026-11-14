@@ -2,10 +2,10 @@ open Emit_c.Builder
 
 let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
 
-type argument = Place of Lir.place | Value of Lir.operand
+type argument = Place of Lowered.place | Value of Lowered.operand
 type types = { usize : Ground.ty; string_slice : Ground.ty }
 
-let operand = function Place place -> Lir.Copy place | Value operand -> operand
+let operand = function Place place -> Lowered.Copy place | Value operand -> operand
 let place = function Place place -> place | Value _ -> bug "an operation on storage given a value"
 
 (* Where a value that is only read is: it arrives as a place, or as a copy
@@ -40,7 +40,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
   let binary op = set (Binary (op, value 0, value 1)) in
   let unary op = set (Unary (op, value 0)) in
   let call ?result intrinsic arguments =
-    let result = match result with Some place -> Lir.Returned place | None -> Discarded in
+    let result = match result with Some place -> Lowered.Returned place | None -> Discarded in
     emit builder (Call { target = Intrinsic intrinsic; arguments; result })
   in
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
@@ -50,8 +50,8 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
     Memory_layout.of_type env
       (match element_type with Some element -> element | None -> element ())
   in
-  let length storage = Lir.Copy (Storage.length storage) in
-  let view_length view = Lir.Copy (Storage.view_length view) in
+  let length storage = Lowered.Copy (Storage.length storage) in
+  let view_length view = Lowered.Copy (Storage.view_length view) in
   let element_at = Storage.at in
   (* Ends the run with a panic where [failed] holds. *)
   let panic_when failed message =
@@ -117,14 +117,14 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
      that is undefined in C, or gives a wrong value, where its precondition
      does not hold. These are the only checks: no [requires] clause is
      evaluated when a program runs. *)
-  let panic_if (failed : Lir.rvalue) message =
+  let panic_if (failed : Lowered.rvalue) message =
     (* A comparison's value where its operands decide it: two
        constants, or an unsigned value and zero. Such a comparison is not
        written. GCC reports a comparison of an unsigned value with zero
        that always or never holds, and the tests compile the C with every
        warning an error. *)
     let decided =
-      let unsigned_zero : Lir.operand -> bool = function
+      let unsigned_zero : Lowered.operand -> bool = function
         | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64 | USize), zero)) -> Z.sign zero = 0
         | _ -> false
       in
@@ -167,7 +167,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
   in
   (* How many more elements a storage has room for. A static storage has a
      capacity below its length, and has none. *)
-  let room storage : Lir.operand =
+  let room storage : Lowered.operand =
     let room = local builder ~name:"room" (Value types.usize) in
     let any = local builder (Raw Bool) in
     emit builder (Assign (at room, Use (usize 0)));
@@ -249,7 +249,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
       let byte : Ground.ty = Named { path = Intrinsic.builtin_path UInt8; arguments = [] } in
       (* A number of the C library's headers, with the value this system
          gives it. *)
-      let number_constant number : Lir.operand =
+      let number_constant number : Lowered.operand =
         let integer =
           match
             scalar env
@@ -365,7 +365,9 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           (match (integer_argument (), scalar env (type_argument 1)) with
           | Some integer, Integer amount ->
               let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
-              let constant number : Lir.operand = Constant (Integer (amount, Z.of_int number)) in
+              let constant number : Lowered.operand =
+                Constant (Integer (amount, Z.of_int number))
+              in
               (match amount with
               | Int8 | Int16 | Int32 | Int64 | ISize ->
                   panic_if (Binary (Less, value 1, constant 0)) "shift amount out of range"
@@ -377,22 +379,22 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           (* Whether a value of [Source] fits [Target]: a test of each bound of
          [Target] that [Source] can pass, each of which [Source] can hold. *)
           let target = Memory_layout.target env in
-          let fits () : Lir.rvalue =
+          let fits () : Lowered.rvalue =
             match (scalar env (type_argument 0), scalar env (type_argument 1)) with
             | Integer source, Integer target_integer -> (
                 let source_low, source_high = Memory_layout.integer_range target source in
                 let low, high = Memory_layout.integer_range target target_integer in
-                let constant value = Lir.Constant (Integer (source, value)) in
+                let constant value = Lowered.Constant (Integer (source, value)) in
                 let tests =
-                  (if Z.lt source_low low then [ (Lir.Greater_equal, low) ] else [])
-                  @ if Z.gt source_high high then [ (Lir.Less_equal, high) ] else []
+                  (if Z.lt source_low low then [ (Lowered.Greater_equal, low) ] else [])
+                  @ if Z.gt source_high high then [ (Lowered.Less_equal, high) ] else []
                 in
                 let results =
                   List.map
                     (fun (op, bound) ->
                       let result = local builder (Raw Bool) in
                       emit builder (Assign (at result, Binary (op, value 0, constant bound)));
-                      Lir.Copy (at result))
+                      Lowered.Copy (at result))
                     tests
                 in
                 match results with
@@ -417,7 +419,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                       && Z.equal (Z.of_float (Z.to_float bound)) bound
                   | _ -> Z.equal (Z.of_float (Z.to_float bound)) bound
                 in
-                let constant bound : Lir.operand =
+                let constant bound : Lowered.operand =
                   match source with
                   | Float32 -> Constant (Float32 (Int32.bits_of_float (Z.to_float bound)))
                   | _ -> Constant (Float64 (Int64.bits_of_float (Z.to_float bound)))
@@ -643,7 +645,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                 arguments = [ Type (element ()); Value count ];
               }
           in
-          let elements : Lir.operand =
+          let elements : Lowered.operand =
             if Memory_layout.has_zero_size env array_ty then Constant (Bytes "")
             else Address { place = read (argument 0) / Index (usize 0); writable = false }
           in
@@ -676,7 +678,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                     | [ count ] -> count
                     | _ -> bug "array_take_view without the array's length"
                   in
-                  (owner / Index from, Lir.Constant (Integer (USize, count)))
+                  (owner / Index from, Lowered.Constant (Integer (USize, count)))
             in
             let message = "a view taken back is not of these elements" in
             let stop = usize_local "stop" in
@@ -855,7 +857,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           in
           let call_arguments =
             List.map
-              (fun (_, (passes : Libc.passes)) : Lir.operand ->
+              (fun (_, (passes : Libc.passes)) : Lowered.operand ->
                 match passes with
                 | Value _ -> value (next_argument ())
                 | Elements _ -> Copy (Storage.view_elements (place (argument (next_argument ()))))
@@ -920,12 +922,12 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                   | Always _ | Fixed _ -> [])
                 parameters
             in
-            let as_usize operand : Lir.operand =
+            let as_usize operand : Lowered.operand =
               let count = usize_local "count" in
               emit builder (Assign (at count, Convert (operand, Integer USize)));
               Copy (at count)
             in
-            let counted (extent : Libc.extent) : Lir.operand option =
+            let counted (extent : Libc.extent) : Lowered.operand option =
               match extent with
               | Counted { by; each } -> (
                   match List.find_opt (fun (name, _, _) -> name = by) passed with
@@ -970,7 +972,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                         let message =
                           "a call of the C library with text that does not end with a zero"
                         in
-                        let zero : Lir.operand =
+                        let zero : Lowered.operand =
                           match scalar env (ground element) with
                           | Integer integer -> Constant (Integer (integer, Z.zero))
                           | _ -> bug "a C library row reads up to a zero that is not an integer"
@@ -985,7 +987,9 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                 | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
               passed
           end;
-          let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).system function_) in
+          let target =
+            Lowered.Foreign (Libc.declaration (Memory_layout.target env).system function_)
+          in
           (* A call that can block is bracketed, so that the runtime knows
              the thread is blocked while it lasts. *)
           let bracket intrinsic =

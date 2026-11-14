@@ -10,7 +10,7 @@
 (* A valid program stage0 cannot lower yet: the construct, and its position
    if one is known. It is not a compiler bug: the driver reports it as a
    limit of stage0. *)
-type unsupported = { construct : string; at : Lir.site option }
+type unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
@@ -25,7 +25,7 @@ val monomorphic : context -> Monomorphic.context
 val context :
   ?checks:bool ->
   cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
-  constant:(context -> Path.t -> Lir.static_value option) ->
+  constant:(context -> Path.t -> Lowered.static_value option) ->
   Query.context ->
   Memory_layout.target ->
   context
@@ -42,7 +42,7 @@ val instance : context -> Instance.key -> Emit_c.Builder.instance
    strings, lists, and arrays of parts that fold. Otherwise the type of the
    value its [Evaluator] computes. Folding gives exactly the result running
    would, and anything it does not know is run. *)
-type constant = Folded of Lir.data | Run of Ground.ty
+type constant = Folded of Lowered.data | Run of Ground.ty
 
 val constant : context -> Path.t -> constant
 
@@ -66,14 +66,14 @@ type pulled = {
 val pulled : context -> Ground.yielding -> pulled
 
 (* A capability [impl]'s table of entries. *)
-val table : context -> Instance.key -> Lir.table
+val table : context -> Instance.key -> Lowered.table
 
 (* The table of an [any] value of a type and trait. *)
-val any_table : context -> Instance.key -> Lir.table
+val any_table : context -> Instance.key -> Lowered.table
 
 (* A capability's locking table, whose entries lock a mutex around the
    implementation's entries. *)
-val locked_table : context -> Instance.key -> capability:Path.t -> Lir.table
+val locked_table : context -> Instance.key -> capability:Path.t -> Lowered.table
 
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key
@@ -97,6 +97,6 @@ val call_evaluation :
   context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Emit_c.Builder.instance
 
 module For_testing : sig
-  val constant_value : context -> Path.t -> Lir.static_value option
+  val constant_value : context -> Path.t -> Lowered.static_value option
   (** Another constant's value, where it folds. *)
 end

@@ -49,8 +49,8 @@ let () =
                ])));
   test "a call that writes its result to a place it is also given is a bug" (fun () ->
       let quad = named "Quad" in
-      let pointer writable = Lir.Pointer { target = value quad; writable } in
-      let swapped : Lir.statement =
+      let pointer writable = Lowered.Pointer { target = value quad; writable } in
+      let swapped : Lowered.statement =
         Call
           {
             target =
@@ -70,7 +70,7 @@ let () =
             (shape_env ~extra:[ ("Quad", four) ] ())
             (entry [ local (value quad) ] [ block [ swapped ] (Return (Some (constant_int32 0))) ])));
   test "a move out of a constant's static data is a bug" (fun () ->
-      let constant : Lir.place =
+      let constant : Lowered.place =
         { root = Static { key = Constant (definition "words"); ty = text }; projections = [] }
       in
       expect_bug ~saying:"a move out of test::words, which is static data" (fun () ->

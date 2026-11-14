@@ -19,8 +19,8 @@ let glue ?(extra = []) () =
    local [target], using local [buffer]. *)
 let fill_storage ~target ~buffer values =
   let count = List.length values in
-  let usize_constant number = Lir.Constant (Integer (USize, Z.of_int number)) in
-  Lir.Call
+  let usize_constant number = Lowered.Constant (Integer (USize, Z.of_int number)) in
+  Lowered.Call
     {
       target = Intrinsic Allocate;
       arguments = [ usize_constant (4 * count); usize_constant 4 ];
@@ -28,7 +28,7 @@ let fill_storage ~target ~buffer values =
     }
   :: List.mapi
        (fun index value ->
-         Lir.Assign
+         Lowered.Assign
            (at ~projections:[ Index (usize_constant index) ] buffer, Use (constant_int32 value)))
        values
   @ [
@@ -48,7 +48,7 @@ let fill_storage ~target ~buffer values =
     ]
 
 let copy_call glue ty ~destination ~source =
-  Lir.Call
+  Lowered.Call
     {
       target =
         Direct
@@ -156,7 +156,7 @@ let () =
   test "a copy of storage of storage copies every element and both drop cleanly" (fun () ->
       let inner = storage int32 in
       let outer = storage inner in
-      let usize_constant number = Lir.Constant (Integer (USize, Z.of_int number)) in
+      let usize_constant number = Lowered.Constant (Integer (USize, Z.of_int number)) in
       expect_status 4
         [
           printed (Glue.copy glue outer);

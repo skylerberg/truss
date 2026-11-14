@@ -12,9 +12,9 @@ let static_name context =
 (* A static value as a C initializer, or [None] for a value of zero size.
    Storage elements and the blocks of [indirect] variants become static
    objects of their own, defined before the data that points at them. *)
-let rec initializer_c context ty (value : Lir.static_value) : string option =
+let rec initializer_c context ty (value : Lowered.static_value) : string option =
   let layout = layout context ty in
-  let fields_c (fields : Memory_layout.field list) (values : (string * Lir.static_value) list)
+  let fields_c (fields : Memory_layout.field list) (values : (string * Lowered.static_value) list)
       prefix =
     String.concat ", "
       (List.filter_map
@@ -118,7 +118,7 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
         end
   | _ -> bug "static data that does not fit %s" (Ground.to_string ty)
 
-let table_c context (table : Lir.table) =
+let table_c context (table : Lowered.table) =
   let entries =
     List.map
       (fun (key, signature) ->
@@ -132,7 +132,7 @@ let table_c context (table : Lir.table) =
     (max 1 (List.length entries))
     (if entries = [] then "0" else String.concat ", " entries)
 
-let data_c context (data : Lir.data) =
+let data_c context (data : Lowered.data) =
   let symbol = Instance.symbol data.data_key in
   match initializer_c context data.ty data.value with
   | None -> ""

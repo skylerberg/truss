@@ -81,7 +81,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
                arguments = [ Copy (at evidence); Constant (Integer (Int32, Z.of_int position)) ];
                result = Returned (at outer);
              });
-        (capability, Lir.Copy (at outer)))
+        (capability, Lowered.Copy (at outer)))
       captured;
   let self_mode : Types.mode =
     match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
@@ -93,7 +93,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
-      ((self_mode, self_ty, { Lir.root = Local implementation; projections = [ Deref ] })
+      ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
   finish_function st
@@ -112,7 +112,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
    implementation by several tasks are mutually exclusive. *)
 let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder.instance =
   let slot, capability_signature = capability_method context capability name in
-  let lir_signature, result = entry_signature context capability_signature in
+  let c_signature, result = entry_signature context capability_signature in
   let st = generated_state context ~key ~anchor:capability ~substitution:[] in
   let builder = st.builder in
   let evidence = local builder ~name:"evidence" Convention.evidence in
@@ -125,7 +125,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
       capability_signature.parameters
   in
   start builder (block builder);
-  let outer index : Lir.operand =
+  let outer index : Lowered.operand =
     let outer = local builder Convention.evidence in
     emit builder
       (Call
@@ -174,7 +174,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
     (Call
        {
          target =
-           Evidence_call { evidence = implementation; capability; slot; signature = lir_signature };
+           Evidence_call { evidence = implementation; capability; slot; signature = c_signature };
          arguments =
            List.filter_map (fun ((_, place), mode, ty) -> pass st mode ty place) parameter_places;
          result = Convention.destination result (passed_on st result_ty);
@@ -189,7 +189,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
 
 (* A capability's locking table: a locking entry for each of the
    capability's methods, in the capability's order. *)
-let locked_table context (key : Instance.key) ~capability : Lir.table =
+let locked_table context (key : Instance.key) ~capability : Lowered.table =
   let interface =
     match demand context Environment.trait_interface capability with
     | Some interface -> interface
@@ -208,7 +208,7 @@ let locked_table context (key : Instance.key) ~capability : Lir.table =
 
 (* A capability [impl]'s table: an entry for each of the capability's
    methods, in the capability's order. *)
-let table context (key : Instance.key) : Lir.table =
+let table context (key : Instance.key) : Lowered.table =
   match key with
   | Table { impl; type_arguments } ->
       let interface, capability, _ = impl_capability context impl in
@@ -280,7 +280,7 @@ let real_implementations st ~user capabilities =
               (Ground.path_name capability)
       in
       let implementation =
-        if is_zero_size st ty then Lir.Constant Null
+        if is_zero_size st ty then Lowered.Constant Null
         else begin
           let value = binding st ty in
           let constructor : Path.t =
@@ -458,7 +458,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
-      ((self_mode, self_ty, { Lir.root = Local typed; projections = [ Deref ] })
+      ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
   finish_function st
@@ -470,7 +470,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
 
 (* An [any] table: the type's drop in slot 0, then an entry for each method
    that can be called through [any]. *)
-let any_table context (key : Instance.key) : Lir.table =
+let any_table context (key : Instance.key) : Lowered.table =
   match key with
   | Any_table { impl; type_arguments } ->
       let interface = impl_interface context impl in
@@ -478,7 +478,7 @@ let any_table context (key : Instance.key) : Lir.table =
       let substitution = bind interface.impl_generics type_arguments in
       let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
       let any = Types.substitute_trait substitution interface.implements in
-      let drop_signature : Lir.signature =
+      let drop_signature : Lowered.signature =
         { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true }
       in
       let entries =

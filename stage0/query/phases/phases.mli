@@ -32,7 +32,7 @@ val diagnostics : Query.phase
 (** Every stage's diagnostics for a file *)
 
 val lowering : Query.phase
-(** Each instance's LIR *)
+(** Each instance's C *)
 
 val linking : Query.phase
 (** Each instance's references, and the hash of its own code *)

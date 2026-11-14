@@ -143,7 +143,7 @@ let bytes_definition (text, name) =
     (max 1 (String.length text))
     (if bytes = [] then "0" else String.concat ", " bytes)
 
-type compiled = Code of Builder.instance | Data of Lir.data | Table of Lir.table
+type compiled = Code of Builder.instance | Data of Lowered.data | Table of Lowered.table
 
 let fragment env (compiled : compiled) =
   let key, context =
