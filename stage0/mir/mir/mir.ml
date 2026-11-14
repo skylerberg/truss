@@ -2275,12 +2275,6 @@ and of_definition (definition : Core.definition) =
       { body = finished; lambdas = Array.of_list (List.rev !(b.lambdas)) })
     code
 
-let of_path =
-  Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->
-      Option.bind (Query.demand database Infer.core_of_path path)
-        (fun ((form : Core.t), substitution) ->
-          Option.map (fun mir -> (mir, substitution)) (of_definition form.definition)))
-
 let mir =
   Query.query ~name:"mir" ~phase:Phases.bodies ~show:Resolve.Names.show_key (fun database key ->
       match
@@ -2294,6 +2288,17 @@ let mir =
               None
           | _ -> of_definition form.definition)
       | _ -> None)
+
+let of_path =
+  Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->
+      Option.bind (Query.demand database Infer.form_origin path) (fun (origin, substitution) ->
+          Option.map
+            (fun mir -> (mir, substitution))
+            (match origin with
+            | Infer.Written key | Inherited key -> Query.demand database mir key
+            | Generated ->
+                Option.bind (Query.demand database Infer.derived path) (fun (form : Core.t) ->
+                    of_definition form.definition))))
 
 let of_constant =
   Query.query ~name:"mir_of_constant" ~phase:Phases.bodies ~show:Path.show (fun database path ->

@@ -1327,8 +1327,6 @@ let source_of database (key : Names.key) core =
 let source_at_key database key =
   Option.map (source_of database key) (Query.demand database Infer.core key)
 
-type form_origin = Written | Derived | Provided
-
 (* The form of a function or a method by its path, with the substitution it
    is read under: the [impl]'s, for the form of the trait's method that the
    [impl] leaves to it. A caller reads its callee's specification, which
@@ -1342,29 +1340,18 @@ let source_at ?reading_package database (path : Path.t) =
     | Some package when package <> Path.package path -> Infer.exported_specification_of_path
     | _ -> Infer.specification_of_path
   in
-  match Query.demand database specification path with
-  | None -> None
-  | Some (core, substitution) -> (
-      if Option.is_some (Query.demand database Infer.derived path) then
-        Some
-          ( { key = None; name = Path.show path; core; spans = lazy [||]; text = lazy "" },
-            substitution,
-            Derived )
-      else
-        let own_key =
-          Option.bind (Query.demand database Interface.Summary.key path) (fun key ->
-              Option.map (fun _ -> key) (Query.demand database Infer.core key))
-        in
-        match (own_key, path) with
-        | Some key, _ -> Some (source_of database key core, substitution, Written)
-        | None, Method { owner; name; receiver } ->
-            Option.bind (Interface.Impls.impl_interface database owner)
-              (fun (impl : Types.impl_interface) ->
-                Option.map
-                  (fun key -> (source_of database key core, substitution, Provided))
-                  (Query.demand database Interface.Summary.key
-                     (Method { owner = impl.implements.trait; name; receiver })))
-        | None, _ -> None)
+  match
+    (Query.demand database specification path, Query.demand database Infer.form_origin path)
+  with
+  | Some (core, substitution), Some (origin, _) ->
+      let source =
+        match origin with
+        | Written key | Inherited key -> source_of database key core
+        | Generated ->
+            { key = None; name = Path.show path; core; spans = lazy [||]; text = lazy "" }
+      in
+      Some (source, substitution, origin)
+  | _ -> None
 
 (* The substitution a trait's clauses and laws are read with for a type: [Self] the
    type, and each of the trait's parameters its argument. *)
@@ -1581,13 +1568,13 @@ let method_contract ?reading_package database (trait : Types.trait_reference) na
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match source_at ?reading_package database path with
-      | Some (callee, _, (Written | Derived)) ->
+      | Some (callee, _, (Written _ | Generated)) ->
           Option.map
             (fun own ->
               make_contract database path ~own ~others:(Option.to_list trait_side)
                 ~body:(body_of callee))
             (part_of callee)
-      | Some (_, _, Provided) | None ->
+      | Some (_, _, Inherited _) | None ->
           (* A method the [impl] leaves to its trait: the trait's clauses and
              default body, with the [impl]'s signature for the method. *)
           Option.map
@@ -9826,7 +9813,8 @@ let calls_of (body : Mir.body) =
 (* The MIR of a body that runs. A function for specifications only, and a
    proof, never runs, so it has no MIR, and is read from its core form, as
    ghost code is. *)
-let mir_of (source : source) ~runs = if runs then Mir.of_definition source.core.definition else None
+let mir_of database (source : source) ~runs =
+  if runs then Query.demand database Mir.mir (home source) else None
 
 (* The blocks a set of blocks reaches, the set included, without entering
    [avoid]. *)
@@ -10764,7 +10752,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
     promised;
   let finished =
     match
-      mir_of source
+      mir_of database source
         ~runs:
           ((not proof)
           &&
@@ -11039,7 +11027,7 @@ let test database (source : source) ~path =
   let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Test body -> (
-      match mir_of source ~runs:true with
+      match mir_of database source ~runs:true with
       | Some (mir : Mir.t) -> mir_run context (empty_frame source) ~lambdas:mir.lambdas mir.body
       | None -> ignore (block_value context (empty_frame source) body))
   | _ -> ());

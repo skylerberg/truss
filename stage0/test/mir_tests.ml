@@ -699,6 +699,42 @@ let () =
                  (statements mir.body))
           then fail "the lambda value does not capture g's offset"
       | lambdas -> fail "%d lambdas" (Array.length lambdas));
+  test "a method an impl inherits shares its trait's default method's MIR" (fun () ->
+      let database =
+        setup [ ("app::main", Fixtures.Mir.method_an_impl_inherits_shares_its_traits_default) ]
+      in
+      let module_ = module_of "app::main" in
+      let method_of owner name : Path.t = Method { owner; name; receiver = Read } in
+      let impl_for type_name : Path.t =
+        Impl { module_; trait = "Shape"; for_type = { type_name; generics = [] } }
+      in
+      let by_path path =
+        match Query.demand database Mir.of_path path with
+        | Some (mir, _) -> mir
+        | None -> failwith (Path.show path ^ " has no MIR")
+      in
+      let default_method = method_of (Top { module_; name = "Shape" }) "doubled" in
+      let default_mir =
+        match
+          Option.bind (Query.demand database Interface.Summary.key default_method) (mir_of database)
+        with
+        | Some mir -> mir
+        | None -> failwith "the default method has no MIR"
+      in
+      (* Physical equality: the inherited methods hold the default method's MIR itself, not a
+         MIR built again for each [impl]. *)
+      List.iter
+        (fun type_name ->
+          if by_path (method_of (impl_for type_name) "doubled") != default_mir then
+            fail "`%s` has a MIR of its own for the method it inherits" type_name)
+        [ "Square"; "Cube" ];
+      if by_path default_method != default_mir then
+        fail "the default method's MIR by its path is not its definition's";
+      (* A method an [impl] writes has its own definition's MIR. *)
+      if
+        by_path (method_of (impl_for "Square") "side")
+        == by_path (method_of (impl_for "Cube") "side")
+      then fail "two written methods share one MIR");
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
       let blocks = mir.body.blocks in

@@ -291,19 +291,18 @@ val block_successors : body -> block -> block list
 (** The blocks control goes to from the end of a block: its terminator's {!successors}, and, for the
     end of an iteration, the loop's next iteration and the block after the loop. *)
 
-val of_definition : Core.definition -> t option
-(** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. *)
-
-val of_path : (Path.t, (t * Types.substitution) option) Query.query
-(** The MIR of the function or method at a path that has code to run, with the substitution to apply
-    to it, as [Infer.core_of_path] gives the core form: a method of a derived [impl], or one that an
-    [impl] inherits from its trait, has the MIR of its generated or inherited core form. *)
-
 val of_expression : ?parameters:Core.parameter list -> Core.expression -> t
 
 val mir : (Resolve.Names.key, t option) Query.query
-(** The MIR of a definition whose code runs. The body of a function for specifications only never
-    runs, so it has none. *)
+(** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. It is built
+    once for the definition. The body of a function for specifications only never runs, so it has
+    none. *)
+
+val of_path : (Path.t, (t * Types.substitution) option) Query.query
+(** The MIR of the function or method at a path that has code to run, with the substitution to apply
+    to it, as [Infer.form_origin] gives it. A written method has its definition's {!mir}, and so
+    does a method that an [impl] inherits from its trait: the default method's, which every such
+    [impl] shares. A method of a derived [impl] has the MIR of its generated core form. *)
 
 val of_constant : (Path.t, t option) Query.query
 (** The MIR of a constant's value: a body that returns it. *)

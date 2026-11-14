@@ -186,8 +186,6 @@ and open_axiom = {
 val quote : source -> int -> string
 val source_at_key : Query.context -> Names.key -> source option
 
-type form_origin = Written | Derived | Provided
-
 val law_proofs :
   Query.context ->
   Path.package ->

@@ -64,14 +64,23 @@ val derived : (Path.t, Core.t option) Query.query
 val core : (Resolve.Names.key, Core.t option) Query.query
 (** The core form of a definition. [None] if the definition has an error. *)
 
-val core_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
-(** The core form of the function or method at a path, with a substitution to apply to it.
+(** Where the core form of a function or a method comes from. *)
+type form_origin =
+  | Written of Resolve.Names.key  (** Its own definition. *)
+  | Generated  (** No definition: {!derived} generates it for a method of a derived [impl]. *)
+  | Inherited of Resolve.Names.key
+      (** The trait's default method, which the method's [impl] inherits. *)
 
-    - A function or method with a written body: its own core form, and the empty substitution.
-    - A method of a derived [impl]: the generated core form, and the empty substitution.
-    - A method that an [impl] inherits from its trait: the core form of the trait's default method,
-      and the substitution that maps [Self] and the trait's generic parameters to the [impl]'s
-      types. *)
+val form_origin : (Path.t, (form_origin * Types.substitution) option) Query.query
+(** The origin of the core form of the function or method at a path, with the substitution to apply
+    to that form: empty, but for an inherited method, where it maps [Self] and the trait's generic
+    parameters to the [impl]'s types. [None] where the definition has an error. Editing a body
+    leaves this result equal, and a result derived from a definition, such as its MIR, is computed
+    once for the definition and shared by every path that inherits it. *)
+
+val core_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
+(** The core form of the function or method at a path, with the substitution {!form_origin} gives.
+*)
 
 val specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
 (** As {!core_of_path}, for {!specification}. *)
