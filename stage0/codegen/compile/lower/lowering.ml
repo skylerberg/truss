@@ -75,6 +75,12 @@ and mir_frame = {
   lending : lending option;  (** In a lending method, its trailing parameters *)
   called_parts : Mir.local list;  (** The parts that calls of lending methods lend *)
   lent_calls : (Mir.local, lent_call) Hashtbl.t;  (** The call that lends each of [called_parts] *)
+  placed_parts : (Mir.local, unit) Hashtbl.t;
+      (** Those of [called_parts] that were lowered with no call: the callee only forwards to an
+          intrinsic, which gives the part's place *)
+  mutable forwarded_locals : int;
+      (** How many locals the body has been given for the values that forwarding methods compute.
+          They are numbered below zero, so that none is a local of the MIR. *)
   ended_after_lend : Mir.local list;
       (** The locals that end after a lending method has lent its part. The part of a lending call
           among them may still be lent then, and the method may forward it. *)

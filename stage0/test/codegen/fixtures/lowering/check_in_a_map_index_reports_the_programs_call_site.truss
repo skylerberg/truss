@@ -1,0 +1,4 @@
+test "an index of a map by a key that it does not hold" {
+  let counts: Map[Int64, Int64] = [1: 2]
+  let _ = counts[5]
+}

@@ -235,6 +235,8 @@ let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list o
           | Lend { part; _ } -> [ part ]
           | _ -> []);
     lent_calls = Hashtbl.create 4;
+    placed_parts = Hashtbl.create 4;
+    forwarded_locals = 0;
     ended_after_lend = statements_where (fun block -> after_lend.(block)) Moves.ended_by;
     after_lend;
     block = 0;
@@ -1095,6 +1097,30 @@ let emit_mark st (intrinsic : Lowered.intrinsic) (call : lent_call) =
          result = Discarded;
        })
 
+(* The calls that a lending call stands for, where its callee is a method
+   of the standard library that only forwards to another lending call, as
+   [List.at] forwards to the intrinsic that gives an element's place. The
+   caller then makes the inner calls itself. The standard library changes
+   only with the toolchain, so the caller's code still depends on no body
+   that an edit changes. A value that the method computes first has
+   nothing to drop, as a view has: the caller ends no scope for it. *)
+let forwarded_call st (call : Mir.call) : Forwarded.t option =
+  match resolve_callee st call.callee with
+  | Some (path, type_arguments) when Path.package path = Path.standard_package ->
+      let frame = mir st in
+      let fresh () =
+        frame.forwarded_locals <- frame.forwarded_locals + 1;
+        -frame.forwarded_locals
+      in
+      let code = code_of st.context path type_arguments in
+      Option.bind
+        (Forwarded.call ~substitution:code.substitution ~fresh (mir_of st.context path) call)
+        (fun (forwarded : Forwarded.t) ->
+          if List.for_all (fun (_, type_, _) -> trivial st (ground st type_)) forwarded.setup then
+            Some forwarded
+          else None)
+  | _ -> None
+
 (* Whether the block being lowered ends where the method lends [part]
    whole: the method forwards the part of a lending call as its own. *)
 let is_forwarded_whole (frame : mir_frame) part =
@@ -1279,7 +1305,7 @@ and lower_statement st (statement : Mir.statement) =
    the caller's record and runs when the method's lend ends. *)
 and dead st local =
   let frame = mir st in
-  if List.mem local frame.called_parts then
+  if List.mem local frame.called_parts && not (Hashtbl.mem frame.placed_parts local) then
     emit_mark st
       (if frame.after_lend.(frame.block) then Lend_transfer else Lend_release)
       (lent_call st local)
@@ -1696,9 +1722,10 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
     st.frame <- caller
   end
 
-and lend st part (call : Mir.call) ~origin =
-  match call.callee with
-  | Intrinsic { operation; type_arguments } ->
+and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
+  match (call.callee, if forwards < 8 then forwarded_call st call else None) with
+  | Intrinsic { operation; type_arguments }, _ ->
+      Hashtbl.replace (mir st).placed_parts part ();
       in_statement st (fun () ->
           match
             intrinsic st operation ~type_arguments call.arguments ~destination:None
@@ -1706,7 +1733,15 @@ and lend st part (call : Mir.call) ~origin =
           with
           | Some place -> bind_local st part place
           | None -> bug "a lent place from an intrinsic that does not lend")
-  | callee ->
+  | _, Some { setup; call = inner } ->
+      List.iter
+        (fun (local, type_, (computing : Mir.call)) ->
+          let destination = held st (Value (ground st type_)) in
+          Hashtbl.replace (mir st).places local destination;
+          call_into st computing destination ~origin)
+        setup;
+      lend ~forwards:(forwards + 1) st part inner ~origin
+  | callee, None ->
       let frame = mir st in
       let lent = lent_call st part in
       (* The callee's trailing arguments, for a part of the type [part_ty].
