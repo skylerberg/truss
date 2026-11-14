@@ -38,6 +38,12 @@ and mir_frame = {
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
+  lent_slot : (Lowered.place * Ground.ty) option;
+      (** In a lending method compiled as a function, the slot of the caller's where the method
+          builds a part that is not a place of its parameters, and the part's type *)
+  called_lends : (Mir.local, bool) Hashtbl.t;
+      (** Each part that a call of a lending function lends, and whether that call was given
+          [lent_slot] as its own slot *)
 }
 
 type task = { id : Core.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }

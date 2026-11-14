@@ -152,8 +152,20 @@ let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
   let parameter_locals, places = begin_body st ~body in
-  Mir_form.lower_code st path ~parameters:places;
-  finish_instance st ~returns ~rest:parameter_locals ()
+  (* A lending method's slot is its last parameter. *)
+  let slot =
+    match (lent_slot context code.substitution code.result, code.result) with
+    | Some pointer, Lends (_, ty) -> Some (local st.builder ~name:"lent" pointer, ground st ty)
+    | _ -> None
+  in
+  Mir_form.lower_code st path ~parameters:places
+    ?lent_slot:
+      (Option.map
+         (fun (pointer, ty) : (Lowered.place * Ground.ty) ->
+           ({ root = Local pointer; projections = [ Deref ] }, ty))
+         slot)
+    ();
+  finish_instance st ~returns ~rest:(parameter_locals @ Option.to_list (Option.map fst slot)) ()
 
 let instance context (key : Instance.key) : Emit_c.Builder.instance =
   match key with

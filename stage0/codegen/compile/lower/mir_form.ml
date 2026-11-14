@@ -136,7 +136,7 @@ let variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list
         variants
   | Scalar _ | Array _ -> bug "the fields of %s, which has none" (Ground.to_string ty)
 
-let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~lambdas
+let frame_of_body st ?owner ?returns_into ?lent_slot ?(passed : Ground.mode list option) ~lambdas
     (body : Mir.body) : mir_frame =
   (* How each parameter is passed, where it is not as its binding says: a
      lambda's parameters are patterns, and its function type says how each
@@ -201,7 +201,109 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
           (path, at (local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool))))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
+    lent_slot;
+    called_lends = Hashtbl.create 1;
   }
+
+(* Where the bits of a place of a lending method's body are stored, for as
+   long as the method's part is lent. *)
+type lent_storage =
+  | Outside
+      (** In storage that outlives the method's call: a part of a parameter that the method borrows,
+          or of a constant, or a value that owns nothing and views only such storage. *)
+  | Frame_slot
+      (** In a slot of the method's frame, where a lending function that the method called built its
+          part from storage that is [Outside]. Its bits can be copied out. *)
+  | Owned  (** In a value that the method owns, which it drops where it returns. *)
+
+(* Where a place of a body is stored, through every binding of it.
+   [is_trivial] says whether a type has nothing to drop, [is_view] whether
+   it holds a view, and [in_frame_slot] whether a lent part may be in a slot
+   of this frame. *)
+let lent_storage ~(is_trivial : Types.ty -> bool) ~(is_view : Types.ty -> bool)
+    ~(in_frame_slot : Mir.local -> bool) (body : Mir.body) (place : Mir.place) : lent_storage =
+  let operand_source (operand : Mir.operand) : Mir.place option list =
+    match operand with
+    | Borrow { place; _ } | Use { place; _ } | Take { place; _ } -> [ Some place ]
+    | Constant _ -> []
+  in
+  (* A call's result views only what its borrowed arguments view. *)
+  let argument_sources (call : Mir.call) =
+    List.concat_map
+      (function
+        | Mir.Passed { mode = Read | Mut; value; _ } -> operand_source value
+        | Passed _ | Default -> [])
+      call.arguments
+  in
+  (* The places whose bits a local holds or views, in every statement that
+     gives it a value. [None] is a value that the body made and owns. *)
+  let sources local : Mir.place option list option =
+    let owns_nothing = is_trivial body.locals.(local).type_ in
+    let made = if owns_nothing then [] else [ None ] in
+    Array.fold_left
+      (fun sources (block : Mir.basic_block) ->
+        List.fold_left
+          (fun sources (statement : Mir.statement) ->
+            let add found = Some (found @ Option.value sources ~default:[]) in
+            let is_local (target : Mir.place) = target = { root = Local local; projections = [] } in
+            match statement.kind with
+            | Assign { target; value; _ } when is_local target -> (
+                match value with
+                | Operand operand -> add (operand_source operand)
+                | Construct { fields; _ } ->
+                    add
+                      (List.concat_map
+                         (fun (_, field) ->
+                           match (field : Mir.operand option) with
+                           | Some operand -> operand_source operand
+                           | None -> made)
+                         fields)
+                | _ -> add made)
+            | Lend { part; call } when part = local -> add (argument_sources call)
+            | Call { destination = Some target; call } when is_local target ->
+                add (if owns_nothing then argument_sources call else made)
+            | Slice { destination; base; call } when is_local destination ->
+                add (Some base :: argument_sources call)
+            | Template { destination; _ } when is_local destination -> add made
+            | _ -> sources)
+          sources block.statements)
+      None body.blocks
+  in
+  let worst first second =
+    match (first, second) with
+    | Owned, _ | _, Owned -> Owned
+    | Frame_slot, _ | _, Frame_slot -> Frame_slot
+    | Outside, Outside -> Outside
+  in
+  let rec storage seen (place : Mir.place) =
+    match place.root with
+    | Constant _ -> Outside
+    | Local local when List.mem local seen -> Outside
+    | Local local -> (
+        let info = body.locals.(local) in
+        let is_parameter = List.mem local body.parameters in
+        match info.kind with
+        (* A value with nothing to drop that holds no view is its own bits. *)
+        | _ when is_trivial info.type_ && not (is_view info.type_) -> Outside
+        | Source { mode = Read | Mut; _ } when is_parameter -> Outside
+        (* A view that is passed whole views the caller's storage. *)
+        | Source { mode = Own; _ } when is_parameter ->
+            if is_trivial info.type_ then Outside else Owned
+        | Source { mode = Own; _ } when not (is_trivial info.type_) -> Owned
+        | Lent _ when in_frame_slot local -> Frame_slot
+        | Source _ | Temporary | Lent _ -> (
+            match sources local with
+            | None -> Owned
+            | Some sources ->
+                List.fold_left
+                  (fun found source ->
+                    worst found
+                      (match source with
+                      | Some source -> storage (local :: seen) source
+                      | None -> Owned))
+                  Outside sources))
+  in
+  storage [] place
 
 (* Writes [build] for each variant that the value at [source], of type
    [ty], may have, with the variant's fields: once for a record, and for a
@@ -1723,10 +1825,131 @@ and lend st part (call : Mir.call) ~origin =
       (* A lending method runs inside the statement that calls it, so its
          code is inlined there. The inlining of a lending method that
          calls itself would not end. *)
-      match inlinable st callee with
-      | Some { path; _ } when List.exists (Path.equal path) st.frame.inlined ->
-          unsupported ~at:(site_of st origin) "a lending method that calls itself"
+      match resolve_callee st callee with
+      | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
+          lend_by_call st part call ~path ~type_arguments
       | _ -> bug "a lending call that is not inlined")
+
+(* A call of a lending method that is compiled as a function, which a
+   method that calls itself is. The method returns a pointer to its part.
+   A part that it builds, it builds in the slot it is passed, which lasts
+   as long as this frame. A lending function passes on its own slot where
+   the part's type is the same, so that it can lend the part on. *)
+and lend_by_call st part (call : Mir.call) ~path ~type_arguments =
+  let frame = mir st in
+  let signature = signature_of st.context path in
+  let substitution = bind signature.generics type_arguments in
+  let mode, part_ty =
+    match signature.output with
+    | Lends (mode, ty) -> (mode, Monomorphic.ground st.context.monomorphic substitution ty)
+    | Returns _ -> bug "%s does not lend" (Path.show path)
+  in
+  let arguments, mask = evaluate_arguments st signature substitution call.arguments in
+  let own_slot =
+    match frame.lent_slot with
+    | Some (slot, ty) when Ground.compare ty part_ty = 0 -> Some slot
+    | _ -> None
+  in
+  let slot =
+    match own_slot with Some slot -> slot | None -> held st ~name:"lent" (Value part_ty)
+  in
+  let pointer = held st ~name:"part" (Pointer { target = Value part_ty; writable = mode = Mut }) in
+  call_instance st
+    (Code { path; type_arguments })
+    ~signature ~substitution ~arguments ~mask ~lent_slot:slot ~destination:pointer ();
+  (* A part lent to change is a place of the callee's parameters. A part
+     lent to read may be one that the callee built in the slot. *)
+  Hashtbl.replace frame.called_lends part (own_slot = None && mode <> Mut);
+  bind_local st part (pointer / Deref)
+
+(* Where a lending method that is compiled as a function lends its part: a
+   pointer to the part, for its caller. A place of the method's parameters
+   is lent where it is. A constructor of such places is built in the
+   caller's slot from the bits of the places, and owns nothing, so nobody
+   drops it. A value that the method made would have to be dropped when the
+   lend ends, which a caller of this function does not do yet. *)
+and lent_pointer st ~(mode : Types.mode) (part : Mir.yielded) ~origin : Lowered.operand =
+  let frame = mir st in
+  let slot =
+    match frame.lent_slot with
+    | Some (slot, _) -> slot
+    | None -> bug "a lent part outside an inlined lending call"
+  in
+  let made () =
+    unsupported ~at:(site_of st origin)
+      "a lending method that calls itself and lends a value that it made"
+  in
+  let storage =
+    lent_storage
+      ~is_trivial:(fun ty -> trivial st (ground st ty))
+      ~is_view:(Interface.Impls.is_view st.context.database ~bounds:(fun _ -> []))
+      ~in_frame_slot:(fun local -> Hashtbl.find_opt frame.called_lends local = Some true)
+      frame.body
+  in
+  let written : Mir.operand -> Mir.place option = function
+    | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> Some place
+    | Constant _ -> None
+  in
+  let operand_storage operand =
+    match written operand with
+    | Some place -> storage place
+    | None -> if trivial st (operand_type st operand) then Outside else Owned
+  in
+  (* The bits of a leaf of the part: of a place whose bits stay valid, or of
+     a value with nothing to drop. *)
+  let bits (operand : Mir.operand) : Lowered.operand =
+    if operand_storage operand <> Owned || trivial st (operand_type st operand) then
+      Copy (whole st (operand_place st operand))
+    else made ()
+  in
+  let rec build (yielded : Mir.yielded) (destination : Lowered.place) =
+    match yielded with
+    | Part operand -> emit st.builder (Assign (destination, Use (bits operand)))
+    | Built { variant; fields; type_; _ } ->
+        let ty = ground st type_ in
+        let fields =
+          List.map
+            (fun (name, (field : Mir.yielded option)) ->
+              match field with
+              | Some (Part operand) -> (name, bits operand)
+              | Some (Built inner as nested) ->
+                  let held_nested = held st (Value (ground st inner.type_)) in
+                  build nested held_nested;
+                  (name, Lowered.Copy held_nested)
+              | None ->
+                  let default, default_ty = field_default_place st ty ~variant ~field:name in
+                  if trivial st default_ty then (name, Copy default) else made ())
+            fields
+        in
+        emit st.builder (Assign (destination, Build { ty; variant; fields }))
+  in
+  (* The part is built apart from the slot, since a leaf of it may be in the
+     slot: a called lending function that was passed the slot built it
+     there. *)
+  let in_slot ty : Lowered.operand =
+    let built = held st (Value ty) in
+    build part built;
+    emit st.builder (Assign (slot, Use (Copy built)));
+    Address { place = slot; writable = mode = Mut }
+  in
+  let part_ty =
+    match frame.lent_slot with Some (_, ty) -> ty | None -> bug "a lending method with no slot"
+  in
+  match part with
+  | Part ((Use { place = lent; _ } | Borrow { place = lent; _ }) as operand) ->
+      let lowered = place st lent in
+      let through_pointer =
+        List.exists (function Lowered.Deref -> true | _ -> false) lowered.projections
+      in
+      if operand_storage operand = Outside && through_pointer && lent_at st lowered = None then
+        Address { place = whole st lowered; writable = mode = Mut }
+      else if mode <> Mut then in_slot part_ty
+      else made ()
+  | Part _ | Built _ ->
+      if mode = Mut then
+        unsupported ~at:(site_of st origin)
+          "a lending method that calls itself and lends a constructor of places to change"
+      else in_slot part_ty
 
 and terminator st region (ending : Mir.terminator) ~origin =
   match ending with
@@ -1800,7 +2023,14 @@ and terminator st region (ending : Mir.terminator) ~origin =
         (Switch
            { value = Copy (local_place st winner); cases; default = Some (jump st region next) });
       start st.builder (block st.builder)
-  | Yield _ -> bug "a lent part outside an inlined lending call"
+  | Yield { mode; part; resume } ->
+      (* The method is compiled as a function: its result is a pointer to
+         the part. Its scopes end before it returns, as after any value. *)
+      let pointer = lent_pointer st ~mode part ~origin in
+      (match result_place st with
+      | Some result -> emit st.builder (Assign (result, Use pointer))
+      | None -> bug "a lending method with no result");
+      goto st region resume
   | For { iteration; part; body; after; loop; _ } ->
       claim st region after;
       for_loop st region ~iteration ~part ~body ~loop;
@@ -2102,13 +2332,13 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
 
 (* Lowers the MIR of the code at [path] in the current frame, with its
    parameters in [parameters], in order. *)
-let lower_code st path ~parameters =
+let lower_code st path ~parameters ?lent_slot () =
   let code_mir =
     Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined
       (mir_of st.context path)
   in
   let frame =
-    frame_of_body st ~owner:(innermost_scope st) ~lambdas:code_mir.lambdas code_mir.body
+    frame_of_body st ~owner:(innermost_scope st) ?lent_slot ~lambdas:code_mir.lambdas code_mir.body
   in
   st.frame <- { st.frame with mir = Some frame };
   List.iter2 (bind_local st) code_mir.body.parameters parameters;

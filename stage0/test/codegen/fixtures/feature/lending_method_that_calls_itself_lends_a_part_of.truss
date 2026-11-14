@@ -1,0 +1,120 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, value: Int64, right: Tree)
+
+fn Tree.leftmost(self, fallback: Int64) lends Int64 {
+  match self {
+    Leaf => fallback
+    Node(left, value, ..) => {
+      if left is Leaf {
+        value
+      } else {
+        left.leftmost(fallback)
+      }
+    }
+  }
+}
+
+fn Tree.find(self, wanted: Int64) lends Option[Tree] {
+  match self {
+    Leaf => None
+    Node(left, value, right) => {
+      if wanted == value {
+        Some(self)
+      } else if wanted < value {
+        left.find(wanted)
+      } else {
+        right.find(wanted)
+      }
+    }
+  }
+}
+
+fn Tree.slot(mut self, wanted: Int64) lends mut Int64
+  uses Panic
+{
+  match mut self {
+    Leaf => Panic.crash("no such value")
+    Node(left, value, right) => {
+      if wanted == value {
+        mut value
+      } else if wanted < value {
+        mut left.slot(wanted)
+      } else {
+        mut right.slot(wanted)
+      }
+    }
+  }
+}
+
+fn value_of(tree: Tree) -> Int64 {
+  match tree {
+    Leaf => -1
+    Node(value, ..) => value
+  }
+}
+
+fn Tree.value_after(self, wanted: Int64, hops: Int64) lends Int64 {
+  if hops > 0 {
+    self.value_after(wanted, hops: hops - 1)
+  } else {
+    match self.find(wanted) {
+      Some(found) => {
+        match found {
+          Node(value, ..) => value
+          Leaf => 0
+        }
+      }
+      None => 0
+    }
+  }
+}
+
+type Pair(first: Int64, second: Int64)
+
+fn Pair.first_after(self, steps: Int64) lends Int64 {
+  if steps <= 0 {
+    self.first
+  } else {
+    self.first_after(steps - 1)
+  }
+}
+
+fn sample() -> Tree {
+  let one = Tree.Node(left: Tree.Leaf, value: 1, right: Tree.Leaf)
+  let three = Tree.Node(left: Tree.Leaf, value: 3, right: Tree.Leaf)
+  Tree.Node(left: own one, value: 2, right: own three)
+}
+
+test "a part found through recursion is read" {
+  let tree = sample()
+  assert tree.leftmost(0) == 1
+  assert Tree.Leaf.leftmost(7) == 7
+}
+
+test "a constructor of a part found through recursion is read" {
+  let tree = sample()
+  assert tree.find(3) is Some(found) && value_of(found) == 3
+  assert tree.find(2) is Some(found) && value_of(found) == 2
+  assert tree.find(9) is None
+}
+
+test "a part found through recursion is changed" {
+  var tree = sample()
+  mut tree.slot(3) = 30
+  mut tree.slot(1) = 10
+  assert tree.leftmost(0) == 10
+  assert tree.find(30) is Some(found) && value_of(found) == 30
+}
+
+test "a part reached through another recursive lend is read" {
+  let tree = sample()
+  assert tree.value_after(3, hops: 2) == 3
+  assert tree.value_after(1, hops: 0) == 1
+  assert tree.value_after(9, hops: 1) == 0
+}
+
+test "a part of a small receiver is lent through the caller's slot" {
+  let pair = Pair(first: 4, second: 5)
+  assert pair.first_after(3) == 4
+}

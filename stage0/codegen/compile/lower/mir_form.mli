@@ -17,4 +17,12 @@ val expression_into :
 val fill_defaults :
   Lowering.state -> Lowered.place -> Mir.body -> Lowered.place list -> Lowered.place list
 
-val lower_code : Lowering.state -> Path.t -> parameters:Lowered.place list -> unit
+val lower_code :
+  Lowering.state ->
+  Path.t ->
+  parameters:Lowered.place list ->
+  ?lent_slot:Lowered.place * Ground.ty ->
+  unit ->
+  unit
+(** Lowers the body of a function or a method. [lent_slot] is a lending method's slot: the place its
+    last parameter points at, and the type of the part it lends. *)
