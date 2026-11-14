@@ -15,7 +15,6 @@
   path
   query
   packages
-  parsed
   resolve
   infer
   inspect

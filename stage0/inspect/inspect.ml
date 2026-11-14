@@ -32,8 +32,9 @@ let local_type (tables : Infer.tables) id =
    none and is at its name. *)
 type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : span }
 
-(* Each [todo] and [echo] of a definition, in source order. *)
-let unfinished (definition : definition) =
+(* Each [todo] and [echo] of a definition, in source order. It reads only
+   the definition's tree, so an edit to another definition changes it not. *)
+let unfinished_in (definition : definition) =
   let found = ref [] in
   let add keyword id (span : span) = found := { keyword; id; span } :: !found in
   let rec visit (value : expression) =
@@ -49,34 +50,46 @@ let unfinished (definition : definition) =
   | _ -> ());
   List.sort (fun left right -> compare left.span.start right.span.start) !found
 
+let unfinished =
+  Query.query ~name:"unfinished" ~phase:Phases.inspection ~show:Resolve.Names.show_key
+    (fun database key ->
+      match Query.demand database Resolve.Names.definition key with
+      | Some definition -> unfinished_in definition
+      | None -> [])
+
 (* Each [todo] of a definition, in source order. Name resolution records
    the bindings in scope at each [todo], and the type checker's tables give
    their types. *)
-let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infer.tables) =
-  List.filter_map
-    (fun { keyword; id; span } ->
-      match (keyword, id) with
-      | `Echo, _ -> None
-      | `Todo, None -> Some { offset = span.start; expected = None; scope = [] }
-      | `Todo, Some id ->
-          Option.map
-            (fun scope ->
-              {
-                offset = span.start;
-                expected = Some (show_type tables id);
-                scope =
-                  List.map
-                    (fun (name, (value : Resolve.value)) ->
-                      ( name,
-                        match value with
-                        | Value_local binding -> local_type tables binding
-                        | Value_generic _ -> "USize"
-                        | Value_field _ -> "a field"
-                        | Value_law_parameter _ -> "a parameter of the law" ))
-                    scope;
-              })
-            (List.assoc_opt id resolved.holes))
-    (unfinished definition)
+let holes database key =
+  match
+    (Query.demand database Resolve.resolved key, Query.demand database Infer.type_check_result key)
+  with
+  | None, _ | _, None -> []
+  | Some resolved, Some { tables; _ } ->
+      List.filter_map
+        (fun { keyword; id; span } ->
+          match (keyword, id) with
+          | `Echo, _ -> None
+          | `Todo, None -> Some { offset = span.start; expected = None; scope = [] }
+          | `Todo, Some id ->
+              Option.map
+                (fun scope ->
+                  {
+                    offset = span.start;
+                    expected = Some (show_type tables id);
+                    scope =
+                      List.map
+                        (fun (name, (value : Resolve.value)) ->
+                          ( name,
+                            match value with
+                            | Value_local binding -> local_type tables binding
+                            | Value_generic _ -> "USize"
+                            | Value_field _ -> "a field"
+                            | Value_law_parameter _ -> "a parameter of the law" ))
+                        scope;
+                  })
+                (List.assoc_opt id resolved.holes))
+        (Query.demand database unfinished key)
 
 type explanation = {
   text : string;  (** The name or expression as written *)

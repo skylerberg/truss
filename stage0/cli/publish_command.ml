@@ -9,22 +9,27 @@ module Lock = Registry.Lock
 (* Every [todo] and [echo] of the package, with its position, in order of
    position in each file. A type defined as [todo] is at its name. *)
 let unfinished session packages =
+  let context = Database.context session in
   List.concat_map
     (fun file ->
       let source = Command_packages.source session packages file in
       List.concat_map
-        (fun (item : Syntax.definition Syntax.item) ->
-          List.map
-            (fun ({ keyword; span; _ } : Inspect.unfinished) ->
-              let line, column =
-                Source.position source (Syntax.Span.to_source ~base:item.base span).start
-              in
-              ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
-                Source.path source,
-                line,
-                column ))
-            (Inspect.unfinished item.value))
-        (Query.demand (Database.context session) Parsed.file file).definitions)
+        (fun declaration ->
+          let key = Names.key_of declaration in
+          match Query.demand context Names.base key with
+          | None -> []
+          | Some (_, base) ->
+              List.map
+                (fun ({ keyword; span; _ } : Inspect.unfinished) ->
+                  let line, column =
+                    Source.position source (Syntax.Span.to_source ~base span).start
+                  in
+                  ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
+                    Source.path source,
+                    line,
+                    column ))
+                (Query.demand context Inspect.unfinished key))
+        (Query.demand context Names.declarations_in file))
     (Command_packages.files session packages)
 
 (* The files to publish: the package's own, with its published lock file
