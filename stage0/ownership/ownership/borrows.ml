@@ -130,7 +130,6 @@ type builder = {
   mutable keeps_lent : (Mir.local * Mir.local * Types.ty * Core.origin) list;
       (** Each binding of a lent part not yet dead: the binding, the part, its type, and where it is
           bound. A binding still live where its part ends would outlive the loan. *)
-  mutable loops : (Mir.block, Mir.block) Hashtbl.t;  (** [Mir.iteration_loops] of the body *)
   loop_entries : (Mir.block, int) Hashtbl.t;
       (** For the first block of a loop's body, the first position after the loop's loan starts. *)
   mutable position : position;  (** The position being written *)
@@ -878,13 +877,10 @@ let terminator builder ~returns (basic : Mir.basic_block) =
               emit_ builder (Return_view (views_of_operand builder value)) origin
           | _ -> ())
       | None -> ())
-  | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } -> (
-      match Hashtbl.find_opt builder.loops builder.position.block with
-      | Some loop -> (
-          match builder.body.blocks.(loop).terminator with
-          | For { iteration; _ } -> pull builder iteration origin
-          | _ -> ())
-      | None -> ())
+  | Iteration_end { loop } | Exit_tasks { exit = Exit_iteration { loop }; _ } -> (
+      match builder.body.blocks.(loop).terminator with
+      | For { iteration; _ } -> pull builder iteration origin
+      | _ -> ())
   | Join _ | Goto _ | Fork _ | Exit_tasks _ | Unreachable | Written_unreachable | Todo -> ()
 
 (* The fork-joins of a body: a [parallel] or [concurrent] block, whose
@@ -907,7 +903,6 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
   builder.returned <- returned_temporaries body;
   builder.aliases <- [];
   builder.binding <- [];
-  builder.loops <- Mir.iteration_loops body;
   Hashtbl.reset builder.loop_entries;
   let shape =
     Array.map (fun (basic : Mir.basic_block) -> List.length basic.statements + 2) body.blocks
@@ -975,7 +970,7 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
                   List.filter
                     (fun { block; index } ->
                       index < shape.(block) - 1
-                      || Hashtbl.find_opt builder.loops block <> Some loop_block)
+                      || Mir.iteration_loop body.blocks.(block).terminator <> Some loop_block)
                     (positions_of
                        ~from:(fun block ->
                          if block = inside then Hashtbl.find_opt builder.loop_entries inside
@@ -1125,7 +1120,6 @@ let join (after : state) ~(into : state) =
    the group go on to their end from before them. *)
 let forward context (actions : actions) =
   let blocks = Array.length actions.steps in
-  let loops = Mir.iteration_loops actions.body in
   let entries = Array.make blocks None and pending = Queue.create () in
   if blocks > 0 then begin
     entries.(0) <- Some { views = []; loans = [] };
@@ -1163,7 +1157,7 @@ let forward context (actions : actions) =
                 entries.(successor) <- Some merged;
                 Queue.add successor pending
             | None -> ()))
-      (Mir.block_successors actions.body loops block)
+      (Mir.block_successors actions.body block)
   done;
   Array.mapi
     (fun block entry ->
@@ -1728,7 +1722,6 @@ let check context ~(moves : Mir.body -> Moves.t) ~returns (mir : Mir.t) =
       binding = [];
       storage_lend = false;
       keeps_lent = [];
-      loops = Hashtbl.create 1;
       loop_entries = Hashtbl.create 4;
       position = { block = 0; index = 0 };
       written = [];

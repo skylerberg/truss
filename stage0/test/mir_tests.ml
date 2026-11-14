@@ -85,7 +85,7 @@ let terminator_reads : Mir.terminator -> Mir.local list = function
   | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
   | Yield { part; _ } -> yielded_locals part
   | Return (Some value) | Exit_tasks { exit = Exit_return (Some value); _ } -> operand_locals value
-  | Goto _ | Fork _ | Join _ | Iteration_end
+  | Goto _ | Fork _ | Join _ | Iteration_end _
   | Return None
   | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
       []
@@ -180,15 +180,16 @@ let validate definition (body : Mir.body) =
       | _ -> ())
     body.blocks;
   (* Closed loops and branches *)
-  let iteration_loops = Mir.iteration_loops body in
   let parts = ref [] in
   Array.iteri
     (fun index (basic : Mir.basic_block) ->
-      (match basic.terminator with
-      | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
-          if not (Hashtbl.mem iteration_loops index) then
-            problem "block %d ends an iteration outside a loop" index
-      | _ -> ());
+      (match Mir.iteration_loop basic.terminator with
+      | Some loop -> (
+          match body.blocks.(loop).terminator with
+          | For { blocks; _ } when List.mem index blocks -> ()
+          | _ ->
+              problem "block %d ends an iteration of %d, which is not a loop around it" index loop)
+      | None -> ());
       match basic.terminator with
       | For { part; body = inside; blocks; after; _ } ->
           parts := part :: !parts;
@@ -310,7 +311,7 @@ let validate definition (body : Mir.body) =
       end
     in
     let iteration_end at =
-      match Hashtbl.find_opt iteration_loops at with
+      match Mir.iteration_loop body.blocks.(at).terminator with
       | Some loop ->
           (if report then
              match Hashtbl.find_opt entered loop with
@@ -355,13 +356,13 @@ let validate definition (body : Mir.body) =
           if not (Hashtbl.mem entered node) then
             Hashtbl.replace entered node (still_alive ~kept:[], still_open ~kept:[]);
           flow (count + node) (state, open_loans)
-      | Iteration_end -> iteration_end node
+      | Iteration_end _ -> iteration_end node
       | Return value -> returns node value
       | Exit_tasks { exit; _ } -> (
           match exit with
           | Exit_return value -> returns node value
           | Exit_to target -> flow target (state, open_loans)
-          | Exit_iteration -> iteration_end node)
+          | Exit_iteration _ -> iteration_end node)
       | terminator ->
           List.iter (fun target -> flow target (state, open_loans)) (Mir.successors terminator)
   in
@@ -523,7 +524,10 @@ let () =
           if not inclusive then fail "the range is not inclusive";
           if body.locals.(i).kind = Temporary || i = part then fail "i is the loop's counter";
           let ends =
-            List.filter (fun block -> body.blocks.(block).terminator = Iteration_end) blocks
+            List.filter
+              (fun block ->
+                match body.blocks.(block).terminator with Iteration_end _ -> true | _ -> false)
+              blocks
           in
           if List.length ends < 2 then fail "the continue does not end the iteration");
   test "a loop over a yielding call runs its body for each part, and a break leaves it" (fun () ->
@@ -543,7 +547,7 @@ let () =
             not
               (List.exists
                  (fun block ->
-                   body.blocks.(block).terminator <> Iteration_end
+                   Mir.iteration_loop body.blocks.(block).terminator = None
                    && List.mem after (Mir.successors body.blocks.(block).terminator))
                  blocks)
           then fail "the break does not leave the loop");
@@ -670,7 +674,7 @@ let () =
                     match exit with
                     | Exit_return _ -> "return"
                     | Exit_to _ -> "jump"
-                    | Exit_iteration -> "next" )
+                    | Exit_iteration _ -> "next" )
             | _ -> None)
           (terminators mir.body)
       in

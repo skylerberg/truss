@@ -10078,7 +10078,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
                 in
                 context.returns <- (exiting, value) :: context.returns
             | [], Exit_to target -> jump target exiting
-            | [], Exit_iteration -> iteration_end exiting);
+            | [], Exit_iteration _ -> iteration_end exiting);
             restrict frame (Logic.not_ flag))
       frame task_exits
   in
@@ -10129,7 +10129,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
     | Unreachable -> ()
     | Written_unreachable -> unreachable_reached context frame span
     | Todo -> todo_reached context frame span
-    | Iteration_end -> iteration_end frame
+    | Iteration_end _ -> iteration_end frame
     | For
         {
           loop =
@@ -10282,7 +10282,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
             context.iteration_returns <-
               (loop, Option.map (mir_operand_type context frame) returned)
               :: context.iteration_returns
-        | Exit_to _ | Exit_iteration -> ());
+        | Exit_to _ | Exit_iteration _ -> ());
         iteration_end frame
     | Exit_tasks { tasks = { task_end = Some target; _ } :: _; exit } ->
         (* The exit is taken where the block it leaves ends, after the other

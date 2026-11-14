@@ -169,7 +169,8 @@ type iteration =
 type task_exit =
   | Exit_return of operand option
   | Exit_to of block
-  | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
+  | Exit_iteration of { loop : block }
+      (** The end of the iteration of the enclosing {!For}, the terminator of [loop]. *)
 
 type left_task = { task : Core.task; ends : statement list; task_end : block option }
 (** A task an early exit leaves. *)
@@ -198,7 +199,8 @@ type terminator =
   | Join of { fork : Core.origin; next : block }
       (** The end of a branch of the {!Fork} [fork]. Read in order, [next] runs after it: the next
           branch's entry, or the block's end after the last branch. *)
-  | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
+  | Iteration_end of { loop : block }
+      (** The end of an iteration of the enclosing {!For}, the terminator of [loop]. *)
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
@@ -285,7 +287,7 @@ type scope = {
    [while] binds a name that may alias a lent part; or for the condition
    alone. *)
 type condition_lends = For_statement | For_block | For_condition
-type target = Jump of block | Next_iteration
+type target = Jump of block | Next_iteration of block
 
 type enclosing_loop = {
   break_ : block;
@@ -537,7 +539,7 @@ let return_ b value origin =
 let exit_depth b (exit : task_exit) =
   match (exit, b.loops) with
   | Exit_return _, _ -> Some 0
-  | (Exit_to _ | Exit_iteration), loop :: _ -> Some loop.depth
+  | (Exit_to _ | Exit_iteration _), loop :: _ -> Some loop.depth
   | _, [] -> None
 
 (* A place a [yield] lends that outlives the method's frame: a local, a
@@ -746,13 +748,13 @@ let rec expression b (node : Core.expression) : operand option =
               leave_scopes b ~depth:loop.depth origin;
               (match loop.continue_ with
               | Jump block -> goto b block origin
-              | Next_iteration -> terminate b Iteration_end origin);
+              | Next_iteration loop -> terminate b (Iteration_end { loop }) origin);
               None
           | loop :: _, tasks ->
               leave_tasks b tasks
                 (match loop.continue_ with
                 | Jump block -> Exit_to block
-                | Next_iteration -> Exit_iteration)
+                | Next_iteration loop -> Exit_iteration { loop })
                 origin;
               None
           | [], _ -> bug "a `continue` outside a loop")
@@ -1670,7 +1672,7 @@ and leave_tasks b tasks exit origin =
   let exit =
     match exit with
     | Exit_return value -> Exit_return (Option.map (held_past_scopes b origin) value)
-    | Exit_to _ | Exit_iteration -> exit
+    | Exit_to _ | Exit_iteration _ -> exit
   in
   (* The task ends the scopes inside it. The scopes outside it
        are the enclosing code's, which ends them once the task has
@@ -1724,9 +1726,10 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
   let part = new_local b Temporary pattern.type_ origin in
   let inside = new_block b and after = new_block b in
   let entry = b.current in
+  let loop_block = match entry with Some block -> block | None -> new_block b in
   start b inside;
   let first = b.block_count in
-  looping b ~break_:after ~continue_:Next_iteration (fun () ->
+  looping b ~break_:after ~continue_:(Next_iteration loop_block) (fun () ->
       each (fun () ->
           (match iteration with
           | Yielding { arguments = Passed { mode; value = Borrow _ as receiver; _ } :: _; _ } ->
@@ -1746,7 +1749,7 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
           match iteration with
           | Range _ -> bind ~owned:true b pattern (at part)
           | Yielding _ | Pull _ -> bind b pattern (at part)));
-  terminate b Iteration_end origin;
+  terminate b (Iteration_end { loop = loop_block }) origin;
   let blocks = inside :: List.init (b.block_count - first) (fun index -> first + index) in
   b.current <- entry;
   terminate b (For { iteration; part; body = inside; blocks; after; loop }) origin;
@@ -1901,7 +1904,10 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
     blocks = canonical blocks;
   }
 
-(* The blocks control can reach from the entry, in reverse postorder. *)
+(* The blocks control can reach from the entry, in reverse postorder. The
+   end of each iteration names the innermost loop it ends, of those
+   reached: a pass that moves or copies loops, as inlining does, leaves
+   that to this. *)
 and canonical (blocks : basic_block array) =
   let visited = Array.make (Array.length blocks) false and order = ref [] in
   let rec visit block =
@@ -1918,7 +1924,26 @@ and canonical (blocks : basic_block array) =
   let reached blocks =
     List.filter_map (fun block -> if visited.(block) then Some (target block) else None) blocks
   in
-  let renumber = function
+  let innermost = Hashtbl.create 4 in
+  List.iter
+    (fun loop ->
+      match blocks.(loop).terminator with
+      | For { blocks = inside; _ } ->
+          let size = List.length inside in
+          List.iter
+            (fun block ->
+              match Hashtbl.find_opt innermost block with
+              | Some (_, known) when known <= size -> ()
+              | _ -> Hashtbl.replace innermost block (loop, size))
+            inside
+      | _ -> ())
+    !order;
+  let loop_of block =
+    match Hashtbl.find_opt innermost block with
+    | Some (loop, _) -> target loop
+    | None -> bug "the end of an iteration outside every loop"
+  in
+  let renumber at = function
     | Goto block -> Goto (target block)
     | Branch branch -> Branch { branch with yes = target branch.yes; no = target branch.no }
     | Switch_variant { place; cases } ->
@@ -1962,16 +1987,21 @@ and canonical (blocks : basic_block array) =
                           if visited.(task_end) then Some (target task_end) else None);
                   })
                 tasks;
-            exit = (match exit with Exit_to block -> Exit_to (target block) | other -> other);
+            exit =
+              (match exit with
+              | Exit_to block -> Exit_to (target block)
+              | Exit_iteration _ -> Exit_iteration { loop = loop_of at }
+              | Exit_return _ -> exit);
           }
-    | (Iteration_end | Return _ | Unreachable | Written_unreachable | Todo) as other -> other
+    | Iteration_end _ -> Iteration_end { loop = loop_of at }
+    | (Return _ | Unreachable | Written_unreachable | Todo) as other -> other
   in
   Array.of_list
     (List.map
        (fun block ->
          {
            (blocks.(block)) with
-           terminator = renumber blocks.(block).terminator;
+           terminator = renumber block blocks.(block).terminator;
            header =
              Option.map
                (fun (natural : natural_loop) ->
@@ -1996,38 +2026,20 @@ and successors = function
   | Join { next; _ } -> [ next ]
   | Yield { resume; _ } -> [ resume ]
   | Exit_tasks { exit; tasks } -> (
-      (match exit with Exit_to block -> [ block ] | Exit_return _ | Exit_iteration -> [])
+      (match exit with Exit_to block -> [ block ] | Exit_return _ | Exit_iteration _ -> [])
       @ match tasks with innermost :: _ -> Option.to_list innermost.task_end | [] -> [])
-  | Iteration_end | Return _ | Unreachable | Written_unreachable | Todo -> []
+  | Iteration_end _ | Return _ | Unreachable | Written_unreachable | Todo -> []
 
-(* The innermost [For] whose body each [Iteration_end] ends. Blocks are in
-   reverse postorder, so a loop comes before the loops nested in it, which
-   then replace it. *)
-let iteration_loops (body : body) =
-  let loops = Hashtbl.create 4 in
-  Array.iteri
-    (fun index (block : basic_block) ->
-      match block.terminator with
-      | For { blocks; _ } ->
-          List.iter
-            (fun inside ->
-              match body.blocks.(inside).terminator with
-              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
-                  Hashtbl.replace loops inside index
-              | _ -> ())
-            blocks
-      | _ -> ())
-    body.blocks;
-  loops
+let iteration_loop = function
+  | Iteration_end { loop } | Exit_tasks { exit = Exit_iteration { loop }; _ } -> Some loop
+  | _ -> None
 
-let block_successors (body : body) loops block =
-  (match Hashtbl.find_opt loops block with
-    | Some loop -> (
-        match body.blocks.(loop).terminator with
-        | For { body = first; after; _ } -> [ first; after ]
-        | _ -> [])
-    | None -> [])
-  @ successors body.blocks.(block).terminator
+let block_successors (body : body) block =
+  let terminator = body.blocks.(block).terminator in
+  (match Option.map (fun loop -> body.blocks.(loop).terminator) (iteration_loop terminator) with
+    | Some (For { body = first; after; _ }) -> [ first; after ]
+    | _ -> [])
+  @ successors terminator
 
 let conditional_lends (body : body) =
   let ends_of part (statement : statement) =
