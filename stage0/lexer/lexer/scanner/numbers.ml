@@ -182,6 +182,7 @@ let character_length text offset =
 
 let character_at text offset = String.sub text offset (character_length text offset)
 
+(* No fix: removing a suffix can change the literal's type. *)
 let suffix_issue text ~offset ~fixed =
   let suffix = String.sub text offset (String.length text - offset) in
   let example =
@@ -193,7 +194,7 @@ let suffix_issue text ~offset ~fixed =
         in
         Printf.sprintf "`let value: %s = %s`" default_type fixed
   in
-  issue Number_suffix
+  issue ~fixable:false Number_suffix
     (Printf.sprintf
        "Number literals have no type suffixes such as `%s`. A literal takes its type from its \
         context, as in %s."
@@ -436,7 +437,7 @@ let check_decimal text =
       ]
   in
   let value =
-    if not is_float then Token.Integer (Z.of_string whole_digits)
+    if not (is_float || has_float_suffix) then Token.Integer (Z.of_string whole_digits)
     else
       let fraction_digits =
         match parts.fraction with Some fraction -> digits fraction | None -> ""

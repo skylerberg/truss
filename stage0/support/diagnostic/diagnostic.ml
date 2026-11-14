@@ -600,12 +600,12 @@ let map_spans convert diagnostic =
         diagnostic.fixes;
   }
 
-let apply_fix text (fix : span fix) =
+let apply_edits text (edits : span edit list) =
   (* Edits at the same offset apply in the order they are listed. *)
   let edits =
     List.stable_sort
       (fun (left : span edit) (right : span edit) -> compare left.span.start right.span.start)
-      fix.edits
+      edits
   in
   let buffer = Buffer.create (String.length text) in
   let position =
@@ -619,6 +619,44 @@ let apply_fix text (fix : span fix) =
   in
   Buffer.add_substring buffer text position (String.length text - position);
   Buffer.contents buffer
+
+let apply_fix text (fix : span fix) = apply_edits text fix.edits
+
+let adds_none ~(before : _ diagnostic list) ~(after : _ diagnostic list) =
+  let codes diagnostics =
+    List.sort compare (List.map (fun (diagnostic : _ diagnostic) -> diagnostic.code) diagnostics)
+  in
+  let rec contained smaller larger =
+    match (smaller, larger) with
+    | [], _ -> true
+    | _ :: _, [] -> false
+    | first :: rest, candidate :: larger_rest ->
+        if first = candidate then contained rest larger_rest
+        else if first > candidate then contained smaller larger_rest
+        else false
+  in
+  contained (codes after) (codes before)
+
+let machine_applicable (diagnostics : t list) =
+  let overlaps (left : span edit) (right : span edit) =
+    (left.span.start < right.span.stop && right.span.start < left.span.stop)
+    || left.span.start = right.span.start
+       && (left.span.start = left.span.stop || right.span.start = right.span.stop)
+  in
+  let accepted_edits = ref [] in
+  List.filter
+    (fun (diagnostic : t) ->
+      match diagnostic.fixes with
+      | [ fix ] ->
+          let clear =
+            List.for_all
+              (fun (edit : span edit) -> not (List.exists (overlaps edit) !accepted_edits))
+              fix.edits
+          in
+          if clear then accepted_edits := fix.edits @ !accepted_edits;
+          clear
+      | _ -> false)
+    diagnostics
 
 let limit = 200
 

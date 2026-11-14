@@ -10,7 +10,7 @@ type kind = Upper | Lower
 
 type checked = {
   kind : kind;
-  name : string; (* the corrected name when there is a fix *)
+  name : string; (* as written *)
   problem : (Diagnostic.Code.lexer * string) option; (* code, message *)
   fix : string option;
 }
@@ -142,5 +142,4 @@ let check name =
             then Some corrected
             else None
           in
-          let name = Option.value fix ~default:name in
           { kind = kind_of name; name; problem = Some problem; fix })

@@ -126,7 +126,27 @@ let checked_name cursor name =
       Hashtbl.add cursor.names name checked;
       checked
 
-let number cursor =
+let ends_operand : Token.kind -> bool = function
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
+  | Punctuation (Close _ | Question) -> true
+  | Keyword (True | False | Self_value | Self_type | Todo | Unreachable) -> true
+  | _ -> false
+
+let follows_operand cursor =
+  match cursor.previous with Some kind -> ends_operand kind | None -> false
+
+let begins_operand : Token.kind -> bool = function
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
+  | Punctuation (Open (Paren | Square)) -> true
+  | Keyword (True | False | Self_value | Self_type | Todo | Unreachable) -> true
+  | _ -> false
+
+let is_word : Token.kind -> bool = function
+  | Upper _ | Lower _ | Underscore | Keyword _ | Reserved _ -> true
+  | _ -> false
+
+(* [word_follows index]: whether a word follows [index] on its line. *)
+let number cursor ~word_follows =
   let start = cursor.position in
   let stop = Numbers.scan_end cursor.text start in
   cursor.position <- stop;
@@ -143,14 +163,13 @@ let number cursor =
         problem.message
   | None -> ());
   match checked with
-  (* `1.`, with nothing after the `.` that a member access could continue
-     with: a float with no digit after its `.`. *)
+  (* `1.` with no word or `.` after it: a float with no digit after its `.`. *)
   | { value = Integer _; problem = None; _ }
     when byte cursor stop = Char.code '.'
+         && byte cursor (stop + 1) <> Char.code '.'
+         && (not cursor.is_peek)
          && (not (Numbers.is_radix_prefix cursor.text start))
-         &&
-         let after = byte cursor (Source_text.skip_blank cursor (stop + 1)) in
-         not (is_ascii_name_byte after || after >= 0x80 || after = Char.code '.') -> (
+         && not (word_follows (stop + 1)) -> (
       let written = String.sub cursor.text start (stop + 1 - start) in
       match Numbers.float_with_zero (written ^ "0") with
       | Some value ->
@@ -160,7 +179,7 @@ let number cursor =
               [
                 Diagnostic.fix
                   (Printf.sprintf "Write `%s0`" written)
-                  [ Diagnostic.insert (Source.zero_width (stop + 1)) "0" ];
+                  [ Diagnostic.replace (span start (stop + 1)) (written ^ "0") ];
               ]
             (span stop (stop + 1))
             (Printf.sprintf "A float has a digit after its `.`: `%s0`." written);
@@ -169,53 +188,59 @@ let number cursor =
   | _ -> checked.value
 
 (* `.5`, where no operand comes before the `.`: a float with no digit before
-   its `.`. [None] when the text is not one valid float. *)
+   its `.`, with a fix when it has no other problem. *)
 let leading_dot_float cursor =
   let start = cursor.position in
   let stop = Numbers.scan_end cursor.text (start + 1) in
   let written = String.sub cursor.text start (stop - start) in
-  match Numbers.float_with_zero ("0" ^ written) with
-  | Some value ->
+  let checked = Numbers.check ("0" ^ written) in
+  match checked.value with
+  | Float _ ->
       cursor.position <- stop;
-      report cursor ~code:Number_missing_digits
-        ~fixes:
-          [
-            Diagnostic.fix
-              (Printf.sprintf "Write `0%s`" written)
-              [ Diagnostic.insert (Source.zero_width start) "0" ];
-          ]
-        (span start (start + 1))
-        (Printf.sprintf "A float has a digit before its `.`: `0%s`." written);
-      Some value
-  | None -> None
+      let fixed = "0" ^ written in
+      let fixes, message =
+        match checked.problem with
+        | None ->
+            ( [
+                Diagnostic.fix
+                  (Printf.sprintf "Write `%s`" fixed)
+                  [ Diagnostic.replace (span start stop) fixed ];
+              ],
+              Printf.sprintf "A float has a digit before its `.`: `%s`." fixed )
+        | Some _ -> ([], "A float has a digit before its `.`.")
+      in
+      report cursor ~code:Number_missing_digits ~fixes (span start (start + 1)) message;
+      Some checked.value
+  | _ -> None
 
-(* `...`, which is three things in other languages. Between two operands
-   it is the inclusive range of Ruby and Swift, and lexes as `..=`. With an
-   operand on neither side it is a placeholder for code not written yet, as
-   in Python, and lexes as `todo`. Before an operand only, it is the spread
-   or rest operator, which Truss does not have, and lexes as nothing. *)
-let ellipsis cursor =
+(* `...`: between two operands a range, whose end Ruby excludes and Swift
+   includes; with neither, Python's placeholder, `todo`; before an operand
+   only, a spread, which lexes as nothing. *)
+let ellipsis cursor ~operand_follows =
   let start = cursor.position in
   let stop = start + 3 in
-  let after = Trivia.after_operand cursor start and before = Trivia.before_operand cursor stop in
+  let after = follows_operand cursor and before = operand_follows stop in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  let replaced replacement message kind =
+  let replaced replacements message kind =
     report cursor ~code:Foreign_operator
       ~fixes:
-        [
-          Diagnostic.fix
-            ("Write `" ^ replacement ^ "`")
-            [ Diagnostic.replace (span start stop) replacement ];
-        ]
+        (List.map
+           (fun replacement ->
+             Diagnostic.fix
+               ("Write `" ^ replacement ^ "`")
+               [ Diagnostic.replace (span start stop) replacement ])
+           replacements)
       (span start stop) message;
     Some kind
   in
   if after && before then
-    replaced "..=" "Truss has no `...`; a range that includes its end is written `..=`."
+    replaced [ ".."; "..=" ]
+      "Truss has no `...`. A range that leaves out its end is written `..`, and one that includes \
+       its end is written `..=`."
       (Punctuation Dot_dot_equal)
   else if (not after) && not before then
-    replaced "todo" "Truss has no `...`; code that is not written yet is `todo`." (Keyword Todo)
+    replaced [ "todo" ] "Truss has no `...`; code that is not written yet is `todo`." (Keyword Todo)
   else begin
     report cursor ~code:Foreign_operator (span start stop)
       "Truss has no `...`: it has no spread or rest operator, and a function takes a list where it \
@@ -224,10 +249,20 @@ let ellipsis cursor =
   end
 
 let rec scan cursor ~inline ~nesting =
+  let item = scan_item cursor ~inline ~nesting in
+  (match item with Token { kind; _ } -> cursor.previous <- Some kind | Line_end | End -> ());
+  item
+
+and scan_item cursor ~inline ~nesting =
   let start = cursor.position in
   let current = byte cursor start in
   let next = byte cursor (start + 1) in
-  let again () = scan cursor ~inline ~nesting in
+  let again () = scan_item cursor ~inline ~nesting in
+  let next_kind index =
+    match scan_item (peek cursor index) ~inline ~nesting with
+    | Token { kind; _ } -> Some kind
+    | Line_end | End -> None
+  in
   let reject ?code length message =
     Trivia.reject ?code cursor ~length message;
     again ()
@@ -245,7 +280,10 @@ let rec scan cursor ~inline ~nesting =
   end
   else if is_line_break current then Line_end
   else if is_ascii_letter current || current = Char.code '_' then name cursor ~nesting
-  else if is_digit current then token (number cursor)
+  else if is_digit current then
+    token
+      (number cursor ~word_follows:(fun index ->
+           match next_kind index with Some kind -> is_word kind | None -> false))
   else if current >= 0x80 then begin
     let packed = decode cursor start in
     if packed < 0 then begin
@@ -261,8 +299,7 @@ let rec scan cursor ~inline ~nesting =
         let unused () =
           reject length (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
         in
-        (* A character that looks like ASCII punctuation is reported, and
-           lexes as the token that its fix writes. *)
+        (* A character that looks like ASCII punctuation lexes as it. *)
         let confusable ~replacement ~name =
           report cursor ~code:Confusable_character
             ~fixes:
@@ -312,22 +349,34 @@ let rec scan cursor ~inline ~nesting =
         | Some stop ->
             token (Strings.character_literal cursor ~tag:"Character" ~literal_start:start ~stop)
         | None -> (
-            let touches_name index =
-              let neighbor = byte cursor index in
-              is_ascii_name_byte neighbor || neighbor >= 0x80
+            (* Decoded, so that a symbol such as `→` is not a name character. *)
+            let is_name_character position =
+              let packed = decode cursor position in
+              packed >= 0
+              &&
+              if byte cursor position < 0x80 then is_ascii_name_byte (byte cursor position)
+              else Unicode.is_xid_continue (Unicode.decoded_code_point packed)
             in
+            let touches_name_before index =
+              let rec sequence_start position =
+                if position > 0 && byte cursor position land 0xC0 = 0x80 then
+                  sequence_start (position - 1)
+                else position
+              in
+              index > 0 && is_name_character (sequence_start (index - 1))
+            in
+            let touches_name_at index = is_name_character index in
             match Strings.closing_delimiter cursor ~start ~delimiter:current with
             (* A string of Python or JavaScript, `'abc'`. A quote that
                touches a name on its outer side is not one: it is an
                apostrophe, or it opens a lifetime of Rust. *)
-            | Some close
-              when (not (start > 0 && touches_name (start - 1))) && not (touches_name (close + 1))
+            | Some close when (not (touches_name_before start)) && not (touches_name_at (close + 1))
               ->
                 let kind, ending = Strings.quoted_string cursor ~scan ~nesting ~delimiter:current in
                 Token { kind; start; ending }
             | _
-              when (is_ascii_letter next || next = Char.code '_')
-                   && not (start > 0 && touches_name (start - 1)) ->
+              when (is_ascii_letter next || next = Char.code '_') && not (touches_name_before start)
+              ->
                 let rec name_end position =
                   if is_ascii_name_byte (byte cursor position) then name_end (position + 1)
                   else position
@@ -362,7 +411,7 @@ let rec scan cursor ~inline ~nesting =
           Trivia.semicolon cursor;
           again ()
         end
-    | '.' when is_digit next && not (Trivia.after_operand cursor start) -> (
+    | '.' when is_digit next && not (follows_operand cursor) -> (
         match leading_dot_float cursor with
         | Some kind -> token kind
         | None -> ( match punctuation cursor '.' with Some kind -> token kind | None -> again ()))
@@ -378,8 +427,15 @@ let rec scan cursor ~inline ~nesting =
         cursor.position <- start + 1;
         let kind, ending = Strings.prefixed_string cursor ~scan ~prefix:"@" ~start ~nesting in
         Token { kind; start; ending }
+    (* Scanning ahead, `...` is `..=`, so it does not scan ahead again. *)
+    | '.' when next = Char.code '.' && byte cursor (start + 2) = Char.code '.' && cursor.is_peek ->
+        cursor.position <- start + 3;
+        token (Punctuation Dot_dot_equal)
     | '.' when next = Char.code '.' && byte cursor (start + 2) = Char.code '.' -> (
-        match ellipsis cursor with Some kind -> token kind | None -> again ())
+        let operand_follows index =
+          match next_kind index with Some kind -> begins_operand kind | None -> false
+        in
+        match ellipsis cursor ~operand_follows with Some kind -> token kind | None -> again ())
     | character -> (
         match punctuation cursor character with
         | Some kind -> token kind

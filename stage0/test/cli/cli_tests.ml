@@ -405,19 +405,20 @@ let diagnostic ?(fixes = []) start stop =
   Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.span start stop) "x."
 
 let () =
-  test "edits apply from the last to the first, so each one's offsets hold" (fun () ->
-      expect_string ~expected:"A bb C" (Check_command.apply "a bb c" [ edit 0 1 "A"; edit 5 6 "C" ]));
+  test "edits apply at the offsets of the text they were made for" (fun () ->
+      expect_string ~expected:"A bb C"
+        (Diagnostic.apply_edits "a bb c" [ edit 0 1 "A"; edit 5 6 "C" ]));
   test "a fix that overlaps an earlier one waits for the next round" (fun () ->
       let first = diagnostic ~fixes:[ Diagnostic.fix "one" [ edit 0 3 "x" ] ] 0 3 in
       let second = diagnostic ~fixes:[ Diagnostic.fix "two" [ edit 2 4 "y" ] ] 2 4 in
-      if Check_command.For_testing.chosen [ first; second ] <> [ first ] then fail "chose both");
+      if Diagnostic.machine_applicable [ first; second ] <> [ first ] then fail "chose both");
   test "a diagnostic with several fixes is left for the person or agent to choose" (fun () ->
       let choice =
         diagnostic
           ~fixes:[ Diagnostic.fix "one" [ edit 0 1 "x" ]; Diagnostic.fix "two" [ edit 0 1 "y" ] ]
           0 1
       in
-      if Check_command.For_testing.chosen [ choice ] <> [] then fail "chose one");
+      if Diagnostic.machine_applicable [ choice ] <> [] then fail "chose one");
   test "check --fix writes the only fix and leaves no diagnostic" (fun () ->
       let root = package [ ("main.truss", Fixtures.check_fix_writes_the_only_fix_and_leaves_no) ] in
       let status = quietly [ "check"; "-C"; root; "--fix" ] in

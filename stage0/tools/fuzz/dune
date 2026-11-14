@@ -6,7 +6,6 @@
   token
   lexer
   zarith
-  documents
   syntax
   syntax_walk
   parser

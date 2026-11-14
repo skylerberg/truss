@@ -1157,7 +1157,7 @@ pattern         = pattern_primary { "|" pattern_primary } ;
 pattern_primary = "_"
                 | LOWER_NAME
                 | range_end [ ( ".." | "..=" ) range_end ]
-                | [ module_path "::" ] UPPER_NAME [ pattern_fields ]
+                | UPPER_NAME [ pattern_fields ]
                 | pattern_fields ;
 range_end       = literal_pattern | constant ;
 literal_pattern = [ "-" ] INTEGER | "true" | "false" | plain_string
@@ -1475,7 +1475,8 @@ postfix    = primary { "." LOWER_NAME
                      | "?"
                      | "with" "(" list(update) ")" } ;
 brackets   = expression
-           | [ additive ] ( ".." | "..=" ) [ additive ]
+           | [ additive ] ".." [ additive ]
+           | [ additive ] "..=" additive
            | type_argument { "," type_argument } [ "," ] ;
 
 primary    = INTEGER | FLOAT | STRING | [ module_path "::" ] TAGGED_STRING

@@ -61,6 +61,16 @@ let next kind start stop ~ending =
       unterminated_string = ending = Unterminated;
     }
 
+(* Whether an unterminated string ends in a closing bracket, before which it
+   more likely ends. *)
+let ends_in_closer cursor ~text_start stop =
+  let rec last position =
+    if position > text_start && is_space (byte cursor (position - 1)) then last (position - 1)
+    else position - 1
+  in
+  let index = last stop in
+  index >= text_start && String.contains ")]}" (Char.chr (byte cursor index))
+
 (* An interpolation, at its delimiter: `${`, or the `$`s and `{` of a raw
    string opened with `$`s. *)
 let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
@@ -87,6 +97,7 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
   end
   else begin
     cursor.position <- start + delimiter_length;
+    cursor.previous <- None;
     let braces = ref 0 and count = ref 0 in
     let finished = ref false and closed = ref false and ending = ref Closed in
     let end_of_input position =
@@ -129,13 +140,21 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
       Layout.interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics next_input
     in
     let interpolation_span = span start cursor.position in
-    if !closed && !count = 0 then
+    if !closed && !count = 0 then begin
+      let rec is_blank position =
+        position >= cursor.position - 1
+        || (is_space (byte cursor position) && is_blank (position + 1))
+      in
       report cursor ~code:Empty_interpolation
         ~fixes:
-          [
-            Diagnostic.fix "Remove the empty interpolation" [ Diagnostic.delete interpolation_span ];
-          ]
-        interpolation_span "An interpolation needs an expression.";
+          (if is_blank (start + delimiter_length) then
+             [
+               Diagnostic.fix "Remove the empty interpolation"
+                 [ Diagnostic.delete interpolation_span ];
+             ]
+           else [])
+        interpolation_span "An interpolation needs an expression."
+    end;
     ({ tokens; span = interpolation_span }, !ending)
   end
 
@@ -181,10 +200,12 @@ and scan_ordinary ?(closing = quote) cursor ~scan ~tag ~nesting =
       if nesting = 0 then begin
         report cursor ~code:Unterminated_string
           ~fixes:
-            [
-              Diagnostic.fix "Close the string"
-                [ Diagnostic.insert (Source.zero_width position) "\"" ];
-            ]
+            (if ends_in_closer cursor ~text_start:(literal_start + 1) position then []
+             else
+               [
+                 Diagnostic.fix "Close the string"
+                   [ Diagnostic.insert (Source.zero_width position) "\"" ];
+               ])
           (span literal_start position) message;
         (Unterminated, position)
       end
@@ -441,7 +462,11 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
     let current = byte cursor position in
     if is_end_of_line current then begin
       let fixes =
-        if nesting = 0 && byte cursor (position - 1) <> quote then
+        if
+          nesting = 0
+          && byte cursor (position - 1) <> quote
+          && not (ends_in_closer cursor ~text_start:builder.text_start position)
+        then
           [
             Diagnostic.fix
               ("Close the string with `" ^ delimiter ^ "`")
@@ -684,26 +709,32 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             (String.length value - String.length indentation)
         else if leading_whitespace line = None then ""
         else begin
-          let length = min (String.length value) (String.length indentation) in
-          let rec differs index =
-            if index < length && value.[index] = indentation.[index] then differs (index + 1)
-            else index
+          let first_difference text =
+            let length = min (String.length text) (String.length indentation) in
+            let rec differs index =
+              if index < length && text.[index] = indentation.[index] then differs (index + 1)
+              else index
+            in
+            differs 0
           in
-          let at = differs 0 in
+          let at = first_difference value in
           let line_whitespace = Option.value (leading_whitespace line) ~default:"" in
+          (* Measured in the source, which can differ from the value. *)
+          let whitespace_stop = skip_spaces cursor first.span.start in
+          let source_at =
+            first.span.start
+            + first_difference
+                (String.sub cursor.text first.span.start (whitespace_stop - first.span.start))
+          in
           (* The line most likely belongs at the closing delimiter's
              indentation, as the lines around it are. *)
           report cursor ~code:Raw_string_indentation
             ~fixes:
               [
                 Diagnostic.fix "Indent the line like the closing delimiter"
-                  [
-                    Diagnostic.replace
-                      (span first.span.start (first.span.start + String.length line_whitespace))
-                      indentation;
-                  ];
+                  [ Diagnostic.replace (span first.span.start whitespace_stop) indentation ];
               ]
-            (span (first.span.start + at) (first.span.start + at + 1))
+            (span source_at (source_at + 1))
             (Printf.sprintf
                "Every line of a multi-line raw string starts with the indentation of its closing \
                 delimiter, which is %s. This line starts with %s."
@@ -820,7 +851,7 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
   let quotes = run_length cursor quote_start quote in
   let empty = quotes = 2 in
   let kind_of_prefix = prefix_kind prefix in
-  let remove_prefix = Diagnostic.delete (span start quote_start) in
+  let remove_prefix = Diagnostic.replace (span start quote_start) "" in
   let kind, ending =
     if kind_of_prefix = Raw_text && quotes = 1 then begin
       cursor.position <- quote_start + 1;

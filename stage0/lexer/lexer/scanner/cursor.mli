@@ -9,9 +9,14 @@ type t = {
   mutable line_is_blank : bool;
   mutable unterminated_at_end : bool;
   names : (string, Names.checked) Hashtbl.t;
+  mutable previous : Token.kind option;
+  is_peek : bool;
 }
 
 val create : Source.t -> Diagnostic.Collector.t -> t
+
+val peek : t -> int -> t
+(** A copy of [cursor] at [index], for scanning ahead, that discards what it reports. *)
 
 type ending = Closed | Unterminated
 type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
