@@ -30,14 +30,57 @@ let calls form =
     (fun (node : Core.expression) -> match node.kind with Call call -> Some call | _ -> None)
     (expressions form)
 
-let callees form =
-  List.map (fun (call : Core.call) -> Core_lint.callee_name call.callee) (calls form)
+let name form (local : Core.local) =
+  match local with
+  | Self -> "self"
+  | Named _ | Synthetic _ -> Option.value ~default:"" (Hashtbl.find_opt form.names local)
 
-(* Fails the running test, printing the core form, unless it has the
-   property. *)
-let check form property =
-  if not (property form) then
-    fail "found:\n%s\ncallees: %s" (Core_print.show form.core) (String.concat ", " (callees form))
+(* A place written as a local and fields, such as [self.first]. *)
+let rec access_path form (place : Core.place) =
+  match place with
+  | Local { local; _ } -> name form local
+  | Field { base; field; _ } -> access_path form base ^ "." ^ field
+  | Constant { path; _ } -> Path.show path
+  | Lent call -> "lent " ^ expression form call
+  | Temporary value -> "temporary " ^ expression form value
+
+(* The parts of an expression that the tests observe, written briefly: a
+   call with its callee and arguments, an operator, a slice, a use, and a
+   literal. *)
+and expression form (node : Core.expression) =
+  let list describe items = String.concat ", " (List.map describe items) in
+  match node.kind with
+  | Integer number -> Z.to_string number
+  | Use place -> "use " ^ access_path form place
+  | Slice { call } -> "slice " ^ expression form call
+  | Operator { operation; arguments } ->
+      Printf.sprintf "%s(%s)"
+        (Intrinsic.operation_name operation)
+        (list (expression form) arguments)
+  | Call { callee; arguments; _ } ->
+      let dispatch =
+        match callee with
+        | Trait_method { self_type; evidence; _ } ->
+            Printf.sprintf " for %s by %s" (Types.show self_type)
+              (match evidence with
+              | Impl { impl; _ } -> Path.show impl
+              | Bound -> "a bound"
+              | Dynamic -> "any")
+        | _ -> ""
+      in
+      Printf.sprintf "%s%s(%s)" (Core_lint.callee_name callee) dispatch
+        (list (argument form) arguments)
+  | _ -> "a value of the type " ^ Types.show node.type_
+
+and operand form (value : Core.operand) =
+  match value with
+  | Place place -> "place " ^ access_path form place
+  | Value value -> expression form value
+
+and argument form (passed : Core.argument) =
+  match passed with
+  | Passed { mode; value; _ } -> Types.show_mode mode ^ operand form value
+  | Default -> "default"
 
 (* The core form of the definition [name] of the program [text], which must
    check without a diagnostic and pass the lint. *)
@@ -72,63 +115,34 @@ let definition_form text name =
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
 
-let expect ?(definition = "g") test_name text property =
-  test test_name (fun () -> check (definition_form text definition) property)
+(* Fails the running test unless the observations are the expected
+   ones. *)
+let expect_observed expected observed =
+  if observed <> expected then
+    fail "expected [%s], found [%s]" (String.concat "; " expected) (String.concat "; " observed)
+
+(* [expect test_name text observe expected]: what [observe] reports of the
+   definition [g], or of [definition], of the program [text]. *)
+let expect ?(definition = "g") test_name text observe expected =
+  test test_name (fun () -> expect_observed expected (observe (definition_form text definition)))
 
 let contract form : Core.contract =
   match form.core.definition with
   | Function { contract; _ } -> contract
   | _ -> failwith "the definition is not a function"
 
-(* Whether the body's final expression has the property: its value, or the
-   last statement of a body that has no value. *)
-let ends_with property form =
+(* The body's final expression: its value, or the last statement of a body
+   that has no value. *)
+let final_expression form =
+  let of_block (block : Core.block) =
+    match (block.value, List.rev block.statements) with
+    | Some value, _ -> [ expression form value ]
+    | None, { kind = Evaluate value; _ } :: _ -> [ expression form value ]
+    | None, _ -> []
+  in
   match form.core.definition with
-  | Function { body = Some { value = Some value; _ }; _ }
-  | Law_proof { body = { value = Some value; _ }; _ } ->
-      property value
-  | Function { body = Some { value = None; statements }; _ }
-  | Law_proof { body = { value = None; statements }; _ } -> (
-      match List.rev statements with
-      | { kind = Evaluate value; _ } :: _ -> property value
-      | _ -> false)
-  | _ -> false
-
-let name form (local : Core.local) =
-  match local with
-  | Self -> "self"
-  | Named _ | Synthetic _ -> Option.value ~default:"" (Hashtbl.find_opt form.names local)
-
-(* A place written as a local and fields, such as [self.first]. *)
-let rec access_path form (place : Core.place) =
-  match place with
-  | Local { local; _ } -> Some (name form local)
-  | Field { base; field; _ } -> Option.map (fun base -> base ^ "." ^ field) (access_path form base)
-  | Constant { path; _ } -> Some (Path.show path)
-  | Lent _ | Temporary _ -> None
-
-let is_place form path (operand : Core.operand) =
-  match operand with Place place -> access_path form place = Some path | Value _ -> false
-
-let passed property (argument : Core.argument) =
-  match argument with Passed { value; _ } -> property value | Default -> false
-
-(* A call of the callee [name] with one argument for each property. *)
-let is_call name arguments (expression : Core.expression) =
-  match expression.kind with
-  | Call call ->
-      Core_lint.callee_name call.callee = name
-      && List.length arguments = List.length call.arguments
-      && List.for_all2 (fun property argument -> property argument) arguments call.arguments
-  | _ -> false
-
-let is_operator (operation : Intrinsic.operation) operands (expression : Core.expression) =
-  match expression.kind with
-  | Operator { operation = applied; arguments } ->
-      applied = operation
-      && List.length arguments = List.length operands
-      && List.for_all2 (fun property argument -> property argument) operands arguments
-  | _ -> false
+  | Function { body = Some body; _ } | Law_proof { body; _ } -> of_block body
+  | _ -> []
 
 let capabilities (set : Types.capability_set) =
   List.map
@@ -141,32 +155,25 @@ let shape = Fixtures.Core.shape
 
 let () =
   expect "a match on a local borrows the local: its scrutinee is a place"
-    (shape ^ Fixtures.Core.match_on_a_place_borrows_the_place) (fun form ->
-      ends_with
-        (fun value ->
-          match value.kind with
-          | Match { scrutinees = [ scrutinee ]; _ } -> is_place form "shape" scrutinee
-          | _ -> false)
-        form)
-
-let () =
+    (shape ^ Fixtures.Core.match_on_a_place_borrows_the_place)
+    (fun form ->
+      List.concat_map
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Match { scrutinees; _ } -> List.map (operand form) scrutinees
+          | _ -> [])
+        (expressions form))
+    [ "place shape" ];
   expect "a list passed to a `mut` slice parameter is passed as a mutable view of all of it"
-    Fixtures.Core.list_passed_to_a_mut_slice_parameter (fun form ->
-      match calls form with
-      | [
-       { arguments = [ Passed { mode = Mut; value = Value { kind = Slice { call }; _ }; _ } ]; _ };
-       _;
-      ] ->
-          is_call "standard::list::List.slice_from"
-            [
-              passed (is_place form "items");
-              passed (fun (start : Core.operand) ->
-                  match start with
-                  | Value { kind = Integer zero; _ } -> Z.equal zero Z.zero
-                  | _ -> false);
-            ]
-            call
-      | _ -> false)
+    Fixtures.Core.list_passed_to_a_mut_slice_parameter
+    (fun form ->
+      List.filter_map
+        (fun (call : Core.call) ->
+          if Core_lint.callee_name call.callee = "app::main::clear" then
+            Some (String.concat ", " (List.map (argument form) call.arguments))
+          else None)
+        (calls form))
+    [ "mut slice standard::list::List.slice_from(place items, 0)" ]
 
 (* Holes *)
 
@@ -223,20 +230,26 @@ let () =
   let apply = Fixtures.Core.apply in
   (* The capabilities that the call of [apply] is inferred to grant. *)
   let granted form =
-    match
-      List.filter
-        (fun (call : Core.call) -> Core_lint.callee_name call.callee = "app::main::apply")
-        (calls form)
-    with
-    | [ { callee = Function { type_arguments = [ Capabilities set ]; _ }; _ } ] -> capabilities set
-    | _ -> []
+    List.concat_map
+      (fun (call : Core.call) ->
+        match call.callee with
+        | Function { path; type_arguments } when Path.show path = "app::main::apply" ->
+            List.concat_map
+              (function
+                | Types.Capabilities set -> capabilities set
+                | other -> [ Types.show_argument other ])
+              type_arguments
+        | _ -> [])
+      (calls form)
   in
   expect "a capability parameter is inferred as the set of capabilities that a lambda uses"
-    (apply ^ Fixtures.Core.capability_parameter_is_inferred_as_the_set_of) (fun form ->
-      granted form = [ "standard::capabilities::Console" ]);
+    (apply ^ Fixtures.Core.capability_parameter_is_inferred_as_the_set_of)
+    granted
+    [ "standard::capabilities::Console" ];
   expect "a capability parameter is inferred as the set of capabilities that a named function uses"
-    (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic) (fun form ->
-      granted form = [ "standard::capabilities::Console" ]);
+    (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
+    granted
+    [ "standard::capabilities::Console" ];
   test "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (fun () ->
       let text = apply ^ Fixtures.Core.calls_uses_and_a_lambdas_type_contain_the_inferred in
@@ -328,45 +341,73 @@ let () =
 (* Specifications *)
 
 let () =
-  (* The specification functions that a definition applies, in order. *)
-  let specification_functions form =
+  (* The specification functions that a definition applies, and the
+     functions it calls, in order. *)
+  let applied form =
     List.filter_map
       (fun (node : Core.expression) ->
-        match node.kind with Specification_function { function_; _ } -> Some function_ | _ -> None)
+        match node.kind with
+        | Specification_function { function_; _ } ->
+            Some
+              (match function_ with
+              | Log -> "log"
+              | Power -> "power"
+              | Time -> "time"
+              | Calls -> "calls")
+        | Call call -> Some ("call " ^ Core_lint.callee_name call.callee)
+        | _ -> None)
       (expressions form)
   in
   expect "a cost clause names its resource" Fixtures.Core.cost_clause_names_its_resource
     (fun form ->
-      match (contract form).costs with
-      | [
-       { resource = Calls (Function_parameter visit); bound = Exactly _; _ };
-       { resource = Calls (Capability_method (clock, "now")); bound = At_most _; _ };
-       { resource = Time; bound = Order_of _; _ };
-      ] ->
-          name form visit = "visit" && Path.show clock = "standard::capabilities::Clock"
-      | _ -> false);
+      List.map
+        (fun (cost : Core.cost) ->
+          let resource =
+            match cost.resource with
+            | Time -> "time"
+            | Allocations -> "allocations"
+            | Allocated_bytes -> "allocated bytes"
+            | Calls (Function_parameter local) -> "calls through " ^ name form local
+            | Calls (Capability path) -> "calls of " ^ Path.show path
+            | Calls (Capability_method (path, method_)) ->
+                "calls of " ^ Path.show path ^ "." ^ method_
+          in
+          resource ^ " "
+          ^
+          match cost.bound with
+          | Finite -> "finite"
+          | Order_of _ -> "of an order"
+          | At_most _ -> "at most"
+          | Exactly _ -> "exactly")
+        (contract form).costs)
+    [
+      "calls through visit exactly";
+      "calls of standard::capabilities::Clock.now at most";
+      "time of an order";
+    ];
   expect "`log` and `power` are specification functions outside a cost bound too"
-    Fixtures.Core.log_and_power_are_specification_functions_outside (fun form ->
-      specification_functions form = [ Log; Power ] && calls form = []);
+    Fixtures.Core.log_and_power_are_specification_functions_outside applied [ "log"; "power" ];
   expect "a function of the file named `power` is called in a specification"
-    Fixtures.Core.function_of_the_file_named_power_is_called_in_a (fun form ->
-      specification_functions form = [] && callees form = [ "app::main::power" ]);
+    Fixtures.Core.function_of_the_file_named_power_is_called_in_a applied
+    [ "call app::main::power" ];
   expect "the time of a method of a type parameter's bound names the trait method"
-    Fixtures.Core.time_of_a_method_of_a_type_parameters_bound_names (fun form ->
-      List.exists
+    Fixtures.Core.time_of_a_method_of_a_type_parameters_bound_names
+    (fun form ->
+      List.filter_map
         (fun (node : Core.expression) ->
           match node.kind with
-          | Method_time
-              (Trait_method
-                 {
-                   name = "equal";
-                   evidence = Bound;
-                   self_type = Parameter { name = "Element"; _ };
-                   _;
-                 }) ->
-              true
-          | _ -> false)
-        (expressions form));
+          | Method_time (Trait_method { self_type; evidence; _ } as callee) ->
+              Some
+                (Printf.sprintf "time(%s) for %s by %s" (Core_lint.callee_name callee)
+                   (Types.show self_type)
+                   (match evidence with
+                   | Bound -> "a bound"
+                   | Impl _ -> "an impl"
+                   | Dynamic -> "any"))
+          | Method_time callee -> Some ("time(" ^ Core_lint.callee_name callee ^ ")")
+          | _ -> None)
+        (expressions form))
+    [ "time(standard::core::Equal.equal) for Element by a bound" ];
   test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       no_diagnostics
         ~check:(fun database module_ ->
@@ -507,30 +548,22 @@ let () =
             substitution )
     | None -> failwith "no core form"
   in
-  (* A call of [Described.describe] through the bound on [self_type]. *)
-  let describes self_type receiver (call : Core.expression) =
-    is_call "app::main::Described.describe" [ passed receiver ] call
-    &&
-    match call.kind with
-    | Call { callee = Trait_method { evidence = Bound; self_type = Parameter { name; _ }; _ }; _ }
-      ->
-        name = self_type
-    | _ -> false
+  (* The method's final expression, and then its substitution. *)
+  let observed name =
+    let form, substitution = core_of_method name in
+    final_expression form @ substitution
   in
   test "a method defined in an impl has its own core form" (fun () ->
-      let form, substitution = core_of_method "describe" in
-      if substitution <> [] then
-        fail "found the substitution [%s]" (String.concat "; " substitution);
-      check form (fun form -> ends_with (describes "Value" (is_place form "self.first")) form));
+      expect_observed
+        [ "app::main::Described.describe for Value by a bound(place self.first)" ]
+        (observed "describe"));
   test
     "a method inherited from a trait has the default method's core form and a substitution for Self"
     (fun () ->
-      let form, substitution = core_of_method "twice" in
-      if substitution <> [ "Self = Both[Value]" ] then
-        fail "found the substitution [%s]" (String.concat "; " substitution);
-      check form (fun form ->
-          let describes_self = describes "Self" (is_place form "self") in
-          ends_with (is_operator Add [ describes_self; describes_self ]) form));
+      let describe = "app::main::Described.describe for Self by a bound(place self)" in
+      expect_observed
+        [ Printf.sprintf "add(%s, %s)" describe describe; "Self = Both[Value]" ]
+        (observed "twice"));
   test "a method of a derived impl has the generated core form" (fun () ->
       let database = setup [ ("app::main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
@@ -552,17 +585,22 @@ let () =
     (Fixtures.Core.pair_ordering
    ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")
     (fun form ->
-      match form.core.definition with
-      | Law_proof { parameters = [ first; second ]; _ } ->
-          first.local = Synthetic 0 && second.local = Synthetic 1 && first.name = "first"
-          && second.name = "second"
-          && Types.show first.type_ = "Pair"
-          && Types.show second.type_ = "Pair"
-          && ends_with
-               (is_call "app::main::only_equal"
-                  [ passed (is_place form "first"); passed (is_place form "second") ])
-               form
-      | _ -> false)
+      (match form.core.definition with
+        | Law_proof { parameters; _ } ->
+            List.map
+              (fun (parameter : Core.parameter) ->
+                Printf.sprintf "%s: %s, %s" parameter.name (Types.show parameter.type_)
+                  (match parameter.local with
+                  | Synthetic index -> Printf.sprintf "synthetic local %d" index
+                  | Named _ | Self -> "not synthetic"))
+              parameters
+        | _ -> [ "not a law's proof" ])
+      @ final_expression form)
+    [
+      "first: Pair, synthetic local 0";
+      "second: Pair, synthetic local 1";
+      "app::main::only_equal(place first, place second)";
+    ]
 
 (* [Infer.For_testing.specification] *)
 
