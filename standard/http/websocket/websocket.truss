@@ -34,7 +34,7 @@ internal fn is_valid_key(key: StringSlice) -> Bool {
   }
 }
 
-internal type Frame(is_final: Bool, opcode: UInt8, payload: List[UInt8])
+internal type Frame(is_final: Bool, is_compressed: Bool, opcode: UInt8, payload: List[UInt8])
 
 internal type Parsed =
   | Incomplete
@@ -45,16 +45,17 @@ fn invalid(code: UInt16, reason: StringSlice) -> Parsed {
   Parsed.Invalid(code: code, reason: reason.to_string())
 }
 
-internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize) -> Parsed {
+internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize, is_deflate: Bool = false) -> Parsed {
   if bytes.length() < 2 {
     return Parsed.Incomplete
   }
   let first = bytes[0]
   let second = bytes[1]
-  if (first & 112) != 0 {
+  let opcode = first & 15
+  let is_compressed = (first & 64) != 0
+  if (first & 48) != 0 || (is_compressed && (!is_deflate || (opcode != text_opcode && opcode != binary_opcode))) {
     return invalid(protocol_error, reason: "a frame with reserved bits set")
   }
-  let opcode = first & 15
   let is_final = (first & 128) != 0
   let is_masked = (second & 128) != 0
   if is_masked != is_server {
@@ -113,12 +114,12 @@ internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize) -> Parsed 
   for index in 0..raw.length() {
     mut payload.push(if is_masked { raw[index] ^ mask[index % 4] } else { raw[index] })
   }
-  Parsed.Complete(frame: Frame(is_final: is_final, opcode: opcode, payload: own payload), length: at + size)
+  Parsed.Complete(frame: Frame(is_final: is_final, is_compressed: is_compressed, opcode: opcode, payload: own payload), length: at + size)
 }
 
-internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: Option[Array[UInt8, 4]]) -> List[UInt8] {
+internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: Option[Array[UInt8, 4]], is_compressed: Bool = false) -> List[UInt8] {
   var bytes: List[UInt8] = List.with_capacity(payload.length() + 14)
-  mut bytes.push((if is_final { 128 } else { 0 }) | (opcode & 15))
+  mut bytes.push((if is_final { 128 } else { 0 }) | (if is_compressed { 64 } else { 0 }) | (opcode & 15))
   let mask_bit: UInt8 = if mask is Some(_) { 128 } else { 0 }
   let length = payload.length()
   if length < 126 {
@@ -168,4 +169,136 @@ internal fn close_code(payload: Slice[UInt8]) -> Result[UInt16, UInt16] {
     return Err(protocol_error)
   }
   Ok(code)
+}
+
+internal let deflate_offer: String = "permessage-deflate; server_no_context_takeover; client_no_context_takeover"
+
+internal type Deflate(compresses: Bool)
+
+internal type DeflateAcceptance(response: String, deflate: Deflate)
+
+type Parameter(name: String, value: Option[String])
+
+fn parameters_of(extension: StringSlice) -> List[Parameter] {
+  var parameters: List[Parameter] = []
+  for part in extension.split(";") {
+    let item = part.trim()
+    match item.find("=") {
+      Some(at) => {
+        let raw = item.part(at + 1, to: item.length()).trim()
+        let value = if raw.length() >= 2 && raw.starts_with("\"") && raw.ends_with("\"") { raw.part(1, to: raw.length() - 1) } else { raw }
+        mut parameters.push(Parameter(name: item.part(0, to: at).trim().to_ascii_lowercase(), value: Some(value.to_string())))
+      }
+      None => mut parameters.push(Parameter(name: item.to_ascii_lowercase(), value: None))
+    }
+  }
+  parameters
+}
+
+fn is_window_bits(value: StringSlice) -> Bool {
+  value == "8".slice() || value == "9".slice() || value == "10".slice() || value == "11".slice() || value == "12".slice()
+    || value == "13".slice() || value == "14".slice() || value == "15".slice()
+}
+
+type DeflateParameters(server_window: Option[String], client_window: Option[String], keeps_server_context: Bool)
+
+fn deflate_parameters(parameters: Slice[Parameter], is_response: Bool) -> Option[DeflateParameters] {
+  var seen: List[String] = []
+  var settings = DeflateParameters(server_window: None, client_window: None, keeps_server_context: true)
+  for index in 1..parameters.length() {
+    let parameter = parameters[index]
+    let name = parameter.name.slice()
+    for earlier in seen {
+      if earlier.slice() == name {
+        return None
+      }
+    }
+    mut seen.push(parameter.name.copy())
+    if name == "server_no_context_takeover".slice() || name == "client_no_context_takeover".slice() {
+      if parameter.value is Some(_) {
+        return None
+      }
+      if name == "server_no_context_takeover".slice() {
+        settings.keeps_server_context = false
+      }
+    } else if name == "server_max_window_bits".slice() || name == "client_max_window_bits".slice() {
+      let value = match parameter.value {
+        Some(value) => {
+          if !is_window_bits(value.slice()) {
+            return None
+          }
+          Some(value.copy())
+        }
+        None => {
+          if is_response || name == "server_max_window_bits".slice() {
+            return None
+          }
+          None
+        }
+      }
+      if name == "server_max_window_bits".slice() {
+        settings.server_window = own value
+      } else {
+        settings.client_window = own value
+      }
+    } else {
+      return None
+    }
+  }
+  Some(own settings)
+}
+
+internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAcceptance] {
+  let header = match offers {
+    Some(header) => header
+    None => return None
+  }
+  for extension in header.split(",") {
+    let parameters = parameters_of(extension)
+    if !parameters.is_empty() && parameters[0].name.slice() == "permessage-deflate".slice() {
+      match deflate_parameters(parameters.slice(), is_response: false) {
+        Some(settings) => {
+          var response = deflate_offer.copy()
+          var compresses = true
+          match settings.server_window {
+            Some(bits) => {
+              mut response.push("; server_max_window_bits=")
+              mut response.push(bits.slice())
+              compresses = bits.slice() == "15".slice()
+            }
+            None => {}
+          }
+          return Some(DeflateAcceptance(response: own response, deflate: Deflate(compresses: compresses)))
+        }
+        None => {}
+      }
+    }
+  }
+  None
+}
+
+internal fn agreed_deflate(response: Option[StringSlice], is_offered: Bool) -> Result[Option[Deflate], String] {
+  let header = match response {
+    Some(header) => header.trim()
+    None => return Ok(None)
+  }
+  if header.is_empty() {
+    return Ok(None)
+  }
+  let parameters = parameters_of(header)
+  if !is_offered || header.contains(",") || parameters.is_empty() || parameters[0].name.slice() != "permessage-deflate".slice() {
+    return Err("a WebSocket extension that was not offered")
+  }
+  let settings = match deflate_parameters(parameters.slice(), is_response: true) {
+    Some(settings) => own settings
+    None => return Err("a permessage-deflate response with invalid parameters")
+  }
+  if settings.keeps_server_context {
+    return Err("a permessage-deflate response without server_no_context_takeover")
+  }
+  let compresses = match settings.client_window {
+    Some(bits) => bits.slice() == "15".slice()
+    None => true
+  }
+  Ok(Some(Deflate(compresses: compresses)))
 }

@@ -42,6 +42,19 @@ fn raw_exchange(raw: StringSlice) -> String
   String.from_utf8_lossy(reply.slice())
 }
 
+fn raw_session(raw: Slice[UInt8], expected: StringSlice) -> String
+  uses NetworkClient, Handles, Tasks, Panic
+{
+  let connection = network::connect("localhost", port: 8090).expect("the server accepts")
+  let _ = connection.send_all(raw)
+  var reply: List[UInt8] = []
+  var reads: USize = 0
+  while reads < 20 && !String.from_utf8_lossy(reply.slice()).slice().contains(expected) && connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 {
+    reads += 1
+  }
+  String.from_utf8_lossy(reply.slice())
+}
+
 fn conversation() -> List[String]
   uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
 {
@@ -77,6 +90,26 @@ fn conversation() -> List[String]
         Ok(heard) => mut seen.append(own heard)
         Err(error) => mut seen.push("failed: ${error}")
       }
+      let plain = mut client.websocket(url::Url"ws://localhost:8090/chat", session: fn(socket) {
+        let _ = mut socket.send_text("y".slice().repeated(1000).slice())
+        let reply = match mut socket.receive() {
+          Ok(Some(Text(text))) => "${text.length()} ${text.slice().starts_with("YYY")}"
+          _ => "no reply"
+        }
+        let _ = mut socket.close()
+        reply
+      }, compresses: false)
+      match own plain {
+        Ok(reply) => mut seen.push(own reply)
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let upgrade = "GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+      let offered = raw_exchange("${upgrade}Sec-WebSocket-Extensions: x-unknown, permessage-deflate; client_max_window_bits\r\n\r\n".slice())
+      let declined = raw_exchange("${upgrade}Sec-WebSocket-Extensions: permessage-deflate; bogus\r\n\r\n".slice())
+      mut seen.push("${offered.slice().contains("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n")} ${declined.slice().contains("Sec-WebSocket-Extensions")}")
+      var compressed = "${upgrade}Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n".slice().bytes().to_list()
+      mut compressed.append_slice([193, 135, 0, 0, 0, 0, 242, 72, 205, 201, 201, 7, 0][..])
+      mut seen.push("${raw_session(compressed.slice(), expected: "HELLO").slice().contains("HELLO")}")
       let handshake = raw_exchange("GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
       mut seen.push("${handshake.slice().starts_with("HTTP/1.1 101 Switching Protocols")} ${handshake.slice().contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")}")
       match http::get("http://localhost:8090/chat") {
@@ -108,20 +141,23 @@ fn conversation() -> List[String]
   }
 }
 
-test "a WebSocket client and server exchange text, binary, and long messages, then close" {
+test "a WebSocket client and server exchange text, binary, and long messages, compressed or not, then close" {
   provide simulation::World.new() {
     let seen = conversation()
-    assert seen.length() == 11
+    assert seen.length() == 14
     assert seen[0] == "protocol chat.v1"
     assert seen[1] == "HELLO"
     assert seen[2] == "3 bytes"
     assert seen[3] == "70000 true"
     assert seen[4] == "closed true"
-    assert seen[5] == "true true"
-    assert seen[6] == "400"
-    assert seen[7] == "text/event-stream"
-    assert seen[8] == "message|-|first|0"
-    assert seen[9] == "note|7|two\nlines|0"
-    assert seen[10] == "message|7|last|500"
+    assert seen[5] == "1000 true"
+    assert seen[6] == "true false"
+    assert seen[7] == "true"
+    assert seen[8] == "true true"
+    assert seen[9] == "400"
+    assert seen[10] == "text/event-stream"
+    assert seen[11] == "message|-|first|0"
+    assert seen[12] == "note|7|two\nlines|0"
+    assert seen[13] == "message|7|last|500"
   }
 }

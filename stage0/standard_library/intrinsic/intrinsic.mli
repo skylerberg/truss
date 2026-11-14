@@ -197,6 +197,11 @@ type operation =
           the result. [change] uses no capability, so it cannot block or call [shared_update], and
           two updates cannot deadlock. [Result] is [Storable], so no view of the value escapes the
           lock. *)
+  | Holds_invariant
+      (** [holds_invariant(value, clause: USize) -> Bool]: whether a value meets one [invariant]
+          clause of its type, by the clause's position among the type's clauses, which is a literal.
+          The clause can be evaluated at run time. A derived [Deserialize] calls it on the value it
+          read, so data cannot make a value that breaks its type's invariant. *)
   | Shared_key
       (** [shared_key(shared) -> UInt64]: the address of the heap block, as a key for [Tasks.wait]
           and [Tasks.wake]. Every copy of one [Shared] has the same key. *)

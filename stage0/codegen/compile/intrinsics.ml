@@ -771,6 +771,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                })
       | Shared_key -> set (Convert (Copy (read (argument 0) / Field "value"), Integer UInt64))
       | Shared_update -> bug "shared_update is lowered with the call of its function value"
+      | Holds_invariant -> bug "holds_invariant is lowered with its type's invariant"
       | Handle_release ->
           (* The handle is moved into a local that nothing drops, so its
              descriptor stays open. *)

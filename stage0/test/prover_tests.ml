@@ -410,6 +410,12 @@ let () =
         "prover.invariant");
   test "building a value that meets its invariant" (fun () ->
       proven (span ^ Fixtures.Prover.building_a_value_that_meets_its_invariant));
+  test "a derived Default must meet the invariant" (fun () ->
+      not_proven Fixtures.Prover.derived_default_must_meet_the_invariant "prover.invariant");
+  test "a derived Default built from field defaults meets the invariant" (fun () ->
+      proven Fixtures.Prover.derived_default_from_field_defaults_meets_the_invariant);
+  test "a field's default must meet its type's invariant" (fun () ->
+      not_proven Fixtures.Prover.field_default_must_meet_its_types_invariant "prover.invariant");
   test "a parameter meets its invariant" (fun () ->
       proven (span ^ Fixtures.Prover.parameter_meets_its_invariant));
   test "a mut parameter must meet its invariant when the function returns" (fun () ->

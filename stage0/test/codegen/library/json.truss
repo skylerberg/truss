@@ -191,6 +191,36 @@ test "deserialize says which member has the wrong type or is missing" {
   assert untyped is Ok(value) && value.to_text() == "{\"a\":[1,2.5,null,true,\"x\"]}"
 }
 
+type Signup(name: String, age: UInt32, team: Team = Team())
+  invariant age >= 13 && age <= 150
+  invariant name.length() > 0
+  derives serialization::Deserialize
+
+type Team(size: UInt32 = 1)
+  invariant size > 0
+  derives serialization::Deserialize
+
+type Reading =
+  | Celsius(degrees: Int32)
+  | Kelvin(degrees: Int32)
+  invariant !(self is Kelvin(degrees) && degrees < 0)
+  derives serialization::Deserialize
+
+test "deserialize rejects a value that breaks its type's invariant, at the value's path" {
+  let young: Result[Signup, json::Error] = json::decode("{\"name\":\"Ada\",\"age\":7}")
+  assert young is Err(Deserialize(error)) && error.path == "" && error.message == "breaks the invariant `age >= 13 && age <= 150`"
+  let unnamed: Result[Signup, json::Error] = json::decode("{\"name\":\"\",\"age\":30}")
+  assert unnamed is Err(Deserialize(error)) && error.message == "breaks the invariant `name.length() > 0`"
+  let empty: Result[Signup, json::Error] = json::decode("{\"name\":\"Ada\",\"age\":30,\"team\":{\"size\":0}}")
+  assert empty is Err(Deserialize(error)) && error.path == "/team" && error.message == "breaks the invariant `size > 0`"
+  let valid: Result[Signup, json::Error] = json::decode("{\"name\":\"Ada\",\"age\":30}")
+  assert valid is Ok(signup) && signup.age == 30 && signup.team.size == 1
+  let cold: Result[Reading, json::Error] = json::decode("{\"Kelvin\":{\"degrees\":-1}}")
+  assert cold is Err(Deserialize(_))
+  let mild: Result[Reading, json::Error] = json::decode("{\"Celsius\":{\"degrees\":-1}}")
+  assert mild is Ok(Celsius(degrees)) && degrees == -1
+}
+
 test "a value is read from a reader and written to a writer" {
   provide streams::NoHandles() {
     var source = streams::ByteReader.new("{\"items\": [1, 2, 3]}".bytes())

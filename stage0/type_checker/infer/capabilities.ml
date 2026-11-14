@@ -651,7 +651,7 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
           | Order_of value | At_most value | Exactly value -> check_specification value)
         contract.costs
   | Type { invariants; potential; _ } ->
-      List.iter check_specification invariants;
+      List.iter (fun (invariant : Core.condition) -> check_specification invariant.value) invariants;
       Option.iter check_specification potential
   | Trait laws ->
       List.iter

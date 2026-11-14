@@ -238,7 +238,7 @@ let definition_children visit = function
       Option.iter (block visit) body
   | Type { defaults; invariants; potential } ->
       List.iter (fun (_, _, value) -> visit.expression value) defaults;
-      List.iter visit.expression invariants;
+      List.iter (fun (invariant : condition) -> visit.expression invariant.value) invariants;
       Option.iter visit.expression potential
   | Trait laws ->
       List.iter

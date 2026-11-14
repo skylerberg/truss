@@ -105,3 +105,11 @@ test "a system error names the failure" {
   assert "${SystemError.Closed}" == "closed"
   assert "${SystemError.Other(code: 71)}" == "system error 71"
 }
+
+type Retry(attempts: UInt32 = 3, label: String)
+  derives Default
+
+test "a derived Default builds each field from its default, or from its type's default" {
+  let made = Retry.default()
+  assert made.attempts == 3 && made.label == ""
+}
