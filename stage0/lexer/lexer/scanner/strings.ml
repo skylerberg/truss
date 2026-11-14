@@ -87,6 +87,8 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
   end
   else begin
     cursor.position <- start + delimiter_length;
+    (* An interpolation's first token follows no operand. *)
+    cursor.previous <- None;
     let braces = ref 0 and count = ref 0 in
     let finished = ref false and closed = ref false and ending = ref Closed in
     let end_of_input position =

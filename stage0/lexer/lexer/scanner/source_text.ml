@@ -129,15 +129,6 @@ let read_character cursor buffer ~context =
     cursor.position <- cursor.position + Unicode.decoded_length packed
   end
 
-(* The first offset at or after [index] that holds neither a space nor a
-   line break. *)
-let skip_blank cursor index =
-  let rec loop position =
-    let current = byte cursor position in
-    if is_space current || is_line_break current then loop (position + 1) else position
-  in
-  loop index
-
 (* Consumes the line break at the cursor and returns its span. A carriage
    return on its own is an error, and still a line break, so that the lines
    after it lex normally. *)

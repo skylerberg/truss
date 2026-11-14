@@ -126,32 +126,35 @@ let checked_name cursor name =
       Hashtbl.add cursor.names name checked;
       checked
 
-(* Whether a name, or a keyword that a confusable character such as `∀` spells, starts
-   at [index]: after `1.`, it makes the `.` a member access. *)
-let starts_name cursor index =
-  let current = byte cursor index in
-  if current < 0x80 then is_ascii_name_byte current
-  else
-    let packed = decode cursor index in
-    packed >= 0
-    &&
-    let value = Unicode.decoded_code_point packed in
-    Unicode.is_xid_start value
-    ||
-    match Confusables.find value with
-    | Some (Spelled spelling) -> Token.word spelling <> None
-    | _ -> false
+(* Whether a token of this kind can end an operand: `.5` after it is a
+   member access, not a float, and `...` after it is not a placeholder. *)
+let ends_operand : Token.kind -> bool = function
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
+  | Punctuation (Close _ | Question) -> true
+  | Keyword (True | False | Self_value | Self_type | Todo | Unreachable) -> true
+  | _ -> false
 
-(* The first offset at or after [index] that holds no space, line break, or
-   character that its fix replaces with a space, such as U+00A0. *)
-let rec skip_blank_and_confusable_spaces cursor index =
-  let position = Source_text.skip_blank cursor index in
-  let packed = if byte cursor position >= 0x80 then decode cursor position else -1 in
-  if packed >= 0 && Confusables.find (Unicode.decoded_code_point packed) = Some Confusables.Space
-  then skip_blank_and_confusable_spaces cursor (position + Unicode.decoded_length packed)
-  else position
+(* Whether the last token scanned can end an operand. *)
+let follows_operand cursor =
+  match cursor.previous with Some kind -> ends_operand kind | None -> false
 
-let number cursor =
+(* Whether a token of this kind can begin an operand: `...` before it is a
+   range or a spread operator, not a placeholder. *)
+let begins_operand : Token.kind -> bool = function
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
+  | Punctuation (Open (Paren | Square)) -> true
+  | Keyword (True | False | Self_value | Self_type | Todo | Unreachable) -> true
+  | _ -> false
+
+(* Whether a token of this kind is a word, which a `.` before it can make
+   a member: `1.max` is a member access. *)
+let is_word : Token.kind -> bool = function
+  | Upper _ | Lower _ | Underscore | Keyword _ | Reserved _ -> true
+  | _ -> false
+
+(* A number. [word_follows index] says whether the next token at or after
+   [index], across line breaks, is a word. *)
+let number cursor ~word_follows =
   let start = cursor.position in
   let stop = Numbers.scan_end cursor.text start in
   cursor.position <- stop;
@@ -168,14 +171,16 @@ let number cursor =
         problem.message
   | None -> ());
   match checked with
-  (* `1.`, with nothing after the `.` that a member access could continue
-     with: a float with no digit after its `.`. *)
+  (* `1.`, with no word after the `.` for a member access to name, and no
+     second `.` of a range: a float with no digit after its `.`. A cursor
+     that scans ahead leaves it an integer, since either kind begins an
+     operand and neither is a word. *)
   | { value = Integer _; problem = None; _ }
     when byte cursor stop = Char.code '.'
+         && byte cursor (stop + 1) <> Char.code '.'
+         && (not cursor.is_peek)
          && (not (Numbers.is_radix_prefix cursor.text start))
-         &&
-         let after = skip_blank_and_confusable_spaces cursor (stop + 1) in
-         not (starts_name cursor after || byte cursor after = Char.code '.') -> (
+         && not (word_follows (stop + 1)) -> (
       let written = String.sub cursor.text start (stop + 1 - start) in
       match Numbers.float_with_zero (written ^ "0") with
       | Some value ->
@@ -223,10 +228,10 @@ let leading_dot_float cursor =
    operand on neither side it is a placeholder for code not written yet, as
    in Python, and lexes as `todo`. Before an operand only, it is the spread
    or rest operator, which Truss does not have, and lexes as nothing. *)
-let ellipsis cursor =
+let ellipsis cursor ~operand_follows =
   let start = cursor.position in
   let stop = start + 3 in
-  let after = Trivia.after_operand cursor start and before = Trivia.before_operand cursor stop in
+  let after = follows_operand cursor and before = operand_follows stop in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
   let replaced replacement message kind =
@@ -252,11 +257,32 @@ let ellipsis cursor =
     None
   end
 
+(* The next item, with the kind of a token recorded as the cursor's
+   previous one. *)
 let rec scan cursor ~inline ~nesting =
+  let item = scan_item cursor ~inline ~nesting in
+  (match item with Token { kind; _ } -> cursor.previous <- Some kind | Line_end | End -> ());
+  item
+
+and scan_item cursor ~inline ~nesting =
   let start = cursor.position in
   let current = byte cursor start in
   let next = byte cursor (start + 1) in
-  let again () = scan cursor ~inline ~nesting in
+  let again () = scan_item cursor ~inline ~nesting in
+  (* The kind of the next token at or after [index], scanned by a copy of
+     the cursor. [across_lines] skips line breaks before it. *)
+  let next_kind index ~across_lines =
+    let ahead = peek cursor index in
+    let rec first () =
+      match scan_item ahead ~inline ~nesting with
+      | Token { kind; _ } -> Some kind
+      | Line_end when across_lines ->
+          ignore (Source_text.consume_line_break ahead);
+          first ()
+      | Line_end | End -> None
+    in
+    first ()
+  in
   let reject ?code length message =
     Trivia.reject ?code cursor ~length message;
     again ()
@@ -274,7 +300,10 @@ let rec scan cursor ~inline ~nesting =
   end
   else if is_line_break current then Line_end
   else if is_ascii_letter current || current = Char.code '_' then name cursor ~nesting
-  else if is_digit current then token (number cursor)
+  else if is_digit current then
+    token
+      (number cursor ~word_follows:(fun index ->
+           match next_kind index ~across_lines:true with Some kind -> is_word kind | None -> false))
   else if current >= 0x80 then begin
     let packed = decode cursor start in
     if packed < 0 then begin
@@ -392,7 +421,7 @@ let rec scan cursor ~inline ~nesting =
           Trivia.semicolon cursor;
           again ()
         end
-    | '.' when is_digit next && not (Trivia.after_operand cursor start) -> (
+    | '.' when is_digit next && not (follows_operand cursor) -> (
         match leading_dot_float cursor with
         | Some kind -> token kind
         | None -> ( match punctuation cursor '.' with Some kind -> token kind | None -> again ()))
@@ -408,8 +437,20 @@ let rec scan cursor ~inline ~nesting =
         cursor.position <- start + 1;
         let kind, ending = Strings.prefixed_string cursor ~scan ~prefix:"@" ~start ~nesting in
         Token { kind; start; ending }
+    (* A cursor that scans ahead reads `...` as `..=`, neither a word nor
+       the start of an operand, without scanning further ahead itself. Each
+       token is then scanned at most twice, where a chain of `...`s would
+       otherwise scan ahead from each one to the end of the chain. *)
+    | '.' when next = Char.code '.' && byte cursor (start + 2) = Char.code '.' && cursor.is_peek ->
+        cursor.position <- start + 3;
+        token (Punctuation Dot_dot_equal)
     | '.' when next = Char.code '.' && byte cursor (start + 2) = Char.code '.' -> (
-        match ellipsis cursor with Some kind -> token kind | None -> again ())
+        let operand_follows index =
+          match next_kind index ~across_lines:false with
+          | Some kind -> begins_operand kind
+          | None -> false
+        in
+        match ellipsis cursor ~operand_follows with Some kind -> token kind | None -> again ())
     | character -> (
         match punctuation cursor character with
         | Some kind -> token kind

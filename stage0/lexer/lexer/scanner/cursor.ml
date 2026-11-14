@@ -17,6 +17,13 @@ type t = {
   (* Each name spelling is checked once per file, and its tokens share one
      string. *)
   names : (string, Names.checked) Hashtbl.t;
+  (* The kind of the last token scanned in this file or interpolation, which
+     decides what a `.` or a `...` after it means. *)
+  mutable previous : Token.kind option;
+  (* Whether this cursor only scans ahead for the kind of the next token. A
+     cursor that scans ahead does not scan further ahead itself, so that
+     each token is scanned at most twice. *)
+  is_peek : bool;
 }
 
 let create source diagnostics =
@@ -31,6 +38,19 @@ let create source diagnostics =
     line_is_blank = true;
     unterminated_at_end = false;
     names = Hashtbl.create 256;
+    previous = None;
+    is_peek = false;
+  }
+
+(* A copy of [cursor] at [index] for scanning ahead: what it scans changes
+   nothing in [cursor], and what it reports is discarded. *)
+let peek cursor index =
+  {
+    cursor with
+    position = index;
+    diagnostics = Diagnostic.Collector.create ();
+    previous = None;
+    is_peek = true;
   }
 
 (* How a construct that must end on its line ended. [Unterminated] means

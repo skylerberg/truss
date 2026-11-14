@@ -120,63 +120,6 @@ let character_literal_end ?(after_prefix = false) cursor start =
         Some (close + 1)
     | _ -> None
 
-(* Whether the token before [index] can end an operand: a name, a literal, a
-   closer, `?`, or one of the keywords that are expressions. It is read
-   from the text, since the scanner does not keep the token before. A
-   confusable character counts as the ASCII that its fix writes, so that
-   recovery reads the text as the fixed text: U+00A0 is a space, and `）` is
-   `)`. *)
-let after_operand cursor index =
-  let rec back position =
-    if position < 0 then None
-    else
-      let current = byte cursor position in
-      if is_space current || is_line_break current then back (position - 1) else Some position
-  in
-  let rec sequence_start position =
-    if position > 0 && byte cursor position land 0xC0 = 0x80 then sequence_start (position - 1)
-    else position
-  in
-  let rec ends_operand index =
-    match back (index - 1) with
-    | None -> false
-    | Some last ->
-        let current = byte cursor last in
-        if is_ascii_name_byte current then begin
-          let rec word_start position =
-            if position > 0 && is_ascii_name_byte (byte cursor (position - 1)) then
-              word_start (position - 1)
-            else position
-          in
-          let first = word_start last in
-          match Token.word (String.sub cursor.text first (last + 1 - first)) with
-          | Some (Keyword (True | False | Self_value | Self_type | Todo | Unreachable)) | None ->
-              true
-          | Some _ -> false
-        end
-        else if current >= 0x80 then
-          let first = sequence_start last in
-          let packed = decode cursor first in
-          if packed < 0 then true
-          else
-            match Confusables.find (Unicode.decoded_code_point packed) with
-            | Some Space -> ends_operand first
-            | Some (Spelled spelling) -> List.mem spelling [ ")"; "]"; "}" ]
-            | Some (Opening_quote _) | None -> true
-        else List.mem (Char.chr current) [ '"'; ')'; ']'; '}'; '?' ]
-  in
-  ends_operand index
-
-(* Whether an operand starts at [index], after spaces: a name, a literal, or
-   an opening `(` or `[`. A `.` before a digit is a literal, the float `.5`
-   that is missing its leading `0`. *)
-let before_operand cursor index =
-  let start = skip_spaces cursor index in
-  let current = byte cursor start in
-  is_ascii_name_byte current || current >= 0x80
-  || (current >= 0 && List.mem (Char.chr current) [ '"'; '('; '[' ])
-  || (current = Char.code '.' && is_digit (byte cursor (start + 1)))
-
 (* An attribute of Rust, `#[derive(...)]` or `#![...]`: like a comment, it
    lexes as nothing, up to the end of its line. *)
 let attribute cursor =
