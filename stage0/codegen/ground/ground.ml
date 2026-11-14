@@ -4,12 +4,8 @@ type ty =
   | Named of { path : Path.t; arguments : argument list }
   | Function of function_type
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
-  | Lent of lent
   | Never
 
-and lent = { base : ty; writable : bool; fields : lent_field list }
-and lent_field = { variant : string option; field : string; holds : holds }
-and holds = Address | Nested of lent
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
 and result = Returns of ty | Lends of mode * ty
@@ -29,25 +25,10 @@ let rec compare left right =
         (fun (left_name, left_type) (right_name, right_type) ->
           String.compare left_name right_name >>= fun () -> compare left_type right_type)
         left.associated right.associated
-  | Lent left, Lent right -> compare_lent left right
   | Never, Never -> 0
   | _ -> Int.compare (rank left) (rank right)
 
-and rank = function Named _ -> 0 | Function _ -> 1 | Any _ -> 2 | Lent _ -> 3 | Never -> 4
-
-and compare_lent left right =
-  compare left.base right.base >>= fun () ->
-  Bool.compare left.writable right.writable >>= fun () ->
-  List.compare
-    (fun left_field right_field ->
-      Option.compare String.compare left_field.variant right_field.variant >>= fun () ->
-      String.compare left_field.field right_field.field >>= fun () ->
-      match (left_field.holds, right_field.holds) with
-      | Address, Address -> 0
-      | Nested left_field, Nested right_field -> compare_lent left_field right_field
-      | Address, Nested _ -> -1
-      | Nested _, Address -> 1)
-    left.fields right.fields
+and rank = function Named _ -> 0 | Function _ -> 1 | Any _ -> 2 | Never -> 3
 
 (* [Z.t] is compared by [Z.compare], since the polymorphic comparison does
    not accept it. Every other part is a string, a list, or a constructor. *)
@@ -112,20 +93,7 @@ let rec to_string = function
         @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
       in
       "any " ^ path_name trait ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
-  | Lent lent -> lent_to_string lent
   | Never -> "Never"
-
-and lent_to_string { base; writable; fields } =
-  let field { variant; field; holds } =
-    Option.fold ~none:"" ~some:(fun variant -> variant ^ ".") variant
-    ^ field
-    ^ match holds with Address -> " by address" | Nested lent -> ": " ^ lent_to_string lent
-  in
-  "lent "
-  ^ (if writable then "mut " else "")
-  ^ to_string base ^ "("
-  ^ String.concat ", " (List.map field fields)
-  ^ ")"
 
 and argument_to_string = function
   | Type ty -> to_string ty

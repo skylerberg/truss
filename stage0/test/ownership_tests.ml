@@ -95,10 +95,9 @@ let () =
       fine
         (lends "tagged" "(self) lends Tagged"
            "  let tag = \"new\".copy()\n  Tagged(tag: tag, book: self.books[0])\n"));
-  test "a lent constructor that lends a place cannot hold an owned value" (fun () ->
-      one_diagnostic
-        (lends "tagged" "(self) lends Tagged" "  Tagged(tag: \"new\".copy(), book: self.books[0])\n")
-        "ownership.owned_beside_lent");
+  test "a lent constructor that lends a place owns a value that the method made" (fun () ->
+      fine
+        (lends "tagged" "(self) lends Tagged" "  Tagged(tag: \"new\".copy(), book: self.books[0])\n"));
   test "a place lent `mut` inside a variant is rejected" (fun () ->
       one_diagnostic
         (lends "first" "(mut self) lends mut Option[String]" "  Some(mut self.books[0])\n")

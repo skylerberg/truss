@@ -57,9 +57,10 @@ val panic_path : Path.t
 val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 val result_of : context -> Types.substitution -> Types.result -> Convention.result * bool
 
-val lent_slot : context -> Types.substitution -> Types.result -> Lowered.ty option
-(** The slot that a lending method takes as its last parameter: a pointer to where it builds a part
-    that is not a place of its parameters. *)
+val lending_parameters : context -> Types.substitution -> Types.result -> Lowered.ty list
+(** The trailing parameters of a lending method: the slot, a pointer to storage of the caller's
+    where the method builds a part that is not a place it was passed, unless the part has zero size;
+    a pointer to the caller's {!Lowered.Lend}; and a pointer to the call site. *)
 
 val c_signature :
   context ->

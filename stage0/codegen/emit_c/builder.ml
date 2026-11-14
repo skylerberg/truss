@@ -452,7 +452,7 @@ let build ?(returns = true) builder ~parameters ~result =
                 when Keys.find_opt (Environment (symbol, nested_index)) context.environments
                      = Some [] ->
                   "{}"
-              | Environment _ | Evidence _ -> "{0}"
+              | Environment _ | Evidence _ | Lend | Lend_mark -> "{0}"
               | _ -> "0"
             in
             Buffer.add_string body

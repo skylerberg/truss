@@ -21,8 +21,8 @@ val lower_code :
   Lowering.state ->
   Path.t ->
   parameters:Lowered.place list ->
-  ?lent_slot:Lowered.place * Ground.ty ->
+  ?lending:Lowering.lending ->
   unit ->
   unit
-(** Lowers the body of a function or a method. [lent_slot] is a lending method's slot: the place its
-    last parameter points at, and the type of the part it lends. *)
+(** Lowers the body of a function or a method. [lending] is a lending method's trailing parameters.
+*)

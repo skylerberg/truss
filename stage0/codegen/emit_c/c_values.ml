@@ -14,7 +14,7 @@ let local_name local = function
 
 let erased context : Lowered.ty -> bool = function
   | Value ty -> (layout context ty).size = 0
-  | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
+  | Pointer _ | Raw _ | Environment _ | Evidence _ | Lend | Lend_mark -> false
 
 let find_field (fields : Memory_layout.field list) name =
   List.find_opt (fun (field : Memory_layout.field) -> field.name = name) fields
@@ -22,6 +22,13 @@ let find_field (fields : Memory_layout.field list) name =
 let declare_prototype context symbol declaration =
   if not (List.mem_assoc symbol context.prototypes) then
     context.prototypes <- (symbol, declaration) :: context.prototypes
+
+(* The address of a definition's position anchor. *)
+let anchor_c context definition =
+  let symbol = anchor_symbol definition in
+  if not (List.mem_assoc symbol context.anchors) then
+    context.anchors <- (symbol, definition) :: context.anchors;
+  "&" ^ symbol
 
 let integer_literal integer value =
   let c_type = integer_c integer in
@@ -160,6 +167,10 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
   | Size_of ty -> (Printf.sprintf "((t_usize)sizeof(%s))" (value_c context ty), Raw (Integer USize))
   | Alignment_of ty ->
       (Printf.sprintf "((t_usize)_Alignof(%s))" (value_c context ty), Raw (Integer USize))
+  | Site { definition; line; column } ->
+      ( Printf.sprintf "((void *)&(struct t_site){ %s, %d, %d })" (anchor_c context definition) line
+          column,
+        Raw (Pointer Opaque) )
   | Symbol_address key ->
       refer context key;
       let symbol = Instance.symbol key in
@@ -167,6 +178,7 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
         (match key with
         | Table _ | Any_table _ | Locked_table _ ->
             Printf.sprintf "extern const void *const %s[];\n" symbol
+        | Drop ty -> Printf.sprintf "void %s(%s *);\n" symbol (value_c context ty)
         | _ -> Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
       ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))
 
@@ -179,6 +191,7 @@ let scalar_of context : Lowered.ty -> Memory_layout.scalar = function
       | _ -> bug "an operator on %s, which is not a scalar" (Ground.to_string ty))
   | Raw scalar -> scalar
   | Pointer _ | Environment _ | Evidence _ -> Pointer Opaque
+  | Lend | Lend_mark -> bug "an operator on a lend's record"
 
 let is_float : Memory_layout.scalar -> bool = function Float32 | Float64 -> true | _ -> false
 

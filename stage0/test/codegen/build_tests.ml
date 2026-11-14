@@ -145,7 +145,8 @@ let () =
       let text value = Lowered.Constant (Bytes value) in
       let length value = Lowered.Constant (Integer (USize, Z.of_int (String.length value))) in
       let ending failure message =
-        Lowered.Fail { failure; message = text message; length = length message; site }
+        Lowered.Fail
+          { failure; message = text message; length = length message; site; reported = None }
       in
       let suite name blocks = instance name (function_ [] blocks) in
       let tests =

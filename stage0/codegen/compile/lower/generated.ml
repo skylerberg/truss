@@ -9,7 +9,7 @@ open Emit_c.Builder
 
 let generated_state context ~key ~anchor ~substitution =
   enter context ~builder:(create context.env ~key)
-    (frame_of ~inlined:[]
+    (frame_of
        (unwritten
           ~definition_key:
             {
@@ -437,6 +437,12 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
       method_signature.parameters
   in
   let evidence = evidence_parameters st capabilities in
+  (* A lending method's trailing parameters, which the entry forwards. *)
+  let lending =
+    List.map
+      (fun ty -> local builder ~name:"lend" ty)
+      (lending_parameters context substitution method_signature.output)
+  in
   start builder (block builder);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let typed = local builder (Pointer { target = Value self_ty; writable = true }) in
@@ -444,20 +450,26 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
   let self_mode : Types.mode =
     match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
   in
-  let result_ty =
-    match method_signature.output with
-    | Returns result_type -> Monomorphic.ground context.monomorphic substitution result_type
-    | _ -> bug "an any method that lends"
+  (* Where the method's result goes: the entry's own result, which for a
+     lending method is the pointer to the part. *)
+  let destination =
+    match (method_signature.output, result_place st) with
+    | _, Some place -> place
+    | Returns result_type, None ->
+        temporary st (Monomorphic.ground context.monomorphic substitution result_type)
+    | Lends _, None -> temporary st (Monomorphic.builtin Unit)
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
-    ~destination:(passed_on st result_ty) ();
+    ~lending:(List.map (fun local -> Lowered.Copy (at local)) lending)
+    ~destination ();
   finish_function st
     ~returns:(method_signature.output <> Returns Never)
     ~first:[ value ]
-    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+    ~rest:
+      (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence @ lending)
     ();
   built st.builder
 

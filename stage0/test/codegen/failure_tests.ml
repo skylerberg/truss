@@ -1,6 +1,5 @@
 (* How code generation fails: the C emitter's checks of the code it
-   prints, the programs stage0 cannot build yet, and a compiler bug's
-   report. *)
+   prints, and a compiler bug's report. *)
 
 open Memory_layout
 open Codegen_support
@@ -81,18 +80,7 @@ let () =
   test "an instance whose calls fit their targets passes" (fun () ->
       emit env (caller [ constant_int32 1 ]))
 
-(* A module's tests cannot be built, with a message that says this. *)
-let refused name ~saying source =
-  test name (fun () ->
-      let database, compile = load source in
-      match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
-      | Ok _ -> fail "expected the build to be refused"
-      | Error message -> if not (contains message saying) then fail "got %S" message)
-
 let () =
-  refused "a lending method that calls itself and lends a value it made is refused"
-    ~saying:"a lending method that calls itself and lends a value that it made"
-    Fixtures.Failure.lending_method_that_calls_itself_and_lends_a_value;
   test "a compiler bug says which instance was being lowered" (fun () ->
       let _, compile = load "type Point(x: Int64)\n" in
       let not_code =

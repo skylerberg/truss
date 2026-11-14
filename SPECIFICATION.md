@@ -995,8 +995,8 @@ mut grid.cell(position).visit()
 - `lends Cell` lends read-only access, and `lends mut Cell` lends `mut`
   access, written on the place: `mut part`.
 - **The method lends the value of its body, or of a `return`.** No code of
-  the method runs after it lends. The values it still owns are dropped when
-  the lend ends.
+  the method runs after it lends. The values it still owns are dropped where
+  it lends, before the caller uses the part.
 - **The part is lent for the rest of the caller's statement,** even if the
   statement exits early.
 - **In the condition of an `if` or a `while`, the part is lent for the
@@ -1039,14 +1039,16 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
 
 - An argument of the lent constructor that is a place is lent, with no copy.
   Constructors nest.
-- Every other field is a place, a nested constructor, or a `Plain` value.
+- Any other argument is a value that the method made. The lent value owns
+  it, and it is dropped when the lend ends.
 - A `mut` lend writes `mut` on each place that it lends `mut`, and the
   caller's mutations of such a field reach the place when the lend ends.
   Two places lent `mut` by one method are different places.
 - **A place lent `mut` is never inside a variant,** at any depth: the caller
   could replace the variant, and the place would have no value, a use after
   free.
-- The built value owns nothing it was lent.
+- The built value owns the values that the method made, and nothing that it
+  was lent.
 
 #### Contracts of lending methods
 

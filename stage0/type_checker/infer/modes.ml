@@ -318,16 +318,11 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
            name)
   | (Mut | Own), With_mode (Read, _) -> ()
 
-(* A lent constructor that lends a place owns nothing, so nothing drops
-   it when the lend ends. Each of its other fields must then have nothing
-   to drop: the field is a constructor too, or its type is [Plain].
-
-   A place lent [mut] is not inside a variant's constructor at any depth.
+(* A place lent [mut] is not inside a variant's constructor at any depth.
    The caller could replace the variant, as [mut pair.maybe() = None] does,
    and the place would be left without a value: a use after free.
    [operand] is the part that the method lends. *)
 let check_lent_value state env (operand : expression) =
-  let has_lent_field = ref false and owned_values = ref [] in
   let rec fields ~variant (value : expression) =
     match (value.kind, state.tables.calls.(value.id)) with
     | ( Call (_, arguments),
@@ -341,9 +336,8 @@ let check_lent_value state env (operand : expression) =
                   checked_argument.expression = argument.value.id)
                 checked
             with
-            | Some { mode = Read; _ } -> has_lent_field := true
+            | Some { mode = Read; _ } -> ()
             | Some { mode = Mut; _ } -> (
-                has_lent_field := true;
                 match variant with
                 | Some variant when runs env ->
                     state.diagnostics <-
@@ -358,31 +352,9 @@ let check_lent_value state env (operand : expression) =
                 | _ -> ())
             | _ -> fields ~variant argument.value)
           arguments
-    | _ -> owned_values := value :: !owned_values
+    | _ -> ()
   in
-  fields ~variant:None operand;
-  if !has_lent_field && runs env then
-    List.iter
-      (fun (value : expression) ->
-        defer state (fun () ->
-            match Option.map (normalize state) state.tables.types.(value.id) with
-            | None -> true
-            | Some type_ when Types.contains_unsolved type_ -> false
-            | Some type_ ->
-                let fieldless_variant =
-                  match (state.tables.resolutions.(value.id), type_) with
-                  | Some (Variant_value _), Types.Function _ -> false
-                  | Some (Variant_value _), _ -> true
-                  | _ -> false
-                in
-                if not (plain state type_ || fieldless_variant) then
-                  state.diagnostics <-
-                    Diagnostic.make ~code:(Ownership Owned_beside_lent) value.span
-                      "This value is owned, but the value that is yielded lends a place, so it \
-                       owns nothing. Bind this value to a name first, and pass the name."
-                    :: state.diagnostics;
-                true))
-      !owned_values
+  fields ~variant:None operand
 
 (* Checks a value where an owned value is required and no parameter
    receives it: the initializer of a [var], the value of an assignment, an

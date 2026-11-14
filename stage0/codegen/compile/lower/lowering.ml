@@ -9,12 +9,6 @@ type cleanup =
   | Free_pointed of Lowered.place
       (** Frees the heap block that the pointer at the place points to, after the block's contents
           are dropped. *)
-  | Free_blocks of { place : Lowered.place; variants : string list }
-      (** Frees the block of the value at [place] where its variant is one of [variants], without
-          dropping the block's contents. *)
-  | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
-      (** Moves the value at [source] into [destination], the place it was moved out of so that the
-          caller could mutate it. *)
   | Join_group of Lowered.statement  (** Joins a task group with the call of [Tasks.join]. *)
 
 (* A scope owns the values dropped as it ends: the scope of a block's names,
@@ -30,13 +24,25 @@ type loop = {
   break_depth : int;
 }
 
+(* The trailing parameters of a lending method. [slot] is a pointer to
+   storage of the caller's for a part that the method builds, null where
+   the caller has none: the method then allocates from [record]. A part of
+   zero size has no slot. [record] is a pointer to the caller's
+   {!Lowered.Lend}, and [site] a pointer to the call site. *)
+type lending = {
+  slot : Lowered.place option;
+  part : Ground.ty;
+  record : Lowered.operand;
+  site : Lowered.operand;
+}
+
+(* A lending call: its {!Lowered.Lend_mark}, and a pointer to the
+   {!Lowered.Lend} that the call adds to. *)
+type lent_call = { mark : Lowered.place; record : Lowered.operand }
+
 type frame = {
   code : code;
   mutable self_place : Lowered.place option;
-  inlined : Path.t list;
-  reported : Lowered.site option;
-      (** In the standard library's code that is inlined into a program's, the position of the
-          program's call, where a check that fails in this code is reported *)
   exit : (Lowered.block * int) option;
   mir : mir_frame option;  (** The MIR being lowered in this frame *)
 }
@@ -63,12 +69,15 @@ and mir_frame = {
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
-  lent_slot : (Lowered.place * Ground.ty) option;
-      (** In a lending method compiled as a function, the slot of the caller's where the method
-          builds a part that is not a place of its parameters, and the part's type *)
-  called_lends : (Mir.local, bool) Hashtbl.t;
-      (** Each part that a call of a lending function lends, and whether that call was given
-          [lent_slot] as its own slot *)
+  lending : lending option;  (** In a lending method, its trailing parameters *)
+  called_parts : Mir.local list;  (** The parts that calls of lending methods lend *)
+  lent_calls : (Mir.local, lent_call) Hashtbl.t;  (** The call that lends each of [called_parts] *)
+  ended_after_lend : Mir.local list;
+      (** The locals that end after a lending method has lent its part. The part of a lending call
+          among them may still be lent then, and the method may forward it. *)
+  after_lend : bool array;
+      (** For each block, whether it runs after a lending method has lent its part *)
+  mutable block : Mir.block;  (** The block being lowered *)
 }
 
 (* A task whose body is being lowered. *)
@@ -107,10 +116,11 @@ type state = {
       (** The evidence for each capability available *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable moved : Lowered.place list;
+  mutable lend_record : Lowered.operand option;
+      (** A pointer to the {!Lowered.Lend} of the C function being written, once it has one *)
 }
 
-let frame_of code ~inlined =
-  { code; self_place = None; inlined; reported = None; exit = None; mir = None }
+let frame_of code = { code; self_place = None; exit = None; mir = None }
 
 let enter context ?(nested = ref 0) ~builder frame =
   {
@@ -124,6 +134,7 @@ let enter context ?(nested = ref 0) ~builder frame =
     evidence = [];
     tasks = [];
     moved = [];
+    lend_record = None;
   }
 
 let may_fork st = st.frame.exit = None
@@ -137,7 +148,12 @@ let held st ?name ty : Lowered.place = at (local st.builder ?name ty)
 let outlined st ~parts body =
   let nested = !(st.nested) in
   incr st.nested;
+  (* Outlined code may run on another thread, so its lending calls add to
+     a record of its own. *)
+  let enclosing = st.lend_record in
+  st.lend_record <- None;
   let holder = Emit_c.Builder.outline st.builder ~nested ~parts body in
+  st.lend_record <- enclosing;
   (nested, Lowered.Address { place = at holder; writable = false })
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
@@ -251,23 +267,6 @@ let drop_scope st (scope : scope) =
       | Free_pointed pointer ->
           emit st.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
-      | Free_blocks { place; variants } ->
-          let after = block st.builder in
-          let cases =
-            List.map
-              (fun variant ->
-                let case = block st.builder in
-                in_block st.builder case (fun () ->
-                    emit st.builder (Free_block { place; variant });
-                    finish st.builder (Goto after));
-                (variant, case))
-              variants
-          in
-          finish st.builder (Switch_variant { place; cases; default = Some after });
-          start st.builder after
-      | Write_back { destination; source; ty } ->
-          emit st.builder
-            (Assign (destination, Use (if trivial st ty then Copy source else moved st source)))
       | Join_group join -> emit st.builder join)
     scope.owned
 
@@ -370,29 +369,6 @@ let place_type st (place : Lowered.place) =
         | Static { ty; _ } -> Value ty
       in
       if Lowered.erased st.context.env root then None else projected root place.projections
-
-(* The lent value at a place, if the place holds one. *)
-let lent_at st place =
-  match place_type st place with Some (Value (Lent lent)) -> Some lent | _ -> None
-
-(* A field or a variant's field of a place. A field of a lent value that
-   holds an address is the place it points at. *)
-let project st (place : Lowered.place) (projection : Lowered.projection) =
-  let projected = place / projection in
-  let variant, field =
-    match projection with
-    | Field field -> (None, field)
-    | Variant_field { variant; field } -> (Some variant, field)
-    | Index _ | Deref -> (None, "")
-  in
-  match lent_at st place with
-  | Some lent
-    when List.exists
-           (fun (lent : Ground.lent_field) ->
-             lent.variant = variant && lent.field = field && lent.holds = Address)
-           lent.fields ->
-      projected / Deref
-  | _ -> projected
 
 let constant_int integer value = Lowered.Constant (Integer (integer, value))
 
