@@ -773,6 +773,36 @@ let () =
           if returned value <> Some 2 then fail "the default of `step` is not 2"
       | Field_defaults defaults -> fail "`Counter` has %d field defaults" (List.length defaults)
       | Parameter_defaults _ -> fail "a type with parameter defaults");
+  test "a requires clause that can run has a body that takes the function's parameters" (fun () ->
+      let database =
+        setup [ ("app::main", Fixtures.Mir.requires_clause_that_can_run_has_a_body) ]
+      in
+      let g : Path.t = Top { module_ = module_of "app::main"; name = "g" } in
+      match Query.demand database Mir.executable_requires_of_path g with
+      (* The quantified clause, at position 0, cannot run, and has no body. *)
+      | Some [ (1, clause) ] ->
+          validate "a clause" clause.body;
+          let names =
+            List.map
+              (fun parameter ->
+                match clause.body.locals.(parameter).kind with
+                | Source { name; _ } -> name
+                | Temporary | Lent _ -> None)
+              clause.body.parameters
+          in
+          if names <> [ Some "count"; Some "items" ] then
+            fail "the clause does not take `count` and `items`";
+          if
+            not
+              (List.exists
+                 (fun (_, (terminator : Mir.terminator)) ->
+                   match terminator with Return (Some _) -> true | _ -> false)
+                 (terminators clause.body))
+          then fail "the clause returns no value"
+      | Some clauses ->
+          fail "the clauses at positions %s have bodies"
+            (String.concat ", " (List.map (fun (position, _) -> string_of_int position) clauses))
+      | None -> fail "`g` has no clauses");
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
       let blocks = mir.body.blocks in

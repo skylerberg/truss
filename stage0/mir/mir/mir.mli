@@ -302,8 +302,6 @@ val block_successors : body -> block -> block list
 (** The blocks control goes to from the end of a block: its terminator's {!successors}, and, for the
     end of an iteration, the loop's next iteration and the block after the loop. *)
 
-val of_expression : ?parameters:Core.parameter list -> Core.expression -> t
-
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. It is built
     once for the definition. The body of a function for specifications only never runs, so it has
@@ -322,6 +320,17 @@ val defaults_of_path : (Path.t, defaults option) Query.query
     body's MIR: a function has its defaults whether or not it has a body, as a capability's method
     has none, and a caller that reads them reads nothing of the body. [None] for a definition with
     an error, or one that has neither parameters nor fields. *)
+
+val executable_requires_of_path : (Path.t, (int * t) list option) Query.query
+(** The [requires] clauses of the function or method at a path that can run, each by its position
+    among the clauses, as a body that takes the function's parameters and returns a [Bool]. A clause
+    cannot run where it holds a quantifier, a value of type [Integer], [old], [result], or a call of
+    a function for specifications only, and has no MIR. They are built once for the definition that
+    writes them, as {!defaults_of_path}'s are. *)
+
+val is_generated : Query.context -> Path.t -> bool
+(** Whether the code of the method at a path is generated for a derived [impl], so that no
+    definition writes it. *)
 
 val of_constant : (Path.t, t option) Query.query
 (** The MIR of a constant's value: a body that returns it. *)

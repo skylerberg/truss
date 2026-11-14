@@ -2325,6 +2325,34 @@ let defaults_of_path =
   Query.query ~name:"mir_defaults_of_path" ~phase:Phases.bodies ~show:Path.show
     (fun database path -> by_path database path ~of_definition:defaults ~of_form:defaults_of)
 
+let executable_requires_of (definition : Core.definition) =
+  match definition with
+  | Function { parameters; contract; _ } ->
+      Some
+        (List.concat
+           (List.mapi
+              (fun position (clause : Core.condition) ->
+                if clause.executable then [ (position, of_expression ~parameters clause.value) ]
+                else [])
+              contract.requires))
+  | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
+
+let executable_requires =
+  Query.query ~name:"mir_executable_requires" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.bind (Query.demand database Infer.core key) (fun (form : Core.t) ->
+          executable_requires_of form.definition))
+
+let executable_requires_of_path =
+  Query.query ~name:"mir_executable_requires_of_path" ~phase:Phases.bodies ~show:Path.show
+    (fun database path ->
+      by_path database path ~of_definition:executable_requires ~of_form:executable_requires_of)
+
+let is_generated database path =
+  match Query.demand database Infer.form_origin path with
+  | Some (Generated, _) -> true
+  | Some ((Written _ | Inherited _), _) | None -> false
+
 let of_constant =
   Query.query ~name:"mir_of_constant" ~phase:Phases.bodies ~show:Path.show (fun database path ->
       match Query.demand database Infer.core_of_path path with

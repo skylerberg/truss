@@ -11,13 +11,6 @@ val parameter_of : Mir.body -> Mir.local -> Types.mode * string * Types.ty
 val mir_into : ?arguments:Lowered.place list -> Lowering.state -> Mir.t -> Lowered.place -> unit
 (** Lowers the MIR of one expression, with its parameters bound to [arguments], into a place. *)
 
-val expression_into :
-  ?arguments:(Core.parameter * Lowered.place) list ->
-  Lowering.state ->
-  Core.expression ->
-  Lowered.place ->
-  unit
-
 val fill_defaults :
   Lowering.state ->
   Lowered.place ->

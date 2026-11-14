@@ -71,42 +71,38 @@ let code_state context ~key path =
   let code = code_of context path [] in
   (enter context ~builder:(create context.env ~key) (frame_of code ~inlined:[ path ]), code)
 
-(* A tag's [from_template]: its one parameter and its [requires] clauses,
-   from its core form. *)
-let from_template_contract context from_template : Core.parameter * Core.condition list =
-  match demand context Infer.core_of_path from_template with
-  | Some ({ definition = Function { parameters = [ parameter ]; contract; _ }; _ }, _) ->
-      (parameter, contract.requires)
-  | _ -> bug "%s does not take one template" (Path.show from_template)
+(* The [requires] clauses of a tag's [from_template] that can run, each by
+   its position among the clauses, as a body that takes the template. *)
+let template_clauses context from_template : (int * Mir.t) list =
+  match demand context Mir.executable_requires_of_path from_template with
+  | Some clauses -> clauses
+  | None -> bug "%s is not a function" (Path.show from_template)
 
-let template_checked context from_template =
-  let _, requires = from_template_contract context from_template in
-  List.concat
-    (List.mapi
-       (fun index (clause : Core.condition) -> if clause.executable then [ index ] else [])
-       requires)
+let template_checked context from_template = List.map fst (template_clauses context from_template)
 
 let template_check context (key : Instance.key) ~from_template ~texts : Emit_c.Builder.instance =
   let st, _ = code_state context ~key from_template in
-  let parameter, requires = from_template_contract context from_template in
+  let template_type =
+    match interface_parameters (signature_of context from_template) with
+    | [ (_, template_type) ] -> template_type
+    | _ -> bug "%s does not take one template" (Path.show from_template)
+  in
   start st.builder (block st.builder);
   in_scope st (fun () ->
       let template =
-        template_value st (ground st parameter.type_) texts
+        template_value st (ground st template_type) texts
           ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
           ~parts:[]
       in
       let output = Constants.begin_output st in
       List.iter
-        (fun (clause : Core.condition) ->
-          if clause.executable then begin
-            let holds = temporary st context.bool in
-            Mir_form.expression_into ~arguments:[ (parameter, template) ] st clause.value holds;
-            Glue.encode_call context.glue st.builder
-              ~output:(Address { place = output; writable = true })
-              context.bool holds
-          end)
-        requires;
+        (fun (_, clause) ->
+          let holds = temporary st context.bool in
+          Mir_form.mir_into ~arguments:[ template ] st clause holds;
+          Glue.encode_call context.glue st.builder
+            ~output:(Address { place = output; writable = true })
+            context.bool holds)
+        (template_clauses context from_template);
       Constants.write_output st output);
   finish_instance st ~rest:[] ()
 

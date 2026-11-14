@@ -1551,17 +1551,9 @@ and field_default_place st ty ~variant ~field =
       mir_into st default.value place;
       (place, default_ty))
 
-(* Evaluates a core expression that runs on its own, such as a default, and
-   writes its value to [destination], from the expression's MIR. [arguments]
-   are the parameters it reads, with their places. *)
-and expression_into ?(arguments = []) st (expression : Core.expression)
-    (destination : Lowered.place) =
-  mir_into st
-    (Mir.of_expression ~parameters:(List.map fst arguments) expression)
-    ~arguments:(List.map snd arguments) destination
-
-(* Lowers the MIR of one expression, with its parameters bound to
-   [arguments], into [destination]. *)
+(* Lowers the MIR of an expression that runs on its own, such as a default
+   or a clause, with its parameters bound to [arguments], into
+   [destination]. *)
 and mir_into ?(arguments = []) st (expression_mir : Mir.t) (destination : Lowered.place) =
   let expression_mir =
     Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined expression_mir

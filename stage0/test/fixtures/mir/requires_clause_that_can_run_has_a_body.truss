@@ -1,0 +1,6 @@
+fn g(count: Int64, items: Slice[Int64]) -> Int64
+  requires forall index in 0..items.length() => items[index] >= 0
+  requires count > 0 && count < 10
+{
+  count
+}
