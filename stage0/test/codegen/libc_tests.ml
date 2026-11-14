@@ -70,7 +70,7 @@ let compiles text =
   let directory = Lazy.force scratch in
   let source = Filename.temp_file ~temp_dir:directory "libc" ".c" in
   Out_channel.with_open_text source (fun channel -> output_string channel text);
-  Toolchain.compile (Lazy.force compiler) ~optimization:O1 ~extra:strict ~source
+  Toolchain.compile (Lazy.force compiler) ~optimization:O1 ~extra:(Lazy.force strict) ~source
     ~output:(source ^ ".o") ()
 
 let linux : Libc.system = { os = Linux; architecture = X86_64 }
@@ -272,6 +272,10 @@ let () =
           built_entry (fun builder ->
               let seconds = local builder (value int64)
               and nanoseconds = local builder (value int64) in
+              (* A [Written] argument keeps its value where the function
+                 writes nothing, so it holds one before the call. *)
+              emit builder (Assign (at seconds, Use (constant_int64 0)));
+              emit builder (Assign (at nanoseconds, Use (constant_int64 0)));
               let clock = flags builder [ Clock_realtime ] in
               let failed = local builder (value int32) in
               operate builder ~destination:(at failed) (Libc Clock_gettime)
@@ -346,6 +350,7 @@ let () =
               (* Two draws of eight random bytes differ. *)
               let draw () =
                 let value = local builder (value uint64) and failed = local builder (value int32) in
+                emit builder (Assign (at value, Use (Constant (Integer (UInt64, Z.zero)))));
                 operate builder ~destination:(at failed) (Libc Getentropy) [ Place (at value) ];
                 value
               in
@@ -378,6 +383,8 @@ let () =
           built_entry (fun builder ->
               let read_end = local builder (value int32)
               and write_end = local builder (value int32) in
+              emit builder (Assign (at read_end, Use (constant_int32 (-1))));
+              emit builder (Assign (at write_end, Use (constant_int32 (-1))));
               operate builder (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
               let view = view_of builder "x" in
               operate builder (Libc Write)

@@ -7,7 +7,10 @@ let bug format = Compiler_bug.bug ~stage:"Builder" format
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
-type local_info = { ty : Lowered.ty; name : string option }
+(* [is_zeroed] marks a local that is declared zeroed: a drop flag, which
+   starts false, or an omitted argument, which C must be passed a value
+   for. *)
+type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
 type instance = C_instance.t
 
 open C_instance
@@ -110,8 +113,8 @@ let nested parent ~index ~environment =
     Keys.add (Environment (Instance.symbol code.key, index)) environment code.context.environments;
   start_function (new_builder parent.env) ~code ~nested:(Some index)
 
-let local builder ?name ty =
-  Dynarray.add_last builder.locals { ty; name };
+let local builder ?name ?(is_zeroed = false) ty =
+  Dynarray.add_last builder.locals { ty; name; is_zeroed };
   Dynarray.length builder.locals - 1
 
 let local_type builder local = (Dynarray.get builder.locals local).ty
@@ -441,22 +444,25 @@ let build ?(returns = true) builder ~parameters ~result =
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
       let symbol = Instance.symbol function_.code.key in
+      (* A local is declared with no initializer, unless it is zeroed. The
+         code writes every other local before it reads it, so an
+         initializer would cost a store, and would hide a read of a local
+         that the lowering never wrote. *)
       List.iter
         (fun local ->
           let ty = local_type builder local in
           if (not (List.mem local (parameters_of number))) && not (erased context ty) then
-            let zero =
-              match ty with
-              | Value ty when is_struct context ty -> "{0}"
-              | Environment nested_index
-                when Keys.find_opt (Environment (symbol, nested_index)) context.environments
-                     = Some [] ->
-                  "{}"
-              | Environment _ | Evidence _ | Lend | Lend_mark -> "{0}"
-              | _ -> "0"
+            let initializer_ =
+              if not (Dynarray.get builder.locals local).is_zeroed then ""
+              else
+                match ty with
+                | Value ty when is_struct context ty -> " = {0}"
+                | Value _ | Pointer _ | Raw _ -> " = 0"
+                | Lend | Lend_mark -> " = {0}"
+                | Environment _ | Evidence _ -> bug "a zeroed environment or evidence slot"
             in
             Buffer.add_string body
-              (Printf.sprintf "  %s %s = %s;\n" (c_ty context symbol ty) (name local) zero))
+              (Printf.sprintf "  %s %s%s;\n" (c_ty context symbol ty) (name local) initializer_))
         (List.sort compare
            (Hashtbl.fold
               (fun local owner locals -> if owner = number then local :: locals else locals)

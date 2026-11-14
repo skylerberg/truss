@@ -158,9 +158,14 @@ fn client_and_server() -> List[String]
         Ok(response) => mut seen.push("${response.body.length()} ${response.headers.contains("Content-Encoding")}")
         Err(error) => mut seen.push("failed: ${error}")
       }
+      match http::get("http://localhost:8080/big") {
+        Ok(response) => mut seen.push("${response.body.length()} ${response.headers.contains("Content-Encoding")}")
+        Err(error) => mut seen.push("failed: ${error}")
+      }
       let zipped = exchange("GET /big HTTP/1.1\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n")
+      let zstd_reply = exchange("GET /big HTTP/1.1\r\nAccept-Encoding: gzip, zstd\r\nConnection: close\r\n\r\n")
       let plain = exchange("GET /big HTTP/1.1\r\nConnection: close\r\n\r\n")
-      mut seen.push("${zipped.slice().contains("Content-Encoding: gzip")} ${zipped.length() < plain.length()}")
+      mut seen.push("${zipped.slice().contains("Content-Encoding: gzip")} ${zstd_reply.slice().contains("Content-Encoding: zstd")} ${zipped.length() < plain.length()} ${plain.slice().contains("Vary: Accept-Encoding")}")
       match http::get("http://localhost:8080/page/a%3Cb") {
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
         Err(error) => mut seen.push("failed: ${error}")
@@ -196,7 +201,7 @@ fn client_and_server() -> List[String]
 test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" {
   provide simulation::World.new() {
     let seen = client_and_server()
-    assert seen.length() == 14
+    assert seen.length() == 15
     assert seen[0] == "200 application/json"
     assert seen[1] == "{\"name\":\"ada\",\"count\":1}"
     assert seen[2] == "201 {\"name\":\"bo\",\"count\":5}"
@@ -206,10 +211,11 @@ test "a server answers a client in a world: JSON, a body, a missing page, keep-a
     assert seen[6] == "true"
     assert seen[7] == "true"
     assert seen[8] == "2500 false"
-    assert seen[9] == "true true"
-    assert seen[10] == "<h1>a&lt;b</h1>"
-    assert seen[11] == "true true true"
-    assert seen[12].slice().starts_with("5000 in ")
-    assert seen[13] == "200 [part][ 0;][part][ 1;][part][ 2;]"
+    assert seen[9] == "2500 false"
+    assert seen[10] == "true true true true"
+    assert seen[11] == "<h1>a&lt;b</h1>"
+    assert seen[12] == "true true true"
+    assert seen[13].slice().starts_with("5000 in ")
+    assert seen[14] == "200 [part][ 0;][part][ 1;][part][ 2;]"
   }
 }

@@ -501,6 +501,8 @@ let () =
 let () =
   test "a string literal's length is its bytes'" (fun () ->
       proven Fixtures.Prover.string_literals_length_is_its_bytes);
+  test "a long string literal has its length without a fact for each byte" (fun () ->
+      proven Fixtures.Prover.long_string_literal_has_its_length);
   test "pushing text onto a string adds its length" (fun () ->
       proven Fixtures.Prover.pushing_text_onto_a_string_adds_its_length);
   test "a string pattern matches text with its bytes" (fun () ->

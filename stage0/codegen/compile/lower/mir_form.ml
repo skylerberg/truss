@@ -214,7 +214,15 @@ let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list o
     moves;
     flags =
       List.map
-        (fun (path : Moves.path) -> (path, held st ~name:"owned" (Raw Bool)))
+        (fun (path : Moves.path) ->
+          (* A flag is written only where its path's state changes, so it
+             starts zeroed: false, for a path that holds nothing. A flag of
+             a path that holds a value on entry is set true there. The
+             zero is the flag's declaration, not an assignment on entry: an
+             outlined loop body that alone names a flag then has its own
+             in each run, where an assignment in the enclosing function
+             would make the runs share one flag, a data race. *)
+          (path, at (local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool))))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
     lending;
@@ -714,9 +722,13 @@ let call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~des
     ~signature ~substitution ~arguments ~destination ()
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
-   order. An omitted argument gets a local that holds nothing, and which
-   nothing drops: the callee makes the default its own. The returned mask has one bit for each
-   parameter with a default, set where the call passes an argument. *)
+   order. An omitted argument gets a zeroed local. A function or a method
+   evaluates the default itself and never reads the argument, so nothing
+   here drops the local, but C must be passed a value: passing an
+   uninitialized one is undefined behavior. For a capability method,
+   [capability_defaults] then writes the default into the local and drops
+   it. The returned mask has one bit for each parameter with a default, set
+   where the call passes an argument. *)
 let evaluate_arguments st (signature : Types.signature) substitution (arguments : Mir.argument list)
     =
   let parameters = interface_parameters signature in
@@ -738,7 +750,7 @@ let evaluate_arguments st (signature : Types.signature) substitution (arguments 
           else None
         in
         match argument with
-        | Default -> (mode, ty, at (local st.builder (Value ty)))
+        | Default -> (mode, ty, at (local st.builder ~is_zeroed:true (Value ty)))
         | Passed { value; _ } ->
             Option.iter (fun bit -> mask := !mask lor (1 lsl bit)) bit;
             (mode, ty, operand_place st value))
@@ -1050,8 +1062,9 @@ let lend_record st : Lowered.operand =
   match st.lend_record with
   | Some record -> record
   | None ->
+      (* The record starts zeroed: it holds nothing. *)
       let record : Lowered.operand =
-        Address { place = held st ~name:"lend" Lend; writable = true }
+        Address { place = at (local st.builder ~name:"lend" ~is_zeroed:true Lend); writable = true }
       in
       st.lend_record <- Some record;
       record
@@ -1062,7 +1075,13 @@ let lent_call st part : lent_call =
   match Hashtbl.find_opt frame.lent_calls part with
   | Some call -> call
   | None ->
-      let call = { mark = held st ~name:"lent" Lend_mark; record = lend_record st } in
+      (* The mark starts zeroed: the call has not run. *)
+      let call =
+        {
+          mark = at (local st.builder ~name:"lent" ~is_zeroed:true Lend_mark);
+          record = lend_record st;
+        }
+      in
       Hashtbl.replace frame.lent_calls part call;
       call
 
@@ -2244,16 +2263,17 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
           incr bit;
           let bit = !bit in
           let ty = ground st type_ in
-          let passed = local builder (Raw (Integer UInt64))
-          and is_passed = local builder (Raw Bool) in
+          let passed_bit = local builder (Raw (Integer UInt64))
+          and is_omitted = local builder (Raw Bool) in
           emit builder
             (Assign
-               (at passed, Binary (Bit_and, Copy mask, constant_int UInt64 (Z.shift_left Z.one bit))));
+               ( at passed_bit,
+                 Binary (Bit_and, Copy mask, constant_int UInt64 (Z.shift_left Z.one bit)) ));
           emit builder
-            (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+            (Assign (at is_omitted, Binary (Equal, Copy (at passed_bit), constant_int UInt64 Z.zero)));
           let fill = block builder and after = block builder in
           let unless_passed other =
-            Emit_c.Builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
+            Emit_c.Builder.branch builder (Copy (at is_omitted)) ~yes:fill ~no:other
           in
           let place =
             if mode = Own && not (trivial st ty) then begin
@@ -2268,18 +2288,24 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
               owned_here
             end
             else begin
+              (* A default lent to the function is a value of its own, which
+                 only the path that omits the argument initializes, so
+                 [is_omitted] is its drop flag. Dropping it where the
+                 argument was passed would be a free of a pointer that
+                 nothing wrote. *)
+              let default_value () = flagged_binding st ty ~flag:(at is_omitted) in
               unless_passed after;
               start builder fill;
               in_statement st (fun () ->
                   match arrived with
                   | { projections = [ Deref ]; root = Local pointer } ->
-                      let value = binding st ty in
+                      let value = default_value () in
                       mir_into st default value;
                       emit builder
                         (Assign (at pointer, Use (Address { place = value; writable = true })))
                   | place when mode = Own || trivial st ty -> mir_into st default place
                   | place ->
-                      let value = binding st ty in
+                      let value = default_value () in
                       mir_into st default value;
                       emit builder (Assign (place, Use (Copy value))));
               arrived

@@ -8,7 +8,7 @@ type linkage = C_runtime.linkage = External | Internal
 let anchor_struct = C_runtime.anchor_struct
 let runtime_declarations = C_runtime.runtime_declarations
 let anchor_symbol = C_runtime.anchor_symbol
-let version = 26
+let version = 27
 
 type site = C_runtime.site = { definition : Path.t; line : int; column : int }
 type failure = C_runtime.failure = Echo | Todo

@@ -1,4 +1,3 @@
-use standard::compression
 use standard::streams
 use standard::url
 
@@ -56,6 +55,13 @@ public fn media_type_of(file: Path) -> StringSlice {
     }
   }
   "application/octet-stream".slice()
+}
+
+let sibling_codings: Array[String, 3] = ["br", "zstd", "gzip"]
+
+fn sibling_of(file: Path, coding: StringSlice) -> Path {
+  let suffix = if coding == "br".slice() { ".br" } else if coding == "zstd".slice() { ".zst" } else { ".gz" }
+  Path.new("${file}${suffix}".slice())
 }
 
 fn is_compressible_type(media_type: StringSlice) -> Bool {
@@ -182,26 +188,41 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
     }
     Whole => {}
   }
-  let is_wanted = options.compress && is_compressible_type(media_type) && accepts_coding(request.headers.get("Accept-Encoding"), coding: "gzip")
-  if is_wanted {
+  if options.compress && is_compressible_type(media_type) {
     mut headers.add("Vary", value: "Accept-Encoding")
-    let sibling = Path.new("${file}.gz".slice())
-    match FileRead.metadata(sibling) {
-      Ok(compressed) => {
-        if compressed.is_file() {
-          mut headers.add("Content-Encoding", value: "gzip")
-          mut headers.add("Content-Length", value: "${compressed.length}".slice())
+    if request.headers.contains("Accept-Encoding") {
+      var precompressed: List[String] = []
+      for coding in sibling_codings {
+        match FileRead.metadata(sibling_of(file, coding: coding.slice())) {
+          Ok(sibling) => {
+            if sibling.is_file() {
+              mut precompressed.push(coding.copy())
+            }
+          }
+          Err(_) => {}
+        }
+      }
+      match request.preferred_encoding(precompressed.slice()) {
+        Some(coding) => {
+          let sibling = sibling_of(file, coding: coding.slice())
+          let sibling_length = system(FileRead.metadata(sibling))?.length
+          mut headers.add("Content-Encoding", value: coding.slice())
+          mut headers.add("Content-Length", value: "${sibling_length}".slice())
           var reader = system(FileRead.open(sibling))?
           return mut responder.stream(mut reader, headers: headers)
         }
+        None => {}
       }
-      Err(_) => {}
     }
     if length <= 1048576 {
-      let plain = system(FileRead.read(file))?
-      let packed = compression::compress(plain.slice(), format: compression::Format.Gzip, level: compression::Level.Fastest)
-      mut headers.add("Content-Encoding", value: "gzip")
-      return mut responder.send(Response(status: Status.ok, headers: own headers, body: own packed))
+      match coding_on_the_fly(request) {
+        Some(coding) => {
+          let plain = system(FileRead.read(file))?
+          mut headers.add("Content-Encoding", value: coding.slice())
+          return mut responder.send(Response(status: Status.ok, headers: own headers, body: encoded_body(plain.slice(), coding: coding.slice())))
+        }
+        None => {}
+      }
     }
   }
   mut headers.add("Content-Length", value: "${length}".slice())
