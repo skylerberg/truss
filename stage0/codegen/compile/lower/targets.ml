@@ -457,7 +457,7 @@ let all_passed (signature : Types.signature) =
   (1 lsl defaulted) - 1
 
 let call_instance st key ~(signature : Types.signature) ~substitution
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ~destination () =
+    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?lent_slot ~destination () =
   let mask = match mask with Some mask -> mask | None -> all_passed signature in
   let c_signature, result =
     c_signature st.context substitution ~parameters:(interface_parameters signature)
@@ -468,9 +468,20 @@ let call_instance st key ~(signature : Types.signature) ~substitution
     (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
     @ List.map (evidence_of st) (evidence_for st.context substitution signature.uses)
   in
+  let slot =
+    Option.to_list
+      (Option.map
+         (fun slot : Lowered.operand -> Address { place = slot; writable = true })
+         lent_slot)
+  in
   let target = Lowered.Direct { function_ = Instance key; signature = c_signature } in
   emit st.builder
-    (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
+    (Call
+       {
+         target;
+         arguments = passed @ mask @ slot;
+         result = Convention.destination result destination;
+       });
   if not c_signature.returns then unreachable_block st
 
 (* A number literal's value. *)

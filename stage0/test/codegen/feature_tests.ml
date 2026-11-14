@@ -24,6 +24,11 @@ let () =
     (fun () ->
       expect_output Fixtures.Feature.associated_capability_set_gives_each_instance_the
         (String.concat "" (List.init 8 (Printf.sprintf "test %d passed\n"))));
+  (* A lending method that calls itself is compiled as a function, which
+     returns a pointer to its part. *)
+  test "a lending method that calls itself lends a part of its receiver" (fun () ->
+      expect_output Fixtures.Feature.lending_method_that_calls_itself_lends_a_part_of
+        (String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n"))));
   passes "a lending method lends a local it owns, which lives until the caller's statement ends"
     Fixtures.Feature.lending_method_lends_a_local_it_owns_which_lives;
   (* The caller continues from either path, and only the first has [label]

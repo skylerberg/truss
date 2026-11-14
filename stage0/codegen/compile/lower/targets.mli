@@ -97,9 +97,12 @@ val call_instance :
   substitution:Types.substitution ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   ?mask:int ->
+  ?lent_slot:Lowered.place ->
   destination:Lowered.place ->
   unit ->
   unit
+(** Calls an instance. [lent_slot] is the slot that a lending method is passed, and [destination]
+    then takes the pointer to the part. *)
 
 type literal = Integer_value of Z.t | Float_value of float
 
