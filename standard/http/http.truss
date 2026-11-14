@@ -1,5 +1,7 @@
 use standard::base64
 use standard::compression
+use standard::compression::brotli
+use standard::compression::zstd
 use standard::html
 use standard::http::date
 use standard::http::flow
@@ -687,16 +689,35 @@ fn is_compressible(content_type: Option[StringSlice]) -> Bool {
   }
 }
 
+internal fn encoded_body(bytes: Slice[UInt8], coding: StringSlice) -> List[UInt8] {
+  if coding == "zstd".slice() {
+    zstd::compress(bytes)
+  } else {
+    compression::compress(bytes, format: compression::Format.Gzip, level: compression::Level.Fastest)
+  }
+}
+
+internal fn coding_on_the_fly(request: Request) -> Option[String] {
+  if !request.headers.contains("Accept-Encoding") {
+    return None
+  }
+  let offered: List[String] = ["zstd", "gzip"]
+  request.preferred_encoding(offered.slice())
+}
+
 public fn Response.compressed(own self, request: Request) -> Response {
   var response = own self
-  if response.body.length() < 1024 || response.headers.contains("Content-Encoding")
-    || !accepts_coding(request.headers.get("Accept-Encoding"), coding: "gzip") || !is_compressible(response.headers.get("Content-Type"))
-  {
+  if response.body.length() < 1024 || response.headers.contains("Content-Encoding") || !is_compressible(response.headers.get("Content-Type")) {
     return response
   }
-  response.body = compression::compress(response.body.slice(), format: compression::Format.Gzip, level: compression::Level.Fastest)
-  mut response.headers.set("Content-Encoding", value: "gzip")
   mut response.headers.add("Vary", value: "Accept-Encoding")
+  match coding_on_the_fly(request) {
+    Some(coding) => {
+      response.body = encoded_body(response.body.slice(), coding: coding.slice())
+      mut response.headers.set("Content-Encoding", value: coding.slice())
+    }
+    None => {}
+  }
   response
 }
 
@@ -2268,17 +2289,72 @@ fn tunnel(connection: mut network::Connection, host: StringSlice, port: UInt16, 
   Ok(Unit)
 }
 
+fn content_codings(header: Option[StringSlice]) -> List[String] {
+  var codings: List[String] = []
+  match header {
+    Some(value) => {
+      for part in value.split(",") {
+        let coding = part.trim().to_ascii_lowercase()
+        if !coding.is_empty() && coding.slice() != "identity".slice() {
+          mut codings.push(own coding)
+        }
+      }
+    }
+    None => {}
+  }
+  codings
+}
+
+fn is_decodable(coding: StringSlice) -> Bool {
+  coding == "gzip".slice() || coding == "x-gzip".slice() || coding == "br".slice() || coding == "zstd".slice()
+}
+
+fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: USize) -> Result[List[UInt8], Error] {
+  if coding == "br".slice() {
+    return match brotli::decompress(bytes, limit: limit) {
+      Ok(plain) => Ok(own plain)
+      Err(TooLarge(_)) => Err(Error.BodyTooLarge)
+      Err(_) => Err(malformed("a Brotli body that does not decompress"))
+    }
+  }
+  if coding == "zstd".slice() {
+    return match zstd::decompress(bytes, limit: limit) {
+      Ok(plain) => Ok(own plain)
+      Err(TooLarge(_)) => Err(Error.BodyTooLarge)
+      Err(_) => Err(malformed("a zstd body that does not decompress"))
+    }
+  }
+  match compression::decompress(bytes, format: compression::Format.Gzip, limit: limit) {
+    Ok(plain) => Ok(own plain)
+    Err(TooLarge(_)) => Err(Error.BodyTooLarge)
+    Err(_) => Err(malformed("a gzip body that does not decompress"))
+  }
+}
+
 fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: Limits) -> Result[Response, Error] {
-  if !has_token(headers.get("Content-Encoding"), token: "gzip") {
+  let codings = content_codings(headers.get("Content-Encoding"))
+  var is_known = !codings.is_empty()
+  for coding in codings {
+    if !is_decodable(coding.slice()) {
+      is_known = false
+    }
+  }
+  if !is_known {
     return Ok(Response(status: status, headers: own headers, body: own body))
+  }
+  var plain = own body
+  var index = codings.length()
+  while index > 0
+    invariant index <= codings.length()
+    decreases index
+  {
+    index -= 1
+    plain = decoded_body(plain.slice(), coding: codings[index].slice(), limit: limits.body_bytes)?
   }
   var plain_headers = own headers
   mut plain_headers.remove("Content-Encoding")
   mut plain_headers.remove("Content-Length")
-  match compression::decompress(body.slice(), format: compression::Format.Gzip, limit: limits.body_bytes) {
-    Ok(plain) => Ok(Response(status: status, headers: own plain_headers, body: own plain))
-    Err(_) => Err(malformed("a gzip body that does not decompress"))
-  }
+  Ok(Response(status: status, headers: own plain_headers, body: own plain))
 }
 
 fn request_target(url: url::Url) -> String {
@@ -2878,12 +2954,16 @@ public fn Client.send(
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic
 {
   let limits = self.options.limits
+  var asked = headers.copy()
+  if !asked.contains("Accept-Encoding") {
+    mut asked.add("Accept-Encoding", value: "gzip, br, zstd")
+  }
   let outcome = mut self.stream(method, url: url, receive: fn(status, response_headers, response_body) {
     match mut response_body.read_all() {
       Ok(bytes) => decoded(status, headers: response_headers.copy(), body: own bytes, limits: limits)
       Err(error) => Err(own error)
     }
-  }, headers: headers, body: body)?
+  }, headers: asked, body: body)?
   outcome
 }
 

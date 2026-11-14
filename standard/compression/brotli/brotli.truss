@@ -1,0 +1,780 @@
+use standard::base64
+use standard::intrinsic
+
+public type Error =
+  | Malformed(message: String)
+  | TooLarge(limit: USize)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Malformed(message) => {
+        mut output.write("malformed Brotli data: ")
+        mut output.write(message.slice())
+      }
+      TooLarge(limit) => {
+        mut output.write("the decompressed data is longer than ")
+        limit.display(mut output)
+        mut output.write(" bytes")
+      }
+    }
+  }
+}
+
+fn malformed[Value](message: StringSlice) -> Result[Value, Error] {
+  Err(Error.Malformed(message: message.to_string()))
+}
+
+let insert_length_bases: Array[USize, 24] = [
+  0, 1, 2, 3, 4, 5, 6, 8, 10, 14, 18, 26, 34, 50, 66, 98, 130, 194, 322, 578, 1090, 2114, 6210, 22594,
+]
+
+let insert_length_bits: Array[UInt32, 24] = [0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10, 12, 14, 24]
+
+let copy_length_bases: Array[USize, 24] = [
+  2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 18, 22, 30, 38, 54, 70, 102, 134, 198, 326, 582, 1094, 2118,
+]
+
+let copy_length_bits: Array[UInt32, 24] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10, 24]
+
+let block_count_bases: Array[USize, 26] = [
+  1, 5, 9, 13, 17, 25, 33, 41, 49, 65, 81, 97, 113, 145, 177, 209, 241, 305, 369, 497, 753, 1265, 2289, 4337, 8433, 16625,
+]
+
+let block_count_bits: Array[UInt32, 26] = [2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 7, 8, 9, 10, 11, 12, 13, 24]
+
+let insert_code_starts: Array[USize, 11] = [0, 0, 0, 0, 8, 8, 0, 16, 8, 16, 16]
+
+let copy_code_starts: Array[USize, 11] = [0, 8, 0, 8, 0, 8, 16, 0, 16, 8, 16]
+
+let code_length_order: Array[USize, 18] = [1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+let code_length_code_lengths: Array[UInt32, 16] = [2, 2, 2, 3, 2, 2, 2, 4, 2, 2, 2, 3, 2, 2, 2, 4]
+
+let code_length_code_values: Array[UInt8, 16] = [0, 4, 3, 2, 0, 4, 3, 1, 0, 4, 3, 2, 0, 4, 3, 5]
+
+let short_code_recent: Array[USize, 16] = [0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+
+let short_code_adjustments: Array[Int64, 16] = [0, 0, 0, 0, -1, 1, -2, 2, -3, 3, -1, 1, -2, 2, -3, 3]
+
+let distance_alphabet_bases: Array[USize, 4] = [64, 112, 208, 400]
+
+let block_count_omitted: USize = 16777216
+
+let longest_code: USize = 15
+
+fn byte_at(bytes: Slice[UInt8], at: USize) -> UInt64
+  ensures result <= 255
+{
+  if at < bytes.length() { intrinsic::convert(bytes[at]) } else { 0 }
+}
+
+type Bits(bytes: List[UInt8], position: USize)
+
+fn Bits.peek(self, count: UInt32) -> UInt32
+  requires count <= 24
+{
+  let at = self.position / 8
+  let bytes = self.bytes.slice()
+  let word = byte_at(bytes, at: at) | (byte_at(bytes, at: at.saturating_add(1)) << 8) | (byte_at(bytes, at: at.saturating_add(2)) << 16) | (byte_at(bytes, at: at.saturating_add(3)) << 24)
+  let shifted = word >> intrinsic::convert[USize, UInt64](self.position % 8)
+  let mask: UInt64 = (1 << intrinsic::convert[UInt32, UInt64](count)) - 1
+  intrinsic::convert(shifted & mask & 0xFFFFFF)
+}
+
+fn Bits.skip(mut self, count: UInt32) {
+  self.position = self.position.saturating_add(intrinsic::convert[UInt32, USize](count))
+}
+
+fn Bits.skip_bytes(mut self, count: USize) {
+  self.position = self.position.saturating_add(count.saturating_multiply(8))
+}
+
+fn Bits.read(mut self, count: UInt32) -> UInt32
+  requires count <= 24
+{
+  let value = self.peek(count)
+  mut self.skip(count)
+  value
+}
+
+fn Bits.is_overrun(self) -> Bool {
+  self.position > self.bytes.length().saturating_multiply(8)
+}
+
+fn Bits.align(mut self) -> Result[Unit, Error] {
+  let padding: UInt32 = intrinsic::convert((8 - self.position % 8) % 8)
+  if mut self.read(padding) != 0 {
+    return malformed("padding bits that are not zero")
+  }
+  Ok(Unit)
+}
+
+type PrefixCode(counts: List[USize], symbols: List[UInt16])
+
+fn single_symbol(symbol: USize) -> PrefixCode {
+  PrefixCode(counts: List.filled(0, count: longest_code + 1), symbols: [intrinsic::convert(symbol & 0xFFFF)])
+}
+
+fn code_from_lengths(lengths: Slice[UInt8]) -> Result[PrefixCode, Error] {
+  var counts: List[USize] = List.filled(0, count: longest_code + 1)
+  for length in lengths {
+    let index: USize = intrinsic::convert(length)
+    if index > longest_code {
+      return malformed("a code length above 15")
+    }
+    if index > 0 && index < counts.length() {
+      counts[index] = counts[index].saturating_add(1)
+    }
+  }
+  var space: USize = 0
+  for length in 1..counts.length() {
+    if length <= longest_code {
+      space = space.saturating_add(counts[length].saturating_multiply(1 << (longest_code - length)))
+    }
+  }
+  if space != (1 << longest_code) {
+    return malformed("a prefix code that is not complete")
+  }
+  var symbols: List[UInt16] = []
+  for length in 1..=longest_code {
+    for symbol in 0..lengths.length() {
+      if intrinsic::convert[UInt8, USize](lengths[symbol]) == length && symbol < 65536 {
+        mut symbols.push(intrinsic::convert(symbol))
+      }
+    }
+  }
+  Ok(PrefixCode(counts: own counts, symbols: own symbols))
+}
+
+fn PrefixCode.decode(self, bits: mut Bits) -> Result[USize, Error] {
+  if self.symbols.length() == 1 {
+    return Ok(intrinsic::convert(self.symbols[0]))
+  }
+  let window = bits.peek(15)
+  var code: USize = 0
+  var first: USize = 0
+  var index: USize = 0
+  for length in 1..=longest_code {
+    if length < self.counts.length() {
+      code = code | intrinsic::convert[UInt32, USize]((window >> intrinsic::convert[USize, UInt32](length - 1)) & 1)
+      let count = self.counts[length]
+      if code >= first && code - first < count {
+        mut bits.skip(intrinsic::convert(length))
+        let position = index.saturating_add(code - first)
+        if position >= self.symbols.length() {
+          return malformed("a prefix code without its symbol")
+        }
+        return Ok(intrinsic::convert(self.symbols[position]))
+      }
+      index = index.saturating_add(count)
+      first = first.saturating_add(count).saturating_multiply(2) & 0xFFFFFF
+      code = (code << 1) & 0xFFFFFF
+    }
+  }
+  malformed("a code that is not in its prefix code")
+}
+
+fn alphabet_bits(alphabet_size: USize) -> UInt32
+  ensures result <= 24
+{
+  var bits: UInt32 = 0
+  var rest = alphabet_size.saturating_subtract(1)
+  while rest > 0 && bits < 24
+    invariant bits <= 24
+    decreases 24 - bits
+  {
+    rest = rest >> 1
+    bits += 1
+  }
+  bits
+}
+
+fn read_simple_code(bits: mut Bits, alphabet_size: USize) -> Result[PrefixCode, Error] {
+  let count = intrinsic::convert[UInt32, USize](mut bits.read(2) & 3) + 1
+  let width = alphabet_bits(alphabet_size)
+  var symbols: List[USize] = []
+  for _ in 0..count {
+    let symbol: USize = intrinsic::convert(mut bits.read(width))
+    if symbol >= alphabet_size {
+      return malformed("a simple prefix code symbol outside its alphabet")
+    }
+    for earlier in symbols {
+      if earlier == symbol {
+        return malformed("a simple prefix code with a repeated symbol")
+      }
+    }
+    mut symbols.push(symbol)
+  }
+  if symbols.length() == 1 {
+    return Ok(single_symbol(symbols[0]))
+  }
+  var depths: List[UInt8] = [1, 1]
+  if count == 3 {
+    depths = [1, 2, 2]
+  } else if count == 4 {
+    depths = if (mut bits.read(1) & 1) == 0 { [2, 2, 2, 2] } else { [1, 2, 3, 3] }
+  }
+  var lengths: List[UInt8] = List.filled(0, count: alphabet_size)
+  for index in 0..symbols.length() {
+    let symbol = symbols[index]
+    if symbol < lengths.length() && index < depths.length() {
+      lengths[symbol] = depths[index]
+    }
+  }
+  code_from_lengths(lengths.slice())
+}
+
+fn read_code_length_code(bits: mut Bits, skipped: USize) -> Result[PrefixCode, Error] {
+  var lengths: List[UInt8] = List.filled(0, count: 18)
+  var space: Int32 = 32
+  var used: USize = 0
+  var last: USize = 0
+  for position in skipped..code_length_order.length() {
+    if space > 0 {
+      let window: USize = intrinsic::convert(bits.peek(4) & 15)
+      mut bits.skip(code_length_code_lengths[window])
+      let length = code_length_code_values[window]
+      let symbol = code_length_order[position]
+      if symbol < lengths.length() {
+        lengths[symbol] = length
+      }
+      if length != 0 {
+        space = space.saturating_subtract(32 >> intrinsic::convert[UInt8, UInt32](length))
+        used = used.saturating_add(1)
+        last = symbol
+      }
+    }
+  }
+  if used == 1 {
+    return Ok(single_symbol(last))
+  }
+  if space != 0 {
+    return malformed("a code length code that is not complete")
+  }
+  code_from_lengths(lengths.slice())
+}
+
+fn read_complex_code(bits: mut Bits, alphabet_size: USize, skipped: USize) -> Result[PrefixCode, Error] {
+  let length_code = read_code_length_code(bits: mut bits, skipped: skipped)?
+  var lengths: List[UInt8] = List.filled(0, count: alphabet_size)
+  var symbol: USize = 0
+  var previous_length: UInt8 = 8
+  var repeat: USize = 0
+  var repeat_length: UInt8 = 0
+  var space: Int64 = 32768
+  while symbol < alphabet_size && space > 0
+    decreases alphabet_size - symbol
+  {
+    let code = length_code.decode(bits: mut bits)?
+    if code < 16 {
+      repeat = 0
+      if symbol < lengths.length() {
+        lengths[symbol] = intrinsic::convert(code)
+      }
+      if code != 0 {
+        previous_length = intrinsic::convert(code)
+        space = space.saturating_subtract(32768 >> intrinsic::convert[USize, UInt64](code))
+      }
+      symbol += 1
+    } else {
+      let extra: UInt32 = if code == 16 { 2 } else { 3 }
+      let length: UInt8 = if code == 16 { previous_length } else { 0 }
+      if repeat_length != length {
+        repeat = 0
+        repeat_length = length
+      }
+      let earlier = repeat
+      if repeat > 0 {
+        repeat = repeat.saturating_subtract(2).saturating_multiply(if code == 16 { 4 } else { 8 })
+      }
+      repeat = repeat.saturating_add(intrinsic::convert[UInt32, USize](mut bits.read(extra))).saturating_add(3)
+      if repeat < earlier || repeat - earlier > alphabet_size - symbol {
+        return malformed("a code length repeat past its alphabet")
+      }
+      let added = repeat - earlier
+      for _ in 0..added {
+        if symbol < lengths.length() {
+          lengths[symbol] = repeat_length
+        }
+        symbol = symbol.saturating_add(1)
+      }
+      if repeat_length != 0 && repeat_length <= 15 {
+        let weight: Int64 = 32768 >> intrinsic::convert[UInt8, UInt64](repeat_length)
+        let count: Int64 = intrinsic::convert(if added > 65536 { 65536 } else { added })
+        space = space.saturating_subtract(weight.saturating_multiply(count))
+      }
+    }
+    if bits.is_overrun() {
+      return malformed("a prefix code past the end of the data")
+    }
+  }
+  if space != 0 {
+    return malformed("code lengths that do not complete a prefix code")
+  }
+  code_from_lengths(lengths.slice())
+}
+
+fn read_prefix_code(bits: mut Bits, alphabet_size: USize) -> Result[PrefixCode, Error] {
+  let kind: USize = intrinsic::convert(mut bits.read(2) & 3)
+  if kind == 1 {
+    read_simple_code(bits: mut bits, alphabet_size: alphabet_size)
+  } else {
+    read_complex_code(bits: mut bits, alphabet_size: alphabet_size, skipped: kind)
+  }
+}
+
+fn read_type_count(bits: mut Bits) -> USize
+  ensures result >= 1 && result <= 256
+{
+  if (mut bits.read(1) & 1) == 0 {
+    return 1
+  }
+  let width = mut bits.read(3) & 7
+  if width == 0 {
+    return 2
+  }
+  let value: USize = (1 << intrinsic::convert[UInt32, USize](width)) + intrinsic::convert[UInt32, USize](mut bits.read(width) & 127) + 1
+  if value > 256 { 256 } else { value }
+}
+
+fn read_block_count(bits: mut Bits, code: PrefixCode) -> Result[USize, Error] {
+  let symbol = code.decode(bits: mut bits)?
+  if symbol >= block_count_bases.length() {
+    return malformed("a block count code outside its alphabet")
+  }
+  Ok(block_count_bases[symbol].saturating_add(intrinsic::convert[UInt32, USize](mut bits.read(block_count_bits[symbol]))))
+}
+
+type Blocks(types: USize, type_code: PrefixCode, count_code: PrefixCode, current: USize, previous: USize, remaining: USize)
+
+fn read_blocks(bits: mut Bits) -> Result[Blocks, Error] {
+  let types = read_type_count(bits: mut bits)
+  if types < 2 {
+    return Ok(Blocks(types: 1, type_code: single_symbol(0), count_code: single_symbol(0), current: 0, previous: 1, remaining: block_count_omitted))
+  }
+  let type_code = read_prefix_code(bits: mut bits, alphabet_size: types + 2)?
+  let count_code = read_prefix_code(bits: mut bits, alphabet_size: 26)?
+  let remaining = read_block_count(bits: mut bits, code: count_code)?
+  Ok(Blocks(types: types, type_code: own type_code, count_code: own count_code, current: 0, previous: 1, remaining: remaining))
+}
+
+fn Blocks.advance(mut self, bits: mut Bits) -> Result[Unit, Error] {
+  if self.remaining == 0 {
+    let symbol = self.type_code.decode(bits: mut bits)?
+    var next = if symbol == 0 { self.previous } else if symbol == 1 { self.current.saturating_add(1) } else { symbol - 2 }
+    if next >= self.types {
+      next = next - self.types
+    }
+    if next >= self.types {
+      return malformed("a block type outside its category")
+    }
+    self.previous = self.current
+    self.current = next
+    self.remaining = read_block_count(bits: mut bits, code: self.count_code)?
+  }
+  self.remaining = self.remaining.saturating_subtract(1)
+  Ok(Unit)
+}
+
+fn read_context_map(bits: mut Bits, size: USize, trees: USize) -> Result[List[UInt8], Error] {
+  var map: List[UInt8] = List.filled(0, count: size)
+  if trees < 2 {
+    return Ok(own map)
+  }
+  var zero_runs: USize = 0
+  if (mut bits.read(1) & 1) == 1 {
+    zero_runs = intrinsic::convert[UInt32, USize](mut bits.read(4) & 15) + 1
+  }
+  let code = read_prefix_code(bits: mut bits, alphabet_size: trees.saturating_add(zero_runs))?
+  var index: USize = 0
+  while index < size
+    decreases size - index
+  {
+    let symbol = code.decode(bits: mut bits)?
+    if symbol == 0 {
+      index += 1
+    } else if symbol <= zero_runs {
+      let run = (1 << symbol) + intrinsic::convert[UInt32, USize](mut bits.read(intrinsic::convert(symbol)))
+      if run > size - index {
+        return malformed("a context map run past its map")
+      }
+      index += run
+    } else {
+      let tree = symbol - zero_runs
+      if tree >= trees || tree > 255 || index >= map.length() {
+        return malformed("a context map entry outside its trees")
+      }
+      map[index] = intrinsic::convert(tree)
+      index += 1
+    }
+    if bits.is_overrun() {
+      return malformed("a context map past the end of the data")
+    }
+  }
+  if (mut bits.read(1) & 1) == 1 {
+    var order: List[UInt8] = []
+    for value in 0..256 {
+      mut order.push(intrinsic::convert(value))
+    }
+    for position in 0..map.length() {
+      let at: USize = if position < map.length() { intrinsic::convert(map[position]) } else { 256 }
+      if at < order.length() && position < map.length() {
+        let value = order[at]
+        map[position] = value
+        let _ = mut order.remove_at(at)
+        mut order.insert_at(0, item: value)
+      }
+    }
+    for value in map {
+      if intrinsic::convert[UInt8, USize](value) >= trees {
+        return malformed("a context map entry outside its trees")
+      }
+    }
+  }
+  Ok(own map)
+}
+
+fn read_codes(bits: mut Bits, count: USize, alphabet_size: USize) -> Result[List[PrefixCode], Error] {
+  var codes: List[PrefixCode] = []
+  for _ in 0..count {
+    mut codes.push(read_prefix_code(bits: mut bits, alphabet_size: alphabet_size)?)
+  }
+  Ok(own codes)
+}
+
+fn code_at(codes: Slice[PrefixCode], index: USize) -> Result[PrefixCode, Error] {
+  if index < codes.length() { Ok(codes[index].copy()) } else { malformed("a prefix code index outside its trees") }
+}
+
+type Stream(recent: Array[USize, 4], window: USize, dictionary: Option[List[UInt8]])
+
+fn literal_context(mode: UInt8, last: USize, before: USize) -> USize
+  ensures result < 64
+{
+  let p1 = last & 255
+  let p2 = before & 255
+  if mode == 0 {
+    p1 & 63
+  } else if mode == 1 {
+    p1 >> 2
+  } else if mode == 2 {
+    intrinsic::convert[UInt8, USize](literal_context_low[p1] | literal_context_high[p2]) & 63
+  } else {
+    ((intrinsic::convert[UInt8, USize](signed_context[p1]) << 3) | intrinsic::convert[UInt8, USize](signed_context[p2])) & 63
+  }
+}
+
+fn byte_before(output: Slice[UInt8], distance: USize) -> USize {
+  if distance <= output.length() && distance > 0 { intrinsic::convert(output[output.length() - distance]) } else { 0 }
+}
+
+fn distance_of(code: USize, bits: mut Bits, stream: Stream, postfix_bits: UInt32, direct: USize) -> Result[USize, Error]
+  requires postfix_bits <= 3
+{
+  if code < 16 {
+    let which = short_code_recent[code]
+    let base: Int64 = intrinsic::convert(if stream.recent[which] > 1073741824 { 1073741824 } else { stream.recent[which] })
+    let distance = base + short_code_adjustments[code]
+    if distance <= 0 {
+      return malformed("a distance short code below one")
+    }
+    return Ok(intrinsic::convert(distance))
+  }
+  if code > 1023 || direct > 120 {
+    return malformed("a distance code outside its alphabet")
+  }
+  if code < 16 + direct {
+    return Ok(code - 15)
+  }
+  let rest = code - 16 - direct
+  let extra_bits = 1 + (rest >> intrinsic::convert[UInt32, USize](postfix_bits + 1))
+  if extra_bits > 24 {
+    return malformed("a distance code with more than 24 extra bits")
+  }
+  let high = rest >> intrinsic::convert[UInt32, USize](postfix_bits)
+  let low = rest & ((1 << intrinsic::convert[UInt32, USize](postfix_bits)) - 1)
+  let offset = ((2 + (high & 1)) << extra_bits).saturating_subtract(4)
+  let extra: USize = intrinsic::convert(mut bits.read(intrinsic::convert(extra_bits)))
+  let base = offset.saturating_add(extra).saturating_multiply(1 << intrinsic::convert[UInt32, USize](postfix_bits))
+  Ok(base.saturating_add(low).saturating_add(direct).saturating_add(1))
+}
+
+fn dictionary_word(stream: mut Stream, length: USize, word_id: USize, output: mut List[UInt8]) -> Result[Unit, Error] {
+  if length < 4 || length > 24 {
+    return malformed("a dictionary reference whose length is not 4 to 24")
+  }
+  let index_bits = word_index_bits[length]
+  let index = word_id & ((1 << intrinsic::convert[UInt32, USize](index_bits)) - 1)
+  let transform = word_id >> intrinsic::convert[UInt32, USize](index_bits)
+  if transform >= transform_kinds.length() {
+    return malformed("a dictionary reference with an unknown transform")
+  }
+  if stream.dictionary is None {
+    match base64::decode(dictionary_text().slice()) {
+      Ok(bytes) => stream.dictionary = Some(own bytes)
+      Err(_) => return malformed("the static dictionary")
+    }
+  }
+  let words = match stream.dictionary {
+    Some(words) => words.copy()
+    None => return malformed("the static dictionary")
+  }
+  let start = word_offsets[length].saturating_add(index.saturating_multiply(length))
+  if start > words.length() || length > words.length() - start {
+    return malformed("a dictionary word outside the dictionary")
+  }
+  var word = words[start..start + length].to_list()
+  let kind: USize = intrinsic::convert(transform_kinds[transform])
+  if kind >= 3 && kind <= 11 {
+    let omitted = if kind - 2 > word.length() { word.length() } else { kind - 2 }
+    word = word[omitted..].to_list()
+  } else if kind >= 12 && kind <= 20 {
+    let omitted = if kind - 11 > word.length() { word.length() } else { kind - 11 }
+    word = word[..word.length() - omitted].to_list()
+  } else if kind == 1 {
+    let _ = ferment(mut word, at: 0)
+  } else if kind == 2 {
+    var position: USize = 0
+    while position < word.length()
+      decreases word.length() - position
+    {
+      position = position.saturating_add(ferment(mut word, at: position))
+    }
+  }
+  append_affix(mut output, affix: intrinsic::convert(transform_prefixes[transform]))
+  mut output.append_slice(word.slice())
+  append_affix(mut output, affix: intrinsic::convert(transform_suffixes[transform]))
+  Ok(Unit)
+}
+
+fn ferment(word: mut List[UInt8], at: USize) -> USize
+  ensures result >= 1
+{
+  if at >= word.length() {
+    return 1
+  }
+  let byte = word[at]
+  if byte < 192 {
+    if byte >= 97 && byte <= 122 {
+      word[at] = byte ^ 32
+    }
+    return 1
+  }
+  if byte < 224 {
+    if at + 1 < word.length() {
+      word[at + 1] = word[at + 1] ^ 32
+    }
+    return 2
+  }
+  if at + 2 < word.length() {
+    word[at + 2] = word[at + 2] ^ 5
+  }
+  3
+}
+
+fn append_affix(output: mut List[UInt8], affix: USize) {
+  if affix < affix_starts.length().saturating_subtract(1) {
+    let start = affix_starts[affix]
+    let end = affix_starts[affix + 1]
+    if start <= end && end <= affix_bytes.length() {
+      mut output.append_slice(affix_bytes[start..end])
+    }
+  }
+}
+
+fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8], length: USize) -> Result[Unit, Error] {
+  var literal_blocks = read_blocks(bits: mut bits)?
+  var command_blocks = read_blocks(bits: mut bits)?
+  var distance_blocks = read_blocks(bits: mut bits)?
+  let postfix_bits = mut bits.read(2) & 3
+  let direct: USize = intrinsic::convert[UInt32, USize](mut bits.read(4) & 15) << intrinsic::convert[UInt32, USize](postfix_bits)
+  var modes: List[UInt8] = []
+  for _ in 0..literal_blocks.types {
+    mut modes.push(intrinsic::convert(mut bits.read(2) & 3))
+  }
+  let literal_trees = read_type_count(bits: mut bits)
+  let literal_map = read_context_map(bits: mut bits, size: literal_blocks.types.saturating_multiply(64), trees: literal_trees)?
+  let distance_trees = read_type_count(bits: mut bits)
+  let distance_map = read_context_map(bits: mut bits, size: distance_blocks.types.saturating_multiply(4), trees: distance_trees)?
+  let literal_codes = read_codes(bits: mut bits, count: literal_trees, alphabet_size: 256)?
+  let command_codes = read_codes(bits: mut bits, count: command_blocks.types, alphabet_size: 704)?
+  let distance_codes = read_codes(bits: mut bits, count: distance_trees, alphabet_size: direct.saturating_add(distance_alphabet_bases[intrinsic::convert[UInt32, USize](postfix_bits)]))?
+  if bits.is_overrun() {
+    return malformed("a meta-block header past the end of the data")
+  }
+  let end = output.length().saturating_add(length)
+  while output.length() < end
+    decreases end - output.length()
+  {
+    if bits.is_overrun() {
+      return malformed("a meta-block past the end of the data")
+    }
+    let before = output.length()
+    mut command_blocks.advance(bits: mut bits)?
+    let command = code_at(command_codes.slice(), index: command_blocks.current)?.decode(bits: mut bits)?
+    let cell = command >> 6
+    if cell >= insert_code_starts.length() {
+      return malformed("an insert-and-copy code outside its alphabet")
+    }
+    let insert_code = insert_code_starts[cell] + ((command >> 3) & 7)
+    let copy_code = copy_code_starts[cell] + (command & 7)
+    if insert_code >= insert_length_bases.length() || copy_code >= copy_length_bases.length() {
+      return malformed("an insert-and-copy code outside its alphabet")
+    }
+    let insert_length = insert_length_bases[insert_code].saturating_add(intrinsic::convert[UInt32, USize](mut bits.read(insert_length_bits[insert_code])))
+    let copy_length = copy_length_bases[copy_code].saturating_add(intrinsic::convert[UInt32, USize](mut bits.read(copy_length_bits[copy_code])))
+    if insert_length > end - output.length() {
+      return malformed("literals past the end of their meta-block")
+    }
+    for _ in 0..insert_length {
+      mut literal_blocks.advance(bits: mut bits)?
+      let mode = if literal_blocks.current < modes.length() { modes[literal_blocks.current] } else { 0 }
+      let context = literal_context(mode, last: byte_before(output.slice(), distance: 1), before: byte_before(output.slice(), distance: 2))
+      let slot = literal_blocks.current.saturating_multiply(64).saturating_add(context)
+      let tree: USize = if slot < literal_map.length() { intrinsic::convert(literal_map[slot]) } else { 0 }
+      let literal = code_at(literal_codes.slice(), index: tree)?.decode(bits: mut bits)?
+      mut output.push(intrinsic::convert(literal & 255))
+    }
+    if output.length() >= end {
+      break
+    }
+    var distance: USize = 0
+    var is_pushed = false
+    if cell < 2 {
+      distance = stream.recent[0]
+    } else {
+      mut distance_blocks.advance(bits: mut bits)?
+      let context = if copy_length > 4 { 3 } else { copy_length - 2 }
+      let slot = distance_blocks.current.saturating_multiply(4).saturating_add(context)
+      let tree: USize = if slot < distance_map.length() { intrinsic::convert(distance_map[slot]) } else { 0 }
+      let code = code_at(distance_codes.slice(), index: tree)?.decode(bits: mut bits)?
+      distance = distance_of(code, bits: mut bits, stream: stream, postfix_bits: postfix_bits, direct: direct)?
+      is_pushed = code != 0
+    }
+    let reach = if output.length() < stream.window { output.length() } else { stream.window }
+    if distance > reach {
+      let word_id = distance - reach - 1
+      dictionary_word(stream: mut stream, length: copy_length, word_id: word_id, output: mut output)?
+      if output.length() > end {
+        return malformed("a dictionary word past the end of its meta-block")
+      }
+    } else {
+      if is_pushed {
+        stream.recent = [distance, stream.recent[0], stream.recent[1], stream.recent[2]]
+      }
+      if copy_length > end - output.length() {
+        return malformed("a copy past the end of its meta-block")
+      }
+      let from = output.length() - distance
+      for index in 0..copy_length {
+        let source = from.saturating_add(index)
+        if source < output.length() {
+          mut output.push(output[source])
+        }
+      }
+    }
+    if output.length() <= before {
+      return malformed("a command that produces no output")
+    }
+  }
+  Ok(Unit)
+}
+
+fn window_bits(bits: mut Bits) -> Result[UInt32, Error] {
+  if (mut bits.read(1) & 1) == 0 {
+    return Ok(16)
+  }
+  let high = mut bits.read(3) & 7
+  if high != 0 {
+    return Ok(17 + high)
+  }
+  let low = mut bits.read(3) & 7
+  if low == 1 {
+    return malformed("the large-window format")
+  }
+  Ok(if low == 0 { 17 } else { 8 + low })
+}
+
+public fn decompress(input: Slice[UInt8], limit: USize = 268435456) -> Result[List[UInt8], Error] {
+  var bits = Bits(bytes: input.to_list(), position: 0)
+  if input.is_empty() {
+    return malformed("no stream header")
+  }
+  let window = window_bits(bits: mut bits)?
+  if window < 10 || window > 24 {
+    return malformed("a window size outside 10 to 24 bits")
+  }
+  var stream = Stream(recent: [4, 11, 15, 16], window: (1 << intrinsic::convert[UInt32, USize](window)) - 16, dictionary: None)
+  var output: List[UInt8] = []
+  var is_last = false
+  var blocks: USize = 0
+  while !is_last && blocks <= input.length()
+    decreases input.length() + 1 - blocks
+  {
+    blocks += 1
+    is_last = (mut bits.read(1) & 1) == 1
+    if is_last && (mut bits.read(1) & 1) == 1 {
+      break
+    }
+    let nibbles_code = mut bits.read(2) & 3
+    if nibbles_code == 3 {
+      if (mut bits.read(1) & 1) != 0 {
+        return malformed("a metadata block with its reserved bit set")
+      }
+      let skip_bytes = mut bits.read(2) & 3
+      var skip_length: USize = 0
+      for index in 0..skip_bytes {
+        let byte: USize = intrinsic::convert(mut bits.read(8) & 255)
+        if index + 1 == skip_bytes && skip_bytes > 1 && byte == 0 {
+          return malformed("a metadata length with a zero last byte")
+        }
+        skip_length = skip_length | (byte << (8 * intrinsic::convert[UInt32, USize](index)))
+      }
+      if skip_bytes > 0 {
+        skip_length = skip_length.saturating_add(1)
+      }
+      mut bits.align()?
+      mut bits.skip_bytes(skip_length)
+    } else {
+      let nibbles = 4 + nibbles_code
+      var length: USize = 0
+      for index in 0..nibbles {
+        let nibble: USize = intrinsic::convert(mut bits.read(4) & 15)
+        if index + 1 == nibbles && nibbles > 4 && nibble == 0 {
+          return malformed("a meta-block length with a zero last nibble")
+        }
+        length = length | (nibble << (4 * intrinsic::convert[UInt32, USize](index)))
+      }
+      length = length.saturating_add(1)
+      if length > limit.saturating_subtract(output.length()) {
+        return Err(Error.TooLarge(limit: limit))
+      }
+      let is_uncompressed = !is_last && (mut bits.read(1) & 1) == 1
+      if is_uncompressed {
+        mut bits.align()?
+        let start = bits.position / 8
+        if start > input.length() || length > input.length() - start {
+          return malformed("an uncompressed meta-block past the end of the data")
+        }
+        mut output.append_slice(input[start..start + length])
+        mut bits.skip_bytes(length)
+      } else {
+        decode_compressed(bits: mut bits, stream: mut stream, output: mut output, length: length)?
+      }
+    }
+    if bits.is_overrun() {
+      return malformed("a stream that ends inside a meta-block")
+    }
+  }
+  if !is_last {
+    return malformed("a stream without a last meta-block")
+  }
+  mut bits.align()?
+  if bits.position != input.length().saturating_multiply(8) {
+    return malformed("data after the end of the stream")
+  }
+  Ok(own output)
+}
