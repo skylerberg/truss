@@ -1,3 +1,5 @@
+module References = References
+
 type unfinished = { keyword : [ `Todo | `Echo ]; id : Syntax.id option; span : Syntax.span }
 
 val unfinished : Syntax.definition -> unfinished list

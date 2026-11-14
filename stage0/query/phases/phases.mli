@@ -19,6 +19,9 @@ val interfaces : Query.phase
 val bodies : Query.phase
 (** Checked bodies, and the facts found in them *)
 
+val inspection : Query.phase
+(** Indexes of definitions for the tools, such as each name's occurrences *)
+
 val checks : Query.phase
 (** The rules that span a package *)
 

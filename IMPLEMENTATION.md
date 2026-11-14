@@ -86,7 +86,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   The libraries at the top of `stage0` put the areas together: `checks`
   runs every check before the prover, `database` is the project's layer over
-  sessions, `evaluator` gives the prover code generation, and `cli` is the
+  sessions, `evaluator` gives the prover code generation, `inspect` indexes
+  definitions for the tools, and `cli` is the
   command line. No area depends on them, so the areas form no cycle.
 - **A unit of several modules inside a library is a subdirectory.** The
   library's `dune` file sets `(include_subdirs qualified)`, the
