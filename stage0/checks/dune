@@ -4,7 +4,7 @@
   query
   phases
   path
-  workspace
+  parsed
   diagnostic
   resolve
   interface

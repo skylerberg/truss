@@ -745,16 +745,16 @@ let file_states ?evaluator ~record database solver file =
                    | Some (cited, span) -> (
                        match base_of cited with
                        | Some (cited_file, offset) when cited_file <> file -> (
-                           match Query.demand database Workspace.file cited_file with
-                           | parsed ->
+                           match Query.demand database Packages.source cited_file with
+                           | source ->
                                let start =
                                  (Span.to_source ~base:offset
                                     (clamp_to_definition database cited span))
                                    .start
                                in
-                               let line, _ = Source.position parsed.source start in
+                               let line, _ = Source.position source start in
                                Printf.sprintf " The clause that must hold is at `%s:%d`."
-                                 (Source.path parsed.source) line
+                                 (Source.path source) line
                            | exception Not_found -> "")
                        | _ -> "")
                    | _ -> ""

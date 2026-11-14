@@ -52,7 +52,7 @@ let impls database (modules : Path.module_ list) =
 
 let package_impls =
   Query.query ~phase:Phases.proofs ~name:"package_impls" ~show:Path.show_package
-    (fun database package -> impls database (Query.demand database Workspace.modules package))
+    (fun database package -> impls database (Query.demand database Packages.modules package))
 
 (* The [impl]s of a package that a value of a type, given where one of
    these traits is needed, could use. Matched by the type's head, which may
@@ -188,7 +188,7 @@ let edges database impls (body : Core.block) =
   List.rev !body_edges
 
 let build database package =
-  let modules = Query.demand database Workspace.modules package in
+  let modules = Query.demand database Packages.modules package in
   let impls = Query.demand database package_impls package in
   List.concat_map
     (fun module_ ->
@@ -219,7 +219,7 @@ let reachable_packages database package =
       Hashtbl.replace seen package ();
       List.iter
         (fun (dependency : Manifest.dependency) -> visit dependency.package)
-        (Query.demand database Workspace.dependencies package)
+        (Query.demand database Packages.dependencies package)
     end
   in
   visit package;

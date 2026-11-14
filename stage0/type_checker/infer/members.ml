@@ -10,7 +10,7 @@ let visible_packages database (package : Path.package) =
     (Path.standard_package :: package
     :: List.map
          (fun (dependency : Manifest.dependency) -> dependency.package)
-         (Query.demand database Workspace.dependencies package))
+         (Query.demand database Packages.dependencies package))
 
 (* The methods of a type with the given name: one for each receiver mode. *)
 let own_methods database owner name =

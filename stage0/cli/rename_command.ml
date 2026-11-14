@@ -139,8 +139,7 @@ let plan_module session packages (old_module : Path.module_) to_ =
         | Module edit_module when edit_module = old_module ->
             (* Written as its import's name, one segment, or as a full path. *)
             let text =
-              Source.text
-                (Query.demand (Database.context session) Workspace.file occurrence.file).source
+              Source.text (Query.demand (Database.context session) Packages.source occurrence.file)
             in
             let written =
               String.sub text occurrence.span.start (occurrence.span.stop - occurrence.span.start)
@@ -158,7 +157,7 @@ let plan_module session packages (old_module : Path.module_) to_ =
   { edits = by_file edits; moved = Some (old_module, new_module) }
 
 let text_of session file =
-  Source.text (Query.demand (Database.context session) Workspace.file file).source
+  Source.text (Query.demand (Database.context session) Packages.source file)
 
 (* Each file, the file it becomes, and its text after the rename. *)
 let applied session packages plan =

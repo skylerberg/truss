@@ -24,7 +24,7 @@ let unfinished session packages =
                 line,
                 column ))
             (Inspect.unfinished item.value))
-        (Query.demand (Database.context session) Workspace.file file).definitions)
+        (Query.demand (Database.context session) Parsed.file file).definitions)
     (Command_packages.files session packages)
 
 (* The files to publish: the package's own, with its published lock file
@@ -53,7 +53,7 @@ let record session registry (package : Path.package) =
     List.filter_map
       (fun (dependency : Manifest.dependency) ->
         if (not code) || List.mem dependency.package used then Some dependency.package else None)
-      (Query.demand (Database.context session) Workspace.dependencies name)
+      (Query.demand (Database.context session) Packages.dependencies name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =

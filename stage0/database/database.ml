@@ -61,7 +61,7 @@ let check_standard engine =
         match Engine.get engine Checks.file_diagnostics file with
         | [] -> []
         | diagnostics ->
-            let source = (Engine.get engine Workspace.file file).source in
+            let source = Engine.get engine Packages.source file in
             List.map (Diagnostic.render source) diagnostics)
       Standard_library.files
   in

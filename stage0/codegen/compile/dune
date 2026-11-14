@@ -10,7 +10,7 @@
   phases
   resolve
   interface
-  workspace
+  packages
   source
   ground
   instance
