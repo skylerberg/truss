@@ -65,11 +65,9 @@
   project
   resolve
   standard_library
-  support
   logic
   solver
   prover
-  parse_support
   types
   intrinsic
   interface
