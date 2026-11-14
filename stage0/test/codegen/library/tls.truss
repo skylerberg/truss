@@ -1,7 +1,9 @@
 use standard::http
+use standard::mail
 use standard::network
 use standard::url
 use standard::simulation
+use standard::streams
 use standard::tasks
 use standard::tls
 use standard::x509
@@ -396,5 +398,120 @@ test "a client sends plain requests to its proxy in absolute form and tunnels TL
     assert seen[1] == "CONNECT example.test:8455 HTTP/1.1"
     assert seen[2] == "200 13 served /first"
     assert seen[3] == "200 14 served /second"
+  }
+}
+
+fn smtp_line[Stream: streams::Duplex](connection: Stream, inbox: mut List[UInt8]) -> Option[String]
+  uses Handles, Tasks
+{
+  while true {
+    for index in 1..inbox.length() {
+      if inbox[index] == 10 && inbox[index - 1] == 13 {
+        let rest = mut inbox.split_off(index + 1)
+        let line = String.from_utf8_lossy(inbox[..index - 1])
+        inbox = own rest
+        return Some(own line)
+      }
+    }
+    match connection.receive(mut inbox, limit: 4096) {
+      Ok(count) => if count == 0 { return None }
+      Err(_) => return None
+    }
+  }
+}
+
+fn smtp_session[Stream: streams::Duplex](connection: Stream, transcript: tasks::Cell[List[String]], offers_tls: Bool) -> Bool
+  uses Handles, Tasks
+{
+  var inbox: List[UInt8] = []
+  while true {
+    let line = match smtp_line(connection, inbox: mut inbox) {
+      Some(line) => own line
+      None => return false
+    }
+    let recorded = line.copy()
+    transcript.update(fn(listed) { mut listed.push(recorded.copy()) })
+    if line.slice().starts_with("EHLO") {
+      let _ = connection.send_all(if offers_tls { "250-mail.example.test\r\n250 STARTTLS\r\n".bytes() } else { "250 mail.example.test\r\n".bytes() })
+    } else if line == "STARTTLS" {
+      let _ = connection.send_all("220 go ahead\r\n".bytes())
+      return true
+    } else if line == "DATA" {
+      let _ = connection.send_all("354 go ahead\r\n".bytes())
+      while true {
+        match smtp_line(connection, inbox: mut inbox) {
+          Some(body_line) => if body_line == "." { break }
+          None => return false
+        }
+      }
+      let _ = connection.send_all("250 queued\r\n".bytes())
+    } else if line == "QUIT" {
+      let _ = connection.send_all("221 bye\r\n".bytes())
+      return false
+    } else {
+      let _ = connection.send_all("250 ok\r\n".bytes())
+    }
+  }
+}
+
+fn mailed(port: UInt16, offers_tls: Bool) -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: port)).expect("the port is free")
+  let transcript = tasks::Cell[List[String]].new([])
+  var outcome = ""
+  concurrent {
+    {
+      match mut listener.accept() {
+        Ok(connection) => {
+          let _ = connection.send_all("220 mail.example.test ready\r\n".bytes())
+          if smtp_session(connection, transcript: transcript, offers_tls: offers_tls) {
+            match tls::accept(own connection, config: server_config()) {
+              Ok(secured) => {
+                let _ = smtp_session(secured, transcript: transcript, offers_tls: false)
+              }
+              Err(_) => {}
+            }
+          }
+        }
+        Err(_) => {}
+      }
+    }
+    {
+      let note = mail::Message(from: mail::Address(email: "ada@example.test"), to: [mail::Address(email: "grace@example.test")], subject: "Hello", text: Some("Hi"))
+      outcome = match mail::send(note, options: mail::SmtpOptions(host: "example.test", port: port, roots: Some([certificate(root_pem.slice())]))) {
+        Ok(_) => "sent"
+        Err(Unsupported(message)) => "unsupported: ${message}"
+        Err(error) => "failed: ${error}"
+      }
+    }
+  }
+  var seen: List[String] = [own outcome]
+  for line in transcript.read(fn(listed) { listed.copy() }) {
+    mut seen.push(line.copy())
+  }
+  seen
+}
+
+test "mail upgrades an SMTP connection with STARTTLS, verifies the server, and sends over TLS" {
+  provide world() {
+    assert mailed(2526, offers_tls: true) == [
+      "sent",
+      "EHLO localhost",
+      "STARTTLS",
+      "EHLO localhost",
+      "MAIL FROM:<ada@example.test>",
+      "RCPT TO:<grace@example.test>",
+      "DATA",
+      "QUIT",
+    ]
+  }
+}
+
+test "mail refuses to send in the clear to a server that does not offer STARTTLS" {
+  provide world() {
+    let seen = mailed(2527, offers_tls: false)
+    assert seen[0] == "unsupported: a mail server that does not offer STARTTLS"
+    assert !seen.contains("MAIL FROM:<ada@example.test>")
   }
 }
