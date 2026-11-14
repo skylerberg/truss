@@ -854,6 +854,41 @@ public fn create_temporary_directory(parent: Path, prefix: StringSlice) -> Resul
   Err(failure)
 }
 
+public fn temporary_root() -> Path
+  uses Environment
+{
+  match Environment.variable("TMPDIR") {
+    Some(directory) => if directory.slice().trim().is_empty() { Path.new("/tmp") } else { Path.new(directory.slice()) }
+    None => Path.new("/tmp")
+  }
+}
+
+public fn with_temporary_directory[Output, capability Granted](work: (fn(Path) -> Output uses Granted)) -> Result[Output, SystemError]
+  uses FileRead, FileWrite, Random, Environment, Granted
+{
+  let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
+  let output = work(directory)
+  let _ = remove_all(directory)
+  Ok(own output)
+}
+
+public fn with_temporary_file[Output, capability Granted](work: (fn(Path) -> Output uses Granted)) -> Result[Output, SystemError]
+  uses FileRead, FileWrite, Random, Environment, Granted
+{
+  let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
+  let file = directory.join("file")
+  match FileWrite.write_text(file, contents: "") {
+    Ok(_) => {}
+    Err(error) => {
+      let _ = remove_all(directory)
+      return Err(error)
+    }
+  }
+  let output = work(file)
+  let _ = remove_all(directory)
+  Ok(own output)
+}
+
 public type WalkEntry(path: Path, kind: FileKind, depth: USize)
   derives Equal
 
