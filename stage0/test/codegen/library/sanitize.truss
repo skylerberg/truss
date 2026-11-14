@@ -1,0 +1,61 @@
+use standard::html
+
+fn clean(input: StringSlice) -> String {
+  html::sanitize(input).text().to_string()
+}
+
+test "sanitize keeps allowed formatting and links, and gives links rel=nofollow" {
+  assert clean("<p>Hello <b>bold</b> and <em>soft</em></p>") == "<p>Hello <b>bold</b> and <em>soft</em></p>"
+  assert clean("<a href=\"https://example.com/a?b=1&amp;c=2\" title=\"x\">link</a>")
+    == "<a href=\"https://example.com/a?b=1&amp;c=2\" title=\"x\" rel=\"nofollow noopener noreferrer\">link</a>"
+  assert clean("<img src=\"/logo.png\" alt=\"Logo\">") == "<img src=\"/logo.png\" alt=\"Logo\">"
+  assert clean("<ul><li>one<li>two</ul>") == "<ul><li>one<li>two</li></li></ul>"
+  assert clean("<table><tr><td colspan=2>x</td></tr></table>") == "<table><tr><td colspan=\"2\">x</td></tr></table>"
+}
+
+test "sanitize removes script, style, and other active content with their contents" {
+  assert clean("a<script>alert(1)</script>b") == "ab"
+  assert clean("a<SCRIPT SRC=//evil.test/x.js></SCRIPT>b") == "ab"
+  assert clean("<style>body{display:none}</style>text") == "text"
+  assert clean("<iframe src=\"https://evil.test\">inside</iframe>after") == "after"
+  assert clean("<svg><script>alert(1)</script></svg>after") == "after"
+  assert clean("<math><mi>x</mi></math>after") == "after"
+  assert clean("<object data=\"x\"><param name=a></object>ok") == "ok"
+  assert clean("a<script>never closed") == "a"
+}
+
+test "sanitize drops event handlers, style, ids, and classes" {
+  assert clean("<img src=\"x.png\" onerror=\"alert(1)\">") == "<img src=\"x.png\">"
+  assert clean("<p onclick=alert(1) style=\"color:red\" id=main class=c>x</p>") == "<p>x</p>"
+  assert clean("<b ONMOUSEOVER=\"alert(1)\">x</b>") == "<b>x</b>"
+}
+
+test "sanitize drops URLs whose decoded scheme is not http, https, mailto, or tel" {
+  assert clean("<a href=\"javascript:alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<a href=\"JaVaScRiPt:alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<a href=\"java\tscript:alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<a href=\"&#106;avascript:alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<a href=\"&#x6A;avascript:alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<a href=\"javascript&colon;alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<a href=\" javascript:alert(1)\">x</a>") == "<a rel=\"nofollow noopener noreferrer\">x</a>"
+  assert clean("<img src=\"data:image/svg+xml;base64,PHN2Zz4=\">") == "<img>"
+  assert clean("<a href=\"mailto:ada@example.test\">mail</a>") == "<a href=\"mailto:ada@example.test\" rel=\"nofollow noopener noreferrer\">mail</a>"
+  assert clean("<a href=\"#top\">top</a>") == "<a href=\"#top\" rel=\"nofollow noopener noreferrer\">top</a>"
+}
+
+test "sanitize unwraps unknown elements, balances tags, and escapes stray markup" {
+  assert clean("<custom-thing>kept text</custom-thing>") == "kept text"
+  assert clean("<b><i>x</b>y</i>") == "<b><i>x</i></b>y"
+  assert clean("</p>stray end") == "stray end"
+  assert clean("<b>unclosed") == "<b>unclosed</b>"
+  assert clean("1 < 2 && 3 > 2") == "1 &lt; 2 &amp;&amp; 3 &gt; 2"
+  assert clean("caf&eacute; &amp; &#169; &copy &") == "caf&eacute; &amp; &#169; &amp;copy &amp;"
+  assert clean("a<!-- <script>alert(1)</script> -->b<!DOCTYPE html>c") == "abc"
+  assert clean("<p title=\"a&quot;b\">x</p>") == "<p title=\"a&quot;b\">x</p>"
+  assert clean("<p title='\"><script>alert(1)</script>'>x</p>") == "<p title=\"&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;\">x</p>"
+}
+
+test "sanitize follows a policy that allows other elements and no link rel" {
+  let policy = html::SanitizePolicy(elements: ["p", "a"], attributes: [], element_attributes: [html::AllowedAttribute(element: "a", name: "href")], link_rel: None)
+  assert html::sanitize("<p><b>x</b><a href=\"/a\" title=\"t\">y</a></p>", policy: policy).text() == "<p>x<a href=\"/a\">y</a></p>".slice()
+}
