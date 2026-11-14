@@ -16,5 +16,4 @@ module For_testing : sig
       already printed, which come after its own members. *)
 
   val definitions : Syntax.definition Syntax.item list -> string list
-  (** A file's definitions, with each method inside the one it is written inside. *)
 end

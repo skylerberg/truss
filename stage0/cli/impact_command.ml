@@ -14,7 +14,7 @@ type change = {
   status : [ `Added | `Removed | `Changed of string list ];  (** The parts that changed *)
   before : string option;  (** The signature at the base, when it changed *)
   after : string option;  (** The signature now *)
-  dependents : Graph_types.edge list;  (** The edges to its changed signature *)
+  dependents : Graph_types.edge list;
 }
 
 let declarations context packages =

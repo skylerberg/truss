@@ -124,10 +124,6 @@ let prove database (key : Names.key) =
   | Some declaration, Some source -> (
       try
         match (declaration.kind, source.core.definition) with
-        (* A trait's method without a body is only declared, and an [impl]
-           shows it. A provided body is proven once, here, with [Self] the
-           trait's type parameter, so it keeps the trait's clauses for every
-           [impl] that keeps it. *)
         | (Function | Method), Function { body = None; _ } -> Not_proven_here
         | Theorem, Function _ -> Obligations (Translate.theorem database source ~path:key.path)
         | (Function | Method), Function { body = Some _; _ } -> (
@@ -378,11 +374,6 @@ type evaluator = { code_key : run -> string option; run : run -> run_result }
 
 let no_evaluator = { code_key = (fun _ -> None); run = (fun _ -> Not_run) }
 
-(* The oracles a definition's proof is decided by: the solver, of one of
-   its obligations' queries, by the obligation's index and whether a
-   counterexample gives the locals too; and the evaluator, of a template's
-   check and of the values of the known calls. A definition's outcome is
-   derived from their responses. *)
 type oracles = {
   solve : index:int -> with_locals:bool -> solver_response;
   check_template : Translate.evaluation -> run_result;
@@ -414,11 +405,6 @@ let query_of ~call (obligation : Translate.obligation) =
   | [] -> obligation.query
   | added -> { obligation.query with facts = obligation.query.facts @ added }
 
-(* Each obligation's answer. A clause that running code decides is decided
-   so, and the solver is never asked. Where the solver finds a
-   counterexample, the query is asked again for the values of the locals
-   there too, asked for only then, so that a query that proves keeps its
-   key. *)
 let answers (oracles : oracles) (obligations : Translate.obligation list) =
   List.mapi
     (fun index (obligation : Translate.obligation) ->
@@ -440,9 +426,6 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
       (obligation, answer))
     obligations
 
-(* An obligation's state: where it is, its goal, where it was not
-   shown, the diagnostic that says why, and whether its proof trusts
-   compiled code. *)
 type 'span state = {
   code : Diagnostic.Code.prover;
   span : 'span;
@@ -563,8 +546,6 @@ let run_result database run =
 let call_value database call =
   match run_result database (Call call) with Some (Returned value) -> Some value | _ -> None
 
-(* The runs a definition's proof needs: a saved result, so that the driver
-   finds them in a later process without translating the definition. *)
 let runs =
   Query.query ~name:"proof_runs" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
@@ -590,8 +571,6 @@ let question_query database question =
             List.map fst obligation.values
             @ if question.with_locals then List.map fst obligation.locals else []
           in
-          (* With the locals, each [if]'s reach and condition, for the path a
-             counterexample takes. *)
           let terms =
             if question.with_locals then
               List.concat
@@ -605,9 +584,6 @@ let question_query database question =
       | None -> None)
   | Not_proven_here | Unsupported _ -> None
 
-(* A question's request for the solver: a result of its own, found current
-   when only the solver's responses changed, so a definition's outcome is
-   derived again without rendering anything. *)
 let question_request =
   Query.query ~name:"question_request" ~phase:Phases.verdicts ~saved:true ~show:show_question
     (fun database question ->
@@ -615,13 +591,6 @@ let question_request =
         (fun (query, values, terms) -> Solver.request ~values ~terms query)
         (question_query database question))
 
-(* Each definition's outcome, derived from its obligations and the oracles'
-   responses: a saved result, so a definition whose reads have not changed
-   is neither translated nor asked anything again. A request whose response
-   is not recorded is pending, and the outcome waits for it. The values of
-   runs go into the solver's queries, so while any run is pending, only
-   runs are requested: a query asked without their values would be one no
-   later round asks. *)
 let outcome =
   Query.query ~name:"proof_outcome" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
@@ -711,12 +680,6 @@ let rerun_changed (evaluator : evaluator) database keys =
           None
       | Some _ | None -> Some (request_key (Run run), run_response evaluator run code_key))
 
-(* Each definition of the files decided: the runs whose code changed are
-   run again, the definitions' outcomes are asked for together, their
-   pending requests are sent to the oracles together, and so on until none
-   is pending, which takes a round or two, since a query waits for the runs
-   whose values it holds, and a counterexample asks again for the values of
-   the locals. *)
 let solve_ahead ?(evaluator = no_evaluator) ~record database solver files =
   let keys =
     List.concat_map
@@ -823,9 +786,6 @@ let states ?evaluator ~record database solver file =
   List.concat (file_states ?evaluator ~record database solver file)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
-(* The failures among the states. The same failure on another path of one
-   definition, as a second index into the same list with the same index
-   is, is reported once. *)
 let diagnostics ?evaluator ~record database solver file =
   List.concat_map
     (fun states ->

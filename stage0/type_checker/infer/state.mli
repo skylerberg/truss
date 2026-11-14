@@ -172,9 +172,6 @@ val reported_mismatch :
   sides:(Types.ty * Types.ty) list ->
   string ->
   Diagnostic.reported
-(** Reports a mismatch once per local whose literal type an earlier statement decided, with a note
-    at that statement. Each side is a type that may be such a local's, with the type the other side
-    needs. *)
 
 val mismatched : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
 val mismatch : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> unit

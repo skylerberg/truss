@@ -602,8 +602,6 @@ let describe function_ =
         ]
         ~headers:[ "sys/wait.h" ]
   | Snprintf ->
-      (* The one use: a float written with a number of digits, by a format
-         that takes the two. *)
       row (everywhere (Named "int")) (Returns Int32) ~variadic_from:3
         [
           ("buffer", Room (UInt8, counted "size"), everywhere (Pointer (Named "char")));
@@ -1035,8 +1033,6 @@ let describe function_ =
         ]
         ~headers:[ "sys/socket.h" ]
   | Accept ->
-      (* The length is how much room the address has, and then how long
-         the address is. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -1879,9 +1875,6 @@ let value (system : system) number =
       Linux ) ->
       0
 
-(* How many bytes a number the function reaches through an address takes,
-   which the C type it is declared with must take too. [USize] has no one
-   width: code run while compiling for a narrower target has the target's. *)
 let bytes = function
   | UInt8 -> 1
   | Int32 | UInt32 | Float32 -> 4
@@ -1899,8 +1892,6 @@ let check system =
           (List.filter (fun number -> number_expression system number <> None) numbers))
   in
   let holds message condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition message in
-  (* The address is of one of the numbers, where C takes the first of
-     several, or of a structure that is all of them. *)
   let reached symbol c_type count scalar =
     let c_type = show_c_type c_type in
     holds

@@ -11,9 +11,6 @@ type key =
   | Code of Ground.function_type
   | Environment of string * int  (** The instance's symbol, and the nested function *)
   | Evidence of int
-      (** The evidence that a [provide] builds on the stack, with room for this many pointers to the
-          evidence its [impl] uses. It has a name so that every use of it in a file is one C type: a
-          function outlined around such a local holds a pointer to it. *)
 
 let compare_key left right =
   match (left, right) with
@@ -80,8 +77,6 @@ type context = {
       (** The methods of capabilities it calls: each capability, and the method's place *)
   mutable failures : (failure * site) list;  (** Its [echo]s and [todo]s *)
   mutable cursors : (Ground.yielding * (string * Lowered.ty) list ref) list;
-      (** The fields but the state of each cursor whose pulled method this code is, which the code
-          names before the cursor's layout is known *)
 }
 
 let new_context env prefix =

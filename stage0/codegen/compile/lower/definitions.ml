@@ -57,13 +57,10 @@ let context ?(checks = false) ~cursor_fields ~constant database target =
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 
-(* Where a function is written, and its generic parameters' instantiation in
-   this instance. Its body is in the core form of the definition. *)
 type code = {
   definition_key : Names.key;  (** The definition that holds the body *)
-  anchor : Path.t;  (** The definition positions in the body are relative to *)
+  anchor : Path.t;
   enclosing_impl : Path.t option;
-      (** The [impl] this is a method of, whether the [impl] writes it or leaves it to its trait *)
   text : string;  (** The definition's source text, for positions and messages *)
   result : Types.result;
   substitution : Types.substitution;
@@ -76,9 +73,6 @@ type code = {
 
 let demand context query key = Query.demand context.database query key
 
-(* The code of a function lowering writes itself, which has no source: only
-   the base of its positions, its generic parameters' instantiation, and
-   its result. *)
 let unwritten ~definition_key ~anchor ~substitution ~result =
   {
     definition_key;
@@ -180,10 +174,6 @@ let code_of context (path : Path.t) type_arguments : code =
             enclosing_impl;
           }
       | None, Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
-          (* A method the [impl] leaves to its trait: the trait's default
-             body, with the [impl]'s instantiation of the trait's [Self] and
-             parameters, at this instance's arguments for the [impl]'s
-             parameters, which come first. *)
           let trait = (impl_interface context impl).implements.trait in
           let provided = Path.Method { owner = trait; name; receiver } in
           match written context provided with

@@ -45,7 +45,7 @@ type value =
 
 type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
-  names_result : bool;  (** In [ensures] or [cost], where [result] does. *)
+  names_result : bool;
   cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
   names_yielded : bool;
       (** In the [ensures] of a lending or yielding method, or in the clauses of a [for] loop, where
@@ -446,8 +446,6 @@ and check_place state (marked : expression) (inner : expression) =
     match value.kind with
     | Member (base, _) -> head base
     | Parenthesized inner -> head inner
-    (* An index, or type arguments after a method's name, which reads the
-       same place. *)
     | Bracket (base, _) -> (
         match state.brackets.(value.id) with
         | Some (Index | Method_bracket) -> head base
@@ -803,10 +801,6 @@ let declare_type state scope (name : name) target =
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
          name.text existing)
   in
-  (* A generic parameter cannot hide a type of its module, unlike a local
-     a function: an [impl]'s head declares its arguments' names, so
-     [impl Shown for Box[Marker]] would otherwise be an [impl] for every
-     [Box] where a type [Marker] was meant. *)
   (if String_map.mem name.text scope.types then hides "a generic parameter here"
    else
      match module_item state name.text with
@@ -913,9 +907,6 @@ let field_names (fields_ : field list) =
       match field.kind with Field_declaration { name; _ } -> Some name.text | Field_error -> None)
     fields_
 
-(* The generic parameters of the trait or the [impl] a method is written
-   inside, which the method's own tree does not hold: they are in scope as
-   that one's, and it is where they are bound and their bounds resolved. *)
 let inherited scope ~(owner : Path.t) (generics : generic_parameter list) =
   List.fold_left
     (fun scope (generic : generic_parameter) ->

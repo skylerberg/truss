@@ -15,13 +15,9 @@ type t = { callee : callee; lends : Types.mode option; uses : Types.capability_s
     uses. *)
 
 val unit_callee : 'a Core.target -> callee
-(** A callee over nothing, from either form's. *)
-
 val of_core : Core.call -> t
 val of_mir : Mir.call -> lends:Types.mode option -> t
 
-(** What an argument is, for the checks of a callback it passes and the text of a fix that names it.
-*)
 type shape =
   | Named_function of { id : Core.id; origin : Core.origin; path : Path.t }
       (** A named function passed as a value. *)

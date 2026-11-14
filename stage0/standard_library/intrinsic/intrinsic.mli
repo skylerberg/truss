@@ -106,9 +106,6 @@ type operation =
       (** [(storage, by)]: the [by] elements after the last, which a function of the C library wrote
           into room the storage had, are the storage's *)
   | Storage_shorten
-      (** [storage_shorten(mut storage, length)]: the storage keeps its first [length] elements and
-          its capacity, and the rest are forgotten, which elements with nothing to drop can be. Its
-          length is at least [length]. *)
   | Storage_push
   | Storage_pop
   | Storage_insert

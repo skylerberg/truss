@@ -1,14 +1,5 @@
-(* The MIR an instance runs: its body with each lending and yielding method
-   it calls inlined, so that what remains is plain code. A loop over a
-   yielding method becomes the method's body, with the loop's body at each
-   [yield]; a lending call becomes the method's body up to its [yield],
-   with the rest of the method where the part it lends ends. *)
-
 let bug format = Compiler_bug.bug ~stage:"Instance MIR" format
 
-(* A change to every local, block, lambda, and type of a body, which a
-   copy of a body into another and a substitution of type arguments both
-   are. *)
 type change = {
   local : Mir.local -> Mir.local;
   block : Mir.block -> Mir.block;
@@ -326,15 +317,11 @@ let substituted (substitution : Types.substitution) (mir : Mir.t) : Mir.t =
 
 module Locals = Set.Make (Int)
 
-(* A body being built: its locals, blocks, and lambdas, which an inlined
-   method's join. *)
 type building = {
   locals : Mir.local_info Dynarray.t;
   blocks : Mir.basic_block Dynarray.t;
   lambdas : Mir.body Dynarray.t;
   mutable last_fork : Core.origin;
-      (** The fork that a copy of a loop's body last gave a fork of its own, counting down from -1,
-          below every origin *)
 }
 
 let add_block building (basic : Mir.basic_block) =
@@ -350,8 +337,6 @@ let new_local building (info : Mir.local_info) =
   Dynarray.add_last building.locals info;
   local
 
-(* A renaming of forks that gives each fork it meets a fork of its own, for
-   a second copy of code, whose forks are apart from the first copy's. *)
 let fresh_forks building =
   let forks = Hashtbl.create 1 in
   fun fork ->
@@ -362,12 +347,6 @@ let fresh_forks building =
         Hashtbl.replace forks fork building.last_fork;
         building.last_fork
 
-(* A copy of a method's body into the one being built: its locals and
-   lambdas after those already there, and its blocks after those, marked as
-   inlined from [path] at a call at [origin], inside the methods [inlined]
-   names. Gives the change that names the copy's locals and blocks. Copying
-   the same body again with [same_locals] gives a second copy of its blocks
-   over the same locals, with forks of its own. *)
 let copy building ~path ~type_arguments ~origin ~(inlined : Mir.inlined list) ?same_locals
     (mir : Mir.t) =
   let local_offset, lambda_offset =
@@ -405,11 +384,6 @@ let copy building ~path ~type_arguments ~origin ~(inlined : Mir.inlined list) ?s
     mir.body.blocks;
   (change, (local_offset, lambda_offset), block_offset, Array.length mir.body.blocks)
 
-(* The statements that make [parameter] [value]. An [own] parameter takes
-   the value. Any other is the argument's place, or, for a value that is no
-   place, the place of an owned temporary, which joins [temporaries] and
-   lives as long as the method's locals. A default's value is one the
-   method made, so it is always held in a temporary. *)
 let bind_parameter building ~origin ~temporaries ~is_default parameter (value : Mir.operand) =
   let assign target rvalue : Mir.statement =
     {
@@ -439,10 +413,6 @@ let bind_parameter building ~origin ~temporaries ~is_default parameter (value : 
       held type_ mode
   | _ -> [ assign parameter (Operand value) ]
 
-(* The statements that bind a method's parameters to a call's arguments, the
-   block that runs first, and the temporaries that hold arguments: a
-   parameter left out takes its default, whose MIR runs before the method's
-   body. *)
 let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : change) (mir : Mir.t)
     (arguments : Mir.argument list) ~entry =
   let parameters = List.map change.local mir.body.parameters in
@@ -511,9 +481,6 @@ let written (statement : Mir.statement) =
   | Matched _ | Proof _ ->
       ([], [])
 
-(* The locals of a copied method, those [is_method_local] holds of, that may
-   hold a value at the end of each of its blocks' statements: a forward pass
-   from [entry], where [bound] hold values. *)
 let alive building ~entry ~bound ~(is_method_local : Mir.local -> bool) =
   let reaching = Hashtbl.create 16 and pending = Queue.create () in
   let flow block locals =
@@ -541,8 +508,6 @@ let alive building ~entry ~bound ~(is_method_local : Mir.local -> bool) =
     Hashtbl.replace ending block locals;
     List.iter
       (fun target ->
-        (* A loop that pulls values gives its part one on the way into its
-           body. *)
         match basic.terminator with
         | For { iteration = Pull _; part; body; _ } when target = body && is_method_local part ->
             flow target (Locals.add part locals)
@@ -551,10 +516,6 @@ let alive building ~entry ~bound ~(is_method_local : Mir.local -> bool) =
   done;
   fun block -> Option.value (Hashtbl.find_opt ending block) ~default:Locals.empty
 
-(* The statements that make [part] the value a [yield] of [mode] gives. A
-   [yield] that lends gives the place itself, so that the method keeps
-   owning what it made, or a constructor built around places; an [own]
-   [yield] hands the value over. *)
 let rec yielded_into building ~part ~(mode : Types.mode) ~origin (yielded : Mir.yielded) :
     Mir.statement list =
   let assign value : Mir.statement =
@@ -627,12 +588,6 @@ let tasks_in building (blocks : Mir.block list) ~iteration : Core.task list =
         | _ -> [])
       blocks
 
-(* Ends [locals] on each way out of [blocks] but to a block that [stays]
-   holds of: a jump passes a pad that ends them, and a [return] ends them
-   first. An exit from tasks ends them where it leaves their scope: with the
-   ends of the outermost task it leaves that runs in [blocks], or before it
-   leaves, where it leaves none. [iteration] is the loop whose iterations
-   [blocks] are, by its origin, where they run as tasks. *)
 let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~origin =
   if locals <> [] then begin
     let dead : Mir.statement = { kind = Dead locals; origin } in
@@ -694,13 +649,6 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
       blocks
   end
 
-(* A copy of a loop's body, entered with its part bound, whose iteration's
-   end goes to [resume], and which ends [ending], the inlined method's locals
-   that hold values there, on each other way out. With [is_one_of_several],
-   its forks are forks of their own, apart from those of another copy.
-   Where the iterations are tasks, [iteration] is the loop's origin, and
-   [outer] the locals of [ending] that live outside each iteration: the
-   others end in the task. Gives the copy's entry. *)
 let copy_loop_body building ~(blocks : Mir.block list) ~entry ~resume ~ending ~outer
     ~is_one_of_several ~iteration ~origin =
   let ends = own_iteration_ends building blocks in
@@ -734,15 +682,11 @@ let copy_loop_body building ~(blocks : Mir.block list) ~entry ~resume ~ending ~o
    arguments, and its MIR with them substituted. *)
 type callee = { path : Path.t; type_arguments : Types.argument list; mir : Mir.t }
 
-(* The locals of a copy of a method, with the temporaries that hold its
-   arguments, and those that hold values on entry. *)
 let copied_locals (change : change) (mir : Mir.t) ~temporaries =
   let first = change.local 0 and count = Array.length mir.body.locals in
   ( (fun local -> (local >= first && local < first + count) || List.mem local temporaries),
     List.map change.local mir.body.parameters @ temporaries )
 
-(* The blocks made while inlining at [at], from [start] on, join each loop's
-   body and each branch that [at] is in, which they are now part of. *)
 let join_regions building ~at ~start =
   let made = List.init (Dynarray.length building.blocks - start) (fun index -> start + index) in
   for block = 0 to start - 1 do
@@ -778,11 +722,6 @@ let yield_count (body : Mir.body) =
       match basic.terminator with Yield _ -> count + 1 | _ -> count)
     0 body.blocks
 
-(* A loop over a yielding method, at the end of block [at]: the method's
-   body runs there, and each of its [yield]s runs a copy of the loop's body,
-   whose iteration's end resumes the method. A method that yields by
-   position has one range loop, which takes [loop], the loop in the source,
-   with its schedule. *)
 let inline_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~blocks ~after
     ~(loop : Mir.loop) =
   let origin = loop.origin in
@@ -801,9 +740,6 @@ let inline_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~
     { basic with statements = basic.statements @ bound; terminator = Goto first };
   let is_method_local, parameters = copied_locals change callee.mir ~temporaries in
   let alive_at = alive building ~entry:offset ~bound:parameters ~is_method_local in
-  (* Where the method's range loop takes [loop], its iterations are tasks,
-     and the locals that hold values where the range loop starts live
-     outside each. *)
   let outer =
     if not takes_loop then None
     else
@@ -814,8 +750,6 @@ let inline_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~
           | _ -> None)
         (List.init count (fun index -> offset + index))
   in
-  (* Each [yield] binds the part, which is now the place it lends, or the
-     value it hands over. *)
   Array.iter
     (fun (basic : Mir.basic_block) ->
       match basic.terminator with
@@ -880,7 +814,6 @@ let inline_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~
           join_regions building ~at:block ~start
       | _ -> ()
     done;
-  (* The copies replace the loop's body, which nothing reaches now. *)
   List.iter
     (fun block ->
       set_block building block
@@ -980,9 +913,6 @@ let snapshot building (body : Mir.body) =
     blocks = Dynarray.to_array building.blocks;
   }
 
-(* Where a lend's part ends: the first [Dead] that names it on each path
-   from [from], the code after the lend. A copy of a loop's body lends the
-   same part again, after the [Dead]. *)
 let ends_of building part ~from =
   let visited = Hashtbl.create 16 and ends = ref [] in
   let rec visit block =
@@ -1030,12 +960,6 @@ let constant_int number : Mir.operand =
 let local_operand local type_ origin : Mir.operand =
   Use { place = { root = Local local; projections = [] }; type_; node = origin; origin }
 
-(* A lending call, the statement at [position] of block [at]: the method's
-   body runs there up to its [yield], which binds [part], and where [part]
-   ends, the rest of the method runs from the [yield] it reached, in a copy
-   of its body over the same locals. With several [yield]s, or a part whose
-   end some path reaches without the call, a selector records which [yield]
-   ran, 0 for none. *)
 let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : callee)
     ~(call : Mir.call) ~origin =
   let basic = block_at building at in
@@ -1060,9 +984,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
         | _ -> None)
       (List.init count (fun index -> offset + index))
   in
-  (* The method's locals that hold values at some [yield]. The caller goes
-     on from whichever [yield] ran, so where the method's rest returns, each
-     may or may not hold a value still, and ends there. *)
   let held =
     let is_method_local, parameters = copied_locals change callee.mir ~temporaries in
     let alive_at = alive building ~entry:offset ~bound:parameters ~is_method_local in
@@ -1093,8 +1014,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
         ]
     | None -> []
   in
-  (* The selector starts at 0 where the region around the call starts: a
-     task's region keeps its own, since tasks run at the same time. *)
   if conditional then begin
     let entry = region_entry building at in
     let basic = block_at building entry in
@@ -1151,8 +1070,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
           | None -> (
               match yields with [ yielded ] -> resume_of yielded | _ -> bug "a lend with no yield")
           | Some selector ->
-              (* A test of the selector for each [yield], and for none where
-               the call may not have run. *)
               let choices =
                 (if conditional then [ (0, goes_on) ] else [])
                 @ List.mapi (fun index yielded -> (index + 1, resume_of yielded)) yields
@@ -1208,8 +1125,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
         set_block building ending { ended with statements = kept; terminator = Goto dispatch })
       (ends_of building part ~from:continuation)
 
-(* Whether no exit from tasks ends [part] among the scopes it leaves, where
-   no copy of a method's rest could run. *)
 let ends_only_in_statements building part =
   Dynarray.for_all
     (fun (basic : Mir.basic_block) ->
@@ -1225,11 +1140,6 @@ let ends_only_in_statements building part =
       | _ -> true)
     building.blocks
 
-(* Ends the part of each loop of the body's own that pulls values, which
-   holds a value of its own each iteration: where the iteration ends, and on
-   each other way out of the loop's body. A method copied in has ended its
-   own loops' parts already, and its [yield] that now jumps to the caller's
-   code leaves no loop: the caller resumes it. *)
 let end_loop_parts building (body : Mir.body) =
   let iteration_loops = Mir.iteration_loops (snapshot building body) in
   for block = 0 to Dynarray.length building.blocks - 1 do
@@ -1249,13 +1159,6 @@ let end_loop_parts building (body : Mir.body) =
     | _ -> ()
   done
 
-(* The instance's MIR with each lending and yielding method it calls
-   inlined, as [resolve] finds the method a call reaches. Each method is
-   itself inlined into before it is inlined, so a copy of it is final, and
-   what remains to examine is the caller's own code. A method is never
-   inlined into itself, where [enclosing] has it: a loop over it pulls a
-   cursor instead, as a [concurrent for] does over a method that does not
-   yield by position, whose iterations are tasks that a [yield] spawns. *)
 let rec inlined ~(resolve : Mir.callee -> callee option) ~enclosing (mir : Mir.t) : Mir.t =
   let lambdas = Dynarray.of_array mir.lambdas in
   let body = inlined_body ~resolve ~enclosing ~lambdas mir.body in
@@ -1265,8 +1168,6 @@ let rec inlined ~(resolve : Mir.callee -> callee option) ~enclosing (mir : Mir.t
   done;
   { mir with body; lambdas = Dynarray.to_array lambdas }
 
-(* A body of the definition, with the definition's lambdas, which the
-   lambdas of the methods inlined into it join. *)
 and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
   let building =
     {

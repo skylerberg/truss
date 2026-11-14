@@ -87,8 +87,6 @@ let punctuation cursor current =
       cursor.position <- start + 2;
       Some (Foreign Pipe_greater)
   | '|' -> followed_by [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
-  (* JavaScript's `===` and `!==`, as a whole: a longer run of `=` is not
-     that habit, and lexes as `==`s for the parser to report. *)
   | ('=' | '!') when is 1 '=' && is 2 '=' && not (is 3 '=') ->
       let written, replacement, kind =
         if current = '=' then ("===", "==", Equal_equal) else ("!==", "!=", Not_equal)

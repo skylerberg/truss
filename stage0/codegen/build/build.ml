@@ -115,7 +115,6 @@ let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> [
   let emitted =
     List.mapi
       (fun part_index fragments ->
-        (* Each copy once, and none of an instance the file defines itself. *)
         let copies =
           List.fold_left
             (fun copies copy ->

@@ -193,8 +193,6 @@ and adopt :
                 true))
   | _ -> false
 
-(* A result the engine has never held: the dependencies of a result of its
-   query and key, wherever one was first computed, give the key to look for. *)
 and adopt_new : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> bool =
  fun engine query cell ->
   match engine.store with

@@ -30,8 +30,6 @@ and mir_frame = {
   places : (Mir.local, Lowered.place) Hashtbl.t;
   aliases : (Mir.local, int) Hashtbl.t;
   built : (Mir.local, Mir.rvalue list) Hashtbl.t;
-      (** The locals that hold no value of their own that some assignment constructs around places,
-          with each value assigned to them *)
   owner : scope option;
   returns_into : Lowered.place option;
   mutable provides : (Path.t * Lowered.operand) list list;
@@ -41,7 +39,7 @@ and mir_frame = {
   kept : Mir.local list;
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
-  mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
+  mutable state : Moves.state;
 }
 
 type early_exits = {
@@ -97,8 +95,6 @@ type state = {
   cursor : cursor option;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
-      (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
-          of, so that the scope that owns one drops it only if it holds a value *)
 }
 
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
@@ -164,8 +160,6 @@ val in_statement : state -> (unit -> 'a) -> 'a
 val finish_function :
   state -> ?returns:bool -> first:Lowered.local list -> rest:Lowered.local list -> unit -> unit
 
-(* The instance written: its function, which [finish_function] ends with
-   [rest] as its parameters, and the nested functions it made. *)
 val finish_instance :
   state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.Builder.instance
 

@@ -19,8 +19,6 @@ let generated_state context ~key ~anchor ~substitution =
             }
           ~anchor ~substitution ~result:(Returns Types.unit)))
 
-(* Where a generated function's result goes when it is another function's,
-   passed on as it came: the slot, or a local for a result of no size. *)
 let passed_on st result_ty =
   match result_place st with Some place -> place | None -> temporary st result_ty
 
@@ -263,11 +261,6 @@ let real_implementation (capability : Path.t) : Path.t =
       for_type = { type_name = "System" ^ name; generics = [] };
     }
 
-(* The real implementation of each capability, for code the runtime runs
-   with the world's: [main], and an external test. Each is a value the code
-   owns, with evidence on the stack pointing at it. One that holds something,
-   as [SystemConsole] holds the input it has read and not yet given, is made
-   by its type's [new]. *)
 let real_implementations st ~user capabilities =
   List.map
     (fun capability ->

@@ -174,10 +174,6 @@ let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
    is the group of the operator that encloses [whole], if any, and whether
    [whole] is its right operand. *)
 let report_problem cursor ?context (whole : expression) (operand : expression) ~right problem =
-  (* [x _ y _ z], where [y] is the operand right next to [whole]'s operator.
-     On the right, that is the first operand of the chain [operand] starts,
-     [b] in [a & b + c + d]; on the left, a chain associates to the left, so
-     it is [operand]'s right operand. *)
   let rec first_of_chain (value : expression) =
     match value.kind with
     | Binary { left; _ } when Option.equal ( = ) (group left) (group value) -> first_of_chain left

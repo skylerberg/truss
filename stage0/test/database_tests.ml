@@ -237,7 +237,6 @@ let () =
       write directory "shapes.truss" (shapes "1");
       expect_errors directory 0;
       clear directory;
-      (* The change moves [sides], which is the same method where it is. *)
       write directory "shapes.truss" (shapes "10 + 2");
       expect_errors directory 0;
       let again = checked directory in

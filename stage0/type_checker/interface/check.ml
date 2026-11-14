@@ -89,7 +89,6 @@ let check_method_location state (head : type_head) =
   in
   match owner with
   | Some (Top { module_ = owner_module; name } as owner) -> (
-      (* A head that names no type has that as its one error. *)
       match Query.demand state.database Names.find (owner_module, name) with
       | Some { kind = Type; visibility; _ } ->
           if owner_module.package <> state.key.module_.package then
@@ -470,7 +469,6 @@ let check state =
                 report state Unknown_member law.span
                   (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
             | _ -> ());
-            (* A head with the wrong number of parameters is reported as that. *)
             let arity_matches =
               match for_type with
               | Types.Named { path; _ } -> (

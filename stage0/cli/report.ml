@@ -15,12 +15,6 @@ let shown session packages file diagnostics =
   | diagnostics ->
       Some { file; source = Command_packages.source session packages file; diagnostics }
 
-(* The diagnostics of every file of [Command_packages.program_files], in package
-   order, and with [proofs], the prover's too. Such a dependency is checked
-   because the program is built from it: code generation cannot lower a
-   body that does not type-check, and a release build omits the run-time
-   checks that the dependency's proofs replace. Files without a diagnostic
-   are left out, and each file lists at most [Diagnostic.limit]. *)
 let gather ?(proofs = false) session packages =
   let files = Command_packages.program_files session packages in
   {

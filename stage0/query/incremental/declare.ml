@@ -161,8 +161,6 @@ let rec value : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_
         if node.busy then invalid_arg ("Incremental: no result for " ^ label node);
         let before = node.changed_at in
         compute engine query cell;
-        (* A lost value that comes back different has readers that were
-           found current against the old one. *)
         if node.changed_at <> before then
           List.iter (mark ~every_phase:true engine) (readers_here engine node ~phase:None);
         match cell.outcome with

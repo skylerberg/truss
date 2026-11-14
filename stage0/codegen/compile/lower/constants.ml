@@ -8,7 +8,6 @@ open Emit_c.Builder
 
 let ( let* ) = Option.bind
 
-(* Every value, if each of them is there. *)
 let all values =
   List.fold_right
     (fun value rest ->
@@ -114,7 +113,6 @@ let compared (comparison : Core.comparison) (left : Lowered.static_value)
 let call_depth = 8
 let step_limit = 10_000
 
-(* The part of a folded value that projections name. *)
 let rec part (value : Lowered.static_value) (projections : Mir.projection list) =
   match (projections, value) with
   | [], _ -> Some value
@@ -154,14 +152,6 @@ let literal st ty (constant : Mir.constant) =
       | _ -> None)
   | Unit -> None
 
-(* A body's value, where running it from [arguments] gives exactly that
-   value and does nothing else: it reads only literals, other constants that
-   fold, and its parameters; it computes with operations on numbers and
-   [Bool]s that stay in range, constructors, arrays, and storages it pushes
-   onto; and it follows calls of functions whose bodies fold the same way.
-   Anything else, such as a sum that overflows, an [echo], a lending call, or
-   more steps than [steps] has left, leaves the value to be found by running
-   it. Running defines a constant's value; folding only saves the run. *)
 let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_value list) =
   let body = mir.body in
   let locals = Hashtbl.create 16 in

@@ -51,11 +51,6 @@ let is_small fragment =
   | Functions { nested; weight } -> nested = 0 && weight <= small
   | Static_data | Table_entries _ -> false
 
-(* A fragment's C with every name it holds written as a number: the
-   instance's own symbol, which its nested functions' and statics' names
-   start with, as a mark; each instance it refers to as that instance's
-   place among its references; each type as its place among the types it
-   names; and each anchor as its place among its anchors. *)
 let text fragment =
   let names = Hashtbl.create 64 in
   let number prefix list =
@@ -187,7 +182,6 @@ let fragment env (compiled : compiled) =
     environments;
     prototypes = List.rev context.prototypes;
     statics =
-      (* A text that only code no path reaches names is not defined. *)
       List.rev_map bytes_definition
         (List.filter
            (fun (_, name) ->
@@ -330,8 +324,6 @@ let file env build (fragments : (fragment * linkage) list) =
     end
   in
   List.iter emit keys;
-  (* The C compiler lays each type out again from its definition, so it is
-     made to check that it agrees with the layout the rest was built on. *)
   List.iter
     (fun key ->
       let layout =

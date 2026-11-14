@@ -5,8 +5,6 @@ let site_of (node : Core.expression) = { id = node.id; origin = node.origin; typ
 type callee = unit Core.target
 type t = { callee : callee; lends : Types.mode option; uses : Types.capability_set }
 
-(* A callee over nothing: what a call through a function value gives is the
-   caller's. *)
 let unit_callee callee =
   Option.value (Core_walk.traverse_indirect (fun _ -> Some ()) callee) ~default:(Core.Indirect ())
 

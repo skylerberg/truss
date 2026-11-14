@@ -49,9 +49,7 @@ type t =
   | Serializer
   | Deserializer
   | Deserialize_required
-      (** The function a derived [deserialize] reads a field without a default with. *)
   | Deserialize_optional
-      (** The function a derived [deserialize] reads a field with a default with. *)
   | Unknown_variant
       (** The error a derived [deserialize] returns for a variant name it does not know. *)
   | Write_fully  (** The function that writes a program's output. *)

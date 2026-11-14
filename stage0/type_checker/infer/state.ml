@@ -812,9 +812,6 @@ let names_variant (member : name) =
 
 let show state type_ = Types.show (zonk state type_)
 
-(* The decision of the literal type of a local that a type is, if an
-   earlier statement decided it. The type is the local's type as declared,
-   before it is resolved. *)
 let literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
     match type_ with

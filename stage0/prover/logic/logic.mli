@@ -19,8 +19,6 @@ module Symbol : sig
   (** A symbol, over the terms it can hold. *)
   type 'term t =
     | Variable of { label : string; numbers : int list }
-        (** A value the prover makes, or a bound variable: [label] names its purpose, and [numbers]
-            tell it from others with the same label. *)
     | Function of { callee : Path.t; instance : string list }
         (** A pure callee as a function in the logic, at the keys of its type arguments. *)
     | Limited of { callee : Path.t; instance : string list }

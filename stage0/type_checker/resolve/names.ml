@@ -398,8 +398,6 @@ let file_declarations =
              let definition = item.value in
              let declare = declare index item in
              match (definition.kind, Option.bind item.container (Hashtbl.find_opt containers)) with
-             (* A method written inside a trait, an [impl], or a capability
-                is that one's. *)
              | (Function { signature; _ } | Method_declaration signature), Some (owner, static) ->
                  declare
                    (Method
@@ -733,9 +731,6 @@ let per_definition database file of_definition =
   |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
 
-(* A definition's source text, which fixes quote, apart from the rest of
-   its file, so that editing another definition changes nothing that reads
-   it. *)
 let text =
   Query.query ~name:"text" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with

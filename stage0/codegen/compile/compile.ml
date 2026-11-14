@@ -1,17 +1,5 @@
 module Names = Resolve.Names
 
-(* Lowering is a query: each instance's C, for a target and whether the
-   build has run-time checks, kept current by the code database like any
-   other result.
-
-   Each computation makes a lowering context of its own from the query's
-   reads, so a layout or a piece of glue computed on the way is read
-   through this query and never cached where another could miss the
-   dependency. A pulled method's cursor is a query too. A constant whose value
-   must be computed by running code is the one result a query cannot make,
-   since running code is not a function of reads: the query says so, and the
-   driver runs its [Evaluator], whose own code is lowered by the query. *)
-
 type lowering = { target : Memory_layout.target; checks : bool }
 
 let show_lowering lowering =
@@ -29,17 +17,11 @@ let target_key (target : Memory_layout.target) =
       Cbor.Text (Libc.system_name target.system);
     ]
 
-(* An instance's C; or a constant's data, where its value folds, which
-   folding other constants reads; or, for a constant whose value does not
-   fold, that its evaluator is to be run. *)
 type lowered_outcome =
   | Compiled of Emit_c.fragment
   | Folded of Lowered.data
   | Evaluate of Path.t * Ground.ty
 
-(* A lowering context of its own for one computation, which reads a pulled
-   method's cursor and another constant's value through the queries below,
-   so that each is made once and its readers are known. *)
 let rec fresh_context lowering database =
   Lower.context ~checks:lowering.checks
     ~cursor_fields:(fun _ yielding ->
@@ -94,9 +76,6 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
   | Table _ -> emitted context (Table (Lower.table context key))
   | Locked_table capability -> emitted context (Table (Lower.locked_table context key ~capability))
 
-(* An instance's C, a constant's data, or for a constant whose value does
-   not fold, that its evaluator is to be run, which no query can do, since
-   running code is not a function of a query's reads. *)
 and lowered =
   lazy
     (Query.query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
@@ -141,22 +120,13 @@ let references =
   Query.query ~name:"references" ~phase:Phases.linking ~saved:true ~portable:true
     ~show:show_instance (fun database key -> snd (Query.demand database linked key))
 
-(* The tests and programs whose keys have been asked for. The instances
-   they reach are those searched for groups that reach each other, so this
-   is an input: a driver names the instances it wants keys for before it asks for
-   them, and nothing is lowered for a test nobody asked about. *)
 let roots : (lowering, Instance.key list) Query.input =
   Query.input ~name:"roots" ~show:show_lowering ()
 
-(* The roots with more wanted: the value a driver sets the input to before it
-   asks for those instances' keys. *)
 let add_roots database lowering wanted =
   List.sort_uniq Instance.compare
     (wanted @ Option.value (Query.find database roots lowering) ~default:[])
 
-(* The recursive groups among the instances the roots reach. It reads
-   every such instance's references, and is unchanged unless a group forms
-   or changes, so only then does it invalidate anything after it. *)
 let recursion =
   Query.query ~name:"recursion" ~phase:Phases.recursion ~show:show_lowering
     ~equal:(Reachable.Keys.equal (List.equal Instance.equal))
@@ -174,9 +144,6 @@ let group =
     (fun database (lowering, key) ->
       Reachable.Keys.find_opt key (Query.demand database recursion lowering))
 
-(* The key of everything an instance can reach: its own hash and the keys
-   of its references, or for an instance of a group, the group as a
-   walk from the instance reaches it. *)
 let rec reach =
   lazy
     (Query.query ~name:"reach" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
@@ -230,9 +197,6 @@ let fresh_program compiler =
   Filename.concat compiler.programs
     (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
 
-(* A build that failed for a reason that is not the compiler's: the C
-   compiler or the linker refused, or a program run while compiling did not
-   end well. *)
 exception Cannot_build of string
 
 let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
@@ -257,7 +221,6 @@ let result_key compiler root =
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
 
-(* A test's key, once it has been said to be wanted. *)
 let test_key compiler test = result_key compiler (Lower.test_key test)
 
 (* The key a run of code while compiling is kept under. *)
@@ -276,8 +239,6 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
           let line, _ = Source.position parsed.source base in
           Some { definition = path; path = compiler.file_name file; first_line = line })
 
-(* A value read back from its binary form, as [Glue.encode] writes it, as
-   static data. *)
 let decode compiler ty text : Lowered.static_value =
   let env = Lower.env compiler.context in
   let monomorphic = Lower.monomorphic compiler.context in
@@ -378,9 +339,6 @@ let small_callees ~find ~worked_on fragment =
    calls. *)
 let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
 
-(* Builds the instances the roots reach into a program at [output], with the given
-   startup code, once the instances agree with one another. An instance
-   among [supplied] is itself, and no query's. *)
 let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~startup ~output =
   let supplied =
     List.map (fun instance -> Emit_c.fragment (Lower.env compiler.context) (Code instance)) supplied
@@ -435,10 +393,6 @@ and build_and_run ?input ?time_limit ?(in_order = true) compiler ~roots ~startup
   (try Sys.remove output with Sys_error _ -> ());
   result
 
-(* Runs the code [root] reaches while compiling, as a program that writes
-   its result to standard output, and returns the result as [read] decodes
-   it, or that the run passed the compiler's time limit. Each run is done
-   once per compiler, and its output is kept in the compiler's results. *)
 and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -> 'value ran =
  fun compiler root ~read ->
   let key = run_key compiler root in
@@ -567,7 +521,6 @@ let rec drain reader =
             | Some parsed_count -> parsed_count
             | None -> malformed line
           in
-          (* The block is its bytes and a newline after the line. *)
           if String.length text >= stop + 1 + count + 1 then begin
             let content = String.sub text (stop + 1) count in
             if label = "message" then reader.message <- Some content
@@ -621,15 +574,8 @@ let parse_report text =
   | () -> Ok (List.map snd (List.sort (fun (left, _) (right, _) -> compare left right) !records))
   | exception Cannot_build message -> Error message
 
-(* The results that are kept: a pass with nothing to show. A failure's
-   message and any echo give positions, which the key leaves out so that
-   moving code keeps its results, and a time limit or a crash may come from
-   the machine, so those tests run again. *)
 let is_cacheable record = record.outcome = Passed && record.message = None && record.echo = None
 
-(* A kept result is a pass, so it is only the microseconds of the run that
-   kept it. A result in any other form, such as one an earlier version wrote,
-   counts as none, so its test runs again and replaces it. *)
 let stored results key =
   Option.map
     (fun microseconds ->
@@ -819,9 +765,6 @@ let build_program compiler ~main ~output =
   let root = Instance.Program_main main in
   build compiler ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
 
-(* Evaluates a tagged template's check: each of the tag's [from_template]'s
-   clauses that can run, for a template of these literal texts, by its
-   position among the clauses, with whether it holds. *)
 let check_template compiler ~from_template ~texts =
   reporting compiler @@ fun () ->
   match Lower.template_checked compiler.context from_template with
