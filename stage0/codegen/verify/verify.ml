@@ -177,7 +177,6 @@ let function_ env (instance : Lir.t) label (function_ : Lir.function_) =
           if block_index < 0 || block_index >= blocks then bug "block %d, of %d" block_index blocks)
         (Lir.successors block.terminator);
       match (block.terminator, function_.result) with
-      | Yield _, _ -> bug "a yield that yield lowering left in place"
       | Return None, Some _ -> bug "a return of nothing from a function with a result"
       | Return (Some _), None -> bug "a return of a value from a function with no result"
       | _ -> ())

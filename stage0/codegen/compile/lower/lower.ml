@@ -18,12 +18,6 @@ let monomorphic (context : context) = context.monomorphic
 let constant_value (context : context) = context.constant
 let context = Definitions.context
 let test_key = Definitions.test_key
-let cursor_result = Targets.cursor_result
-
-let pulled_evidence context (yielding : Ground.yielding) (function_ : Lir.function_) =
-  let count = List.length (Targets.cursor_evidence context yielding) in
-  let first = List.length function_.parameters - count in
-  List.filteri (fun position _ -> position >= first) function_.parameters
 
 type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
 
@@ -33,39 +27,54 @@ let table = Generated.table
 let locked_table = Generated.locked_table
 let any_table = Generated.any_table
 
-(* Binds the parameters of the code being lowered, each as [how] passes it.
-   The function owns each [own] one, which the move analysis of its MIR
-   drops where it returns. Gives each one's local, if it has one, with its
-   mode, its type, and for one with a default, its bit in the mask of
-   defaults passed. *)
-let bind_parameters ?how st (body : Mir.body) =
-  let defaults = ref 0 in
-  List.map
-    (fun local ->
-      let mode, _, type_ = Mir_form.parameter_of body local in
-      let ty = ground st type_ in
-      let bit =
-        Option.map
-          (fun _ ->
-            incr defaults;
-            !defaults - 1)
-          (List.assoc_opt local body.defaults)
-      in
-      let arrives, place =
-        Lowering.parameter st ?how ~in_scope:false
-          ~owned:(mode = Own && bit = None)
-          (Monomorphic.mode mode) ty
-      in
-      (arrives, mode, ty, bit, place))
-    body.parameters
+(* Binds the parameters of the code being lowered: each as the calling
+   convention passes it, or, in a pulled method, in a field of its
+   [cursor], as [Convention.held] says, named by its place among the
+   arguments the cursor holds. The function owns each [own] one, which the
+   move analysis of its MIR drops where it returns. Gives each one's local,
+   if it arrives in one, with its mode, its type, for one with a default,
+   its bit in the mask of defaults passed, and its place; and how many
+   arguments the cursor holds. *)
+let bind_parameters ?cursor st (body : Mir.body) =
+  let defaults = ref 0 and held = ref 0 in
+  let bound =
+    List.map
+      (fun local ->
+        let mode, _, type_ = Mir_form.parameter_of body local in
+        let ty = ground st type_ in
+        let bit =
+          Option.map
+            (fun _ ->
+              incr defaults;
+              !defaults - 1)
+            (List.assoc_opt local body.defaults)
+        in
+        let arrives, place =
+          match cursor with
+          | None ->
+              Lowering.parameter st ~in_scope:false
+                ~owned:(mode = Own && bit = None)
+                (Monomorphic.mode mode) ty
+          | Some cursor -> (
+              match Convention.held st.context.env (Monomorphic.mode mode) ty with
+              | None -> (None, temporary st ty)
+              | Some ty -> (
+                  let field = cursor_field cursor (Convention.cursor_parameter !held) ty in
+                  incr held;
+                  (None, match ty with Pointer _ -> field / Deref | _ -> field)))
+        in
+        (arrives, mode, ty, bit, place))
+      body.parameters
+  in
+  (bound, !held)
 
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
-   given, with its defaults filled in. Returns the parameters bound, the
-   mask, every parameter's local in order, and each parameter's place. *)
-let begin_body ?how st ~(body : Mir.body) =
+   given, with its defaults filled in. Returns every parameter's local in
+   order, and each parameter's place. *)
+let begin_body st ~(body : Mir.body) =
   let code = st.frame.code in
-  let bound = bind_parameters ?how st body in
+  let bound, _ = bind_parameters st body in
   let places = List.map (fun (_, _, _, _, place) -> place) bound in
   let mask =
     if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
@@ -76,46 +85,118 @@ let begin_body ?how st ~(body : Mir.body) =
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   let places =
-    match mask with Some mask -> Mir_form.fill_defaults st mask body places | None -> places
+    match mask with Some mask -> Mir_form.fill_defaults st (at mask) body places | None -> places
   in
-  ( List.map (fun (arrives, mode, ty, bit, _) -> (arrives, mode, ty, bit)) bound,
-    mask,
-    List.filter_map (fun (arrives, _, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence,
+  ( List.filter_map (fun (arrives, _, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence,
     places )
 
-(* The pulled version of a yielding method: lowered as the method is, but
-   holding its arguments as a cursor does, and with its own [yield]s left
-   for yield lowering. With it, the values a cursor that has not started owns:
-   each [own] argument's local, and for a parameter with a default, the
-   mask's local and the parameter's bit in it, since the argument is there
-   only when the bit is set. *)
-let pulled context (yielding : Ground.yielding) :
-    Lir.function_ * (Lir.local * (Lir.local * int) option) list =
+type pulled = {
+  next : Lir.function_;
+  drop : Lir.function_;
+  fields : (string * Memory_layout.member) list;
+}
+
+let member : Lir.ty -> Memory_layout.member = function
+  | Value ty -> Typed ty
+  | Raw scalar -> Raw scalar
+  | Pointer { target = Value ty; _ } -> Raw (Pointer (Data ty))
+  | Pointer _ | Environment _ | Evidence _ -> bug "a value a cursor cannot hold"
+
+(* The pulled version of a yielding method: a state machine over a cursor,
+   which holds the method's arguments and the values it keeps from one
+   [yield] to the next. Its [next] runs the method from where it stopped to
+   its next [yield], and gives the value yielded in [Some], or [None] once
+   the method returns. Its drop function drops what the cursor holds: the
+   arguments it owns before the method starts, where an argument with a
+   default is there only when the mask of defaults passed has its bit, and
+   after a [yield], what the method owns there. *)
+let pulled context (yielding : Ground.yielding) : pulled =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let body = (Mir_form.mir_of context yielding.method_).body in
-  let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
-  let bound, mask, parameter_locals, places =
-    begin_body st ~how:(Convention.held context.env) ~body
+  let st = enter context (frame_of code ~inlined:[ yielding.method_ ]) in
+  (* [next] starts in block 0, which builds the evidence the method's code
+     reads on every call, then goes to the state's code. *)
+  let entry = block st.builder in
+  result_slot st (Convention.result context.env (cursor_result context yielding));
+  let pointer =
+    local st.builder ~name:"cursor" (Pointer { target = Value (Cursor yielding); writable = true })
   in
-  let owned =
-    List.filter_map
-      (fun (arrives, mode, ty, bit) ->
-        if mode = Types.Own && not (trivial st ty) then
-          Option.map
-            (fun local ->
-              ( local,
-                Option.map
-                  (fun bit ->
-                    match mask with
-                    | Some mask -> (mask, bit)
-                    | None -> bug "a default with no mask")
-                  bit ))
-            arrives
-        else None)
-      bound
+  let cursor =
+    {
+      pointer;
+      drop = Lir_builder.separate st.builder ~parts:[ pointer ];
+      fields = [];
+      resumes = [];
+      stops = [];
+    }
+  in
+  let st = { st with cursor = Some cursor } in
+  let bound, held = bind_parameters ~cursor st body in
+  let mask =
+    if code.has_defaults then
+      Some (cursor_field cursor (Convention.cursor_parameter held) (Raw (Integer UInt64)))
+    else None
+  in
+  let evidence = evidence_parameters st (evidence_for st.context code.substitution code.uses) in
+  start st.builder entry;
+  st.evidence <-
+    st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
+  let dispatch = block st.builder and first = block st.builder in
+  finish st.builder (Goto dispatch);
+  start st.builder first;
+  let places = List.map (fun (_, _, _, _, place) -> place) bound in
+  let places =
+    match mask with Some mask -> Mir_form.fill_defaults st mask body places | None -> places
   in
   Mir_form.lower_code st yielding.method_ ~parameters:places;
-  (finish_function st ~first:[] ~rest:parameter_locals (), owned)
+  let state = Mir_form.cursor_state cursor in
+  let switch ~started ~ended blocks =
+    finish st.builder
+      (Switch
+         {
+           value = Copy state;
+           cases =
+             [ (Z.zero, started); (Z.one, ended) ]
+             @ List.mapi (fun index block -> (Z.of_int (index + 2), block)) (List.rev blocks);
+           default = None;
+         })
+  in
+  let ended = block st.builder in
+  in_block st.builder ended (fun () -> Mir_form.give_option st None);
+  in_block st.builder dispatch (fun () -> switch ~started:first ~ended cursor.resumes);
+  Lir_builder.write_in st.builder cursor.drop (fun () ->
+      let unstarted = block st.builder and ended = block st.builder in
+      start st.builder unstarted;
+      List.iter
+        (fun (_, mode, ty, bit, place) ->
+          if mode = Types.Own && not (trivial st ty) then
+            match (bit, mask) with
+            | None, _ -> emit st.builder (Drop place)
+            | Some bit, Some mask ->
+                let bits = local st.builder (Raw (Integer UInt64))
+                and passed = local st.builder (Raw Bool) in
+                emit st.builder
+                  (Assign
+                     ( at bits,
+                       Binary (Bit_and, Copy mask, constant_int UInt64 (Z.shift_left Z.one bit)) ));
+                emit st.builder
+                  (Assign (at passed, Binary (Not_equal, Copy (at bits), constant_int UInt64 Z.zero)));
+                when_ st.builder (Copy (at passed)) (fun () -> emit st.builder (Drop place))
+            | Some _, None -> bug "a default with no mask")
+        bound;
+      finish st.builder (Return None);
+      start st.builder ended;
+      finish st.builder (Return None);
+      start st.builder (Lir_builder.separate_entry st.builder cursor.drop);
+      switch ~started:unstarted ~ended cursor.stops);
+  let next = finish_function st ~first:[] ~rest:(pointer :: evidence) () in
+  {
+    next;
+    drop = Lir_builder.separate_function st.builder cursor.drop;
+    fields =
+      (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
+      :: List.rev_map (fun (name, ty) -> (name, member ty)) cursor.fields;
+  }
 
 let code_state context path =
   let code = code_of context path [] in
@@ -203,7 +284,7 @@ let source_code context key ~path ~type_arguments : Lir.t =
   let st = enter context (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
-  let _, _, parameter_locals, places = begin_body st ~body in
+  let parameter_locals, places = begin_body st ~body in
   Mir_form.lower_code st path ~parameters:places;
   finish_instance st ~returns ~rest:parameter_locals key
 

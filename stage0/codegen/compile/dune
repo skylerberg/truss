@@ -19,7 +19,6 @@
   libc
   lir
   glue
-  yields
   reachable
   moves
   emit_c

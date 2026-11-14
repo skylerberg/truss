@@ -152,7 +152,7 @@ let visit_statement visitor = function
       visit_operand visitor last
 
 let visit_terminator visitor = function
-  | Switch { value; _ } | Yield { value; _ } -> visit_operand visitor value
+  | Switch { value; _ } -> visit_operand visitor value
   | Switch_variant { place; _ } -> visit_place visitor place
   | Return value -> Option.iter (visit_operand visitor) value
   | Fail { message; length; _ } ->
@@ -165,7 +165,6 @@ let successors = function
   | Switch { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Return _ | Unreachable | Fail _ -> []
-  | Yield { resume; stop; _ } -> resume :: Option.to_list stop
 
 (* Blocks in reverse postorder of a depth-first walk that takes successors
    in order. *)
@@ -292,8 +291,6 @@ let map_terminator ~place ~block terminator =
   | Unreachable -> Unreachable
   | Fail { failure; message; length; site } ->
       Fail { failure; message = operand message; length = operand length; site }
-  | Yield { value; resume; stop } ->
-      Yield { value = operand value; resume = block resume; stop = Option.map block stop }
 
 let rename map_local (lir_place : place) =
   match lir_place.root with

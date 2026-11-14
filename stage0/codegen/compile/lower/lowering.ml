@@ -66,7 +66,8 @@ and mir_frame = {
       (** The targets of compound assignments whose old value an operator has taken, which hold
           nothing until they are assigned again *)
   moves : Moves.t;  (** Which places may hold a value at each point *)
-  flags : (Moves.path * Lir.local) list;
+  kept : Mir.local list;  (** In a pulled method, the locals its cursor holds *)
+  flags : (Moves.path * Lir.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
 }
@@ -115,6 +116,18 @@ type spawn_loop = {
   element : Ground.ty;  (** The type of the value that the loop's pattern matches *)
 }
 
+(* The cursor of a pulled method: [next] keeps in it the values it needs
+   from one call to the next, and its drop function drops them. *)
+type cursor = {
+  pointer : Lir.local;  (** [next]'s parameter, and the drop function's, that points to it *)
+  drop : Lir_builder.separate;  (** The cursor's drop function *)
+  mutable fields : (string * Lir.ty) list;  (** Its fields but its state, most recent first *)
+  mutable resumes : Lir.block list;
+      (** Where [next] goes on in each state after the first, most recent first *)
+  mutable stops : Lir.block list;
+      (** Where the drop function starts in each state after the first, most recent first *)
+}
+
 (* How the iterations of a loop run: one after another, as chunks of a
    range on several threads, or each as a spawned task. *)
 type schedule = Sequential | Chunked | Spawned of spawn_loop
@@ -133,7 +146,8 @@ type state = {
   nested : Lir.function_ option list ref;
       (** The instance's nested functions, its lambdas and outlined code, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
-  pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
+  cursor : cursor option;
+      (** In a yielding method's pulled version, the cursor it keeps values in *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable moved : Lir.place list;
       (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
@@ -146,7 +160,7 @@ let frame_of code ~inlined =
 
 (* The state to write one function in: a builder of its own and the
    function's scope. A lambda shares [nested] with the function around it. *)
-let enter context ?(pulling = false) ?(nested = ref []) frame =
+let enter context ?cursor ?(nested = ref []) frame =
   {
     context;
     frame;
@@ -156,7 +170,7 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     result = No_result;
     nested;
     evidence = [];
-    pulling;
+    cursor;
     tasks = [];
     moved = [];
   }
@@ -166,7 +180,20 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
    They are not in a method's pulled version, whose code is a state
    machine, nor in an expression lowered on its own, whose [return] leaves
    to its end, and a region has one way out. *)
-let may_fork st = (not st.pulling) && st.frame.exit = None
+let may_fork st = st.cursor = None && st.frame.exit = None
+
+(* A field of the cursor, with the place it is at. *)
+let cursor_field (cursor : cursor) name ty : Lir.place =
+  if not (List.mem_assoc name cursor.fields) then cursor.fields <- (name, ty) :: cursor.fields;
+  { root = Local cursor.pointer; projections = [ Deref; Field name ] }
+
+(* A place that holds a value [kept] across a [yield]: a new field of the
+   cursor in a pulled method, or else a new local. *)
+let held st ~kept ?name ty : Lir.place =
+  match st.cursor with
+  | Some cursor when kept ->
+      cursor_field cursor (Printf.sprintf "held%d" (List.length cursor.fields)) ty
+  | _ -> at (local st.builder ?name ty)
 
 (* Writes code with [body] as an outlined function, nested in the instance,
    given [parts] as its parameters. Gives the function's number and the
@@ -427,14 +454,17 @@ let take st (place : Lir.place) ty ~destination =
 
 (* A place whose indexes are fixed now, so that an alias of it refers to the
    same element however the index variables change later. *)
-let snapshot st (place : Lir.place) =
+let snapshot st ~kept (place : Lir.place) =
   {
     place with
     projections =
       List.map
         (function
           | Lir.Index (Copy index_place) ->
-              let fixed = binding st st.context.types.usize in
+              let fixed =
+                if kept then held st ~kept (Value st.context.types.usize)
+                else binding st st.context.types.usize
+              in
               emit st.builder (Assign (fixed, Use (Copy index_place)));
               Lir.Index (Copy fixed)
           | projection -> projection)
@@ -459,12 +489,21 @@ let place_type st (place : Lir.place) =
         Option.bind (Lir.projection_type st.context.env ~environment ty projection) (fun ty ->
             projected ty rest)
   in
-  let root : Lir.ty =
-    match place.root with
-    | Local local -> local_type st.builder local
-    | Static { ty; _ } -> Value ty
-  in
-  if Lir.erased st.context.env root then None else projected root place.projections
+  match (st.cursor, place) with
+  | Some cursor, { root = Local pointer; projections = Deref :: Field field :: rest }
+    when pointer = cursor.pointer -> (
+      (* A field of the cursor that the code is writing the fields of. *)
+      match List.assoc_opt field cursor.fields with
+      | Some ty -> projected ty rest
+      | None when field = Convention.cursor_state -> projected (Raw (Integer UInt32)) rest
+      | None -> bug "the cursor has no field %s" field)
+  | _ ->
+      let root : Lir.ty =
+        match place.root with
+        | Local local -> local_type st.builder local
+        | Static { ty; _ } -> Value ty
+      in
+      if Lir.erased st.context.env root then None else projected root place.projections
 
 (* The lent value at a place, if the place holds one. *)
 let lent_at st place =

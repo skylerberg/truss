@@ -147,7 +147,6 @@ type terminator =
   | Return of operand option
   | Unreachable
   | Fail of { failure : failure; message : operand; length : operand; site : site }
-  | Yield of { value : operand; resume : block; stop : block option }
 
 type basic_block = { statements : statement list; terminator : terminator }
 type local_info = { ty : ty; name : string option }

@@ -187,7 +187,6 @@ let instance_references env (instance : Lir.t) =
         | Return value ->
             Option.fold ~none:keys ~some:(fun operand -> operand_keys operand keys) value
         | Fail { message; length; _ } -> operand_keys length (operand_keys message keys)
-        | Yield { value; _ } -> operand_keys value keys
         | Goto _ | Unreachable -> keys)
       keys function_.blocks
   in

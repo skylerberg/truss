@@ -306,7 +306,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
              environment = Some (Address { place = environment_local; writable = false });
            } ));
   let inner =
-    enter st.context ~pulling:st.pulling ~nested:st.nested
+    enter st.context ~nested:st.nested
       {
         st.frame with
         exit = None;
@@ -685,11 +685,12 @@ let call_next st (yielding : Ground.yielding) cursor destination =
 (* Pulls a cursor until it ends, running [body] with the place of each
    value. [call_next] calls the cursor's [next], which writes an [Option] of
    type [option] to the place it is given. The loop's part, the value, ends
-   where the MIR ends it, so the [Option] holds nothing else to drop. *)
-let pull_loop st ~(option : Ground.ty) ~(call_next : Lir.place -> unit) ~(body : Lir.place -> unit)
-    =
+   where the MIR ends it, so the [Option] holds nothing else to drop. The
+   [Option] is [kept] across a [yield] in the body. *)
+let pull_loop st ~kept ~(option : Ground.ty) ~(call_next : Lir.place -> unit)
+    ~(body : Lir.place -> unit) =
   in_scope st (fun () ->
-      let next = at (local st.builder (Value option)) in
+      let next = held st ~kept (Value option) in
       let depth = List.length st.scopes in
       let test = block st.builder and inside = block st.builder and after = block st.builder in
       finish st.builder (Goto test);
@@ -708,16 +709,16 @@ let pull_loop st ~(option : Ground.ty) ~(call_next : Lir.place -> unit) ~(body :
 (* A heap block for a cursor, which the current scope frees. A loop over a
    recursive yielding method keeps its cursor there, so that a cursor over
    the method can hold another. *)
-let boxed_cursor st (yielding : Ground.yielding) : Lir.place =
+let boxed_cursor st ~kept (yielding : Ground.yielding) : Lir.place =
   let cursor_ty = Ground.Cursor yielding in
   let boxed =
-    local st.builder ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true })
+    held st ~kept ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true })
   in
   emit st.builder
     (Call
        {
          target = Intrinsic Allocate;
          arguments = [ Constant (Size_of cursor_ty); Constant (Alignment_of cursor_ty) ];
-         result = Returned (at boxed);
+         result = Returned boxed;
        });
-  at boxed
+  boxed

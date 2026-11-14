@@ -203,9 +203,6 @@ let terminator_to_string = function
   | Fail { failure; message; length; _ } ->
       (match failure with Panic -> "panic(" | Assertion -> "assertion failed(" | Todo -> "todo(")
       ^ operand_to_string message ^ ", " ^ operand_to_string length ^ ")"
-  | Yield { value; resume; stop } ->
-      Printf.sprintf "yield %s resume b%d%s" (operand_to_string value) resume
-        (match stop with None -> "" | Some block_index -> Printf.sprintf " stop b%d" block_index)
 
 let function_to_string (function_ : function_) =
   let parameters =

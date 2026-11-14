@@ -32,7 +32,8 @@ and mir_frame = {
   returned : Mir.local list;
   mutable taken : Mir.place list;
   moves : Moves.t;  (** Which places may hold a value at each point *)
-  flags : (Moves.path * Lir.local) list;
+  kept : Mir.local list;
+  flags : (Moves.path * Lir.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
 }
@@ -67,6 +68,14 @@ type spawn_loop = {
   element : Ground.ty;
 }
 
+type cursor = {
+  pointer : Lir.local;
+  drop : Lir_builder.separate;
+  mutable fields : (string * Lir.ty) list;
+  mutable resumes : Lir.block list;
+  mutable stops : Lir.block list;
+}
+
 type schedule = Sequential | Chunked | Spawned of spawn_loop
 type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 
@@ -79,7 +88,7 @@ type state = {
   mutable result : result_slot;
   nested : Lir.function_ option list ref;
   mutable evidence : (Path.t * Lir.operand) list;
-  pulling : bool;
+  cursor : cursor option;
   mutable tasks : task list;
   mutable moved : Lir.place list;
       (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
@@ -89,9 +98,16 @@ type state = {
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
 
 val enter :
-  Definitions.context -> ?pulling:bool -> ?nested:Lir.function_ option list ref -> frame -> state
+  Definitions.context -> ?cursor:cursor -> ?nested:Lir.function_ option list ref -> frame -> state
 
 val may_fork : state -> bool
+
+(* A field of the cursor, with the place it is at. *)
+val cursor_field : cursor -> string -> Lir.ty -> Lir.place
+
+(* A place that holds a value [kept] across a [yield]: a new field of the
+   cursor in a pulled method, or else a new local. *)
+val held : state -> kept:bool -> ?name:string -> Lir.ty -> Lir.place
 
 (* Writes code with [body] as an outlined function, nested in the instance,
    given [parts] as its parameters. Gives the function's number and the
@@ -144,7 +160,7 @@ val unreachable_block : state -> unit
 val moved : state -> Lir.place -> Lir.operand
 val owned : state -> Lir.place -> Ground.ty -> Lir.operand
 val take : state -> Lir.place -> Ground.ty -> destination:Lir.place -> unit
-val snapshot : state -> Lir.place -> Lir.place
+val snapshot : state -> kept:bool -> Lir.place -> Lir.place
 
 val looping :
   state -> continue_:Lir.block -> break_:Lir.block -> depth:int -> (unit -> unit) -> unit

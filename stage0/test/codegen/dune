@@ -2,7 +2,6 @@
  (names
   layout_tests
   lir_tests
-  yields_tests
   glue_tests
   build_tests
   source_tests
@@ -22,7 +21,6 @@
   fixtures
   layout_tests
   lir_tests
-  yields_tests
   glue_tests
   build_tests
   source_tests
@@ -55,7 +53,6 @@
   process
   startup
   positions
-  yields
   glue
   reachable
   build

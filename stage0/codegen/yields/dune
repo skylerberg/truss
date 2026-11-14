@@ -1,3 +1,0 @@
-(library
- (name yields)
- (libraries compiler_bug ground memory_layout lir convention zarith))
