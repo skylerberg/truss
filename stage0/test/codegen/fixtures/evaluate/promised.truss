@@ -3,7 +3,7 @@ fn count_to(limit: UInt8 = 3) -> UInt8
 {
   var count: UInt8 = 0
   for _ in 0..limit
-    invariant count == yielded.length()
+    invariant count == visited.length()
   {
     count += 1
   }

@@ -8,7 +8,7 @@ impl Signals for SystemSignals {
   fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
     var numbers: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(signals.length())
     for signal in signals
-      invariant intrinsic::storage_length(numbers) <= yielded.length()
+      invariant intrinsic::storage_length(numbers) <= visited.length()
       invariant intrinsic::storage_capacity(numbers) == signals.length()
     {
       let number = handles::signal_number(signal)

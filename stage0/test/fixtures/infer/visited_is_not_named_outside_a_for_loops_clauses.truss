@@ -1,0 +1,10 @@
+fn f(count: Int64) -> Int64 {
+  var index = 0
+  while index < count
+    invariant visited.length() == 0
+    decreases count - index
+  {
+    index += 1
+  }
+  index
+}

@@ -1,0 +1,13 @@
+type Cell(value: Int64)
+
+fn Cell.part(mut self) lends mut Int64
+  ensures self.value == final(result)
+{
+  mut self.value
+}
+
+fn f(cell: mut Cell)
+  ensures cell.value == 7
+{
+  mut cell.part() = 7
+}

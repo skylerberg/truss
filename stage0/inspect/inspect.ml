@@ -111,10 +111,8 @@ let describe_target (target : Resolve.target) =
   | Result_value -> ("the result, in a specification", None)
   | Old -> ("a value as it was when the function was called", None)
   | Identical -> ("identity of two values, in a specification", None)
-  | Yielded ->
-      ( "in a specification, the values of a loop's earlier iterations, or a lending method's part \
-         as the caller left it",
-        None )
+  | Visited -> ("the values of the loop's iterations before, in a loop's clauses", None)
+  | Final -> ("a lending method's part as the caller left it, in its `ensures`", None)
   | Specification_function _ -> ("a specification function", None)
   | Unknown _ -> ("nothing: the name is not known", None)
 

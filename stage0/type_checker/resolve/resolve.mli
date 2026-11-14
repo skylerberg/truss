@@ -27,9 +27,10 @@ type target = Walk.target =
   | Result_value  (** [result], in [ensures] and [cost]. *)
   | Old  (** [old], in specifications and proofs. *)
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
-  | Yielded
-      (** [yielded]: in a loop's clauses, the values of the iterations before; in a lending method's
-          [ensures], its part as the caller left it. *)
+  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Final
+      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
+          it. *)
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
 

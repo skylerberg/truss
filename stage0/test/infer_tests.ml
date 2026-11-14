@@ -447,6 +447,15 @@ let () =
         "types.missing_mark";
       one_diagnostic Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key_3
         "types.not_assignable");
+  test "`final(result)` is a lending method's part as the caller left it" (fun () ->
+      fine Fixtures.Infer.final_of_result_is_the_part_as_the_caller_left_it;
+      one_diagnostic ~says:"`final(result)`" Fixtures.Infer.final_takes_the_lent_part
+        "types.not_callable");
+  test "`final` and `visited` are names only where they have a meaning" (fun () ->
+      one_diagnostic Fixtures.Infer.final_is_not_named_outside_a_lending_methods_ensures
+        "resolve.unknown_name";
+      one_diagnostic Fixtures.Infer.visited_is_not_named_outside_a_for_loops_clauses
+        "resolve.unknown_name");
   (* [Index] lends an element read-only, [IndexMut] lends it [mut], and
      [IndexAssign] replaces it. *)
   (let readings = Fixtures.Infer.readings in

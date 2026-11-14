@@ -18,7 +18,10 @@ type target = Walk.target =
   | Result_value
   | Old
   | Identical
-  | Yielded
+  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Final
+      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
+          it. *)
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 

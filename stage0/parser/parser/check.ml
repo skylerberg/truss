@@ -191,10 +191,10 @@ let parameters ?(lends = false) cursor (parameters : parameter list) =
             report cursor Reserved_specification_name name.span
               "A parameter cannot be named `result`, which names the return value in `ensures` and \
                `cost`.";
-          if lends && name.text = "yielded" then
+          if lends && name.text = "final" then
             report cursor Reserved_specification_name name.span
-              "A parameter of a lending method cannot be named `yielded`, which names the part as \
-               the caller left it in the method's `ensures`.";
+              "A parameter of a lending method cannot be named `final`: in the method's `ensures`, \
+               `final(result)` is the part as the caller left it.";
           types ~parameter:true cursor plain type_;
           Option.iter (expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())

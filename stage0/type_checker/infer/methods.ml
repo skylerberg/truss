@@ -48,6 +48,62 @@ and call_named state env ?expected (value : expression) (callee : expression)
             (error state
                (if arguments = [] then Missing_argument else Too_many_arguments)
                value.span "`old` takes one value: `old(value)`."))
+  | Final -> (
+      (* [final(result)] is a lending method's part as the caller left it: the
+         one element of the sequence of the parts the method lent. *)
+      let names_result (argument : expression) =
+        match argument.kind with
+        | Name path -> State.target state path.last = Some Result_value
+        | _ -> false
+      in
+      match (arguments, env.output) with
+      | [ argument ], Some (Lends (_, part)) when names_result argument.value ->
+          ignore (expression state env argument.value);
+          let part = normalize state part in
+          let parts : Types.ty =
+            Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }
+          in
+          let index = trait_reference (Well_known.path Index) in
+          let evidence =
+            match implements state parts index with
+            | Some evidence -> Form.evidence (evidence_of evidence)
+            | None -> bug "`Sequence` does not implement `Index`"
+          in
+          state.tables.resolutions.(value.id) <- Some Specification_value;
+          register_expression state value (fun () ->
+              let make = synthetic_expression state ~origin:value.id in
+              let passed value : Core.argument =
+                Passed { mode = Read; value = Value value; mark = None }
+              in
+              let first =
+                make part
+                  (Call
+                     {
+                       callee =
+                         Trait_method
+                           {
+                             trait = index;
+                             name = "at";
+                             receiver = Read;
+                             self_type = parts;
+                             type_arguments = [];
+                             evidence;
+                           };
+                       arguments =
+                         [
+                           passed (make parts Yielded); passed (make Types.Integer (Integer Z.zero));
+                         ];
+                       lends = Some Read;
+                       uses = Types.no_capabilities;
+                     })
+              in
+              Use (Lent first));
+          part
+      | _ ->
+          arguments_alone state env arguments
+            (error state Not_callable value.span
+               "`final` takes the part that a lending method lends: `final(result)` is that part \
+                as the caller left it."))
   | Identical -> (
       (* [identical(first, second)] compares two values of the same type
          with the solver's equality. *)
@@ -115,7 +171,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
   | Unknown report -> arguments_alone state env arguments (Types.Error report)
   | Local _ | Law_parameter _ | Value_parameter _
   | Definition (Constant, _)
-  | Field _ | Result_value | Yielded ->
+  | Field _ | Result_value | Visited ->
       function_value_call state env value callee arguments
   | Binding | Module _ -> bug "the name `%s` is not resolved" name.text
 

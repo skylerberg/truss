@@ -3,7 +3,7 @@ fn f(couple: Couple) -> USize
 {
   var seen: USize = 0
   for value in couple
-    invariant seen == yielded.length()
+    invariant seen == visited.length()
   {
     let _ = value
     seen += 1

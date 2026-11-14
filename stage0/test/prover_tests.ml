@@ -257,6 +257,8 @@ let () =
       proven
         (tagged "  ensures self.first == old(self.first)\n"
         ^ Fixtures.Prover.caller_of_a_method_that_lends_a_constructor_mut));
+  test "a caller's change to a part lent `mut` is its `final(result)`" (fun () ->
+      proven Fixtures.Prover.callers_change_to_a_part_lent_mut_is_its_final_value);
   test "a lending method that lends a part it does not promise" (fun () ->
       not_proven Fixtures.Prover.lending_method_that_lends_a_part_it_does_not_promise
         "prover.ensures");
@@ -268,8 +270,8 @@ let () =
       not_proven
         (couple ^ Fixtures.Prover.elements_that_a_loop_has_read_are_not_known_beyond)
         "prover.invariant");
-  test "a loop over a range has its indexes as yielded" (fun () ->
-      proven Fixtures.Prover.loop_over_a_range_has_its_indexes_as_yielded);
+  test "a loop over a range has visited its indexes" (fun () ->
+      proven Fixtures.Prover.loop_over_a_range_has_its_indexes_as_visited);
   test "a range loop's index in its clauses is the next index" (fun () ->
       proven Fixtures.Prover.range_loops_index_in_its_clauses_is_the_next_index);
   test "a range loop's index counts from the range's start" (fun () ->

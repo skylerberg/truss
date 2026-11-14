@@ -3,7 +3,7 @@ fn count_cells(rows: List[List[Int64]]) -> USize
 {
   var count: USize = 0
   for row in rows
-    cost time O(yielded.length() + yielded.sum(fn(cells) { cells.length() }))
+    cost time O(visited.length() + visited.sum(fn(cells) { cells.length() }))
   {
     for _ in row {
       count = count.saturating_add(1)

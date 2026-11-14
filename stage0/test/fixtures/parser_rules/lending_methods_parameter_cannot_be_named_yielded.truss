@@ -1,3 +1,0 @@
-fn T.part(self, yielded: Int64) lends Int64 {
-  self.value
-}

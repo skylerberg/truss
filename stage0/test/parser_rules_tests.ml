@@ -207,13 +207,13 @@ let () =
     (fun () ->
       definition Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
         "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
-  test "a lending method's parameter cannot be named yielded" (fun () ->
-      error Fixtures.Parser_rules.lending_methods_parameter_cannot_be_named_yielded
-        ~code:Reserved_specification_name ~at:"yielded";
-      definition "fn f(yielded: Bool) {}" "(fn f ((yielded: Bool)) (block))");
+  test "a lending method's parameter cannot be named final" (fun () ->
+      error Fixtures.Parser_rules.lending_methods_parameter_cannot_be_named_final
+        ~code:Reserved_specification_name ~at:"final";
+      definition "fn f(final: Bool) {}" "(fn f ((final: Bool)) (block))");
   test "a loop's cost clause" (fun () ->
-      statement "for row in rows\n  cost time O(yielded.length())\n{}"
-        "(for row rows (cost time (O (call (. yielded length)))) (block))");
+      statement "for row in rows\n  cost time O(visited.length())\n{}"
+        "(for row rows (cost time (O (call (. visited length)))) (block))");
   test "a loop's cost is not amortized or finite" (fun () ->
       body_error "while a\n  cost amortized time O(1)\n{}" ~code:Loop_cost_bound ~at:"cost";
       body_error "while a\n  cost time finite\n{}" ~code:Loop_cost_bound ~at:"cost");
