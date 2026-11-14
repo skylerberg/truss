@@ -15,12 +15,11 @@ let add_root engine root =
   if not (List.mem root roots) then Engine.set engine Project.roots () (roots @ [ root ])
 
 (* A manifest of one package, as [Manifest.parse] reads it. *)
-let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
+let manifest_text ~name ~(dependencies : Manifest.dependency list) =
   String.concat ""
     ([
        Printf.sprintf "[package]\nname = %S\ntruss = %S\n" (Path.show_package name)
          Manifest.truss_version;
-       (if usize_bits = 64 then "usize_bits = 64\n" else "");
        (if dependencies = [] then "" else "\n[dependencies]\n");
      ]
     @ List.map
@@ -30,21 +29,19 @@ let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
             (String.concat ", " (List.map (Printf.sprintf "%S") dependency.capabilities)))
         dependencies)
 
-let set_package engine ~root ~usize_bits ~name ~dependencies (files : (Path.file * string) list) =
+let set_package engine ~root ~name ~dependencies (files : (Path.file * string) list) =
   set_root engine root
-    (("truss.toml", manifest_text ~usize_bits ~name ~dependencies)
+    (("truss.toml", manifest_text ~name ~dependencies)
     :: List.map (fun (file, text) -> (Project.file_path ~directory:"" file, text)) files);
   add_root engine root
 
-let load_package ?(usize_bits = 32) engine ~name ~dependencies files =
-  set_package engine ~root:(Project.package_root name) ~usize_bits ~name ~dependencies files
+let load_package engine ~name ~dependencies files =
+  set_package engine ~root:(Project.package_root name) ~name ~dependencies files
 
-(* The standard library holds the code for each platform, and its bounds of
-   [USize] are its target's, so it is checked with the target's width. *)
 let set_standard engine files =
   set_package engine
     ~root:(Project.package_root Path.standard_package)
-    ~usize_bits:64 ~name:Path.standard_package ~dependencies:[] files
+    ~name:Path.standard_package ~dependencies:[] files
 
 let load_standard engine = set_standard engine Standard_library.files
 
@@ -871,10 +868,9 @@ module For_testing = struct
     if not (List.mem path files) then
       Engine.set engine Project.tree root (List.sort compare (path :: files))
 
-  let set_manifest ?(usize_bits = 32) engine ~name ~dependencies =
+  let set_manifest engine ~name ~dependencies =
     let root = Project.package_root name in
-    Engine.set engine Project.text (root, "truss.toml")
-      (manifest_text ~usize_bits ~name ~dependencies);
+    Engine.set engine Project.text (root, "truss.toml") (manifest_text ~name ~dependencies);
     let files = Option.value (Query.find (Engine.observer engine) Project.tree root) ~default:[] in
     if not (List.mem "truss.toml" files) then
       Engine.set engine Project.tree root (List.sort compare ("truss.toml" :: files));

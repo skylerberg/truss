@@ -262,12 +262,20 @@ Rules: [Types](SPECIFICATION.md#types).
 
 Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 
-**Code is verified for both widths of `USize`.** The prover knows only that
-`USize` has 32 or 64 bits. A proof therefore holds on every target, and a
-cached proof needs no target in its key. A package that runs only on 64-bit
-targets says so with `usize_bits = 64`, and only a package that says the
-same can depend on it. A package without the setting therefore runs on every
-target, dependencies included.
+**`USize` has 64 bits on every target.** A proof about a `USize` therefore
+holds on every target, a cached proof needs no target in its key, and every
+package runs on every target. A target whose pointers have 32 bits still has
+a 64-bit `USize`. A length never exceeds the address space, and the
+target's allocator fails a size that does not fit in a pointer, as it fails
+any request it cannot meet.
+
+A `USize` of the pointer's width would need every proof to hold for both
+widths. Each package would then carry overflow obligations for 32-bit
+targets that most never run on, or would declare that it runs only on 64-bit
+targets and split the registry by target. A 64-bit `USize` costs a 32-bit
+target 4 more bytes per length, and a 32-bit processor two instructions for
+an addition of sizes. WebAssembly's 32-bit targets have 64-bit integers
+natively.
 
 | Rule | Reason |
 |---|---|
@@ -633,7 +641,7 @@ Rules: [Constants](SPECIFICATION.md#constants).
 |---|---|
 | A constant expression calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
 | A constant `Map` or `Set` is built at compile time by the standard library's insertion code, with no random hash key. | A lookup has the cost it has on any map, and the table is identical in every build (*determinism*). |
-| Code that runs at compile time is compiled and run as a test is, not interpreted. | Truss then has one implementation of its semantics, and a result computed at compile time equals the result in the compiled program, including the width of `USize`. Such code only discharges proofs and produces static data, so type checking never depends on it. |
+| Code that runs at compile time is compiled and run as a test is, not interpreted. | Truss then has one implementation of its semantics, and a result computed at compile time equals the result in the compiled program. Such code only discharges proofs and produces static data, so type checking never depends on it. |
 
 ## Functions
 

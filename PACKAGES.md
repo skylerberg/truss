@@ -73,11 +73,6 @@ forecast = []
 - **A dependency the package never uses is a compile error,** as an unused
   `use` is. A package uses a dependency by naming one of its modules, or by
   calling a method of one of its traits with a dot.
-- **`usize_bits = 64`** in `[package]` says that the package runs only on
-  64-bit targets. Its code may then rely on `USize` and `ISize` having 64
-  bits, it cannot be built for a 32-bit target, and only packages that say
-  the same can depend on it. Otherwise the package is verified for both
-  widths.
 - **A manifest is TOML, read strictly.** A table or a key that is not
   described here is an error, and so is a version.
 

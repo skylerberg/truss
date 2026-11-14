@@ -1,10 +1,8 @@
-(* The target code is built for: the width of the pointers of the machine it runs
-   on, the width of [USize] and [ISize], and the system whose C library it
-   calls. The widths differ only for code built to run while compiling for
-   a target whose [USize] is narrower than the host's pointers: such code
-   runs on the host, with the target's [USize], so that it computes the
-   target's results. *)
-type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
+(* The target code is built for: the width of its pointers, and the system
+   whose C library it calls. [USize] and [ISize] have 64 bits on every
+   target, so a proof and a value computed at compile time hold on all of
+   them. *)
+type target = { pointer_bytes : int; system : Libc.system }
 
 val target_64 : Libc.system -> target
 
@@ -96,10 +94,10 @@ val has_zero_size : env -> Ground.ty -> bool
    itself, which is why the variant is [indirect]. *)
 val block : env -> Ground.ty -> string -> t
 val scalar_size : target -> scalar -> int
-val integer_size : target -> integer -> int
+val integer_size : integer -> int
 
-val integer_range : target -> integer -> Z.t * Z.t
-(** The least and the greatest value of an integer kind on a target. *)
+val integer_range : integer -> Z.t * Z.t
+(** The least and the greatest value of an integer kind. *)
 
 type discriminant =
   | Only  (** The type has one variant, or none with a size: nothing to test *)

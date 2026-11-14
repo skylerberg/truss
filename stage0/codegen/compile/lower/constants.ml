@@ -17,8 +17,8 @@ let all values =
     values (Some [])
 
 (* An integer of a kind, if the kind holds it. *)
-let integer st (kind : Memory_layout.integer) value =
-  let low, high = Memory_layout.integer_range (Memory_layout.target st.context.env) kind in
+let integer (kind : Memory_layout.integer) value =
+  let low, high = Memory_layout.integer_range kind in
   if Z.leq low value && Z.leq value high then Some (Lowered.Static_scalar (Integer (kind, value)))
   else None
 
@@ -37,10 +37,10 @@ let arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_va
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
-      let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
+      let bits = 8 * Memory_layout.integer_size kind in
       let number value =
         let* kind = integer_kind st ty in
-        integer st kind value
+        integer kind value
       in
       let shift by =
         if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
@@ -77,9 +77,9 @@ let arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_va
       | _ -> None)
   | _ -> None
 
-let negated st (value : Lowered.static_value) =
+let negated (value : Lowered.static_value) =
   match value with
-  | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
+  | Static_scalar (Integer (kind, x)) -> integer kind (Z.neg x)
   | Static_scalar (Float64 x) ->
       Some
         (Lowered.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
@@ -179,7 +179,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
     | Operand value | Copy value -> operand value
     | Operation { operation = Negate; operands = [ inner ]; _ } ->
         let* inner = operand inner in
-        negated st inner
+        negated inner
     | Operation { operation; operands = [ left; right ]; _ } ->
         let* left = operand left in
         let* right = operand right in

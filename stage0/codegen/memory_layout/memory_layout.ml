@@ -1,9 +1,9 @@
 let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
 
-type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
+type target = { pointer_bytes : int; system : Libc.system }
 
-let target_64 system = { pointer_bytes = 8; usize_bytes = 8; system }
-let target_32 system = { pointer_bytes = 4; usize_bytes = 4; system }
+let target_64 system = { pointer_bytes = 8; system }
+let target_32 system = { pointer_bytes = 4; system }
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 
@@ -67,22 +67,21 @@ let create target ~shape_of = { target; shape_of; done_ = Types.empty; in_progre
 let target env = env.target
 let shape env ty = env.shape_of ty
 
-let integer_size target = function
+let integer_size = function
   | Int8 | UInt8 -> 1
   | Int16 | UInt16 -> 2
   | Int32 | UInt32 -> 4
-  | Int64 | UInt64 -> 8
-  | USize | ISize -> target.usize_bytes
+  | Int64 | UInt64 | USize | ISize -> 8
 
-let integer_range target integer =
-  let bits = 8 * integer_size target integer in
+let integer_range integer =
+  let bits = 8 * integer_size integer in
   match integer with
   | Int8 | Int16 | Int32 | Int64 | ISize ->
       (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
 
 let scalar_size target = function
-  | Integer integer -> integer_size target integer
+  | Integer integer -> integer_size integer
   | Float32 -> 4
   | Float64 -> 8
   | Bool -> 1
@@ -109,9 +108,9 @@ let of_scalar target scalar =
 (* The smallest unsigned integer that numbers [count] variants. *)
 let tag_for count = if count <= 0x100 then UInt8 else if count <= 0x10000 then UInt16 else UInt32
 
-let tag_niche target tag count path =
+let tag_niche tag count path =
   let start = Z.of_int count in
-  { path; scalar = Integer tag; start; count = Z.sub (bits (integer_size target tag)) start }
+  { path; scalar = Integer tag; start; count = Z.sub (bits (integer_size tag)) start }
 
 let under name niche = { niche with path = Field name :: niche.path }
 
@@ -207,13 +206,13 @@ and of_sum env ty shapes =
   | [] when count <= 1 -> zero_size
   | [] ->
       let tag = tag_for count in
-      let size = integer_size env.target tag in
+      let size = integer_size tag in
       {
         size;
         alignment = size;
         form =
           Tag_only { tag; variants = List.map (fun (variant : variant) -> variant.name) variants };
-        niche = Some (tag_niche env.target tag count []);
+        niche = Some (tag_niche tag count []);
       }
   | [ only ]
     when match only.payload.niche with
@@ -245,7 +244,7 @@ and of_sum env ty shapes =
       }
   | _ ->
       let tag = tag_for count in
-      let tag_size = integer_size env.target tag in
+      let tag_size = integer_size tag in
       let union_size, union_alignment =
         List.fold_left
           (fun (size, alignment) variant ->
@@ -258,7 +257,7 @@ and of_sum env ty shapes =
         size = round_up (payload_offset + union_size) alignment;
         alignment;
         form = Tagged { tag; payload_offset; variants };
-        niche = Some (tag_niche env.target tag count [ Tag ]);
+        niche = Some (tag_niche tag count [ Tag ]);
       }
 
 let block env ty name =

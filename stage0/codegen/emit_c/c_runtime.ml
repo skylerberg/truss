@@ -39,12 +39,8 @@ let signed : Memory_layout.integer -> bool = function
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> false
 
 (* The declarations every file starts with: the fixed-width integers, from the
-   compiler's own predefined macros, the target's [USize], and the runtime. *)
-let runtime_declarations (target : Memory_layout.target) =
-  let usize, isize =
-    if target.usize_bytes = 8 then ("__UINT64_TYPE__", "__INT64_TYPE__")
-    else ("__UINT32_TYPE__", "__INT32_TYPE__")
-  in
+   compiler's own predefined macros, [USize] and [ISize], and the runtime. *)
+let runtime_declarations =
   String.concat ""
     [
       "typedef __INT8_TYPE__ int8_t;\n";
@@ -55,8 +51,8 @@ let runtime_declarations (target : Memory_layout.target) =
       "typedef __UINT16_TYPE__ uint16_t;\n";
       "typedef __UINT32_TYPE__ uint32_t;\n";
       "typedef __UINT64_TYPE__ uint64_t;\n";
-      Printf.sprintf "typedef %s t_usize;\n" usize;
-      Printf.sprintf "typedef %s t_isize;\n" isize;
+      "typedef __UINT64_TYPE__ t_usize;\n";
+      "typedef __INT64_TYPE__ t_isize;\n";
       anchor_struct;
       "_Noreturn void t_runtime_panic(const uint8_t *message, t_usize length, const struct \
        t_anchor *anchor, uint32_t line, uint32_t column);\n";

@@ -174,8 +174,6 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 - An integer literal is never a float.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.
-- A literal of `USize` or `ISize` fits in 32 bits, except in the standard
-  library.
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
@@ -336,7 +334,7 @@ its file or its position in the file.
 |---|---|
 | `Int8`, `Int16`, `Int32`, `Int64` | Signed integers |
 | `UInt8`, `UInt16`, `UInt32`, `UInt64` | Unsigned integers |
-| `USize`, `ISize` | Unsigned and signed integers of 32 or 64 bits |
+| `USize`, `ISize` | Unsigned and signed integers of 64 bits, on every target |
 | `Float32`, `Float64` | IEEE 754 binary floating point |
 | `Bool` | `true` and `false` |
 | `String` | UTF-8 text |
@@ -345,8 +343,6 @@ its file or its position in the file.
 | `Unit` | One value, also written `Unit`: the result of a function that returns nothing |
 | `Never` | No values: the result of a function that never returns |
 
-A package is verified for both widths of `USize` and `ISize` unless its
-manifest says `usize_bits = 64` (see [PACKAGES.md](PACKAGES.md#package-manifest)).
 Integer types never convert implicitly.
 
 ### Type definitions
@@ -1579,8 +1575,6 @@ public trait Add[Right] {
   shifts in zeros. A shift amount is any unsigned integer type, proven
   smaller than the bit width of the value.
 - Unsigned integers cannot be negated.
-- A proof about `USize` or `ISize` holds for both widths, unless the package
-  says `usize_bits = 64`.
 - The traits `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger` are
   sealed: only the built-in integer types implement them.
 

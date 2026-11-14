@@ -6,20 +6,17 @@ module Compatibility = Cli.Compatibility
 open Harness
 open Support
 
-let changes ?(usize_bits = (32, 32)) before after =
-  let state text bits =
+let changes before after =
+  let state text =
     let database = setup [] in
-    Database.load_package ~usize_bits:bits (Engine.of_context database)
-      ~name:{ owner = None; name = "lib" } ~dependencies:[]
+    Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
+      ~dependencies:[]
       [ (file_of "lib::shapes", text) ];
     database
   in
-  Compatibility.compare
-    ~before:(state before (fst usize_bits))
-    ~after:(state after (snd usize_bits))
-    { owner = None; name = "lib" }
+  Compatibility.compare ~before:(state before) ~after:(state after) { owner = None; name = "lib" }
 
-let show (actual, _) =
+let show actual =
   List.map
     (fun ({ path; change } : Compatibility.public_change) ->
       match change with
@@ -189,8 +186,4 @@ let () =
       expect (feed "  capability Uses\n") (feed "")
         [ "breaks: lib::shapes::Feed lost an associated capability set" ];
       expect (feed "") (feed "  capability Uses\n")
-        [ "grows: lib::shapes::Feed gained an associated capability set" ]);
-  test "a package that ran on every target and now runs only on 64-bit ones is told" (fun () ->
-      if not (snd (changes ~usize_bits:(32, 64) "" "")) then fail "not told";
-      if snd (changes ~usize_bits:(64, 64) "" "") || snd (changes ~usize_bits:(64, 32) "" "") then
-        fail "told of a package that does not narrow")
+        [ "grows: lib::shapes::Feed gained an associated capability set" ])

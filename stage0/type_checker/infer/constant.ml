@@ -11,7 +11,6 @@
 
 open Syntax
 open State
-open Pattern_typing
 
 (* The first sub-expression that is not allowed in a constant expression. *)
 let rec offending state (value : expression) : expression option =
@@ -55,7 +54,7 @@ let rec check_arithmetic state (value : expression) =
   (match (value.kind, state.tables.types.(value.id)) with
   | Prefix (Negate, { kind = Integer _; _ }), _ -> ()
   | (Prefix _ | Binary _), Some type_ -> (
-      match (builtin_range ~usize_bits:(usize_bits state) type_, worked_out value, value.kind) with
+      match (Types.integer_range type_, worked_out value, value.kind) with
       | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
           report state Constant_overflow value.span
             (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."

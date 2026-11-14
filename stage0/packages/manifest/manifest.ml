@@ -14,14 +14,7 @@
      time_limit = 10 *)
 
 type dependency = { package : Path.package; capabilities : string list }
-
-type package = {
-  name : Path.package;
-  truss : string option;
-  dependencies : dependency list;
-  usize_bits : int;
-}
-
+type package = { name : Path.package; truss : string option; dependencies : dependency list }
 type t = { package : package option; project : bool; time_limit : int option }
 
 let default_time_limit = 10
@@ -263,7 +256,7 @@ let parse text =
            `[project]`, and `[test]`."
           table.name)
     tables;
-  let name = ref None and truss = ref None and usize_bits = ref 32 in
+  let name = ref None and truss = ref None in
   List.iter
     (fun (entry : entry) ->
       match entry.key with
@@ -282,17 +275,12 @@ let parse text =
                `\"%s\"`."
               truss_version;
           truss := Some text
-      | "usize_bits" -> (
-          match entry.value with
-          | Number ((32 | 64) as bits) -> usize_bits := bits
-          | _ -> malformed entry.line "`usize_bits` is 32 or 64.")
       | "version" ->
           malformed entry.line
             "A manifest holds no version. The registry gives a package its version when it is \
              published. Delete this line."
       | key ->
-          malformed entry.line
-            "`[package]` has no key `%s`. Its keys are `name`, `truss`, and `usize_bits`." key)
+          malformed entry.line "`[package]` has no key `%s`. Its keys are `name` and `truss`." key)
     (entries "package");
   let time_limit = ref None in
   List.iter
@@ -311,13 +299,7 @@ let parse text =
   let package =
     match (table "package", !name) with
     | Some _, Some name ->
-        Some
-          {
-            name;
-            truss = !truss;
-            dependencies = List.map dependency (entries "dependencies");
-            usize_bits = !usize_bits;
-          }
+        Some { name; truss = !truss; dependencies = List.map dependency (entries "dependencies") }
     | Some table, None ->
         malformed table.line "`[package]` names its package, with `name = \"...\"` under it."
     | None, _ -> (

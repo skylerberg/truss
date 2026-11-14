@@ -328,22 +328,6 @@ let () =
         not
           (List.exists (fun problem -> contains problem "truss.toml:2") (Database.problems session))
       then fail "problems: [%s]" (String.concat "; " (Database.problems session)));
-  test "a package cannot depend on one that runs only on 64-bit targets unless it does too"
-    (fun () ->
-      fresh_store ();
-      let root = fresh "project" in
-      write root "truss.toml" project;
-      write root "wide/truss.toml" (manifest "wide" ^ "usize_bits = 64\n");
-      write root "wide/main.truss" program;
-      write root "app/truss.toml" (manifest "app" ^ "\n[dependencies]\nwide = []\n");
-      write root "app/main.truss" program;
-      let session, _ = session root in
-      if
-        not
-          (List.exists
-             (fun problem -> contains problem "runs only on 64-bit targets")
-             (Database.problems session))
-      then fail "problems: [%s]" (String.concat "; " (Database.problems session)));
   test "a session opened in a package's directory is about that package alone" (fun () ->
       fresh_store ();
       let root = fresh "project" in

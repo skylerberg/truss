@@ -3,19 +3,15 @@ module Names = Resolve.Names
 type lowering = { target : Memory_layout.target; checks : bool }
 
 let show_lowering lowering =
-  Printf.sprintf "%d-bit %s%s" (lowering.target.usize_bytes * 8)
+  Printf.sprintf "%d-bit %s%s"
+    (lowering.target.pointer_bytes * 8)
     (Libc.system_name lowering.target.system)
     (if lowering.checks then ", checked" else "")
 
 (* The target as part of a key: a result that depends on the target is
    keyed by all of it. *)
 let target_key (target : Memory_layout.target) =
-  Cbor.Array
-    [
-      Cbor.int target.pointer_bytes;
-      Cbor.int target.usize_bytes;
-      Cbor.Text (Libc.system_name target.system);
-    ]
+  Cbor.Array [ Cbor.int target.pointer_bytes; Cbor.Text (Libc.system_name target.system) ]
 
 type lowered_outcome =
   | Compiled of Emit_c.fragment
@@ -226,7 +222,6 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
 let decode compiler ty text : Lowered.static_value =
   let env = Lower.env compiler.context in
   let monomorphic = Lower.monomorphic compiler.context in
-  let target = Memory_layout.target env in
   let at = ref 0 in
   let take count =
     if !at + count > String.length text then bug "a value written out while compiling ends early";
@@ -242,7 +237,7 @@ let decode compiler ty text : Lowered.static_value =
     !value
   in
   let integer (kind : Memory_layout.integer) =
-    let size = Memory_layout.integer_size target kind in
+    let size = Memory_layout.integer_size kind in
     let value = unsigned (take size) in
     match kind with
     | Int8 | Int16 | Int32 | Int64 | ISize ->
@@ -340,8 +335,7 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
   in
   let paths = List.sort_uniq Path.compare (List.concat_map Emit_c.anchors units) in
   let anchors = List.filter_map (anchor compiler) paths in
-  let target = Memory_layout.target (Lower.env compiler.context) in
-  let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
+  let sources = [ ("startup", startup); ("anchors", Positions.anchors_file anchors) ] in
   let find key = Reachable.Keys.find_opt key units_by_key in
   let copied =
     match compiler.settings.build with

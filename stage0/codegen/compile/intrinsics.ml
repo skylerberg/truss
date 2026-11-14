@@ -224,7 +224,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
             panic_when (Copy (at zero)) "division by zero";
             (match integer with
             | Int8 | Int16 | Int32 | Int64 | ISize ->
-                let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+                let bits = 8 * Memory_layout.integer_size integer in
                 let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
                 let by_minus_one = local builder (Raw Bool)
                 and of_least = local builder (Raw Bool) in
@@ -287,7 +287,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           (* The least value of a signed type has no negation in the type. *)
           match integer_argument () with
           | Some ((Int8 | Int16 | Int32 | Int64 | ISize) as integer) when checks ->
-              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let bits = 8 * Memory_layout.integer_size integer in
               let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
               let of_least = local builder (Raw Bool) in
               emit builder
@@ -357,7 +357,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
              wrong value. The amount has a type of its own. *)
           (match (integer_argument (), scalar env (type_argument 1)) with
           | Some integer, Integer amount ->
-              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let bits = 8 * Memory_layout.integer_size integer in
               let constant number : Lowered.operand =
                 Constant (Integer (amount, Z.of_int number))
               in
@@ -369,12 +369,11 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           | _ -> ());
           binary (if operation = Shift_left then Shift_left else Shift_right)
       | Convert | Fits -> (
-          let target = Memory_layout.target env in
           let fits () : Lowered.rvalue =
             match (scalar env (type_argument 0), scalar env (type_argument 1)) with
             | Integer source, Integer target_integer -> (
-                let source_low, source_high = Memory_layout.integer_range target source in
-                let low, high = Memory_layout.integer_range target target_integer in
+                let source_low, source_high = Memory_layout.integer_range source in
+                let low, high = Memory_layout.integer_range target_integer in
                 let constant value = Lowered.Constant (Integer (source, value)) in
                 let tests =
                   (if Z.lt source_low low then [ (Lowered.Greater_equal, low) ] else [])
@@ -401,7 +400,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  type holds exactly. Where the first is not held exactly,
                  no float lies between it and the least value. A float
                  that is not a number passes neither test. *)
-                let low, high = Memory_layout.integer_range target target_integer in
+                let low, high = Memory_layout.integer_range target_integer in
                 let held bound =
                   match source with
                   | Float32 ->

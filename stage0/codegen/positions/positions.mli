@@ -12,4 +12,4 @@ type anchor = {
 }
 
 (* The C file defining every anchor, in the order given. *)
-val anchors_file : Memory_layout.target -> anchor list -> string
+val anchors_file : anchor list -> string

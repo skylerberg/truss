@@ -14,7 +14,7 @@ let source = Fixtures.Shared.shared_probe
 let loaded =
   lazy
     (let engine = Engine.create () in
-     Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
+     Database.load_package engine ~name:Path.standard_package ~dependencies:[]
        (Standard_library.files @ [ (probe, source) ]);
      let database = Engine.context engine in
      let text = Query.demand database Packages.source probe in
@@ -67,7 +67,7 @@ let () =
   test "Shared's operations require Tasks outside an impl, and its value must be Storable"
     (fun () ->
       let engine = Engine.create () in
-      Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
+      Database.load_package engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.files @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
       let text = Source.text (Query.demand database Packages.source checks) in

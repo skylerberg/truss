@@ -137,17 +137,10 @@ let () =
   test "a literal of a type UnsignedInteger bounds cannot be negated" (fun () ->
       one_diagnostic Fixtures.Infer.literal_of_a_type_unsignedinteger_bounds_cannot_be
         "types.negated_unsigned");
-  test "a USize literal must fit in 32 bits, so that the code holds on every target" (fun () ->
-      one_diagnostic Fixtures.Infer.usize_literal_must_fit_in_32_bits_so_that_the_code
+  test "a USize literal has 64 bits on every target" (fun () ->
+      fine Fixtures.Infer.usize_literal_has_64_bits_on_every_target;
+      one_diagnostic Fixtures.Infer.usize_literal_above_64_bits_is_out_of_range
         "types.literal_out_of_range");
-  test "a package that runs only on 64-bit targets may use 64-bit USize literals" (fun () ->
-      let engine = Engine.create ~bases:[ Lazy.force Support.standard ] () in
-      Database.load_package ~usize_bits:64 engine ~name:{ owner = None; name = "app" }
-        ~dependencies:[]
-        [ (file_of "app::main", Fixtures.Infer.package_that_runs_only_on_64_bit_targets_may_use) ];
-      match check (Engine.context engine) (file_of "app::main") with
-      | [] -> ()
-      | actual -> fail "%s" (String.concat "; " (codes actual)));
   test "a negated literal is checked after the negation" (fun () ->
       fine Fixtures.Infer.negated_literal_is_checked_after_the_negation);
   test "an integer literal where a float is expected is an error with a fix" (fun () ->

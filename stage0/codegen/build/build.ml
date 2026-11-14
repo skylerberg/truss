@@ -111,7 +111,6 @@ let objects ?progress toolchain cache settings sources =
 
 let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> []) toolchain cache
     env settings ~files ~sources ~output =
-  let target = Memory_layout.target env in
   let emitted =
     List.mapi
       (fun part_index fragments ->
@@ -134,7 +133,7 @@ let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> [
       files
   in
 
-  let runtime = ("the runtime", Startup.runtime target ~tests ~in_order) in
+  let runtime = ("the runtime", Startup.runtime ~tests ~in_order) in
   match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
   | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()

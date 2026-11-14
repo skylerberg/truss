@@ -32,7 +32,6 @@ let () =
                    capabilities = [ "NetworkClient"; "Handles"; "Clock" ];
                  };
                ];
-             usize_bits = 32;
            };
        project = false;
        time_limit = None;
@@ -63,14 +62,8 @@ let () =
       malformed_at 3 "[package]\nname = \"a\"\ntruss = \"1\"\n";
       malformed_at 3 "[package]\nname = \"a\"\ntruss = \"1.2.3\"\n";
       malformed_at 3 "[package]\nname = \"a\"\ntruss = 1\n");
-  test "a package says it runs only on 64-bit targets with usize_bits" (fun () ->
-      match Manifest.parse "[package]\nname = \"a\"\nusize_bits = 64\n" with
-      | { package = Some { usize_bits = 64; _ }; _ } -> ()
-      | _ -> fail "read differently");
-  test "usize_bits other than 32 or 64 is malformed, at its line" (fun () ->
-      malformed_at 3 "[package]\nname = \"a\"\nusize_bits = 16\n");
   test "a manifest without a name is malformed, at its [package] table" (fun () ->
-      malformed_at 2 "\n[package]\nusize_bits = 64\n");
+      malformed_at 2 "\n[package]\ntruss = \"0.1\"\n");
   test "a line that is not key = value is malformed, at its line" (fun () ->
       malformed_at 5 "[package]\nname = \"a\"\n\n[dependencies]\njson\n");
   test "a name is one lower_snake_case part or an owner and a name" (fun () ->

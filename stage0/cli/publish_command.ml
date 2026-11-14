@@ -158,7 +158,7 @@ let decide session registry (package : Path.package) =
           match Database.published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let changes, narrowed =
+              let changes =
                 Compatibility.compare ~before:(Database.context published)
                   ~after:(Database.context session) name
               in
@@ -178,13 +178,6 @@ let decide session registry (package : Path.package) =
                            ]
                        else [])))
                   (Compatibility.breaks changes)
-                @
-                if narrowed then
-                  [
-                    Printf.sprintf "`%s` ran on every target, and now says `usize_bits = 64`."
-                      (Path.show_package name);
-                  ]
-                else []
               in
               if breaks <> [] then
                 Refused

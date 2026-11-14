@@ -255,7 +255,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : instance 
   let sources =
     [
       ("main", Startup.For_testing.main_calling (Instance.symbol (key "entry")));
-      ("anchors", Positions.anchors_file target_64 anchors);
+      ("anchors", Positions.anchors_file anchors);
     ]
   in
   match

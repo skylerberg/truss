@@ -274,7 +274,7 @@ let file env build (fragments : (fragment * linkage) list) =
   let keys = List.rev context.order in
   let defined key = Keys.find key !definitions in
   let buffer = Buffer.create 4096 in
-  Buffer.add_string buffer (runtime_declarations (Memory_layout.target env));
+  Buffer.add_string buffer runtime_declarations;
   Buffer.add_string buffer
     (match build with
     | Development -> "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"

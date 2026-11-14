@@ -1,7 +1,7 @@
 (* The C that every program links with: the runtime's few functions, and
    the generated [main].
 
-   The runtime is one fixed file per target, compiled once and cached, so
+   The runtime is one fixed file, compiled once per target and cached, so
    unlike generated code it includes the system's headers: its declarations
    of signals and alternate stacks differ between systems, and parsing the
    headers costs nothing on an edit. Failures go through it: a panic, a
@@ -15,7 +15,7 @@
    neither. With [in_order], the runtime runs the branches of a fork one
    after another and has no threads, as a test program and code run while
    compiling have it. *)
-val runtime : Memory_layout.target -> tests:bool -> in_order:bool -> string
+val runtime : tests:bool -> in_order:bool -> string
 
 (* A C [main] that installs the stack-overflow handler, calls the C
    function [entry], which takes nothing and returns an [Int32], and exits

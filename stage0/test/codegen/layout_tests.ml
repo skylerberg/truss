@@ -97,9 +97,9 @@ let () =
         (For_testing.to_string (Memory_layout.block env (named "Tree") "Node")));
   test "an Array holds its elements in place" (fun () ->
       expect_string ~expected:"32/1 array(32 x 1/1 UInt8)" (describe (array uint8 32)));
-  test "USize follows the target's pointer width" (fun () ->
+  test "USize has 64 bits on a target whose pointers have 32" (fun () ->
       expect_int ~expected:24 (layout (list int64)).size;
-      expect_int ~expected:12 (layout ~target:target_32 (list int64)).size);
+      expect_int ~expected:24 (layout ~target:target_32 (list int64)).size);
   test "a variant whose fields have zero size counts as having none" (fun () ->
       expect_string ~expected:"1/1 tag(UInt8: Some None) niche . 2+254" (describe (option unit)));
   test "a sum type with one variant has no tag" (fun () ->

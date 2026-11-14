@@ -2586,14 +2586,13 @@ const t_test *t_runtime_tests;
 void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
 |}
 
-let runtime (target : Memory_layout.target) ~tests ~in_order =
+let runtime ~tests ~in_order =
   String.concat ""
     [
       (if tests then "#define T_TESTS 1\n" else "");
       (if in_order then "#define T_IN_ORDER 1\n" else "");
       headers;
-      (if target.usize_bytes = 8 then "typedef uint64_t t_usize;\ntypedef int64_t t_isize;\n"
-       else "typedef uint32_t t_usize;\ntypedef int32_t t_isize;\n");
+      "typedef uint64_t t_usize;\ntypedef int64_t t_isize;\n";
       Emit_c.anchor_struct;
       failing;
       allocation;
