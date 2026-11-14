@@ -24,8 +24,6 @@ type lowered_outcome =
 
 let rec fresh_context lowering database =
   Lower.context ~checks:lowering.checks
-    ~cursor_fields:(fun _ yielding ->
-      (Query.demand database (Lazy.force pulled) (lowering, yielding)).Lower.fields)
     ~constant:(fun _ path ->
       match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
       | Folded data -> Some data.value
@@ -33,25 +31,12 @@ let rec fresh_context lowering database =
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
     database lowering.target
 
-(* A yielding method's pulled version: its cursor's [next], its drop
-   function, and its fields. *)
-and pulled =
-  lazy
-    (Query.query ~name:"pulled" ~phase:Phases.lowering ~saved:true ~portable:true
-       ~show:(fun (lowering, yielding) ->
-         show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
-       (fun database (lowering, yielding) ->
-         Compiler_bug.while_doing ~stage:"Compile"
-           ("lowering the pulled form of " ^ Ground.to_string (Cursor yielding))
-           (fun () -> Lower.pulled (fresh_context lowering database) yielding)))
-
 (* An instance's C, a constant's data, or a capability's table. *)
 and emitted (context : Lower.context) (compiled : Emit_c.compiled) =
   Compiled (Emit_c.fragment (Lower.env context) compiled)
 
-and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
+and make (context : Lower.context) (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
-  let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
   let code instance = emitted context (Code instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
@@ -60,8 +45,6 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       match Lower.constant context path with
       | Folded data -> Folded data
       | Run ty -> Evaluate (path, ty))
-  | Drop (Cursor yielding) -> Compiled (pulled yielding).Lower.drop
-  | Cursor_next yielding -> Compiled (pulled yielding).Lower.next
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
@@ -83,7 +66,7 @@ and lowered =
        (fun database (lowering, key) ->
          Compiler_bug.while_doing ~stage:"Compile"
            ("lowering " ^ Instance.to_string key)
-           (fun () -> make (fresh_context lowering database) lowering database key)))
+           (fun () -> make (fresh_context lowering database) key)))
 
 (* Keys. A test's result is kept under the key of everything its code can
    reach, which is composed from the instances' own keys, so that an edit
@@ -92,7 +75,7 @@ and lowered =
 (* Declared when the module is initialized, not when first read: a state
    opened before a query is declared leaves out every result that read
    it. *)
-let () = ignore (Lazy.force pulled, Lazy.force lowered)
+let () = ignore (Lazy.force lowered)
 let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
 
 (* An instance's references, and the hash of its own code. A constant
@@ -819,9 +802,7 @@ module For_testing = struct
     type context = Lower.context
     type constant = Lower.constant = Folded of Lowered.data | Run of Ground.ty
 
-    let context ?checks ~cursor_fields ~constant database target =
-      Lower.context ?checks ~cursor_fields ~constant database target
-
+    let context = Lower.context
     let constant = Lower.constant
     let constant_value = Lower.For_testing.constant_value
   end

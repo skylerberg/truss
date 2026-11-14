@@ -703,14 +703,6 @@ public fn Listener.accept(mut self) -> Result[Connection, SystemError]
   Ok(Connection(handle: own accepted.handle, local: self.local, peer: accepted.peer))
 }
 
-public fn Listener.connections(mut self) yields own Result[Connection, SystemError]
-  uses Handles
-{
-  while true {
-    yield mut self.accept()
-  }
-}
-
 public opaque type LocalConnection(handle: streams::Handle)
 
 public fn LocalConnection.from_handle(handle: own streams::Handle) -> LocalConnection {
@@ -791,14 +783,6 @@ public fn LocalListener.accept(mut self) -> Result[LocalConnection, SystemError]
   uses Handles
 {
   Ok(LocalConnection(handle: Handles.accept_local(self.handle)?))
-}
-
-public fn LocalListener.connections(mut self) yields own Result[LocalConnection, SystemError]
-  uses Handles
-{
-  while true {
-    yield mut self.accept()
-  }
 }
 
 public type Datagram(length: USize, from: SocketAddress)

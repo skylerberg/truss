@@ -1,0 +1,8 @@
+fn Reader.window(self) lends Slice[Int64] {
+  self.buffer[..1]
+}
+
+fn Reader.scratch(self) lends List[Int64] {
+  let scratch: List[Int64] = [1, 2, 3]
+  scratch
+}

@@ -17,7 +17,6 @@ type target =
   | Old
   | Identical
   | Yielded
-  | Finished
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 
@@ -34,7 +33,6 @@ type specification = {
   names_result : bool;
   cost_bound : bool;
   names_yielded : bool;
-  names_finished : bool;
   elements : string list;
 }
 
@@ -42,7 +40,7 @@ type scope = {
   values : (value * string) String_map.t;
   types : target String_map.t;
   specification : specification;
-  lends_or_yields : bool;
+  lends : bool;
 }
 
 type state = {

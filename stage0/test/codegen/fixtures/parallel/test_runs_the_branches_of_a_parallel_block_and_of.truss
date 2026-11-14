@@ -7,7 +7,7 @@ test "parallel in a test" {
   }
   assert first == 111
   assert second == 118
-  parallel for cell in mut board {
+  parallel for cell in mut board.cells {
     cell = cell.wrapping_multiply(2)
   }
   assert board.cells[0] == 2

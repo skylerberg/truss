@@ -10,7 +10,6 @@ type context = {
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, Types.ty) Hashtbl.t;
   mutable parameters : Core.local list;
-  yields : bool;
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
   mutable diagnostics : Syntax.diagnostic list;
@@ -22,8 +21,6 @@ val copyable : context -> Types.ty -> bool
 val is_view : context -> Types.ty -> bool
 val holds_function : context -> Types.ty -> bool
 val stores_function : context -> Mir.callee -> int -> bool
-val yields_own : context -> Mir.callee -> bool
-val cursor_yields_own : context -> Types.ty -> bool
 val span : context -> Core.origin -> Syntax.span
 
 val report :

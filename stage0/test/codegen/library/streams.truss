@@ -111,8 +111,8 @@ test "a buffered reader gives lines, with either line end or none at the end" {
     var counted = streams::BufferedReader.new(drip("a\nbb\nccc\n", step: 2))
     var lengths: USize = 0
     var lines: USize = 0
-    for line in mut counted.lines() {
-      assert line is Ok(text) && text.length() == lines + 1
+    while mut counted.read_line() is Ok(Some(text)) {
+      assert text.length() == lines + 1
       lines += 1
       lengths += lines
     }

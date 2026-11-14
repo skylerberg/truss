@@ -1,7 +1,7 @@
 type Grid(cells: List[Int64], width: USize)
 
 fn Grid.cell(self, row: USize, column: USize) lends Int64 {
-  yield self.cells[row * self.width + column]
+  self.cells[row * self.width + column]
 }
 
 test "an index formed in a lending method" {

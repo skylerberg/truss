@@ -1,0 +1,9 @@
+fn f(chunked: mut Chunked, other: List[Int64]) -> USize {
+  var held: Slice[Int64] = other[..]
+  var total: USize = 0
+  for chunk in mut chunked {
+    total = total + held.length()
+    held = chunk[..]
+  }
+  total
+}

@@ -88,7 +88,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
 
 (* Checks one argument against its parameter's type and mode. Returns the
    mode it is passed with, which is the parameter's mode except for a field
-   of a yielded constructor that lends a place. *)
+   of a lent constructor that lends a place. *)
 and check_argument state env (value : expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
@@ -395,7 +395,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
           fields
       in
       let matched, left_out = match_arguments state value parameters arguments ~record:true in
-      (* The fields of a yielded constructor may lend places, and so may the
+      (* The fields of a lent constructor may lend places, and so may the
          fields of a constructor that is one of them. *)
       Option.iter
         (fun mode ->

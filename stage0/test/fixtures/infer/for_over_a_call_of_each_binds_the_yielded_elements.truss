@@ -1,7 +1,0 @@
-fn total(items: List[Int64]) -> Int64 {
-  var sum = 0
-  for item in items.each() {
-    sum += item
-  }
-  sum
-}

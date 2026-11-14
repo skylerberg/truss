@@ -17,8 +17,8 @@ let () =
     Fixtures.Owning.early_return_while_an_any_value_is_being_made;
   passes "an any value drops its value's owned parts, also when it is made in a loop"
     Fixtures.Owning.any_value_drops_its_values_owned_parts_also_when;
-  passes "a pulled loop left without taking its value drops the value"
-    Fixtures.Owning.pulled_loop_left_without_taking_its_value_drops;
+  passes "a loop over a cursor that is left without taking its value drops the value"
+    Fixtures.Owning.loop_over_a_cursor_left_without_taking_its_value;
   passes "a loop that uses up a list takes its elements in order"
     Fixtures.Owning.loop_that_uses_up_a_list_takes_its_elements_in;
   passes "a loop that uses up a list and is left early drops the elements it did not reach"
@@ -31,8 +31,6 @@ let () =
     Fixtures.Owning.array_moved_into_a_list_keeps_its_elements_in;
   passes "continue keeps a list a loop is over, when the list is a call's result"
     Fixtures.Owning.continue_keeps_a_list_a_loop_is_over_when_the_list;
-  passes "a loop over a yielding function that takes nothing"
-    Fixtures.Owning.loop_over_a_yielding_function_that_takes_nothing;
   passes "an own parameter left to its default is dropped once"
     Fixtures.Owning.own_parameter_left_to_its_default_is_dropped_once;
   passes "a lambda that ignores an own parameter drops it"

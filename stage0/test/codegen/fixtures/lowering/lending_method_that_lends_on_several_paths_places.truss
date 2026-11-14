@@ -1,0 +1,69 @@
+type Names(first: String, second: String, others: List[String])
+
+type Both(left: String, right: String)
+
+fn Names.both(self) lends Option[Both] {
+  if self.others.length() == 0 {
+    Some(Both(left: self.first, right: self.second))
+  } else {
+    None
+  }
+}
+
+fn Names.either(self, second: Bool) lends String {
+  if second {
+    self.second
+  } else {
+    self.first
+  }
+}
+
+fn Names.built(self, fresh: Bool) lends String {
+  if fresh {
+    "${self.first} and ${self.second}"
+  } else {
+    self.first
+  }
+}
+
+type Numbered(index: USize, value: String)
+
+fn Names.numbered(self, index: USize) lends Numbered {
+  Numbered(index: index, value: self.others[index])
+}
+
+type Slot(index: USize, name: String)
+
+fn Names.slot(mut self, index: USize) lends mut Slot {
+  Slot(index: index, name: mut self.others[index])
+}
+
+fn rename_first(names: mut Names, to: String) -> Bool {
+  if names.others.length() == 0 {
+    return false
+  }
+  mut names.slot(0).name = to.copy()
+  true
+}
+
+test "more constructors of lent places" {
+  let pair = Names(first: "${1}st", second: "${2}nd!", others: [])
+  if pair.both() is Some(both) {
+    assert both.left.length() + both.right.length() == 7
+  }
+  assert pair.either(true).length() == 4
+  assert pair.either(false).length() == 3
+  assert pair.built(true).length() == 12
+  assert pair.built(false).length() == 3
+
+  var many = Names(first: "${1}a", second: "${2}b", others: ["${3}rd", "${4}th!", "${5}th!!"])
+  assert many.both() is None
+  var total: USize = 0
+  for index in 0..many.others.length() {
+    total += many.numbered(index).index + many.numbered(index).value.length()
+  }
+  assert total == 15
+  assert rename_first(mut many, to: "${9} renamed")
+  assert many.others[0].length() == 9
+  assert many.others[1].length() == 4
+}

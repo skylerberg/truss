@@ -257,10 +257,6 @@ let rec check_expression checking scope (node : Core.expression) =
       (* Taking a function as a value lets the holder call it, so the grants
          are checked here as they are for a call. *)
       check_callee_grants checking node.origin (Function { path; type_arguments = [] })
-  | Cursor_next cursor ->
-      check_children checking scope (`Expression node);
-      require_available checking scope node.origin
-        (Impls.cursor_uses checking.state.database (Core_walk.place_type cursor))
   | Call call -> (
       check_children checking scope (`Expression node);
       check_callee_grants checking node.origin call.callee;
@@ -312,16 +308,16 @@ and check_statement checking scope (statement : Core.statement) =
       | Integer_range { start; stop; _ } ->
           check_expression checking scope start;
           check_expression checking scope stop
-      | Yielding_call call -> check_expression checking scope call
-      | Cursor { cursor; next } -> (
+      | Elements { count; element; _ } ->
+          check_expression checking scope count;
+          Core_walk.place
+            { Core_walk.ignore_all with expression = check_expression checking scope }
+            element
+      | Cursor { cursor; next } ->
           Core_walk.place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             cursor;
-          match next with
-          | Some next -> require_callee_uses checking scope statement.origin next
-          | None ->
-              require_available checking scope statement.origin
-                (Impls.cursor_uses checking.state.database (Core_walk.place_type cursor))));
+          require_callee_uses checking scope statement.origin next);
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;
       check_block checking
@@ -508,7 +504,6 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
       || inside (Types.result_type output)
   | Types.Any trait -> trait_uses trait
   | Types.Parameter parameter -> List.exists trait_uses (bounds parameter)
-  | Types.Cursor { arguments = type_arguments; _ } -> arguments type_arguments
   | Types.Named { path; arguments = type_arguments } -> (
       arguments type_arguments
       || (not (List.exists (Path.equal path) seen))

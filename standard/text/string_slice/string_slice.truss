@@ -187,39 +187,84 @@ public fn StringSlice.is_boundary(self, offset: USize) -> Bool
   offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80)
 }
 
-public fn StringSlice.characters(self) yields Character
-  ensures yielded.length() <= self.length()
-  cost time O(self.length())
+public type Characters(text: StringSlice, offset: USize)
+  invariant offset <= text.length()
+
+public fn Characters.remaining(self) -> USize
+  ensures result == self.text.length() - self.offset
+  cost time O(1)
+  cost allocations == 0
 {
-  var offset: USize = 0
-  while offset < self.length()
-    invariant offset <= self.length()
-    invariant yielded.length() <= offset
-    decreases self.length() - offset
-    cost time O(offset)
+  self.text.length() - self.offset
+}
+
+impl Cursor for Characters {
+  type Element = Character
+
+  fn next(mut self) -> Option[Character]
+    ensures (result is Some(_)) == (old(self.remaining()) > 0)
+    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+    ensures (result is None) ==> self.remaining() == old(self.remaining())
+    cost time O(1)
+    cost allocations == 0
   {
-    let decoded = self.decode(offset)
-    yield decoded.character
-    offset += decoded.length
+    if self.offset < self.text.length() {
+      let decoded = self.text.decode(self.offset)
+      self.offset += decoded.length
+      Some(decoded.character)
+    } else {
+      None
+    }
   }
 }
 
-public fn StringSlice.characters_with_offsets(self) yields core::Indexed[Character]
-  ensures result.index < self.length()
-  ensures yielded.length() <= self.length()
-  cost time O(self.length())
+public fn StringSlice.characters(self) -> Characters
+  ensures result.remaining() == self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  var offset: USize = 0
-  while offset < self.length()
-    invariant offset <= self.length()
-    invariant yielded.length() <= offset
-    decreases self.length() - offset
-    cost time O(offset)
+  Characters(text: self, offset: 0)
+}
+
+public type CharactersWithOffsets(text: StringSlice, offset: USize)
+  invariant offset <= text.length()
+
+public fn CharactersWithOffsets.remaining(self) -> USize
+  ensures result == self.text.length() - self.offset
+  cost time O(1)
+  cost allocations == 0
+{
+  self.text.length() - self.offset
+}
+
+impl Cursor for CharactersWithOffsets {
+  type Element = core::Indexed[Character]
+
+  fn next(mut self) -> Option[core::Indexed[Character]]
+    ensures (result is Some(_)) == (old(self.remaining()) > 0)
+    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+    ensures (result is None) ==> self.remaining() == old(self.remaining())
+    ensures !(result is Some(found) && found.index >= self.text.length())
+    cost time O(1)
+    cost allocations == 0
   {
-    let decoded = self.decode(offset)
-    yield core::Indexed(index: offset, element: decoded.character)
-    offset += decoded.length
+    if self.offset < self.text.length() {
+      let decoded = self.text.decode(self.offset)
+      let index = self.offset
+      self.offset += decoded.length
+      Some(core::Indexed(index: index, element: decoded.character))
+    } else {
+      None
+    }
   }
+}
+
+public fn StringSlice.characters_with_offsets(self) -> CharactersWithOffsets
+  ensures result.remaining() == self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  CharactersWithOffsets(text: self, offset: 0)
 }
 
 public fn StringSlice.character_count(self) -> USize
@@ -258,57 +303,61 @@ public fn StringSlice.last_character(self) -> Option[Character]
   }
 }
 
-public fn StringSlice.graphemes(self) yields StringSlice
-  ensures yielded.length() <= self.length()
+public fn StringSlice.graphemes(self) -> List[StringSlice]
+  ensures result.length() <= self.length()
   cost time O(self.length())
 {
+  var parts: List[StringSlice] = []
   var start: USize = 0
   var offset: USize = 0
   var state = grapheme_breaks::State.start()
   while offset < self.length()
     invariant start <= offset
     invariant offset <= self.length()
-    invariant yielded.length() <= start
+    invariant parts.length() <= start
     decreases self.length() - offset
     cost time O(offset)
   {
     let decoded = self.decode(offset)
     let code = decoded.character.code()
     if offset > start && !state.joins(code) {
-      yield self.part(start, to: offset)
+      mut parts.push(self.part(start, to: offset))
       start = offset
     }
     state = state.after(code)
     offset += decoded.length
   }
   if start < self.length() {
-    yield self.part(start, to: self.length())
+    mut parts.push(self.part(start, to: self.length()))
   }
+  parts
 }
 
-public fn StringSlice.lines(self) yields StringSlice
-  ensures yielded.length() <= self.length() + 1
+public fn StringSlice.lines(self) -> List[StringSlice]
+  ensures result.length() <= self.length() + 1
   cost time O(self.length())
 {
+  var parts: List[StringSlice] = []
   var start: USize = 0
   var index: USize = 0
   while index < self.length()
     invariant start <= index
     invariant index <= self.length()
-    invariant yielded.length() <= index
+    invariant parts.length() <= index
     decreases self.length() - index
     cost time O(index)
   {
     if self.byte(index) == 10 {
       let end = if index > start && self.byte(index - 1) == 13 { index - 1 } else { index }
-      yield self.part(start, to: end)
+      mut parts.push(self.part(start, to: end))
       start = index + 1
     }
     index += 1
   }
   if start < self.length() {
-    yield self.part(start, to: self.length())
+    mut parts.push(self.part(start, to: self.length()))
   }
+  parts
 }
 
 public fn StringSlice.substring(self, from: USize, to: USize) -> StringSlice
@@ -689,11 +738,12 @@ public fn StringSlice.trim_matching(self, predicate: (fn(Character) -> Bool cost
   self.part(start, to: self.trailing_matching_start(predicate, from: start))
 }
 
-public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
+public fn StringSlice.split(self, separator: StringSlice) -> List[StringSlice]
   requires separator.length() > 0
-  ensures yielded.length() <= self.length() + 1
+  ensures result.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
+  var parts: List[StringSlice] = []
   let table = failure_table(separator)
   var start: USize = 0
   var matched: USize = 0
@@ -702,7 +752,7 @@ public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
     invariant index <= self.length()
     invariant matched < separator.length()
     invariant start + matched <= index
-    invariant yielded.length() <= index
+    invariant parts.length() <= index
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -711,7 +761,7 @@ public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
     if matched == separator.length() {
       let offset = index - matched
       if self.is_boundary(offset) {
-        yield self.part(start, to: offset)
+        mut parts.push(self.part(start, to: offset))
         start = index
         matched = 0
       } else {
@@ -719,16 +769,18 @@ public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
       }
     }
   }
-  yield self.part(start, to: self.length())
+  mut parts.push(self.part(start, to: self.length()))
+  parts
 }
 
-public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) yields StringSlice
+public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) -> List[StringSlice]
   requires separator.length() > 0
   requires parts > 0
-  ensures yielded.length() <= parts
-  ensures yielded.length() <= self.length() + 1
+  ensures result.length() <= parts
+  ensures result.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
+  var pieces: List[StringSlice] = []
   let table = failure_table(separator)
   var start: USize = 0
   var matched: USize = 0
@@ -738,7 +790,7 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) 
     invariant index <= self.length()
     invariant matched < separator.length()
     invariant start + matched <= index
-    invariant yielded.length() == count
+    invariant pieces.length() == count
     invariant count < parts
     invariant count <= index
     decreases self.length() - index
@@ -749,7 +801,7 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) 
     if matched == separator.length() {
       let offset = index - matched
       if self.is_boundary(offset) {
-        yield self.part(start, to: offset)
+        mut pieces.push(self.part(start, to: offset))
         count += 1
         start = index
         matched = 0
@@ -758,50 +810,54 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) 
       }
     }
   }
-  yield self.part(start, to: self.length())
+  mut pieces.push(self.part(start, to: self.length()))
+  pieces
 }
 
-public fn StringSlice.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) yields StringSlice
-  ensures yielded.length() <= self.length() + 1
+public fn StringSlice.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> List[StringSlice]
+  ensures result.length() <= self.length() + 1
   cost time O(self.length() * time(predicate))
 {
+  var parts: List[StringSlice] = []
   var start: USize = 0
   var offset: USize = 0
   while offset < self.length()
     invariant start <= offset
     invariant offset <= self.length()
-    invariant yielded.length() <= offset
+    invariant parts.length() <= offset
     decreases self.length() - offset
     cost time O(offset * time(predicate))
   {
     let decoded = self.decode(offset)
     if predicate(decoded.character) {
-      yield self.part(start, to: offset)
+      mut parts.push(self.part(start, to: offset))
       start = offset + decoded.length
     }
     offset += decoded.length
   }
-  yield self.part(start, to: self.length())
+  mut parts.push(self.part(start, to: self.length()))
+  parts
 }
 
-public fn StringSlice.split_whitespace(self) yields StringSlice
-  ensures yielded.length() <= self.length() + 1
+public fn StringSlice.split_whitespace(self) -> List[StringSlice]
+  ensures result.length() <= self.length() + 1
   cost time O(self.length())
 {
+  var parts: List[StringSlice] = []
   var start: USize = 0
   var inside = false
   var offset: USize = 0
   while offset < self.length()
     invariant start <= offset
     invariant offset <= self.length()
-    invariant yielded.length() <= offset
+    invariant parts.length() <= offset
     decreases self.length() - offset
     cost time O(offset)
   {
     let decoded = self.decode(offset)
     if decoded.character.is_whitespace() {
       if inside {
-        yield self.part(start, to: offset)
+        mut parts.push(self.part(start, to: offset))
         inside = false
       }
     } else if !inside {
@@ -811,8 +867,9 @@ public fn StringSlice.split_whitespace(self) yields StringSlice
     offset += decoded.length
   }
   if inside {
-    yield self.part(start, to: self.length())
+    mut parts.push(self.part(start, to: self.length()))
   }
+  parts
 }
 
 public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]

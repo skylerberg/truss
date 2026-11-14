@@ -48,8 +48,9 @@ type action =
   | Assign of Place.t
   | Bind of Core.local list  (** A pattern binds these locals to new values. *)
   | Yield_point of { mode : Types.mode; lent : Place.t option list; views : view list }
-      (** A [yield]. [lent] is the places that the yield lends, where [None] is a place that the
-          check does not track. [views] is the views of the yielded value, if it has a view type. *)
+      (** Where a lending method lends its part. [lent] is the places that the part lends, where
+          [None] is a place that the check does not track. [views] is the views of the part, if it
+          has a view type. *)
   | Bind_views of { locals : Core.local list; views : view list }
       (** A pattern binds [locals] to a value that has these views. *)
   | Store of { place : Place.t; views : view list; overwrites : bool }
@@ -77,7 +78,8 @@ type action =
     }
       (** The places that one call borrows, in argument order, to be checked for aliasing. [views]
           lists each argument of a view type: its position, its views, and its origin. If [yielded],
-          the places are those that a yielded constructor lends, and [views] is empty. *)
+          the places are those that a constructor lends where a lending method lends it, and [views]
+          is empty. *)
 
 (* A position in a block: one of its statements, then its terminator. *)
 type position = { block : Mir.block; index : int }
@@ -98,7 +100,7 @@ type held = {
           [Dead]: not a string literal, a lambda, a value read out of a named place, or a part that
           a loop's callee lends. *)
   alias : Mir.place option;
-  part : bool;  (** Whether it is the part a loop over a yielding call is given. *)
+  part : bool;  (** Whether it is the element that a loop over a collection is lent. *)
 }
 
 let nothing =
@@ -130,6 +132,9 @@ type builder = {
           bound. A binding still live where its part ends would outlive the loan. *)
   loop_entries : (Mir.block, int) Hashtbl.t;
       (** For the first block of a loop's body, the first position after the loop's loan starts. *)
+  mutable loop_elements : Mir.local list;
+      (** The [Lent] locals of the elements that the body's loops over collections lend to their
+          iterations. *)
   mutable position : position;  (** The position being written *)
   mutable written : step list;  (** Its actions so far, most recent first *)
 }
@@ -495,21 +500,23 @@ let rvalue builder (value : Mir.rvalue) : held =
 let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin ~is_var
     =
   let type_ = (local_info builder local).type_ in
-  let holds_views =
-    is_view builder.context type_ || match type_ with Types.Cursor _ -> true | _ -> false
-  in
+  let holds_views = is_view builder.context type_ in
   let result = rvalue builder value in
+  let is_loop_part (place : Mir.place) =
+    match place.root with Local part -> (held builder part).part | Constant _ -> false
+  in
   (match value with
   | Operand
       (Borrow { place = { root = Local part; _ } as place; type_ = part_type; origin = at; _ })
     when (not is_var) && is_lent_part builder place
+         && (not (is_loop_part place))
          && ((not (plain builder.context part_type)) || is_view builder.context part_type) ->
       builder.keeps_lent <- (local, part, part_type, at) :: builder.keeps_lent
   | _ -> ());
   let views =
     match value with
     | Operand (Borrow { place; type_ = part_type; _ })
-      when holds_views || is_temporary builder place
+      when holds_views || is_temporary builder place || is_loop_part place
            || (Option.is_some (tracked builder place) && not (plain builder.context part_type)) ->
         views_of_borrow builder place part_type
     | Operand (Borrow _) -> []
@@ -676,21 +683,33 @@ let statement builder (statement : Mir.statement) =
       call builder called origin;
       hold builder destination (call_result builder called)
   | Lend { part; call = called } -> (
+      let is_storage type_ =
+        Types.is_well_known List type_ || Types.is_well_known Slice type_
+        || Types.is_builtin Array type_
+      in
+      let is_loop_element = List.mem part builder.loop_elements in
+      let element_of collection collection_type =
+        let collection_place = tracked builder collection in
+        Some
+          ( Option.map
+              (fun (place : Place.t) ->
+                { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
+              collection_place,
+            (collection_place, collection_type) )
+      in
       let element =
         match (called.callee, called.arguments) with
         | ( Trait_method { trait; name = "at"; self_type; _ },
             Passed { value = Borrow { place = collection; type_ = collection_type; _ }; _ } :: _ )
-          when Well_known.is Index trait.trait
-               && (Types.is_well_known List self_type
-                  || Types.is_well_known Slice self_type
-                  || Types.is_builtin Array self_type) ->
-            let collection_place = tracked builder collection in
-            Some
-              ( Option.map
-                  (fun (place : Place.t) ->
-                    { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
-                  collection_place,
-                (collection_place, collection_type) )
+          when Well_known.is Index trait.trait && is_storage self_type ->
+            element_of collection collection_type
+        (* A loop over a [List], a [Slice], or an [Array] lends each iteration
+           the element at its position, as an index does. *)
+        | ( ( Trait_method { name = "element"; _ }
+            | Function { path = Method { name = "element"; _ }; _ } ),
+            Passed { value = Borrow { place = collection; type_ = collection_type; _ }; _ } :: _ )
+          when is_loop_element && is_storage collection_type ->
+            element_of collection collection_type
         | _ -> None
       in
       match element with
@@ -706,7 +725,11 @@ let statement builder (statement : Mir.statement) =
       | None ->
           read_uses builder uses;
           call builder called origin;
-          hold builder { Mir.root = Local part; projections = [] } (call_result builder called))
+          (* The element that a loop lends an iteration views what the
+             collection does. *)
+          hold builder
+            { Mir.root = Local part; projections = [] }
+            { (call_result builder called) with part = is_loop_element })
   | Slice { destination; base; call = called } ->
       (* The slice's base is the call's first argument, which reads it. *)
       read_uses builder ~skip:(fun use -> use.operand = None) uses;
@@ -735,10 +758,6 @@ let statement builder (statement : Mir.statement) =
         | None -> views_of_borrow builder base (Option.value ~default:Types.unit base_type)
       in
       hold builder destination { nothing with views; slice = elements }
-  | Pull { destination; cursor } ->
-      (* A pull changes the cursor. *)
-      Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
-      hold builder destination { nothing with views = views_of_copy builder cursor }
   | Assert _ | Echo _ -> read_uses builder uses
   | Provide { provided; _ } ->
       read_uses builder uses;
@@ -758,20 +777,15 @@ let statement builder (statement : Mir.statement) =
   | Loan_end loans -> emit_ builder (End_loans loans) origin
   | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
 
-(* A pull of a loop's next part resumes what the loop iterates over, which
-   may change it: a cursor, or a receiver borrowed [mut]. A pull happens
-   before the first iteration and at the end of each, whether or not
-   another follows, so a view kept from one iteration is in use where the
-   pull after it changes its original. *)
+(* A pull of a cursor calls its [next], which may change the cursor. A pull
+   happens before the first iteration and at the end of each, whether or
+   not another follows, so a view of the cursor kept from one iteration is
+   in use where the pull after it changes the cursor. *)
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with
   | Pull { cursor; _ } ->
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor)
-  | Yielding { arguments = Passed { mode = Mut; value = Borrow _ as receiver; _ } :: _; _ } ->
-      List.iter
-        (fun place -> emit_ builder (Mutate place) origin)
-        (operand_borrows builder receiver)
-  | Yielding _ | Range _ -> ()
+  | Range _ -> ()
 
 let terminator builder ~returns (basic : Mir.basic_block) =
   let origin = basic.terminator_origin in
@@ -796,27 +810,12 @@ let terminator builder ~returns (basic : Mir.basic_block) =
   | For { iteration; part; _ } -> (
       let part_place = { Mir.root = Local part; projections = [] } in
       match iteration with
-      | Yielding called ->
-          read_uses builder uses;
-          call builder called origin;
-          pull builder iteration origin;
-          (* A part that the callee lends is not a new value. *)
-          hold builder part_place
-            {
-              (call_result builder called) with
-              part = true;
-              fresh = yields_own builder.context called.callee;
-            }
       | Range _ -> read_uses builder uses
       | Pull { cursor; _ } ->
           pull builder iteration origin;
-          let fresh =
-            match cursor with
-            | { root = Local local; projections = [] } ->
-                cursor_yields_own builder.context (local_info builder local).type_
-            | _ -> false
-          in
-          hold builder part_place { nothing with views = views_of_copy builder cursor; fresh })
+          (* The [next] of a cursor returns each value owned. *)
+          hold builder part_place
+            { nothing with views = views_of_copy builder cursor; fresh = true })
   | Yield { mode; part; _ } ->
       (* A constructor built where it is yielded lends each place among its
          leaves, and its other leaves are values. A temporary yielded is
@@ -904,6 +903,12 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
   builder.aliases <- [];
   builder.binding <- [];
   Hashtbl.reset builder.loop_entries;
+  builder.loop_elements <-
+    Array.to_list body.blocks
+    |> List.filter_map (fun (basic : Mir.basic_block) ->
+        match basic.terminator with
+        | For { lent = Some { element; _ }; _ } -> Some element
+        | _ -> None);
   let shape =
     Array.map (fun (basic : Mir.basic_block) -> List.length basic.statements + 1) body.blocks
   in
@@ -1209,14 +1214,6 @@ let loan_message context (loan : loan) ~viewed (place : Place.t) ~verb =
       Printf.sprintf "`%s` cannot %s while %s borrows it%s." (show context place) verb lender
         through
 
-(* Why a task that starts at one of a method's [yield]s cannot keep the
-   yielded value after the method resumes. *)
-type task_hazard =
-  | Yields_mut  (** The method yields [mut] borrows. *)
-  | Borrows of string
-      (** A yielded value borrows or views this place, which the method can mutate or drop when it
-          resumes: a local, or a place inside a [mut] or [own] parameter. *)
-
 (* Reports a view that would dangle once the function returns: one of a
    lambda's captured variables, or of a place the function drops. [doing]
    says what the code does with the value, and [fix] what to do instead.
@@ -1259,10 +1256,8 @@ let surely_overlap context first second =
       false
   | Disjoint -> false
 
-(* Reports the errors of one body's loans and views. Returns the first
-   [task_hazard] of its [yield]s, if it has one. *)
-let check_body context (actions : actions) moves : task_hazard option =
-  let task_hazard = ref None in
+(* Reports the errors of one body's loans and views. *)
+let check_body context (actions : actions) moves =
   let states = forward context actions in
   let live = Moves.live moves actions.body ~drops:false in
   let mir_local = Hashtbl.create 16 in
@@ -1631,43 +1626,13 @@ let check_body context (actions : actions) moves : task_hazard option =
                         through."
                        (show context slice) (show context viewed.place) (show context slice))
               | None -> ()))
-      | Yield_point { mode; lent; views } ->
-          (* A task can keep a borrow or a view only of a place that the
-             method cannot mutate or drop: a place inside a read-only
-             parameter, or a constant. *)
-          (if !task_hazard = None then
-             let safe (view : view) =
-               match view.place.root with
-               | Constant _ -> true
-               | Temporary _ | Environment -> false
-               | Local local ->
-                   (local = Self || List.mem local context.parameters)
-                   && kind context view.place.root = Borrowed
-             in
-             let borrowed =
-               List.concat_map
-                 (function
-                   | Some place -> resolve context here.views [ { place; copied_out = false } ]
-                   | None -> [])
-                 lent
-             in
-             task_hazard :=
-               if mode = Mut then Some Yields_mut
-               else
-                 match
-                   List.find_opt
-                     (fun view -> not (safe view))
-                     (borrowed @ resolve context here.views views)
-                 with
-                 | Some view -> Some (Borrows (show context view.place))
-                 | None when List.mem None lent -> Some (Borrows "a part that a lending call lends")
-                 | None -> None);
-          (* The caller may store a yielded view, so a method yields a view
-             only of its parameters. *)
+      | Yield_point { views; _ } ->
+          (* The caller may store a lent view, so a method lends a view only
+             of its parameters. *)
           ignore
             (dangles context at
                ~views:(resolve context here.views views)
-               ~doing:"yields" ~fix:"A method yields a view only of its parameters.")
+               ~doing:"lends" ~fix:"A method lends a view only of its parameters.")
       | Bind _ | Bind_views _ | Start_loan _ | End_loans _ -> ());
   (* The places that a range of positions mutates, and the places that it
      uses. A use of a view uses the places that it views, and a write
@@ -1745,13 +1710,11 @@ let check_body context (actions : actions) moves : task_hazard option =
                   mutate only its own element and its own locals."
                  keyword))
         (fst (effects body)))
-    actions.fork_join_loops;
-  !task_hazard
+    actions.fork_join_loops
 
 (* Checks the loans and views of a definition's body, then of each of its
    lambdas', with [moves], the move analysis of each body. [returns] says
-   whether the definition's body returns to a caller. Only the definition's
-   own body yields, so the task hazard is its. *)
+   whether the definition's body returns to a caller. *)
 let check context ~(moves : Mir.body -> Moves.t) ~returns (mir : Mir.t) =
   let builder =
     {
@@ -1766,11 +1729,12 @@ let check context ~(moves : Mir.body -> Moves.t) ~returns (mir : Mir.t) =
       storage_lend = false;
       keeps_lent = [];
       loop_entries = Hashtbl.create 4;
+      loop_elements = [];
       position = { block = 0; index = 0 };
       written = [];
     }
   in
-  let hazard = check_body context (of_body builder mir.body ~returns) (moves mir.body) in
+  check_body context (of_body builder mir.body ~returns) (moves mir.body);
   Array.iter
     (fun (lambda : Mir.body) ->
       builder.moves <- moves lambda;
@@ -1792,6 +1756,5 @@ let check context ~(moves : Mir.body -> Moves.t) ~returns (mir : Mir.t) =
             | _ -> None)
           (List.init (Array.length lambda.locals) Fun.id);
       Hashtbl.reset builder.held;
-      ignore (check_body context (of_body builder lambda ~returns:false) (moves lambda)))
-    mir.lambdas;
-  hazard
+      check_body context (of_body builder lambda ~returns:false) (moves lambda))
+    mir.lambdas

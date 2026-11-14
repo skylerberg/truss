@@ -2,7 +2,7 @@ type Holder(id: Int64)
 
 fn Holder.label(self) lends String {
   let text = "label ${self.id}"
-  yield text
+  text
 }
 
 test "lent" {

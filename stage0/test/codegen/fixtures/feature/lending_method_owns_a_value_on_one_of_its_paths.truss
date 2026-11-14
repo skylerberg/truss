@@ -1,0 +1,24 @@
+type Pair(first: String, second: String)
+
+fn Pair.chosen(self, pick: Bool) lends String {
+  if pick {
+    let label = "picked ${self.first}"
+    let _ = label.length()
+    self.first
+  } else {
+    self.second
+  }
+}
+
+test "lent on either path" {
+  let pair = Pair(first: "one", second: "two")
+  assert pair.chosen(true) == "one"
+  assert pair.chosen(false) == "two"
+  var seen = 0
+  for pick in [true, false, true] {
+    if pair.chosen(pick).length() == 3 {
+      seen += 1
+    }
+  }
+  assert seen == 3
+}

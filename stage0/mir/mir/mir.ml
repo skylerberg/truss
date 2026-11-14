@@ -125,8 +125,6 @@ and statement_kind =
       (** A call of [slice_range], whose result views [base]. *)
   | Template of { destination : place; literals : string list; call : call }
       (** A tagged string: the call of the tag's [from_template], with the literal texts. *)
-  | Pull of { destination : place; cursor : place }
-      (** The next value of the built-in cursor of a yielding method, an [Option]. *)
   | Live of local list  (** These locals start to hold values here. *)
   | Dead of local list  (** These locals hold nothing from here on. *)
   | Assert of { condition : operand; bit_vector : Core.expression option }
@@ -157,13 +155,11 @@ type loop = {
 
 (** What a [for] loop iterates over. *)
 type iteration =
-  | Yielding of call  (** The parts a call of a yielding method yields. *)
   | Range of { start : operand; stop : operand; inclusive : bool }
       (** The integers or characters from [start] to [stop], each once. A range of [Character] skips
           the surrogates. *)
-  | Pull of { cursor : place; next : callee option }
-      (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
-          [next] is [None], or else the cursor type's [Cursor.next]. *)
+  | Pull of { cursor : place; next : callee }
+      (** The values a cursor gives until it has none, by its type's [Cursor.next]. *)
 
 type early_exit = {
   resume : block;  (** Where the code after the group goes on, where this exit won *)
@@ -178,6 +174,17 @@ type branch = {
 }
 (** A branch of a [parallel] or [concurrent] block. *)
 
+type lent_element = {
+  element : local;  (** The [Lent] local of the element. *)
+  count : Core.expression;
+      (** The call of the collection's [count], which the prover reads: a loop that changes its
+          elements leaves their number as it was. *)
+  call : Core.expression;
+      (** The call of the collection's [element] at the loop's position, which the prover reads: a
+          loop that reads its elements was lent the values of this call at the positions before. *)
+}
+(** The element that an iteration of a loop over a collection is lent. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block; is_if_condition : bool }
@@ -187,6 +194,9 @@ type terminator =
   | For of {
       iteration : iteration;
       part : local;
+      lent : lent_element option;
+          (** In a loop over the elements of a collection, the element that each iteration is lent.
+              [part] is then the element's position. *)
       body : block;
       blocks : block list;  (** Every block of the body, [body] first, nested loops' included. *)
       after : block;
@@ -252,18 +262,7 @@ type body = {
   blocks : basic_block array;  (** The entry is block 0. *)
 }
 
-and t = { body : body; lambdas : body array; yielding : yielding }
-
-and yielding = {
-  by_position : bool;
-  through : Path.t list;
-      (** The yielding functions it delegates to: those a [for] loop iterates over where the loop
-          body yields. *)
-  yields_places : bool;
-      (** A [yield] lends a place that outlives the method's frame, such as [self[index]], rather
-          than a temporary. *)
-}
-(** Facts of a body about its [yield]s, which a caller of a yielding method reads. *)
+and t = { body : body; lambdas : body array }
 
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
@@ -349,9 +348,6 @@ type builder = {
   resume_ends : (block, (scope * int list) list) Hashtbl.t;
       (** For the block where an early exit goes on once a group of tasks has ended, the scopes
           between that group and the next one out, which end there *)
-  mutable yield_count : int;  (** The [yield]s built so far. *)
-  mutable through : Path.t list;  (** The yielding functions a loop that yields iterates over. *)
-  mutable yields_places : bool;  (** Whether a [yield] lends a place that outlives the body. *)
   mutable if_conditions : Core.origin list;  (** The conditions of the [if]s built so far. *)
 }
 
@@ -374,9 +370,6 @@ let create ~lambdas =
     tasks = [];
     groups = Hashtbl.create 1;
     resume_ends = Hashtbl.create 1;
-    yield_count = 0;
-    through = [];
-    yields_places = false;
     if_conditions = [];
   }
 
@@ -586,16 +579,6 @@ let exit_depth b (exit : task_exit) =
   | (Exit_to _ | Exit_iteration _), loop :: _ -> Some loop.depth
   | _, [] -> None
 
-(* A place a [yield] lends that outlives the method's frame: a local, a
-   constant, or an element of a storage, rather than a temporary or a part
-   that a call lends. *)
-let rec outlives_body (place : Core.place) =
-  match place with
-  | Local _ | Constant _ -> true
-  | Field { base; _ } -> outlives_body base
-  | Lent index -> Option.is_some (Core_walk.storage_index index)
-  | Temporary _ -> false
-
 (* The temporaries that a [let] extends to the end of its bindings' scope,
    by the id of their expression, as Rust and C++ do: the base of a slice
    that the value is, through fields and nested slices, and the same in the
@@ -715,11 +698,6 @@ let rec expression b (node : Core.expression) : operand option =
           let* inner = expression b inner in
           hold (Not inner)
       | And _ | Or _ | Implies _ | Matches _ -> truth b node
-      | Cursor_next cursor ->
-          let* cursor = place b cursor in
-          let local = temporary b node.type_ origin in
-          emit b (Pull { destination = at local; cursor }) origin;
-          Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
       | Convert { conversion; value } ->
           let* value = expression b value in
           hold (Convert { conversion; value })
@@ -855,18 +833,13 @@ let rec expression b (node : Core.expression) : operand option =
               range_loop b ~origin ~pattern ~start ~stop ~inclusive
                 ~loop:{ (no_clauses origin) with formula = Some node }
                 ~each)
-      | Quantified
-          {
-            quantifier;
-            binder = Over_each { pattern; call = { kind = Call called; _ } as call };
-            body;
-          } ->
+      | Quantified { quantifier; binder = Over_elements { pattern; elements }; body } ->
           quantifier_loop b node quantifier pattern body (fun ~each ->
-              each_loop b ~origin ~pattern ~called ~node:call.id ~call_origin:call.origin
+              elements_loop b ~origin ~pattern ~elements
                 ~loop:{ (no_clauses origin) with formula = Some node }
                 ~each)
       | Collection_literal { construction = Specification_only; _ }
-      | Map_literal _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _
+      | Map_literal _ | Result | Old _ | Quantified _ | Yielded | Identical _
       | Specification_function _ | Method_time _ ->
           bug "a specification's expression in code that runs")
 
@@ -944,7 +917,10 @@ and construct_fields b fields =
          (fun (_, (field : Core.operand)) ->
            ( (fun () ->
                match field with
-               | Place _ -> bug "a constructor field that is a place, outside a yield"
+               | Place _ ->
+                   bug
+                     "a constructor field that is a place, in a construct that no lending method \
+                      lends"
                | Value value -> expression b value),
              operand_type field,
              operand_origin field ))
@@ -1027,23 +1003,7 @@ and place b (found : Core.place) : place option =
       | Field { base; field; _ } ->
           let* base = place b base in
           Some (project base (Field field))
-      | Lent ({ kind = Call called; _ } as lending) -> (
-          let* call = call_of b called ~node:lending.id ~origin:lending.origin in
-          match called.lends with
-          | Some mode ->
-              let part = new_local b (Lent mode) lending.type_ lending.origin in
-              add_temporary b part;
-              emit b (Lend { part; call }) lending.origin;
-              (match call.arguments with
-              | Passed { mode; value = Borrow _ as receiver; _ } :: _ ->
-                  ignore
-                    (start_loan b receiver
-                       (if mode = Mut then Mut else Read)
-                       Rest_of_statement lending.origin)
-              | _ -> ());
-              Some (at part)
-          | None -> bug "a lent place whose call does not lend")
-      | Lent _ -> bug "a lent place that is not a call"
+      | Lent lending -> lent b lending ~duration:Rest_of_statement
       | Temporary written ->
           let* value = expression b written in
           let local = new_local b Temporary written.type_ written.origin in
@@ -1053,6 +1013,23 @@ and place b (found : Core.place) : place option =
           | _ -> add_temporary b local);
           assign b (at local) (Operand value) written.origin;
           Some (at local))
+
+(* The part that a lending call lends, which the innermost scope ends. The
+   receiver stays lent for as long. *)
+and lent b (lending : Core.expression) ~duration : place option =
+  match lending.kind with
+  | Call ({ lends = Some mode; _ } as called) ->
+      let* call = call_of b called ~node:lending.id ~origin:lending.origin in
+      let part = new_local b (Lent mode) lending.type_ lending.origin in
+      add_temporary b part;
+      emit b (Lend { part; call }) lending.origin;
+      (match call.arguments with
+      | Passed { mode; value = Borrow _ as receiver; _ } :: _ ->
+          ignore (start_loan b receiver (if mode = Mut then Mut else Read) duration lending.origin)
+      | _ -> ());
+      Some (at part)
+  | Call _ -> bug "a lent place whose call does not lend"
+  | _ -> bug "a lent place that is not a call"
 
 and callee_of b (callee : Core.callee) : callee option =
   Core_walk.traverse_indirect (operand b Read) callee
@@ -1644,10 +1621,9 @@ and statement b (node : Core.statement) =
           | Integer_range { start; stop; inclusive } ->
               range_loop b ~origin ~pattern ~start ~stop ~inclusive ~loop ~each:(fun bind_part ->
                   each ~bind_part)
-          | Yielding_call ({ kind = Call called; _ } as call) ->
-              each_loop b ~origin ~pattern ~called ~node:call.id ~call_origin:call.origin ~loop
-                ~each:(fun bind_part -> each ~bind_part)
-          | Yielding_call _ -> bug "a loop over an expression that is not a call"
+          | Elements elements ->
+              elements_loop b ~origin ~pattern ~elements ~loop ~each:(fun bind_part ->
+                  each ~bind_part)
           | Cursor { cursor; next } ->
               cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each:(fun bind_part ->
                   each ~bind_part))
@@ -1726,9 +1702,6 @@ and statement b (node : Core.statement) =
       | Yield { mode; part = written } -> (
           match yielded b mode written with
           | Some part ->
-              b.yield_count <- b.yield_count + 1;
-              if List.exists outlives_body (Core_walk.lent_places written) then
-                b.yields_places <- true;
               let resume = new_block b in
               terminate b (Yield { mode; part; resume }) origin;
               start b resume
@@ -1897,7 +1870,8 @@ and resume_group b key ~next origin =
 (* A [for] loop: the structured [For] terminator, with its body as a region
    that [each] lowers, given a function that binds the pattern to the
    element. The loop borrows what it iterates over for the body. *)
-and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~each =
+and for_loop ?cursor_type ?(lent = ref None) b ~origin ~(pattern : Core.pattern) ~iteration ~loop
+    ~each =
   let part = new_local b Temporary pattern.type_ origin in
   let inside = new_block b and after = new_block b in
   let entry = b.current in
@@ -1907,8 +1881,6 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
   looping b ~break_:after ~continue_:(Next_iteration loop_block) (fun () ->
       each (fun () ->
           (match iteration with
-          | Yielding { arguments = Passed { mode; value = Borrow _ as receiver; _ } :: _; _ } ->
-              ignore (start_loan b receiver (if mode = Mut then Mut else Read) Loop_body origin)
           | Pull { cursor; _ } ->
               ignore
                 (start_loan b
@@ -1920,10 +1892,10 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
                         origin;
                       })
                    Read Loop_body origin)
-          | Yielding _ | Range _ -> ());
+          | Range _ -> ());
           match iteration with
           | Range _ -> bind ~owned:true b pattern (at part)
-          | Yielding _ | Pull _ -> bind b pattern (at part)));
+          | Pull _ -> bind b pattern (at part)));
   terminate b (Iteration_end { loop = loop_block }) origin;
   let blocks =
     inside_group b origin (inside :: List.init (b.block_count - first) (fun index -> first + index))
@@ -1931,7 +1903,9 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
   let ended = resumed b origin ~next:after in
   b.current <- entry;
   start_group b origin origin;
-  terminate b (For { iteration; part; body = inside; blocks; after = ended; loop }) origin;
+  terminate b
+    (For { iteration; part; lent = !lent; body = inside; blocks; after = ended; loop })
+    origin;
   resume_group b origin ~next:after origin;
   start b after
 
@@ -1942,17 +1916,31 @@ and range_loop b ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
       for_loop b ~origin ~pattern ~iteration:(Range { start; stop; inclusive }) ~loop ~each
   | _ -> ()
 
-(* A loop over a call of a yielding method. *)
-and each_loop b ~origin ~pattern ~called ~node ~call_origin ~loop ~each =
-  Option.iter
-    (fun (call : call) ->
-      let yields_before = b.yield_count in
-      for_loop b ~origin ~pattern ~iteration:(Yielding call) ~loop ~each;
-      match call.callee with
-      | Function { path; _ } when b.yield_count > yields_before && not (List.mem path b.through) ->
-          b.through <- path :: b.through
-      | _ -> ())
-    (call_of b called ~node ~origin:call_origin)
+(* A loop over the elements of a collection: a loop over the positions from
+   zero up to the collection's count, each iteration of which is lent the
+   element at its position, and binds the pattern to it. *)
+and elements_loop b ~origin ~(pattern : Core.pattern) ~(elements : Core.elements) ~loop ~each =
+  let { Core.count; position; element } = elements in
+  match (expression b count, element) with
+  | Some stop, Lent lending ->
+      let stop = held b stop count.type_ origin in
+      let start = Constant { value = Integer Z.zero; type_ = count.type_ } in
+      let lent_part = ref None in
+      for_loop ~lent:lent_part b ~origin ~pattern:position
+        ~iteration:(Range { start; stop; inclusive = false })
+        ~loop
+        ~each:(fun bind_position ->
+          each (fun () ->
+              bind_position ();
+              Option.iter
+                (fun (part : place) ->
+                  (match part.root with
+                  | Local element -> lent_part := Some { element; count; call = lending }
+                  | Constant _ -> ());
+                  bind b pattern part)
+                (lent b lending ~duration:Loop_body)))
+  | Some _, _ -> bug "a loop over elements that no call lends"
+  | None, _ -> ()
 
 (* A loop that pulls a cursor until it has no next value. *)
 and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
@@ -1961,8 +1949,10 @@ and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
   | Some place_ ->
       let cursor_type = Core_walk.place_type cursor in
       let cursor = place_ in
-      let next = match next with Some next -> callee_of b next | None -> None in
-      for_loop ~cursor_type b ~origin ~pattern ~iteration:(Pull { cursor; next }) ~loop ~each
+      Option.iter
+        (fun next ->
+          for_loop ~cursor_type b ~origin ~pattern ~iteration:(Pull { cursor; next }) ~loop ~each)
+        (callee_of b next)
 
 (* A quantifier that runs: a loop that stops at the first element that
    decides it. *)
@@ -2235,27 +2225,6 @@ let conditional_lends (body : body) =
       if ended_before || reaches 0 then Some part else None)
     !lends
 
-(* Whether a body is one [for] loop over a range whose body is one [yield]. *)
-let yields_by_position (body : Core.block) =
-  match (body.statements, body.value) with
-  | ( [
-        {
-          kind =
-            For
-              {
-                iteration = Integer_range _;
-                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
-                _;
-              };
-          _;
-        };
-      ],
-      None ) ->
-      true
-  | _ -> false
-
-let no_yields = { by_position = false; through = []; yields_places = false }
-
 let rec of_expression ?(parameters = []) (written : Core.expression) =
   let b = create ~lambdas:(ref []) in
   let parameters =
@@ -2269,7 +2238,7 @@ let rec of_expression ?(parameters = []) (written : Core.expression) =
       in_statement b written.origin (fun () ->
           Option.iter (fun value -> return_ b (Some value) written.origin) (expression b written)));
   let body = finish b ~parameters in
-  { body; lambdas = Array.of_list (List.rev !(b.lambdas)); yielding = no_yields }
+  { body; lambdas = Array.of_list (List.rev !(b.lambdas)) }
 
 and of_definition (definition : Core.definition) =
   let code =
@@ -2303,16 +2272,7 @@ and of_definition (definition : Core.definition) =
             (fun value -> return_ b (if returns then Some value else None) 0)
             (block b body));
       let finished = finish b ~parameters:locals ~defaults in
-      {
-        body = finished;
-        lambdas = Array.of_list (List.rev !(b.lambdas));
-        yielding =
-          {
-            by_position = yields_by_position body;
-            through = List.rev b.through;
-            yields_places = b.yields_places;
-          };
-      })
+      { body = finished; lambdas = Array.of_list (List.rev !(b.lambdas)) })
     code
 
 let of_path =

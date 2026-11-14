@@ -2,9 +2,10 @@ type Bag(items: List[Int64])
 
 impl Iterable for Bag {
   type Element = Int64
-  fn each(self) yields Int64 { todo }
+  fn count(self) -> USize { todo }
+  fn element(self, position: USize) lends Int64 { todo }
 }
 
-fn Bag.each(mut self) yields mut Int64 { todo }
+fn Bag.element(mut self, position: USize) lends mut Int64 { todo }
 
-fn Bag.each(own self) yields own Int64 { todo }
+fn Bag.count(mut self) -> USize { todo }

@@ -284,7 +284,6 @@ and statement (statement : statement) =
   | Proof body -> form "proof" [ block body ]
   | Assert { value; by_bit_vector } ->
       form "assert" (expression value :: (if by_bit_vector then [ "by"; "bit_vector" ] else []))
-  | Yield value -> form "yield" [ expression value ]
   | Statement_error -> "error"
 
 and constant = function
@@ -356,7 +355,6 @@ let signature (signature : signature) =
     form "" (list parameter signature.parameters);
     (match signature.result with
     | Some (Returns type_) -> "-> " ^ type_expression type_
-    | Some (Yields (written, type_)) -> "yields " ^ moded written type_
     | Some (Lends (written, type_)) -> "lends " ^ moded written type_
     | None -> "");
   ]

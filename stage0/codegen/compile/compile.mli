@@ -131,7 +131,6 @@ module For_testing : sig
 
     val context :
       ?checks:bool ->
-      cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
       constant:(context -> Path.t -> Lowered.static_value option) ->
       Query.context ->
       Memory_layout.target ->

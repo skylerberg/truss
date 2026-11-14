@@ -331,27 +331,6 @@ public fn BufferedReader[Source: Reader].read_line(mut self) -> Result[Option[St
   }
 }
 
-public fn BufferedReader[Source: Reader].lines(mut self) yields own Result[String, SystemError]
-  uses Handles
-{
-  var more = true
-  while more
-    invariant self.start <= self.pending.length()
-    invariant self.capacity > 0
-  {
-    match mut self.read_line() {
-      Ok(Some(line)) => yield Ok(own line)
-      Ok(None) => {
-        more = false
-      }
-      Err(error) => {
-        more = false
-        yield Err(error)
-      }
-    }
-  }
-}
-
 public fn BufferedReader[Source: Reader].peek(mut self, count: USize) -> Result[Slice[UInt8], SystemError]
   uses Handles
   ensures !(result is Ok(seen) && seen.length() > count)
@@ -378,11 +357,11 @@ public fn BufferedReader[Source: Reader].finish(own self) -> Source {
 }
 
 public fn BufferedReader[Source: Reader].source(self) lends Source {
-  yield self.source
+  self.source
 }
 
 public fn BufferedReader[Source: Reader].source(mut self) lends mut Source {
-  yield mut self.source
+  mut self.source
 }
 
 impl Reader for BufferedReader[Source: Reader] {

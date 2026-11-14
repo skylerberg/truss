@@ -96,7 +96,6 @@ module Code : sig
     | Specification_only
     | Misplaced_assert
     | Misplaced_proof
-    | Misplaced_yield
     | Misplaced_loop_exit
     | Leaves_parallel
     | Echo_in_specification
@@ -151,7 +150,6 @@ module Code : sig
     | Lambda_needs_type
     | Not_a_record
     | Unknown_variant
-    | Wrong_yield
     | Specification_only
     | Not_in_specification
     | Not_structural
@@ -202,14 +200,12 @@ module Code : sig
     | Self_referential
     | View_crosses_capability
     | Needs_owned
-    | Yield_count
-    | Not_pullable
     | Data_race
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
     | Lent_mut_in_variant
-    | Task_outlives_yield
+    | Task_keeps_view
 
   type capabilities =
     | Not_available

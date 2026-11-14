@@ -92,31 +92,63 @@ fn through(feed: mut any Feed) -> Option[Int64] {
   mut feed.pull()
 }
 
-fn readings(count: Int64) yields Int64
-  uses Meter
-{
-  var index = 0
-  while index < count {
-    yield Meter.read() + index
-    index += 1
+type Readings(index: Int64, count: Int64)
+
+impl Cursor for Readings {
+  type Element = Int64
+  capability Uses = Meter
+
+  fn next(mut self) -> Option[Int64]
+    uses Meter
+  {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(Meter.read() + self.index - 1)
   }
 }
 
-fn plain(count: Int64) yields Int64 {
-  var index = 0
-  while index < count {
-    yield index
-    index += 1
+fn readings(count: Int64) -> Readings {
+  Readings(index: 0, count: count)
+}
+
+type Counted(index: Int64, count: Int64)
+
+impl Cursor for Counted {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(self.index - 1)
   }
 }
 
-fn doubled[Source: Cursor[Element = Int64]](source: own Source) yields Int64
-  uses Source.Uses
-{
-  var cursor = own source
-  while mut cursor.next() is Some(value) {
-    yield value * 2
+fn plain(count: Int64) -> Counted {
+  Counted(index: 0, count: count)
+}
+
+type Doubled[Source](source: Source)
+
+impl Cursor for Doubled[Source: Cursor[Element = Int64]] {
+  type Element = Int64
+  capability Uses = Source.Uses
+
+  fn next(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    match mut self.source.next() {
+      Some(value) => Some(value * 2)
+      None => None
+    }
   }
+}
+
+fn doubled[Source: Cursor[Element = Int64]](source: own Source) -> Doubled[Source] {
+  Doubled(source: own source)
 }
 
 fn added[Source: Cursor[Element = Int64]](source: own Source) -> Int64
@@ -211,7 +243,7 @@ test "a generic function over a cursor passes the evidence where it calls next" 
   }
 }
 
-test "a yielding function that uses its source's set" {
+test "a cursor whose set is its source's set" {
   assert doubled(plain(3)).to_list() == [0, 2, 4]
   assert added(doubled(doubled(plain(3)))) == 12
   provide Table(values: [10]) {

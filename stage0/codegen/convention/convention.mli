@@ -9,14 +9,6 @@
    [None] for a type of zero size, which is not passed at all. *)
 val parameter : Memory_layout.env -> Ground.mode -> Ground.ty -> Lowered.ty option
 
-(* How a cursor holds an argument for its method's parameter: an [own]
-   argument as a value of its own, whatever its size, since the cursor owns
-   it and may outlive the caller's statement, and any other as the
-   parameter takes it. *)
-val held : Memory_layout.env -> Ground.mode -> Ground.ty -> Lowered.ty option
-val cursor_state : string
-val cursor_parameter : int -> string
-
 type result =
   | Nothing  (** Zero size or [Never]: the C function returns [void] *)
   | Returned of Lowered.ty

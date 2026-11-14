@@ -1,6 +1,0 @@
-
-fn clear(shelf: mut Shelf) {
-  for numbered in mut shelf.numbered() {
-    numbered.title = "".copy()
-  }
-}

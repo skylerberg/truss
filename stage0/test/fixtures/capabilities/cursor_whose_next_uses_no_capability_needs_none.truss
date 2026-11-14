@@ -1,0 +1,32 @@
+type Counted(index: Int64, count: Int64)
+
+impl Cursor for Counted {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(self.index - 1)
+  }
+}
+
+fn counted(count: Int64) -> Counted {
+  Counted(index: 0, count: count)
+}
+
+fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}
+
+fn first() -> Option[Int64] {
+  var cursor = counted(3)
+  pull(mut cursor)
+}
+
+fn length() -> USize {
+  counted(3).count()
+}

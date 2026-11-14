@@ -105,8 +105,8 @@ test "a map's entries, keys, and values are walked, and its values changed in pl
     sum += entry.value
   }
   assert seen == "bac" && sum == 6
-  for value in mut table.values() {
-    value = value * 2
+  for position in 0..table.count() {
+    mut table.value_at(position) *= 2
   }
   assert total(table) == 12 && table.get("c") == Some(6)
   var owned = ""
@@ -137,10 +137,10 @@ test "a map is made from a list or a cursor of entries, the last of a key winnin
   ]
   let table: Map[String, Int64] = Map.from(entries.copy())
   assert table.length() == 2 && table.get("a") == Some(3) && order(table) == "a b "
-  var collected: Map[String, Int64] = Map.collect(entries.copy().each())
+  var collected: Map[String, Int64] = Map.collect(entries.copy().cursor())
   assert collected == table
   let more: List[map::Entry[String, Int64]] = [map::Entry(key: "c", value: 4), map::Entry(key: "b", value: 5)]
-  mut collected.extend(more.copy().each())
+  mut collected.extend(more.copy().cursor())
   assert order(collected) == "a b c " && collected.get("b") == Some(5)
 }
 

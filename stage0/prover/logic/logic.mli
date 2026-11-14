@@ -52,8 +52,6 @@ module Symbol : sig
     | Slack of string  (** A buffer's slack for growing. *)
     | Potential of string  (** A value's potential. *)
     | Potential_measure of string  (** A type's potential as a measure for a sum. *)
-    | Cursor_yielded of string  (** A cursor's yielded parts. *)
-    | Cursor_ended of string  (** Whether a cursor has ended. *)
     | Block_bytes of { type_key : string; variant : string option }
         (** The size of a variant's or a record's block. *)
     | Time of sort  (** The time of one call of a function value of the sort. *)

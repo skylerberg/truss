@@ -58,7 +58,7 @@ test "replace_first returns the first item and keeps the heap in order" {
 
 test "a heap is extended, reserved, and cleared" {
   var heap: collections::Heap[Int64] = collections::Heap.smallest_first()
-  mut heap.extend([3, 1, 2].each())
+  mut heap.extend([3, 1, 2].cursor())
   mut heap.reserve(16)
   assert heap.length() == 3 && mut heap.pop() == Some(1)
   mut heap.clear()

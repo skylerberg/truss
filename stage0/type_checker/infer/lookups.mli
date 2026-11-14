@@ -57,7 +57,12 @@ val versions :
   State.Names.String_map.key ->
   ((Path.receiver * version) list, Types.trait_reference list) Result.t
 
-val impl_method_if_resolved : State.state -> Types.ty -> version -> version
+val elements_calls :
+  State.state ->
+  Syntax.span ->
+  Types.ty ->
+  Types.mode ->
+  (Tables.loop * Types.ty * Types.mode) option
 
-val each_call :
-  State.state -> Syntax.span -> Types.ty -> Types.mode -> (Tables.call * Types.ty) option
+val consuming_cursor : State.state -> Syntax.span -> Types.ty -> (Tables.loop * Types.ty) option
+val remaining_call : State.state -> Syntax.span -> Types.ty -> Tables.call option

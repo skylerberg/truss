@@ -191,8 +191,7 @@ compatible with the one before when:
 - every public definition is still there, at the same path
 - a function, method, or theorem has the same parameters and result, no
   capability more in its `uses`, a `requires` that the old one implies, an
-  `ensures` that implies the old one, and no cost greater than before, and a
-  method that could make a cursor still can
+  `ensures` that implies the old one, and no cost greater than before
 - a type that shows its fields has the same fields, variants, and invariant;
   an opaque type may change everything inside it
 - a trait or capability has the same methods, associated types, required

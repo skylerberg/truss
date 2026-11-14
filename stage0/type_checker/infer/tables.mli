@@ -52,8 +52,8 @@ type literal = Integer_value of Z.t | Float_value of float
 
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
-  | Yielding of { call : call; mode : Types.mode }
-  | Pulled of { cursor : Types.ty }
+  | Elements of { count : call; element : call; lends : Types.mode }
+  | Pulled of { cursor : Types.ty; made_by : call option; remaining : call option }
 
 type pattern =
   | Variant_pattern of { type_ : Types.ty; variant : string }

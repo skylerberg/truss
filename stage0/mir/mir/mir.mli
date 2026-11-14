@@ -132,8 +132,6 @@ and statement_kind =
       (** A call of [slice_range], whose result views [base]. *)
   | Template of { destination : place; literals : string list; call : call }
       (** A tagged string: the call of the tag's [from_template], with the literal texts. *)
-  | Pull of { destination : place; cursor : place }
-      (** The next value of the built-in cursor of a yielding method, an [Option]. *)
   | Live of local list  (** These locals start to hold values here. *)
   | Dead of local list  (** These locals hold nothing from here on. *)
   | Assert of { condition : operand; bit_vector : Core.expression option }
@@ -164,13 +162,11 @@ type loop = {
 
 (** What a [for] loop iterates over. *)
 type iteration =
-  | Yielding of call  (** The parts a call of a yielding method yields. *)
   | Range of { start : operand; stop : operand; inclusive : bool }
       (** The integers or characters from [start] to [stop], each once. A range of [Character] skips
           the surrogates. *)
-  | Pull of { cursor : place; next : callee option }
-      (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
-          [next] is [None], or else the cursor type's [Cursor.next]. *)
+  | Pull of { cursor : place; next : callee }
+      (** The values a cursor gives until it has none, by its type's [Cursor.next]. *)
 
 type early_exit = {
   resume : block;  (** Where the code after the group goes on, where this exit won *)
@@ -185,6 +181,17 @@ type branch = {
 }
 (** A branch of a [parallel] or [concurrent] block. *)
 
+type lent_element = {
+  element : local;  (** The [Lent] local of the element. *)
+  count : Core.expression;
+      (** The call of the collection's [count], which the prover reads: a loop that changes its
+          elements leaves their number as it was. *)
+  call : Core.expression;
+      (** The call of the collection's [element] at the loop's position, which the prover reads: a
+          loop that reads its elements was lent the values of this call at the positions before. *)
+}
+(** The element that an iteration of a loop over a collection is lent. *)
+
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block; is_if_condition : bool }
@@ -194,6 +201,9 @@ type terminator =
   | For of {
       iteration : iteration;
       part : local;
+      lent : lent_element option;
+          (** In a loop over the elements of a collection, the element that each iteration is lent.
+              [part] is then the element's position. *)
       body : block;
       blocks : block list;  (** Every block of the body, [body] first, nested loops' included. *)
       after : block;
@@ -260,18 +270,7 @@ type body = {
   blocks : basic_block array;  (** The entry is block 0. *)
 }
 
-and t = { body : body; lambdas : body array; yielding : yielding }
-
-and yielding = {
-  by_position : bool;
-  through : Path.t list;
-      (** The yielding functions it delegates to: those a [for] loop iterates over where the loop
-          body yields. *)
-  yields_places : bool;
-      (** A [yield] lends a place that outlives the method's frame, such as [self[index]], rather
-          than a temporary. *)
-}
-(** Facts of a body about its [yield]s, which a caller of a yielding method reads. *)
+and t = { body : body; lambdas : body array }
 
 val canonical : basic_block array -> basic_block array
 (** The blocks control can reach from the entry, block 0, in reverse postorder, numbered in that

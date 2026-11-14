@@ -7,10 +7,10 @@ fn Cell.visit(mut self) {
 }
 
 fn Grid.cell(self, index: USize) lends Cell {
-  yield self.cells[index]
+  self.cells[index]
 }
 
 fn Grid.cell(mut self, index: USize) lends mut Cell {
-  yield mut self.cells[index]
+  mut self.cells[index]
 }
 

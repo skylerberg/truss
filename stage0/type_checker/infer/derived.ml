@@ -57,7 +57,7 @@ let form database (path : Path.t) : Core.t option =
           let result =
             match signature.output with
             | Returns type_ -> type_
-            | Yields _ | Lends _ -> bug "a derived method that yields"
+            | Lends _ -> bug "a derived method that lends"
           in
           let parameters : Core.parameter list =
             (match signature.receiver with

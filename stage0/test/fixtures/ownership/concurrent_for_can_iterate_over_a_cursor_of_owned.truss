@@ -1,0 +1,10 @@
+fn f(names: own List[String], numbers: List[Int64])
+  uses Tasks
+{
+  concurrent for name in own names {
+    look(name)
+  }
+  concurrent for number in numbers.cursor() {
+    look(number)
+  }
+}

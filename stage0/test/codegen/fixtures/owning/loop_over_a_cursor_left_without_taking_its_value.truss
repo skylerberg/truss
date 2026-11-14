@@ -1,0 +1,16 @@
+type Words(left: List[String])
+
+impl Cursor for Words {
+  type Element = String
+
+  fn next(mut self) -> Option[String] {
+    mut self.left.pop()
+  }
+}
+
+test "left early" {
+  var each = Words(left: ["a${1}", "b${2}"])
+  for _ in each {
+    break
+  }
+}

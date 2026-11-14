@@ -23,8 +23,7 @@ let () =
 let () =
   passes "a while loop with break and continue, and a for loop over an integer range"
     Fixtures.Lowering.while_loop_with_break_and_continue_and_a_for_loop;
-  passes "a for loop over a yielding method's call"
-    Fixtures.Lowering.for_loop_over_a_yielding_methods_call
+  passes "a for loop over a list" Fixtures.Lowering.for_loop_over_a_list
 
 let () =
   passes "a match on literals, a range, strings, and two values at once"
@@ -50,11 +49,11 @@ let () =
         "test 0 passed\n");
   test "a check in the standard library's inlined code reports the program's position" (fun () ->
       expect_output Fixtures.Lowering.check_in_the_standard_librarys_inlined_code
-        "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:9\n")
+        "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n")
 
 let () =
-  passes "an index, a lending method with a default, and a yielding method that returns early"
-    Fixtures.Lowering.index_a_lending_method_with_a_default_and_a
+  passes "an index, and a lending method with a default"
+    Fixtures.Lowering.index_and_a_lending_method_with_a_default
 
 let () =
   passes "a capability method call, a provide, and a crash on a path not taken"
@@ -73,16 +72,12 @@ let () =
     Fixtures.Lowering.array_literal_and_a_generic_value_parameter_used
 
 let () =
-  test "a call of a lending method that never yields compiles, and the code after it is unreachable"
+  test "a call of a lending method that never lends compiles, and the code after it is unreachable"
     (fun () ->
-      expect_output Fixtures.Lowering.call_of_a_lending_method_that_never_yields
+      expect_output Fixtures.Lowering.call_of_a_lending_method_that_never_lends
         "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
 
 let () =
-  passes "a loop over a recursive yielding function pulls a cursor over it"
-    Fixtures.Lowering.loop_over_a_recursive_yielding_function_pulls_a;
-  passes "a pulled yielding function copies the places it yields"
-    Fixtures.Lowering.pulled_yielding_function_copies_the_places_it;
   passes "a named function as a value, at its own type and at a wider one"
     Fixtures.Lowering.named_function_as_a_value_at_its_own_type_and_at_a
 
@@ -110,8 +105,8 @@ let () =
     Fixtures.Lowering.slice_of_a_small_array_or_of_one_in_a_small_record
 
 let () =
-  passes "constructors of lent places, yielded read-only and `mut`"
-    Fixtures.Lowering.constructors_of_lent_places_yielded_read_only_and
+  passes "constructors of lent places, lent read-only and `mut`"
+    Fixtures.Lowering.constructors_of_lent_places_lent_read_only_and
 
 let () =
   passes
@@ -121,13 +116,9 @@ let () =
 
 let () =
   passes
-    "a lending method that yields on several paths: places, a value it makes, and one built around \
+    "a lending method that lends on several paths: places, a value it makes, and one built around \
      places"
-    Fixtures.Lowering.lending_method_that_yields_on_several_paths_places
-
-let () =
-  passes "a method that yields constructors of lent places and loops over itself"
-    Fixtures.Lowering.method_that_yields_constructors_of_lent_places_and
+    Fixtures.Lowering.lending_method_that_lends_on_several_paths_places
 
 let () =
   passes "a value moved out of a `mut` parameter, which is then reinitialized"
@@ -138,7 +129,7 @@ let () =
     Fixtures.Lowering.quantifiers_over_ranges_which_run_as_loops_that
 
 let () =
-  passes "quantifiers over a list, a slice, and a type with an each of its own"
+  passes "quantifiers over a list, a slice, and a type with a `count` and an `element` of its own"
     Fixtures.Lowering.quantifiers_over_a_list_a_slice_and_a_type_with_an
 
 let () =
@@ -146,8 +137,8 @@ let () =
     Fixtures.Lowering.constants_that_are_infinite_or_not_a_number_which
 
 let () =
-  passes "a yielding function's cursor through a bound, and the methods Cursor gives it"
-    Fixtures.Lowering.yielding_functions_cursor_through_a_bound_and_the
+  passes "a cursor through a bound, and the methods Cursor gives it"
+    Fixtures.Lowering.cursor_through_a_bound_and_the_methods_cursor_gives
 
 let () =
   passes "any of a trait whose methods name an associated type, over two kinds of cursor"
@@ -171,9 +162,7 @@ let folds name ~folded ~run source =
   test name (fun () ->
       let database, _ = load source in
       let context =
-        Lower.context ~checks:true database target_64
-          ~cursor_fields:(fun _ _ -> failwith "folding a constant lowers no pulled method")
-          ~constant:(fun context path ->
+        Lower.context ~checks:true database target_64 ~constant:(fun context path ->
             match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
       in
       let value = Lower.constant_value context in

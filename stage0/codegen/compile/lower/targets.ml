@@ -78,13 +78,6 @@ let operand_as st (mode : Types.mode) ty (place : Lowered.place) (passed : Lower
 let pass st (mode : Types.mode) ty place =
   operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
 
-let hold st mode ty place =
-  operand_as st mode ty place (Convention.held st.context.env (Monomorphic.mode mode) ty)
-
-(* Calls a function instance with arguments that are places of their
-   parameter types, writing the result to [destination]. *)
-(* A capability's method: its slot in every table of the capability, and
-   its signature. *)
 (* A method's slot in a table whose first method is at [first], and its
    signature. *)
 let method_slot ~first ~missing (methods : Types.trait_method list) name =
@@ -96,6 +89,8 @@ let method_slot ~first ~missing (methods : Types.trait_method list) name =
   | Some index -> (first + index, (List.nth methods index).method_signature)
   | None -> missing ()
 
+(* A capability's method: its slot in every table of the capability, and
+   its signature. *)
 let capability_method context capability name =
   let interface =
     match demand context Environment.trait_interface capability with
@@ -215,35 +210,6 @@ let evidence_of st capability =
           implementation_evidence st ~impl ~type_arguments ~implementation
       | _ -> missing ())
 
-(* The capabilities whose evidence the [next] of a cursor over the method
-   takes: the method's own. A cursor holds no evidence. The evidence it
-   was made with is in the frame of a [provide], and a cursor that held it
-   and outlived that frame would use the implementation after it was
-   dropped. *)
-let cursor_evidence context (yielding : Ground.yielding) =
-  let code = code_of context yielding.method_ yielding.type_arguments in
-  evidence_for context code.substitution code.uses
-
-(* Writes a cursor over a yielding method to [destination]. The cursor holds
-   the call's arguments, in the order of the pulled method's parameters:
-   its own, then the mask of defaults passed. *)
-let cursor_into st ~path ~type_arguments ~(signature : Types.signature)
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ~mask destination =
-  let held = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
-  let mask = if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [] in
-  let fields =
-    List.mapi (fun position operand -> (Convention.cursor_parameter position, operand)) (held @ mask)
-  in
-  emit st.builder
-    (Assign
-       ( destination,
-         Build
-           {
-             ty = Cursor { method_ = path; type_arguments };
-             variant = None;
-             fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
-           } ))
-
 let nested_function st ~(function_type : Ground.function_type) ~(output : Types.result option)
     ~(captures : (Lowered.place * Ground.ty) list)
     ~(body :
@@ -291,7 +257,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
   in
   let environment_parameter = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty =
-    match function_type.result with Returns ty -> ty | _ -> bug "a lambda that yields"
+    match function_type.result with Returns ty -> ty | _ -> bug "a lambda that lends"
   in
   result_slot inner (Convention.result st.context.env result_ty);
   let parameter_places =
@@ -344,7 +310,7 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
              result = Convention.(destination (result st.context.env ty)) destination;
            });
       if ty = Never then unreachable_block st
-  | Yields _ | Lends _ -> bug "a function value that yields"
+  | Lends _ -> bug "a function value that lends"
 
 (* Calls a method through an [any] value: the entry in its table, given the
    value's pointer, then the arguments, then the evidence the method uses. *)
@@ -479,14 +445,6 @@ let provided_evidence st ~(implementation : Lowered.operand) provides =
       (capability, implementation_evidence st ~impl ~type_arguments ~implementation))
     provides
 
-let called (key : Instance.key) : Instance.key =
-  match key with
-  | Code { path = Method { owner; name = "next"; _ }; type_arguments } -> (
-      match Interface.Impls.cursor_of_impl owner with
-      | Some method_ -> Cursor_next { method_; type_arguments }
-      | None -> key)
-  | key -> key
-
 (* The mask of a call that passes every argument: a bit for each parameter
    that has a default. *)
 let all_passed (signature : Types.signature) =
@@ -510,7 +468,7 @@ let call_instance st key ~(signature : Types.signature) ~substitution
     (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
     @ List.map (evidence_of st) (evidence_for st.context substitution signature.uses)
   in
-  let target = Lowered.Direct { function_ = Instance (called key); signature = c_signature } in
+  let target = Lowered.Direct { function_ = Instance key; signature = c_signature } in
   emit st.builder
     (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not c_signature.returns then unreachable_block st
@@ -611,45 +569,12 @@ let template_value st template_ty texts ~site ~parts =
   list_of st parts_ty (built / Field "parts") ~site parts;
   built
 
-(* A yielding method's yield type, in an instance. *)
-let cursor_element context (yielding : Ground.yielding) =
-  let signature = signature_of context yielding.method_ in
-  match signature.output with
-  | Yields (_, ty) ->
-      Monomorphic.ground context.monomorphic (bind signature.generics yielding.type_arguments) ty
-  | _ -> bug "%s does not yield" (Path.show yielding.method_)
-
-(* A cursor's [next] result type: an [Option] of its yield type. *)
-let cursor_result context yielding : Ground.ty =
-  Named { path = Well_known.path Option; arguments = [ Type (cursor_element context yielding) ] }
-
-(* Calls [next] on a cursor: the pulled method's state machine, which takes
-   the method's evidence from this call. *)
-let call_next st (yielding : Ground.yielding) cursor destination =
-  let option = cursor_result st.context yielding in
-  let cursor_pointer = Lowered.Pointer { target = Value (Cursor yielding); writable = true } in
-  let target signature =
-    Lowered.Direct { function_ = Instance (Cursor_next yielding); signature }
-  in
-  let self = Lowered.Address { place = cursor; writable = true } in
-  let evidence = List.map (evidence_of st) (cursor_evidence st.context yielding) in
-  let convention = Convention.result st.context.env option in
-  emit st.builder
-    (Call
-       {
-         target =
-           target
-             (Convention.signature
-                (cursor_pointer :: List.map (fun _ -> Convention.evidence) evidence)
-                convention);
-         arguments = self :: evidence;
-         result = Convention.destination convention destination;
-       })
-
-let pull_loop st ~kept ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
+(* A loop over a cursor: [call_next] writes the result of the cursor's
+   [next], an [Option], and [body] runs for each value in [Some]. *)
+let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =
   in_scope st (fun () ->
-      let next = held st ~kept (Value option) in
+      let next = held st (Value option) in
       let depth = List.length st.scopes in
       let test = block st.builder and inside = block st.builder and after = block st.builder in
       finish st.builder (Goto test);
@@ -664,20 +589,3 @@ let pull_loop st ~kept ~(option : Ground.ty) ~(call_next : Lowered.place -> unit
               body (next / Variant_field { variant = "Some"; field = "value" })));
       finish st.builder (Goto test);
       start st.builder after)
-
-(* A heap block for a cursor, which the current scope frees. A loop over a
-   recursive yielding method keeps its cursor there, so that a cursor over
-   the method can hold another. *)
-let boxed_cursor st ~kept (yielding : Ground.yielding) : Lowered.place =
-  let cursor_ty = Ground.Cursor yielding in
-  let boxed =
-    held st ~kept ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true })
-  in
-  emit st.builder
-    (Call
-       {
-         target = Intrinsic Allocate;
-         arguments = [ Constant (Size_of cursor_ty); Constant (Alignment_of cursor_ty) ];
-         result = Returned boxed;
-       });
-  boxed

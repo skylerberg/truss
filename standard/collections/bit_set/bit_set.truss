@@ -363,10 +363,10 @@ public fn collections::BitSet.first_zero(self) -> Option[USize]
   Some(full * 64 + zeros.trailing_zeros())
 }
 
-public fn collections::BitSet.ones(self) yields USize
-  ensures result < self.length()
+public fn collections::BitSet.ones(self) -> List[USize]
   cost time O(self.length())
 {
+  var parts: List[USize] = []
   var index: USize = 0
   while index < self.words.length()
     invariant index <= self.words.length()
@@ -388,12 +388,13 @@ public fn collections::BitSet.ones(self) yields USize
           lowest_one_is_below_the_bit_length(rest, bits: 64)
         }
       }
-      yield index * 64 + rest.trailing_zeros()
+      mut parts.push(index * 64 + rest.trailing_zeros())
       rest = rest & (rest - 1)
       remaining -= 1
     }
     index += 1
   }
+  parts
 }
 
 internal fn collections::BitSet.combine(mut self, other: collections::BitSet, how: Combination)
@@ -446,51 +447,38 @@ public fn collections::BitSet.complement(mut self)
   clear_unused_bits(mut self.words, length: self.length)
 }
 
-impl Index for collections::BitSet {
-  type Key = USize
-  type Output = Bool
+public fn collections::BitSet.is_set(self, index: USize) -> Bool
+  requires index < self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  self.bit(index)
+}
 
-  fn contains_key(self, key: USize) -> Bool
-    cost time O(1)
-  {
-    key < self.length()
-  }
-
-  fn at(self, key: USize) lends Bool
-    requires key < self.length()
-    cost time O(1)
-  {
-    let value = self.bit(key)
-    yield value
-  }
-
-  fn at(mut self, key: USize) lends mut Bool
-    requires key < self.length()
-    cost time O(1)
-  {
-    var value = self.bit(key)
-    yield mut value
-    mut self.assign_bit(key, value: value)
-  }
+public fn collections::BitSet.set(mut self, index: USize, value: Bool)
+  requires index < self.length()
+  ensures self.length() == old(self.length())
+  cost time O(1)
+  cost allocations == 0
+{
+  mut self.assign_bit(index, value: value)
 }
 
 impl Iterable for collections::BitSet {
   type Element = Bool
 
-  fn each(self) yields Bool
-    ensures finished ==> yielded.length() == self.length()
-    cost time O(self.length())
+  fn count(self) -> USize
+    ensures result == self.length()
+    cost time O(1)
   {
-    var index: USize = 0
-    while index < self.length
-      invariant index <= self.length
-      invariant yielded.length() == index
-      decreases self.length - index
-      cost time O(index)
-    {
-      yield self.bit(index)
-      index += 1
-    }
+    self.length
+  }
+
+  fn element(self, position: USize) lends Bool
+    requires position < self.count()
+    cost time O(1)
+  {
+    self.bit(position)
   }
 }
 

@@ -1,7 +1,0 @@
-fn Bag.first(self) lends Option[String] {
-  yield None
-  for item in self.each() {
-    yield Some(item)
-    return
-  }
-}

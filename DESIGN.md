@@ -400,48 +400,52 @@ with `copy()`, so its allocation is written and counted. A string literal
 is the exception that costs nothing: only methods that write bytes change
 a `String`, and those may allocate anyway.
 
-### Lending and yielding methods
+### Lending methods and cursors
 
-A method gives its caller parts of `self` without returning a stored
-reference, which would need lifetimes. `lends` gives one part, exactly once,
-as Swift's `_read` and `_modify` accessors do; it is how `items[i]` works.
-`yields` gives any number of parts, as a generator does; it is how `for`
-loops and cursors work.
+A method gives its caller a part of `self` without returning a stored
+reference, which would need lifetimes. `lends` lends one part for the
+caller's statement, as Swift's `_read` and `_modify` accessors do; it is how
+`items[i]` works.
 
-- **The signature says which.** A lending method is proven on the promise
-  that it continues after its `yield`, while a loop may stop at any `yield`.
-  If the body decided, a body edit could change callers' meaning.
-- **User collections are not second-class.** `[]` and `for` work through
-  `Index` and `each`, so a user's `Grid` gets the same syntax and proof rules
-  as a `List`.
-- **A lent part need not be stored in `self`.** A set of bits can still be
-  indexed: its `at` makes the `Bool`, lends it, and writes it back. Rust's
-  `Index` returns a reference, so there such a collection cannot be indexed.
+- **A lending method lends the value of its body, and no code of it runs
+  afterward.** A method that resumed after its caller's statement could
+  update a cached total, but every reader of a call would then follow code
+  that runs after the statement, and the checker and the prover would need
+  rules for a statement that leaves early. A type that must update other
+  state when a part changes takes the new value in a method, as `BitSet.set`
+  does.
+- **User collections are not second-class.** `[]` works through `Index`, and
+  `for` through `count` and `element`, so a user's `Grid` gets the same
+  syntax and proof rules as a `List`.
+- **A lent part need not be stored in `self`.** A method can lend a value it
+  computes. A change to such a value is not written back, so a collection
+  that packs its elements, such as a set of bits, is read with one method
+  and changed with another.
 - **A lending call lends its whole receiver,** since the method was proven
-  as if nothing else touches `self` until it resumes. `List`, `Slice`, and
-  `Array` can lend two parts because their `at` has nothing left to do
-  after its `yield`.
-- **A lending method always continues afterward,** so a type can update
-  values that depend on the part, such as a cached total.
-- **A loop can stop at any `yield`, and the method does not continue.**
-  Continuing to the next `yield` would do unasked-for work, such as reading
-  one more line after `break`, and Truss has no `finally`. So invariants hold
-  at every `yield`.
-- **The contract names the yielded parts and the history,** as Dafny's
-  iterators do. A loop over a list then gets its facts from the list's
-  `each`, so a user's collection gets the same facts.
-- **Read-only and owned yields can be pulled.** Internal iteration alone
+  as if nothing else touches `self` while the part is lent. `List`, `Slice`,
+  and `Array` can lend two parts because their elements at different
+  positions are different places.
+- **A `for` loop visits a collection by position.** It asks for the
+  collection's `count`, and is lent `element(position)` for each position.
+  The collection's code runs only inside those two calls, so the loop is a
+  loop over a range to the ownership check, the prover, and the compiler.
+  A generator, a method suspended between iterations, would keep its locals
+  alive across the loop's body, and would need rules for what runs when the
+  loop stops early. A loop over a list gets its facts from the contract of
+  the list's `element`, so a user's collection gets the same facts.
+- **A cursor is a value of a type the program names.** Its state is in its
+  fields, so its size, its allocations, and whether it is a view are in its
+  type, and it can be stored, passed, and returned. A loop by position alone
   cannot advance two sequences together, so it cannot write `zip`, merge, or
-  `peek`. `mut` yields cannot be pulled, since a cursor would store `mut`
-  access.
-- **Recursive yields can be looped over but not pulled.** A cursor would
-  need room for every level of the recursion, which C# and Python allocate
-  behind the scenes. A cursor over such a structure is a type with an
-  explicit stack, so its allocations are visible.
-- **Cursor types have no name.** A cursor is a state machine the compiler
-  makes from one method, described by `Cursor`.
-- **No coroutines at run time.** A loop or a lending call compiles to a
-  plain loop, and a pulled cursor to a state machine.
+  `peek`; a cursor can.
+- **A cursor never holds `mut` access,** since `mut` access is never stored.
+  A `mut` loop changes elements in place, by position.
+- **A collection with no positions has a cursor or a fold.** A tree is
+  visited by recursion, by `fold`, or by a cursor that holds an explicit
+  stack, so the stack's allocations are visible. C# and Python allocate that
+  stack behind a recursive generator.
+- **No coroutines at run time.** A lending call is compiled into its caller,
+  and a loop to a plain loop.
 
 ### Closures
 
@@ -1230,7 +1234,8 @@ not, because a package may want that name.
   works without `names[..]`. Truss converts an owner to its view only at a
   parameter, so the standard library declares the methods.
 - **Methods that work on any collection are provided methods of
-  `Iterable`,** so a user's collection gets them by implementing `each`.
+  `Iterable`,** so a user's collection gets them by implementing `count` and
+  `element`.
 - **A collection method takes a pure callback, and an `Option` or `Result`
   method one that may use capabilities.** `map` and `sort_by` may later run
   their callback in parallel. `Option.map` calls its callback at most once,

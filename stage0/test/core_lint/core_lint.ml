@@ -128,9 +128,7 @@ let call_types context (node : Core.expression) (call : Core.call) =
                     position callee (Types.show found) (Types.show expected)
             | Default -> ())
           (List.combine parameters call.arguments);
-      let result =
-        match output with Returns result | Lends (_, result) -> Some result | Yields _ -> None
-      in
+      let result = match output with Returns result | Lends (_, result) -> Some result in
       Option.iter
         (fun result ->
           if
@@ -422,8 +420,9 @@ let check_semantics context (form : Core.t) =
                      "a lambda captures %d locals, and its body reads %d of the enclosing \
                       function's"
                      (List.length captures) (List.length free)
-             | Quantified { binder = Over_each _; _ } when Hashtbl.mem in_specification node.id ->
-                 context.wrong "a quantifier in a specification runs as a loop (`Over_each`)"
+             | Quantified { binder = Over_elements _; _ } when Hashtbl.mem in_specification node.id
+               ->
+                 context.wrong "a quantifier in a specification runs as a loop (`Over_elements`)"
              | Quantified { binder = Over_collection _; _ }
                when not (Hashtbl.mem in_specification node.id) ->
                  context.wrong "a quantifier in executable code is over a mathematical collection"
@@ -517,7 +516,7 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
       (set :> T.capability list)
   and type_ subject (ty : T.ty) =
     match ty with
-    | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter (argument subject) arguments
+    | Named { arguments; _ } -> List.iter (argument subject) arguments
     | Parameter named -> parameter subject named
     | Projection { base; trait = reference; _ } ->
         type_ subject base;
@@ -548,15 +547,12 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
   let callee (callee : Core.callee) =
     match callee with
     | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
-    | Trait_method { trait = reference; name; self_type; type_arguments; evidence; _ } -> (
+    | Trait_method { trait = reference; self_type; type_arguments; evidence; _ } -> (
         trait "a call's trait" reference;
         type_ "a call's `Self`" self_type;
         List.iter (argument "a call's type argument") type_arguments;
         match evidence with
-        | Impl { impl; arguments } ->
-            (* The [next] of a yielding method's cursor is a [Cursor_next]. *)
-            if name = "next" && Option.is_some (Interface.Impls.cursor_of_impl impl) then
-              wrong "the `next` of a yielding method's cursor is a call";
+        | Impl { arguments; _ } ->
             List.iter (fun (_, inner) -> argument "an `impl`'s type argument" inner) arguments
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
@@ -681,10 +677,10 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
     | Lent _ -> wrong "%s mutates a place that is lent read-only" subject
   in
-  (* The constructs that a [yield] yields: its operand, and each construct
-     that is a field of one. Only they may have a field that is a place. A
-     yielded construct that lends a place owns nothing, so every value that
-     it takes has a [Plain] type. *)
+  (* The constructs that a lending method lends: the operand of a [Yield],
+     and each construct that is a field of one. Only they may have a field
+     that is a place. A lent construct that lends a place owns nothing, so
+     every value that it takes has a [Plain] type. *)
   let yielded = Hashtbl.create 8 in
   let plain =
     let bounds parameter =
@@ -697,14 +693,21 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
   let rec yielded_operand ~lends (mode : T.mode) (part : Core.operand) =
     match part with
     | Place core_place ->
-        if mode = Mut then mutable_place "a `yield mut`" core_place else place core_place
+        if mode = Mut then mutable_place "a `Yield` with the mode `mut`" core_place
+        else place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
         List.iter (fun (_, field) -> Option.iter (yielded_operand ~lends mode) field) fields
     | Value value ->
         if lends && not (plain value.type_) then
-          wrong "a yielded construct that lends a place takes a value of the type `%s`"
+          wrong "a lent construct that lends a place takes a value of the type `%s`"
             (T.show value.type_)
+  in
+  let rec lends_place : Core.operand -> bool = function
+    | Place _ -> true
+    | Value { kind = Construct { fields; _ }; _ } ->
+        List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends_place field) fields
+    | Value _ -> false
   in
   Core_walk.definition
     (located at
@@ -714,7 +717,7 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
            (fun (node : Core.statement) ->
              match node.kind with
              | Yield { mode; part = Value { kind = Construct _; _ } as part } ->
-                 yielded_operand ~lends:(Core_walk.lent_places part <> []) mode part
+                 yielded_operand ~lends:(lends_place part) mode part
              | Yield { mode; part } -> yielded_operand ~lends:false mode part
              | _ -> ());
        })
@@ -744,19 +747,14 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
              type_ "an expression" node.type_;
              match node.kind with
              | Use core_place -> place core_place
-             | Quantified { binder = Over_each { call; _ }; _ } -> (
-                 match call.kind with
-                 | Call { arguments = [ Passed { mode = Read; _ } ]; _ } -> ()
-                 | _ -> wrong "an `Over_each` does not hold a read-only call with one argument")
              | Construct { fields; _ } ->
                  List.iter
                    (fun (_, (field : Core.operand option)) ->
                      match field with
                      | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
-                         wrong "a construct that no `yield` yields has a field that is a place"
+                         wrong "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields
-             | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
              | Slice { call } -> (
                  Hashtbl.replace slice_calls call.id ();
                  match call.kind with
@@ -873,23 +871,16 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
                      wrong "a `let` that binds a mutable local receives a place"
                  | _ -> ())
              | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
-             | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
-                 let output =
-                   match callee with
-                   | Function { path; _ } ->
-                       Option.map
-                         (fun (signature : T.signature) -> signature.output)
-                         (Interface.Impls.signature database path)
-                   | Trait_method { trait = reference; name; receiver; _ } ->
-                       Option.map
-                         (fun (method_ : T.trait_method) -> method_.method_signature.output)
-                         (Infer.Members.trait_method database reference.trait name receiver)
-                   | Capability_method _ | Intrinsic _ | Indirect _ -> None
-                 in
-                 match output with
-                 | Some (Yields _) -> ()
-                 | _ -> wrong "a `Yielding_call` calls a method that does not yield")
-             | For { iteration = Yielding_call _; _ } -> wrong "a `Yielding_call` is not a call"
+             | For { iteration = Elements { count; position; element }; _ } -> (
+                 (match count.kind with
+                 | Call _ -> ()
+                 | _ -> wrong "the count of an `Elements` loop is not a call");
+                 (match position.kind with
+                 | Bind _ -> ()
+                 | _ -> wrong "the position of an `Elements` loop is not a `Bind`");
+                 match element with
+                 | Lent { kind = Call _; _ } -> ()
+                 | _ -> wrong "the element of an `Elements` loop is not the lent place of a call")
              | _ -> ());
          pattern =
            (fun (node : Core.pattern) ->

@@ -1,0 +1,20 @@
+trait Rows {
+  fn count(self) -> USize
+  fn element(mut self, position: USize) lends mut List[Int64]
+}
+
+type Grid(cells: List[List[Int64]])
+
+impl Rows for Grid {
+  fn count(self) -> USize { self.cells.count() }
+  fn element(mut self, position: USize) lends mut List[Int64] { mut self.cells[position] }
+}
+
+fn f[Source: Rows](grid: mut Grid, source: mut Source) {
+  for row in mut grid {
+    mut row.push(1)
+  }
+  for row in mut source {
+    mut row.push(2)
+  }
+}

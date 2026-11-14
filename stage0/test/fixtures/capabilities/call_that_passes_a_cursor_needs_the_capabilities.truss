@@ -5,8 +5,6 @@ fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
 }
 
 fn first() -> Option[Int64] {
-  var cursor = provide Fixed(value: 7) {
-    readings(3)
-  }
+  var cursor = readings(3)
   pull(mut cursor)
 }

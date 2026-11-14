@@ -73,8 +73,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
          other type is one error, and its bounds are not checked against the
          type. *)
       match resolve state type_ with
-      | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Cursor _ | Types.Parameter _) as
-        resolved
+      | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _) as resolved
         when not (integer_type state resolved || Types.is_builtin Character resolved) ->
           report state Mismatch written.span
             (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."

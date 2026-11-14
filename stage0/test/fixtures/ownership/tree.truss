@@ -1,4 +1,0 @@
-type Tree =
-  | Leaf
-  | indirect Node(left: Tree, value: Int64, right: Tree)
-

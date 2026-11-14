@@ -157,8 +157,6 @@ let change_statement change (statement : Mir.statement) : Mir.statement =
     | Template template ->
         Template
           { template with destination = place template.destination; call = call template.call }
-    | Pull { destination; cursor } ->
-        Pull { destination = place destination; cursor = place cursor }
     | Live locals -> Live (List.map change.local locals)
     | Dead locals -> Dead (List.map change.local locals)
     | Assert assert_ -> Assert { assert_ with condition = operand assert_.condition }
@@ -202,16 +200,15 @@ let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
           loop with
           iteration =
             (match loop.iteration with
-            | Yielding called -> Yielding (change_call change called)
             | Range range ->
                 Range { range with start = operand range.start; stop = operand range.stop }
             | Pull { cursor; next } ->
-                Pull
-                  {
-                    cursor = change_place change cursor;
-                    next = Option.map (change_callee change) next;
-                  });
+                Pull { cursor = change_place change cursor; next = change_callee change next });
           part = change.local loop.part;
+          lent =
+            Option.map
+              (fun (lent : Mir.lent_element) -> { lent with element = change.local lent.element })
+              loop.lent;
           body = block loop.body;
           blocks = List.map block loop.blocks;
           after = block loop.after;
@@ -298,7 +295,6 @@ let substituted (substitution : Types.substitution) (mir : Mir.t) : Mir.t =
     }
   in
   {
-    mir with
     body =
       {
         (change_body change mir.body) with
@@ -307,8 +303,7 @@ let substituted (substitution : Types.substitution) (mir : Mir.t) : Mir.t =
             (fun (local, (default : Mir.t)) ->
               ( local,
                 {
-                  default with
-                  body = change_body change default.body;
+                  Mir.body = change_body change default.body;
                   lambdas = Array.map (change_body change) default.lambdas;
                 } ))
             mir.body.defaults;
@@ -473,8 +468,7 @@ let written (statement : Mir.statement) =
   | Assign { target; _ } -> (whole target, [])
   | Call { destination = Some destination; _ }
   | Slice { destination; _ }
-  | Template { destination; _ }
-  | Pull { destination; _ } ->
+  | Template { destination; _ } ->
       (whole destination, [])
   | Lend { part; _ } -> ([ part ], [])
   | Live locals -> (locals, [])
@@ -634,35 +628,6 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
       blocks
   end
 
-let copy_loop_body building ~(blocks : Mir.block list) ~entry ~resume ~ending ~outer
-    ~is_one_of_several ~iteration ~origin =
-  let ends = own_iteration_ends building blocks in
-  let numbering = Hashtbl.create 16 in
-  List.iter
-    (fun block -> Hashtbl.replace numbering block (add_block building (block_at building block)))
-    blocks;
-  let change =
-    {
-      unchanged with
-      block = (fun block -> Option.value (Hashtbl.find_opt numbering block) ~default:block);
-      fork = (if is_one_of_several then fresh_forks building else Fun.id);
-    }
-  in
-  let copies = List.map (Hashtbl.find numbering) blocks in
-  List.iter
-    (fun block ->
-      let basic = change_block change (block_at building block) in
-      set_block building (Hashtbl.find numbering block)
-        (match basic.terminator with
-        | Iteration_end _ when List.mem block ends -> { basic with terminator = Goto resume }
-        | _ -> basic))
-    blocks;
-  let stays block = block = resume || List.mem block copies in
-  let outer, inner = List.partition (fun local -> List.mem local outer) ending in
-  end_on_exits building ~blocks:copies ~stays ~locals:inner ~iteration:None ~origin;
-  end_on_exits building ~blocks:copies ~stays ~locals:outer ~iteration ~origin;
-  Hashtbl.find numbering entry
-
 (* A method the instance calls, ready to inline: its path, its type
    arguments, and its MIR with them substituted. *)
 type callee = { path : Path.t; type_arguments : Types.argument list; mir : Mir.t }
@@ -700,195 +665,6 @@ let join_regions building ~at ~start =
           }
     | _ -> ()
   done
-
-let yield_count (body : Mir.body) =
-  Array.fold_left
-    (fun count (basic : Mir.basic_block) ->
-      match basic.terminator with Yield _ -> count + 1 | _ -> count)
-    0 body.blocks
-
-let inline_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~blocks ~after
-    ~(loop : Mir.loop) =
-  let origin = loop.origin in
-  let takes_loop = loop.schedule <> Sequential && callee.mir.yielding.by_position in
-  let is_one_of_several = yield_count callee.mir.body > 1 in
-  let basic = block_at building at in
-  let change, _, offset, count =
-    copy building ~path:callee.path ~type_arguments:callee.type_arguments ~origin
-      ~inlined:basic.inlined callee.mir
-  in
-  let bound, first, temporaries =
-    bind_parameters building ~path:callee.path ~type_arguments:callee.type_arguments ~origin
-      ~inlined:basic.inlined ~change callee.mir call.arguments ~entry:offset
-  in
-  set_block building at
-    { basic with statements = basic.statements @ bound; terminator = Goto first };
-  let is_method_local, parameters = copied_locals change callee.mir ~temporaries in
-  let alive_at = alive building ~entry:offset ~bound:parameters ~is_method_local in
-  let outer =
-    if not takes_loop then None
-    else
-      List.find_map
-        (fun block ->
-          match (block_at building block).terminator with
-          | For { iteration = Range _; _ } -> Some (alive_at block)
-          | _ -> None)
-        (List.init count (fun index -> offset + index))
-  in
-  Array.iter
-    (fun (basic : Mir.basic_block) ->
-      match basic.terminator with
-      | Yield { mode = (Read | Mut) as mode; _ } ->
-          Dynarray.set building.locals part
-            { (Dynarray.get building.locals part) with kind = Lent mode }
-      | _ -> ())
-    callee.mir.body.blocks;
-  for block = offset to offset + count - 1 do
-    let copied = block_at building block in
-    match copied.terminator with
-    | Return _ ->
-        (* The method's parameters end where it returns, as the temporaries
-           that hold its arguments do. *)
-        set_block building block
-          {
-            copied with
-            statements = copied.statements @ [ { kind = Dead parameters; origin } ];
-            terminator = Goto after;
-          }
-    | Yield { part = yielded; resume; mode } ->
-        let start = Dynarray.length building.blocks in
-        let entry =
-          copy_loop_body building ~blocks ~entry:body ~resume
-            ~ending:(Locals.elements (alive_at block))
-            ~outer:(Locals.elements (Option.value outer ~default:(alive_at block)))
-            ~is_one_of_several
-            ~iteration:(if takes_loop then Some origin else None)
-            ~origin
-        in
-        (* The part is the caller's, so the caller's code binds it. *)
-        let binding =
-          add_block building
-            {
-              statements = yielded_into building ~part ~mode ~origin yielded;
-              terminator = Goto entry;
-              terminator_origin = origin;
-              header = None;
-              inlined = basic.inlined;
-            }
-        in
-        set_block building block { copied with terminator = Goto binding };
-        join_regions building ~at:block ~start
-    | _ -> ()
-  done;
-  if takes_loop then
-    for block = offset to offset + count - 1 do
-      match (block_at building block).terminator with
-      | For ({ iteration = Range _; _ } as range) ->
-          let start = Dynarray.length building.blocks in
-          let header =
-            add_block building
-              {
-                statements = [];
-                terminator = For { range with loop };
-                terminator_origin = origin;
-                header = None;
-                inlined = basic.inlined;
-              }
-          in
-          set_block building block { (block_at building block) with terminator = Goto header };
-          join_regions building ~at:block ~start
-      | _ -> ()
-    done;
-  List.iter
-    (fun block ->
-      set_block building block
-        { (block_at building block) with statements = []; terminator = Unreachable })
-    blocks
-
-(* A loop over a yielding method that is not inlined, at the end of block
-   [at]: a call of the method makes a cursor, which the loop pulls, and
-   which ends on each way out of the loop. *)
-let pull_loop building ~at ~(callee : callee) ~(call : Mir.call) ~part ~body ~blocks ~after
-    ~(loop : Mir.loop) =
-  let origin = loop.origin in
-  let basic = block_at building at in
-  let cursor =
-    new_local building
-      {
-        kind = Temporary;
-        type_ = Cursor { method_ = callee.path; arguments = callee.type_arguments };
-        origin;
-      }
-  in
-  let place : Mir.place = { root = Local cursor; projections = [] } in
-  let dead : Mir.statement = { kind = Dead [ cursor ]; origin } in
-  end_on_exits building ~blocks
-    ~stays:(fun block -> List.mem block blocks)
-    ~locals:[ cursor ]
-    ~iteration:(if loop.schedule = Sequential then None else Some origin)
-    ~origin;
-  let exhausted =
-    add_block building
-      {
-        statements = [ dead ];
-        terminator = Goto after;
-        terminator_origin = origin;
-        header = None;
-        inlined = (block_at building after).inlined;
-      }
-  in
-  set_block building at
-    {
-      basic with
-      statements = basic.statements @ [ { kind = Call { destination = Some place; call }; origin } ];
-      terminator =
-        For
-          {
-            iteration = Pull { cursor = place; next = None };
-            part;
-            body;
-            blocks;
-            after = exhausted;
-            loop;
-          };
-    }
-
-(* A method's body in which each [parallel] block that yields in a branch
-   runs its branches in order. Inlined, the caller's code runs at the
-   [yield], and that code may leave the block, which a branch that runs on
-   a thread of its own cannot. *)
-let yielding_branches_in_order (body : Mir.body) =
-  let is_yield block = match body.blocks.(block).terminator with Yield _ -> true | _ -> false in
-  let in_order =
-    Array.to_list body.blocks
-    |> List.filter_map (fun (basic : Mir.basic_block) ->
-        match basic.terminator with
-        | Fork { fork; concurrent = false; branches; _ }
-          when List.exists
-                 (fun (branch : Mir.branch) -> List.exists is_yield branch.blocks)
-                 branches ->
-            Some fork
-        | _ -> None)
-  in
-  if in_order = [] then body
-  else
-    {
-      body with
-      blocks =
-        Array.map
-          (fun (basic : Mir.basic_block) ->
-            match basic.terminator with
-            | Fork { fork; branches; _ } when List.mem fork in_order ->
-                {
-                  basic with
-                  terminator =
-                    (match branches with first :: _ -> Goto first.entry | [] -> Unreachable);
-                }
-            | Join { fork; next } when List.mem fork in_order ->
-                { basic with terminator = Goto next }
-            | _ -> basic)
-          body.blocks;
-    }
 
 (* The blocks of a body being built, as a body, for an analysis of it. *)
 let snapshot building (body : Mir.body) =
@@ -1150,7 +926,7 @@ let rec inlined ~(resolve : Mir.callee -> callee option) ~enclosing (mir : Mir.t
     Dynarray.set lambdas index
       (inlined_body ~resolve ~enclosing ~lambdas (Dynarray.get lambdas index))
   done;
-  { mir with body; lambdas = Dynarray.to_array lambdas }
+  { body; lambdas = Dynarray.to_array lambdas }
 
 and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
   let building =
@@ -1170,8 +946,7 @@ and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
   examine_from 0;
   let is_recursive (callee : callee) = List.exists (Path.equal callee.path) enclosing in
   let prepared (callee : callee) =
-    let mir = inlined ~resolve ~enclosing:(callee.path :: enclosing) callee.mir in
-    { callee with mir = { mir with body = yielding_branches_in_order mir.body } }
+    { callee with mir = inlined ~resolve ~enclosing:(callee.path :: enclosing) callee.mir }
   in
   while not (Queue.is_empty pending) do
     let at = Queue.pop pending in
@@ -1190,24 +965,12 @@ and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
         basic.statements
     in
     let start = Dynarray.length building.blocks in
-    match (lend, basic.terminator) with
-    | Some (position, part, call, callee, origin), _ ->
+    match lend with
+    | Some (position, part, call, callee, origin) ->
         inline_lend building ~body ~at ~position ~part ~callee ~call ~origin;
         join_regions building ~at ~start;
         examine_from start
-    | None, For { iteration = Yielding call; part; body; blocks; after; loop } -> (
-        match resolve call.callee with
-        | None -> ()
-        | Some callee ->
-            let callee = if is_recursive callee then callee else prepared callee in
-            if
-              is_recursive callee
-              || (loop.schedule = Concurrent_loop && not callee.mir.yielding.by_position)
-            then pull_loop building ~at ~callee ~call ~part ~body ~blocks ~after ~loop
-            else inline_loop building ~at ~callee ~call ~part ~body ~blocks ~after ~loop;
-            join_regions building ~at ~start;
-            examine_from start)
-    | _ -> ()
+    | None -> ()
   done;
   end_loop_parts building;
   {

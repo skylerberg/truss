@@ -1,4 +1,5 @@
 use standard::core
+use standard::list
 
 public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Value]])
   invariant forall i in 0..entries.length() => forall j in 0..entries.length() =>
@@ -296,9 +297,9 @@ public fn Map[Key: Hash + Ordered, Value].get(self, key: Key) lends Option[Value
 {
   let position = self.index_of(key)
   if position < self.entries.length() {
-    yield Some(self.entries[position].value)
+    Some(self.entries[position].value)
   } else {
-    yield None
+    None
   }
 }
 
@@ -321,7 +322,7 @@ public fn Map[Key: Hash + Ordered, Value].get_or_insert(mut self, key: own Key, 
   cost time O(1 + old(self.length()) * (1 + time(Key.equal)))
 {
   let position = mut self.find_or_insert(own key, default: own default)
-  yield mut self.entries[position].value
+  mut self.entries[position].value
 }
 
 public fn Map[Key: Hash + Ordered, Value].update[capability Granted](
@@ -436,7 +437,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
     requires self.contains(key)
     cost time O(self.length() * time(Key.equal))
   {
-    yield self.entries[self.index_of(key)].value
+    self.entries[self.index_of(key)].value
   }
 
   fn at(mut self, key: Key) lends mut Value
@@ -444,7 +445,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
     cost time O(self.length() * time(Key.equal))
   {
     let position = self.index_of(key)
-    yield mut self.entries[position].value
+    mut self.entries[position].value
   }
 }
 
@@ -469,74 +470,91 @@ impl core::IndexAssign for Map[Key: Hash + Ordered, Value] {
 impl Iterable for Map[Key: Hash + Ordered, Value] {
   type Element = Entry[Key, Value]
 
-  fn each(self) yields Entry[Key, Value]
-    ensures finished ==> yielded.length() == self.length()
-    cost time O(self.length())
+  fn count(self) -> USize
+    ensures result == self.length()
+    cost time O(1)
   {
-    var index: USize = 0
-    while index < self.entries.length()
-      invariant index <= self.entries.length()
-      invariant yielded.length() == index
-      decreases self.entries.length() - index
-    {
-      yield self.entries[index]
-      index += 1
-    }
+    self.entries.length()
+  }
+
+  fn element(self, position: USize) lends Entry[Key, Value]
+    requires position < self.count()
+    cost time O(1)
+  {
+    self.entries[position]
   }
 }
 
-public fn Map[Key: Hash + Ordered, Value].each(own self) yields own Entry[Key, Value]
+public fn Map[Key: Hash + Ordered, Value].cursor(own self) -> list::ListCursor[Entry[Key, Value]]
+  ensures result.remaining() == self.length()
   cost time O(self.length())
+  cost amortized time O(self.length())
 {
-  for entry in own self.entries {
-    yield own entry
+  own self.entries.cursor()
+}
+
+public type Keys[Key, Value](entries: Slice[Entry[Key, Value]])
+
+impl Iterable for Keys[Key, Value] {
+  type Element = Key
+
+  fn count(self) -> USize
+    ensures result == self.entries.length()
+    cost time O(1)
+  {
+    self.entries.length()
+  }
+
+  fn element(self, position: USize) lends Key
+    requires position < self.count()
+    ensures identical(result, self.entries.model()[position].key)
+    cost time O(1)
+  {
+    self.entries[position].key
   }
 }
 
-public fn Map[Key: Hash + Ordered, Value].keys(self) yields Key
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
-{
-  var index: USize = 0
-  while index < self.entries.length()
-    invariant index <= self.entries.length()
-    invariant yielded.length() == index
-    decreases self.entries.length() - index
+public type Values[Key, Value](entries: Slice[Entry[Key, Value]])
+
+impl Iterable for Values[Key, Value] {
+  type Element = Value
+
+  fn count(self) -> USize
+    ensures result == self.entries.length()
+    cost time O(1)
   {
-    yield self.entries[index].key
-    index += 1
+    self.entries.length()
+  }
+
+  fn element(self, position: USize) lends Value
+    requires position < self.count()
+    ensures identical(result, self.entries.model()[position].value)
+    cost time O(1)
+  {
+    self.entries[position].value
   }
 }
 
-public fn Map[Key: Hash + Ordered, Value].values(self) yields Value
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+public fn Map[Key: Hash + Ordered, Value].keys(self) -> Keys[Key, Value]
+  ensures result.count() == self.length()
+  cost time O(1)
 {
-  var index: USize = 0
-  while index < self.entries.length()
-    invariant index <= self.entries.length()
-    invariant yielded.length() == index
-    decreases self.entries.length() - index
-  {
-    yield self.entries[index].value
-    index += 1
-  }
+  Keys(entries: self.entries.slice())
 }
 
-public fn Map[Key: Hash + Ordered, Value].values(mut self) yields mut Value
-  cost time O(self.length())
+public fn Map[Key: Hash + Ordered, Value].values(self) -> Values[Key, Value]
+  ensures result.count() == self.length()
+  cost time O(1)
 {
-  var index: USize = 0
-  while index < self.entries.length()
-    invariant self.entries.length() == old(self.entries.length())
-    invariant index <= self.entries.length()
-    invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
-      i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
-    decreases self.entries.length() - index
-  {
-    yield mut self.entries[index].value
-    index += 1
-  }
+  Values(entries: self.entries.slice())
+}
+
+public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: USize) lends mut Value
+  requires position < self.length()
+  ensures self.length() == old(self.length())
+  cost time O(1)
+{
+  mut self.entries[position].value
 }
 
 internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, other: Map[Key, Value]) -> Bool

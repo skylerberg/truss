@@ -1,5 +1,0 @@
-fn f(names: mut List[String]) {
-  for name in mut names.each() {
-    let _ = name
-  }
-}

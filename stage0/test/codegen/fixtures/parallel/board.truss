@@ -1,11 +1,5 @@
 type Board(cells: List[Int64])
 
-fn Board.each(mut self) yields mut Int64 {
-  for index in 0..self.cells.length() {
-    yield mut self.cells[index]
-  }
-}
-
 fn collatz(start: Int64) -> Int64 {
   var value = start
   var steps: Int64 = 0

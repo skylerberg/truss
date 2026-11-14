@@ -18,10 +18,10 @@ let () =
       expect_bug
         (fun () ->
           Compiler_bug.while_doing ~stage:"Compile" "lowering a caller" (fun () ->
-              Compiler_bug.while_doing ~stage:"Compile" "lowering a cursor" (fun () ->
-                  Compiler_bug.bug ~stage:"Yields" "a local a cursor cannot keep")))
+              Compiler_bug.while_doing ~stage:"Compile" "lowering a callee" (fun () ->
+                  Compiler_bug.bug ~stage:"Lower" "a local with no place")))
         (fun bug ->
-          if bug.stage <> "Yields" || bug.doing <> [ "lowering a cursor"; "lowering a caller" ] then
+          if bug.stage <> "Lower" || bug.doing <> [ "lowering a callee"; "lowering a caller" ] then
             fail "got %s" (Compiler_bug.to_string bug)));
   test "a broken invariant the standard library finds is a bug of the stage that ran" (fun () ->
       expect_bug

@@ -7,11 +7,11 @@ type Tagged(tag: Int64, value: String)
 type Holder(bigs: List[Big], name: String)
 
 fn Holder.tagged(mut self) lends mut Tagged {
-  yield Tagged(tag: 7, value: mut self.name)
+  Tagged(tag: 7, value: mut self.name)
 }
 
 fn Holder.split(self) lends Option[list::SplitFirst[Big]] {
-  yield self.bigs.split_first()
+  self.bigs.split_first()
 }
 
 type Expression =
@@ -21,7 +21,7 @@ type Expression =
 type Terms(left: Expression, right: Expression)
 
 fn Terms.sum(self) lends Expression {
-  yield Expression.Sum(left: self.left, right: self.right)
+  Expression.Sum(left: self.left, right: self.right)
 }
 
 fn evaluate(expression: Expression) -> Int64 {

@@ -18,12 +18,3 @@ val fill_defaults :
   Lowering.state -> Lowered.place -> Mir.body -> Lowered.place list -> Lowered.place list
 
 val lower_code : Lowering.state -> Path.t -> parameters:Lowered.place list -> unit
-
-(* The field of a pulled method's cursor that holds its state: 0 before
-   the method starts, 1 once it has returned, and [k + 1] after its [k]th
-   [yield]. *)
-val cursor_state : Lowering.cursor -> Lowered.place
-
-(* Ends a call of a pulled method's [next], which gives [value] in [Some],
-   or [None]. *)
-val give_option : Lowering.state -> Lowered.operand option -> unit

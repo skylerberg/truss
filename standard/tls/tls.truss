@@ -762,7 +762,7 @@ public fn Connection[Stream: streams::Duplex].peer_certificates(self) -> Slice[x
 }
 
 public fn Connection[Stream: streams::Duplex].stream(self) lends Stream {
-  yield self.stream
+  self.stream
 }
 
 fn established[Stream: streams::Duplex](

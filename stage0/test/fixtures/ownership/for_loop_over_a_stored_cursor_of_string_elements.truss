@@ -1,6 +1,0 @@
-fn f(names: List[String]) {
-  var each = names.each()
-  for name in mut each {
-    let _ = name
-  }
-}

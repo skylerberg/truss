@@ -1,4 +1,5 @@
 use standard::core
+use standard::text::string_slice
 
 public fn String.bytes(self) -> Slice[UInt8]
   ensures result.length() == self.length()
@@ -20,21 +21,20 @@ public fn String.is_boundary(self, offset: USize) -> Bool
   self.slice().is_boundary(offset)
 }
 
-public fn String.characters(self) yields Character
-  cost time O(self.length())
+public fn String.characters(self) -> string_slice::Characters
+  ensures result.remaining() == self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  for character in self.slice().characters() {
-    yield character
-  }
+  self.slice().characters()
 }
 
-public fn String.characters_with_offsets(self) yields core::Indexed[Character]
-  ensures result.index < self.length()
-  cost time O(self.length())
+public fn String.characters_with_offsets(self) -> string_slice::CharactersWithOffsets
+  ensures result.remaining() == self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  for entry in self.slice().characters_with_offsets() {
-    yield entry
-  }
+  self.slice().characters_with_offsets()
 }
 
 public fn String.character_count(self) -> USize
@@ -58,20 +58,18 @@ public fn String.last_character(self) -> Option[Character]
   self.slice().last_character()
 }
 
-public fn String.graphemes(self) yields StringSlice
+public fn String.graphemes(self) -> List[StringSlice]
+  ensures result.length() <= self.length()
   cost time O(self.length())
 {
-  for grapheme in self.slice().graphemes() {
-    yield grapheme
-  }
+  self.slice().graphemes()
 }
 
-public fn String.lines(self) yields StringSlice
+public fn String.lines(self) -> List[StringSlice]
+  ensures result.length() <= self.length() + 1
   cost time O(self.length())
 {
-  for line in self.slice().lines() {
-    yield line
-  }
+  self.slice().lines()
 }
 
 public fn String.substring(self, from: USize, to: USize) -> StringSlice
@@ -195,39 +193,36 @@ public fn String.trim_matching(self, predicate: (fn(Character) -> Bool cost time
   self.slice().trim_matching(predicate)
 }
 
-public fn String.split(self, separator: StringSlice) yields StringSlice
+public fn String.split(self, separator: StringSlice) -> List[StringSlice]
   requires separator.length() > 0
+  ensures result.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
-  for part in self.slice().split(separator) {
-    yield part
-  }
+  self.slice().split(separator)
 }
 
-public fn String.split_at_most(self, separator: StringSlice, parts: USize) yields StringSlice
+public fn String.split_at_most(self, separator: StringSlice, parts: USize) -> List[StringSlice]
   requires separator.length() > 0
   requires parts > 0
+  ensures result.length() <= parts
+  ensures result.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
-  for part in self.slice().split_at_most(separator, parts: parts) {
-    yield part
-  }
+  self.slice().split_at_most(separator, parts: parts)
 }
 
-public fn String.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) yields StringSlice
+public fn String.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> List[StringSlice]
+  ensures result.length() <= self.length() + 1
   cost time O(self.length() * time(predicate))
 {
-  for part in self.slice().split_matching(predicate) {
-    yield part
-  }
+  self.slice().split_matching(predicate)
 }
 
-public fn String.split_whitespace(self) yields StringSlice
+public fn String.split_whitespace(self) -> List[StringSlice]
+  ensures result.length() <= self.length() + 1
   cost time O(self.length())
 {
-  for part in self.slice().split_whitespace() {
-    yield part
-  }
+  self.slice().split_whitespace()
 }
 
 public fn String.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]

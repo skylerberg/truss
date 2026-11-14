@@ -27,9 +27,9 @@ public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].contains(
 
 public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].peek(self, key: Key) lends Option[Value] {
   if self.entries.contains(key) {
-    yield Some(self.entries[key].value)
+    Some(self.entries[key].value)
   } else {
-    yield None
+    None
   }
 }
 
@@ -38,9 +38,9 @@ public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].get(mut s
     touch(mut self, key: key)
   }
   if self.entries.contains(key) {
-    yield Some(self.entries[key].value)
+    Some(self.entries[key].value)
   } else {
-    yield None
+    None
   }
 }
 

@@ -58,6 +58,10 @@ let body state env (written : block) =
                    value of any statement. *)
                 statement state env last ~last:false
             | Expression value, Some (Returns output) -> check state env value output
+            | Expression value, Some (Lends (_, part)) ->
+                (* The value of a lending method's body is the part it lends. *)
+                mark_lent_tails state value;
+                check state env value part
             | _, Some (Returns output) ->
                 statement state env last ~last:true;
                 if not (statement_diverges state last || unify state output Types.unit) then
@@ -278,7 +282,13 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       (fun () ->
         let parameters = core_parameters state written.parameters signature in
         let contract = core_contract state written.clauses in
-        Function { parameters; contract; body = Option.map (build_block state) body_block });
+        let body = Option.map (build_block state) body_block in
+        let body =
+          match signature.output with
+          | Lends (mode, _) -> Option.map (Form.lend_block state mode) body
+          | Returns _ -> body
+        in
+        Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
 let check_definition state (lowered : Environment.lowered_interface) =
@@ -581,8 +591,15 @@ let finalize (state : state) =
   update tables.loops (function
     | Tables.Integer_range { element; inclusive } ->
         Tables.Integer_range { element = final_type element; inclusive }
-    | Yielding { call = written; mode } -> Yielding { call = call written; mode }
-    | Pulled { cursor } -> Pulled { cursor = final_type cursor });
+    | Elements { count; element; lends } ->
+        Elements { count = call count; element = call element; lends }
+    | Pulled { cursor; made_by; remaining } ->
+        Pulled
+          {
+            cursor = final_type cursor;
+            made_by = Option.map call made_by;
+            remaining = Option.map call remaining;
+          });
   update tables.patterns (function
     | Tables.Variant_pattern { type_; variant } ->
         Tables.Variant_pattern { type_ = final_type type_; variant }
@@ -667,6 +684,7 @@ let check database (key : Names.key) =
           references = [];
           receiver_modes = [];
           yielded = Hashtbl.create 4;
+          lent_tails = Hashtbl.create 4;
           binding_spans;
           lambdas = [];
           unsolved = None;

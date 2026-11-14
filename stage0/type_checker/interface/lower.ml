@@ -510,7 +510,6 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
     match written.result with
     | None -> Types.Returns Types.unit
     | Some (Returns result) -> Types.Returns (type_ context result)
-    | Some (Yields (written_mode, result)) -> Types.Yields (mode written_mode, type_ context result)
     | Some (Lends (written_mode, result)) -> Types.Lends (mode written_mode, type_ context result)
   in
   let terminates = terminates written.clauses in

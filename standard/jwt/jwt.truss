@@ -311,7 +311,7 @@ fn check_signature(keys: Slice[jwk::Key], key_id: Option[String], algorithm: Alg
 public fn verify(token: StringSlice, keys: Slice[jwk::Key], rules: Validation) -> Result[Token, Error]
   uses Clock, Panic
 {
-  let parts: List[StringSlice] = List.collect(token.split("."))
+  let parts: List[StringSlice] = token.split(".")
   if parts.length() != 3 {
     return Err(malformed("a token that does not have three segments"))
   }

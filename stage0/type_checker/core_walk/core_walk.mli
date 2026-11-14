@@ -23,11 +23,6 @@ val callees : (Core.callee -> unit) -> visit
 
 val place_type : Core.place -> Types.ty
 val place_origin : Core.place -> Core.origin
-
-val lent_places : Core.operand -> Core.place list
-(** The places that a yielded operand lends: the operand itself if it is a place, and the fields of
-    a yielded construct that are places, to any depth. *)
-
 val place : visit -> Core.place -> unit
 val operand : visit -> Core.operand -> unit
 val block : visit -> Core.block -> unit
@@ -62,13 +57,6 @@ val expression_exists :
   bool
 (** Whether an expression, or an expression or statement in it, satisfies its test. *)
 
-val statement_exists :
-  ?expression:(Core.expression -> bool) ->
-  ?statement:(Core.statement -> bool) ->
-  Core.statement ->
-  bool
-(** Whether a statement, or an expression or statement in it, satisfies its test. *)
-
 (** How code can use [Tasks]. *)
 type tasks_use =
   | Uses_tasks  (** It contains [concurrent] code, or a call in it uses [Tasks]. *)
@@ -83,10 +71,5 @@ val tasks_use : ?solved:(int -> Types.capability_set) -> Core.block -> tasks_use
 val can_use_tasks : ?solved:(int -> Types.capability_set) -> Core.block -> bool
 (** Whether code can use [Tasks]. An implementation that is provided [mut] around such code is a
     monitor. *)
-
-val storage_index : Core.expression -> Core.place option
-(** If an expression is an index of a [List], a [Slice], or an [Array], the collection it indexes.
-    An element of one of these is a place; an index of any other collection is a call of the
-    collection's [at], which lends the element. *)
 
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option

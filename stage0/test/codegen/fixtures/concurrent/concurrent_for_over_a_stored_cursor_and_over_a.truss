@@ -1,0 +1,40 @@
+type Countdown(left: Int64)
+
+impl Cursor for Countdown {
+  type Element = String
+
+  fn next(mut self) -> Option[String] {
+    if self.left <= 0 {
+      return None
+    }
+    self.left -= 1
+    Some("left ${self.left + 1}")
+  }
+}
+
+fn countdown(from: Int64) -> Countdown {
+  Countdown(left: from)
+}
+
+fn cursors() -> Int64
+  uses Tasks, Console
+{
+  var lines = countdown(3)
+  concurrent for line in lines {
+    Console.print_line("stored ${line}")
+  }
+  concurrent for line in countdown(4) {
+    if line == "left 2" {
+      return 2
+    }
+    Console.print_line("temporary ${line}")
+  }
+  0
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  Console.print_line("${cursors()}")
+  ExitCode.success
+}

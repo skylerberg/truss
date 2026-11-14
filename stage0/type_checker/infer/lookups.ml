@@ -128,17 +128,13 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       let part =
         match (env.loop_element, env.output) with
         | Some element, _ -> Some element
-        | None, Some (Yields (_, part) | Lends (_, part)) -> Some part
+        | None, Some (Lends (_, part)) -> Some part
         | _ -> None
       in
       match part with
       | Some part ->
           Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }
       | None -> bug "`yielded` is named where nothing is yielded")
-  | Finished ->
-      state.tables.resolutions.(value.id) <- Some Specification_value;
-      register_expression state value (fun () -> Finished);
-      Types.bool
   | Unknown report -> Types.Error report
   | Binding | Module _ -> bug "the name `%s` is not resolved" text
 
@@ -316,22 +312,7 @@ and finish_call state (value : expression) callee (instance : instance) argument
       };
   note_lending state value instance.signature.output;
   Form.register_call state value;
-  (* A call of a yielding method outside a [for] loop creates a cursor. *)
-  match instance.signature.output with
-  | Yields _ -> cursor_type state callee instance
-  | _ -> result
-
-and cursor_type _state callee (instance : instance) =
-  match callee with
-  | Tables.Function { path; _ } ->
-      Types.Cursor { method_ = path; arguments = instance.type_arguments }
-  | Tables.Trait_method { trait; name; receiver; _ } ->
-      Types.Cursor
-        {
-          method_ = Method { owner = trait.trait; name; receiver };
-          arguments = instance.type_arguments;
-        }
-  | _ -> bug "a call that yields is not a call of a method"
+  result
 
 and check_specification_call state env (value : expression) (signature : Types.signature) =
   if signature.specification_only && not env.specification then
@@ -511,86 +492,107 @@ and versions state receiver_type name :
              (List.assoc_opt receiver (own @ from_traits)))
          [ Read; Mut; Own ])
 
-(* When a call of a trait's yielding method resolves to a known [impl] that
-   defines the method, the callee is the [impl]'s method. The cursor's type
-   and a loop's contract then come from that method. The trait's method
-   cannot provide them, because [Self.Element] is abstract there. *)
-and impl_method_if_resolved state type_ (version : version) =
-  match version with
-  | Trait_version (trait, ({ method_signature = { output = Yields _; _ }; _ } as method_)) -> (
-      match implements state type_ trait with
-      | Some (Impls.From_impl { impl; _ }) ->
-          let path : Path.t =
-            Method { owner = impl; name = method_.method_name; receiver = method_.method_receiver }
-          in
-          if Option.is_some (Query.demand state.database Environment.signature path) then
-            Own_version path
-          else version
-      | _ -> version)
-  | _ -> version
-
-and each_call state (span : span) type_ mode =
-  let receiver : Path.receiver = match mode with Types.Read -> Read | Mut -> Mut | Own -> Own in
-  let each_versions =
-    match versions state type_ "each" with Ok each_versions -> each_versions | Error _ -> []
-  in
-  match
-    Option.map (impl_method_if_resolved state type_) (List.assoc_opt receiver each_versions)
-  with
+(* The callee of the version of a method of a type that takes [self] with
+   [receiver], and the method's signature as a call instantiates it. *)
+and method_version state (span : span) type_ name (receiver : Path.receiver) :
+    (Tables.callee * Types.signature) option =
+  let found = match versions state type_ name with Ok found -> found | Error _ -> [] in
+  match List.assoc_opt receiver found with
   | Some (Own_version method_path) -> (
       match function_signature state method_path with
-      | Some (Ok signature) -> (
+      | Some (Ok signature) ->
           let instance = instantiate state span signature in
           (match instance.signature.receiver with
           | Some (_, self_type) -> ignore (unify state self_type type_)
           | None -> ());
-          match instance.signature.output with
-          | Yields (_, element) ->
-              Some
-                ( {
-                    Tables.callee =
-                      Function { path = method_path; type_arguments = instance.type_arguments };
-                    arguments = [];
-                    omitted_defaults = [];
-                    uses = instance.signature.uses;
-                    callee_result = element;
-                  },
-                  element )
-          | _ -> None)
+          Some
+            ( Function { path = method_path; type_arguments = instance.type_arguments },
+              instance.signature )
       | Some (Error _) | None -> None)
-  | Some (Trait_version (trait, method_)) -> (
+  | Some (Trait_version (trait, method_)) ->
       let instance =
         instantiate state span
           ~extra:[ ({ owner = trait.trait; name = "Self" }, Types.Type type_) ]
           method_.method_signature
       in
-      match instance.signature.output with
-      | Yields (_, element) ->
-          let element = normalize state element in
-          Some
-            ( {
-                Tables.callee =
-                  Trait_method
-                    {
-                      trait;
-                      name = "each";
-                      receiver;
-                      self_type = type_;
-                      type_arguments = [];
-                      evidence =
-                        (match type_ with
-                        | Types.Any _ -> Dynamic
-                        | Types.Parameter _ -> Bound
-                        | _ -> (
-                            match implements state type_ trait with
-                            | Some evidence -> evidence_of evidence
-                            | None -> Built_in));
-                    };
-                arguments = [];
-                omitted_defaults = [];
-                uses = instance.signature.uses;
-                callee_result = element;
-              },
-              element )
-      | _ -> None)
+      Some
+        ( Trait_method
+            {
+              trait;
+              name;
+              receiver;
+              self_type = type_;
+              type_arguments = [];
+              evidence =
+                (match type_ with
+                | Types.Any _ -> Dynamic
+                | Types.Parameter _ -> Bound
+                | _ -> (
+                    match implements state type_ trait with
+                    | Some evidence -> evidence_of evidence
+                    | None -> Built_in));
+            },
+          instance.signature )
   | None -> None
+
+and argumentless_call callee (signature : Types.signature) result : Tables.call =
+  { callee; arguments = []; omitted_defaults = []; uses = signature.uses; callee_result = result }
+
+(* The calls that a [for] loop over a collection makes to visit its
+   elements by position: of its [count], and of the version of its
+   [element] that takes [self] with the loop's mode. The loop, the type of
+   its elements, and the mode it binds each with. *)
+and elements_calls state (span : span) type_ (mode : Types.mode) =
+  let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+  let is_usize type_ = Types.is_builtin USize (normalize state type_) in
+  match
+    ( method_version state span type_ "count" Read,
+      method_version state span type_ "element" receiver )
+  with
+  | Some (count, counted), Some (element, lent) -> (
+      match (counted.parameters, counted.output, lent.parameters, lent.output) with
+      | [], Returns count_type, [ position ], Lends (lends, part)
+        when is_usize count_type && is_usize position.type_ ->
+          let part = normalize state part in
+          Some
+            ( Tables.Elements
+                {
+                  count = argumentless_call count counted (Types.builtin USize);
+                  element = argumentless_call element lent part;
+                  lends;
+                },
+              part,
+              lends )
+      | _ -> None)
+  | _ -> None
+
+(* The call of a collection's [cursor] that a [for] loop makes to consume
+   the collection: the version that takes [self] as [own], whose result is
+   a [Cursor]. The loop and the type of its elements. *)
+and consuming_cursor state (span : span) type_ =
+  match method_version state span type_ "cursor" Own with
+  | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
+      let cursor = normalize state cursor in
+      let trait = trait_reference (Well_known.path Cursor) in
+      match implements state cursor trait with
+      | Some _ ->
+          Some
+            ( Tables.Pulled
+                {
+                  cursor;
+                  made_by = Some (argumentless_call callee signature cursor);
+                  remaining = remaining_call state span cursor;
+                },
+              associated state cursor trait "Element" ~at:span )
+      | None -> None)
+  | _ -> None
+
+(* The call of a cursor's [remaining], if its type has one that takes
+   [self] read-only and gives a [USize]: a bound on the values the cursor
+   has left. *)
+and remaining_call state (span : span) cursor =
+  match method_version state span cursor "remaining" Read with
+  | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))
+    when Types.is_builtin USize (normalize state bound) ->
+      Some (argumentless_call callee signature (Types.builtin USize))
+  | _ -> None

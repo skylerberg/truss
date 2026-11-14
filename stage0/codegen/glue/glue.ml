@@ -24,7 +24,7 @@ let rec trivial glue ty =
   | Some answer -> answer
   | None ->
       glue.trivial_types <- Types.add ty false glue.trivial_types;
-      let any = match ty with Ground.Any _ | Cursor _ -> true | _ -> false in
+      let any = match ty with Ground.Any _ -> true | _ -> false in
       let member : Memory_layout.member -> bool = function
         | Typed ty -> trivial glue ty
         | Raw _ -> true
@@ -557,7 +557,6 @@ let debug glue ty =
       | Never, _ -> ()
       | Function _, _ -> text "fn"
       | Any _, _ -> text "any"
-      | Cursor _, _ -> text "cursor"
       | Lent _, _ ->
           bug "debug glue for %s, which a lent value is copied into first" (Ground.to_string ty)
       | _, Scalar scalar -> scalar_debug glue builder ~output scalar value

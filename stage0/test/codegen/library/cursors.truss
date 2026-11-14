@@ -125,18 +125,18 @@ test "a list and a string are collected from a cursor, and a list is extended by
   assert text == "h\u{e9}h\u{e9}"
 }
 
-test "the adapters and the trait's methods work on a yielding method's cursor" {
+test "the adapters and the trait's methods work on a list's cursor" {
   let items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
-  assert same_items(items.each().skip(2).to_list(), expected: [3, 4, 5, 6, 7])
-  assert same_items(items.each().take(3).to_list(), expected: [1, 2, 3])
-  assert same_items(items.each().step_by(3).to_list(), expected: [1, 4, 7])
-  assert same_items(items.each().skip(1).step_by(2).take(2).to_list(), expected: [2, 4])
-  assert items.each().count() == 7
-  assert items.each().last() == Some(7)
-  assert items.each().fold(0, combine: fn(total, item) { total + item }) == 28
-  let collected: List[Int64] = List.collect(items.each().skip(5))
+  assert same_items(items.cursor().skip(2).to_list(), expected: [3, 4, 5, 6, 7])
+  assert same_items(items.cursor().take(3).to_list(), expected: [1, 2, 3])
+  assert same_items(items.cursor().step_by(3).to_list(), expected: [1, 4, 7])
+  assert same_items(items.cursor().skip(1).step_by(2).take(2).to_list(), expected: [2, 4])
+  assert items.cursor().count() == 7
+  assert items.cursor().last() == Some(7)
+  assert items.cursor().fold(0, combine: fn(total, item) { total + item }) == 28
+  let collected: List[Int64] = List.collect(items.cursor().skip(5))
   assert same_items(collected, expected: [6, 7])
-  var cursor = items.each().peekable()
+  var cursor = items.cursor().peekable()
   assert mut cursor.peek() == Some(1)
   assert mut cursor.next() == Some(1)
   assert mut cursor.find(fn(item) { item > 5 }) == Some(6)
@@ -149,14 +149,30 @@ test "the adapters and the trait's methods work on a yielding method's cursor" {
 
 type Typed(most: USize)
 
-fn Typed.line_lengths(self) yields USize
-  uses Console
-{
-  var read_count: USize = 0
-  while read_count < self.most && Console.read_line() is Some(line) {
-    yield line.length()
-    read_count += 1
+type LineLengths(most: USize, read_count: USize)
+
+impl Cursor for LineLengths {
+  type Element = USize
+  capability Uses = Console
+
+  fn next(mut self) -> Option[USize]
+    uses Console
+  {
+    if self.read_count >= self.most {
+      return None
+    }
+    match Console.read_line() {
+      Some(line) => {
+        self.read_count += 1
+        Some(line.length())
+      }
+      None => None
+    }
   }
+}
+
+fn Typed.line_lengths(self) -> LineLengths {
+  LineLengths(most: self.most, read_count: 0)
 }
 
 fn typing(lines: own List[String]) -> simulation::World {

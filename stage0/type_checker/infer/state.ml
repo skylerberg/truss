@@ -13,8 +13,8 @@ type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 (* The context of the code that is being checked. *)
 type env = {
   output : Types.result option;
-      (** The result of the enclosing function or lambda. [return] and [yield] are checked against
-          it. *)
+      (** The result of the enclosing function or lambda. A [return], and the part a lending method
+          lends, are checked against it. *)
   specification : bool;
       (** The code is a specification: a contract, a [proof] block, or the body of a function for
           specifications only. *)
@@ -134,9 +134,13 @@ type state = {
   mutable receiver_modes : (id * Types.mode) list;
       (** Method calls whose receiver a mark covers. *)
   yielded : (id, Types.mode) Hashtbl.t;
-      (** The operand of each [yield], and each field of a constructor that is in this table, with
-          the mode of the [yield]. A field in this table that is a place is lent to the yielded
-          value instead of moved into it. *)
+      (** The part that a lending method lends, and each field of a constructor that is in this
+          table, with the mode the method lends with. A field in this table that is a place is lent
+          to the lent value instead of moved into it. *)
+  lent_tails : (id, unit) Hashtbl.t;
+      (** In a lending method, the expressions whose value is the part the method lends: the tail
+          expressions of its body and of the values of its [return]s, which have not been checked
+          yet. *)
   binding_spans : (id, span) Hashtbl.t;
       (** Where each name of the definition is, for lambdas' captures. *)
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
@@ -356,6 +360,33 @@ let build_pattern state (written : pattern) : Core.pattern =
    parentheses and for a mode marker such as [mut value]. *)
 let alias_expression state (value : expression) (inner : expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
+
+(* Records in [state.lent_tails] the tail expressions of [value]: the
+   expressions whose value is the value of [value]. The value of an [if], a
+   [match], or a block is the value of one of its branches, so its tails
+   are theirs. A [return] checks its own value, and a [todo] or an
+   [unreachable] has none. *)
+let rec mark_lent_tails state (value : expression) =
+  match value.kind with
+  | Parenthesized inner -> mark_lent_tails state inner
+  | If { then_; else_ = Some else_; _ } -> (
+      mark_lent_block state then_;
+      match else_ with
+      | Else block -> mark_lent_block state block
+      | Else_if nested -> mark_lent_tails state nested)
+  | Match { arms; _ } ->
+      List.iter
+        (fun (arm : arm) ->
+          match arm.body.kind with Expression body -> mark_lent_tails state body | _ -> ())
+        arms
+  | Block body -> mark_lent_block state body
+  | Return _ | Todo | Unreachable -> ()
+  | _ -> Hashtbl.replace state.lent_tails value.id ()
+
+and mark_lent_block state (body : block) =
+  match List.rev body.statements with
+  | { kind = Expression value; _ } :: _ -> mark_lent_tails state value
+  | _ -> ()
 
 (* The place a core expression denotes. A [Use] denotes the place it
    reads. Any other expression is a value, which is stored in a
@@ -930,13 +961,6 @@ let rec marked_call state (value : expression) =
   | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
       if is_place state base then Some value.id else marked_call state base
   | Member (base, _) | Bracket (base, _) | Try base -> marked_call state base
-  | _ -> None
-
-(* The call inside an expression, looking through marks and parentheses. *)
-let rec called (value : expression) =
-  match value.kind with
-  | Call _ -> Some value
-  | Mode (_, inner) | Parenthesized inner -> called inner
   | _ -> None
 
 (* Checks the target of a [calls] clause: a function-typed parameter, a

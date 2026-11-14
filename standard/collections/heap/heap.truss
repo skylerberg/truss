@@ -139,9 +139,9 @@ public fn collections::Heap[Element: Ordered].peek(self) lends Option[Element]
   cost time O(1)
 {
   if self.items.length() > 0 {
-    yield Some(self.items[0])
+    Some(self.items[0])
   } else {
-    yield None
+    None
   }
 }
 
@@ -204,21 +204,29 @@ public fn collections::Heap[Element: Ordered].to_sorted_list(own self) -> List[E
   items
 }
 
-public fn collections::Heap[Element: Ordered].each(own self) yields own Element
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length() * log(self.length()) * time(Element.compare))
+public fn collections::HeapCursor[Element: Ordered].remaining(self) -> USize
+  ensures result == self.heap.length()
+  cost time O(1)
 {
-  var remaining = own self
-  while remaining.length() > 0
-    invariant remaining.length() + yielded.length() == self.length()
-    decreases remaining.length()
-    cost time O((self.length() - remaining.length()) * log(self.length()) * time(Element.compare))
+  self.heap.length()
+}
+
+impl Cursor for collections::HeapCursor[Element: Ordered] {
+  type Element = Element
+
+  fn next(mut self) -> Option[Element]
+    ensures (result is Some(_)) == (old(self.remaining()) > 0)
+    ensures (result is Some(_)) ==> self.remaining() + 1 == old(self.remaining())
+    ensures (result is None) ==> self.remaining() == old(self.remaining())
+    cost time O(log(old(self.remaining())) * time(Element.compare))
   {
-    match mut remaining.pop() {
-      Some(item) => {
-        yield own item
-      }
-      None => {}
-    }
+    mut self.heap.pop()
   }
+}
+
+public fn collections::Heap[Element: Ordered].cursor(own self) -> collections::HeapCursor[Element]
+  ensures result.remaining() == self.length()
+  cost time O(1)
+{
+  collections::HeapCursor(heap: own self)
 }

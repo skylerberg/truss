@@ -69,9 +69,7 @@ let token (kind : Token.kind) : Truss.token option =
         | Uses -> USES
         | Var -> VAR
         | While -> WHILE
-        | With -> WITH
-        | Yield -> YIELD
-        | Yields -> YIELDS)
+        | With -> WITH)
   | Punctuation punctuation ->
       Some
         (match punctuation with

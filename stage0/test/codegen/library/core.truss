@@ -39,8 +39,8 @@ test "a collection folds, counts, and maps its elements" {
   let items: List[Int64] = [1, 2, 3, 4]
   assert items.fold(0, combine: fn(total, item) { total + item }) == 10
   assert items.fold(1, combine: fn(total, item) { total * item }) == 24
-  assert items.count(fn(item) { item % 2 == 0 }) == 2
-  assert items.count(fn(item) { item > 9 }) == 0
+  assert items.count_where(fn(item) { item % 2 == 0 }) == 2
+  assert items.count_where(fn(item) { item > 9 }) == 0
   let halves = items.filter_map(fn(item) { if item % 2 == 0 { Some(item / 2) } else { None } })
   assert halves.length() == 2
   assert halves[0] == 1

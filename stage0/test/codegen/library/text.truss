@@ -177,7 +177,7 @@ test "contains and occurrences count matches that do not overlap" {
   assert "".occurrences("x") == 0
 }
 
-test "split yields the parts between separators, empty ones included" {
+test "split gives the parts between separators, empty ones included" {
   var parts: List[String] = []
   for part in "a,b,,c".split(",") {
     mut parts.push(part.to_string())
@@ -289,7 +289,7 @@ test "split_matching splits at each character that matches" {
   assert collected(one, expected: ["plain"])
 }
 
-test "split_whitespace yields the words, however much white space is between them" {
+test "split_whitespace gives the words, however much white space is between them" {
   var words: List[String] = []
   for word in "  the quick\t\tbrown\u{a0}fox \n".split_whitespace() {
     mut words.push(word.to_string())
@@ -312,7 +312,7 @@ test "split_whitespace yields the words, however much white space is between the
   assert collected(single, expected: ["word"])
 }
 
-test "lines yields each line without its line break" {
+test "lines gives each line without its line break" {
   var lines: List[String] = []
   for line in "first\nsecond\r\nthird".lines() {
     mut lines.push(line.to_string())
@@ -591,7 +591,7 @@ test "graphemes join an Indic linker to the consonant after it" {
   assert joined_graphemes("\u{1CF5}\u{915}") == "\u{1CF5}\u{915}"
 }
 
-test "a String yields the graphemes of its slice" {
+test "a String gives the graphemes of its slice" {
   var count: USize = 0
   let text = "e\u{301}\u{1F1FA}\u{1F1F8}!"
   for _ in text.graphemes() {

@@ -18,15 +18,6 @@ val impls_for : Query.context -> Path.t -> Path.package -> (Path.t * Path.t) lis
 
 val impls_in : (Path.t * Path.t * Path.package, Path.t list) Query.query
 val cursor_trait : Path.t
-
-val cursor_uses : Query.context -> Types.ty -> Types.capability_set
-(** The capabilities that [next] uses on the cursor of a yielding method: the method's, for the
-    cursor's type arguments, since [next] runs the method's code. Any other type has none. *)
-
-val cursor_of_impl : Path.t -> Path.t option
-(** The yielding function or method whose cursor an [impl] is for, if the [impl] is a cursor's. No
-    type derives [Cursor], so a derived [impl] of it is a cursor's. *)
-
 val impl_interface : Query.context -> Path.t -> Types.impl_interface option
 
 val trait_substitution : Query.context -> Path.t -> Types.substitution option
@@ -76,11 +67,6 @@ type through_any =
           associated type of [Self] does not count: the [any] type fixes it. *)
 
 val through_any : trait:Path.t -> Types.trait_method -> through_any
-
-val cursor_element : Query.context -> Path.t -> Types.argument list -> Types.ty option
-(** The element type of a pulled yielding method's cursor: the method's yielded type, with the
-    method's type arguments substituted. *)
-
 val copyable_path : Path.t
 
 type bounds = Types.parameter -> Types.trait_reference list

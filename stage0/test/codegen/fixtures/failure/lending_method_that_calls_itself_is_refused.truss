@@ -1,0 +1,21 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, value: Int64, right: Tree)
+
+fn Tree.leftmost(self, fallback: Int64) lends Int64 {
+  match self {
+    Leaf => fallback
+    Node(left, value, ..) => {
+      if left is Leaf {
+        value
+      } else {
+        left.leftmost(fallback)
+      }
+    }
+  }
+}
+
+test "leftmost" {
+  let one = Tree.Node(left: Tree.Leaf, value: 1, right: Tree.Leaf)
+  assert one.leftmost(0) == 1
+}

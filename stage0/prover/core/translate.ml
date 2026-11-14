@@ -111,7 +111,7 @@ type part = {
 type contract = {
   parts : part list;  (** The callee's own first. *)
   pure : bool;  (** Pure and terminating, so a function in the logic. *)
-  result_kind : [ `Returns | `Lends | `Yields ];
+  result_kind : [ `Returns | `Lends ];
   definition : (part * block) option;  (** A functional body, which is the callee's definition. *)
 }
 
@@ -135,11 +135,10 @@ type frame = {
       (** The type arguments of the callee whose clauses are read here, for its generic types. *)
   self_type : Types.ty option;  (** The type of [self], whose fields an invariant names. *)
   yielded : Logic.term option;
-      (** The value of [yielded] here: the parts a lending or yielding callee yielded, or the values
-          a [for] loop's earlier iterations received. *)
-  finished : Logic.term option;  (** The value of [finished] here. *)
+      (** The value of [yielded] here: the part a lending callee lent, or the values a [for] loop's
+          earlier iterations received. *)
   yielded_so_far : Logic.term option;
-      (** In a lending or yielding method's own body, the parts it has yielded so far. *)
+      (** In a lending method's own body, the part it has lent, once it has. *)
   spent : (Costs.counter * Logic.term) list;
       (** Each counter's cost so far in the definition being proven. *)
 }
@@ -156,12 +155,18 @@ type loop_cost = {
   entry : Logic.term;  (** The counter on entry to the loop. *)
   rule : loop_rule;
   held : (frame -> Logic.term) option;  (** The potential of the values the loop changes. *)
+  held_on_entry : Logic.term option;  (** That potential on entry to the loop. *)
+  gained_at_head : Logic.term option;
+      (** For a [cost] clause of a loop whose changed values hold potential: what the clause counts
+          at the head beside the cost so far. It is the potential gained if an iteration spends or
+          saves potential, and zero otherwise, which is known once the body is read. *)
+  mutable counts_potential : bool;
+      (** Whether the loop's [cost] clause bounds its cost so far plus the potential gained. *)
 }
 
 (* Which elements an index or a range reaches: one, or the run from a start
    to before a stop. *)
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
-type cursor = { method_frame : frame; own : part; element : Types.ty }
 
 type received = {
   has_another : Logic.term;
@@ -205,23 +210,31 @@ type given =
   | Given_lambda of { position : int; mode : Types.mode; written : expression }
 
 (* What a [for] loop iterates over, as the code evaluated it: a range's
-   bounds, a yielding call's callee and arguments, or the place of a
-   cursor, of the built-in cursor of a yielding method or, with its [next],
-   of a type's own. *)
+   bounds, or the place of a cursor with its type's [next]. *)
 type looped =
   | Over_range of { low : Logic.term; high : Logic.term; inclusive : bool }
-  | Over_call of { invocation : Invocation.t; values : passed list }
-  | Over_cursor of { cursor : passed_place; cursor_type : Types.ty }
-  | Over_own_cursor of { cursor : passed_place; cursor_type : Types.ty; next : Invocation.callee }
+  | Over_cursor of { cursor : passed_place; cursor_type : Types.ty; next : Invocation.callee }
 
 type driven = {
   loop_at : Core.origin;
   loop_clauses : loop_clause list;
   looped : looped;
   element_type : Types.ty;
+  lent_element : Types.ty option;
+      (** In a loop over the elements of a collection, the type of the element each iteration is
+          lent. The loop is then over the positions of the elements, and [yielded] holds the
+          elements. *)
+  kept_count : Core.expression option;
+      (** In a loop that changes the elements of a collection, the call of the collection's [count],
+          whose value every iteration keeps. *)
+  element_call : Core.expression option;
+      (** In a loop that reads the elements of a collection, the call of the collection's [element]
+          at the loop's position. The loop borrows the collection, so the element at a position is
+          the same value in every iteration, and [yielded] holds those values. *)
   bind_element : frame -> Logic.term -> frame;
   changed_in : frame -> changed;
-  body_yields : bool;
+      (** The values the loop changes: those its body changes, and a cursor it pulls. *)
+  changed_by_body : frame -> changed;
   run_body : frame -> Logic.term -> frame list * frame list;
   bindings : frame -> frame;
 }
@@ -274,10 +287,11 @@ type context = {
   mutable evaluated_keys : (Core.id * Logic.term) list;
       (** The terms of the index keys of the target of the assignment being translated, by node.
           Reading and storing the target look them up, so that no key is evaluated twice. *)
-  mutable yielded_part : (Types.ty * [ `Lends | `Yields ]) option;
-      (** In a lending or yielding method's body, the type of the parts it yields. *)
+  mutable yielded_part : Types.ty option;
+      (** In a lending method's body, the type of the part it lends. *)
   mutable yield_ensures : (expression list * expression list) option;
-      (** Its [ensures]: the clauses for each [yield], which mention [result], and the others. *)
+      (** Its [ensures]: the clauses that mention [result], which hold where the method lends, and
+          the others, which hold where the lend ends. *)
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;
@@ -308,7 +322,6 @@ type context = {
       (** Each [if] and [match] arm read so far, reversed. *)
   mutable entry : Logic.symbol list;
       (** The symbols of the definition's parameters and [self] as they arrive. *)
-  mutable cursors : (Logic.term * cursor) list;  (** Where each cursor value came from. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
@@ -1215,8 +1228,8 @@ let join context ?value_type frames =
             | None -> term)
           first.locals
       in
-      (* [self] and the parts a lending or yielding method has yielded change
-         along paths too, like locals. *)
+      (* [self] and the part a lending method has lent change along paths
+         too, like locals. *)
       let self =
         match first.self_type with
         | Some ty -> (
@@ -1283,7 +1296,7 @@ let join context ?value_type frames =
       in
       let yielded_so_far =
         match context.yielded_part with
-        | Some (part, _) -> (
+        | Some part -> (
             match
               define "parts"
                 (sort_of context
@@ -1516,12 +1529,7 @@ let make_contract database path ~own ~others ~body =
         && match signature.receiver with Some (Mut, _) -> false | _ -> true)
     | None -> false
   in
-  let result_kind =
-    match signature with
-    | Some { output = Lends _; _ } -> `Lends
-    | Some { output = Yields _; _ } -> `Yields
-    | _ -> `Returns
-  in
+  let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
   let definition =
     match body with
     | Some body when pure && result_kind = `Returns && is_functional_block body -> Some (own, body)
@@ -1895,10 +1903,6 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
       let frame, term = operand_value context frame tested in
       let condition, frame = pattern_match context frame pattern term tested_type in
       Some (frame, condition)
-  | Cursor_next place ->
-      Some
-        (pulled_cursor context frame (at frame node) ~cursor_type:(place_type context frame place)
-           (core_place context place))
   | Convert { conversion; value = converted } -> (
       let frame, term = value context frame converted in
       match conversion with
@@ -1976,16 +1980,12 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
       Some (frame, term)
   | Quantified { quantifier; binder; body } -> quantified context frame quantifier binder body
   | Yielded -> (
-      (* The parts the innermost loop has received, or else, in a lending or
-         yielding method's body, the parts the method has yielded. *)
+      (* The values the innermost loop has received, or else, in a lending
+         method's body, the part the method has lent. *)
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> Some (frame, yielded)
       | None, Some yielded_so_far when source.key = Some context.home -> Some (frame, yielded_so_far)
       | _ -> unsupported (at frame node) "`yielded` here")
-  | Finished -> (
-      match frame.finished with
-      | Some finished -> Some (frame, finished)
-      | None -> unsupported (at frame node) "`finished` here")
   | Identical (first, second) ->
       (* Identity, for every type: the solver's equality. *)
       let frame, first_value = value context frame first in
@@ -2046,16 +2046,6 @@ and to_any context frame (site : Invocation.site) =
         | (Time | Calls _), _ -> Costs.zero)
   in
   (frame, arrive context frame "any" (substituted context frame site.type_))
-
-(* The next value of a cursor whose method the prover knows, with the
-   cursor left after it and the step it takes. *)
-and pulled_cursor context frame span ~cursor_type (cursor : passed_place) =
-  let cursor_term = cursor.read frame in
-  match List.assoc_opt cursor_term context.cursors with
-  | Some cursor_method ->
-      let pulled, later = pull context frame cursor_method cursor_term ~cursor_type in
-      (spend context (cursor.write frame later) one_step, pulled)
-  | None -> unsupported span "a pull of a cursor whose method the prover does not know"
 
 and refreshed context frame ty (place : passed_place) =
   let fresh_value = arrive context frame "changed" ty in
@@ -2599,23 +2589,45 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
       (fun frame -> (frame, Logic.Boolean true))
       (join_frames context (List.map fst reached))
 
+(* Reads the body of a quantifier that binds [bound_symbol], which
+   [frame.bound] already holds. [read] is given the frame of a value that
+   [premise] admits: the body runs only for those values, which may be
+   none, so its assumptions hold only for them. Gives that frame, what
+   [read] gave, and a function for the quantified term, which keeps with
+   the term the facts that the body stated about the bound symbol. *)
+and under_binder :
+    'read.
+    context ->
+    frame ->
+    Logic.symbol ->
+    Logic.sort ->
+    Logic.term ->
+    (frame -> 'read) ->
+    frame * 'read * (Logic.term -> Logic.term) =
+ fun context frame bound_symbol sort premise read ->
+  let body_frame =
+    restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
+  in
+  let facts = ref [] in
+  context.scopes <- (bound_symbol, facts) :: context.scopes;
+  context.quantifier_symbols <- bound_symbol :: context.quantifier_symbols;
+  let body =
+    Fun.protect
+      ~finally:(fun () -> context.scopes <- List.tl context.scopes)
+      (fun () -> read body_frame)
+  in
+  let with_facts term =
+    if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
+    term
+  in
+  (body_frame, body, with_facts)
+
 and quantified context frame (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
     let mark = context.fresh in
-    (* The body runs only for the values the premise admits, which may be
-       none, so its assumptions hold only for them. *)
-    let body_frame =
-      restrict
-        { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
-        premise
-    in
-    let facts = ref [] in
-    context.scopes <- (bound_symbol, facts) :: context.scopes;
-    context.quantifier_symbols <- bound_symbol :: context.quantifier_symbols;
-    let after, body_value =
-      Fun.protect
-        ~finally:(fun () -> context.scopes <- List.tl context.scopes)
-        (fun () -> value context body_frame body)
+    let body_frame, (after, body_value), with_facts =
+      under_binder context body_frame bound_symbol sort premise (fun body_frame ->
+          value context body_frame body)
     in
     let bound = [ (bound_symbol, sort) ] in
     (* In code, a quantifier over a range runs its body once for each value
@@ -2649,8 +2661,7 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
       | Forall -> Logic.forall (bound, Logic.( ==> ) premise body_value)
       | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
-    if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
-    Some (frame, term)
+    Some (frame, with_facts term)
   in
   let symbol = fresh_name context "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
@@ -2731,17 +2742,24 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
         (type_of context frame collection)
         (snd (value context frame collection))
         (at frame collection)
-  (* In executable code, the collection is the argument of the [each] call. *)
-  | Over_each
+  (* In executable code, the collection is the argument of the call of its
+     [count]. *)
+  | Over_elements
       {
         pattern;
-        call = { kind = Call { arguments = [ Passed { value = collection; _ } ]; _ }; _ } as call;
+        elements =
+          {
+            count =
+              { kind = Call { arguments = [ Passed { value = collection; _ } ]; _ }; _ } as call;
+            _;
+          };
       } ->
       over_collection pattern
         (operand_type context frame collection)
         (snd (operand_value context frame collection))
         (at frame call)
-  | Over_each { call; _ } -> unsupported (at frame call) "this quantifier's loop"
+  | Over_elements { elements = { count = call; _ }; _ } ->
+      unsupported (at frame call) "this quantifier's loop"
 
 (* A [USize] generic argument's value: a literal, the frame's
    substitution for a parameter, or else the parameter as an uninterpreted
@@ -4873,66 +4891,7 @@ and model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
         in
         add_fact context fact)
 
-(* Cursors. A cursor carries its yielded parts and whether it has
-   ended as ghost parts of its value. *)
 and cursor_trait : Path.t = Well_known.path Cursor
-
-and cursor_yielded context cursor_type element cursor =
-  let sort = sort_of context cursor_type in
-  let symbol = Symbol.Cursor_yielded (type_key cursor_type) in
-  declare context (Logic.Function (symbol, [ sort ], sort_of context (sequence_type element)));
-  Logic.Apply (symbol, [ cursor ])
-
-and cursor_ended context cursor_type cursor =
-  let symbol = Symbol.Cursor_ended (type_key cursor_type) in
-  declare context (Logic.Function (symbol, [ sort_of context cursor_type ], Logic.Bool));
-  Logic.Apply (symbol, [ cursor ])
-
-and pull context frame (cursor_method : cursor) cursor ~cursor_type =
-  let element = cursor_method.element in
-  let option_type = Types.Named { path = option_path; arguments = [ Types.Type element ] } in
-  ignore (sort_of context option_type);
-  let later = arrive context frame "cursor" cursor_type in
-  context.cursors <- (later, cursor_method) :: context.cursors;
-  let pulled = arrive context frame "pulled" option_type in
-  let some = Logic.Is (constructor_name option_type (Some "Some"), pulled) in
-  let part = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
-  let before = cursor_yielded context cursor_type element cursor in
-  let clauses (at : frame) ~each ~result ~yielded ~finished =
-    let inside =
-      {
-        cursor_method.method_frame with
-        condition = at.condition;
-        bound = at.bound;
-        result;
-        yielded = Some yielded;
-        finished;
-      }
-    in
-    List.iter
-      (fun (clause : expression) ->
-        if mentions_result clause = each then
-          assume context at (snd (clause_value context inside clause)))
-      cursor_method.own.ensures
-  in
-  assume context frame (Logic.( ==> ) (cursor_ended context cursor_type cursor) (Logic.not_ some));
-  let handed = restrict frame some in
-  assume_valid context handed element part;
-  clauses handed ~each:true ~result:(Some part) ~yielded:before ~finished:None;
-  let through = appended context handed element before part in
-  assume context handed
-    Logic.(
-      equal (cursor_yielded context cursor_type element later) through
-      &&& not_ (cursor_ended context cursor_type later));
-  clauses handed ~each:false ~result:None ~yielded:through ~finished:(Some (Logic.Boolean false));
-  let none = restrict frame (Logic.not_ some) in
-  assume context none
-    Logic.(
-      equal (cursor_yielded context cursor_type element later) before
-      &&& cursor_ended context cursor_type later);
-  clauses none ~each:false ~result:None ~yielded:before ~finished:(Some (Logic.Boolean true));
-  (pulled, later)
-
 and option_path : Path.t = Well_known.path Option
 
 (* A sequence of parts with nothing in it. *)
@@ -4988,19 +4947,18 @@ and appended context frame element parts part =
                 ] )) ));
   longer
 
-(* Whether a clause mentions [result], so that it holds at each [yield]
-   of a lending or yielding method, rather than where the method ends. *)
+(* Whether a clause mentions [result], so that it holds where a lending
+   method lends its part, rather than where the lend ends. *)
 and mentions_result clause =
   Core_walk.expression_exists
     ~expression:(fun (node : expression) -> match node.kind with Result -> true | _ -> false)
     clause
 
-(* Whether a clause reads a lending or yielding method's history, the parts
-   yielded so far and whether it ended. *)
+(* Whether a clause reads [yielded]: in a lending method, its part as the
+   caller left it. *)
 and mentions_history clause =
   Core_walk.expression_exists
-    ~expression:(fun (node : expression) ->
-      match node.kind with Yielded | Finished -> true | _ -> false)
+    ~expression:(fun (node : expression) -> match node.kind with Yielded -> true | _ -> false)
     clause
 
 and signature_terminates context path =
@@ -5877,7 +5835,7 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
      The same term gets the same name, so the same call is the same term
      wherever it is made. *)
   let values =
-    if contract.pure && contract.result_kind <> `Yields then
+    if contract.pure then
       List.map
         (fun (passed : passed) ->
           if passed.mode = Types.Mut || Logic.mentions frame.bound passed.term then passed
@@ -6070,10 +6028,7 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
   let applied_as = ref None in
   let is_limited_call = ref false in
   let result =
-    if
-      contract.pure && contract.result_kind <> `Yields
-      && List.length own_arguments = List.length own_bound
-    then begin
+    if contract.pure && List.length own_arguments = List.length own_bound then begin
       let function_symbol = Symbol.Function { callee = path; instance } in
       let sorts =
         List.mapi
@@ -6141,12 +6096,9 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
       note_known_call context invocation path term own_arguments;
       term
     end
-    else if contract.result_kind = `Yields then
-      (* A cursor, of the call's own type. *)
-      arrive context after "cursor" result_type
     else arrive context after "result" result_type
   in
-  if contract.result_kind <> `Yields then assume_valid context after result_type result;
+  assume_valid context after result_type result;
   (* A part lent [mut] goes back into the value it is part of when the lend
      ends, as the caller's statement left it, so that value is valid only
      if the part is, which is checked below. *)
@@ -6542,12 +6494,8 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
             | `Lends when List.exists mentions_history part.ensures ->
                 let left = match lent_final with Some leave -> leave result | None -> result in
                 let none = empty_parts context after result_type in
-                {
-                  ensures_frame with
-                  yielded = Some (appended context after result_type none left);
-                  finished = Some (Logic.Boolean true);
-                }
-            | `Lends | `Returns | `Yields -> ensures_frame
+                { ensures_frame with yielded = Some (appended context after result_type none left) }
+            | `Lends | `Returns -> ensures_frame
           in
           List.iter
             (fun (clause : expression) ->
@@ -6573,7 +6521,7 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
                     state (Logic.( ==> ) (required_by part) term)
                 | exception Foreign_unsupported _ -> ())
             part.ensures)
-        (if contract.result_kind = `Yields then [] else contract.parts)
+        contract.parts
     in
     let about_part clause = contract.result_kind <> `Lends || mentions_result clause in
     assume_ensures about_part;
@@ -6595,23 +6543,6 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
           List.iter (fun at_call -> at_call after substitute) axiom.at_calls)
         (Hashtbl.find_all context.axioms_of symbol)
   | _ -> ());
-  (if contract.result_kind = `Yields then
-     match result_type with
-     | Types.Cursor _ as cursor_type -> (
-         match Interface.Impls.signature context.database path with
-         | Some { output = Yields (_, element); _ } ->
-             let element = Types.substitute (substitution_of own) element in
-             let cursor_method = { method_frame = entry_frame own; own; element } in
-             context.cursors <- (result, cursor_method) :: context.cursors;
-             assume context after
-               Logic.(
-                 equal
-                   (sequence_length context element
-                      (cursor_yielded context cursor_type element result))
-                   (int 0)
-                 &&& not_ (cursor_ended context cursor_type result))
-         | _ -> ())
-     | _ -> ());
   (* The call's cost is the callee's cost clauses with the arguments and
      [result] substituted. [change] is the call's change in potential: that
      of its result and its [mut] arguments after the call, less that of its
@@ -6632,7 +6563,6 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
         | Types.Own -> Costs.minus total (potential context frame ty passed.term)
         | Types.Read -> total)
       (match contract.result_kind with
-      | `Yields -> Costs.zero
       | `Lends -> (
           (* A lent part stays in place, so the call hands over none of its
              potential, and the caller, not the method, pays for the
@@ -7711,7 +7641,19 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
                   Option.map (fun held -> (fresh context frame "per" Logic.Int, held frame)) held;
               }
       in
-      { counter; entry; rule; held })
+      {
+        counter;
+        entry;
+        rule;
+        held;
+        held_on_entry = Option.map (fun held -> held frame) held;
+        gained_at_head =
+          (match (rule, held) with
+          | Clause_bound _, Some _ when counter.counting <> Exactly ->
+              Some (fresh context frame "gained" Logic.Int)
+          | _ -> None);
+        counts_potential = false;
+      })
     context.counters
 
 and counting_of (cost : Core.cost) : Costs.counting =
@@ -7729,6 +7671,16 @@ and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Cor
   | Units -> Costs.at_most since (Costs.bound amount)
   | Exactly -> Logic.equal since amount
   | At_most -> Costs.at_most since amount
+
+(* The potential that the values a loop changes have gained since its
+   entry, where the loop's [cost] clause counts it. An iteration that calls
+   an amortized callee spends or saves potential, so its clause bounds the
+   cost so far plus the potential gained: that sum telescopes where the cost
+   alone does not. *)
+and potential_gained (cost : loop_cost) (at : frame) =
+  match (cost.held, cost.held_on_entry) with
+  | Some held, Some on_entry when cost.counts_potential -> Costs.minus (held at) on_entry
+  | _ -> Costs.zero
 
 and spent_at (frame : frame) key =
   match List.assoc_opt key frame.spent with Some spent_term -> spent_term | None -> Costs.zero
@@ -7755,7 +7707,9 @@ and loop_head context head costs ~iterations =
       | Clause_bound written ->
           assume context head
             (loop_clause_holds context head cost.counter written
-               ~since:(Costs.minus at_head cost.entry))
+               ~since:
+                 (Costs.plus (Costs.minus at_head cost.entry)
+                    (Option.value cost.gained_at_head ~default:Costs.zero)))
       | Per_iteration { per; per_held } -> (
           assume context head
             (counted_with ~counter:cost.counter ~at:at_head
@@ -7800,6 +7754,18 @@ and loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
     (fun cost ->
       match cost.rule with
       | Clause_bound written_cost ->
+          (* The clause counts the potential gained where an iteration spends
+             or saves potential, which decides what it counted at the head. *)
+          cost.counts_potential <-
+            Option.is_some cost.gained_at_head
+            && List.exists
+                 (fun (frame : frame) ->
+                   mentions_potential
+                     (Costs.since ~start:(spent_at head cost.counter) (spent_at frame cost.counter)))
+                 (ends @ breaks);
+          Option.iter
+            (fun gained -> fact context head (Logic.equal gained (potential_gained cost head)))
+            cost.gained_at_head;
           List.iter
             (fun (frame, when_) ->
               oblige context frame Cost
@@ -7808,7 +7774,10 @@ and loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
                    (quote frame.source written_cost.origin)
                    when_)
                 (loop_clause_holds context frame cost.counter written_cost
-                   ~since:(Costs.minus (spent_at frame cost.counter) cost.entry)))
+                   ~since:
+                     (Costs.plus
+                        (Costs.minus (spent_at frame cost.counter) cost.entry)
+                        (potential_gained cost frame))))
             (List.map (fun exit_frame -> (exit_frame, "after an iteration")) ends
             @ List.map (fun exit_frame -> (exit_frame, "where the loop is left")) breaks)
       | Per_iteration { per; per_held } -> (
@@ -7879,7 +7848,9 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
               | At_most -> bounded_amount context exit_ amount
               | Exactly -> amount
             in
-            (cost.counter, Costs.plus cost.entry counted)
+            (* The clause bounds the cost with the potential gained, so the
+               cost is the bound less that potential. *)
+            (cost.counter, Costs.minus (Costs.plus cost.entry counted) (potential_gained cost exit_))
         | Per_iteration { per; per_held } ->
             let bounded ~at ~start per =
               if cost.counter.counting <> Exactly then
@@ -8333,53 +8304,38 @@ and bit_vector_assertion context frame (asserted : expression) =
   Hashtbl.reset context.stated;
   Hashtbl.iter (Hashtbl.replace context.stated) saved_stated
 
-(* A [yield] in a lending or yielding method's own body: the part meets
-   the clauses about each part; a [mut] part comes back as the caller left
-   it, which is any value of its type; and a yielding method may end here,
-   if a loop stops it, so its other clauses and [self]'s invariant hold. *)
-(* [given], where the MIR gives the part: its value, whether it lends places,
-   and how the caller's changes to it are written back to them. *)
-and yield_part context frame origin (mode : Types.mode) ~handed ~lends ~write_back =
+(* The part a lending method lends, where its body gives it: the part meets
+   the clauses about it, and a [mut] part comes back as the caller left it,
+   which is any value of its type. [handed] is the part's value, [lends]
+   says whether it lends places, and [write_back] writes the caller's
+   changes to it back to them. *)
+and lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_back =
   let span = span_of frame.source origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
-  | Some (part_type, kind), Some (each, at_end), Some before ->
-      let show clauses ~at ~result ~yielded ~finished ~when_ =
-        List.iter
-          (fun (clause : expression) ->
-            let _, term =
-              clause_value context { at with result; yielded = Some yielded; finished } clause
-            in
-            oblige context at Ensures (span_of at.source clause.origin)
-              (Printf.sprintf "`%s` may not hold %s." (quote at.source clause.origin) when_)
-              term)
-          clauses
-      in
-      show each ~at:frame ~result:(Some handed) ~yielded:before ~finished:None
-        ~when_:"for the part yielded here";
-      check_valid context frame span part_type handed ~deep:true ~when_:"for the part yielded here";
+  | Some part_type, Some (each, _), Some before ->
+      List.iter
+        (fun (clause : expression) ->
+          let _, term =
+            clause_value context { frame with result = Some handed; yielded = Some before } clause
+          in
+          oblige context frame Ensures
+            (span_of frame.source clause.origin)
+            (Printf.sprintf "`%s` may not hold for the part lent here."
+               (quote frame.source clause.origin))
+            term)
+        each;
+      check_valid context frame span part_type handed ~deep:true ~when_:"for the part lent here";
       (* The caller's changes to a part lent [mut] are written to each lent
          place. *)
       let frame, part_after =
         if mode = Types.Mut && lends then (
           let part_after = arrive context frame "lent" part_type in
-          if kind = `Lends then
-            context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
+          context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
           (write_back frame part_after, part_after))
         else (frame, handed)
       in
-      let after = appended context frame part_type before part_after in
-      let frame = { frame with yielded_so_far = Some after } in
-      if kind = `Yields then begin
-        show at_end ~at:frame ~result:None ~yielded:after ~finished:(Some (Logic.Boolean false))
-          ~when_:"at this `yield`, where a loop may stop the method";
-        match (frame.self, frame.self_type) with
-        | Some self, Some self_type ->
-            check_valid context frame span self_type self ~deep:true
-              ~when_:"for `self` at this `yield`, where a loop may stop the method"
-        | _ -> ()
-      end;
-      Some frame
-  | _ -> unsupported span "`yield` outside a lending or yielding method's body"
+      Some { frame with yielded_so_far = Some (appended context frame part_type before part_after) }
+  | _ -> unsupported span "a lent part outside a lending method's body"
 
 (* A storage whose element at [index] is [part], and which is otherwise the
    one it was. *)
@@ -8688,15 +8644,15 @@ and measures_of clauses =
 
 (* The start of a loop, from the frame before it and [entry], the frame its
    invariants are checked in on entry. *)
-and enter_loop context frame ~entry clauses ~changed ~yields =
-  let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
+and enter_loop ?holds context frame ~entry clauses ~changed =
+  let holds = Option.value holds ~default:changed in
+  let costs = loop_costs context frame clauses ~held:(held_by context frame holds) in
   loop_entry context entry costs;
   let fresh_mark = context.fresh and facts_mark = List.length context.facts in
   let preserved = preserved_validity context frame changed in
   let head = havoc context frame changed in
   assume_preserved_validity context head preserved;
-  let havocked = if yields then { head with yielded_so_far = havoc_parts context head } else head in
-  { loop_costs = costs; fresh_mark; facts_mark; preserved; havocked }
+  { loop_costs = costs; fresh_mark; facts_mark; preserved; havocked = head }
 
 (* The frame after a loop, from the frames that leave it, without the
    locals declared inside it. *)
@@ -8738,17 +8694,26 @@ and loop_over ~(driven : driven) context frame =
   let clauses = driven.loop_clauses in
   match driven.looped with
   | Over_range { low; high; inclusive } ->
-      let element = substituted context frame driven.element_type in
+      (* In a loop over the elements of a collection, [yielded] holds the
+         elements. Where the loop reads them, each is the value of the
+         collection's [element] at its position. Where the loop changes
+         them, the prover knows them by their number alone. *)
+      let element =
+        substituted context frame (Option.value driven.lent_element ~default:driven.element_type)
+      in
+      let over_positions = Option.is_some driven.lent_element in
+      let element_at (at : frame) position =
+        Option.map
+          (fun call -> snd (clause_value context (driven.bind_element at position) call))
+          driven.element_call
+      in
       let outer_yielded = frame.yielded in
       (* In the loop's clauses, the pattern names the next index: [low] plus
          the iterations so far. *)
       let at_index (exit_frame : frame) next = driven.bind_element exit_frame next in
       let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
       check_invariants context entry clauses ~when_:"on entry to the loop";
-      let start =
-        enter_loop context frame ~entry clauses ~changed:(driven.changed_in frame)
-          ~yields:driven.body_yields
-      in
+      let start = enter_loop context frame ~entry clauses ~changed:(driven.changed_in frame) in
       let costs = start.loop_costs and head = driven.bindings start.havocked in
       (* The [n]th iteration, from 0, has the index [low + n]. *)
       let count =
@@ -8765,7 +8730,9 @@ and loop_over ~(driven : driven) context frame =
       let before = some_parts context head element in
       assume context head (Logic.equal (sequence_length context element before) iterations);
       (let position = fresh_name context "index" in
-       match sequence_at context element before (Logic.Symbol position) with
+       match
+         if over_positions then None else sequence_at context element before (Logic.Symbol position)
+       with
        | Some yielded_index ->
            assume context head
              (Logic.forall
@@ -8775,6 +8742,10 @@ and loop_over ~(driven : driven) context frame =
                     &&& Operation ("<", [ Symbol position; iterations ])
                     ==> equal yielded_index (Operation ("+", [ low; Symbol position ]))) ))
        | None -> ());
+      Option.iter
+        (fun call ->
+          elements_so_far context head ~element ~call ~count:iterations before element_at)
+        driven.element_call;
       let index = Costs.plus low iterations in
       let head =
         loop_head context
@@ -8782,8 +8753,23 @@ and loop_over ~(driven : driven) context frame =
           costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
+      (* A loop that changes the elements of a collection keeps their number,
+         which is the loop's stop: each iteration's [element] must. *)
+      let keeps_count (at : frame) =
+        Option.map
+          (fun kept -> Logic.equal (snd (clause_value context at kept)) high)
+          driven.kept_count
+      in
+      Option.iter (assume context head) (keeps_count { head with checking = false });
       let inside = restrict head (Logic.Operation ("<", [ iterations; count ])) in
-      let through = appended context inside element before index in
+      let through =
+        appended context inside element before
+          (if over_positions then
+             match element_at { inside with checking = false } index with
+             | Some lent -> lent
+             | None -> arrive context inside "element" element
+           else index)
+      in
       let inside = { inside with yielded = outer_yielded } in
       let inside = spend context inside one_step in
       let ends, breaks = driven.run_body inside index in
@@ -8792,6 +8778,15 @@ and loop_over ~(driven : driven) context frame =
       in
       end_iterations context frame driven.loop_at clauses start ~head ~inside ~ends ~breaks
         ~with_through;
+      List.iter
+        (fun (end_ : frame) ->
+          Option.iter
+            (oblige context end_ Invariant
+               (span_of frame.source driven.loop_at)
+               "An iteration of this loop may change how many elements the collection has. The \
+                collection's `element(mut self)` must leave its `count` as it was.")
+            (keeps_count end_))
+        ends;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
         loop_exit context
@@ -8810,147 +8805,53 @@ and loop_over ~(driven : driven) context frame =
         (List.map
            (fun (exit_frame : frame) -> { exit_frame with yielded = outer_yielded })
            (exit_ :: left))
-  | Over_call { invocation; values } -> each_loop ~driven context frame invocation values
-  | Over_cursor { cursor; cursor_type = Types.Cursor { method_; _ } as cursor_type } ->
-      pulled_loop ~driven context frame cursor ~cursor_type ~method_
-  | Over_cursor _ -> unsupported (span_of frame.source driven.loop_at) "this `for` loop"
-  | Over_own_cursor { cursor; cursor_type; next } ->
+  | Over_cursor { cursor; cursor_type; next } ->
       own_cursor_loop ~driven context frame cursor next ~cursor_type
 
-(* A [for] loop over a yielding method: each element is a fresh value
-   that meets the method's clauses for each part, and the loop ends when
-   the method has a [time] clause. *)
-and each_loop ~(driven : driven) context frame (invocation : Invocation.t) (values : passed list) =
-  let span = span_of frame.source driven.loop_at in
-  let arguments = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
-  let path, terminates, contract, substitution =
-    match invocation.callee with
-    | Function { path; type_arguments } -> (
-        let substitution =
-          match Interface.Impls.signature context.database path with
-          | Some (signature : Types.signature) -> callee_substitution frame signature type_arguments
-          | None -> []
-        in
-        match Interface.Impls.signature context.database path with
-        | Some signature ->
-            ( Some path,
-              signature.terminates,
-              function_contract ?reading_package:(reading_package context) context.database path,
-              substitution )
-        | None -> (Some path, false, None, substitution))
-    | Trait_method { trait; name; receiver; evidence; self_type; _ } ->
-        (* A trait's yielding method, read by its [impl]'s contract where the
-           call reaches one and otherwise by the trait's, with [Self] the
-           type it is called on. *)
-        let self_type = substituted context frame self_type in
-        let trait =
-          {
-            trait with
-            trait_arguments =
-              List.map (Types.substitute_argument frame.substitution) trait.trait_arguments;
-          }
-        in
-        let evidence : evidence =
-          match evidence with
-          | Bound -> (
-              match concrete_impl context trait self_type with
-              | Some (impl, arguments) -> Impl { impl; arguments }
-              | None -> evidence)
-          | _ -> evidence
-        in
-        let path =
-          match evidence with
-          | Impl { impl; _ } -> Path.Method { owner = impl; name; receiver }
-          | Bound | Dynamic -> Path.Method { owner = trait.trait; name; receiver }
-        in
-        ( Some path,
-          signature_terminates context path,
-          method_contract ?reading_package:(reading_package context) context.database trait name
-            receiver evidence,
-          [ ({ Types.owner = trait.trait; name = "Self" }, Types.Type self_type) ] )
-    | _ -> (None, false, None, [])
+(* What a loop that reads the elements of a collection knows of [yielded],
+   the elements of the [count] iterations before: each is the value of the
+   collection's [element] at its position, which [element_at] reads from
+   [call], so each meets that method's postcondition. Where the collection
+   has a model that is a sequence of its elements, [yielded] is compared
+   with the model, so that [yielded] is the model once the loop has been
+   lent every element. *)
+and elements_so_far context head ~element ~(call : expression) ~count yielded element_at =
+  let symbol = fresh_name context "position" in
+  let position = Logic.Symbol symbol in
+  let premise =
+    Logic.(Operation ("<=", [ int 0; position ]) &&& Operation ("<", [ position; count ]))
   in
-  if context.terminates && not terminates then
-    oblige context frame Termination span
-      "This loop may not end: the method it loops over has no `time` clause." (Logic.Boolean false);
-  let element_type = substituted context frame driven.element_type in
-  (* The method's frame, with the loop's arguments. *)
-  let method_frame (at : frame) (own : part) = part_frame at own ~arguments ~substitution in
-  let method_clauses (at : frame) ~each ~result ~yielded ~finished =
-    match contract with
-    | Some { parts = (own : part) :: _; _ } ->
-        let inside = { (method_frame at own) with result; yielded = Some yielded; finished } in
-        List.iter
-          (fun (clause : expression) ->
-            if mentions_result clause = each then
-              assume context at (snd (clause_value context inside clause)))
-          own.ensures
-    | _ -> ()
-  in
-  (* The method's own work, by its cost clauses, once for the loop. *)
-  let frame =
-    match (contract, path) with
-    | Some contract, Some path ->
-        spend context frame
-          (callee_amount context frame ~path ~parts:contract.parts
-             ~bound_frame:(fun part -> method_frame frame part)
-             ~uses:(invocation.uses :> Types.capability list)
-             ~values ~change:None)
-    | _ -> spend context frame (unknown_amount context frame)
-  in
-  (* What the loop changes includes a collection it loops over [mut]. *)
-  receiving_loop ~driven context frame ~element_type ~changed:(driven.changed_in frame)
-    ~start:(fun head -> some_parts context head element_type)
-    ~receive:(fun head before ->
-      (* Each time round, the method either yields another part or ends. *)
-      let has_another = fresh context head "another" Logic.Bool in
-      let element = arrive context head "element" element_type in
-      let inside = restrict head has_another in
-      assume_valid context inside element_type element;
-      method_clauses inside ~each:true ~result:(Some element) ~yielded:before ~finished:None;
-      let through = appended context inside element_type before element in
-      method_clauses inside ~each:false ~result:None ~yielded:through
-        ~finished:(Some (Logic.Boolean false));
-      method_clauses
-        (restrict head (Logic.not_ has_another))
-        ~each:false ~result:None ~yielded:before ~finished:(Some (Logic.Boolean true));
-      { has_another; element; through; advance = Fun.id })
-
-(* A [for] loop over a cursor pulls it until it ends, putting the cursor
-   that is left back where it was. Its [yielded] is everything the cursor
-   has yielded, before the loop too. *)
-and pulled_loop ~(driven : driven) context frame (cursor_access : passed_place) ~cursor_type
-    ~method_ =
-  let span = span_of frame.source driven.loop_at in
-  let cursor = cursor_access.read frame in
-  let cursor_method =
-    match List.assoc_opt cursor context.cursors with
-    | Some cursor_method -> cursor_method
-    | None -> unsupported span "a loop over a cursor whose method the prover does not know"
-  in
-  if context.terminates && not (signature_terminates context method_) then
-    oblige context frame Termination span
-      "This loop may not end: the method its cursor comes from has no `time` clause."
-      (Logic.Boolean false);
-  let at_head = ref cursor in
-  receiving_loop ~driven context frame ~element_type:cursor_method.element
-    ~changed:(driven.changed_in frame)
-    ~start:(fun head ->
-      let cursor = cursor_access.read head in
-      context.cursors <- (cursor, cursor_method) :: context.cursors;
-      at_head := cursor;
-      cursor_yielded context cursor_type cursor_method.element cursor)
-    ~receive:(fun head _ ->
-      let pulled, later = pull context head cursor_method !at_head ~cursor_type in
-      let option_type =
-        Types.Named { path = option_path; arguments = [ Types.Type cursor_method.element ] }
+  (match sequence_at context element yielded position with
+  | Some earlier ->
+      let _, same, with_facts =
+        under_binder context
+          { head with bound = symbol :: head.bound; checking = false }
+          symbol Logic.Int premise
+          (fun inner -> Option.map (Logic.equal earlier) (element_at inner position))
       in
-      {
-        has_another = Logic.Is (constructor_name option_type (Some "Some"), pulled);
-        element = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]);
-        through = cursor_yielded context cursor_type cursor_method.element later;
-        advance = (fun (frame : frame) -> cursor_access.write frame later);
-      })
+      Option.iter
+        (fun same ->
+          assume context head
+            (with_facts (Logic.forall ([ (symbol, Logic.Int) ], Logic.( ==> ) premise same))))
+        same
+  | None -> ());
+  match call.kind with
+  | Call { arguments = Passed { value = collection; _ } :: _; _ } ->
+      let collection_type = operand_type context head collection in
+      let model_type =
+        substituted context head
+          (Projection
+             {
+               base = collection_type;
+               trait = { trait = Well_known.path Model; trait_arguments = []; associated = [] };
+               name = "Value";
+             })
+      in
+      if model_type = sequence_type element then
+        Option.iter
+          (extensional context head model_type yielded)
+          (model_of context collection_type (snd (operand_value context head collection)) ~element)
+  | _ -> ()
 
 (* A [for] loop over a value of a type's own [Cursor]: each iteration
    calls its [next] by the [impl]'s contract, and the loop ends at [None].
@@ -8969,8 +8870,17 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
         unsupported span "a loop over `%s`, whose `Cursor` the prover cannot find"
           (Types.show cursor_type)
   in
-  let impl =
-    match evidence with Impl { impl; _ } -> impl | _ -> bug "a cursor's evidence is not an impl"
+  (* The [impl]'s own generic parameters, as the cursor's type instantiates
+     them: its [next] is read with them. *)
+  let impl, impl_arguments =
+    match evidence with
+    | Impl { impl; arguments } ->
+        ( impl,
+          List.map
+            (fun (parameter, argument) ->
+              (parameter, Types.substitute_argument frame.substitution argument))
+            arguments )
+    | _ -> bug "a cursor's evidence is not an impl"
   in
   let contract =
     match
@@ -9004,7 +8914,26 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
       (List.map (fun measure -> snd (value context { at with checking = false } measure)))
       measures
   in
-  receiving_loop ~driven context frame ~element_type ~changed:(driven.changed_in frame)
+  (* A loop that must end and has one measure runs no more iterations than
+     the measure's value on entry, since each iteration makes the measure
+     smaller and it never goes below zero. *)
+  let entry_measure =
+    if context.terminates then match measured frame with Some [ entry ] -> Some entry | _ -> None
+    else None
+  in
+  (* The loop holds the potential of the values its body changes, and of
+     the cursor only where its [next] is amortized. A [next] that is not
+     amortized neither spends nor saves the cursor's potential, so counting
+     it would leave each iteration's cost depending on a value the loop
+     changes. *)
+  let is_amortized =
+    List.exists
+      (fun (part : part) -> List.exists (fun (cost : Core.cost) -> cost.amortized) part.costs)
+      contract.parts
+  in
+  let holds = if is_amortized then driven.changed_in frame else driven.changed_by_body frame in
+  receiving_loop ~driven context frame ~element_type ~changed:(driven.changed_in frame) ~holds
+    ~most:(Option.to_list entry_measure)
     ~each_iteration:(fun ~head ~ends ->
       (* The pull is part of the iteration, so the measure is compared from
          the head, before it. *)
@@ -9020,7 +8949,17 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
                 | None -> ())
               ends
         | None -> ())
-    ~start:(fun head -> some_parts context head element_type)
+    ~start:(fun head ->
+      let before = some_parts context head element_type in
+      (match (entry_measure, measured head) with
+      | Some entry, Some [ now ] ->
+          assume context head
+            Logic.(
+              Operation
+                ("<=", [ Costs.plus (sequence_length context element_type before) now; entry ])
+              &&& Operation ("<=", [ sequence_length context element_type before; entry ]))
+      | _ -> ());
+      before)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
       let havoc_mut (frame : frame) =
@@ -9041,7 +8980,8 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
           ]
           ~havoc_mut
           ~substitution_of:(fun _ ->
-            [ ({ Types.owner = cursor_trait; name = "Self" }, Types.Type cursor_type) ])
+            impl_arguments
+            @ [ ({ Types.owner = cursor_trait; name = "Self" }, Types.Type cursor_type) ])
           ~instance:[ type_key cursor_type ]
       in
       let has_another = Logic.Is (constructor_name option_type (Some "Some"), pulled) in
@@ -9058,16 +8998,17 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
             { (cursor_access.write frame now) with spent = after.spent });
       })
 
-(* A [for] loop that receives parts one at a time: from a yielding method
-   it calls, or from a cursor it pulls. [start] is the parts received before
-   an iteration, at the head, and [receive] is the part an iteration
-   receives, with the method's [ensures] for it assumed. *)
-and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ~(driven : driven) context frame
-    ~element_type ~changed ~start ~receive =
+(* A [for] loop that receives values one at a time from a cursor it pulls.
+   [start] is the values received before an iteration, at the head, and
+   [receive] is the value an iteration receives, with the [ensures] of the
+   cursor's [next] for it assumed. [holds] is the values whose potential
+   the loop holds, among those it changes. *)
+and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?(most = []) ~(driven : driven)
+    context frame ~element_type ~changed ~holds ~start ~receive =
   let clauses = driven.loop_clauses in
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
-  let loop = enter_loop context frame ~entry clauses ~changed ~yields:driven.body_yields in
+  let loop = enter_loop ~holds context frame ~entry clauses ~changed in
   let costs = loop.loop_costs and head = driven.bindings loop.havocked in
   let before = start head in
   let iterations = sequence_length context element_type before in
@@ -9091,7 +9032,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ~(driven : driv
     loop_exit context
       { ended with yielded = Some before }
       costs ~iterations:(Some iterations)
-      ~most:(Costs.upper_bounds ~varies ~facts:ended_facts iterations)
+      ~most:(most @ Costs.upper_bounds ~varies ~facts:ended_facts iterations)
   in
   let left =
     List.map
@@ -9099,19 +9040,15 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ~(driven : driv
         loop_exit context (with_through exit_frame) costs
           ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
           ~most:
-            (Costs.upper_bounds ~varies ~facts:ended_facts
-               (sequence_length context element_type through)))
+            (most
+            @ Costs.upper_bounds ~varies ~facts:ended_facts
+                (sequence_length context element_type through)))
       breaks
   in
   leave_loop context frame
     (List.map
        (fun (exit_frame : frame) -> { exit_frame with yielded = frame.yielded })
        (exit_ :: left))
-
-and havoc_parts context frame =
-  match context.yielded_part with
-  | Some (part, _) -> Some (some_parts context frame part)
-  | None -> frame.yielded_so_far
 
 type run = {
   body : Mir.body;
@@ -9289,13 +9226,9 @@ let mir_changes ?(also = []) run frame (blocks : Mir.block list) : changed =
           | Slice { destination; call; _ } | Template { destination; call; _ } ->
               note destination;
               passed call
-          | Pull { destination; cursor } ->
-              note destination;
-              note cursor
           | _ -> ())
         basic.statements;
       match basic.terminator with
-      | For { iteration = Yielding call; _ } -> passed call
       | For { iteration = Pull { cursor; _ }; _ } -> note cursor
       | Yield { mode = Types.Mut; part; _ } -> lent part
       | Cancel { winner; returned; _ } ->
@@ -9623,8 +9556,8 @@ let mir_target_type context frame run (target : Mir.place) =
 let mir_lends_places (part : Mir.yielded) =
   match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Constant _) -> false
 
-(* The value a [yield] yields, and the frame after it is built: a
-   constructor built where it is yielded is built here, from its fields. *)
+(* The part a lending method lends, and the frame after it is built: a
+   constructor built where it is lent is built here, from its fields. *)
 let rec mir_yielded context frame run ~origin (part : Mir.yielded) =
   match part with
   | Part operand -> (frame, mir_operand context frame run operand)
@@ -9824,13 +9757,6 @@ let mir_statement context frame run (statement : Mir.statement) =
           in
           Some (write_place context frame run destination tagged)
       | _ -> unsupported span "a tagged template whose tag the prover cannot read")
-  | Pull { destination; cursor } ->
-      let frame, pulled =
-        pulled_cursor context frame span
-          ~cursor_type:(mir_place_type context frame run cursor)
-          (mir_passed_place context run cursor)
-      in
-      Some (write_place context frame run destination pulled)
   | Provide { provided; _ } ->
       (* The body runs with the implementations, which the prover never
          models, so a capability call in it gives a fresh value by its
@@ -9883,7 +9809,7 @@ let definitions_of (body : Mir.body) =
     body.blocks;
   definitions
 
-(* Each call a body makes, a loop's over a yielding call included. *)
+(* Each call a body makes. *)
 let calls_of (body : Mir.body) =
   Array.fold_left
     (fun calls (block : Mir.basic_block) ->
@@ -9894,7 +9820,6 @@ let calls_of (body : Mir.body) =
               Some call
           | _ -> None)
         block.statements
-      @ (match block.terminator with For { iteration = Yielding call; _ } -> [ call ] | _ -> [])
       @ calls)
     [] body.blocks
 
@@ -10096,7 +10021,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
               (write_place context after_frame run { root = Local local; projections = [] } term)
         | None, _ -> bug "a quantifier of the MIR with no local it decides"
         | _, None -> ())
-    | For { iteration; part; body = first; blocks; after; loop } ->
+    | For { iteration; part; lent; body = first; blocks; after; loop } ->
         let in_body = Hashtbl.create 16 in
         List.iter (fun block -> Hashtbl.replace in_body block ()) blocks;
         (* An iteration: the part takes the element, and the body's blocks
@@ -10138,33 +10063,13 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
           binding frame body.blocks.(first).statements
         in
         let operand = mir_operand context frame run in
-        let iterated =
-          match iteration with
-          | Yielding call ->
-              List.filter_map
-                (function
-                  | Mir.Passed { mode = Types.Mut; value = Borrow { place; _ }; _ } -> Some place
-                  | _ -> None)
-                call.arguments
-          | Pull { cursor; _ } -> [ cursor ]
-          | Range _ -> []
-        in
+        let iterated = match iteration with Pull { cursor; _ } -> [ cursor ] | Range _ -> [] in
         let looped =
           match iteration with
           | Range { start; stop; inclusive } ->
               Over_range { low = operand start; high = operand stop; inclusive }
-          | Yielding call ->
-              let invocation = Invocation.of_mir call ~lends:None in
-              Over_call
-                { invocation; values = mir_values context frame run invocation call.arguments }
-          | Pull { cursor; next = None } ->
+          | Pull { cursor; next } ->
               Over_cursor
-                {
-                  cursor = mir_passed_place context run cursor;
-                  cursor_type = mir_place_type context frame run cursor;
-                }
-          | Pull { cursor; next = Some next } ->
-              Over_own_cursor
                 {
                   cursor = mir_passed_place context run cursor;
                   cursor_type = mir_place_type context frame run cursor;
@@ -10177,13 +10082,21 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
             loop_clauses = loop.clauses;
             looped;
             element_type = body.locals.(part).type_;
+            lent_element =
+              Option.map (fun (lent : Mir.lent_element) -> body.locals.(lent.element).type_) lent;
+            kept_count =
+              Option.bind lent (fun (lent : Mir.lent_element) ->
+                  match body.locals.(lent.element).kind with
+                  | Lent Mut -> Some lent.count
+                  | _ -> None);
+            element_call =
+              Option.bind lent (fun (lent : Mir.lent_element) ->
+                  match body.locals.(lent.element).kind with
+                  | Lent Mut -> None
+                  | _ -> Some lent.call);
             bind_element;
             changed_in = (fun frame -> mir_changes ~also:iterated run frame blocks);
-            body_yields =
-              List.exists
-                (fun block ->
-                  match body.blocks.(block).terminator with Yield _ -> true | _ -> false)
-                blocks;
+            changed_by_body = (fun frame -> mir_changes run frame blocks);
             run_body;
             bindings = (fun frame -> mir_bindings context frame run);
           }
@@ -10199,7 +10112,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
             | Built { type_; _ } -> substituted context frame type_
           in
           match
-            yield_part context frame origin mode ~handed ~lends:(mir_lends_places part)
+            lend_part context frame origin mode ~handed ~lends:(mir_lends_places part)
               ~write_back:(fun frame after ->
                 mir_written_back context run part_type part frame after)
           with
@@ -10287,12 +10200,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
     let loop_block_list = Hashtbl.fold (fun block () blocks -> block :: blocks) blocks [] in
     check_invariants context frame clauses ~when_:"on entry to the loop";
     let { loop_costs = costs; fresh_mark = mark; facts_mark; preserved; havocked = head } =
-      enter_loop context frame ~entry:frame clauses
-        ~changed:(mir_changes run frame loop_block_list)
-        ~yields:
-          (List.exists
-             (fun block -> match body.blocks.(block).terminator with Yield _ -> true | _ -> false)
-             loop_block_list)
+      enter_loop context frame ~entry:frame clauses ~changed:(mir_changes run frame loop_block_list)
     in
     let head = mir_bindings context head run in
     let iterations = iterations_so_far context head costs in
@@ -10523,7 +10431,6 @@ let new_context database ~home ~current ~terminates ~measures =
     known_calls = [];
     decisions = [];
     entry = [];
-    cursors = [];
     proving = false;
     holes = [];
     unfinished = [];
@@ -10562,7 +10469,6 @@ let empty_frame source =
     substitution = [];
     self_type = None;
     yielded = None;
-    finished = None;
     yielded_so_far = None;
     spent = [];
   }
@@ -10704,13 +10610,12 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
-  (* A lending or yielding method yields parts: its postconditions that
-     mention [result] hold at each [yield], and its others where it ends. *)
+  (* A lending method lends a part: its postconditions that mention
+     [result] hold where it lends, and its others where the lend ends. *)
   let start =
     match signature with
-    | Some { output = (Yields (_, part) | Lends (_, part)) as output; _ } ->
-        let kind = match output with Lends _ -> `Lends | _ -> `Yields in
-        context.yielded_part <- Some (part, kind);
+    | Some { output = Lends (_, part); _ } ->
+        context.yielded_part <- Some part;
         context.yield_ensures <-
           Some
             ( List.filter mentions_result contract.ensures,
@@ -10913,11 +10818,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
       | Some (_, at_end), Some yielded_so_far ->
           List.iter
             (fun (ensured : expression) ->
-              let _, term =
-                value context
-                  { frame with yielded = Some yielded_so_far; finished = Some (Logic.Boolean true) }
-                  ensured
-              in
+              let _, term = value context { frame with yielded = Some yielded_so_far } ensured in
               oblige context frame Ensures (at frame ensured)
                 (Printf.sprintf "`%s` may not hold when the method ends."
                    (quote source ensured.origin))

@@ -1,0 +1,27 @@
+fn f(couple: Couple) -> USize
+  ensures result == 2
+{
+  var seen: USize = 0
+  for value in couple
+    invariant seen == yielded.length()
+  {
+    let _ = value
+    seen += 1
+  }
+  seen
+}
+
+fn g(couple: Couple) -> Bool
+  requires couple.first == 1 && couple.second == 1
+  ensures result
+{
+  var all = true
+  for value in couple
+    invariant all
+  {
+    if value != 1 {
+      all = false
+    }
+  }
+  all
+}

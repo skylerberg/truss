@@ -55,8 +55,6 @@ type keyword =
   | Var
   | While
   | With
-  | Yield
-  | Yields
 
 type reserved =
   | As
@@ -243,8 +241,6 @@ let keywords =
     ("var", Var);
     ("while", While);
     ("with", With);
-    ("yield", Yield);
-    ("yields", Yields);
   ]
 
 let reserved_words =

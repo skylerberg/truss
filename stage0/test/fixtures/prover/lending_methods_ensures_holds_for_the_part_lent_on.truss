@@ -1,0 +1,11 @@
+type Maybe(present: Bool, value: Int64, other: Int64)
+
+fn Maybe.part(self) lends Int64
+  ensures result == self.value
+{
+  if self.present {
+    self.value
+  } else {
+    self.other
+  }
+}

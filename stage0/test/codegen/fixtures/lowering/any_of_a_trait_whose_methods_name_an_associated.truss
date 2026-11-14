@@ -20,17 +20,17 @@ fn sum(items: mut any Cursor[Element = Int64]) -> Int64 {
   total
 }
 
-test "any Cursor, of a cursor that is written and of a yielding method's" {
+test "any Cursor, of a cursor written here and of a list's" {
   var written: any Cursor[Element = Int64] = any Countdown(left: 4)
   assert sum(mut written) == 6
   let items: List[Int64] = [3, 1, 4]
-  var built: any Cursor[Element = Int64] = any items.each()
+  var built: any Cursor[Element = Int64] = any items.cursor()
   assert sum(mut built) == 8
-  var searched: any Cursor[Element = Int64] = any items.each()
+  var searched: any Cursor[Element = Int64] = any items.cursor()
   assert mut searched.find(fn(item) { item < 2 }) == Some(1)
   assert mut searched.next() == Some(4)
   assert mut searched.next() == None
-  var counted: any Cursor[Element = Int64] = any items.each()
+  var counted: any Cursor[Element = Int64] = any items.cursor()
   assert own counted.count() == 3
   var last: any Cursor[Element = Int64] = any Countdown(left: 3)
   assert own last.last() == Some(0)

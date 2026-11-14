@@ -15,7 +15,6 @@ val monomorphic : context -> Monomorphic.context
 
 val context :
   ?checks:bool ->
-  cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
   constant:(context -> Path.t -> Lowered.static_value option) ->
   Query.context ->
   Memory_layout.target ->
@@ -37,14 +36,6 @@ val constant : context -> Path.t -> constant
 (* The [Evaluator] of a constant: its value computed and written out in
    its binary form. *)
 val evaluator : context -> Path.t -> Emit_c.Builder.instance
-
-type pulled = {
-  next : Emit_c.fragment;
-  drop : Emit_c.fragment;
-  fields : (string * Memory_layout.member) list;
-}
-
-val pulled : context -> Ground.yielding -> pulled
 
 (* A capability [impl]'s table of entries. *)
 val table : context -> Instance.key -> Lowered.table

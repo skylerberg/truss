@@ -1,7 +1,7 @@
 type Counter(count: Int64)
 
 fn Counter.current(self) lends Int64 {
-  yield self.count
+  self.count
 }
 
 fn Counter.step(mut self) {

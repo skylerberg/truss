@@ -23,7 +23,7 @@
 %token ENSURES EXISTS FALSE FN FOR FORALL IF IMPL IN INDIRECT INTERNAL INVARIANT IS LAW LENDS
 %token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
 %token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNREACHABLE USE USES
-%token VAR WHILE WITH YIELD YIELDS
+%token VAR WHILE WITH
 
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
 %token DOT DOTDOT DOTDOTEQ ARROW FATARROW QUESTION BAR
@@ -164,7 +164,6 @@ mode_opt:
 result_opt:
   | { () }
   | ARROW type_expression { () }
-  | YIELDS mode_opt type_expression { () }
   | LENDS mode_opt type_expression { () }
 
 signature:
@@ -389,7 +388,6 @@ statement:
   | PROOF block { () }
   | ASSERT expression { () }
   | ASSERT expression LOWER LOWER { () }
-  | YIELD expression { () }
 
 annotation_opt:
   | { () }

@@ -31,14 +31,6 @@ let parameter env (mode : Ground.mode) ty =
       | Mut -> Pointer { target = Value ty; writable = true }
       | Own -> if small then Value ty else Pointer { target = Value ty; writable = true })
 
-let held env (mode : Ground.mode) ty =
-  match mode with
-  | Own -> if Memory_layout.has_zero_size env ty then None else Some (Lowered.Value ty)
-  | Read | Mut -> parameter env mode ty
-
-let cursor_state = "state"
-let cursor_parameter position = Printf.sprintf "parameter%d" position
-
 type result = Nothing | Returned of Lowered.ty | Through_pointer of Lowered.ty
 
 let result env (ty : Ground.ty) =
@@ -66,7 +58,7 @@ let function_value env (function_type : Ground.function_type) : Lowered.signatur
     match function_type.result with
     | Returns Never -> (Nothing, false)
     | Returns ty -> (result env ty, true)
-    | Yields _ | Lends _ -> Compiler_bug.bug ~stage:"Convention" "a function type that yields"
+    | Lends _ -> Compiler_bug.bug ~stage:"Convention" "a function type that lends"
   in
   let written =
     List.filter_map (fun (mode, ty) -> parameter env mode ty) function_type.parameters

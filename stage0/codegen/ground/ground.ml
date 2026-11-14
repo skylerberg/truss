@@ -4,7 +4,6 @@ type ty =
   | Named of { path : Path.t; arguments : argument list }
   | Function of function_type
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
-  | Cursor of yielding
   | Lent of lent
   | Never
 
@@ -13,8 +12,7 @@ and lent_field = { variant : string option; field : string; holds : holds }
 and holds = Address | Nested of lent
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
-and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
-and yielding = { method_ : Path.t; type_arguments : argument list }
+and result = Returns of ty | Lends of mode * ty
 
 let ( >>= ) order next = if order <> 0 then order else next ()
 
@@ -31,18 +29,11 @@ let rec compare left right =
         (fun (left_name, left_type) (right_name, right_type) ->
           String.compare left_name right_name >>= fun () -> compare left_type right_type)
         left.associated right.associated
-  | Cursor left, Cursor right -> compare_yielding left right
   | Lent left, Lent right -> compare_lent left right
   | Never, Never -> 0
   | _ -> Int.compare (rank left) (rank right)
 
-and rank = function
-  | Named _ -> 0
-  | Function _ -> 1
-  | Any _ -> 2
-  | Cursor _ -> 3
-  | Lent _ -> 4
-  | Never -> 5
+and rank = function Named _ -> 0 | Function _ -> 1 | Any _ -> 2 | Lent _ -> 3 | Never -> 4
 
 and compare_lent left right =
   compare left.base right.base >>= fun () ->
@@ -83,16 +74,11 @@ and compare_function left right =
 and compare_result left right =
   match (left, right) with
   | Returns left, Returns right -> compare left right
-  | Yields (right_name, left), Yields (left_name, right)
   | Lends (right_name, left), Lends (left_name, right) ->
       Stdlib.compare right_name left_name >>= fun () -> compare left right
   | _ ->
-      let rank = function Returns _ -> 0 | Yields _ -> 1 | Lends _ -> 2 in
+      let rank = function Returns _ -> 0 | Lends _ -> 1 in
       Int.compare (rank left) (rank right)
-
-and compare_yielding left right =
-  Path.compare left.method_ right.method_ >>= fun () ->
-  compare_arguments left.type_arguments right.type_arguments
 
 let rec path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name
@@ -115,7 +101,6 @@ let rec to_string = function
         match function_type.result with
         | Returns (Named { path; arguments = [] }) when path_name path = "Unit" -> ""
         | Returns ty -> " -> " ^ to_string ty
-        | Yields (mode, ty) -> " yields " ^ mode_prefix mode ^ to_string ty
         | Lends (mode, ty) -> " lends " ^ mode_prefix mode ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in
@@ -127,7 +112,6 @@ let rec to_string = function
         @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
       in
       "any " ^ path_name trait ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
-  | Cursor yielding -> "cursor of " ^ path_name yielding.method_
   | Lent lent -> lent_to_string lent
   | Never -> "Never"
 

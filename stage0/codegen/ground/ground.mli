@@ -15,10 +15,8 @@ type ty =
   | Function of function_type
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
       (** [any Cursor[Element = Int64]], with every associated type fixed, sorted by name *)
-  | Cursor of yielding  (** The nameless type of a pulled yielding method *)
   | Lent of lent
-      (** The value of a constructor of lent places that a lending or yielding method yields. It
-          owns nothing. *)
+      (** The value of a constructor of lent places that a lending method lends. It owns nothing. *)
   | Never
 
 (* A value of type [base] in which each of [fields] holds the address of a
@@ -38,11 +36,7 @@ and function_type = { parameters : (mode * ty) list; result : result; uses : Pat
     every capability parameter replaced by the capabilities it is instantiated with, and without
     [Panic], which has no evidence. Cost clauses do not change the code, so they are not here. *)
 
-and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
-
-(* One yielding method, whose path names its receiver, with its generic
-   arguments: the instance a cursor pulls from. *)
-and yielding = { method_ : Path.t; type_arguments : argument list }
+and result = Returns of ty | Lends of mode * ty
 
 val compare : ty -> ty -> int
 val compare_arguments : argument list -> argument list -> int

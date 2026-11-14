@@ -271,7 +271,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
     | Assert { condition; _ } -> (
         match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
-    | Assign _ | Lend _ | Slice _ | Template _ | Pull _ | Echo _ | Provide _ | Provide_end -> None
+    | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
   in
   let rec run block =
     if !steps <= 0 then None
@@ -361,7 +361,7 @@ let write_output st output =
   let result =
     match signature.output with
     | Returns ty -> Monomorphic.ground st.context.monomorphic [] ty
-    | Yields _ | Lends _ -> bug "write_fully does not return"
+    | Lends _ -> bug "write_fully does not return"
   in
   call_instance st
     (Code { path = write_fully; type_arguments = [] })

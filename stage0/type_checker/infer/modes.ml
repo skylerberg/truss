@@ -8,7 +8,7 @@ open State
 let note_lending state (value : expression) (output : Types.result) =
   match output with
   | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
-  | Returns _ | Yields _ -> ()
+  | Returns _ -> ()
 
 (* The mode with which an expression is lent, if it is the result of a
    lending call, or a field or an element of one. A mark before the
@@ -176,12 +176,13 @@ let argument_form state (value : expression) =
       | Some mode -> Lent mode
       | None -> if is_place state value then Place else Temporary)
 
-(* The mode with which a field of a yielded constructor lends a place to
-   the value that is built, or [None] if the field takes its value, as a
-   field of any other constructor does. [type_] is the type of [value]. A
-   method that yields read-only lends every place read-only, except a
-   [Plain] place, which is copied. A method that yields [mut] lends the
-   places that are marked [mut]. A slice is a value, so it is taken. *)
+(* The mode with which a field of a constructor that a lending method
+   lends lends a place to the value that is built, or [None] if the field
+   takes its value, as a field of any other constructor does. [type_] is
+   the type of [value]. A method that lends read-only lends every place
+   read-only, except a [Plain] place, which is copied. A method that lends
+   [mut] lends the places that are marked [mut]. A slice is a value, so it
+   is taken. *)
 let lent_field state (value : expression) type_ : Types.mode option =
   match (Hashtbl.find_opt state.yielded value.id, argument_form state value) with
   | _ when is_slice value -> None
@@ -278,14 +279,14 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
            name)
   | (Mut | Own), Marked (Read, _) -> ()
 
-(* A yielded constructor that lends a place owns nothing, so nothing drops
+(* A lent constructor that lends a place owns nothing, so nothing drops
    it when the lend ends. Each of its other fields must then have nothing
    to drop: the field is a constructor too, or its type is [Plain].
 
    A place lent [mut] is not inside a variant's constructor at any depth.
    The caller could change the variant, as [mut pair.maybe() = None] does,
    and the place would be left without a value: a use after free.
-   [operand] is the operand of the [yield]. *)
+   [operand] is the part that the method lends. *)
 let check_lent_value state env (operand : expression) =
   let has_lent_field = ref false and owned_values = ref [] in
   let rec fields ~variant (value : expression) =
@@ -311,8 +312,8 @@ let check_lent_value state env (operand : expression) =
                         (Printf.sprintf
                            "This place is lent `mut` inside the variant `%s`. The caller could \
                             change the variant, and the place would be left without a value. Lend \
-                            a local of the whole type instead, and write it to the field after the \
-                            `yield`."
+                            the place itself, and give the caller another method that says whether \
+                            the place is there."
                            variant)
                       :: state.diagnostics
                 | _ -> ())

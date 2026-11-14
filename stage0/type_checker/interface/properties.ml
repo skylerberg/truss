@@ -163,11 +163,6 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
          [any] is a view type unless its trait requires [Storable]. *)
       | View -> if requires [ storable_trait ] then Some [] else None
       | Holds_function -> None)
-  (* A cursor from an [own self] method owns the collection that it iterates
-     over. A cursor from a [self] method views it. *)
-  | Types.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->
-      each (type_arguments arguments)
-  | Types.Cursor _ -> None
   | Types.Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
@@ -229,7 +224,6 @@ let contents database ~facts_of ~resolve (type_ : Types.ty) =
         inside Indirect (Types.result_type output)
     | Types.Any { trait_arguments; associated; _ } ->
         List.iter (inside Indirect) (type_arguments trait_arguments @ List.map snd associated)
-    | Types.Cursor { arguments; _ } -> List.iter (inside Indirect) (type_arguments arguments)
     | Types.Named { path; arguments } -> (
         match Intrinsic.builtin_of_path path with
         | Some Array -> List.iter (inside In_place) (type_arguments arguments)

@@ -26,9 +26,8 @@ type target =
   | Old  (** [old], in specifications and proofs. *)
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
   | Yielded
-      (** [yielded]: the sequence of the parts that a lending or yielding method has yielded so far.
-      *)
-  | Finished  (** [finished], whether a yielding method ran to its end. *)
+      (** [yielded]: in a loop's clauses, the values of the iterations before; in a lending method's
+          [ensures], its part as the caller left it. *)
   | Specification_function of specification_function
       (** [log], [power], [time], or [calls] in a [cost] bound, or [log] or [power] in another
           specification. *)
@@ -48,10 +47,8 @@ type specification = {
   names_result : bool;
   cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
   names_yielded : bool;
-      (** In the [ensures] of a lending or yielding method, or in the clauses of a [for] loop, where
-          [yielded] is the sequence of the parts yielded so far. *)
-  names_finished : bool;
-      (** In a lending or yielding method's [ensures], where [finished] has its meaning. *)
+      (** In the [ensures] of a lending method, or in the clauses of a [for] loop, where [yielded]
+          has its meaning. *)
   elements : string list;
       (** In the clauses of a [for] loop over a collection or a cursor, the names its pattern binds,
           which hold no value there. *)
@@ -62,19 +59,11 @@ type scope = {
       (** With the kind of its binding, as diagnostics name it. *)
   types : target String_map.t;  (** Generic type and capability parameters, as names mean them. *)
   specification : specification;
-  lends_or_yields : bool;
-      (** In a method that lends or yields, whose [ensures] can name the yielded parts. *)
+  lends : bool;  (** In a lending method, whose [ensures] can name the part as the caller left it. *)
 }
 
 let no_specification =
-  {
-    active = false;
-    names_result = false;
-    cost_bound = false;
-    names_yielded = false;
-    names_finished = false;
-    elements = [];
-  }
+  { active = false; names_result = false; cost_bound = false; names_yielded = false; elements = [] }
 
 let in_specification = { no_specification with active = true }
 
@@ -306,13 +295,7 @@ and clause state scope (clause : clause) =
       expression state
         {
           specification with
-          specification =
-            {
-              in_specification with
-              names_result = true;
-              names_yielded = scope.lends_or_yields;
-              names_finished = scope.lends_or_yields;
-            };
+          specification = { in_specification with names_result = true; names_yielded = scope.lends };
         }
         value
   | Decreases measures -> List.iter (expression state specification) measures
@@ -345,7 +328,6 @@ and local_value state scope (name : name) =
   | None ->
       if scope.specification.active && text = "old" then set state name Old
       else if scope.specification.names_yielded && text = "yielded" then set state name Yielded
-      else if scope.specification.names_finished && text = "finished" then set state name Finished
       else if scope.specification.active && text = "identical" then set state name Identical
       else if scope.specification.names_result && text = "result" then set state name Result_value
       else if List.mem text scope.specification.elements then
@@ -769,7 +751,7 @@ and statement state scope (statement_ : statement) =
   | Proof body ->
       block state { scope with specification = in_specification } body;
       scope
-  | Assert { value; _ } | Yield value ->
+  | Assert { value; _ } ->
       expression state scope value;
       scope
   | Statement_error -> scope
@@ -780,14 +762,13 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop
       { scope with specification = { scope.specification with names_yielded = true; elements } }
     else scope
   in
-  (* [yielded] refers to the parts of the nearest loop or method: the parts
-     of a [for] loop, or else, in a lending or yielding method, the parts of
-     the method. *)
+  (* [yielded] refers to the nearest loop or method: the values of a [for]
+     loop's iterations, or else, in a lending method, the part that the
+     method lends. *)
   let specification =
     {
       scope with
-      specification =
-        { in_specification with names_yielded = for_loop || scope.lends_or_yields; elements };
+      specification = { in_specification with names_yielded = for_loop || scope.lends; elements };
     }
   in
   match written.kind with
@@ -857,7 +838,7 @@ let parameters state scope (parameters_ : parameter list) =
     scope parameters_
 
 let result state scope = function
-  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) -> type_expression state scope type_
+  | Some (Returns type_ | Lends (_, type_)) -> type_expression state scope type_
   | None -> ()
 
 let empty_scope =
@@ -865,7 +846,7 @@ let empty_scope =
     values = String_map.empty;
     types = String_map.empty;
     specification = no_specification;
-    lends_or_yields = false;
+    lends = false;
   }
 
 (* The scope of a definition's head: the generic parameters of the type
@@ -883,9 +864,7 @@ let signature state scope ~owner ~(broken : bool) (signature_ : signature) =
     let scope = parameters state scope signature_.parameters in
     result state scope signature_.result;
     let scope =
-      match signature_.result with
-      | Some (Yields _ | Lends _) -> { scope with lends_or_yields = true }
-      | _ -> scope
+      match signature_.result with Some (Lends _) -> { scope with lends = true } | _ -> scope
     in
     List.iter (clause state scope) signature_.clauses;
     Some scope

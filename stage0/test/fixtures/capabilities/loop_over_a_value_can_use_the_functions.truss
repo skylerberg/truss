@@ -1,9 +1,14 @@
-type Ticker()
+type Ticker(ticks: List[Instant])
 
-fn Ticker.each(self) yields Instant
+fn Ticker.count(self) -> USize {
+  self.ticks.count()
+}
+
+fn Ticker.element(self, position: USize) lends Instant
   uses Clock
 {
-  yield Clock.now()
+  let _ = Clock.now()
+  self.ticks[position]
 }
 
 fn f(ticker: Ticker)

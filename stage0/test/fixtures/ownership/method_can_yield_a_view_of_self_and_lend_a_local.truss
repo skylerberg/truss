@@ -1,9 +1,0 @@
-fn Reader.windows(self) yields Slice[Int64] {
-  yield self.buffer[..1]
-  yield self.buffer[1..]
-}
-
-fn Reader.scratch(self) lends List[Int64] {
-  let scratch: List[Int64] = [1, 2, 3]
-  yield scratch
-}

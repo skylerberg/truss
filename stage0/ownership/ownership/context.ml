@@ -13,8 +13,6 @@ type context = {
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, Types.ty) Hashtbl.t;
   mutable parameters : Core.local list;
-  yields : bool;
-      (** The definition is a yielding method. The caller's loop may [break] at a [yield]. *)
   implements_capability : bool;
       (** The definition is a method of an [impl] of a capability. Its callers cannot see the
           implementation, so no view may be stored in [self] or returned from it. *)
@@ -63,22 +61,6 @@ let stores_function context (callee : Mir.callee) position =
   match callee with
   | Indirect _ -> true
   | _ -> List.exists declared (callee_signatures context callee)
-
-(* Whether a yielding method hands over each part it yields as an owned
-   value, which the loop's iteration drops: [yields own]. A part of any
-   other yield is lent. *)
-let yields_owned_parts (signature : Types.signature) =
-  match signature.output with Yields (Own, _) -> true | Yields _ | Returns _ | Lends _ -> false
-
-let yields_own context (callee : Mir.callee) =
-  List.exists yields_owned_parts (callee_signatures context callee)
-
-let cursor_yields_own context (type_ : Types.ty) =
-  match type_ with
-  | Cursor { method_; _ } ->
-      Option.fold ~none:false ~some:yields_owned_parts
-        (Interface.Impls.signature context.database method_)
-  | _ -> false
 
 let span context (origin : Core.origin) : Syntax.span =
   if origin >= 0 && origin < Array.length context.spans then context.spans.(origin)
@@ -150,8 +132,7 @@ let collect context (mir : Mir.t) =
             | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
                 marks call
             | _ -> ())
-          block.statements;
-        match block.terminator with For { iteration = Yielding call; _ } -> marks call | _ -> ())
+          block.statements)
       body.blocks
   in
   body mir.body;

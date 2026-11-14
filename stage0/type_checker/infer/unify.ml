@@ -93,8 +93,6 @@ let rec zonk unifier (type_ : Types.ty) : Types.ty =
       Projection { base = zonk base; trait = zonk_trait unifier trait; name }
   | Function function_type -> Function (zonk_function unifier function_type)
   | Any trait -> Any (zonk_trait unifier trait)
-  | Cursor { method_; arguments } ->
-      Cursor { method_; arguments = List.map (zonk_argument unifier) arguments }
   | type_ -> type_
 
 and zonk_argument unifier = function
@@ -127,7 +125,6 @@ and zonk_function unifier (function_type : Types.function_type) =
     output =
       (match function_type.output with
       | Returns type_ -> Returns (zonk unifier type_)
-      | Yields (mode, type_) -> Yields (mode, zonk unifier type_)
       | Lends (mode, type_) -> Lends (mode, zonk unifier type_));
     uses = zonk_capabilities unifier function_type.uses;
   }
@@ -164,7 +161,7 @@ let unknowns unifier (type_ : Types.ty) =
     match resolve unifier type_ with
     | Variable index -> unknowns := Unknown_type index :: !unknowns
     | Literal (kind, index) -> unknowns := Unknown_literal (kind, index) :: !unknowns
-    | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter argument arguments
+    | Named { arguments; _ } -> List.iter argument arguments
     | Projection { base; trait = reference; _ } ->
         collect base;
         trait reference
@@ -253,16 +250,12 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       && Path.equal left.trait.trait right.trait.trait
       && unify_arguments unifier left.trait.trait_arguments right.trait.trait_arguments
       && unify unifier left.base right.base
-  | Cursor left, Cursor right ->
-      Path.equal left.method_ right.method_
-      && unify_arguments unifier left.arguments right.arguments
   | Never, Never | Integer, Integer -> true
   | _ -> false
 
 and unify_result unifier (left : Types.result) (right : Types.result) =
   match (left, right) with
   | Returns left, Returns right -> unify unifier left right
-  | Yields (left_mode, left), Yields (right_mode, right)
   | Lends (left_mode, left), Lends (right_mode, right) ->
       left_mode = right_mode && unify unifier left right
   | _ -> false

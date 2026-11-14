@@ -1,5 +1,6 @@
 use standard::collections
 use standard::intrinsic
+use standard::list
 use standard::list::slice
 use standard::map
 
@@ -449,9 +450,9 @@ public fn collections::SortedSet[Element: Ordered].first(self) lends Option[Elem
   cost time O(1)
 {
   if self.elements.length() > 0 {
-    yield Some(self.elements[0])
+    Some(self.elements[0])
   } else {
-    yield None
+    None
   }
 }
 
@@ -460,9 +461,9 @@ public fn collections::SortedSet[Element: Ordered].last(self) lends Option[Eleme
   cost time O(1)
 {
   if self.elements.length() > 0 {
-    yield Some(self.elements[self.elements.length() - 1])
+    Some(self.elements[self.elements.length() - 1])
   } else {
-    yield None
+    None
   }
 }
 
@@ -492,9 +493,9 @@ public fn collections::SortedSet[Element: Ordered].at_or_before(self, element: E
     proof {
       slice::at_most_is_not_less_reversed(self.elements.model()[position - 1], second: element)
     }
-    yield Some(self.elements[position - 1])
+    Some(self.elements[position - 1])
   } else {
-    yield None
+    None
   }
 }
 
@@ -507,28 +508,19 @@ public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: El
     proof {
       slice::at_most_is_not_less_reversed(element, second: self.elements.model()[position])
     }
-    yield Some(self.elements[position])
+    Some(self.elements[position])
   } else {
-    yield None
+    None
   }
 }
 
-public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[Element]) yields Element
-  ensures range.contains(result)
+public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[Element]) -> Slice[Element]
+  ensures forall i in 0..result.length() => range.contains(result.model()[i])
   cost time O(self.length() + log(self.length()) * time(Element.compare))
 {
   let first = self.index_at_or_after(range.start)
   let end = if range.inclusive { self.index_after(range.stop) } else { self.index_at_or_after(range.stop) }
-  var index = first
-  while index < end
-    invariant first <= index
-    invariant index <= self.elements.length()
-    invariant forall i in first..end => range.contains(self.elements.model()[i])
-    decreases self.elements.length() - index
-  {
-    yield self.elements[index]
-    index += 1
-  }
+  if first < end { self.elements[first..end] } else { self.elements[first..first] }
 }
 
 public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
@@ -689,43 +681,34 @@ public fn collections::SortedSet[Element: Ordered + Copyable].difference(
 impl Iterable for collections::SortedSet[Element: Ordered] {
   type Element = Element
 
-  fn each(self) yields Element
-    ensures finished ==> yielded.length() == self.length()
-    cost time O(self.length())
+  fn count(self) -> USize
+    ensures result == self.length()
+    cost time O(1)
   {
-    var index: USize = 0
-    while index < self.elements.length()
-      invariant index <= self.elements.length()
-      invariant yielded.length() == index
-      decreases self.elements.length() - index
-    {
-      yield self.elements[index]
-      index += 1
-    }
+    self.elements.length()
+  }
+
+  fn element(self, position: USize) lends Element
+    requires position < self.count()
+    cost time O(1)
+  {
+    self.elements[position]
   }
 }
 
-public fn collections::SortedSet[Element: Ordered].each(own self) yields own Element
+public fn collections::SortedSet[Element: Ordered].cursor(own self) -> list::ListCursor[Element]
+  ensures result.remaining() == self.length()
   cost time O(self.length())
+  cost amortized time O(self.length())
 {
-  for element in own self.elements {
-    yield own element
-  }
+  own self.elements.cursor()
 }
 
-public fn collections::SortedSet[Element: Ordered].reversed(self) yields Element
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+public fn collections::SortedSet[Element: Ordered].reversed(self) -> list::Reversed[Element]
+  ensures result.count() == self.length()
+  cost time O(1)
 {
-  var remaining = self.elements.length()
-  while remaining > 0
-    invariant remaining <= self.elements.length()
-    invariant yielded.length() == self.elements.length() - remaining
-    decreases remaining
-  {
-    remaining -= 1
-    yield self.elements[remaining]
-  }
+  self.elements.slice().reversed()
 }
 
 impl Equal for collections::SortedSet[Element: Ordered] {

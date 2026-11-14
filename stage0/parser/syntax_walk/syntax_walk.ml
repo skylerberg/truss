@@ -125,7 +125,7 @@ let statement_parts ~expression:on_expression ~statement (written : statement) =
       Option.iter (type_expression on_expression) annotation;
       on_expression value;
       Option.iter block else_
-  | Expression value | Assert { value; _ } | Yield value -> on_expression value
+  | Expression value | Assert { value; _ } -> on_expression value
   | Assignment { target; value; _ } ->
       on_expression target;
       on_expression value
@@ -189,8 +189,7 @@ let signature on_expression (signature : signature) =
   List.iter (generic_parameter on_expression) signature.generics;
   List.iter (parameter on_expression) signature.parameters;
   (match signature.result with
-  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) ->
-      type_expression on_expression type_
+  | Some (Returns type_ | Lends (_, type_)) -> type_expression on_expression type_
   | None -> ());
   List.iter (clause on_expression) signature.clauses
 
@@ -526,7 +525,7 @@ let walk_names ~on_name:add (definition_ : definition) =
     List.iter generic written.generics;
     List.iter parameter_ written.parameters;
     (match written.result with
-    | Some (Returns result | Yields (_, result) | Lends (_, result)) -> type_ result
+    | Some (Returns result | Lends (_, result)) -> type_ result
     | None -> ());
     List.iter clause_ written.clauses
   in

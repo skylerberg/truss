@@ -100,8 +100,7 @@ Reserved everywhere:
 any assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unreachable use uses var while with yield
-yields
+Self test theorem todo trait true type unreachable use uses var while with
 ```
 
 Reserved for later use, and an error if written:
@@ -128,7 +127,7 @@ log power result old by bit_vector
 | `result` | The return value, inside `ensures` and `cost` |
 | `old(e)` | The value of `e` when the function was called, inside a specification |
 | `identical(a, b)` | Whether two values of one type are the same value, inside a specification |
-| `yielded`, `finished` | The history of a lending or yielding method, inside its `ensures`, and `yielded` in a `for` loop's clauses |
+| `yielded` | In a `for` loop's clauses, the values of the iterations before. In a lending method's `ensures`, the lent part as the caller left it |
 | `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 
 A parameter cannot be named `result`, and no function can be named `old` or
@@ -280,7 +279,7 @@ The lexer keeps a stack of open brackets, `(`, `[`, and `{`:
      `forall`, `if`, `impl`, `internal`, `law`, `let`, `match`, `mut`, `own`,
      `parallel`, `proof`, `provide`, `public`, `return`, `self`, `Self`,
      `test`, `theorem`, `todo`, `trait`, `true`, `type`, `unreachable`,
-     `use`, `var`, `while`, `yield`.
+     `use`, `var`, `while`.
 3. Several line feeds in a row produce at most one `NEWLINE`.
 4. At the end of the file, a `NEWLINE` follows the last token if it can end a
    statement.
@@ -548,9 +547,9 @@ While a view is in use, its original cannot be changed or moved. Here `push`
 is allowed because `middle` is not used after it. The compiler checks this
 within each function.
 
-- **Being a view is a property of a type.** `Slice`, `StringSlice`, a cursor
-  from a `self` method, and a lambda that reads local variables are views,
-  and so is any type that holds one anywhere. An `any Trait` is a view
+- **Being a view is a property of a type.** `Slice`, `StringSlice`, and a
+  lambda that reads local variables are views, and so is any type that holds
+  one anywhere, such as a cursor over a slice. An `any Trait` is a view
   unless `Trait` requires `Storable`.
 - **`Storable`** is the prelude trait of every type that is not a view,
   which the compiler derives and no type declares.
@@ -620,7 +619,7 @@ parameter     = [ mode ] "self"
               | LOWER_NAME ":" [ mode ] type [ "=" expression ] ;
 mode          = "mut" | "own" ;
 
-result        = "->" type | "yields" [ mode ] type | "lends" [ mode ] type ;
+result        = "->" type | "lends" [ mode ] type ;
 body          = block ;
 ```
 
@@ -936,9 +935,8 @@ fn Option[Value].take(mut self) -> Option[Value] {
 - The place is a `mut` parameter, `mut self`, the variable of a `mut` loop, a
   `mut` binding of a `match`, or a lambda's `mut` parameter, or a field of
   one.
-- It is assigned again on every path before the function returns, the
-  iteration or arm ends, and, in a yielding method, each `yield`. Until then
-  it is not read.
+- It is assigned again on every path before the function returns or the
+  iteration or arm ends. Until then it is not read.
 
 ## Methods
 
@@ -979,27 +977,26 @@ one. A version may come from a trait that the type implements in its own
 package (see [Method lookup](#method-lookup)). Truss has no other
 overloading.
 
-### Lending and yielding methods
+### Lending methods
 
-A *lending* method, with `lends` in place of a result type, gives its caller
-one part of `self`, exactly once. A *yielding* method, with `yields`, gives
-out any number of parts, one after another. Both do so with `yield`, which is
-allowed only in such a method.
-
-#### Lending methods
+A *lending* method, with `lends` in place of a result type, lends its caller
+one part of `self` for the rest of the caller's statement.
 
 ```truss
 fn Grid.cell(mut self, position: Position) lends mut Cell {
-  yield mut self.cells[position.row * self.width + position.column]
+  mut self.cells[position.row * self.width + position.column]
 }
 
 mut grid.cell(position).visit()
 ```
 
 - `lends Cell` lends read-only access, and `lends mut Cell` lends `mut`
-  access, marked on the place: `yield mut part`.
-- **The part is lent for the rest of the caller's statement,** and then the
-  method continues after its `yield`, even if the statement leaves early.
+  access, marked on the place: `mut part`.
+- **The method lends the value of its body, or of a `return`.** No code of
+  the method runs after it lends. The values it still owns are dropped when
+  the lend ends.
+- **The part is lent for the rest of the caller's statement,** even if the
+  statement leaves early.
 - **In the condition of an `if` or a `while`, the part is lent for the
   condition alone** when each name the condition binds is a copy: a `Plain`
   name that is not a view and is not bound `mut`. The guarded block can then
@@ -1015,124 +1012,89 @@ mut grid.cell(position).visit()
   part is then changed with no mark of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,
   stored, or bound with `let`, except by copying it.
-- **A lending method yields exactly once on every path.** It cannot drive a
-  `for` loop or make a cursor.
-- The part need not be stored in `self`: the method may yield a value it
-  made, and take it back afterward.
+- The part need not be stored in `self`: the method may lend a value it
+  made, which is dropped when the lend ends.
 
-The operand of `yield` may be a constructor applied to places:
+The lent value may be a constructor applied to places:
 
 ```truss
 fn Slice[Element].get(self, index: USize) lends Option[Element] {
   if index < self.length() {
-    yield Some(self[index])
+    Some(self[index])
   } else {
-    yield None
+    None
   }
 }
 ```
 
-- An argument of the constructor directly after `yield` that is a place is
-  lent, with no copy. Constructors nest.
+- An argument of the lent constructor that is a place is lent, with no copy.
+  Constructors nest.
 - Every other field is a place, a nested constructor, or a `Plain` value.
 - A `mut` lend marks each place it lends `mut`, and the caller's changes to
   a marked field reach the place when the lend ends. Two places lent `mut`
-  by one `yield` are different places.
+  by one method are different places.
 - **A place lent `mut` is never inside a variant,** at any depth: the caller
   could replace the variant, and the place would have no value, a use after
   free.
 - The built value owns nothing it was lent.
 
-#### Yielding methods
+#### Contracts of lending methods
 
 ```truss
-fn Grid.each(mut self) yields mut Cell {
-  for index in 0..self.cells.length() {
-    yield mut self.cells[index]
-  }
-}
-
-for cell in mut grid {
-  cell.age += 1
-}
-```
-
-- `yields Cell` gives read-only parts, `yields mut Cell` lends `mut` access to
-  each, and `yields own Cell` hands over owned values.
-- A `for` loop's body runs at each `yield`. When the body leaves the loop,
-  the method stops at that `yield` and does not continue, so the type's
-  invariants, and the `ensures` clauses about how the method ends, hold at
-  each `yield`.
-- `for item in items` calls `items.each()`, and `mut` or `own` before the
-  collection calls that version. A type supports `for` by defining `each`,
-  as its own method or by implementing `Iterable`.
-- A method yields a view only of its parameters.
-
-#### Cursors
-
-A yielding method called anywhere but as a `for` loop's collection makes a
-cursor, which is pulled one value at a time:
-
-```truss
-var first_cursor = first.each()
-var second_cursor = second.each()
-var differences = 0
-while mut first_cursor.next() is Some(left) && mut second_cursor.next() is Some(right) {
-  if left != right { differences += 1 }
-}
-```
-
-- `next()` runs the method to its next `yield` and returns `Some` of the
-  yielded part, or `None` when the method ends. A dropped cursor ends the
-  method at its last `yield`.
-- A cursor from an `own self` method owns its receiver; one from a `self`
-  method is a view of it.
-- A pull returns an owned value, so a method that yields read-only places
-  makes a cursor only where the element is `Plain`.
-- A method that yields `mut` access, or yields through a recursive call,
-  makes no cursor.
-- Whether a method can make a cursor is derived from its body and checked
-  where the cursor is created.
-- A cursor's type has no name. It implements the prelude trait `Cursor`, as
-  a cursor type written by hand does:
-
-  ```truss
-  trait Cursor {
-    type Element
-    capability Uses
-    fn next(mut self) -> Option[Self.Element]
-      uses Self.Uses
-  }
-  ```
-
-- A cursor's `Uses` is its method's `uses` clause. Each `next` uses the
-  implementations provided where it is called.
-
-#### Contracts of lending and yielding methods
-
-```truss
-fn List[Element].each(self) yields Element
-  ensures identical(result, self[yielded.length()])
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+fn List[Element].element(mut self, position: USize) lends mut Element
+  requires position < self.count()
+  ensures identical(result, old(self.model())[position])
+  ensures identical(self.model(), old(self.model()).update(position, value: yielded[0]))
 {
-  for index in 0..self.length() {
-    yield self[index]
+  mut self[position]
+}
+```
+
+- **A clause that mentions `result` holds where the method lends,** where
+  `result` is the lent part, and the caller may rely on it.
+- **Every other clause holds when the lend ends.**
+- **`yielded[0]` is the part as the caller left it.** `yielded` is a
+  `Sequence` of that one part.
+
+### Cursors
+
+A *cursor* gives values one at a time. It is a value of a type that
+implements the prelude trait `Cursor`:
+
+```truss
+trait Cursor {
+  type Element
+  capability Uses
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+}
+```
+
+```truss
+type Countdown(left: USize)
+
+impl Cursor for Countdown {
+  type Element = USize
+
+  fn next(mut self) -> Option[USize] {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(self.left)
   }
 }
 ```
 
-- **A clause that mentions `result` holds at each `yield`,** where `result`
-  is the yielded part, and the caller may rely on it.
-- **Every other clause holds wherever the method ends:** after its last
-  statement, and, for a yielding method, at a `yield` where the loop stops.
-- **`yielded` is the `Sequence` of the parts yielded so far,** each as the
-  caller left it. A lending method's `yielded[0]` is its part once the
-  caller is done with it.
-- **`finished` is `true` when the method ran to its end.**
-
-A `for` loop's facts, such as `i < count` in `for i in 0..count`, come from
-these clauses on the standard library's `each` methods.
+- `next()` returns `Some` of the next value, which the caller owns, or
+  `None` when the cursor has no more.
+- A cursor holds its own state. One that holds a view, such as a cursor over
+  a `Slice`, is a view. One that owns a collection gives its elements away.
+- `Uses` is the set of capabilities that `next` uses. Each `next` uses the
+  implementations provided where it is called.
+- `Cursor` gives a cursor the methods `to_list`, `count`, `last`, `fold`,
+  and `find`, and the adapters of `standard::cursors`, such as `skip`,
+  `take`, and `zip`.
 
 ## Statements and blocks
 
@@ -1149,8 +1111,7 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "concurrent" block
           | "concurrent" "for" pattern [ ":" type ] "in" expression { loop_clause } block
           | "proof" block
-          | "assert" expression [ "by" "bit_vector" ]
-          | "yield" expression ;
+          | "assert" expression [ "by" "bit_vector" ] ;
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
@@ -1357,7 +1318,20 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 | `for item in own items { ... }` | Move each element out. |
 | `while low < high { ... }` | Loop while a condition holds. |
 
-- A `mut` loop changes elements but does not add or remove them.
+- **A `for` loop over a collection visits its elements by position.**
+  `for item in items` evaluates `items.count()` once, and each iteration is
+  lent `items.element(position)`, for each position from zero up to the
+  count. A type supports `for` by defining `count(self) -> USize` and
+  `element(self, position: USize)`, a lending method, as its own methods or
+  by implementing `Iterable`.
+- `for item in mut items` is lent each element by the version of `element`
+  that takes `mut self`. A `mut` loop changes elements but does not add or
+  remove them: each iteration leaves the collection's `count` as it was.
+- `for item in own items` moves each element out: it pulls the cursor that
+  `items.cursor()` returns, where `cursor` takes `own self`.
+- **A `for` loop over a cursor pulls it until it has no more values.** Each
+  iteration owns the value that `next` returned. A cursor in a variable is
+  advanced in place, so it can be pulled again after a `break`.
 - A `for` loop's type annotation is its element type, as a `let`'s is the
   type of its value: `for index: UInt8 in 0..10` iterates over `UInt8`s, and
   `for (index, element): Indexed[UInt8] in data.enumerate()` destructures
@@ -1368,12 +1342,19 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
   never goes below zero. A `while` loop in a function with a `time` clause is
-  proven to terminate.
+  proven to terminate, and so is a `for` loop over a cursor. A `for` loop
+  over a cursor whose type has a `remaining(self) -> USize` method has that
+  method's value as its measure where it states none.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
 - In the clauses of any other `for` loop, `yielded` is the `Sequence` of the
   values of the iterations before. The clauses cannot name the element.
+- In a loop that reads a collection, `yielded[i]` is the value of the
+  collection's `element` at position `i`, so it meets that method's
+  `ensures`. Where the collection's `model()` is the `Sequence` of its
+  elements, as a `List`'s is, `yielded` is that model once the loop has
+  visited every element.
 - A loop's `cost` bounds the loop's cost so far, at the start of every
   iteration and when it ends. It is never `amortized` or `finite`. Its bound
   can use the variables in scope at the loop, and `yielded` or a range's
@@ -1782,16 +1763,21 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   `Result`, `None` where it returns an `Option`, and early where it returns
   nothing. `Tasks.cancelled()` tells whether the task is cancelled. A task
   blocked on the mutex of a `mut` implementation waits until it acquires it.
-- `yield` is not allowed in concurrent code.
 - A function that waits for another task has no `time` clause.
 
-A `concurrent for` iteration keeps running after the loop advances, so its
-inputs stay valid until the loop ends. It is given a value of its own, a
-`Plain` copy, or a place inside a parameter that the method takes read-only.
-A method that yields `mut` access drives one only when its body is one `for`
-over a range whose body is one `yield`. Any other `concurrent for` is
-rejected, because a place in the method's locals or in a `mut` parameter
-could change or be freed while a task uses it: a use after free.
+The iterations of a `parallel for` and of a `concurrent for` run at the same
+time, and a `concurrent for` iteration keeps running after the loop
+advances.
+
+- An iteration that reads its element is lent it for the whole loop, from
+  any collection.
+- **Only a `List`, a `Slice`, or an `Array` lends its elements `mut` to such
+  a loop.** Its elements at different positions are different places.
+  Another collection's `element` could lend one place to two iterations: a
+  data race.
+- **A `concurrent for` over a cursor pulls values that are not views.** The
+  next pull could change or drop what a view from the cursor views, which
+  would leave the task with a dangling view.
 
 ### Shared state
 

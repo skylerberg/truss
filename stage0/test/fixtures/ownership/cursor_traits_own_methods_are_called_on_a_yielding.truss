@@ -1,8 +1,0 @@
-fn f(items: List[Int64], text: String) -> USize {
-  var cursor = items.each()
-  let _ = mut cursor.find(fn(item) { item > 3 })
-  let _ = items.each().fold(0, combine: fn(total, item) { total + item })
-  let skipped = items.each().skip(1).count()
-  let moved = items.each().take(1).count()
-  skipped + moved + text.characters().skip(1).count()
-}

@@ -9,11 +9,11 @@ impl Index for Tally {
   }
 
   fn at(self, key: USize) lends Int64 {
-    yield self.cells[key]
+    self.cells[key]
   }
 
   fn at(mut self, key: USize) lends mut Int64 {
-    yield mut self.cells[key]
+    mut self.cells[key]
   }
 }
 

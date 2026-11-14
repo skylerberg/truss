@@ -34,7 +34,6 @@ and mir_frame = {
   returned : Mir.local list;
   mutable taken : Mir.place list;
   moves : Moves.t;  (** Which places may hold a value at each point *)
-  kept : Mir.local list;
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
@@ -49,14 +48,6 @@ type spawn_loop = {
   element : Ground.ty;
 }
 
-type cursor = {
-  pointer : Lowered.local;
-  drop : Emit_c.Builder.separate;
-  fields : (string * Lowered.ty) list ref;
-  mutable resumes : Lowered.block list;
-  mutable stops : Lowered.block list;
-}
-
 type schedule = Sequential | Chunked | Spawned of spawn_loop
 type result_slot = Through of Lowered.local | Returned_in of Lowered.local | No_result
 
@@ -69,29 +60,16 @@ type state = {
   mutable result : result_slot;
   nested : int ref;
   mutable evidence : (Path.t * Lowered.operand) list;
-  cursor : cursor option;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
 }
 
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
-
-val enter :
-  Definitions.context ->
-  ?cursor:cursor ->
-  ?nested:int ref ->
-  builder:Emit_c.Builder.t ->
-  frame ->
-  state
-
+val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
 val may_fork : state -> bool
 
-(* A field of the cursor, with the place it is at. *)
-val cursor_field : cursor -> string -> Lowered.ty -> Lowered.place
-
-(* A place that holds a value [kept] across a [yield]: a new field of the
-   cursor in a pulled method, or else a new local. *)
-val held : state -> kept:bool -> ?name:string -> Lowered.ty -> Lowered.place
+(* A new local, as the place that holds a value. *)
+val held : state -> ?name:string -> Lowered.ty -> Lowered.place
 
 (* Writes code with [body] as an outlined function, nested in the instance,
    given [parts] as its parameters. Gives the function's number and the
@@ -124,7 +102,6 @@ val parameter :
 val evidence_parameters : state -> Path.t list -> Lowered.local list
 val result_slot : state -> Convention.result -> unit
 val result_place : state -> Lowered.place option
-val returned_type : state -> Ground.ty option
 val return_result : state -> Lowered.terminator
 val leave_to : state -> int -> unit
 val open_scope : state -> scope_kind -> scope
@@ -142,7 +119,7 @@ val unreachable_block : state -> unit
 val moved : state -> Lowered.place -> Lowered.operand
 val owned : state -> Lowered.place -> Ground.ty -> Lowered.operand
 val take : state -> Lowered.place -> Ground.ty -> destination:Lowered.place -> unit
-val snapshot : state -> kept:bool -> Lowered.place -> Lowered.place
+val snapshot : state -> Lowered.place -> Lowered.place
 
 val looping :
   state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit

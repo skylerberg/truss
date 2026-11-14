@@ -20,8 +20,6 @@ type ty =
       (** An associated type of a type that is not known yet: [Items.Element]. *)
   | Function of function_type
   | Any of trait_reference  (** [any Trait], with every associated type fixed. *)
-  | Cursor of { method_ : Path.t; arguments : argument list }
-      (** The nameless type of a pulled yielding method, with the method's type arguments. *)
   | Never
   | Integer  (** The mathematical integers, in specifications only. *)
   | Variable of int  (** An unknown type, while one statement is checked. *)
@@ -55,7 +53,7 @@ and function_type = {
   costs : cost list;
 }
 
-and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
+and result = Returns of ty | Lends of mode * ty
 
 and capability =
   | Capability of Path.t
@@ -136,7 +134,7 @@ val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
 
 val result_type : result -> ty
-(** The type of a function's result, yielded part, or lent part. *)
+(** The type of a function's result or lent part. *)
 
 val show_mode : mode -> string
 (** How a mode is written before a type: [""], ["mut "], or ["own "]. *)
@@ -188,7 +186,7 @@ val show_argument : argument -> string
 
 val show_output : result -> string
 (** A function's result as a signature writes it after the parameters: [" -> Int64"],
-    [" yields mut Element"], or nothing for unit. *)
+    [" lends mut Element"], or nothing for unit. *)
 
 type generic_kind =
   | Type_generic of trait_reference list  (** Bounds. *)

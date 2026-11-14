@@ -314,10 +314,8 @@ test "a file reader over memory files reads lines through Handles" {
   provide mut memory {
     var reader = FileRead.open(path_of("/fresh")).expect("the file opens")
     var lines: List[String] = []
-    for line in mut reader.lines() {
-      if line is Ok(text) {
-        mut lines.push(text.copy())
-      }
+    while mut reader.read_line() is Ok(Some(text)) {
+      mut lines.push(text.copy())
     }
     assert lines == ["line one", "line two", "last"]
     assert mut reader.read_line() == Ok(None)
