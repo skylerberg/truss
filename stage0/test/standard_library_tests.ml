@@ -141,11 +141,11 @@ let measure database ~record ~is_measured =
    log of a slow job names the slow modules. *)
 let timed label work =
   let start = Unix.gettimeofday () in
-  let solved = Solver.solved solver in
+  let runs_before = Solver.queries_run solver in
   let result = work () in
   Printf.printf "%6.1f s, %d queries solved: %s\n%!"
     (Unix.gettimeofday () -. start)
-    (Solver.solved solver - solved)
+    (Solver.queries_run solver - runs_before)
     label;
   result
 

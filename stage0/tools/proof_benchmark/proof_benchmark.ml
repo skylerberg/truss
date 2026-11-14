@@ -34,14 +34,14 @@ let () =
         match Checks.diagnostics database file with
         | _ :: _ -> None
         | [] ->
-            let solved = Solver.solved solver in
+            let runs_before = Solver.queries_run solver in
             let start = Unix.gettimeofday () in
             let failed =
               List.length (Prover.diagnostics ~record:(record database) database solver file)
             in
             Some
               ( Path.show_file file,
-                Solver.solved solver - solved,
+                Solver.queries_run solver - runs_before,
                 Unix.gettimeofday () -. start,
                 failed ))
       Standard_library.files
