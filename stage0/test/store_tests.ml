@@ -9,6 +9,9 @@ let get database input key =
 
 let fresh_directory () = scratch "store"
 
+let write_file path text =
+  Out_channel.with_open_bin path (fun channel -> output_string channel text)
+
 let segment_files directory =
   let segments = Filename.concat directory "segments" in
   Array.to_list (Sys.readdir segments)
@@ -126,7 +129,34 @@ let () =
       Store.close writer;
       let store = Store.open_ directory in
       Store.collect store ~budget:max_int ~live:(fun _ -> false);
-      if Store.get store dead <> Some "dead" then fail "removed a value")
+      if Store.get store dead <> Some "dead" then fail "removed a value");
+  test "collecting removes a cache file unused for a week and keeps a recent one" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let objects = Store.cache_files store "objects" in
+      let file name =
+        let path = Filename.concat objects name in
+        write_file path "object";
+        path
+      in
+      let unused = file "unused.o" and recent = file "recent.o" in
+      let eight_days_ago = Unix.time () -. (8. *. 24. *. 3600.) in
+      Unix.utimes unused eight_days_ago eight_days_ago;
+      Store.collect store ~budget:0 ~live:(fun _ -> false);
+      if Sys.file_exists unused then fail "kept a file unused for a week";
+      if not (Sys.file_exists recent) then fail "removed a recent file");
+  test "a cache file counts toward the store's size" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let size = Store.size store in
+      write_file (Filename.concat (Store.cache_files store "objects") "object.o") "object";
+      if Store.size store <> size + String.length "object" then
+        fail "the size went from %d to %d" size (Store.size store));
+  test "collecting within the budget keeps an unused cache file" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let path = Filename.concat (Store.cache_files store "objects") "unused.o" in
+      write_file path "object";
+      Unix.utimes path 1. 1.;
+      Store.collect store ~budget:max_int ~live:(fun _ -> false);
+      if not (Sys.file_exists path) then fail "removed a file")
 
 let () =
   test "many small segments are gathered into one, and every record is kept" (fun () ->

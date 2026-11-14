@@ -5,7 +5,8 @@ let version = "5.3.3"
 (* The limit in steps every query runs with. *)
 let steps = 1_000_000
 
-type t = { program : string; cache : string option; mutable queries_run : int }
+type cache = { find : string -> string option; add : string -> string -> unit }
+type t = { program : string; cache : cache option; mutable queries_run : int }
 
 let find ?cache () =
   let program =
@@ -105,10 +106,12 @@ type request = {
    same text, so it can be kept by key alone. *)
 type canonical = Proven_canonical | Values of (string * string) list | Out_of_steps_canonical
 
-let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
+(* The answers this process has solved or read, by request key. *)
+let answers : (string, canonical) Hashtbl.t = Hashtbl.create 256
 
-(* Queries are solved on several domains at once, which share the cache
-   and the count of queries run. *)
+(* Queries are solved on several domains at once, which share [answers],
+   the cache, and the count of queries run. The cache is not safe to call
+   from several domains, so it is called under the lock too. *)
 let lock = Mutex.create ()
 let locked work = Mutex.protect lock work
 let request_key_of_text text value_arguments = key_of_text text ^ String.concat "," value_arguments
@@ -149,36 +152,56 @@ let read request = function
              Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
            request.requested)
 
-(* Solves one request: reads its answer from a cache, or else runs the
-   solver. The query is the one the request was made from, and is rendered
-   only to be run. *)
+(* An answer as the cache keeps it: a line naming it, then for a
+   counterexample a line for each value, its canonical name and its text. *)
+let print_canonical = function
+  | Proven_canonical -> "proven\n"
+  | Out_of_steps_canonical -> "out_of_steps\n"
+  | Values pairs ->
+      "counterexample\n"
+      ^ String.concat ""
+          (List.map (fun (canonical, value) -> Printf.sprintf "%s %s\n" canonical value) pairs)
+
+let parse_canonical text =
+  match String.split_on_char '\n' text with
+  | "proven" :: _ -> Some Proven_canonical
+  | "out_of_steps" :: _ -> Some Out_of_steps_canonical
+  | "counterexample" :: lines ->
+      Some
+        (Values
+           (List.filter_map
+              (fun line ->
+                match String.index_opt line ' ' with
+                | Some space ->
+                    Some
+                      ( String.sub line 0 space,
+                        String.sub line (space + 1) (String.length line - space - 1) )
+                | None -> None)
+              lines))
+  | _ -> None
+
+(* The answer this process or the cache already has. One read from the
+   cache is added to [answers], so the cache is read once a key. *)
+let known_answer solver key =
+  locked (fun () ->
+      match Hashtbl.find_opt answers key with
+      | Some answer -> Some answer
+      | None -> (
+          match
+            Option.bind solver.cache (fun cache -> Option.bind (cache.find key) parse_canonical)
+          with
+          | Some answer ->
+              Hashtbl.replace answers key answer;
+              Some answer
+          | None -> None))
+
+(* Solves one request: reads its answer from [answers] or the cache, or
+   else runs the solver. The query is the one the request was made from,
+   and is rendered only to be run. *)
 let solve solver (request, query) =
-  let file = Option.map (fun directory -> Filename.concat directory request.key) solver.cache in
-  let cached_answer =
-    match file with
-    | Some file when Sys.file_exists file -> (
-        (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
-        match String.split_on_char '\n' (File_system.read file) with
-        | "proven" :: _ -> Some Proven_canonical
-        | "out_of_steps" :: _ -> Some Out_of_steps_canonical
-        | "counterexample" :: lines ->
-            Some
-              (Values
-                 (List.filter_map
-                    (fun line ->
-                      match String.index_opt line ' ' with
-                      | Some space ->
-                          Some
-                            ( String.sub line 0 space,
-                              String.sub line (space + 1) (String.length line - space - 1) )
-                      | None -> None)
-                    lines))
-        | _ -> None)
-    | _ -> None
-  in
-  match (locked (fun () -> Hashtbl.find_opt cache request.key), cached_answer) with
-  | Some answer, _ | None, Some answer -> answer
-  | None, None ->
+  match known_answer solver request.key with
+  | Some answer -> answer
+  | None ->
       let text = Logic.text query in
       if request_key_of_text text request.value_arguments <> request.key then
         invalid_arg "Solver.solve_all: the query is not the one its request was made from";
@@ -215,25 +238,9 @@ let solve solver (request, query) =
                solver could not answer, and is never kept as an answer. *)
             failwith ("Solver.solve_all: the solver rejected a query: " ^ String.trim output)
       in
-      locked (fun () -> Hashtbl.replace cache request.key answer);
-      (match file with
-      | Some file -> (
-          let text =
-            match answer with
-            | Proven_canonical -> "proven\n"
-            | Out_of_steps_canonical -> "out_of_steps\n"
-            | Values pairs ->
-                "counterexample\n"
-                ^ String.concat ""
-                    (List.map
-                       (fun (canonical, value) -> Printf.sprintf "%s %s\n" canonical value)
-                       pairs)
-          in
-          try
-            File_system.make_directory (Filename.dirname file);
-            File_system.write_atomically file text
-          with Sys_error _ -> ())
-      | None -> ());
+      locked (fun () ->
+          Hashtbl.replace answers request.key answer;
+          Option.iter (fun cache -> cache.add request.key (print_canonical answer)) solver.cache);
       answer
 
 let solve_all solver requests =

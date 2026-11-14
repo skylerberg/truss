@@ -72,11 +72,12 @@ let modules =
       in
       List.filter (fun entry -> List.memq entry mine) library
 
-(* Solver answers are kept by the text of the query, the solver's version
-   and its limit, so with a directory to keep them in, a run solves only
-   the queries that the last run did not. *)
+(* Solver answers are kept in the store by the text of the query, the
+   solver's version and its limit, so a run solves only the queries that no
+   earlier run solved, whatever compiler that run was. *)
 let solver =
-  match Solver.find ?cache:(Sys.getenv_opt "TRUSS_SOLVER_CACHE") () with
+  let find, add = Database.results ~kind:"solver" in
+  match Solver.find ~cache:{ find; add } () with
   | Ok solver -> solver
   | Error message ->
       prerr_endline message;
@@ -88,7 +89,7 @@ let solver =
    proven by itself, and the run prints [Proof_weights] again, with the
    processor time of each measured module, the solver's included, in
    hundredths of a second, and the recorded weight of every other module.
-   Measure with a directory that holds every query's answer, as CI's runs
+   Measure with a store that holds every query's answer, as CI's runs
    start with: there a module's cost is translating it, which the solver's
    cost from nothing would hide. *)
 let measured_modules =
@@ -227,4 +228,8 @@ let () =
                     | errors -> errors))
                 files)))
     checked;
-  timed "saving the state" (fun () -> Option.iter Database.save_session session)
+  timed "saving the state" (fun () -> Option.iter Database.save_session session);
+  (* A run that saves a state starts no background process, and the
+     background process is what keeps the store within its budget. Without
+     this, CI's store would keep the state of every compiler it ran. *)
+  Option.iter (fun _ -> timed "collecting the store" Database.For_testing.collect_store) session

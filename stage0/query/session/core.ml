@@ -376,6 +376,7 @@ let all () =
   | Some state -> Hashtbl.fold (fun _ session sessions -> session :: sessions) state.sessions []
 
 let directory name = Store.files (store ()) name
+let cache_directory name = Store.cache_files (store ()) name
 
 let results ~kind =
   let store = store () in

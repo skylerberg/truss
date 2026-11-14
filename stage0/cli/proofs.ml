@@ -3,9 +3,10 @@
    running it. *)
 
 (* The solver that [TRUSS_Z3] names, or else [z3]. Proving requires it, as
-   building requires a C compiler. Its answers are cached in the store. *)
+   building requires a C compiler. Its answers are kept in the store. *)
 let solver () =
-  match Solver.find ~cache:(Filename.concat (Database.store_directory ()) "proofs") () with
+  let find, add = Database.results ~kind:"solver" in
+  match Solver.find ~cache:{ find; add } () with
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message
 

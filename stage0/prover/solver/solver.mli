@@ -6,10 +6,14 @@
 type t
 (** A solver found on this machine, of the pinned version. *)
 
-val find : ?cache:string -> unit -> (t, string) result
+type cache = { find : string -> string option; add : string -> string -> unit }
+(** A place that keeps answers between processes, each under its request's key, such as the code
+    database's store. An answer depends only on the query's text and the solver's version, which the
+    key names, so a kept answer holds for every compiler. *)
+
+val find : ?cache:cache -> unit -> (t, string) result
 (** [$TRUSS_Z3], or [z3] on the path, checked to be the pinned version. With [cache], answers are
-    also kept in that directory, one file per key, so a query solved once is never solved again on
-    this machine. *)
+    also kept there, so a query solved once is not solved again while the cache keeps its answer. *)
 
 type answer =
   | Proven  (** The goal cannot be false. *)
