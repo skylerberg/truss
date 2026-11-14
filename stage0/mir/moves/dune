@@ -2,4 +2,4 @@
 
 (library
  (name moves)
- (libraries mir))
+ (libraries core mir types))

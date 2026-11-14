@@ -5,6 +5,8 @@
 open Codegen_support
 
 let () =
+  passes "a value moved in one iteration and given one in the next is not dropped twice"
+    Fixtures.Owning.value_moved_in_one_iteration_and_given_one_in_the;
   passes "an assignment to an element drops the element it replaces"
     Fixtures.Owning.assignment_to_an_element_drops_the_element_it;
   passes "an early return inside an interpolation drops the text built so far"

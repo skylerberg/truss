@@ -10,7 +10,7 @@
    mutated or moved while a live holder stores a view of it. *)
 open Graph
 open Context
-open Moves
+open Move_rules
 
 (* The views that each holder may store. A holder with an entry stores a
    value of a view type, even if the entry is empty. *)

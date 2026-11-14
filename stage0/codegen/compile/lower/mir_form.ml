@@ -206,30 +206,15 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
       if List.exists (function Mir.Construct _ -> true | _ -> false) values then
         Hashtbl.replace built local values)
     lent_values;
-  let parts =
-    Array.fold_left
-      (fun parts (block : Mir.basic_block) ->
-        match block.terminator with For { part; _ } -> part :: parts | _ -> parts)
-      [] body.blocks
-  in
   (* How each parameter is passed, where it is not as its binding says: a
      lambda's parameters are patterns, and its function type says how each
      is passed. *)
-  let passed_as local : Ground.mode option =
-    match passed with
-    | None -> None
-    | Some modes -> Option.map (List.nth modes) (List.find_index (Int.equal local) body.parameters)
-  in
-  (* The locals whose places hold values of their own, which their ends
-     drop. A capture is a place lowering gives it. *)
-  let owns local =
-    (not (Hashtbl.mem aliases local))
-    && (not (List.mem local body.captures))
-    &&
-    match (passed_as local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Own
-    | None, (Temporary | Source { mode = Own; _ }) -> true
-    | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
+  let passed local : Types.mode option =
+    Option.bind passed (fun modes ->
+        Option.map
+          (fun position : Types.mode ->
+            match List.nth modes position with Ground.Read -> Read | Mut -> Mut | Own -> Own)
+          (List.find_index (Int.equal local) body.parameters))
   in
   let needs_drop (path : Moves.path) =
     let rec path_type ty = function
@@ -252,20 +237,7 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     | Some ty -> not (trivial st ty)
     | None -> false
   in
-  (* The locals whose places are another owner's, lent to be changed, which a
-     value may be moved out of and given back to. *)
-  let lent_mut local =
-    (not (owns local))
-    && (not (Hashtbl.mem built local))
-    && (not (List.mem local parts))
-    && (not (List.mem local body.captures))
-    &&
-    match (passed_as local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Mut
-    | None, (Source { mode = Mut; _ } | Lent Mut) -> true
-    | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
-  in
-  let moves = Moves.analyse ~owns ~lent_mut ~needs_drop body in
+  let moves = Moves.analyse ~passed ~tracks:needs_drop body in
   let kept = if st.cursor <> None then Moves.kept_by_cursor moves body else [] in
   {
     body;

@@ -75,18 +75,20 @@ let analysis =
            ->
           let task_hazard =
             Option.bind mir (fun mir ->
+                let returns =
+                  match lowered.interface with
+                  | Function_interface _ | Theorem_interface _ -> true
+                  | _ -> false
+                in
                 let graph =
                   Graph.of_mir ~plain:(Context.plain context) ~is_view:(Context.is_view context)
                     ~holds_function:(Context.holds_function context)
-                    ~stores_function:(Context.stores_function context)
-                    ~returns:
-                      (match lowered.interface with
-                      | Function_interface _ | Theorem_interface _ -> true
-                      | _ -> false)
+                    ~stores_function:(Context.stores_function context) ~returns
                     ~is_var:(fun local -> List.mem local context.mutable_locals)
                     mir
                 in
-                Moves.check context graph;
+                Move_rules.check_refused context graph;
+                Move_rules.check context mir ~returns;
                 Views.check context graph)
           in
           {

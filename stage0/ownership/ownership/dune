@@ -10,6 +10,7 @@
   core
   core_walk
   mir
+  moves
   infer
   interface
   resolve

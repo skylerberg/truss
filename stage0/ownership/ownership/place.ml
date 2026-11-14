@@ -39,17 +39,6 @@ let overlap left right =
     in
     steps_overlap left.steps right.steps
 
-let is_prefix prefix place =
-  prefix.root = place.root
-  &&
-  let rec steps_prefix = function
-    | [], _ -> true
-    | Field first :: prefix, Field second :: place -> first = second && steps_prefix (prefix, place)
-    | Element _ :: prefix, Element _ :: place -> steps_prefix (prefix, place)
-    | _ -> false
-  in
-  steps_prefix (prefix.steps, place.steps)
-
 (* The tracked place that a core place denotes. [None] for a temporary and
    for a part that a call lends, other than an element of a [List], a
    [Slice], or an [Array]. *)

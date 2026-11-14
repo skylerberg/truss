@@ -19,22 +19,50 @@ type path = { local : Mir.local; steps : step list }
 val path_of_place : Mir.place -> path option
 (** [None] for a constant's static data, which nothing moves from. *)
 
+val is_inside : outer:path -> path -> bool
+(** Whether a path is [outer] or lies inside it. *)
+
+val overlaps : path -> path -> bool
+(** Whether two paths overlap: one is the other or lies inside it. *)
+
 type t
 
 val analyse :
-  owns:(Mir.local -> bool) ->
-  lent_mut:(Mir.local -> bool) ->
-  needs_drop:(path -> bool) ->
+  ?passed:(Mir.local -> Types.mode option) ->
+  ?moving:(Types.ty -> bool) ->
+  tracks:(path -> bool) ->
   Mir.body ->
   t
-(** The analysis of a body, whose locals that [owns] holds of own their values, and whose parameters
-    hold values on entry. The places of the locals that [lent_mut] holds of are another owner's,
-    lent to be changed: a value may be moved out of one, which is given a value again before the
-    local ends, and none is dropped where it ends. A path is tracked where its value has something
-    to drop. *)
+(** The analysis of a body. A local owns its value where it is a temporary or an [own] binding, and
+    not a capture or a local that an assignment gives a place; its parameters hold values on entry.
+    A local bound [mut], or lent [mut], is another owner's place, lent to be changed: a value may be
+    moved out of one, which is given a value again before the local ends, and none is dropped where
+    it ends. [passed] says how a parameter is passed where its binding does not, as for a lambda's.
+    A value read by value moves where [moving] holds of its type, every value by default; the rest
+    copy. A path is tracked where [tracks] holds of it. *)
 
 val owns : t -> Mir.local -> bool
 (** Whether a local owns its value, which its end drops. *)
+
+val lent_mut : t -> Mir.local -> bool
+(** Whether a local is another owner's place, lent to be changed. *)
+
+type use = { place : Mir.place; origin : Core.origin; moves : bool }
+(** A place code reads, where it reads it, and whether the read moves the value out. *)
+
+val statement_uses : t -> Mir.statement -> use list
+(** The places a statement reads, in evaluation order. A place it gives a value is not among them.
+*)
+
+val terminator_uses_of : t -> Mir.terminator -> origin:Core.origin -> use list
+(** The places a terminator reads, in evaluation order. [origin] is where a read that has no origin
+    of its own is, the terminator's. *)
+
+val given_by : Mir.statement -> path list
+(** The places a statement gives values. *)
+
+val ended_by : Mir.statement -> Mir.local list
+(** The locals a statement ends. *)
 
 type state
 (** What may hold a value at one point. *)
@@ -54,10 +82,17 @@ val apply_terminator_moves : t -> state -> Mir.terminator -> unit
 
 val copy : state -> state
 
+val move_out : t -> state -> Mir.place -> unit
+(** Moves the value at a place out, as one of a statement's reads does. *)
+
 type status = Holds | Empty | Maybe
 
 val status : t -> state -> path -> status option
 (** [None] for a path that is not tracked, which holds a value whenever its local does. *)
+
+val may_be_empty : t -> state -> path -> path option
+(** The outermost tracked path that overlaps a path, around it or inside it, and may hold nothing,
+    because it was moved out of or not yet given a value on some path here. *)
 
 val inside : t -> path -> path list
 (** The tracked paths strictly inside a path, outermost first. *)
