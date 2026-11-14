@@ -1016,6 +1016,11 @@ mut grid.cell(position).visit()
   stored, or bound with `let`, except by copying it.
 - The part need not be stored in `self`: the method may lend a value it
   made, which is dropped when the lend ends.
+- **A method lends a part of its parameters, or a whole value that it
+  made.** It does not lend a part inside a value it owns, such as an element
+  of a list it built: the method drops the value where it returns, and the
+  part would dangle, a use after free. A part whose type is `Plain` is lent
+  as a copy, so it can come from anywhere.
 
 The lent value may be a constructor applied to places:
 

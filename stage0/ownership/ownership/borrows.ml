@@ -47,10 +47,16 @@ type action =
   | Mutate of Place.t  (** The place is borrowed [mut]. *)
   | Assign of Place.t
   | Bind of Core.local list  (** A pattern binds these locals to new values. *)
-  | Yield_point of { mode : Types.mode; lent : Place.t option list; views : view list }
+  | Yield_point of {
+      mode : Types.mode;
+      lent : Place.t option list;
+      views : view list;
+      parts : Place.t list;
+    }
       (** Where a lending method lends its part. [lent] is the places that the part lends, where
           [None] is a place that the check does not track. [views] is the views of the part, if it
-          has a view type. *)
+          has a view type or is the part of a lending call. [parts] is each place that the part
+          lends by its address: a place whose type is not [Plain]. *)
   | Bind_views of { locals : Core.local list; views : view list }
       (** A pattern binds [locals] to a value that has these views. *)
   | Store of { place : Place.t; views : view list; overwrites : bool }
@@ -851,11 +857,32 @@ let terminator builder ~returns (basic : Mir.basic_block) =
         if List.length places > 1 then
           emit_ builder (Arguments { places; views = []; yielded = true }) origin
       end;
+      (* A place whose type is [Plain] is lent as a copy. Any other place is
+         lent where it is, so it outlives the method: a part of a value that
+         the method owns would dangle. The part of a lending call that the
+         check does not track is a part of what the call's arguments view. *)
+      let lent_by_address (operand : Mir.operand) =
+        match operand with
+        | Use { place; type_; _ } | Borrow { place; type_; _ } | Take { place; type_; _ } ->
+            if plain builder.context type_ then None else Some place
+        | Constant _ -> None
+      in
+      let parts =
+        List.filter_map
+          (fun leaf -> Option.bind (lent_by_address leaf) (tracked builder))
+          (leaves part)
+      in
+      let untracked_part (operand : Mir.operand) =
+        match lent_by_address operand with
+        | Some place -> is_lent_part builder place
+        | None -> false
+      in
       let views =
         match part with
         | Part operand -> (
             match operand_type operand with
-            | Some type_ when is_view builder.context type_ -> views_of_operand builder operand
+            | Some type_ when is_view builder.context type_ || untracked_part operand ->
+                views_of_operand builder operand
             | _ -> [])
         | Built { type_; _ } when is_view builder.context type_ ->
             List.concat_map
@@ -866,7 +893,7 @@ let terminator builder ~returns (basic : Mir.basic_block) =
               (leaves part)
         | Built _ -> []
       in
-      emit_ builder (Yield_point { mode; lent; views }) origin
+      emit_ builder (Yield_point { mode; lent; views; parts }) origin
   (* An early exit that returns a value hands it to the code after its
      group, which returns it. *)
   | Return value -> returning value
@@ -1627,13 +1654,33 @@ let check_body context (actions : actions) moves =
                         through."
                        (show context slice) (show context viewed.place) (show context slice))
               | None -> ()))
-      | Yield_point { views; _ } ->
+      | Yield_point { views; parts; _ } -> (
           (* The caller may store a lent view, so a method lends a view only
              of its parameters. *)
-          ignore
-            (dangles context at
-               ~views:(resolve context here.views views)
-               ~doing:"lends" ~fix:"A method lends a view only of its parameters.")
+          let dangling =
+            dangles context at
+              ~views:(resolve context here.views views)
+              ~doing:"lends" ~fix:"A method lends a view only of its parameters."
+          in
+          (* A part inside a value that the method owns is dropped with the
+             value where the method returns, while the caller still holds
+             the part: a use after free. The whole value can be lent, since
+             the caller then holds it until the lend ends. *)
+          match
+            List.find_opt
+              (fun (part : Place.t) -> part.steps <> [] && kind context part.root = Owned)
+              parts
+          with
+          | Some part when not dangling ->
+              report context View_escapes at
+                (Printf.sprintf
+                   "This lends a part of %s, which the method owns and drops when it returns, so \
+                    the part would dangle. Lend the whole value, move the part out of it and lend \
+                    that, or return the part."
+                   (match part.root with
+                   | Temporary _ -> "a temporary"
+                   | root -> Printf.sprintf "`%s`" (show_root context root)))
+          | _ -> ())
       | Bind _ | Bind_views _ | Start_loan _ | End_loans _ -> ());
   (* The places that a range of positions mutates, and the places that it
      uses. A use of a view uses the places that it views, and a write

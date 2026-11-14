@@ -122,6 +122,36 @@ let () =
       one_diagnostic
         (lends "numbered" "(self) lends Numbered" "  Numbered(index: 0, title: mut self.books[0])\n")
         "types.redundant_mark");
+  (* A part inside a value that the method owns is dropped with the value
+     where the method returns: a use after free. *)
+  test "a lending method cannot lend a part of a local it owns" (fun () ->
+      one_diagnostic ~says:"a part of `sorted`"
+        (lends "first_sorted" "(self) lends String"
+           "  var sorted = self.books.copy()\n  mut sorted.sort()\n  sorted[0]\n")
+        "ownership.view_escapes");
+  test "a lending method cannot lend a part of a temporary" (fun () ->
+      one_diagnostic ~says:"of a temporary"
+        (lends "first_copied" "(self) lends String" "  self.books.copy()[0]\n")
+        "ownership.view_escapes");
+  test "a lending method cannot lend a field of a local it owns inside a constructor" (fun () ->
+      one_diagnostic ~says:"a part of `both`"
+        (lends "tagged" "(self) lends Tagged"
+           "  let both = Tagged(tag: \"new\".copy(), book: \"old\".copy())\n\
+           \  Tagged(tag: both.tag, book: self.books[0])\n")
+        "ownership.view_escapes");
+  test "a lending method can lend the whole of a local it owns" (fun () ->
+      fine
+        (lends "first_sorted" "(self) lends List[String]"
+           "  var sorted = self.books.copy()\n  mut sorted.sort()\n  sorted\n"));
+  test "a lending method can lend a `Plain` part of a local it owns, which is a copy" (fun () ->
+      fine
+        (lends "longest" "(self) lends USize"
+           "  var lengths: List[USize] = []\n\
+           \  for book in self.books {\n\
+           \    mut lengths.push(book.length())\n\
+           \  }\n\
+           \  mut lengths.sort()\n\
+           \  lengths[0]\n"));
   test "a lent constructor is not lent one place `mut` twice" (fun () ->
       one_diagnostic
         (lends "both" "(mut self) lends mut Both"

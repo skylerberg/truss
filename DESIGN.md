@@ -419,6 +419,12 @@ caller's statement, as Swift's `_read` and `_modify` accessors do; it is how
   syntax and proof rules as a `List`.
 - **A lent part need not be stored in `self`.** A method can lend a value it
   computes. A change to such a value is not written back.
+- **A method lends a part of its parameters, or a whole value it made,** and
+  never a part inside a value it owns. Nothing of the method then has to
+  outlive its call except the part itself, which the caller can hold: the
+  method can be compiled as a function, called through `any`, and can call
+  itself. Rust has the same rule for a reference into a local. Swift's
+  accessors lend such a part by keeping the accessor's frame alive.
 - **Reading an element and changing it in place are separate traits.**
   `Index` lends an element read-only, and `IndexMut` lends it `mut`. A
   collection that packs its elements, such as a set of bits, has no place
