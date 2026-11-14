@@ -98,11 +98,8 @@ let indentation_of source offset =
   in
   String.sub text start (stop start - start)
 
-(* Whether the token of [kind] at [offset], after the line break
-   [first_line_break], starts a definition: a definition keyword that is the
-   first token on its line, on a line with no indentation. Trivia before
-   it, such as a forbidden character or a `;`, is not indentation, since its
-   fix removes it or makes it a line break. *)
+(* A definition keyword first on an unindented line; trivia before it is not
+   indentation. *)
 let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
   first_line_break <> None
   && indentation_of source offset = ""

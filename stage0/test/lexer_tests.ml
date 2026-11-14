@@ -53,8 +53,6 @@ let shown tokens =
 
 let tokens_of text = shown (fst (lex text))
 
-(* The tokens of [text] without the marks of zero-width closers, which a
-   fixed text writes as closers of its own. *)
 let recovered_tokens text =
   List.map
     (fun shown ->
@@ -104,8 +102,6 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
           List.iter
             (fun result -> List.iter (fail "the fixed text %S has %s" result) (codes result))
             results;
-          (* The lexer recovers as its only fix writes, so the parser reads
-             the tokens of the fixed program. *)
           let recovered = recovered_tokens text in
           if
             List.length results = 1
@@ -126,8 +122,6 @@ let fixed_texts text ~code =
       else [])
     (snd (lex text))
 
-(* [text] with its machine-applicable fixes applied, as `truss check --fix`
-   applies them in one round. *)
 let machine_fixed text =
   Diagnostic.apply_edits text
     (List.concat_map
@@ -209,13 +203,11 @@ let () =
       error "user__name" ~code:Name_case ~at:"user" ~fixed:"user_name";
       error "_unused" ~code:Name_case ~at:"_" ~fixed:"unused");
   test "no fix that would make a keyword" (fun () -> error "_type" ~code:Name_case ~at:"_");
-  (* `f` before a quote is a format string's prefix, and `_f` is not. *)
   test "no fix that would make a name a string's prefix or tag" (fun () ->
       equal_lists Fun.id "fixed" [] (fixed_texts "_f\"a\"" ~code:Name_case);
       equal_lists Fun.id "fixed" [] (fixed_texts "HTTP_OK\"a\"" ~code:Name_case);
       equal_lists Fun.id "fixed" [ "HttpClient\"a\"" ]
         (fixed_texts "Http_Client\"a\"" ~code:Name_case));
-  (* Renaming would make two names one, and change what a use refers to. *)
   test "no fix that would rename to a name the file already has" (fun () ->
       error "my_var + myVar" ~code:Name_case ~at:"myVar";
       equal_lists Fun.id "tokens" [ "my_var"; "+"; "myVar"; "NL" ] (tokens_of "my_var + myVar");
@@ -250,8 +242,6 @@ let () =
       tokens "1..2" [ "1"; ".."; "2"; "NL" ];
       tokens "1.max" [ "1"; "."; "max"; "NL" ];
       tokens "1.0.max" [ "1e0"; "."; "max"; "NL" ]);
-  (* Removing a suffix would leave the literal the type of its context, not
-     the type the suffix asked for. *)
   test "a type suffix has no fix" (fun () ->
       error "3u8" ~code:Number_suffix ~at:"u8";
       error "1.5f" ~code:Number_suffix ~at:"f";
@@ -362,7 +352,6 @@ let () =
   test "a C# string becomes a Truss string" (fun () ->
       error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
       error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|};
-      (* Removing the `$` would make `Path` the string's tag. *)
       error {|Path$"{name}"|} ~code:String_prefix ~at:"$");
   test "a template literal becomes an ordinary string" (fun () ->
       error "`Hello ${name}`" ~code:String_delimiter ~at:"`" ~fixed:{|"Hello ${name}"|};
@@ -435,8 +424,6 @@ let () =
 (* Rejected sequences *)
 
 let () =
-  (* A comment says what its author meant, so removing it is not a fix:
-     `truss check --fix` must not delete it. *)
   test "a comment at the end of a line has no fix" (fun () ->
       error "let a = 1 // one" ~code:Comment ~at:"//");
   test "a comment on its own line has no fix" (fun () ->
@@ -512,7 +499,6 @@ let () =
       error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
       error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
       equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (tokens_of "a <> b"));
-  (* Ruby's `...` leaves out its end, and Swift's includes it. *)
   test "three dots between operands are either range" (fun () ->
       error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..5" ~alternatives:[ "1..=5" ];
       equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (tokens_of "a...b"));
@@ -533,9 +519,6 @@ let () =
       error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
       error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
       equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"));
-  (* Code a fix would write into a neighbor, joining the two into another
-     token, means the text around the mistake is not code the fix can be
-     sure of. *)
   test "a fix whose code would join a neighbor is withheld" (fun () ->
       error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}";
       error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}";
@@ -546,7 +529,6 @@ let () =
       error "Co@\"x\"" ~code:String_prefix ~at:"@";
       error "Co`x`" ~code:String_delimiter ~at:"`";
       error "x = 1u8.4" ~code:Number_suffix ~at:"u8";
-      (* Side by side, `!=` and `=>` would write `!==>`. *)
       equal_lists Fun.id "fixed" [] (fixed_texts "a \u{2260}\u{21D2} b" ~code:Confusable_character));
   test "a float with no digit before its `.` and a suffix" (fun () ->
       error "x = .5f" ~code:Number_missing_digits ~at:".";
@@ -559,12 +541,8 @@ let () =
       equal_lists Fun.id "tokens" (tokens_of "f(\u{FF08}.5))") (tokens_of "f((.5))"));
   test "`...` before a float with no digit before its `.` is a range" (fun () ->
       equal_lists Fun.id "tokens" [ "3"; "..="; "14e-2"; "NL" ] (tokens_of "3....14"));
-  (* A `.` that ends a line is not a member access, so inserting a closer
-     after it does not change what `1.` is. *)
   test "`1.` at the end of a line is a float" (fun () ->
       error "x = 1.\nmax" ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0\nmax");
-  (* The file is lexed again with these fixes applied, and its tokens are
-     the fixed text's. *)
   test "a file recovers as its machine-applicable fixes write" (fun () ->
       List.iter
         (fun text ->
@@ -573,18 +551,11 @@ let () =
             (recovered_tokens (machine_fixed text))
             (recovered_tokens text))
         [
-          (* A forbidden character before a definition is not indentation. *)
           "f(a\n\u{202E}let x = 1\n";
-          (* A `;` before a definition is a line break. *)
           "let middle = items[;let total = 1\n";
-          (* A line holding only a confusable space is blank. *)
           "a = 1\n\u{2003}\nlet b = 2\n";
-          (* An f-string's fields are interpolations. *)
           "x = f\"a {b} c\"\n";
-          (* Several mistakes on one line. *)
           "if a === b \u{2264} c { f(x\u{FF09} }\n";
-          (* A quote after a confusable arrow does not touch a name, as it
-             does not after the `->` the arrow's fix writes. *)
           "push(item: name\u{2192}'e)\n";
         ]);
   test "an interpolation that holds a rejected character has no fix" (fun () ->
@@ -641,8 +612,6 @@ let () =
   test "a closer goes after a nested group, not inside it" (fun () ->
       equal_lists Fun.id "fixed" [ "x = m(a {\n  b\n})\n" ]
         (fixed_texts "x = m(a {\n  b\n}\n" ~code:Unclosed_bracket));
-  (* The string more likely ends before the `)` than at the end of the line,
-     so neither closing the string there nor closing the bracket is a fix. *)
   test "a bracket whose closer a cut-off string swallowed has no fix" (fun () ->
       equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unclosed_bracket);
       equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unterminated_string);

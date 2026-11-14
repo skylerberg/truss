@@ -622,8 +622,6 @@ let apply_edits text (edits : span edit list) =
 
 let apply_fix text (fix : span fix) = apply_edits text fix.edits
 
-(* Whether every code of [after] is in [before], counting each as often as
-   it occurs. *)
 let adds_none ~(before : _ diagnostic list) ~(after : _ diagnostic list) =
   let codes diagnostics =
     List.sort compare (List.map (fun (diagnostic : _ diagnostic) -> diagnostic.code) diagnostics)
@@ -639,9 +637,6 @@ let adds_none ~(before : _ diagnostic list) ~(after : _ diagnostic list) =
   in
   contained (codes after) (codes before)
 
-(* Each diagnostic with exactly one fix, except a fix whose edits overlap an
-   earlier fix's, since applying both could produce neither intended
-   result. *)
 let machine_applicable (diagnostics : t list) =
   let overlaps (left : span edit) (right : span edit) =
     (left.span.start < right.span.stop && right.span.start < left.span.stop)

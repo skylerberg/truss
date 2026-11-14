@@ -1,16 +1,9 @@
-(* The scanner and layout run as one pipeline: layout requests each raw
-   token from the scanner when it needs it. A file with brackets still open
-   at its end is scanned twice, the second time with bracket recovery
-   enabled.
+(* The scanner and layout run as one pipeline. A file with brackets still
+   open at its end is scanned twice, the second time with bracket recovery.
 
-   A file with errors is then lexed again with its machine-applicable fixes
-   applied, and the tokens of that fixed text, mapped back to the file's
-   offsets, are the file's tokens. The lexer therefore recovers from each
-   such error exactly as its fix writes, by construction: the parser reads
-   the tokens of the program the fixes make, with their values, line breaks,
-   and indentation. The diagnostics are those of the file as written. If the
-   fixed text has a diagnostic the file does not, a fix was wrong, and the
-   tokens of the file as written are kept instead. *)
+   A file's tokens are those of its text with its machine-applicable fixes
+   applied, mapped back to its offsets, so it recovers as its fixes write.
+   Its diagnostics are those of the text as written. *)
 
 let attempt source ~recovery =
   let diagnostics = Diagnostic.Collector.create () in
@@ -27,7 +20,6 @@ let scan source =
       let tokens, diagnostics, _ = attempt source ~recovery:true in
       (tokens, diagnostics)
 
-(* Calls [visit] on every name token, inside interpolations too. *)
 let rec iter_names visit (tokens : Token.t array) =
   Array.iter
     (fun (token : Token.t) ->
@@ -40,11 +32,8 @@ let rec iter_names visit (tokens : Token.t array) =
       | _ -> ())
     tokens
 
-(* A fix that renames a name to the case rules is withheld when the new
-   spelling is already a name in the file, or when two spellings would both
-   become it: applying it would make two names one, and change what a use
-   refers to. A name of another file that this file does not write is not
-   seen here. *)
+(* Withholds a rename to a spelling the file already has, or that two names
+   share, which would make two names one. *)
 let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagnostic.t list) =
   let written = Hashtbl.create 64 in
   iter_names (fun name -> Hashtbl.replace written name ()) tokens;
@@ -55,27 +44,18 @@ let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagn
         Some (String.sub text span.start (span.stop - span.start), edit.replacement)
     | _ -> None
   in
-  let sources = Hashtbl.create 16 in
-  List.iter
-    (fun diagnostic ->
-      match rename diagnostic with
-      | Some (spelling, renamed) ->
-          let spellings = Option.value (Hashtbl.find_opt sources renamed) ~default:[] in
-          if not (List.mem spelling spellings) then
-            Hashtbl.replace sources renamed (spelling :: spellings)
-      | None -> ())
-    diagnostics;
+  let renames = List.filter_map rename diagnostics in
+  let collides (spelling, renamed) =
+    Hashtbl.mem written renamed
+    || List.exists (fun (other, again) -> again = renamed && other <> spelling) renames
+  in
   List.map
     (fun (diagnostic : Diagnostic.t) ->
       match rename diagnostic with
-      | Some (_, renamed)
-        when Hashtbl.mem written renamed || List.length (Hashtbl.find sources renamed) > 1 ->
-          { diagnostic with fixes = [] }
+      | Some rename when collides rename -> { diagnostic with fixes = [] }
       | _ -> diagnostic)
     diagnostics
 
-(* An edit in both texts: [original] in the file, and [fixed] where its
-   replacement lies in the fixed text. *)
 type placed = { original : Source.span; fixed_start : int; fixed_stop : int }
 
 let placed_edits (edits : Diagnostic.span Diagnostic.edit list) =
@@ -97,14 +77,8 @@ let placed_edits (edits : Diagnostic.span Diagnostic.edit list) =
   Array.of_list (List.rev placed)
 
 (* The offset in the file of [offset] in the fixed text. Text an edit wrote
-   maps to the text it replaced: a token's start to the replaced text's
-   start, and its stop to the replaced text's stop, so a token an edit wrote
-   whole, such as a closer it inserted, spans the text it replaced and is
-   zero-width where it was inserted. *)
+   maps to the text it replaced. *)
 let original_offset (placed : placed array) ~is_stop offset =
-  (* The last edit whose replacement starts at or before [offset], or, for a
-     stop, strictly before it, so that a stop at an edit's start maps by the
-     text before the edit. *)
   let starts_before (edit : placed) =
     if is_stop then edit.fixed_start < offset else edit.fixed_start <= offset
   in
@@ -123,9 +97,7 @@ let original_offset (placed : placed array) ~is_stop offset =
       else edit.original.start
 
 let rec original_token placed (token : Token.t) =
-  (* A zero-width span, such as the end of the file after a deleted `;`,
-     stays zero-width, at the place a stop there maps to: before deleted
-     text, so that it stays inside a span that ends at the same place. *)
+  (* A zero-width span maps as a stop, to stay inside a span ending there. *)
   let span (span : Source.span) =
     let stop = original_offset placed ~is_stop:true span.stop in
     if span.start = span.stop then Source.zero_width stop
@@ -154,12 +126,47 @@ let rec original_token placed (token : Token.t) =
   in
   { token with kind; span = span token.span }
 
-let lex source =
-  let tokens, diagnostics = scan source in
-  let diagnostics = without_colliding_renames (Source.text source) tokens diagnostics in
+(* The tokens of [fixed] that overlap two or more of [written]. *)
+let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
+  let tokens array =
+    List.filter
+      (fun (token : Token.t) ->
+        token.kind <> Newline && token.kind <> End_of_file && token.span.start < token.span.stop)
+      (Array.to_list array)
+  in
+  let inside (token : Token.t) =
+    match token.kind with
+    | String literal ->
+        Array.concat
+          (Array.to_list
+             (Array.map
+                (fun (interpolation : Token.interpolation) -> interpolation.tokens)
+                (Token.interpolations literal)))
+    | _ -> [||]
+  in
+  let rec walk (written : Token.t list) (fixed : Token.t list) =
+    match fixed with
+    | [] -> []
+    | token :: rest -> (
+        let rec after = function
+          | (other : Token.t) :: others when other.span.stop <= token.span.start -> after others
+          | written -> written
+        in
+        let written = after written in
+        let overlaps (other : Token.t) = other.span.start < token.span.stop in
+        match written with
+        | first :: second :: _ when overlaps first && overlaps second ->
+            token.span :: walk written rest
+        | first :: _ when overlaps first ->
+            joined ~written:(inside first) ~fixed:(inside token) @ walk written rest
+        | _ -> walk written rest)
+  in
+  walk (tokens written) (tokens fixed)
+
+let rec recover source tokens diagnostics =
   match Diagnostic.machine_applicable diagnostics with
   | [] -> (tokens, diagnostics)
-  | applied ->
+  | applied -> (
       let edits =
         List.concat_map
           (fun (diagnostic : Diagnostic.t) ->
@@ -172,9 +179,33 @@ let lex source =
              (Diagnostic.apply_edits (Source.text source) edits))
       in
       let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
-      if Diagnostic.adds_none ~before:others ~after:remaining then
-        (Array.map (original_token (placed_edits edits)) fixed_tokens, diagnostics)
-      else (tokens, diagnostics)
+      let fixed_tokens = Array.map (original_token (placed_edits edits)) fixed_tokens in
+      (* A fix that joins or splits a neighboring token is withheld. *)
+      match
+        joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens
+      with
+      | [] ->
+          if Diagnostic.adds_none ~before:others ~after:remaining then (fixed_tokens, diagnostics)
+          else (tokens, diagnostics)
+      | joined ->
+          let touches (edit : Diagnostic.span Diagnostic.edit) =
+            List.exists
+              (fun (span : Source.span) ->
+                span.start <= edit.span.stop && edit.span.start <= span.stop)
+              joined
+          in
+          recover source tokens
+            (List.map
+               (fun (diagnostic : Diagnostic.t) ->
+                 match diagnostic.fixes with
+                 | [ fix ] when List.memq diagnostic applied && List.exists touches fix.edits ->
+                     { diagnostic with fixes = [] }
+                 | _ -> diagnostic)
+               diagnostics))
+
+let lex source =
+  let tokens, diagnostics = scan source in
+  recover source tokens (without_colliding_renames (Source.text source) tokens diagnostics)
 
 module For_testing = struct
   let can_end = Layout.can_end

@@ -324,19 +324,14 @@ val apply_fix : string -> span fix -> string
     overlap. *)
 
 val apply_edits : string -> span edit list -> string
-(** Applies edits to the text they were made for, as {!apply_fix} applies one fix's. Raises
-    [Invalid_argument] if two edits overlap. *)
+(** Like {!apply_fix}, for any edits. *)
 
 val adds_none : before:'span diagnostic list -> after:'span diagnostic list -> bool
-(** Whether every code of [after] is in [before], counting each as often as it occurs: a fix that
-    turns [before] into [after] adds no error, though it may remove others, as deleting text removes
-    the errors inside it. *)
+(** Whether every code of [after] is in [before], counting each as often as it occurs. *)
 
 val machine_applicable : t list -> t list
-(** The diagnostics whose fix is applied without review, by [truss check --fix] and by the lexer's
-    recovery: each diagnostic with exactly one fix, except a fix whose edits overlap an earlier
-    fix's, since applying both could produce neither intended result. A diagnostic whose fix is not
-    certain has no fix, or several fixes as alternatives. *)
+(** The diagnostics whose only fix [truss check --fix] and the lexer's recovery apply, leaving out
+    one whose edits overlap an earlier one's. *)
 
 (** Collects the diagnostics of one file. Every diagnostic is kept, so that later checks, such as of
     fixes, see all of them; only {!shown} limits how many are listed. *)

@@ -493,8 +493,6 @@ let () =
       body_error "let x = items[1.., 4]" ~code:Open_range ~at:"..");
   test "an open range has no comma after it" (fun () ->
       body_error "let x = items[1..,]" ~code:Open_range ~at:"," ~fixed:"let x = items[1..]");
-  (* A bare name binds, so it cannot end a range: a constant is written with
-     its module or its type. *)
   test "a bare name does not end a range pattern" (fun () ->
       body_error "match x {\n  lo..hi => 1\n  _ => 0\n}" ~code:Unexpected_token ~at:"lo");
   test "a lambda's body may start on the next line" (fun () ->

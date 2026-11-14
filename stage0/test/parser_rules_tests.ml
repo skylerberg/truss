@@ -331,8 +331,6 @@ let () =
   test "i--" (fun () -> body_error "items[0]--" ~code:Increment ~at:"--" ~fixed:"items[0] -= 1");
   test "--x" (fun () ->
       body_error "let y = --x" ~code:Double_negation ~at:"--" ~fixed:"let y = -(-x)");
-  (* A fix is offered only if the text it writes parses with no error the
-     original does not have. *)
   test "a fix that would add an error is withheld" (fun () ->
       let fixes_of text code =
         match
@@ -345,9 +343,7 @@ let () =
             fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
             []
       in
-      (* `let count = == 0` would join `=` and `==` into `===`. *)
       if fixes_of "count :=== 0" Short_declaration <> [] then fail "offered the `let` fix";
-      (* Removing the comma would join `0` and `e` into one literal. *)
       if fixes_of "match a {\n  A => 0,e(b) => 1\n}" Match_arm_comma <> [] then
         fail "offered the comma fix");
   test "a comma after a match arm" (fun () ->

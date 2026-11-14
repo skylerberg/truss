@@ -1,9 +1,6 @@
 (* The sequences from other languages that lex as whitespace: comments, `;`,
-   and characters Truss does not use. Each is reported. A `;` and a
-   character Truss does not use have a fix that removes them with
-   [Source_text.remove_trivia]. A comment and an attribute have none: their
-   text says what its author meant, and removing it is not what they meant,
-   so that `truss check --fix` must not do it. *)
+   and characters Truss does not use. A comment or an attribute has no fix:
+   removing it would delete what its author wrote. *)
 
 open Cursor
 

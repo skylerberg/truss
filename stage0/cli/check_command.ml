@@ -1,10 +1,6 @@
 (* [truss check]: every diagnostic of the packages, and with [--fix], each
    diagnostic's only fix applied. *)
 
-(* Each round applies the machine-applicable fixes of each file. A fix
-   skipped because it overlaps another is reconsidered in the next round,
-   after the file is checked again. *)
-
 (* Bounds the rounds, so two fixes that undo each other cannot loop
    forever. *)
 let rounds = 32

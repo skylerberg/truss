@@ -16,8 +16,7 @@ type t = {
 val create : Source.t -> Diagnostic.Collector.t -> t
 
 val peek : t -> int -> t
-(** [peek cursor index] is a copy of [cursor] at [index] for scanning ahead: what it scans changes
-    nothing in [cursor], and what it reports is discarded. *)
+(** A copy of [cursor] at [index], for scanning ahead, that discards what it reports. *)
 
 type ending = Closed | Unterminated
 type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
@@ -53,15 +52,3 @@ val spaces_before : t -> int -> int
 val only_spaces_before : t -> int -> bool
 val describe_code_point : int -> string
 val show_character : t -> int -> string
-
-val code_edit : t -> Source.span -> string -> Diagnostic.span Diagnostic.edit option
-(** [code_edit cursor span code] replaces [span] with the tokens [code], or is [None] when [code]
-    would join a neighbor into another token. With [code] empty, it deletes [span], or is [None]
-    when the two neighbors would join. *)
-
-val optional_fix :
-  string -> Diagnostic.span Diagnostic.edit option list -> Diagnostic.span Diagnostic.fix list
-(** [optional_fix title edits] is the fix with [edits], or no fix when one of them is [None]. *)
-
-val code_fix : t -> string -> Source.span -> string -> Diagnostic.span Diagnostic.fix list
-(** [code_fix cursor title span code] is the fix with the one edit {!code_edit} gives, or no fix. *)

@@ -14,7 +14,6 @@ type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnost
 let diagnostics_in_file parsed =
   List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base:parsed.value.base)) parsed.diagnostics
 
-(* A piece's text, from its first token to its last. *)
 let piece_text source (tokens : Token.t array) piece =
   let base = tokens.(piece.first).span.start in
   String.sub (Source.text source) base (tokens.(piece.stop - 1).span.stop - base)
@@ -45,16 +44,8 @@ let parsed cursor value diagnostics =
       List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:cursor.base)) diagnostics;
   }
 
-(* [diagnostics], the diagnostics of [piece], with each parser fix that does
-   not work removed. A fix works when the piece's text with the fix applied,
-   lexed and parsed again by [unchecked], has none of the diagnostics the
-   piece does not have, besides the one it fixes: it may remove others, but
-   adds no error. A fix that would add one is not code the parser can be
-   sure of, as when it would join a neighbor into another token, copy text
-   whose brackets the lexer recovered, or leave the mistake half fixed, so
-   the diagnostic is reported without it. [unchecked] parses a piece of a
-   text on its own, without checking its fixes, so that checking a fix does
-   not check the fixes of the text it writes. *)
+(* Removes each parser fix that, applied and parsed again by [unchecked],
+   adds an error. *)
 let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics : Diagnostic.t list)
     =
   let has_parser_fix (diagnostic : Diagnostic.t) =
@@ -63,8 +54,6 @@ let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics 
   if not (List.exists has_parser_fix diagnostics) then diagnostics
   else
     let base = tokens.(piece.first).span.start and text = piece_text source tokens piece in
-    (* The diagnostics of [text], lexed and split again, when it is one
-       piece. *)
     let diagnostics_of text =
       let source = Source.create ~path:(Source.path source) text in
       let tokens, lexer_diagnostics = Lexer.lex source in
@@ -115,8 +104,7 @@ let check cursor definition =
   Check.definition cursor definition
 
 (* The definition that [parse] builds from a piece, or a
-   [Definition_error] when its header does not parse. With [checks_fixes],
-   its diagnostics keep only fixes that work. *)
+   [Definition_error] when its header does not parse. *)
 let rec one_definition ?(checks_fixes = true) source tokens piece parse =
   let value, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->

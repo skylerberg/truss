@@ -793,8 +793,7 @@ and postfix cursor : expression =
           | Item { kind = Range { start = None; _ } | Range { stop = None; _ }; _ } -> true
           | _ -> false
         in
-        (* A range that leaves out an end must be alone in its brackets, with
-           no comma after it: only a list of type arguments ends in one. *)
+        (* A range that leaves out an end has no comma after it. *)
         (match items with
         | [ item ] when is_open_range item -> (
             match Cursor.token_at cursor (cursor.index - 2) with

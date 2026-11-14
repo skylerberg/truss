@@ -61,11 +61,8 @@ let next kind start stop ~ending =
       unterminated_string = ending = Unterminated;
     }
 
-(* Whether the text of an unterminated string, from [text_start] to the end
-   of its line at [stop], ends in a closing bracket after its last space.
-   Then the string more likely ends before the bracket, as in a call whose
-   argument is missing its closing quote, than at the end of the line, so
-   closing it there is not a likely fix. *)
+(* Whether an unterminated string ends in a closing bracket, before which it
+   more likely ends. *)
 let ends_in_closer cursor ~text_start stop =
   let rec last position =
     if position > text_start && is_space (byte cursor (position - 1)) then last (position - 1)
@@ -100,7 +97,6 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
   end
   else begin
     cursor.position <- start + delimiter_length;
-    (* An interpolation's first token follows no operand. *)
     cursor.previous <- None;
     let braces = ref 0 and count = ref 0 in
     let finished = ref false and closed = ref false and ending = ref Closed in
@@ -145,8 +141,6 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
     in
     let interpolation_span = span start cursor.position in
     if !closed && !count = 0 then begin
-      (* Removing an interpolation that holds a character the lexer rejected
-         would remove text its author wrote, so only a blank one has a fix. *)
       let rec is_blank position =
         position >= cursor.position - 1
         || (is_space (byte cursor position) && is_blank (position + 1))
@@ -715,8 +709,6 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             (String.length value - String.length indentation)
         else if leading_whitespace line = None then ""
         else begin
-          (* The index in [text] of its first byte that differs from the
-             indentation. *)
           let first_difference text =
             let length = min (String.length text) (String.length indentation) in
             let rec differs index =
@@ -727,9 +719,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           in
           let at = first_difference value in
           let line_whitespace = Option.value (leading_whitespace line) ~default:"" in
-          (* The fix and the error point into the source, whose line can
-             differ from the value: a forbidden character is in the source
-             and not in the value. *)
+          (* Measured in the source, which can differ from the value. *)
           let whitespace_stop = skip_spaces cursor first.span.start in
           let source_at =
             first.span.start
@@ -789,7 +779,12 @@ let character_literal cursor ~tag ~literal_start ~stop =
   in
   let replacement = tag ^ "\"" ^ as_ordinary ^ "\"" in
   report cursor ~code:Character_literal
-    ~fixes:(code_fix cursor ("Write `" ^ replacement ^ "`") (span literal_start stop) replacement)
+    ~fixes:
+      [
+        Diagnostic.fix
+          ("Write `" ^ replacement ^ "`")
+          [ Diagnostic.replace (span literal_start stop) replacement ];
+      ]
     (span literal_start stop)
     (Printf.sprintf "Truss has no %s literals. A single %s is a tagged string: `%s`."
        (if tag = "UInt8" then "byte" else "character")
@@ -856,7 +851,7 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
   let quotes = run_length cursor quote_start quote in
   let empty = quotes = 2 in
   let kind_of_prefix = prefix_kind prefix in
-  let remove_prefix = code_edit cursor (span start quote_start) "" in
+  let remove_prefix = Diagnostic.replace (span start quote_start) "" in
   let kind, ending =
     if kind_of_prefix = Raw_text && quotes = 1 then begin
       cursor.position <- quote_start + 1;
@@ -888,16 +883,18 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
              ${name}\"`."
             prefix,
           if (not closed) || has_interpolations then []
-          else if empty then optional_fix "Remove the prefix" [ remove_prefix ]
+          else if empty then [ Diagnostic.fix "Remove the prefix" [ remove_prefix ] ]
           else if quotes >= 3 && contains '\\' then
             (* Python applies escapes in `f"""..."""`, and a raw string has none. *)
             []
           else
             match format_field_edits cursor ~start:text_start ~stop:text_stop with
             | Some edits ->
-                optional_fix
-                  (if quotes = 1 then "Write an ordinary string" else "Write a raw string")
-                  (remove_prefix :: List.map Option.some edits)
+                [
+                  Diagnostic.fix
+                    (if quotes = 1 then "Write an ordinary string" else "Write a raw string")
+                    (remove_prefix :: edits);
+                ]
             | None -> [] )
     | Raw_text ->
         ( Printf.sprintf
@@ -905,18 +902,20 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
              `\"\"\"`s, as in `\"\"\"\\d+\"\"\"`."
             prefix,
           if (not closed) || has_interpolations then []
-          else if empty || quotes >= 3 then optional_fix "Remove the prefix" [ remove_prefix ]
+          else if empty || quotes >= 3 then [ Diagnostic.fix "Remove the prefix" [ remove_prefix ] ]
           else if
             byte cursor (text_stop - 1) = Char.code '\\'
             (* C# writes a quote in `@"..."` as `""`. *)
             || byte cursor (text_stop + 1) = quote
           then []
           else
-            optional_fix "Write a raw string"
-              [
-                code_edit cursor (span start text_start) "\"\"\"";
-                Some (Diagnostic.replace (span text_stop (text_stop + 1)) "\"\"\"");
-              ] )
+            [
+              Diagnostic.fix "Write a raw string"
+                [
+                  Diagnostic.replace (span start text_start) "\"\"\"";
+                  Diagnostic.replace (span text_stop (text_stop + 1)) "\"\"\"";
+                ];
+            ] )
     | Bytes ->
         ( "Truss has no byte strings. A string is UTF-8 text, and `text.bytes()` gives its bytes.",
           [] )
@@ -973,11 +972,13 @@ let hash_raw_string cursor ~start =
         report cursor ~code:String_prefix
           ~fixes:
             (if exact then
-               optional_fix "Write a raw string"
-                 [
-                   code_edit cursor (span start text_start) delimiter;
-                   Some (Diagnostic.replace (span text_stop stop) delimiter);
-                 ]
+               [
+                 Diagnostic.fix "Write a raw string"
+                   [
+                     Diagnostic.replace (span start text_start) delimiter;
+                     Diagnostic.replace (span text_stop stop) delimiter;
+                   ];
+               ]
              else [])
           (span start text_start)
           "Truss has no `r#` strings. A raw string is written between `\"\"\"`s, or between more \
@@ -1033,10 +1034,11 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
   report cursor ~code:String_delimiter
     ~fixes:
       (if ending = Closed then
-         optional_fix "Write the string between `\"`s"
-           (code_edit cursor (span start (start + 1)) "\""
-            :: List.map Option.some (quote_edits (start + 1) [])
-           @ [ Some (Diagnostic.replace (span (stop - 1) stop) "\"") ])
+         [
+           Diagnostic.fix "Write the string between `\"`s"
+             ((Diagnostic.replace (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
+             @ [ Diagnostic.replace (span (stop - 1) stop) "\"" ]);
+         ]
        else [])
     (span start (start + 1))
     (if template then
@@ -1073,11 +1075,13 @@ let curly_quoted_string cursor ~opening_length ~closing =
       report cursor ~code:Confusable_character
         ~fixes:
           (if exact then
-             optional_fix "Write the string between `\"`s"
-               [
-                 code_edit cursor (span start text_start) "\"";
-                 Some (Diagnostic.replace (span text_stop stop) "\"");
-               ]
+             [
+               Diagnostic.fix "Write the string between `\"`s"
+                 [
+                   Diagnostic.replace (span start text_start) "\"";
+                   Diagnostic.replace (span text_stop stop) "\"";
+                 ];
+             ]
            else [])
         (span start text_start)
         "A string is written between straight quotes, `\"`. This is a curly quote.";

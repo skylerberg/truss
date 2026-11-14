@@ -17,12 +17,7 @@ type t = {
   (* Each name spelling is checked once per file, and its tokens share one
      string. *)
   names : (string, Names.checked) Hashtbl.t;
-  (* The kind of the last token scanned in this file or interpolation, which
-     decides what a `.` or a `...` after it means. *)
   mutable previous : Token.kind option;
-  (* Whether this cursor only scans ahead for the kind of the next token. A
-     cursor that scans ahead does not scan further ahead itself, so that
-     each token is scanned at most twice. *)
   is_peek : bool;
 }
 
@@ -42,8 +37,6 @@ let create source diagnostics =
     is_peek = false;
   }
 
-(* A copy of [cursor] at [index] for scanning ahead: what it scans changes
-   nothing in [cursor], and what it reports is discarded. *)
 let peek cursor index =
   {
     cursor with
@@ -148,65 +141,3 @@ let show_character cursor index =
       Printf.sprintf "`%s` (U+%04X)"
         (String.sub cursor.text index (Unicode.decoded_length packed))
         value
-
-(* The edit that writes [code], one or more tokens, in place of [span], or
-   [None] when [code] would join a neighbor into another token: a name
-   byte before a name byte or a quote, as in `p∀x` fixed to `pforallx`; two
-   operator bytes, as in `<>=` fixed to `!==`; a digit before a `.` or a
-   `'`, as in `1u8.4` fixed to the float `1.4`; and `$` before a quote or
-   another `$`, which open a raw string. With [code] empty, the edit deletes
-   [span], and the test is whether its two neighbors would join.
-
-   Code that would join its neighbors is not code a fix can be sure of, so
-   the caller offers no fix there. Padding the code with a space would make
-   the fix valid but not likely to be what was meant. *)
-let code_edit cursor (span : Source.span) code =
-  let is_name_byte byte = is_ascii_name_byte byte || byte >= 0x80 in
-  let is_operator_byte byte =
-    byte >= 0 && byte < 0x80 && String.contains "!%&*+-./:<=>^|" (Char.chr byte)
-  in
-  let joins left right ~next =
-    (is_name_byte left && (is_name_byte right || right = quote))
-    || (is_operator_byte left && is_operator_byte right)
-    || (is_digit left && right = Char.code '.' && next <> Char.code '.')
-    || (is_digit left && right = Char.code '\'')
-    || (left = dollar && (right = quote || right = dollar))
-  in
-  (* A neighbor that is a confusable character counts as the ASCII its own
-     fix writes, so that two fixes side by side cannot join either: `≠⇒`
-     fixed to `!=` and `=>` would be `!==>`. *)
-  let as_written position ~is_before =
-    let packed = decode cursor position in
-    let current = byte cursor position in
-    if current < 0x80 || packed < 0 then current
-    else
-      match Confusables.find (Unicode.decoded_code_point packed) with
-      | Some (Spelled spelling) ->
-          Char.code spelling.[if is_before then String.length spelling - 1 else 0]
-      | Some Space -> Char.code ' '
-      | Some (Opening_quote _) -> quote
-      | None -> current
-  in
-  let rec sequence_start position =
-    if position > 0 && byte cursor position land 0xC0 = 0x80 then sequence_start (position - 1)
-    else position
-  in
-  let before =
-    if span.start > 0 then as_written (sequence_start (span.start - 1)) ~is_before:true else -1
-  and after = as_written span.stop ~is_before:false
-  and after_next = byte cursor (span.stop + 1) in
-  let would_join =
-    if code = "" then joins before after ~next:after_next
-    else
-      let first = Char.code code.[0] and last = Char.code code.[String.length code - 1] in
-      let second = if String.length code > 1 then Char.code code.[1] else after in
-      joins before first ~next:second || joins last after ~next:after_next
-  in
-  if would_join then None else Some (Diagnostic.replace span code)
-
-(* The fix with these edits, or no fix when one of them is [None]. *)
-let optional_fix title edits =
-  if List.mem None edits then [] else [ Diagnostic.fix title (List.filter_map Fun.id edits) ]
-
-(* The fix with the one edit {!code_edit} gives, or no fix. *)
-let code_fix cursor title span code = optional_fix title [ code_edit cursor span code ]

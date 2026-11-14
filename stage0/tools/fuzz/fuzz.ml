@@ -43,8 +43,6 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let quoted = Diagnostic.quote text in
   let length = Array.length tokens in
   if length = 0 || tokens.(length - 1).kind <> End_of_file then fail "no End_of_file in %s" quoted;
-  (* Each span starts at or after the end of the one before, so no byte of
-     the source belongs to two tokens. *)
   let check_spans ~start ~stop spans =
     ignore
       (List.fold_left
@@ -80,8 +78,6 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
     tokens;
   if !stack <> [] then fail "unbalanced brackets in %s" quoted
 
-(* Every span a diagnostic gives, its own, its notes', and its fixes' edits',
-   is in bounds. *)
 let check_diagnostic_spans text (diagnostic : Diagnostic.t) =
   let spans =
     (diagnostic.span :: List.map fst diagnostic.notes)
@@ -122,9 +118,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
     Hashtbl.replace ids value.id ();
     if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
-    (* Where the parser recovered, it may build the node a habit's fix
-       would write, as `a |> f` becomes the call `f(a)`, whose children are
-       not in source order. *)
+    (* A recovery may build the node a habit's fix writes, out of source order. *)
     let holds_recovery =
       List.exists (fun recovery -> contains_span value.span recovery) item.value.recovered
     in
@@ -257,8 +251,6 @@ let check_parsers_agree text =
             item.first item.stop (Diagnostic.quote text))
     items
 
-(* Whether the sorted list [smaller] is among the sorted list [larger],
-   counting each element as often as it occurs. *)
 let rec contained smaller larger =
   match (smaller, larger) with
   | [], _ -> true
@@ -309,11 +301,7 @@ let check_fixes_work text =
         diagnostic.fixes)
     (all text)
 
-(* The lexer recovers by lexing the text its machine-applicable fixes
-   write, and keeps the tokens of the text as written if that text has a
-   diagnostic the others do not. Such a fallback means a fix that leaves or
-   adds an error, which every fix of several mistakes at once must not
-   do. *)
+(* The lexer's machine-applicable fixes, applied together, add no error. *)
 let check_machine_fixes_work text =
   let _, diagnostics = lex text in
   match Diagnostic.machine_applicable diagnostics with
@@ -459,8 +447,7 @@ let mistakes =
     "\u{2192}";
     "\u{21D2}";
     "\u{2200}";
-    (* Names outside ASCII: accented, decomposed, Greek, a Cyrillic letter
-       that looks Latin, a ligature, and the ohm sign that NFC replaces. *)
+    (* Names outside ASCII. *)
     "caf\u{00E9}";
     "e\u{0301}";
     "\u{03BB}";
@@ -529,9 +516,7 @@ let () =
     prerr_endline "fuzz: give Markdown files with ```truss blocks";
     exit 2);
   let example () = examples.(Random.State.int random (Array.length examples)) in
-  (* Bytes at random, or characters at random: uniform bytes are almost
-     never valid UTF-8 beyond one byte, so names and confusable characters
-     outside ASCII need code points of their own. *)
+  (* Uniform bytes are rarely valid UTF-8, so half are characters instead. *)
   let random_text () =
     let length = Random.State.int random 120 in
     if Random.State.bool random then
@@ -549,9 +534,7 @@ let () =
       done;
       Buffer.contents buffer
   in
-  (* One mistake: a range of the text replaced by a mistake from the list,
-     by a piece of another example, or by nothing. An empty range makes it
-     an insertion. *)
+  (* A range replaced by a mistake, a piece of another example, or nothing. *)
   let mutate text =
     let length = String.length text in
     let at = Random.State.int random (length + 1) in
