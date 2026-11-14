@@ -81,10 +81,10 @@ val call :
 val shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
 val scratch : string lazy_t
 val compiler : Toolchain.t lazy_t
-val strict : string list
+val strict : string list lazy_t
 val counter : int ref
 val cache : Build.cache lazy_t
-val settings : Build.settings
+val settings : Build.settings lazy_t
 val worker_counts : int list
 
 val run_program :

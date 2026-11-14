@@ -28,7 +28,7 @@ let loaded =
          ~want:(fun lowering wanted ->
            Engine.set engine Compile.roots lowering
              (Compile.add_roots (Engine.context engine) lowering wanted))
-         database target_64 (Lazy.force compiler) (Lazy.force cache) settings ))
+         database target_64 (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
 
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->
