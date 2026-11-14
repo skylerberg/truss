@@ -11,12 +11,14 @@
      diagnostic is in bounds, no two tokens overlap, and brackets are
      balanced;
    - for one mistake made in an example, every fix removes its diagnostic
-     and adds no other, and the lexer's tokens equal those of the text one
-     of its fixes writes;
+     and adds no other, and for several, the lexer's machine-applicable
+     fixes together remove theirs and add no other, so that the lexer
+     recovers by lexing the text they write;
    - valid tokens printed with spaces between them lex back to the same
      tokens;
    - the parser never raises, every span in a tree is in bounds and inside
-     the node around it, and no two expressions share an id;
+     the node around it, children are in source order where the parser did
+     not recover, and no two expressions share an id;
    - for one mistake made in an example, every fix of the lexer's or
      the parser's removes its diagnostic and adds no other;
    - the parser and the reference grammar accept and reject the same pieces
@@ -120,10 +122,17 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
     Hashtbl.replace ids value.id ();
     if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
+    (* Where the parser recovered, it may build the node a habit's fix
+       would write, as `a |> f` becomes the call `f(a)`, whose children are
+       not in source order. *)
+    let holds_recovery =
+      List.exists (fun recovery -> contains_span value.span recovery) item.value.recovered
+    in
     let previous = ref value.span.start in
     Syntax_walk.children
       (fun (inner : Syntax.expression) ->
-        if inner.span.start < !previous then fail "expressions out of order in %s" quoted;
+        if inner.span.start < !previous && not holds_recovery then
+          fail "expressions out of order in %s" quoted;
         previous := inner.span.start;
         expression value.span inner)
       value
@@ -248,6 +257,17 @@ let check_parsers_agree text =
             item.first item.stop (Diagnostic.quote text))
     items
 
+(* Whether the sorted list [smaller] is among the sorted list [larger],
+   counting each element as often as it occurs. *)
+let rec contained smaller larger =
+  match (smaller, larger) with
+  | [], _ -> true
+  | _ :: _, [] -> false
+  | first :: rest, candidate :: larger_rest ->
+      if first = candidate then contained rest larger_rest
+      else if first > candidate then contained smaller larger_rest
+      else false
+
 (* Applying a fix removes its diagnostic and adds no other: the remaining
    diagnostics are the others, or fewer. *)
 let check_fixes_work text =
@@ -278,15 +298,6 @@ let check_fixes_work text =
             | [] -> []
             | code :: rest -> if code = diagnostic.code then rest else code :: remove_one rest
           in
-          let rec contained smaller larger =
-            match (smaller, larger) with
-            | [], _ -> true
-            | _ :: _, [] -> false
-            | first :: rest, candidate :: larger_rest ->
-                if first = candidate then contained rest larger_rest
-                else if first > candidate then contained smaller larger_rest
-                else false
-          in
           match Diagnostic.apply_fix text fix with
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
@@ -298,68 +309,27 @@ let check_fixes_work text =
         diagnostic.fixes)
     (all text)
 
-(* The lexer recovers from a mistake by lexing the text that a fix of the
-   mistake writes: its tokens are the tokens of the fixed text, up to
-   offsets. Recovery that reads the text any other way gives the parser
-   tokens that no fixed program has, so the parser reports errors that the
-   fix would not leave.
-
-   Two exceptions are left out. An unclosed bracket's fix closes it where
-   the indentation says it was meant to close, which can be before tokens
-   that layout has already emitted, so layout inserts its closer later:
-   before the next definition, or at the end of the file. And a string is
-   compared by its tag and form alone: the fix of a format string of
-   another language, such as `f"{name}"`, rewrites its text into
-   interpolations, and recovery keeps the text as written. *)
-let check_recovery_matches_fix text =
-  let nowhere = Source.zero_width 0 in
-  let without_spans (token : Token.t) =
-    let kind =
-      match token.kind with
-      | String literal ->
-          String
-            {
-              tag = Option.map (fun (tag, _) -> (tag, nowhere)) literal.tag;
-              form = literal.form;
-              first = { value = ""; span = nowhere };
-              rest = [||];
-            }
-      | kind -> kind
-    in
-    { token with kind; span = nowhere }
-  in
-  (* The first token has no token before it, so the line breaks before it,
-     which a fix that removes the file's first lines removes, separate
-     nothing. *)
-  let shape text =
-    let tokens, diagnostics = lex text in
-    ( Array.mapi
-        (fun index token ->
-          let token = without_spans token in
-          if index = 0 then { token with line_break_before = false; blank_line_before = false }
-          else token)
-        tokens,
-      diagnostics )
-  in
-  let tokens, diagnostics = shape text in
-  List.iter
-    (fun (diagnostic : Diagnostic.t) ->
-      if
-        diagnostic.fixes <> []
-        && diagnostic.code <> Lexer Unclosed_bracket
-        && not
-             (List.exists
-                (fun fix ->
-                  (* [check_fixes_work] reports a fix whose edits overlap. *)
-                  match Diagnostic.apply_fix text fix with
-                  | exception Invalid_argument _ -> true
-                  | fixed -> fst (shape fixed) = tokens)
-                diagnostic.fixes)
-      then
-        fail "the lexer recovers from %s other than as its fix writes in %s"
-          (Diagnostic.Code.name diagnostic.code)
-          (Diagnostic.quote text))
-    diagnostics
+(* The lexer recovers by lexing the text its machine-applicable fixes
+   write, and keeps the tokens of the text as written if that text has a
+   diagnostic the others do not. Such a fallback means a fix that leaves or
+   adds an error, which every fix of several mistakes at once must not
+   do. *)
+let check_machine_fixes_work text =
+  let _, diagnostics = lex text in
+  match Diagnostic.machine_applicable diagnostics with
+  | [] -> ()
+  | applied ->
+      let edits =
+        List.concat_map
+          (fun (diagnostic : Diagnostic.t) ->
+            match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+          applied
+      in
+      let _, remaining = lex (Diagnostic.apply_edits text edits) in
+      let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
+      if not (Diagnostic.adds_none ~before:others ~after:remaining) then
+        fail "the machine-applicable fixes of the lexer leave or add an error in %s"
+          (Diagnostic.quote text)
 
 let mistakes =
   [|
@@ -610,7 +580,8 @@ let () =
     check_parsers_agree !several;
     let one = mutate (example ()) in
     check_fixes_work one;
-    check_recovery_matches_fix one;
+    check_machine_fixes_work one;
+    check_machine_fixes_work !several;
     round_trip random
   done;
   if !failures > 0 then begin

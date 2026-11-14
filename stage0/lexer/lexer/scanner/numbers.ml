@@ -4,7 +4,8 @@
    A literal with several problems gets one diagnostic, for the leftmost
    problem, and its fix corrects all of them at once, so that applying it
    leaves no error behind. A literal with a problem that has no exact fix,
-   such as a digit its base does not allow, gets no fix. *)
+   such as a digit its base does not allow or a type suffix, gets one
+   diagnostic for that problem, and no fix. *)
 
 type problem = {
   code : Diagnostic.Code.lexer;
@@ -182,6 +183,10 @@ let character_length text offset =
 
 let character_at text offset = String.sub text offset (character_length text offset)
 
+(* A type suffix of another language. It has no fix: removing it would
+   leave the literal the type of its context, which may not be the type the
+   suffix asked for, as `let value = 3u8` would become an `Int64`. Its
+   message shows the literal written with the type it asked for. *)
 let suffix_issue text ~offset ~fixed =
   let suffix = String.sub text offset (String.length text - offset) in
   let example =
@@ -193,7 +198,7 @@ let suffix_issue text ~offset ~fixed =
         in
         Printf.sprintf "`let value: %s = %s`" default_type fixed
   in
-  issue Number_suffix
+  issue ~fixable:false Number_suffix
     (Printf.sprintf
        "Number literals have no type suffixes such as `%s`. A literal takes its type from its \
         context, as in %s."

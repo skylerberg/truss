@@ -88,12 +88,6 @@ let starts_definition source offset =
   | Some (Keyword keyword) -> List.mem keyword definition_keywords
   | _ -> false
 
-(* The offset of the zero-width closers inserted before a token: the first
-   line break before the token, so that the closers precede the NEWLINE
-   that may follow them and the tokens stay ordered by offset. *)
-let closer_position first_line_break position =
-  match first_line_break with Some (line_break : span) -> line_break.start | None -> position
-
 let indentation_of source offset =
   let text = Source.text source in
   let start = Source.line_start source offset in
@@ -103,6 +97,22 @@ let indentation_of source offset =
     else index
   in
   String.sub text start (stop start - start)
+
+(* Whether the token of [kind] at [offset], after the line break
+   [first_line_break], starts a definition: a definition keyword that is the
+   first token on its line, on a line with no indentation. Trivia before
+   it, such as a forbidden character or a `;`, is not indentation, since its
+   fix removes it or makes it a line break. *)
+let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
+  first_line_break <> None
+  && indentation_of source offset = ""
+  && match kind with Keyword keyword -> List.mem keyword definition_keywords | _ -> false
+
+(* The offset of the zero-width closers inserted before a token: the first
+   line break before the token, so that the closers precede the NEWLINE
+   that may follow them and the tokens stay ordered by offset. *)
+let closer_position first_line_break position =
+  match first_line_break with Some (line_break : span) -> line_break.start | None -> position
 
 (* An open bracket: its token's span, and its token's index in the output. *)
 type opener = { bracket : bracket; span : span; index : int }
@@ -320,7 +330,8 @@ let run ~source ~diagnostics ~mode next_input =
         finish ~position ~first_line_break ~blank_line ~ends_unterminated
     | Next { kind; span; first_line_break; blank_line; unterminated_string } ->
         (match mode with
-        | File { recovery = true } when !stack <> [] && starts_definition source span.start ->
+        | File { recovery = true }
+          when !stack <> [] && token_starts_definition source ~first_line_break kind span.start ->
             close_all
               ~position:(closer_position first_line_break span.start)
               ~reason:" before the next definition"

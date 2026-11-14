@@ -4,13 +4,15 @@
    A case problem has a fix that rewrites the name to pass every check. A
    letter outside ASCII has none, since no spelling can be chosen for the
    author. The fix depends only on the name, so every use of a misspelled
-   name gets the same fix. *)
+   name gets the same fix. The token keeps the name as written: the fix,
+   applied when the file is lexed again, is what recovers the corrected
+   name, so a fix that is withheld leaves the name distinct. *)
 
 type kind = Upper | Lower
 
 type checked = {
   kind : kind;
-  name : string; (* the corrected name when there is a fix *)
+  name : string; (* the name as written, which every token of it shares *)
   problem : (Diagnostic.Code.lexer * string) option; (* code, message *)
   fix : string option;
 }
@@ -142,5 +144,4 @@ let check name =
             then Some corrected
             else None
           in
-          let name = Option.value fix ~default:name in
           { kind = kind_of name; name; problem = Some problem; fix })

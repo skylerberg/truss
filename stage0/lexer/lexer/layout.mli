@@ -50,5 +50,6 @@ val interpolation :
 
 val starts_definition : Source.t -> int -> bool
 (** Whether a definition starts at this offset: a definition keyword in column 0, where `truss fmt`
-    puts the start of every definition. Bracket recovery and the note on an unterminated raw string
-    use this one rule. *)
+    puts the start of every definition. The note on an unterminated raw string uses it on the lines
+    after the string, which are not tokens; bracket recovery uses the same rule on tokens, where
+    trivia before the keyword is not indentation. *)

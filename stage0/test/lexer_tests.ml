@@ -53,19 +53,14 @@ let shown tokens =
 
 let tokens_of text = shown (fst (lex text))
 
-(* The tokens of [text] as recovery must match a fix's: a string by its tag
-   and form alone, since the fix of a format string of another language,
-   such as `f"{name}"`, rewrites its text into interpolations, and recovery
-   keeps the text as written. *)
+(* The tokens of [text] without the marks of zero-width closers, which a
+   fixed text writes as closers of its own. *)
 let recovered_tokens text =
-  Array.to_list (fst (lex text))
-  |> List.map (fun (token : Token.t) ->
-      match token.kind with
-      | String { tag; form; _ } ->
-          let tag = match tag with Some (tag, _) -> tag | None -> "" in
-          let form = match form with Ordinary -> "string" | Raw _ -> "raw string" in
-          tag ^ form
-      | _ -> show token)
+  List.map
+    (fun shown ->
+      if String.length shown > 1 && shown.[0] = '+' then String.sub shown 1 (String.length shown - 1)
+      else shown)
+    (tokens_of text)
 
 (* Asserts that [text] lexes with no diagnostics into [expected]. *)
 let tokens text expected =
@@ -109,12 +104,11 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
           List.iter
             (fun result -> List.iter (fail "the fixed text %S has %s" result) (codes result))
             results;
-          (* The lexer recovers as one of its fixes writes, so the parser
-             reads the tokens of a fixed program. An unclosed bracket's fix
-             closes it where the indentation says, which layout cannot see. *)
+          (* The lexer recovers as its only fix writes, so the parser reads
+             the tokens of the fixed program. *)
           let recovered = recovered_tokens text in
           if
-            code <> Unclosed_bracket
+            List.length results = 1
             && not (List.exists (fun result -> recovered_tokens result = recovered) results)
           then fail "%S recovers as [%s], which no fix writes" text (String.concat "; " recovered))
   | diagnostics ->
@@ -131,6 +125,15 @@ let fixed_texts text ~code =
       if diagnostic.code = Lexer code then List.map (Diagnostic.apply_fix text) diagnostic.fixes
       else [])
     (snd (lex text))
+
+(* [text] with its machine-applicable fixes applied, as `truss check --fix`
+   applies them in one round. *)
+let machine_fixed text =
+  Diagnostic.apply_edits text
+    (List.concat_map
+       (fun (diagnostic : Diagnostic.t) ->
+         match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+       (Diagnostic.machine_applicable (snd (lex text))))
 
 (* Source text *)
 
@@ -206,6 +209,17 @@ let () =
       error "user__name" ~code:Name_case ~at:"user" ~fixed:"user_name";
       error "_unused" ~code:Name_case ~at:"_" ~fixed:"unused");
   test "no fix that would make a keyword" (fun () -> error "_type" ~code:Name_case ~at:"_");
+  (* `f` before a quote is a format string's prefix, and `_f` is not. *)
+  test "no fix that would make a name a string's prefix or tag" (fun () ->
+      equal_lists Fun.id "fixed" [] (fixed_texts "_f\"a\"" ~code:Name_case);
+      equal_lists Fun.id "fixed" [] (fixed_texts "HTTP_OK\"a\"" ~code:Name_case);
+      equal_lists Fun.id "fixed" [ "HttpClient\"a\"" ]
+        (fixed_texts "Http_Client\"a\"" ~code:Name_case));
+  (* Renaming would make two names one, and change what a use refers to. *)
+  test "no fix that would rename to a name the file already has" (fun () ->
+      error "my_var + myVar" ~code:Name_case ~at:"myVar";
+      equal_lists Fun.id "tokens" [ "my_var"; "+"; "myVar"; "NL" ] (tokens_of "my_var + myVar");
+      equal_lists Fun.id "fixed" [] (fixed_texts "myVar + my_Var" ~code:Name_case));
   test "a name with a letter outside ASCII is one name with one error" (fun () ->
       error "let caf\xC3\xA9 = 1" ~code:Name_not_ascii ~at:"caf";
       equal_lists Fun.id "tokens"
@@ -236,11 +250,14 @@ let () =
       tokens "1..2" [ "1"; ".."; "2"; "NL" ];
       tokens "1.max" [ "1"; "."; "max"; "NL" ];
       tokens "1.0.max" [ "1e0"; "."; "max"; "NL" ]);
-  test "type suffixes" (fun () ->
-      error "3u8" ~code:Number_suffix ~at:"u8" ~fixed:"3";
-      error "1.5f" ~code:Number_suffix ~at:"f" ~fixed:"1.5";
-      error "3f" ~code:Number_suffix ~at:"f" ~fixed:"3.0");
-  test "an integer with a float suffix is the float its fix writes" (fun () ->
+  (* Removing a suffix would leave the literal the type of its context, not
+     the type the suffix asked for. *)
+  test "a type suffix has no fix" (fun () ->
+      error "3u8" ~code:Number_suffix ~at:"u8";
+      error "1.5f" ~code:Number_suffix ~at:"f";
+      error "3f" ~code:Number_suffix ~at:"f";
+      error "1_u8" ~code:Number_suffix ~at:"u8");
+  test "an integer with a float suffix is a float" (fun () ->
       equal_lists Fun.id "tokens" [ "3e0"; "NL" ] (tokens_of "3f");
       equal_lists Fun.id "tokens" [ "5e0"; "NL" ] (tokens_of "5d"));
   test "prefixes and exponents are lowercase" (fun () ->
@@ -250,7 +267,7 @@ let () =
       error "1__000" ~code:Number_underscore ~at:"_" ~fixed:"1_000";
       error "0x_FF" ~code:Number_underscore ~at:"_" ~fixed:"0xFF");
   test "one fix corrects every problem in a literal" (fun () ->
-      error "1_u8" ~code:Number_underscore ~at:"_" ~fixed:"1");
+      error "0X_FF" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0xFF");
   test "a leading zero" (fun () ->
       error "0755" ~code:Number_leading_zero ~at:"0755" ~fixed:"0o755" ~alternatives:[ "755" ];
       error "09" ~code:Number_leading_zero ~at:"09" ~fixed:"9";
@@ -319,8 +336,8 @@ let () =
   test "an f-string with a format specification has no fix" (fun () ->
       error {|f"{value:.2f}"|} ~code:String_prefix ~at:"f";
       error {|f"{}"|} ~code:String_prefix ~at:"f");
-  test "an f-string is lexed as one string" (fun () ->
-      equal_lists Fun.id "tokens" [ "x"; "="; {|"a {b}"|}; "NL" ] (tokens_of {|x = f"a {b}"|}));
+  test "an f-string recovers as the string its fix writes" (fun () ->
+      equal_lists Fun.id "tokens" [ "x"; "="; {|"a ${}"|}; "NL" ] (tokens_of {|x = f"a {b}"|}));
   test "an r-string becomes a raw string" (fun () ->
       error {|r"\d+"|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|};
       equal_lists Fun.id "tokens" [ {|"\\d+"|}; "NL" ] (tokens_of {|r"\d+"|}));
@@ -345,8 +362,8 @@ let () =
   test "a C# string becomes a Truss string" (fun () ->
       error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
       error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|};
-      (* Without the space, `Path` would become the string's tag. *)
-      error {|Path$"{name}"|} ~code:String_prefix ~at:"$" ~fixed:{|Path "${name}"|});
+      (* Removing the `$` would make `Path` the string's tag. *)
+      error {|Path$"{name}"|} ~code:String_prefix ~at:"$");
   test "a template literal becomes an ordinary string" (fun () ->
       error "`Hello ${name}`" ~code:String_delimiter ~at:"`" ~fixed:{|"Hello ${name}"|};
       error "`say \"hi\"`" ~code:String_delimiter ~at:"`" ~fixed:{|"say \"hi\""|};
@@ -418,14 +435,16 @@ let () =
 (* Rejected sequences *)
 
 let () =
-  test "a comment at the end of a line" (fun () ->
-      error "let a = 1 // one" ~code:Comment ~at:"//" ~fixed:"let a = 1");
-  test "a comment on its own line" (fun () ->
-      error "a\n// note\nb" ~code:Comment ~at:"//" ~fixed:"a\nb";
-      error "a\n# note\nb" ~code:Comment ~at:"#" ~fixed:"a\nb");
-  test "a block comment between tokens" (fun () ->
-      error "a /* x */ + b" ~code:Comment ~at:"/*" ~fixed:"a + b";
-      error "a /* x /* y */ */ b" ~code:Comment ~at:"/*" ~fixed:"a b");
+  (* A comment says what its author meant, so removing it is not a fix:
+     `truss check --fix` must not delete it. *)
+  test "a comment at the end of a line has no fix" (fun () ->
+      error "let a = 1 // one" ~code:Comment ~at:"//");
+  test "a comment on its own line has no fix" (fun () ->
+      error "a\n// note\nb" ~code:Comment ~at:"//";
+      error "a\n# note\nb" ~code:Comment ~at:"#");
+  test "a block comment between tokens has no fix" (fun () ->
+      error "a /* x */ + b" ~code:Comment ~at:"/*";
+      error "a /* x /* y */ */ b" ~code:Comment ~at:"/*");
   test "an unterminated block comment has no fix" (fun () ->
       error "a /* never closed\nb" ~code:Comment ~at:"/*");
   test "a block comment across lines separates statements" (fun () ->
@@ -486,16 +505,16 @@ let () =
   test "a method call on a hexadecimal literal is not a hexadecimal float" (fun () ->
       tokens "0xFF.abs()" [ "255"; "."; "abs"; "("; ")"; "NL" ];
       tokens "0x1.bad" [ "1"; "."; "bad"; "NL" ]);
-  test "an attribute is removed" (fun () ->
-      error "#[derive(Debug)]\ntype Point(x: Int64)" ~code:Attribute ~at:"#"
-        ~fixed:"type Point(x: Int64)";
-      error "#![allow(unused)]\nx" ~code:Attribute ~at:"#" ~fixed:"x");
+  test "an attribute has no fix" (fun () ->
+      error "#[derive(Debug)]\ntype Point(x: Int64)" ~code:Attribute ~at:"#";
+      error "#![allow(unused)]\nx" ~code:Attribute ~at:"#");
   test "an operator of another language becomes Truss's" (fun () ->
       error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
       error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
       equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (tokens_of "a <> b"));
-  test "three dots between operands are an inclusive range" (fun () ->
-      error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..=5";
+  (* Ruby's `...` leaves out its end, and Swift's includes it. *)
+  test "three dots between operands are either range" (fun () ->
+      error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..5" ~alternatives:[ "1..=5" ];
       equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (tokens_of "a...b"));
   test "three dots alone are todo" (fun () ->
       error "fn f() { ... }" ~code:Foreign_operator ~at:"..." ~fixed:"fn f() { todo }";
@@ -514,17 +533,24 @@ let () =
       error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
       error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
       equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"));
-  test "a fix does not join the code it writes to a neighbor" (fun () ->
-      error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"p forall x";
-      error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:"a- >b";
+  (* Code a fix would write into a neighbor, joining the two into another
+     token, means the text around the mistake is not code the fix can be
+     sure of. *)
+  test "a fix whose code would join a neighbor is withheld" (fun () ->
+      error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}";
+      error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}";
       error "a\u{2013}b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:"a-b";
-      error "fn.5" ~code:Number_missing_digits ~at:"." ~fixed:"fn 0.5";
-      error "a<>=b" ~code:Foreign_operator ~at:"<>" ~fixed:"a!= =b";
-      error "a..<.b" ~code:Foreign_operator ~at:"..<" ~fixed:"a.. .b";
-      error "Co@\"x\"" ~code:String_prefix ~at:"@" ~fixed:"Co \"\"\"x\"\"\"";
-      error "Co`x`" ~code:String_delimiter ~at:"`" ~fixed:"Co \"x\"");
+      error "fn.5" ~code:Number_missing_digits ~at:".";
+      error "a<>=b" ~code:Foreign_operator ~at:"<>";
+      error "a..<.b" ~code:Foreign_operator ~at:"..<";
+      error "Co@\"x\"" ~code:String_prefix ~at:"@";
+      error "Co`x`" ~code:String_delimiter ~at:"`";
+      error "x = 1u8.4" ~code:Number_suffix ~at:"u8";
+      (* Side by side, `!=` and `=>` would write `!==>`. *)
+      equal_lists Fun.id "fixed" [] (fixed_texts "a \u{2260}\u{21D2} b" ~code:Confusable_character));
   test "a float with no digit before its `.` and a suffix" (fun () ->
-      error "x = .5f" ~code:Number_missing_digits ~at:"." ~fixed:"x = 0.5");
+      error "x = .5f" ~code:Number_missing_digits ~at:".";
+      equal_lists Fun.id "tokens" [ "x"; "="; "5e-1"; "NL" ] (tokens_of "x = .5f"));
   test "a confusable character after `1.` is not a member" (fun () ->
       equal_lists Fun.id "tokens" [ "0e0"; "-"; "1"; "NL" ] (tokens_of "0.\u{2013}1");
       equal_lists Fun.id "tokens" [ "1"; "."; "forall" ] (tokens_of "1.\u{2200}");
@@ -532,7 +558,41 @@ let () =
       equal_lists Fun.id "tokens" (tokens_of "f( .5)") (tokens_of "f(\u{00A0}.5)");
       equal_lists Fun.id "tokens" (tokens_of "f(\u{FF08}.5))") (tokens_of "f((.5))"));
   test "`...` before a float with no digit before its `.` is a range" (fun () ->
-      equal_lists Fun.id "tokens" [ "3"; "..="; "14e-2"; "NL" ] (tokens_of "3....14"))
+      equal_lists Fun.id "tokens" [ "3"; "..="; "14e-2"; "NL" ] (tokens_of "3....14"));
+  (* A `.` that ends a line is not a member access, so inserting a closer
+     after it does not change what `1.` is. *)
+  test "`1.` at the end of a line is a float" (fun () ->
+      error "x = 1.\nmax" ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0\nmax");
+  (* The file is lexed again with these fixes applied, and its tokens are
+     the fixed text's. *)
+  test "a file recovers as its machine-applicable fixes write" (fun () ->
+      List.iter
+        (fun text ->
+          equal_lists Fun.id
+            ("recovered tokens of " ^ String.escaped text)
+            (recovered_tokens (machine_fixed text))
+            (recovered_tokens text))
+        [
+          (* A forbidden character before a definition is not indentation. *)
+          "f(a\n\u{202E}let x = 1\n";
+          (* A `;` before a definition is a line break. *)
+          "let middle = items[;let total = 1\n";
+          (* A line holding only a confusable space is blank. *)
+          "a = 1\n\u{2003}\nlet b = 2\n";
+          (* An f-string's fields are interpolations. *)
+          "x = f\"a {b} c\"\n";
+          (* Several mistakes on one line. *)
+          "if a === b \u{2264} c { f(x\u{FF09} }\n";
+          (* A quote after a confusable arrow does not touch a name, as it
+             does not after the `->` the arrow's fix writes. *)
+          "push(item: name\u{2192}'e)\n";
+        ]);
+  test "an interpolation that holds a rejected character has no fix" (fun () ->
+      equal_lists Fun.id "fixed" [] (fixed_texts "\"a ${\\} b\"" ~code:Empty_interpolation));
+  test "the indentation fix keeps a forbidden character whole" (fun () ->
+      equal_lists Fun.id "fixed"
+        [ "x = \"\"\"\n  \u{0085} a\n  \"\"\"\n" ]
+        (fixed_texts "x = \"\"\"\n\u{0085} a\n  \"\"\"\n" ~code:Raw_string_indentation))
 
 (* Layout *)
 
@@ -581,10 +641,13 @@ let () =
   test "a closer goes after a nested group, not inside it" (fun () ->
       equal_lists Fun.id "fixed" [ "x = m(a {\n  b\n})\n" ]
         (fixed_texts "x = m(a {\n  b\n}\n" ~code:Unclosed_bracket));
+  (* The string more likely ends before the `)` than at the end of the line,
+     so neither closing the string there nor closing the bracket is a fix. *)
   test "a bracket whose closer a cut-off string swallowed has no fix" (fun () ->
       equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unclosed_bracket);
-      equal_lists Fun.id "fixed" [ "f(a, \"b)\"\n" ]
-        (fixed_texts "f(a, \"b)\n" ~code:Unterminated_string));
+      equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unterminated_string);
+      equal_lists Fun.id "fixed" [ "f(a, \"b\"\n" ]
+        (fixed_texts "f(a, \"b\n" ~code:Unterminated_string));
   test "a missing } goes on a line of its own" (fun () ->
       error "fn f() {\n  body\n" ~code:Unclosed_bracket ~at:"{" ~fixed:"fn f() {\n  body\n}\n");
   test "a closer that matches nothing is dropped" (fun () ->

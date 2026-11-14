@@ -1,6 +1,9 @@
 (* The sequences from other languages that lex as whitespace: comments, `;`,
-   and characters Truss does not use. Each is reported, and its fix removes
-   it with [Source_text.remove_trivia]. *)
+   and characters Truss does not use. Each is reported. A `;` and a
+   character Truss does not use have a fix that removes them with
+   [Source_text.remove_trivia]. A comment and an attribute have none: their
+   text says what its author meant, and removing it is not what they meant,
+   so that `truss check --fix` must not do it. *)
 
 open Cursor
 
@@ -11,13 +14,7 @@ let line_comment cursor =
   let stop = end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  report cursor ~code:Comment
-    ~fixes:
-      [
-        Diagnostic.fix "Remove the comment"
-          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:false ];
-      ]
-    (span start stop) comment_message
+  report cursor ~code:Comment (span start stop) comment_message
 
 let block_comment cursor =
   let start = cursor.position in
@@ -45,18 +42,7 @@ let block_comment cursor =
   | Some line_break when cursor.first_line_break = None ->
       cursor.first_line_break <- Some line_break
   | _ -> ());
-  (* An unterminated comment runs to the end of the file. Removing it would
-     remove the rest of the file, and where its `*/` was meant to go cannot
-     be known, so it has no fix. *)
-  let fixes =
-    if closed then
-      [
-        Diagnostic.fix "Remove the comment"
-          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:(!first_line_break <> None) ];
-      ]
-    else []
-  in
-  report cursor ~code:Comment ~fixes (span start stop)
+  report cursor ~code:Comment (span start stop)
     (if closed then comment_message
      else comment_message ^ " This comment is never closed, so it runs to the end of the file.")
 
@@ -127,13 +113,7 @@ let attribute cursor =
   let stop = end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  report cursor ~code:Attribute
-    ~fixes:
-      [
-        Diagnostic.fix "Remove the attribute"
-          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:false ];
-      ]
-    (span start stop)
+  report cursor ~code:Attribute (span start stop)
     "Truss has no attributes. A type lists the traits it derives in a `derives` clause, and a test \
      is a `test` definition."
 

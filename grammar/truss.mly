@@ -625,6 +625,7 @@ pattern:
 
 pattern_primary:
   | UNDERSCORE { () }
+  | LOWER { () }
   | range_end { () }
   | range_end DOTDOT range_end { () }
   | range_end DOTDOTEQ range_end { () }
@@ -636,10 +637,10 @@ range_end:
   | literal_pattern { () }
   | constant_reference { () }
 
-/* A bare LOWER is a constant if one is in scope and otherwise a binding;
-   name resolution decides, so the parser builds the same node for both. */
+/* A bare LOWER binds, in every pattern. A constant is written with its
+   module or its type, so adding a constant never changes what a pattern
+   means. */
 constant_reference:
-  | LOWER { () }
   | module_path COLONCOLON LOWER { () }
   | qualified_upper DOT LOWER { () }
 

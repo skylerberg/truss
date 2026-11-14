@@ -789,7 +789,21 @@ and postfix cursor : expression =
           cursor.index <- cursor.index - 1;
           Cursor.fail cursor "an index or type arguments"
         end;
-        (* A range that leaves out an end must be alone in its brackets. *)
+        let is_open_range = function
+          | Item { kind = Range { start = None; _ } | Range { stop = None; _ }; _ } -> true
+          | _ -> false
+        in
+        (* A range that leaves out an end must be alone in its brackets, with
+           no comma after it: only a list of type arguments ends in one. *)
+        (match items with
+        | [ item ] when is_open_range item -> (
+            match Cursor.token_at cursor (cursor.index - 2) with
+            | { kind = Punctuation Comma; span; _ } ->
+                Cursor.report cursor Open_range span
+                  "A range without a start or an end has no comma after it, as in `items[2..]`."
+                  ~fixes:[ Diagnostic.fix "Remove the comma" [ Diagnostic.delete span ] ]
+            | _ -> ())
+        | _ -> ());
         if List.compare_length_with items 1 > 0 then
           List.iter
             (function

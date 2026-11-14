@@ -183,7 +183,7 @@ let applied session packages plan =
     (fun file ->
       let text =
         match List.assoc_opt file plan.edits with
-        | Some edits -> Check_command.apply (text_of session file) edits
+        | Some edits -> Diagnostic.apply_edits (text_of session file) edits
         | None -> text_of session file
       in
       (file, moved_file plan file, text))

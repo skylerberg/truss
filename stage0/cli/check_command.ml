@@ -1,43 +1,9 @@
 (* [truss check]: every diagnostic of the packages, and with [--fix], each
    diagnostic's only fix applied. *)
 
-(* The diagnostics to fix in one round in one file: each diagnostic with
-   exactly one fix, except a fix whose edits overlap an earlier fix's, since
-   applying both could produce neither intended result. A skipped fix is
-   reconsidered in the next round, after the file is checked again. *)
-let chosen (diagnostics : Diagnostic.t list) =
-  let overlaps (left : Diagnostic.span Diagnostic.edit) (right : Diagnostic.span Diagnostic.edit) =
-    (left.span.start < right.span.stop && right.span.start < left.span.stop)
-    || left.span.start = right.span.start
-       && (left.span.start = left.span.stop || right.span.start = right.span.stop)
-  in
-  let accepted_edits = ref [] in
-  List.filter
-    (fun (diagnostic : Diagnostic.t) ->
-      match diagnostic.fixes with
-      | [ fix ] ->
-          let clear =
-            List.for_all
-              (fun (edit : Diagnostic.span Diagnostic.edit) ->
-                not (List.exists (overlaps edit) !accepted_edits))
-              fix.edits
-          in
-          if clear then accepted_edits := fix.edits @ !accepted_edits;
-          clear
-      | _ -> false)
-    diagnostics
-
-(* Applies non-overlapping edits to a text from last to first, so each
-   edit's offsets stay valid. *)
-let apply text (edits : Diagnostic.span Diagnostic.edit list) =
-  List.sort
-    (fun (left : Diagnostic.span Diagnostic.edit) right -> compare right.span.start left.span.start)
-    edits
-  |> List.fold_left
-       (fun text (edit : Diagnostic.span Diagnostic.edit) ->
-         String.sub text 0 edit.span.start ^ edit.replacement
-         ^ String.sub text edit.span.stop (String.length text - edit.span.stop))
-       text
+(* Each round applies the machine-applicable fixes of each file. A fix
+   skipped because it overlaps another is reconsidered in the next round,
+   after the file is checked again. *)
 
 (* Bounds the rounds, so two fixes that undo each other cannot loop
    forever. *)
@@ -92,7 +58,7 @@ let fix session packages =
       List.concat_map
         (fun file ->
           let diagnostics = Database.diagnostics session file in
-          match chosen diagnostics with
+          match Diagnostic.machine_applicable diagnostics with
           | [] -> []
           | chosen ->
               let source = Command_packages.source session packages file in
@@ -104,7 +70,7 @@ let fix session packages =
               in
               Command_packages.write_file
                 (Command_packages.path session file)
-                (apply (Source.text source) edits);
+                (Diagnostic.apply_edits (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
         (Command_packages.files session packages)
       @ unused_dependencies session packages
@@ -144,7 +110,3 @@ let run ~fix:fixing ~proofs =
     end
   end;
   if Report.clean report then 0 else 1
-
-module For_testing = struct
-  let chosen = chosen
-end

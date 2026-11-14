@@ -54,7 +54,14 @@ val only_spaces_before : t -> int -> bool
 val describe_code_point : int -> string
 val show_character : t -> int -> string
 
-val replace_code : t -> Source.span -> string -> Diagnostic.span Diagnostic.edit
-(** [replace_code cursor span code] replaces [span] with the tokens [code], separated by a space
-    from a neighbor that would otherwise join one of them into another token. With [code] empty, it
-    deletes [span], and leaves a space if the two neighbors would join. *)
+val code_edit : t -> Source.span -> string -> Diagnostic.span Diagnostic.edit option
+(** [code_edit cursor span code] replaces [span] with the tokens [code], or is [None] when [code]
+    would join a neighbor into another token. With [code] empty, it deletes [span], or is [None]
+    when the two neighbors would join. *)
+
+val optional_fix :
+  string -> Diagnostic.span Diagnostic.edit option list -> Diagnostic.span Diagnostic.fix list
+(** [optional_fix title edits] is the fix with [edits], or no fix when one of them is [None]. *)
+
+val code_fix : t -> string -> Source.span -> string -> Diagnostic.span Diagnostic.fix list
+(** [code_fix cursor title span code] is the fix with the one edit {!code_edit} gives, or no fix. *)

@@ -14,12 +14,17 @@ type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnost
 let diagnostics_in_file parsed =
   List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base:parsed.value.base)) parsed.diagnostics
 
+(* A piece's text, from its first token to its last. *)
+let piece_text source (tokens : Token.t array) piece =
+  let base = tokens.(piece.first).span.start in
+  String.sub (Source.text source) base (tokens.(piece.stop - 1).span.stop - base)
+
 (* Parses a piece with a cursor of its own, whose collector holds only the
    piece's diagnostics. *)
 let with_cursor source (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
   let base = tokens.(piece.first).span.start in
-  let text = String.sub (Source.text source) base (tokens.(piece.stop - 1).span.stop - base) in
+  let text = piece_text source tokens piece in
   let cursor = Cursor.create ~text ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop in
   let value = parse cursor in
   (value, cursor, Diagnostic.Collector.to_list diagnostics)
@@ -40,14 +45,79 @@ let parsed cursor value diagnostics =
       List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:cursor.base)) diagnostics;
   }
 
+(* [diagnostics], the diagnostics of [piece], with each parser fix that does
+   not work removed. A fix works when the piece's text with the fix applied,
+   lexed and parsed again by [unchecked], has none of the diagnostics the
+   piece does not have, besides the one it fixes: it may remove others, but
+   adds no error. A fix that would add one is not code the parser can be
+   sure of, as when it would join a neighbor into another token, copy text
+   whose brackets the lexer recovered, or leave the mistake half fixed, so
+   the diagnostic is reported without it. [unchecked] parses a piece of a
+   text on its own, without checking its fixes, so that checking a fix does
+   not check the fixes of the text it writes. *)
+let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics : Diagnostic.t list)
+    =
+  let has_parser_fix (diagnostic : Diagnostic.t) =
+    match diagnostic.code with Parser _ -> diagnostic.fixes <> [] | _ -> false
+  in
+  if not (List.exists has_parser_fix diagnostics) then diagnostics
+  else
+    let base = tokens.(piece.first).span.start and text = piece_text source tokens piece in
+    (* The diagnostics of [text], lexed and split again, when it is one
+       piece. *)
+    let diagnostics_of text =
+      let source = Source.create ~path:(Source.path source) text in
+      let tokens, lexer_diagnostics = Lexer.lex source in
+      match Split.pieces tokens with
+      | [ piece ] -> Some (lexer_diagnostics @ unchecked source tokens piece)
+      | _ -> None
+    in
+    match diagnostics_of text with
+    | None -> diagnostics
+    | Some before ->
+        let works (diagnostic : Diagnostic.t) (fix : Diagnostic.span Diagnostic.fix) =
+          let in_piece (edit : Diagnostic.span Diagnostic.edit) =
+            base <= edit.span.start && edit.span.stop <= base + String.length text
+          in
+          if not (List.for_all in_piece fix.edits) then true
+          else
+            let edits =
+              List.map
+                (fun (edit : Diagnostic.span Diagnostic.edit) ->
+                  Diagnostic.replace
+                    (Source.span (edit.span.start - base) (edit.span.stop - base))
+                    edit.replacement)
+                fix.edits
+            in
+            match Diagnostic.apply_edits text edits with
+            | exception Invalid_argument _ -> false
+            | fixed -> (
+                match diagnostics_of fixed with
+                | None -> false
+                | Some after ->
+                    let rec remove_one = function
+                      | [] -> []
+                      | (first : Diagnostic.t) :: rest ->
+                          if first.code = diagnostic.code then rest else first :: remove_one rest
+                    in
+                    Diagnostic.adds_none ~before:(remove_one before) ~after)
+        in
+        List.map
+          (fun (diagnostic : Diagnostic.t) ->
+            if has_parser_fix diagnostic then
+              { diagnostic with fixes = List.filter (works diagnostic) diagnostic.fixes }
+            else diagnostic)
+          diagnostics
+
 (* Runs the checks that need a definition's whole tree. *)
 let check cursor definition =
   Operators.definition cursor definition;
   Check.definition cursor definition
 
 (* The definition that [parse] builds from a piece, or a
-   [Definition_error] when its header does not parse. *)
-let one_definition source tokens piece parse =
+   [Definition_error] when its header does not parse. With [checks_fixes],
+   its diagnostics keep only fixes that work. *)
+let rec one_definition ?(checks_fixes = true) source tokens piece parse =
   let value, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         let definition : Syntax.definition =
@@ -69,6 +139,12 @@ let one_definition source tokens piece parse =
           List.sort_uniq compare (List.map (Cursor.span cursor) !(cursor.recoveries))
         in
         { definition with recovered })
+  in
+  let diagnostics =
+    if checks_fixes then
+      checked_fixes source tokens piece diagnostics ~unchecked:(fun source tokens piece ->
+          diagnostics_in_file (fst (one_definition ~checks_fixes:false source tokens piece parse)))
+    else diagnostics
   in
   (parsed cursor value diagnostics, List.rev !(cursor.methods))
 
@@ -194,7 +270,7 @@ let parse source tokens =
 
 type example = Example_definition | Example_signature
 
-let example_definition source tokens piece =
+let rec parse_example_definition ~checks_fixes source tokens piece =
   let (example, container), cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match Parse_definition.example cursor with
@@ -216,9 +292,15 @@ let example_definition source tokens piece =
           (methods source tokens container (List.rev !(cursor.methods)))
     | None -> []
   in
+  let diagnostics =
+    if checks_fixes then
+      checked_fixes source tokens piece diagnostics ~unchecked:(fun source tokens piece ->
+          snd (parse_example_definition ~checks_fixes:false source tokens piece))
+    else diagnostics
+  in
   (example, diagnostics @ method_diagnostics)
 
-let example_statement source tokens piece =
+let rec parse_example_statement ~checks_fixes source tokens piece =
   let (), _, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match
@@ -230,7 +312,16 @@ let example_statement source tokens piece =
             Syntax_walk.statement (fun value -> Operators.expression cursor value) statement
         | exception Cursor.Failed -> ())
   in
-  diagnostics
+  if checks_fixes then
+    checked_fixes source tokens piece diagnostics ~unchecked:(fun source tokens piece ->
+        parse_example_statement ~checks_fixes:false source tokens piece)
+  else diagnostics
+
+let example_definition source tokens piece =
+  parse_example_definition ~checks_fixes:true source tokens piece
+
+let example_statement source tokens piece =
+  parse_example_statement ~checks_fixes:true source tokens piece
 
 module For_testing = struct
   let definition = definition
