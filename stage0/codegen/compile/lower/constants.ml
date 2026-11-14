@@ -294,7 +294,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
           | _ -> None)
       | Return (Some value) -> operand value
       | Return None
-      | For _ | Fork _ | Join _ | Iteration_end | Yield _ | Exit_tasks _ | Unreachable
+      | For _ | Fork _ | Join _ | Iteration_end _ | Yield _ | Exit_tasks _ | Unreachable
       | Written_unreachable | Todo ->
           None
     end

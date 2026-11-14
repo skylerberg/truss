@@ -176,7 +176,8 @@ type iteration =
 type task_exit =
   | Exit_return of operand option
   | Exit_to of block
-  | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
+  | Exit_iteration of { loop : block }
+      (** The end of the iteration of the enclosing {!For}, the terminator of [loop]. *)
 
 type left_task = { task : Core.task; ends : statement list; task_end : block option }
 (** A task an early exit leaves. *)
@@ -205,7 +206,8 @@ type terminator =
   | Join of { fork : Core.origin; next : block }
       (** The end of a branch of the {!Fork} [fork]. Read in order, [next] runs after it: the next
           branch's entry, or the block's end after the last branch. *)
-  | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
+  | Iteration_end of { loop : block }
+      (** The end of an iteration of the enclosing {!For}, the terminator of [loop]. *)
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
@@ -275,13 +277,13 @@ val conditional_lends : body -> local list
     {!Lend}, as a lend in one arm of a [match] does. A consumer runs the lend's end only where the
     lend ran. *)
 
-val iteration_loops : body -> (block, block) Hashtbl.t
-(** For each block whose terminator ends an iteration, an {!Iteration_end} or an {!Exit_tasks} to
-    {!Exit_iteration}, the block of the innermost {!For} whose body it ends. *)
+val iteration_loop : terminator -> block option
+(** The block of the {!For} whose iteration a terminator ends: an {!Iteration_end}'s, or an
+    {!Exit_tasks}' to {!Exit_iteration}. *)
 
-val block_successors : body -> (block, block) Hashtbl.t -> block -> block list
-(** The blocks control goes to from the end of a block. The end of an iteration goes to the loop's
-    next iteration and to the block after the loop. [loops] is {!iteration_loops} of the body. *)
+val block_successors : body -> block -> block list
+(** The blocks control goes to from the end of a block: its terminator's {!successors}, and, for the
+    end of an iteration, the loop's next iteration and the block after the loop. *)
 
 val of_definition : Core.definition -> t option
 (** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. *)

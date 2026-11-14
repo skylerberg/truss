@@ -970,7 +970,7 @@ let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit
           | _ -> ());
           return_from_frame st
       | Exit_to target -> goto st region target
-      | Exit_iteration -> continue_loop st)
+      | Exit_iteration _ -> continue_loop st)
   | (id, ends) :: remaining, task :: _ when id = task.id ->
       let exits = task.early_exits in
       exits.exits <- { ends; remaining; exit; state = Moves.copy (mir st).state } :: exits.exits;
@@ -1920,7 +1920,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
       | Some slot, Some returned -> in_statement st (fun () -> write_operand st returned slot)
       | _ -> ());
       return_from_frame st
-  | Iteration_end -> continue_loop st
+  | Iteration_end _ -> continue_loop st
   | Exit_tasks { tasks = left; exit } ->
       let tasks = List.map (fun (left : Mir.left_task) -> (left.task, left.ends)) left in
       let task_end = match left with innermost :: _ -> innermost.task_end | [] -> None in

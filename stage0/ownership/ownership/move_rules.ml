@@ -73,7 +73,6 @@ let check_body context (body : Mir.body) moves ~returns =
           }
     | Source { name = None; _ } | Temporary | Lent _ -> None
   in
-  let loops = Mir.iteration_loops body in
   (* The first move that may have left a path that holds nothing empty, or
      [None] where none did: the path was not yet given a value. *)
   let moved_at state (path : Moves.path) =
@@ -194,13 +193,10 @@ let check_body context (body : Mir.body) moves ~returns =
                 "`%s` is moved out and not reinitialized before this `yield`. The caller's loop \
                  may `break` here, and then the method never resumes."
                 moved)
-      | Iteration_end -> (
-          match Hashtbl.find_opt loops block with
-          | Some loop -> (
-              match body.blocks.(loop).terminator with
-              | For { part; _ } -> check_given state ~locals:[ part ] ~at:None scope_end
-              | _ -> ())
-          | None -> ())
+      | Iteration_end { loop } -> (
+          match body.blocks.(loop).terminator with
+          | For { part; _ } -> check_given state ~locals:[ part ] ~at:None scope_end
+          | _ -> ())
       | Join _ ->
           List.iter
             (fun (blocks, entry) ->

@@ -18,7 +18,6 @@ let add left right = match (left, right) with Zero, other | other, Zero -> other
    task, so an early exit from tasks takes its counts to where it goes. *)
 let yield_counts (body : Mir.body) : count list =
   let reaching = Array.make (Array.length body.blocks) [] in
-  let iteration_loops = Mir.iteration_loops body in
   let returned = ref [] and pending = Queue.create () in
   let flow block counts =
     let merged = List.sort_uniq compare (reaching.(block) @ counts) in
@@ -35,8 +34,7 @@ let yield_counts (body : Mir.body) : count list =
     | Yield { resume; _ } -> flow resume (List.map (add One) counts)
     | Return _ | Exit_tasks { exit = Exit_return _; _ } -> returned := counts @ !returned
     | Exit_tasks { exit = Exit_to target; _ } -> flow target counts
-    | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
-        Option.iter (fun loop -> flow loop counts) (Hashtbl.find_opt iteration_loops block)
+    | Iteration_end { loop } | Exit_tasks { exit = Exit_iteration { loop }; _ } -> flow loop counts
     | ( Goto _ | Branch _ | Switch_variant _ | For _ | Fork _ | Join _ | Todo | Unreachable
       | Written_unreachable ) as terminator ->
         List.iter (fun target -> flow target counts) (Mir.successors terminator)

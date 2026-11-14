@@ -252,9 +252,10 @@ let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
             (match exit with
             | Exit_return value -> Exit_return (Option.map operand value)
             | Exit_to target -> Exit_to (block target)
-            | Exit_iteration -> Exit_iteration);
+            | Exit_iteration { loop } -> Exit_iteration { loop = block loop });
         }
-  | (Iteration_end | Unreachable | Written_unreachable | Todo) as terminator -> terminator
+  | Iteration_end { loop } -> Iteration_end { loop = block loop }
+  | (Unreachable | Written_unreachable | Todo) as terminator -> terminator
 
 let change_block change (basic : Mir.basic_block) : Mir.basic_block =
   {
@@ -558,8 +559,9 @@ let rec yielded_into building ~part ~(mode : Types.mode) ~origin (yielded : Mir.
       statements @ [ assign (Construct { variant; fields }) ]
 
 (* The blocks of a loop's body that end its own iterations, not those of a
-   loop nested in it. *)
-let own_iteration_ends building (blocks : Mir.block list) =
+   loop nested in it: with [exits], the early exits to its next iteration
+   too. *)
+let own_iteration_ends ?(exits = false) building (blocks : Mir.block list) =
   let nested =
     List.concat_map
       (fun block ->
@@ -571,7 +573,11 @@ let own_iteration_ends building (blocks : Mir.block list) =
   List.filter
     (fun block ->
       (not (List.mem block nested))
-      && match (block_at building block).terminator with Iteration_end -> true | _ -> false)
+      &&
+      match (block_at building block).terminator with
+      | Iteration_end _ -> true
+      | Exit_tasks { exit = Exit_iteration _; _ } -> exits
+      | _ -> false)
     blocks
 
 (* The tasks that run in [blocks]: each iteration of a loop there and each
@@ -618,7 +624,7 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
         set_block building block
           (match basic.terminator with
           | Return _ -> { basic with statements = basic.statements @ [ dead ] }
-          | Exit_tasks { exit = Exit_iteration; _ } -> basic
+          | Exit_tasks { exit = Exit_iteration _; _ } -> basic
           | Exit_tasks { exit = Exit_to target; _ } when stays target -> basic
           | Exit_tasks { tasks; exit } -> (
               match
@@ -669,7 +675,7 @@ let copy_loop_body building ~(blocks : Mir.block list) ~entry ~resume ~ending ~o
       let basic = change_block change (block_at building block) in
       set_block building (Hashtbl.find numbering block)
         (match basic.terminator with
-        | Iteration_end when List.mem block ends -> { basic with terminator = Goto resume }
+        | Iteration_end _ when List.mem block ends -> { basic with terminator = Goto resume }
         | _ -> basic))
     blocks;
   let stays block = block = resume || List.mem block copies in
@@ -1140,19 +1146,16 @@ let ends_only_in_statements building part =
       | _ -> true)
     building.blocks
 
-let end_loop_parts building (body : Mir.body) =
-  let iteration_loops = Mir.iteration_loops (snapshot building body) in
+let end_loop_parts building =
   for block = 0 to Dynarray.length building.blocks - 1 do
     match block_at building block with
     | { terminator = For { iteration = Pull _; part; blocks; loop; _ }; inlined = []; _ } ->
         let dead : Mir.statement = { kind = Dead [ part ]; origin = loop.origin } in
-        Hashtbl.iter
-          (fun ending owner ->
-            if owner = block then begin
-              let basic = block_at building ending in
-              set_block building ending { basic with statements = basic.statements @ [ dead ] }
-            end)
-          iteration_loops;
+        List.iter
+          (fun ending ->
+            let basic = block_at building ending in
+            set_block building ending { basic with statements = basic.statements @ [ dead ] })
+          (own_iteration_ends ~exits:true building blocks);
         end_on_exits building ~blocks
           ~stays:(fun inner -> List.mem inner blocks)
           ~locals:[ part ] ~iteration:None ~origin:loop.origin
@@ -1225,7 +1228,7 @@ and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
             examine_from start)
     | _ -> ()
   done;
-  end_loop_parts building body;
+  end_loop_parts building;
   {
     body with
     locals = Dynarray.to_array building.locals;

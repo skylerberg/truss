@@ -117,7 +117,7 @@ let terminator_uses ~moving (basic : Mir.basic_block) =
   | Yield { part; _ } -> yielded_uses ~moving part
   | Return (Some operand) | Exit_tasks { exit = Exit_return (Some operand); _ } ->
       operand_use ~moving ~by_value:true operand
-  | Goto _ | Fork _ | Join _ | Iteration_end
+  | Goto _ | Fork _ | Join _ | Iteration_end _
   | Return None
   | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
       []
@@ -542,7 +542,6 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
   (* The end of an iteration flows to the loop's next iteration and to the
      block after the loop. The loop's operands are evaluated once, before
      its first iteration. *)
-  let loops = Mir.iteration_loops body in
   let reached = Array.make (Array.length body.blocks) false in
   if Array.length body.blocks > 0 then reached.(0) <- true;
   let join into state =
@@ -580,7 +579,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
           List.iter
             (fun successor ->
               let state =
-                match Hashtbl.find_opt loops block with
+                match Mir.iteration_loop basic.terminator with
                 | Some loop -> into analysis state body.blocks.(loop).terminator successor
                 | None -> into analysis state basic.terminator successor
               in
@@ -590,7 +589,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
                 changed := true
               end
               else if join analysis.entries.(successor) state then changed := true)
-            (Mir.block_successors body loops block)
+            (Mir.block_successors body block)
         end)
       body.blocks
   done;
@@ -728,7 +727,6 @@ let live analysis (body : Mir.body) ~drops =
               | Range _ | Yielding _ -> [] )
       | _ -> ())
     body.blocks;
-  let loops = Mir.iteration_loops body in
   let before =
     Array.map
       (fun (basic : Mir.basic_block) ->
@@ -750,7 +748,7 @@ let live analysis (body : Mir.body) ~drops =
           Array.iteri
             (fun local is_live -> if is_live then current.(local) <- true)
             entry.(successor))
-        (Mir.block_successors body loops block);
+        (Mir.block_successors body block);
       positions.(last + 1) <- Array.copy current;
       List.iter
         (fun local -> current.(local) <- true)
