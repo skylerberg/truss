@@ -111,7 +111,6 @@ fn exchange(raw: StringSlice) -> String
 {
   var connection = network::connect("localhost", port: 8080).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
-  let _ = mut connection.shut_down(network::Direction.Sending)
   var reply: List[UInt8] = []
   let _ = mut connection.read_to_end(mut reply)
   String.from_utf8_lossy(reply.slice())

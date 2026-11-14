@@ -275,9 +275,12 @@ public fn RateLimiter.take(self, key: StringSlice) -> Decision
 }
 
 public fn peer_key(request: Request) -> String {
-  match request.peer {
-    Some(peer) => "${peer.address}"
-    None => ""
+  match request.client {
+    Some(client) => "${client}"
+    None => match request.peer {
+      Some(peer) => "${peer.address}"
+      None => ""
+    }
   }
 }
 
