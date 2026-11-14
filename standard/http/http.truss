@@ -1139,6 +1139,52 @@ fn head_bytes(status: UInt16, fields: Slice[hpack::Field], is_end: Bool, version
   head
 }
 
+fn collect_response(outbound: tasks::Channel[flow::Outbound]) -> Response
+  uses Tasks
+{
+  var received = Status.ok
+  var headers = Headers.new()
+  var body: List[UInt8] = []
+  for message in outbound.messages() {
+    match own message {
+      Head(status, fields, ack, ..) => {
+        received = Status(code: status)
+        for field in fields {
+          mut headers.add(field.name.slice(), value: field.value.slice())
+        }
+        let _ = ack.send(true)
+      }
+      Data(bytes, ack, ..) => {
+        mut body.append(own bytes)
+        let _ = ack.send(true)
+      }
+      _ => {}
+    }
+  }
+  Response(status: received, headers: own headers, body: own body)
+}
+
+public fn respond[capability Granted](
+  handler: (fn(own Request, mut Responder) uses Granted),
+  request: own Request,
+) -> Response
+  uses Tasks, Granted
+{
+  let outbound = tasks::Channel[flow::Outbound].new(capacity: 2)
+  let is_head = request.method == Method.Head
+  var response = Response.new()
+  concurrent {
+    {
+      var responder = new_responder(outbound, stream: 0, is_head: is_head)
+      handler(own request, mut responder)
+      let _ = mut responder.finish()
+      outbound.close()
+    }
+    response = collect_response(outbound)
+  }
+  response
+}
+
 fn write_one[Stream: streams::Duplex](
   connection: Stream,
   outbound: tasks::Channel[flow::Outbound],

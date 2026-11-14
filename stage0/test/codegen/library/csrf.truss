@@ -1,0 +1,61 @@
+use standard::http
+use standard::simulation
+
+fn request(method: http::Method, headers: List[http::Header]) -> http::Request {
+  var listed = http::Headers.new()
+  mut listed.set("Host", value: "example.com")
+  for header in headers {
+    mut listed.set(header.name.slice(), value: header.value.slice())
+  }
+  http::Request(method: method.copy(), target: "/transfer", headers: own listed, body: http::Body.from_text("amount=10"))
+}
+
+fn header(name: StringSlice, value: StringSlice) -> http::Header {
+  http::Header(name: name.to_string(), value: value.to_string())
+}
+
+fn status(method: http::Method, headers: List[http::Header], policy: http::CsrfPolicy) -> UInt16
+  uses Tasks
+{
+  let response = http::respond(fn(incoming, responder) {
+    http::csrf(own incoming, mut responder, policy: policy, next: fn(_, inner) {
+      let _ = mut inner.send(http::Response.text("done"))
+    })
+  }, request: request(method, headers: headers))
+  response.status.code
+}
+
+test "respond runs a handler without a socket and gives back its status, headers, and body" {
+  provide simulation::World.new() {
+    let response = http::respond(fn(incoming, responder) {
+      mut responder.set_header("X-Seen", value: incoming.target.slice())
+      let _ = mut responder.start(http::Status.created)
+      let _ = mut responder.write("one ".bytes())
+      let _ = mut responder.write("two".bytes())
+    }, request: http::Request(method: http::Method.Post, target: "/items"))
+    assert response.status == http::Status.created
+    assert response.headers.get("X-Seen") == Some("/items".slice())
+    assert response.text_body() == Ok("one two")
+    let empty = http::respond(fn(_, _) {}, request: http::Request(method: http::Method.Get, target: "/"))
+    assert empty.status == http::Status.ok && empty.body.is_empty()
+  }
+}
+
+test "csrf refuses a cross-site write and allows same-origin, safe, non-browser, and trusted requests" {
+  provide simulation::World.new() {
+    let open = http::CsrfPolicy()
+    let trusting = http::CsrfPolicy(trusted_origins: ["https://admin.example.net"])
+    let post = http::Method.Post
+    assert status(post, headers: [header("Sec-Fetch-Site", value: "cross-site"), header("Origin", value: "https://evil.test")], policy: open) == 403
+    assert status(post, headers: [header("Sec-Fetch-Site", value: "same-site"), header("Origin", value: "https://shop.example.com")], policy: open) == 403
+    assert status(post, headers: [header("Sec-Fetch-Site", value: "same-origin")], policy: open) == 200
+    assert status(post, headers: [header("Sec-Fetch-Site", value: "none")], policy: open) == 200
+    assert status(http::Method.Get, headers: [header("Sec-Fetch-Site", value: "cross-site")], policy: open) == 200
+    assert status(post, headers: [header("Origin", value: "https://example.com")], policy: open) == 200
+    assert status(post, headers: [header("Origin", value: "https://evil.test")], policy: open) == 403
+    assert status(post, headers: [header("Origin", value: "null")], policy: open) == 403
+    assert status(post, headers: [], policy: open) == 200
+    assert status(post, headers: [header("Sec-Fetch-Site", value: "cross-site"), header("Origin", value: "https://admin.example.net")], policy: trusting) == 200
+    assert status(http::Method.Delete, headers: [header("Origin", value: "https://admin.example.net")], policy: trusting) == 200
+  }
+}
