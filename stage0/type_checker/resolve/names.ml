@@ -136,7 +136,7 @@ let packages database (module_ : Path.module_) =
   let dependencies =
     List.map
       (fun (dependency : Manifest.dependency) -> dependency.package)
-      (Query.demand database Workspace.dependencies module_.package)
+      (Query.demand database Packages.dependencies module_.package)
   in
   List.sort_uniq compare (module_.package :: Path.standard_package :: dependencies)
 
@@ -169,10 +169,10 @@ let imports =
         (fun (item : path Syntax.item) ->
           let used = used_module database ~from:file.module_ item.value in
           (last_name used, used))
-        (Query.demand database Workspace.file file).uses)
+        (Query.demand database Parsed.file file).uses)
 
 let module_exists database (module_ : Path.module_) =
-  module_ = Intrinsic.module_ || Query.demand database Workspace.module_exists module_
+  module_ = Intrinsic.module_ || Query.demand database Packages.module_exists module_
 
 let top module_ name : Path.t = Top { module_; name }
 
@@ -237,7 +237,7 @@ let builtin_items () =
 
 let file_entries =
   Query.query ~name:"file_entries" ~phase:Phases.syntax ~show:Path.show_file (fun database file ->
-      plain_items (Query.demand database Workspace.file file).definitions)
+      plain_items (Query.demand database Parsed.file file).definitions)
 
 (* A module's entries, file by file. An edit to a body leaves its file's
    entries as they were, so it reaches no lookup. *)
@@ -247,7 +247,7 @@ let entries =
       else
         List.concat_map
           (Query.demand database file_entries)
-          (Query.demand database Workspace.files module_))
+          (Query.demand database Packages.files module_))
 
 module String_map = Map.Make (String)
 
@@ -362,8 +362,8 @@ let impl_types =
                       (Impl { module_; trait = spell_path_type trait_; for_type = spell_head type_ }
                         : Path.t) )
               | _ -> None)
-            (Query.demand database Workspace.file file).definitions)
-        (Query.demand database Workspace.files module_))
+            (Query.demand database Parsed.file file).definitions)
+        (Query.demand database Packages.files module_))
 
 (* A file's declarations, each with ordinal 0; [declarations] numbers them
    across the module. *)
@@ -398,8 +398,6 @@ let file_declarations =
              let definition = item.value in
              let declare = declare index item in
              match (definition.kind, Option.bind item.container (Hashtbl.find_opt containers)) with
-             (* A method written inside a trait, an [impl], or a capability
-                is that one's. *)
              | (Function { signature; _ } | Method_declaration signature), Some (owner, static) ->
                  declare
                    (Method
@@ -479,7 +477,7 @@ let file_declarations =
                  | Definition_error { name = None; _ }
                  | Definition_error { intended = None; _ } ->
                      None))
-           (Query.demand database Workspace.file file).definitions))
+           (Query.demand database Parsed.file file).definitions))
 
 (* A module's declarations, file by file, each numbered among the earlier
    ones with its path. *)
@@ -495,7 +493,7 @@ let declarations =
               Hashtbl.replace counts declaration.path (ordinal + 1);
               { declaration with ordinal })
             (Query.demand database file_declarations file))
-        (Query.demand database Workspace.files module_))
+        (Query.demand database Packages.files module_))
 
 (* The declarations written in one file, numbered as [declarations]
    numbers them. *)
@@ -522,7 +520,7 @@ let package_declarations =
     (fun database package ->
       List.concat_map
         (fun module_ -> Query.demand database declarations module_)
-        (Query.demand database Workspace.modules package))
+        (Query.demand database Packages.modules package))
 
 (* A package's methods and member constants by owner and name. *)
 let member_index =
@@ -614,7 +612,7 @@ let declaration_index =
 (* A file's definitions, by their index in the file. *)
 let items =
   Query.query ~name:"items" ~phase:Phases.syntax ~show:Path.show_file (fun database file ->
-      Array.of_list (Query.demand database Workspace.file file).definitions)
+      Array.of_list (Query.demand database Parsed.file file).definitions)
 
 (* Where a definition is: its declaration, which names its file and its
    place in it. *)
@@ -733,9 +731,6 @@ let per_definition database file of_definition =
   |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
 
-(* A definition's source text, which fixes quote, apart from the rest of
-   its file, so that editing another definition changes nothing that reads
-   it. *)
 let text =
   Query.query ~name:"text" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with

@@ -157,7 +157,6 @@ type number =
     every call to it: a view has that many elements, and storage has room for that many. *)
 type extent =
   | Counted of { by : string; each : int }
-      (** [each] elements for each one of the number passed for the parameter [by] *)
   | Exactly of int
   | Number of number  (** As many as a number of the system, such as [PATH_MAX] *)
   | Through_zero
@@ -177,10 +176,6 @@ type passes =
       (** Storage: the address of its first element, for a function that reads the elements the
           storage has and writes some of them *)
   | Written of scalar * string list
-      (** A structure of numbers of one type that the function writes: the address of one, which
-          holds the values of [mut] arguments of these names, one each, and whose numbers go to
-          those arguments afterwards. A function that reads a number there too, as [accept] reads
-          how much room an address has, finds the argument's value. *)
   | Always of int
       (** A number that is no argument of the Truss call: the function always gets it *)
   | Fixed of number

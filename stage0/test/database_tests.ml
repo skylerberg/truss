@@ -237,7 +237,6 @@ let () =
       write directory "shapes.truss" (shapes "1");
       expect_errors directory 0;
       clear directory;
-      (* The change moves [sides], which is the same method where it is. *)
       write directory "shapes.truss" (shapes "10 + 2");
       expect_errors directory 0;
       let again = checked directory in
@@ -700,8 +699,7 @@ let () =
       let context = Engine.context (Database.For_testing.engine library) in
       if Query.demand context Project.file_text (fst second) <> None then
         fail "the file's text is still set";
-      if
-        List.mem (fst second).module_ (Query.demand context Workspace.modules Path.standard_package)
+      if List.mem (fst second).module_ (Query.demand context Packages.modules Path.standard_package)
       then fail "the package still has the module")
 
 let () =

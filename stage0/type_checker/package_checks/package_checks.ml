@@ -30,7 +30,7 @@ let declarations database package = Query.demand database Names.package_declarat
 let dependencies database package =
   List.map
     (fun (dependency : Manifest.dependency) -> dependency.package)
-    (Query.demand database Workspace.dependencies package)
+    (Query.demand database Packages.dependencies package)
 
 let header_span (definition : definition) =
   match definition.kind with
@@ -705,9 +705,6 @@ let used_packages =
         (Query.demand database Infer.core key);
       List.sort_uniq compare (named @ !called))
 
-(* The packages a package's code uses, its tests apart. A dependency that is
-   not among them is one only its tests use, which a project that uses the
-   package once it is published does not take on. *)
 let code_packages =
   Query.query ~name:"code_packages" ~phase:Phases.checks ~saved:true ~show:Path.show_package
     (fun database package_name ->
@@ -758,7 +755,7 @@ let manifest_problems =
           @
           if checks && not (List.mem dependency.package used) then [ Unused dependency.package ]
           else [])
-        (Query.demand database Workspace.dependencies package))
+        (Query.demand database Packages.dependencies package))
 
 let diagnostics database (file : Path.file) =
   List.filter_map

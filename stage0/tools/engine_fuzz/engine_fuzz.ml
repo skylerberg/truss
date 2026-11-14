@@ -85,8 +85,6 @@ type change =
   | Reopen of { full : bool }
   | Open_second
 
-(* [second]: made in the engine last opened beside the first, if there is
-   one. *)
 type step = { change : change; second : bool }
 
 let show step =

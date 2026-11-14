@@ -17,7 +17,7 @@ let loaded =
      Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
        (Standard_library.files @ [ (probe, source) ]);
      let database = Engine.context engine in
-     let text = (Query.demand database Workspace.file probe).source in
+     let text = Query.demand database Packages.source probe in
      (match Checks.diagnostics database probe with
      | [] -> ()
      | diagnostics ->
@@ -70,7 +70,7 @@ let () =
       Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.files @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
-      let text = Source.text (Query.demand database Workspace.file checks).source in
+      let text = Source.text (Query.demand database Packages.source checks) in
       let actual =
         List.map
           (fun (diagnostic : Diagnostic.t) ->

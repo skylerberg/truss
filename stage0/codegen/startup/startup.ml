@@ -1,8 +1,3 @@
-(* The runtime is C, kept here as text. Its parts: writing and failing,
-   which every program uses; allocation; the threads that run branches at
-   once; and a test program's output to the runner, which is Truss in the
-   standard library. *)
-
 let headers =
   (* Strict C11 hides POSIX functions such as [posix_memalign] and
      [sigaltstack] in glibc unless they are asked for. *)

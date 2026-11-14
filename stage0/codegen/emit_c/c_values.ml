@@ -335,8 +335,6 @@ type built =
 let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) list) =
   let c_type = value_c context ty in
   let layout = layout context ty in
-  (* A field that has no size is left out, as one the layout does not have,
-     so a field the type does not have would be left out too. *)
   (if layout.size > 0 then
      let names =
        match (Memory_layout.shape context.env ty, variant) with
@@ -438,8 +436,6 @@ let prototype context current symbol ?names ~linkage (signature : Lowered.signat
     result symbol
     (signature_parameters context current signature.parameters names)
 
-(* A value built of fields. A cursor whose pulled method this code is has no
-   layout yet, and names its fields alone. *)
 let build_c context fc (ty : Ground.ty) variant (values : (string * Lowered.operand) list) =
   match ty with
   | Cursor yielding when List.mem_assoc yielding context.cursors ->

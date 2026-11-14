@@ -12,15 +12,15 @@ type shown_definition = {
 (* The module a path names, if it names one: [weather], or
    [weather::forecast]. *)
 let as_module database names : Path.module_ option =
-  match Workspace.split_module database names with
-  | Some module_ when Query.demand database Workspace.module_exists module_ -> Some module_
+  match Packages.split_module database names with
+  | Some module_ when Query.demand database Packages.module_exists module_ -> Some module_
   | Some _ | None -> None
 
 let declarations database (module_ : Path.module_) =
   Query.demand database Names.declarations module_
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
-let package_modules database package = Query.demand database Workspace.modules package
+let package_modules database package = Query.demand database Packages.modules package
 
 (* Whether a definition is visible from the command's packages: every
    definition in them, and only public definitions elsewhere. *)
@@ -44,7 +44,7 @@ let resolve session packages text =
     List.concat_map (declarations database) (package_modules database package)
   in
   let module_ = if argument.member = None then as_module database argument.names else None in
-  match (Workspace.split_module database argument.names, module_, argument.member) with
+  match (Packages.split_module database argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       (* A package: its public definitions. *)
       List.filter

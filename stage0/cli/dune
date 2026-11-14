@@ -14,7 +14,8 @@
   syntax_walk
   path
   query
-  workspace
+  packages
+  parsed
   resolve
   infer
   interface

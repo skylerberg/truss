@@ -22,9 +22,9 @@ let () =
       test
         (Printf.sprintf "%s has no interface errors" (Path.show_file file))
         (fun () ->
-          let parsed = Query.demand database Workspace.file file in
+          let source = Query.demand database Packages.source file in
           List.iter
-            (fun diagnostic -> fail "%s" (Diagnostic.render parsed.source diagnostic))
+            (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
             (Interface.diagnostics database file)))
     Standard_library.files
 

@@ -15,7 +15,7 @@ let capability database ~package written : Path.t option =
   | Some [ name ] ->
       Option.bind (Resolve.Prelude.find_type name) (fun module_ -> visible_capability module_ name)
   | Some (name :: modules) -> (
-      match Workspace.split_module database (List.rev modules) with
+      match Packages.split_module database (List.rev modules) with
       | Some module_ -> visible_capability module_ name
       | None -> None)
   | Some [] | None -> None
@@ -47,7 +47,7 @@ let granted =
           })
         (List.find_opt
            (fun (entry : Manifest.dependency) -> entry.package = dependency)
-           (Query.demand database Workspace.dependencies package)))
+           (Query.demand database Packages.dependencies package)))
 
 let missing database ~package ~of_ (uses : Types.capability_set) =
   if of_ = package || of_ = Path.standard_package then []

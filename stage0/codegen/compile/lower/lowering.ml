@@ -30,19 +30,14 @@ type loop = {
   break_depth : int;
 }
 
-(* The code being lowered: the function's own, or a method's inlined into
-   it, whose blocks carry it, each with its own tables and names. *)
 type frame = {
   code : code;
   mutable self_place : Lowered.place option;
   inlined : Path.t list;
-      (** The code's own method and those it is inlined into, whose cursors the code boxes *)
   reported : Lowered.site option;
       (** In the standard library's code that is inlined into a program's, the position of the
           program's call, where a check that fails in this code is reported *)
   exit : (Lowered.block * int) option;
-      (** In an expression lowered on its own, where its [return] goes and how many scopes that
-          keeps *)
   mir : mir_frame option;  (** The MIR being lowered in this frame *)
 }
 
@@ -68,7 +63,7 @@ and mir_frame = {
   kept : Mir.local list;  (** In a pulled method, the locals its cursor holds *)
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
-  mutable state : Moves.state;  (** What may hold a value where the code being lowered is *)
+  mutable state : Moves.state;
 }
 
 (* The early exits of the tasks of one [concurrent] block or loop. An
@@ -90,11 +85,10 @@ type early_exits = {
    the group performs. *)
 and early_exit = {
   ends : Mir.statement list;
-      (** The ends of the scopes between the task and the next task or the exit's target *)
   remaining : (Core.task * Mir.statement list) list;
       (** The enclosing tasks that the exit has yet to end, innermost first *)
   exit : Mir.task_exit;
-  state : Moves.state;  (** What may hold a value where the exit was taken *)
+  state : Moves.state;
 }
 
 (* A task whose body is being lowered. *)
@@ -112,19 +106,17 @@ type spawn_loop = {
   group : Lowered.place;
   early_exits : early_exits;
   item : Lowered.local;  (** A [UInt64]: the argument of the next task *)
-  element : Ground.ty;  (** The type of the value that the loop's pattern matches *)
+  element : Ground.ty;
 }
 
 (* The cursor of a pulled method: [next] keeps in it the values it needs
    from one call to the next, and its drop function drops them. *)
 type cursor = {
-  pointer : Lowered.local;  (** [next]'s parameter, and the drop function's, that points to it *)
+  pointer : Lowered.local;
   drop : Emit_c.Builder.separate;  (** The cursor's drop function *)
-  fields : (string * Lowered.ty) list ref;  (** Its fields but its state, most recent first *)
+  fields : (string * Lowered.ty) list ref;
   mutable resumes : Lowered.block list;
-      (** Where [next] goes on in each state after the first, most recent first *)
   mutable stops : Lowered.block list;
-      (** Where the drop function starts in each state after the first, most recent first *)
 }
 
 (* How the iterations of a loop run: one after another, as chunks of a
@@ -149,16 +141,11 @@ type state = {
       (** In a yielding method's pulled version, the cursor it keeps values in *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable moved : Lowered.place list;
-      (** The places of locals that lowering owns, other than the MIR's, that its code has moved out
-          of, so that the scope that owns one drops it only if it holds a value *)
 }
 
-(* The code a function starts lowering: its own, with nothing bound yet. *)
 let frame_of code ~inlined =
   { code; self_place = None; inlined; reported = None; exit = None; mir = None }
 
-(* The state to write one function in, with [builder], and the function's
-   scope. A lambda shares [nested] with the function around it. *)
 let enter context ?cursor ?(nested = ref 0) ~builder frame =
   {
     context;
@@ -174,11 +161,6 @@ let enter context ?cursor ?(nested = ref 0) ~builder frame =
     moved = [];
   }
 
-(* Whether a [parallel] statement's parts are outlined here, as functions
-   of their own that the runtime may run at the same time.
-   They are not in a method's pulled version, whose code is a state
-   machine, nor in an expression lowered on its own, whose [return] leaves
-   to its end, and a region has one way out. *)
 let may_fork st = st.cursor = None && st.frame.exit = None
 
 (* A field of the cursor, with the place it is at. *)
@@ -249,20 +231,14 @@ let rec binding_scope = function
 
 let innermost_scope st = match st.scopes with scope :: _ -> scope | [] -> bug "no scope"
 
-(* A move out of a place, which the scope that owns the place, if lowering
-   owns it, then does not drop. *)
 let moved st place =
   if not (List.mem place st.moved) then st.moved <- place :: st.moved;
   Lowered.Move place
 
-(* Has the scope of the names around own the value at a place. *)
 let own_in_scope st place =
   let scope = binding_scope st.scopes in
   scope.owned <- Drop_value place :: scope.owned
 
-(* A new local for a value, owned from the start, so that every way out of
-   its owner drops whatever it still holds, and nothing it is given can be
-   forgotten. A type with nothing to drop needs no owner. *)
 let owned_local st ?name (scope : scope) ty =
   let place = at (local st.builder ?name (Value ty)) in
   if not (trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
@@ -275,11 +251,6 @@ let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
 (* A local that lasts as long as the names around it. *)
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
-(* A parameter of the function being written, as the calling convention
-   passes it, or as [how] does: the local it arrives in, unless it has no
-   size, and the place its value is read at. The function owns it when
-   [owned], and the scope around drops it unless [in_scope] is false;
-   otherwise it is the caller's. *)
 let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let how = Option.value how ~default:(Convention.parameter st.context.env) in
   let own place = if in_scope && owned && not (trivial st ty) then own_in_scope st place in
@@ -295,8 +266,6 @@ let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
       own (at arrives);
       (Some arrives, at arrives)
 
-(* A parameter for the evidence of each capability, which the code then
-   reaches by it. Gives the parameters, in order. *)
 let evidence_parameters st capabilities =
   let arriving =
     List.map
@@ -364,8 +333,6 @@ let drop_scope st (scope : scope) =
       | Join_group join -> emit st.builder join)
     scope.owned
 
-(* Drops everything owned in the scopes inside the [depth] outermost, as a
-   [return], [break], or [continue] leaves them. *)
 let leave_to st depth =
   List.iteri
     (fun position scope -> if List.length st.scopes - position > depth then drop_scope st scope)
@@ -397,10 +364,6 @@ let with_scope st kind body =
 let in_scope st body = with_scope st Bindings body
 let in_statement st body = with_scope st Statement body
 
-(* Ends the function being written: its scope's remaining values are dropped
-   and its result returned. Its parameters are [first], which it is given
-   before anything else, the pointer its result is written through, if it
-   has one, and [rest]. *)
 let finish_function st ?(returns = true) ~first ~rest () =
   (match st.scopes with [ scope ] -> drop_scope st scope | _ -> bug "a function ended in a scope");
   finish st.builder (if returns then return_result st else Unreachable);
@@ -410,8 +373,6 @@ let finish_function st ?(returns = true) ~first ~rest () =
   in
   build st.builder ~returns ~parameters:(first @ Option.to_list pointer @ rest) ~result
 
-(* The instance written: its function, which [finish_function] ends with
-   [rest] as its parameters, and the nested functions it made. *)
 let finish_instance st ?returns ~rest () =
   finish_function st ?returns ~first:[] ~rest ();
   built st.builder
@@ -425,9 +386,6 @@ let unreachable_block st =
    temporary or was marked [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lowered.Copy place else moved st place
 
-(* Gives [destination], which holds nothing, the value at a place as its
-   own: moved out of the place, or for a constant's static data, which
-   nothing moves from, copied. *)
 let take st (place : Lowered.place) ty ~destination =
   match place.root with
   | Static _ when not (trivial st ty) ->
@@ -453,8 +411,6 @@ let snapshot st ~kept (place : Lowered.place) =
         place.projections;
   }
 
-(* Runs [f], the body of a loop whose [continue] and [break] each leave
-   every scope inside the [depth] outermost. *)
 let looping st ~continue_ ~break_ ~depth body =
   st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
   body ();
@@ -474,7 +430,6 @@ let place_type st (place : Lowered.place) =
   match (st.cursor, place) with
   | Some cursor, { root = Local pointer; projections = Deref :: Field field :: rest }
     when pointer = cursor.pointer -> (
-      (* A field of the cursor that the code is writing the fields of. *)
       match List.assoc_opt field !(cursor.fields) with
       | Some ty -> projected ty rest
       | None when field = Convention.cursor_state -> projected (Raw (Integer UInt32)) rest

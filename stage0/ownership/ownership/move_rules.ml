@@ -130,7 +130,7 @@ let check_body context (body : Mir.body) moves ~returns =
   let not_reinitialized = Hashtbl.create 8 in
   (* A [mut] borrow must end with the place fully initialized, because its
      owner uses the place afterwards, so a place moved out of one must be
-     given a value again before the borrow ends: [locals] are the borrows
+     reinitialized before the borrow ends: [locals] are the borrows
      that end here. [within] says whether a path's move counts. *)
   let check_given state ~locals ?(within = fun _ -> true) ~at message =
     List.iter

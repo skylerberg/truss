@@ -148,9 +148,6 @@ let write ?(full = false) ?stores_every_value engine =
   let save (node : node) =
     let reads = lazy (current_reads engine node) in
     if Hashtbl.mem engine.unsaved node.id then record_fact engine store node reads;
-    (* A copy that came out as the base's node, reading the same, is the
-           base's node, and is not written, unless an earlier difference
-           holds another result for it, which this one takes the place of. *)
     let as_base = (not full) && engine.on_whole && node.written <> In_difference in
     let as_below () =
       as_base
@@ -276,10 +273,6 @@ let fill engine (artifacts : artifact list) =
           Hashtbl.replace last key (node, artifact))
         artifact.saved)
     artifacts;
-  (* A node that was collected is not in the state. Where a base holds it, the
-     engine holds its place with nothing in it, so that it is computed if it
-     is asked for, and the base's result, which is of an earlier state, is
-     never read. *)
   Hashtbl.iter
     (fun (name, key) () ->
       match Hashtbl.find_opt restorers name with
@@ -334,9 +327,6 @@ let fill engine (artifacts : artifact list) =
         List.iter (fun read -> add_reader engine read node) reads
       end)
     restored;
-  (* A node that cannot be checked is left out, with its readers. One that a base
-     also holds keeps its place, with nothing in it, so that the base's
-     result, which is of an earlier state, is not read in its stead. *)
   let emptied = Hashtbl.create 8 in
   let rec remove (node : node) =
     if node.alive && not (Hashtbl.mem emptied node.id) then begin

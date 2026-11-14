@@ -154,7 +154,6 @@ let mutate state env ~(by : mutation) (value : expression) =
   | Some Not_a_place, Assignment ->
       report state code value.span
         "Only a place, such as a variable, a field, or an element, can be assigned."
-  (* The check of the mark or of the receiver reports these. *)
   | Some (Lent_read_only | Not_a_place), Mut_mark -> ());
   use_mutable_indexes state value
 

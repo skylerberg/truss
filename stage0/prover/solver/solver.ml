@@ -123,8 +123,6 @@ let request ?(values = []) ?(terms = []) query =
         |> Option.map (fun canonical -> ((symbol, canonical), canonical)))
       values
   in
-  (* A term is asked by its text and kept by its place, since its text has
-     spaces and the solver may print it back otherwise. *)
   let terms =
     List.filter_map
       (fun (name, term) -> Logic.term_text rendering term |> Option.map (fun text -> (name, text)))
@@ -153,8 +151,6 @@ let ask solver (request, query) =
   let stored =
     match file with
     | Some file when Sys.file_exists file -> (
-        (* An answer read is one still asked, so its file's age is how long
-           ago a run last asked it, which pruning old answers reads. *)
         (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
         match String.split_on_char '\n' (File_system.read file) with
         | "proven" :: _ -> Some Proven_canonical

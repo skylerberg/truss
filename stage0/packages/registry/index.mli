@@ -21,6 +21,3 @@ val add : t -> Path.package -> Version.t -> (string * string) list -> unit
 (** Adds a version of a package with these files, each a path and its bytes. *)
 
 val fetch : t -> into:string -> Path.package -> Version.t -> hash:string -> (string, string) result
-(** The directory, under [into], that holds a version's files, named by their hash, copying them
-    from the registry if it is not there yet. The files are kept only if they have that hash. An
-    error says why they could not be had, as the end of a sentence. *)

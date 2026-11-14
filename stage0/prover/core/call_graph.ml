@@ -1,15 +1,3 @@
-(* Each package's call graph, for termination.
-
-   A node is a function, a method, an [impl]'s method, or a trait's method.
-   Its edges are every way it can reach another: a call, naming a function
-   as a value, and using an [impl] where a bound or [any] needs one, which
-   reaches every method of that [impl]. A call through a bound or [any] is
-   a call of the trait's method, which reaches its provided body and each
-   [impl]'s own method of that name. Through those, a dependency's code
-   can reach this package's, so a walk reads each node's package's graph,
-   and a trait's method reaches the [impl]s of every package the walk
-   starts from depends on. *)
-
 open Syntax
 module Names = Resolve.Names
 
@@ -64,7 +52,7 @@ let impls database (modules : Path.module_ list) =
 
 let package_impls =
   Query.query ~phase:Phases.proofs ~name:"package_impls" ~show:Path.show_package
-    (fun database package -> impls database (Query.demand database Workspace.modules package))
+    (fun database package -> impls database (Query.demand database Packages.modules package))
 
 (* The [impl]s of a package that a value of a type, given where one of
    these traits is needed, could use. Matched by the type's head, which may
@@ -109,11 +97,6 @@ let impls_used database impls (callee : _ Core.target) =
       | None -> [])
   | _ -> []
 
-(* Whether a call of a trait's method is a call of the trait's method
-   itself, as a node: through [any], whose type is not known, or through a
-   bound on [Self], in a trait's provided body. A call through a bound on
-   another type parameter reaches the [impl] for the type the parameter is
-   given where the generic code is used, which that use's edges name. *)
 (* The traits that only the built-in integer types implement, and those
    types. *)
 let integer_trait owner =
@@ -194,8 +177,6 @@ let edges database impls (body : Core.block) =
              | Call { callee = called; _ } -> callee called
              | Function_value { path; _ } -> add [ Calls path ]
              | To_any { value; trait; _ } ->
-                 (* It builds the table of the [impl] of its trait, and of the
-                    traits that one requires, for the value's type. *)
                  add
                    (List.map
                       (fun impl -> Uses_impl impl)
@@ -207,7 +188,7 @@ let edges database impls (body : Core.block) =
   List.rev !body_edges
 
 let build database package =
-  let modules = Query.demand database Workspace.modules package in
+  let modules = Query.demand database Packages.modules package in
   let impls = Query.demand database package_impls package in
   List.concat_map
     (fun module_ ->
@@ -238,16 +219,13 @@ let reachable_packages database package =
       Hashtbl.replace seen package ();
       List.iter
         (fun (dependency : Manifest.dependency) -> visit dependency.package)
-        (Query.demand database Workspace.dependencies package)
+        (Query.demand database Packages.dependencies package)
     end
   in
   visit package;
   visit Path.standard_package;
   Hashtbl.fold (fun package () packages -> package :: packages) seen []
 
-(* The nodes a node reaches by one edge, from [package]'s point of view:
-   its own edges, read from its package's graph, and for a trait's method,
-   each [impl]'s own method of that name in a package the walk reaches. *)
 let successors database ~packages (path : Path.t) =
   let own =
     match

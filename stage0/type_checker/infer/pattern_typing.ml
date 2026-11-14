@@ -314,9 +314,6 @@ and constant_pattern state id span path type_ =
              | _ -> "the_constant"))
   | None -> ()
 
-(* Whether a type has structural equality: values that are equal cannot be
-   told apart. This holds for built-in equality, and for a derived [Equal]
-   if every field has structural equality. *)
 and structural ?(seen = []) state (type_ : Types.ty) =
   if
     integer_type state type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_
@@ -394,7 +391,7 @@ and check_literal_fits state (value : expression) number type_ =
 (* The number of bits of [USize] and [ISize] that the package is checked
    for: 32, unless the manifest says [usize_bits = 64]. Code checked for 32
    bits is correct on every target. *)
-and usize_bits state = Query.demand state.database Workspace.usize_bits state.package
+and usize_bits state = Query.demand state.database Packages.usize_bits state.package
 and builtin_range ?usize_bits type_ = Types.integer_range ?usize_bits type_
 
 (* [Character"a"] and [UInt8"\n"]: a character or byte literal is a tagged

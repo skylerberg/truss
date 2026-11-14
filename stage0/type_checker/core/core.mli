@@ -375,8 +375,6 @@ and statement_kind =
   | Yield of { mode : Types.mode; part : operand }
       (** [yield] in a lending or yielding method. [mode] is the mode in the method's signature. *)
 
-(** How the iterations of a [for] loop run: one after another, at the same time with no capability
-    but [Panic], or as tasks. *)
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
 (** A task of [concurrent] code, which an early exit may end before the others of its block or loop.

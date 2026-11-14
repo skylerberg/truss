@@ -205,12 +205,7 @@ type statement =
       (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
       *)
   | Fork of { branches : (int * operand) list }
-      (** Runs each nested function, given the address of its environment, and continues when all
-          have returned. They may run at the same time. *)
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
-      (** Runs the nested function, given the address of its environment and the first and last
-          index of a part, for parts that together hold each [UInt64] index from [first] to [last]
-          once, and continues when all have returned. The parts may run at the same time. *)
 
 type terminator =
   | Goto of block

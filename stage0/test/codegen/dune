@@ -58,7 +58,7 @@
   query
   engine
   database
-  workspace
+  packages
   standard_library
   interface
   types

@@ -82,15 +82,8 @@ type action =
    tasks runs on its way out, then its terminator. *)
 type position = { block : Mir.block; index : int }
 type step = { action : action; origin : Core.origin }
-
 type fork_join_block = { keyword : string; branches : position list list }
-(** A [parallel] or [concurrent] block: a fork-join of its branches, which may run at the same time.
-    [keyword] is "parallel" or "concurrent", for error messages. *)
-
 type fork_join_loop = { keyword : string; body : position list; bound : Core.local list }
-(** A [parallel for] or [concurrent for]: a fork-join of its iterations, which may run at the same
-    time. [body] is the positions of the loop body, and [bound] is the locals that the loop's
-    pattern binds. *)
 
 type t = {
   body : Mir.body;
@@ -114,7 +107,7 @@ type held = {
   fresh : bool;
       (** For a temporary, whether its value is a new one, which the statement drops: not a string
           literal, a lambda, or a value read out of a named place. *)
-  alias : Mir.place option;  (** For an operand held where it is evaluated, the place it is. *)
+  alias : Mir.place option;
   part : bool;  (** Whether it is the part a loop over a yielding call is given. *)
 }
 
@@ -142,7 +135,6 @@ type builder = {
   held : (Mir.local, held) Hashtbl.t;
   mutable returned : Mir.local list;  (** The temporaries whose value the body returns. *)
   mutable aliases : Mir.local list;
-      (** The lent locals that an assignment made: an operand held where it is evaluated. *)
   mutable binding : Mir.local list;  (** The locals made live and not yet given a value. *)
   mutable storage_lend : bool;
       (** Whether the last lend was of an element of a collection, which lends nothing for the
@@ -306,32 +298,32 @@ let is_captured builder (place : Place.t) =
   | Local local -> List.mem local builder.captured
   | Constant _ | Environment -> false
 
-(* The value at a place is read: copied, or moved out of it. *)
-let use builder (place : Mir.place) type_ origin ~returned =
-  match tracked builder place with
-  | Some tracked ->
-      if builder.plain type_ then emit_ builder (Read tracked) origin
-      else
-        emit_ builder
-          (Move { place = tracked; type_; returned; captured = is_captured builder tracked })
-          origin
-  | None ->
-      if is_lent_part builder place && not (builder.plain type_) then
-        emit_ builder (Move_out_of_lent type_) origin
-
-(* An operand is evaluated: a value is read, and a read-only borrow reads
-   the place. A [mut] borrow starts where its operation runs. *)
-let evaluate builder ~returned (operand : Mir.operand) =
-  match operand with
-  | Use { place; type_; origin; _ } -> use builder place type_ origin ~returned
-  | Borrow { place; mode = Read | Own; origin; _ } -> (
+(* A read of a place: a copy, or a move out of it, as the move analysis
+   says. A read-only borrow reads the place, and a [mut] borrow starts where
+   its operation runs. A compound assignment's old value is only read: the
+   statement assigns the target again before any other code runs. *)
+let evaluate builder ~returned (use : Moves.use) =
+  let read place origin =
+    Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place)
+  in
+  match use.operand with
+  | Some (Use { place; type_; origin; _ }) -> (
+      match tracked builder place with
+      | Some tracked when use.moves ->
+          emit_ builder
+            (Move { place = tracked; type_; returned; captured = is_captured builder tracked })
+            origin
+      | Some tracked -> emit_ builder (Read tracked) origin
+      | None ->
+          if use.moves && is_lent_part builder place then
+            emit_ builder (Move_out_of_lent type_) origin)
+  | Some (Borrow { place; mode = Read | Own; origin; _ }) -> (
       match place.root with
       | Local local when List.mem local builder.aliases -> ()
-      | _ ->
-          Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place))
-  | Take { place; origin; _ } ->
-      Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place)
-  | Borrow { mode = Mut; _ } | Constant _ -> ()
+      | _ -> read place origin)
+  | Some (Take { place; origin; _ }) -> read place origin
+  | None -> read use.place use.origin
+  | Some (Borrow { mode = Mut; _ } | Constant _) -> ()
 
 (* The [mut] borrow of an operand. *)
 let borrow_mut builder (operand : Mir.operand) =
@@ -636,14 +628,7 @@ let loans_of builder (borrowed : Mir.operand) mode (duration : Mir.loan_duration
    the reads that the code around writes another way. *)
 let read_uses builder ?(returned = fun _ -> false) ?(skip = fun _ -> false) uses =
   List.iter
-    (fun (use : Moves.use) ->
-      if not (skip use) then
-        match use.operand with
-        | Some operand -> evaluate builder ~returned:(returned use) operand
-        | None ->
-            Option.iter
-              (fun tracked -> emit_ builder (Read tracked) use.origin)
-              (tracked builder use.place))
+    (fun (use : Moves.use) -> if not (skip use) then evaluate builder ~returned:(returned use) use)
     uses
 
 let statement builder ~is_var (statement : Mir.statement) =
@@ -911,26 +896,12 @@ let terminator builder ~returns (basic : Mir.basic_block) =
    end of a loop's iteration goes back to the loop's next iteration, or past
    it, without reading the loop's operands again. *)
 let successors (body : Mir.body) loops block =
-  match body.blocks.(block).terminator with
-  | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } -> (
-      let task_end =
-        match body.blocks.(block).terminator with
-        | Exit_tasks { tasks = { task_end = Some target; _ } :: _; _ } -> [ (target, true) ]
-        | _ -> []
-      in
-      match Hashtbl.find_opt loops block with
-      | Some loop -> (
-          match body.blocks.(loop).terminator with
-          | For { body = first; after; _ } -> [ (first, false); (after, false) ] @ task_end
-          | _ -> task_end)
-      | None -> task_end)
-  | Exit_tasks { exit; tasks } -> (
-      (match tasks with { task_end = Some target; _ } :: _ -> [ (target, true) ] | _ -> [])
-      @
-      match exit with
-      | Exit_to target -> [ (target, false) ]
-      | Exit_return _ | Exit_iteration -> [])
-  | terminator -> List.map (fun target -> (target, false)) (Mir.successors terminator)
+  let task_end =
+    match body.blocks.(block).terminator with
+    | Exit_tasks { tasks = { task_end; _ } :: _; _ } -> task_end
+    | _ -> None
+  in
+  List.map (fun target -> (target, Some target = task_end)) (Mir.block_successors body loops block)
 
 (* A forward dataflow analysis of a body's actions: the state before each
    action, for each position some path reaches. [join] merges a state into

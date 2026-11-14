@@ -14,10 +14,6 @@ val parameter : Memory_layout.env -> Ground.mode -> Ground.ty -> Lowered.ty opti
    it and may outlive the caller's statement, and any other as the
    parameter takes it. *)
 val held : Memory_layout.env -> Ground.mode -> Ground.ty -> Lowered.ty option
-
-(* A cursor's fields that whoever makes one fills in: its state number, and
-   its field for each of its method's parameters that has a size, by
-   the parameter's place among them. *)
 val cursor_state : string
 val cursor_parameter : int -> string
 
@@ -28,13 +24,7 @@ type result =
       (** Too large to return: written through a writable pointer, the first parameter *)
 
 val result : Memory_layout.env -> Ground.ty -> result
-
-(* The C signature of code that takes these parameters and gives a result
-   passed as it is: a result's pointer comes before the parameters. *)
 val signature : ?returns:bool -> Lowered.ty list -> result -> Lowered.signature
-
-(* Where a call writes a result, passed as it is, to a place: through a
-   pointer to it when the result is too large to return. *)
 val destination : result -> Lowered.place -> Lowered.destination
 
 (* The C signature of the code behind a function value of a type: its

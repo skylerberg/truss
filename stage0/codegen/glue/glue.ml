@@ -23,13 +23,7 @@ let rec trivial glue ty =
   match Types.find_opt ty glue.trivial_types with
   | Some answer -> answer
   | None ->
-      (* A type that contains itself does so through an [indirect] variant
-         or storage, so it is not trivial, which is the answer a cycle
-         gets. *)
       glue.trivial_types <- Types.add ty false glue.trivial_types;
-      (* An [any] value and a cursor always have a drop function, which a
-         cursor's shape, made from its method's body, need not be looked at
-         to know. *)
       let any = match ty with Ground.Any _ | Cursor _ -> true | _ -> false in
       let member : Memory_layout.member -> bool = function
         | Typed ty -> trivial glue ty

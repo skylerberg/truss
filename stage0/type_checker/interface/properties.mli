@@ -58,7 +58,6 @@ type recursion = {
   recursive : Types.ty;
   occurrence : occurrence;  (** How the type occurs in itself. *)
   defining : Path.t list;
-      (** The [impl]s whose definitions of associated types the type contains itself through. *)
 }
 (** A named type that contains itself through its arguments. No type definition's fields name such a
     type: [Kept[Marker]] is one when [Kept[Source]] has a field of type [Source.Part] and [Marker]'s

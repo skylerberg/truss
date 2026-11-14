@@ -130,8 +130,6 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
 let call_c context fc (target : Lowered.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in
   let texts = String.concat ", " (List.map fst arguments) in
-  (* A call passes its target's leading argument, then each argument that
-     has a size, the pointer a large result is written through first. *)
   (match target with
   | Direct { signature; _ }
   | Indirect { signature; _ }
@@ -177,11 +175,7 @@ let call_c context fc (target : Lowered.target) arguments =
           bug "a call of %s with an argument of zero size" declaration.symbol
       in
       let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " cast_arguments) in
-      (* An address comes back as C's own type for it, which the local it
-         goes to need not be. *)
-      match declaration.returns with
-      | Pointer _ -> "((void *)" ^ called ^ ")"
-      | _ -> called)
+      match declaration.returns with Pointer _ -> "((void *)" ^ called ^ ")" | _ -> called)
   | Table_call { table; value; slot; signature } ->
       let table =
         match operand_c context fc table with
@@ -220,11 +214,6 @@ let anchor_c context definition =
     context.anchors <- (symbol, definition) :: context.anchors;
   "&" ^ symbol
 
-(* Whether two places may share memory. Places under different roots do
-   not. Under one root they do not if their paths part at different fields
-   of a record or of one variant, or if one path is the other followed by a
-   dereference, which leads to another object. Two elements are assumed to
-   overlap unless their indexes are written the same way. *)
 let may_alias (first : Lowered.place) (second : Lowered.place) =
   let rec overlap (first : Lowered.projection list) (second : Lowered.projection list) =
     match (first, second) with
@@ -331,8 +320,6 @@ let statement_c context fc buffer (statement : Lowered.statement) =
         (function_ref_symbol fc (Nested body))
         (operand environment) (operand first) (operand last)
 
-(* A point no run reaches, which each file defines for its build: a call
-   that reports a compiler bug, or a promise to the C compiler. *)
 let unreachable_c _ = "T_UNREACHABLE();"
 
 let terminator_c context fc buffer (terminator : Lowered.terminator) =

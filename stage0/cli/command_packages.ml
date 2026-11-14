@@ -74,7 +74,7 @@ let project_dependencies session packages =
           Hashtbl.replace seen dependency.package ();
           visit dependency.package
         end)
-      (Query.demand (Database.context session) Workspace.dependencies name)
+      (Query.demand (Database.context session) Packages.dependencies name)
   in
   List.iter visit packages;
   List.filter (fun name -> Hashtbl.mem seen name && not (List.mem name packages)) project_packages
@@ -107,12 +107,8 @@ let selected session packages paths =
             wanted)
         (files session packages)
 
-(* A file's text as a source named by its path relative to the current
-   directory, which every command uses for positions, for a file of
-   [packages]. Offsets match the database's source. A file of another
-   package, such as the standard library's, keeps its database name. *)
 let source session packages (file : Path.file) =
-  let source = (Query.demand (Database.context session) Workspace.file file).source in
+  let source = Query.demand (Database.context session) Packages.source file in
   if List.mem file.module_.package packages then
     Source.create ~path:(Shown_path.shown (path session file)) (Source.text source)
   else source

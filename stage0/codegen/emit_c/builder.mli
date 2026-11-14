@@ -14,9 +14,6 @@ val instance_key : instance -> Instance.key
 (* A builder of the instance [key]'s own function, which runs from block 0,
    the first block made. *)
 val create : Memory_layout.env -> key:Instance.key -> t
-
-(* A builder of the nested function [index] of the instance [parent]
-   writes, whose environment has these fields. *)
 val nested : t -> index:int -> environment:(string * Lowered.ty) list -> t
 
 (* A new local, numbered after every earlier one. *)
@@ -56,29 +53,12 @@ val loop :
   (Lowered.local -> unit) ->
   unit
 
-(* Writes code with [body] as an outlined function: a function of its own,
-   nested in the instance as [nested], which the code around it runs by
-   naming the local this returns, the holder of its environment. The
-   function is given [parts], locals of the code around it, as its
-   parameters, and reaches every other local of the code around it through
-   its environment. [body] starts in the function's entry block and ends
-   each of its paths with a return. *)
 val outline : t -> nested:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
 
-(* A separate function: the instance [key]'s own function, written beside
-   this one, given [parts], locals of the code around it, as its
-   parameters, and no environment, so its code names no other local of the
-   code around it. It is written in pieces with [write_in], and runs from
-   its entry block. *)
 type separate
 
 val separate : t -> key:Instance.key -> parts:Lowered.local list -> separate
 val separate_entry : t -> separate -> Lowered.block
-
-(* Gives the fields of the cursor over [yielding], whose pulled method the
-   builder writes, to the code that names them before the cursor's layout
-   is known: [fields] holds each field but the state, with its type, as it
-   is made. *)
 val describe_cursor : t -> Ground.yielding -> (string * Lowered.ty) list ref -> unit
 
 (* Writes [body] in a separate function, then goes back to the block that

@@ -4,9 +4,6 @@ module Symbol = Logic.Symbol
 
 let zero = Logic.Integer Z.zero
 
-(* The target of a [calls(...)] clause: calls through a function value,
-   which is its term in the definition proven, or calls of a capability's
-   methods, or of one of them. *)
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
 type resource = Time | Allocations | Allocated_bytes | Calls of target
 
@@ -24,9 +21,6 @@ type counting = Units | At_most | Exactly
    clause of its kind. *)
 type counter = { resource : resource; counting : counting; amortized : bool }
 
-(* Whether a [calls] clause about [clause] bounds the calls a counter about
-   [counter] counts: the same target, or a whole capability for one of its
-   methods, which bounds it from above. *)
 let covers ~clause ~counter =
   match (clause, counter) with
   | Capability path, Capability_method (owner, _) -> Path.equal path owner
@@ -181,11 +175,7 @@ let rec normalize term =
     (add sums, constant)
   and inner = function
     | Logic.Apply (Symbol.Cost_most, [ left; right ]) -> (
-        (* A term both choices add is moved outside the larger of them. *)
-        let left = normalize left
-        and right = normalize right in
-        (* Each summand with its coefficient, so that a term both choices
-           take away is shared as one both add is. *)
+        let left = normalize left and right = normalize right in
         let rec summands coefficient = function
           | Logic.Operation ("+", parts) -> List.concat_map (summands coefficient) parts
           | Logic.Operation ("-", [ inner ]) -> summands (Z.neg coefficient) inner
@@ -238,9 +228,6 @@ let rec normalize term =
   in
   List.fold_left (fun total entry -> minus total (scaled entry)) total negative
 
-(* The cost since [start], of a counter that is now [total]: a sum
-   that began at [start], or a choice between such sums where paths
-   joined. *)
 let rec since ~start total =
   match total with
   | Logic.Operation ("ite", [ condition; left; right ]) ->

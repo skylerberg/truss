@@ -8,8 +8,6 @@ type types = { usize : Ground.ty; string_slice : Ground.ty }
 let operand = function Place place -> Lowered.Copy place | Value operand -> operand
 let place = function Place place -> place | Value _ -> bug "an operation on storage given a value"
 
-(* Where a value that is only read is: it arrives as a place, or as a copy
-   of one. *)
 let read = function
   | Place place | Value (Copy place) -> place
   | Value _ -> bug "a value to read that is in no place"
@@ -165,8 +163,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
   let check_index index count =
     panic_if (Binary (Greater_equal, index, count)) "index out of bounds"
   in
-  (* How many more elements a storage has room for. A static storage has a
-     capacity below its length, and has none. *)
   let room storage : Lowered.operand =
     let room = local builder ~name:"room" (Value types.usize) in
     let any = local builder (Raw Bool) in
@@ -247,8 +243,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
         | _ -> binary op
       in
       let byte : Ground.ty = Named { path = Intrinsic.builtin_path UInt8; arguments = [] } in
-      (* A number of the C library's headers, with the value this system
-         gives it. *)
       let number_constant number : Lowered.operand =
         let integer =
           match
@@ -324,7 +318,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
       | Rotate_right -> into Rotate_right
       | Multiply_high -> into Multiply_high
       | Compare_bytes ->
-          (* The bytes both views have, then the lengths. *)
           let left = place (argument 0) and right = place (argument 1) in
           let shorter = local builder (Raw Bool) in
           let count = usize_local "count" in
@@ -376,8 +369,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           | _ -> ());
           binary (if operation = Shift_left then Shift_left else Shift_right)
       | Convert | Fits -> (
-          (* Whether a value of [Source] fits [Target]: a test of each bound of
-         [Target] that [Source] can pass, each of which [Source] can hold. *)
           let target = Memory_layout.target env in
           let fits () : Lowered.rvalue =
             match (scalar env (type_argument 0), scalar env (type_argument 1)) with
@@ -489,8 +480,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
               "a storage lengthened to more than its capacity";
           add_to_length storage (value 1)
       | Storage_shorten ->
-          (* Static storage stays static: it is told apart by its capacity,
-             and nothing is written to its elements. *)
           let storage = place (argument 0) in
           panic_if
             (Binary (Greater, value 1, length storage))
@@ -663,8 +652,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           emit builder (Assign (element_at (value 1), Use (Move (element_at (value 2)))));
           emit builder (Assign (element_at (value 2), Use (Move (at held))))
       | (Storage_take_view | View_take_view | Array_take_view) as operation ->
-          (* The view is of the owner's own elements, so there is nothing to
-             write. A checked build makes sure that it is. *)
           if checks then begin
             let owner = place (argument 0) and part = place (argument 1) in
             let from = value 2 in
@@ -846,8 +833,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
               { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
           in
           let { Libc.parameters; result; _ } = Libc.signature function_ in
-          (* The values copied back after the call: a structure's numbers to the
-             arguments they were written for. *)
           let after = ref [] in
           let next = ref 0 in
           let next_argument () =
@@ -911,8 +896,6 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                       incr position;
                       [ (name, Some passes, index) ]
                   | Written (_, names) ->
-                      (* A count can be one of a structure's numbers, as the
-                         length that [getsockopt] is given and writes. *)
                       List.map
                         (fun name ->
                           let index = !position in

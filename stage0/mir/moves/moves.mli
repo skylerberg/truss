@@ -32,17 +32,17 @@ val analyse :
   t
 (** The analysis of a body. A local owns its value where it is a temporary or an [own] binding, and
     not a capture or a local that an assignment gives a place; its parameters hold values on entry.
-    A local bound [mut], or lent [mut], is another owner's place, lent to be changed: a value may be
-    moved out of one, which is given a value again before the local ends, and none is dropped where
-    it ends. [passed] says how a parameter is passed where its binding does not, as for a lambda's.
-    A value read by value moves where [moving] holds of its type, every value by default; the rest
-    copy. A path is tracked where [tracks] holds of it. *)
+    A local bound [mut], or lent [mut], is another owner's place lent [mut]: a value may be moved
+    out of one, which is reinitialized before the local ends, and none is dropped where it ends.
+    [passed] says how a parameter is passed where its binding does not, as for a lambda's. A value
+    read by value moves where [moving] holds of its type, every value by default; the rest copy. A
+    path is tracked where [tracks] holds of it. *)
 
 val owns : t -> Mir.local -> bool
 (** Whether a local owns its value, which its end drops. *)
 
 val lent_mut : t -> Mir.local -> bool
-(** Whether a local is another owner's place, lent to be changed. *)
+(** Whether a local is another owner's place lent [mut]. *)
 
 val places_given : t -> Mir.local -> int
 (** How many assignments give a local a place, so that it holds no value of its own. *)
@@ -73,7 +73,6 @@ val ended_by : Mir.statement -> Mir.local list
 (** The locals a statement ends. *)
 
 type state
-(** What may hold a value at one point. *)
 
 val entry : t -> Mir.block -> state
 (** The state where a block starts, which the caller may change. *)
@@ -120,11 +119,4 @@ val held_at_entry : t -> path list
 (** The flagged paths that hold a value on entry: the parameters'. *)
 
 val given_on_entry : t -> Mir.block -> path list
-(** The flagged paths that the way into a block gives a value: a loop's part, where the block is the
-    body of a loop that pulls values. *)
-
 val kept_by_cursor : t -> Mir.body -> Mir.local list
-(** The locals that the cursor of a pulled method keeps from one call of its [next] to the next: its
-    parameters, each local that code after a [yield] reads, and each that may hold a value with
-    something to drop where a [yield] stops, which a cursor dropped there drops. A read of a local
-    that views other locals' places reads those too. *)

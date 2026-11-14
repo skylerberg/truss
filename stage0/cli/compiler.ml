@@ -16,7 +16,6 @@ let target () =
   | Some system -> Memory_layout.target_64 system
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
-(* Adds the instances a compiler asks keys for to the session's roots. *)
 let want session context lowering wanted =
   Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted)
 

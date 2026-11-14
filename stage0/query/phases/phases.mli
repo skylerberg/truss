@@ -38,7 +38,6 @@ val linking : Query.phase
 (** Each instance's references, and the hash of its own code *)
 
 val recursion : Query.phase
-(** Which instances reach themselves *)
 
 val keys : Query.phase
 (** The key of everything an instance can reach *)

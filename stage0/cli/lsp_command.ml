@@ -175,7 +175,6 @@ let write_message output body =
 type server = {
   write : Json.t -> unit;
   check : root:string -> encoding -> (string * string) list -> string option;
-      (** The JSON text of [check], computed where commands run, or [None] if the check failed. *)
   mutable root : string;
   mutable encoding : encoding;
   mutable buffers : (string * string) list;  (** Each open file's text, by its URI. *)
@@ -383,9 +382,6 @@ let serve ~input ~output ~check =
   in
   loop false
 
-(* The hidden command [__check-buffers ROOT ENCODING URI TEXT ...], which
-   the server runs where commands run, and which prints [check]'s
-   result. *)
 let check_buffers = function
   | root :: encoding :: rest ->
       let rec pairs = function uri :: text :: rest -> (uri, text) :: pairs rest | _ -> [] in

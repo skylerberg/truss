@@ -157,13 +157,12 @@ type t = {
   inside : int list array;  (** For each path, the tracked paths within it, itself included *)
   parameters : Mir.local list;
   owner : Mir.local -> bool;
-  lent : Mir.local -> bool;  (** Whether a local is another owner's place, lent to be changed *)
+  lent : Mir.local -> bool;  (** Whether a local is another owner's place lent [mut] *)
   moving : Types.ty -> bool;
   aliases : (Mir.local, int) Hashtbl.t;  (** How many assignments give each local a place *)
   built : (Mir.local, Mir.rvalue list) Hashtbl.t;
       (** The values assigned to each lent local built around places *)
   loop_parts : (Mir.block, Mir.local list) Hashtbl.t;
-      (** The parts that the way into each loop's body gives values *)
   entries : state array;  (** The state where each block starts *)
   mutable flagged : int list;
 }
@@ -312,8 +311,6 @@ let inside analysis path =
         (fun inner -> if inner = position then None else Some analysis.paths.(inner))
         analysis.inside.(position)
 
-(* The tracked paths inside a path that no other tracked path inside it
-   holds. *)
 let children analysis position =
   let within = List.filter (fun inner -> inner <> position) analysis.inside.(position) in
   List.filter
@@ -325,9 +322,6 @@ let children analysis position =
            within))
     within
 
-(* Marks the paths whose drop here needs a flag: one that may or may not
-   hold a value, and each part of one that may hold a value that may not,
-   since such a part is dropped on its own. *)
 let rec need_flags analysis state position =
   if state.maybe_holds.(position) then begin
     if state.maybe_empty.(position) && not (List.mem position analysis.flagged) then
@@ -365,10 +359,6 @@ let given_on_entry analysis block =
         (affected_local analysis local))
     (Option.value (Hashtbl.find_opt analysis.loop_parts block) ~default:[])
 
-(* The state a terminator passes to one of its successors: a loop that pulls
-   values gives its part one on the way into its body, and an exit from
-   tasks ends the scopes it leaves on the way to its target, not where the
-   task ends without it. *)
 let into analysis state (terminator : Mir.terminator) successor =
   match terminator with
   | For { iteration = Pull _; part; body; _ } when successor = body ->
@@ -383,8 +373,8 @@ let into analysis state (terminator : Mir.terminator) successor =
       state
   | _ -> state
 
-(* Which locals own their values and which are another owner's places,
-   lent to be changed. A local that an assignment gives a place holds no
+(* Which locals own their values and which are another owner's places
+   lent [mut]. A local that an assignment gives a place holds no
    value of its own, nor does a capture, which is the enclosing body's.
    [passed] says how a parameter is passed where its binding does not:
    a lambda's parameters are patterns, and its function type says how each
@@ -549,18 +539,10 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
         start.maybe_empty.(position) <- not holds)
       paths
   end;
-  (* The end of an iteration goes on to the loop's next iteration, or past
-     the loop, with what the iteration left: the loop's operands are read
-     once, before its first iteration. *)
+  (* The end of an iteration flows to the loop's next iteration and to the
+     block after the loop. The loop's operands are evaluated once, before
+     its first iteration. *)
   let loops = Mir.iteration_loops body in
-  let successors block terminator =
-    match Hashtbl.find_opt loops block with
-    | Some loop -> (
-        match body.blocks.(loop).terminator with
-        | For { body = first; after; _ } -> first :: after :: Mir.successors terminator
-        | _ -> Mir.successors terminator)
-    | None -> Mir.successors terminator
-  in
   let reached = Array.make (Array.length body.blocks) false in
   if Array.length body.blocks > 0 then reached.(0) <- true;
   let join into state =
@@ -608,7 +590,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
                 changed := true
               end
               else if join analysis.entries.(successor) state then changed := true)
-            (successors block basic.terminator)
+            (Mir.block_successors body loops block)
         end)
       body.blocks
   done;
@@ -665,10 +647,6 @@ let place_locals (place : Mir.place) =
 let use_locals uses = List.concat_map (fun use -> place_locals use.place) uses
 let every _ = true
 
-(* The locals a statement reads and those it gives a whole value, in
-   [state], where it runs. A write to a part of a local reads the rest of
-   it, and an end of a local that may hold a value with something to drop
-   reads it, since its drop does. *)
 let reads_and_writes analysis state (statement : Mir.statement) =
   match statement.kind with
   | Live locals -> ([], locals)
@@ -722,8 +700,6 @@ let kept_by_cursor analysis (body : Mir.body) =
     | local :: rest -> with_sources (local :: seen) (sources.(local) @ rest)
   in
   let reads locals = with_sources [] locals in
-  (* What each statement reads and writes, which the moves before it
-     decide for an end. *)
   let effects =
     Array.mapi
       (fun block (basic : Mir.basic_block) ->
@@ -741,9 +717,6 @@ let kept_by_cursor analysis (body : Mir.body) =
   let union into locals =
     Array.iteri (fun local is_live -> if is_live then into.(local) <- true) locals
   in
-  (* What is live where a loop goes on to its next iteration: its body less
-     its part, which the loop gives a value, what follows it, and the cursor
-     it pulls from. *)
   let next_iteration block =
     let after = Array.make count false in
     (match body.blocks.(block).terminator with
@@ -787,8 +760,6 @@ let kept_by_cursor analysis (body : Mir.body) =
       end
     done
   done;
-  (* At each [yield]: what the code after it reads, and what may hold a
-     value with something to drop, which dropping the cursor there drops. *)
   let kept = Array.make count false in
   List.iter (fun local -> kept.(local) <- true) body.parameters;
   Array.iteri

@@ -27,14 +27,6 @@ let table = Generated.table
 let locked_table = Generated.locked_table
 let any_table = Generated.any_table
 
-(* Binds the parameters of the code being lowered: each as the calling
-   convention passes it, or, in a pulled method, in a field of its
-   [cursor], as [Convention.held] says, named by its place among the
-   arguments the cursor holds. The function owns each [own] one, which the
-   move analysis of its MIR drops where it returns. Gives each one's local,
-   if it arrives in one, with its mode, its type, for one with a default,
-   its bit in the mask of defaults passed, and its place; and how many
-   arguments the cursor holds. *)
 let bind_parameters ?cursor st (body : Mir.body) =
   let defaults = ref 0 and held = ref 0 in
   let bound =
@@ -68,10 +60,6 @@ let bind_parameters ?cursor st (body : Mir.body) =
   in
   (bound, !held)
 
-(* The start every function from source shares, after its result's slot:
-   its parameters, the mask of defaults passed, and the evidence it is
-   given, with its defaults filled in. Returns every parameter's local in
-   order, and each parameter's place. *)
 let begin_body st ~(body : Mir.body) =
   let code = st.frame.code in
   let bound, _ = bind_parameters st body in
@@ -102,14 +90,6 @@ let member : Lowered.ty -> Memory_layout.member = function
   | Pointer { target = Value ty; _ } -> Raw (Pointer (Data ty))
   | Pointer _ | Environment _ | Evidence _ -> bug "a value a cursor cannot hold"
 
-(* The pulled version of a yielding method: a state machine over a cursor,
-   which holds the method's arguments and the values it keeps from one
-   [yield] to the next. Its [next] runs the method from where it stopped to
-   its next [yield], and gives the value yielded in [Some], or [None] once
-   the method returns. Its drop function drops what the cursor holds: the
-   arguments it owns before the method starts, where an argument with a
-   default is there only when the mask of defaults passed has its bit, and
-   after a [yield], what the method owns there. *)
 let pulled context (yielding : Ground.yielding) : pulled =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let body = (Mir_form.mir_of context yielding.method_).body in
