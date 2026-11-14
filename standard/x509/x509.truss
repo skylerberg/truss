@@ -66,6 +66,7 @@ public opaque type Certificate(
   path_length: Option[UInt64],
   signs_certificates: Bool,
   serves: Bool,
+  authenticates_clients: Bool,
   dns_names: List[String],
   ip_addresses: List[network::IpAddress],
   common_name: Option[String],
@@ -297,6 +298,7 @@ type Extensions(
   path_length: Option[UInt64],
   signs_certificates: Bool,
   serves: Bool,
+  authenticates_clients: Bool,
   dns_names: List[String],
   ip_addresses: List[network::IpAddress],
   unknown_critical: Bool,
@@ -324,6 +326,7 @@ fn read_extensions(list: der::Value) -> Option[Extensions] {
     path_length: None,
     signs_certificates: true,
     serves: true,
+    authenticates_clients: true,
     dns_names: [],
     ip_addresses: [],
     unknown_critical: false,
@@ -355,12 +358,18 @@ fn read_extensions(list: der::Value) -> Option[Extensions] {
       }
     } else if is_oid(identifier, expected: "551d25") {
       var serves = false
+      var authenticates_clients = false
       for usage in items_of(content) {
-        if is_oid(usage, expected: "2b06010505070301") || is_oid(usage, expected: "551d2500") {
+        let is_any = is_oid(usage, expected: "551d2500")
+        if is_any || is_oid(usage, expected: "2b06010505070301") {
           serves = true
+        }
+        if is_any || is_oid(usage, expected: "2b06010505070302") {
+          authenticates_clients = true
         }
       }
       found.serves = serves
+      found.authenticates_clients = authenticates_clients
     } else if is_oid(identifier, expected: "551d11") {
       for general in items_of(content) {
         match general {
@@ -438,6 +447,7 @@ public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
     path_length: None,
     signs_certificates: true,
     serves: true,
+    authenticates_clients: true,
     dns_names: [],
     ip_addresses: [],
     unknown_critical: false,
@@ -473,6 +483,7 @@ public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
     path_length: extensions.path_length,
     signs_certificates: extensions.signs_certificates,
     serves: extensions.serves,
+    authenticates_clients: extensions.authenticates_clients,
     dns_names: own extensions.dns_names,
     ip_addresses: own extensions.ip_addresses,
     common_name: common_name_of(fields[index + 4]),
@@ -631,6 +642,7 @@ public type VerifyError =
   | PathTooLong
   | WrongHost
   | NotForServers
+  | NotForClients
   | UnsupportedCritical
   | Empty
   derives Equal
@@ -646,6 +658,7 @@ impl Display for VerifyError {
       PathTooLong => mut output.write("the chain is longer than an authority allows")
       WrongHost => mut output.write("the certificate is not for this host")
       NotForServers => mut output.write("the certificate is not for servers")
+      NotForClients => mut output.write("the certificate is not for clients")
       UnsupportedCritical => mut output.write("a certificate has a critical extension that is not supported")
       Empty => mut output.write("there is no certificate")
     }
@@ -684,6 +697,28 @@ public fn verify_chain(
   if !leaf.matches_host(host) {
     return Err(VerifyError.WrongHost)
   }
+  verify_path(chain, roots: roots, now: now)
+}
+
+public fn verify_client_chain(chain: Slice[Certificate], roots: Slice[Certificate], now: Instant) -> Result[Unit, VerifyError]
+  uses Panic
+{
+  if chain.is_empty() {
+    return Err(VerifyError.Empty)
+  }
+  let leaf = chain[0]
+  check_time(leaf, now: now)?
+  if !leaf.authenticates_clients {
+    return Err(VerifyError.NotForClients)
+  }
+  verify_path(chain, roots: roots, now: now)
+}
+
+fn verify_path(chain: Slice[Certificate], roots: Slice[Certificate], now: Instant) -> Result[Unit, VerifyError]
+  uses Panic
+  requires chain.length() >= 1
+{
+  let leaf = chain[0]
   var current = leaf.copy()
   var below: UInt64 = 0
   var steps: USize = 0

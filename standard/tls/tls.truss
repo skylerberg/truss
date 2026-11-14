@@ -272,9 +272,25 @@ fn open_record(keys: mut Keys, header: Slice[UInt8], sealed: Slice[UInt8]) -> Re
   }
 }
 
-public type ClientConfig(roots: List[x509::Certificate], protocols: List[String] = [], verify: Bool = true)
+public type Identity(chain: List[x509::Certificate], key: x509::PrivateKey)
 
-public type ServerConfig(chain: List[x509::Certificate], key: x509::PrivateKey, protocols: List[String] = [])
+public type ClientCertificates = Ignored | Verified | Required
+  derives Equal
+
+public type ClientConfig(
+  roots: List[x509::Certificate],
+  protocols: List[String] = [],
+  verify: Bool = true,
+  identity: Option[Identity] = None,
+)
+
+public type ServerConfig(
+  chain: List[x509::Certificate],
+  key: x509::PrivateKey,
+  protocols: List[String] = [],
+  client_certificates: ClientCertificates = ClientCertificates.Ignored,
+  client_roots: List[x509::Certificate] = [],
+)
 
 type Message(kind: UInt8, body: List[UInt8], raw: List[UInt8])
 
@@ -997,12 +1013,12 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
 
   var message = read_message(mut wire)?
   var request_context: Option[List[UInt8]] = None
+  var requested_schemes: List[Extension] = []
   if message.kind == 13 {
-    let length: USize = if message.body.is_empty() { 0 } else { intrinsic::convert(message.body[0]) }
-    if message.body.length() < 1 + length {
-      return Err(protocol_error("a malformed CertificateRequest"))
-    }
-    request_context = Some(message.body[1..1 + length].to_list())
+    var request_decoder = binary::Decoder.new(message.body.slice())
+    let length: USize = intrinsic::convert(decoded(mut request_decoder.uint8())?)
+    request_context = Some(decoded(mut request_decoder.bytes(length))?.to_list())
+    requested_schemes = read_extensions(mut request_decoder)?
     mut wire.transcript.append_slice(message.raw.slice())
     message = read_message(mut wire)?
   }
@@ -1022,26 +1038,8 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
   mut wire.transcript.append_slice(message.raw.slice())
 
   let verify = expect_message(mut wire, kind: 15)?
-  let scheme = match u16_at(verify.body.slice(), at: 0) {
-    Some(scheme) => scheme
-    None => return Err(protocol_error("a malformed CertificateVerify"))
-  }
-  let signature_length = match u16_at(verify.body.slice(), at: 2) {
-    Some(length) => length
-    None => return Err(protocol_error("a malformed CertificateVerify"))
-  }
-  if verify.body.length() < 4 || verify.body.length() - 4 != signature_length {
-    return Err(protocol_error("a malformed CertificateVerify"))
-  }
-  let algorithm = match scheme_algorithm(scheme) {
-    Some(algorithm) => algorithm
-    None => return Err(protocol_error("a signature scheme that was not offered"))
-  }
   let transcript_digest = function.digest(wire.transcript.slice())
-  let content = signed_content("TLS 1.3, server CertificateVerify", digest: transcript_digest.slice())
-  if !chain[0].public_key().verify(algorithm, message: content.slice(), signature: verify.body[4..]) {
-    return Err(Error.Alert(description: 51))
-  }
+  check_certificate_verify(verify, chain: chain.slice(), label: "TLS 1.3, server CertificateVerify", digest: transcript_digest.slice())?
   mut wire.transcript.append_slice(verify.raw.slice())
 
   let finished = expect_message(mut wire, kind: 20)?
@@ -1056,10 +1054,23 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
   let server_application = derive_secret(function, secret: master.slice(), label: "s ap traffic", transcript: wire.transcript.slice())
   match request_context {
     Some(context) => {
-      var empty: List[UInt8] = []
-      push_vector8(mut empty, content: context.slice())
-      push_u24(mut empty, value: 0)
-      write_message(mut wire, kind: 11, body: empty.slice())?
+      let scheme = match config.identity {
+        Some(identity) => signing_scheme(identity.key, extensions: requested_schemes.slice())
+        None => None
+      }
+      match config.identity, scheme {
+        Some(identity), Some(client_scheme) => {
+          write_message(mut wire, kind: 11, body: certificate_body(context.slice(), chain: identity.chain.slice()).slice())?
+          let client_digest = function.digest(wire.transcript.slice())
+          let client_content = signed_content("TLS 1.3, client CertificateVerify", digest: client_digest.slice())
+          let client_signature = sign(identity.key, content: client_content.slice())
+          var client_verify: List[UInt8] = []
+          push_u16(mut client_verify, value: client_scheme)
+          push_vector16(mut client_verify, content: client_signature.slice())
+          write_message(mut wire, kind: 15, body: client_verify.slice())?
+        }
+        _, _ => write_message(mut wire, kind: 11, body: certificate_body(context.slice(), chain: []).slice())?
+      }
     }
     None => {}
   }
@@ -1171,6 +1182,61 @@ fn supported_group(extensions: Slice[Extension]) -> Option[USize] {
   }
 }
 
+fn check_certificate_verify(
+  verify: Message,
+  chain: Slice[x509::Certificate],
+  label: StringSlice,
+  digest: Slice[UInt8],
+) -> Result[Unit, Error]
+  uses Panic
+{
+  if chain.is_empty() {
+    return Err(Error.Certificate(error: x509::VerifyError.Empty))
+  }
+  let scheme = match u16_at(verify.body.slice(), at: 0) {
+    Some(scheme) => scheme
+    None => return Err(protocol_error("a malformed CertificateVerify"))
+  }
+  let signature_length = match u16_at(verify.body.slice(), at: 2) {
+    Some(length) => length
+    None => return Err(protocol_error("a malformed CertificateVerify"))
+  }
+  if verify.body.length() < 4 || verify.body.length() - 4 != signature_length {
+    return Err(protocol_error("a malformed CertificateVerify"))
+  }
+  let algorithm = match scheme_algorithm(scheme) {
+    Some(algorithm) => algorithm
+    None => return Err(protocol_error("a signature scheme that was not offered"))
+  }
+  let content = signed_content(label, digest: digest)
+  if !chain[0].public_key().verify(algorithm, message: content.slice(), signature: verify.body[4..]) {
+    return Err(Error.Alert(description: 51))
+  }
+  Ok(Unit)
+}
+
+fn certificate_body(context: Slice[UInt8], chain: Slice[x509::Certificate]) -> List[UInt8] {
+  var entries: List[UInt8] = []
+  for certificate in chain {
+    push_vector24(mut entries, content: certificate.encoded())
+    push_u16(mut entries, value: 0)
+  }
+  var body: List[UInt8] = []
+  push_vector8(mut body, content: context)
+  push_vector24(mut body, content: entries.slice())
+  body
+}
+
+fn signature_algorithms() -> List[UInt8] {
+  var listed: List[UInt8] = []
+  for scheme in signature_schemes {
+    push_u16(mut listed, value: intrinsic::convert(scheme))
+  }
+  var encoded: List[UInt8] = []
+  push_vector16(mut encoded, content: listed.slice())
+  encoded
+}
+
 fn signing_scheme(key: x509::PrivateKey, extensions: Slice[Extension]) -> Option[USize]
   uses Panic
 {
@@ -1245,7 +1311,7 @@ fn server_hello(random: Slice[UInt8], session: Slice[UInt8], suite: Suite, share
 }
 
 public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConfig) -> Result[Connection[Stream], Error]
-  uses Handles, Tasks, Random, Panic
+  uses Handles, Tasks, Random, Clock, Panic
 {
   var wire = Wire(stream: own stream, raw: [], receiving: None, sending: None, buffered: [], transcript: [])
   var message = expect_message(mut wire, kind: 1)?
@@ -1317,14 +1383,17 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
   push_vector16(mut extensions, content: encrypted.slice())
   write_message(mut wire, kind: 8, body: extensions.slice())?
 
-  var entries: List[UInt8] = []
-  for certificate in config.chain {
-    push_vector24(mut entries, content: certificate.encoded())
-    push_u16(mut entries, value: 0)
+  let requests_certificate = config.client_certificates != ClientCertificates.Ignored
+  if requests_certificate {
+    var requested: List[UInt8] = []
+    push_vector8(mut requested, content: [])
+    var request_extensions: List[UInt8] = []
+    extension(mut request_extensions, kind: 13, content: signature_algorithms().slice())
+    push_vector16(mut requested, content: request_extensions.slice())
+    write_message(mut wire, kind: 13, body: requested.slice())?
   }
-  var certificates: List[UInt8] = [0]
-  push_vector24(mut certificates, content: entries.slice())
-  write_message(mut wire, kind: 11, body: certificates.slice())?
+
+  write_message(mut wire, kind: 11, body: certificate_body([], chain: config.chain.slice()).slice())?
 
   let transcript_digest = function.digest(wire.transcript.slice())
   let content = signed_content("TLS 1.3, server CertificateVerify", digest: transcript_digest.slice())
@@ -1341,6 +1410,27 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
   let server_application = derive_secret(function, secret: master.slice(), label: "s ap traffic", transcript: wire.transcript.slice())
   wire.sending = traffic(suite, secret: server_application.slice())
 
+  var peer: List[x509::Certificate] = []
+  if requests_certificate {
+    let presented = expect_message(mut wire, kind: 11)?
+    peer = parse_certificates(presented.body.slice())?
+    mut wire.transcript.append_slice(presented.raw.slice())
+    if peer.is_empty() {
+      if config.client_certificates == ClientCertificates.Required {
+        return Err(Error.Alert(description: 116))
+      }
+    } else {
+      match x509::verify_client_chain(peer.slice(), roots: config.client_roots.slice(), now: Clock.now()) {
+        Ok(_) => {}
+        Err(error) => return Err(Error.Certificate(error: error))
+      }
+      let client_verify = expect_message(mut wire, kind: 15)?
+      let client_digest = function.digest(wire.transcript.slice())
+      check_certificate_verify(client_verify, chain: peer.slice(), label: "TLS 1.3, client CertificateVerify", digest: client_digest.slice())?
+      mut wire.transcript.append_slice(client_verify.raw.slice())
+    }
+  }
+
   let finished = expect_message(mut wire, kind: 20)?
   let expected = finished_data(function, base: client_handshake.slice(), transcript: wire.transcript.slice())
   if !cryptography::constant_time_equal(finished.body.slice(), second: expected.slice()) {
@@ -1353,7 +1443,7 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
     receiving_secret: own client_application,
     sending_secret: own server_application,
     protocol: own protocol,
-    peer: [],
+    peer: own peer,
   ))
 }
 

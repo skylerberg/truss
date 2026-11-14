@@ -237,6 +237,7 @@ public type Request(
   body: Body = Body(source: Source.Memory(bytes: [], position: 0), pending: [], limit: 0, received: 0),
   peer: Option[network::SocketAddress] = None,
   client: Option[network::IpAddress] = None,
+  client_certificates: List[x509::Certificate] = [],
 )
 
 public fn Request.path(self) -> StringSlice {
@@ -375,7 +376,7 @@ fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
         return Ok(None)
       }
       let piece = match mut link {
-        Plain(connection, inbox) => next_piece(connection, inbox: mut inbox, framing: mut framing)
+        Plain(connection, inbox, ..) => next_piece(connection, inbox: mut inbox, framing: mut framing)
         Secure(connection, inbox) => next_piece(connection, inbox: mut inbox, framing: mut framing)
         Multiplexed(session) => match two::next_data(mut session, stream: stream) {
           Ok(data) => Ok(own data)
@@ -1514,6 +1515,7 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
   peer: Option[network::SocketAddress],
+  certificates: Slice[x509::Certificate],
 )
   uses Tasks, Handles, Clock, Granted
 {
@@ -1578,6 +1580,7 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
           body: channel_body(chunks, credit: None, limit: body_limit),
           peer: peer,
           client: client,
+          client_certificates: certificates.to_list(),
         )
         var responder = new_responder(outbound, stream: 0, is_head: is_head)
         let outcome = run_handler(handler, request: own request, responder: mut responder, gone: gone, seconds: options.request_timeout_seconds)
@@ -1693,6 +1696,7 @@ fn answer_arrival[capability Granted](
   handler: (fn(own Request, mut Responder) uses Granted),
   options: ServerOptions,
   peer: Option[network::SocketAddress],
+  certificates: Slice[x509::Certificate],
 )
   uses Tasks, Clock, Granted
 {
@@ -1712,6 +1716,7 @@ fn answer_arrival[capability Granted](
         body: channel_body(arrival.chunks.copy(), credit: own credit, limit: limits.body_bytes),
         peer: peer,
         client: client,
+        client_certificates: certificates.to_list(),
       )
       let outcome = run_handler(handler, request: own request, responder: mut responder, gone: arrival.cancelled, seconds: options.request_timeout_seconds)
       if outcome == Handled.Completed {
@@ -1750,10 +1755,10 @@ fn serve_connection[capability Granted](
   }
   if inbox.bytes[0..3] == "PRI".bytes() {
     two::serve(opened, inbox: own inbox, header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
-      answer_arrival(own arrival, handler: handler, options: options, peer: peer)
+      answer_arrival(own arrival, handler: handler, options: options, peer: peer, certificates: [])
     })
   } else {
-    serve_one(opened, inbox: own inbox, handler: handler, options: options, stopping: stopping, peer: peer)
+    serve_one(opened, inbox: own inbox, handler: handler, options: options, stopping: stopping, peer: peer, certificates: [])
   }
   let _ = opened.close_sending()
 }
@@ -1792,10 +1797,10 @@ fn serve_secured[capability Granted](
   }
   if secured.protocol() == Some("h2".slice()) {
     two::serve(secured, inbox: two::Inbox(bytes: []), header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
-      answer_arrival(own arrival, handler: handler, options: options, peer: peer)
+      answer_arrival(own arrival, handler: handler, options: options, peer: peer, certificates: secured.peer_certificates())
     })
   } else {
-    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options, stopping: stopping, peer: peer)
+    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options, stopping: stopping, peer: peer, certificates: secured.peer_certificates())
   }
   let _ = secured.close_sending()
 }
@@ -2123,8 +2128,145 @@ public type ClientOptions(
   redirects: USize = 10,
   retry: RetryPolicy = RetryPolicy(),
   stores_cookies: Bool = false,
+  proxy: Option[Proxy] = None,
+  identity: Option[tls::Identity] = None,
 )
+
+public type Proxy(http: Option[url::Url] = None, https: Option[url::Url] = None, excluded: List[String] = [])
   derives Equal
+
+fn first_variable(names: Slice[String]) -> Option[String]
+  uses Environment
+{
+  for name in names {
+    match Environment.variable(name.slice()) {
+      Some(value) => {
+        if !value.slice().trim().is_empty() {
+          return Some(value.slice().trim().to_string())
+        }
+      }
+      None => {}
+    }
+  }
+  None
+}
+
+fn proxy_url(text: own Option[String]) -> Option[url::Url] {
+  let value = match own text {
+    Some(value) => own value
+    None => return None
+  }
+  let full = if value.slice().contains("://") { own value } else { "http://${value}" }
+  url::parse(full.slice()).ok()
+}
+
+public fn proxy_from_environment() -> Option[Proxy]
+  uses Environment
+{
+  let http = proxy_url(first_variable(["HTTP_PROXY", "http_proxy"].slice()))
+  let https = proxy_url(first_variable(["HTTPS_PROXY", "https_proxy"].slice()))
+  if http is None && https is None {
+    return None
+  }
+  var excluded: List[String] = []
+  match first_variable(["NO_PROXY", "no_proxy"].slice()) {
+    Some(listed) => {
+      for entry in listed.slice().split(",") {
+        let trimmed = entry.trim()
+        if !trimmed.is_empty() {
+          mut excluded.push(trimmed.to_ascii_lowercase())
+        }
+      }
+    }
+    None => {}
+  }
+  Some(Proxy(http: own http, https: own https, excluded: own excluded))
+}
+
+fn network_of(entry: StringSlice) -> Option[network::IpNetwork] {
+  let slash = entry.find("/")?
+  let halves = entry.split_at(slash)
+  let address = network::parse_address(halves.first).ok()?
+  let length = UInt8.parse(halves.second.strip_prefix("/").unwrap_or("")).ok()?
+  network::IpNetwork.new(address, prefix_length: length)
+}
+
+fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
+  let name = host.strip_prefix("[").unwrap_or(host)
+  let bare = name.strip_suffix("]").unwrap_or(name).to_ascii_lowercase()
+  for entry in excluded {
+    let listed = entry.slice()
+    if listed == "*".slice() {
+      return true
+    }
+    match network_of(listed) {
+      Some(network) => {
+        match network::parse_address(bare.slice()) {
+          Ok(address) => {
+            if network.contains(address) {
+              return true
+            }
+          }
+          Err(_) => {}
+        }
+        continue
+      }
+      None => {}
+    }
+    let suffix = listed.strip_prefix(".").unwrap_or(listed)
+    if bare.slice() == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}".slice())) {
+      return true
+    }
+  }
+  false
+}
+
+fn proxy_for(options: ClientOptions, host: StringSlice, is_secure: Bool) -> Option[url::Url] {
+  match options.proxy {
+    Some(proxy) => {
+      if is_excluded(proxy.excluded.slice(), host: host) {
+        None
+      } else if is_secure {
+        proxy.https.copy()
+      } else {
+        proxy.http.copy()
+      }
+    }
+    None => None
+  }
+}
+
+fn basic_authorization(proxy: url::Url) -> Option[String] {
+  let information = proxy.user_information()?
+  let decoded = match url::decode_component(information) {
+    Ok(text) => own text
+    Err(_) => information.to_string()
+  }
+  Some("Basic ${base64::encode(decoded.slice().bytes())}")
+}
+
+type Forwarding(authorization: Option[String])
+
+fn tunnel(connection: mut network::Connection, host: StringSlice, port: UInt16, authorization: Option[String], limits: Limits) -> Result[Unit, Error]
+  uses Handles, Tasks
+{
+  var request = "CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n"
+  match authorization {
+    Some(value) => mut request.push("Proxy-Authorization: ${value}\r\n".slice())
+    None => {}
+  }
+  mut request.push("\r\n")
+  system(connection.send_all(request.slice().bytes()))?
+  var inbox = two::Inbox(bytes: [])
+  let opening = read_status(connection, inbox: mut inbox, limits: limits)?
+  if opening.status.code < 200 || opening.status.code > 299 {
+    return Err(Error.Unsupported(message: "a proxy that refused the tunnel with status ${opening.status.code}"))
+  }
+  if !inbox.bytes.is_empty() {
+    return Err(malformed("a proxy that sent bytes after accepting the tunnel"))
+  }
+  Ok(Unit)
+}
 
 fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: Limits) -> Result[Response, Error] {
   if !has_token(headers.get("Content-Encoding"), token: "gzip") {
@@ -2170,11 +2312,28 @@ fn sends_length(method: Method, body_length: USize) -> Bool {
   body_length > 0 || method == Method.Post || method == Method.Put || method == Method.Patch
 }
 
-fn request_head(method: Method, url: url::Url, headers: Headers, body_length: USize) -> List[UInt8] {
+fn request_head(method: Method, url: url::Url, headers: Headers, body_length: USize, forwarding: Option[Forwarding] = None) -> List[UInt8] {
   var head: List[UInt8] = List.with_capacity(256)
   push_text(mut head, text: "${method} ".slice())
-  push_text(mut head, text: request_target(url).slice())
-  push_text(mut head, text: " HTTP/1.1\r\n")
+  match forwarding {
+    Some(forward) => {
+      push_text(mut head, text: "${url.scheme()}://${authority_of(url)}".slice())
+      push_text(mut head, text: request_target(url).slice())
+      push_text(mut head, text: " HTTP/1.1\r\n")
+      match forward.authorization {
+        Some(value) => {
+          push_text(mut head, text: "Proxy-Authorization: ")
+          push_text(mut head, text: value.slice())
+          push_text(mut head, text: "\r\n")
+        }
+        None => {}
+      }
+    }
+    None => {
+      push_text(mut head, text: request_target(url).slice())
+      push_text(mut head, text: " HTTP/1.1\r\n")
+    }
+  }
   if !headers.contains("Host") {
     push_text(mut head, text: "Host: ")
     push_text(mut head, text: authority_of(url).slice())
@@ -2228,7 +2387,7 @@ fn multiplexing_error(failure: two::Failure) -> Error {
 }
 
 type Link =
-  | Plain(connection: network::Connection, inbox: two::Inbox)
+  | Plain(connection: network::Connection, inbox: two::Inbox, forwarding: Option[Forwarding])
   | Secure(connection: tls::Connection[network::Connection], inbox: two::Inbox)
   | Multiplexed(session: two::Session[tls::Connection[network::Connection]])
 
@@ -2283,11 +2442,15 @@ fn read_status[Stream: streams::Duplex](
 fn start_plain(link: own Link, method: Method, url: url::Url, headers: Headers, body: Slice[UInt8], limits: Limits) -> Result[Started, Error]
   uses Handles, Tasks
 {
-  var request = request_head(method, url: url, headers: headers, body_length: body.length())
+  let forwarding = match link {
+    Plain(forwarding, ..) => forwarding.copy()
+    _ => None
+  }
+  var request = request_head(method, url: url, headers: headers, body_length: body.length(), forwarding: forwarding)
   mut request.append_slice(body)
   var opened = own link
   let opening = match mut opened {
-    Plain(connection, inbox) => {
+    Plain(connection, inbox, ..) => {
       system(connection.send_all(request.slice()))?
       read_status(connection, inbox: mut inbox, limits: limits)?
     }
@@ -2383,17 +2546,38 @@ fn open_link(
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic
 {
   let timeout = timeout_of(options.timeout_seconds)
-  var connection = system(network::connect(host, port: port, timeout: timeout))?
+  let route = proxy_for(options, host: host, is_secure: is_secure)
+  var connection = match route {
+    Some(proxy) => {
+      if proxy.scheme() != "http".slice() {
+        return Err(Error.Unsupported(message: "a proxy whose scheme is not http"))
+      }
+      let proxy_host = match proxy.host() {
+        Some(name) => "${name}"
+        None => return Err(malformed("a proxy URL with no host"))
+      }
+      system(network::connect(proxy_host.slice(), port: proxy.port().unwrap_or(80), timeout: timeout))?
+    }
+    None => system(network::connect(host, port: port, timeout: timeout))?
+  }
   let _ = mut connection.set_read_timeout(timeout)
   let _ = mut connection.set_write_timeout(timeout)
+  let authorization = match route {
+    Some(proxy) => basic_authorization(proxy)
+    None => None
+  }
   if !is_secure {
-    return Ok(Link.Plain(connection: own connection, inbox: two::Inbox(bytes: [])))
+    let forwarding = if route is Some(_) { Some(Forwarding(authorization: own authorization)) } else { None }
+    return Ok(Link.Plain(connection: own connection, inbox: two::Inbox(bytes: []), forwarding: own forwarding))
+  }
+  if route is Some(_) {
+    tunnel(mut connection, host: host, port: port, authorization: authorization, limits: options.limits)?
   }
   let trusted = match roots {
     Ok(trusted) => trusted.copy()
     Err(error) => return Err(Error.System(error: error))
   }
-  let config = tls::ClientConfig(roots: own trusted, protocols: own protocols)
+  let config = tls::ClientConfig(roots: own trusted, protocols: own protocols, identity: options.identity.copy())
   let secured = match tls::connect(own connection, host: host, config: config) {
     Ok(secured) => own secured
     Err(error) => return Err(Error.Tls(error: own error))
@@ -3321,7 +3505,12 @@ public fn Client.websocket[Output, capability Granted](
   let link = open_link(host.slice(), port: port, is_secure: is_secure, roots: self.roots, options: self.options, protocols: ["http/1.1"])?
   let seed = Random.next()
   match own link {
-    Plain(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
+    Plain(connection, inbox, forwarding) => {
+      if forwarding is Some(_) {
+        return Err(Error.Unsupported(message: "a ws:// WebSocket through an HTTP proxy"))
+      }
+      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
+    }
     Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
     Multiplexed(..) => Err(Error.Unsupported(message: "a WebSocket over HTTP/2"))
   }
