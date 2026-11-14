@@ -399,23 +399,26 @@ fn main(arguments: List[String]) -> ExitCode
   uses Console, NetworkServer, NetworkClient, Handles
 {
   let path = Path.new(arguments[1].slice())
-  if NetworkServer.listen_local(path) is Ok(opened) {
-    var listener = own opened
-    say("listening at the path ${listener.path() == path}")
-    if NetworkClient.connect_local(path) is Ok(made) {
-      var client = own made
-      if mut listener.accept() is Ok(moved) {
-        var server = own moved
-        let _ = mut client.write("ping".bytes())
-        var heard: List[UInt8] = []
-        if mut server.read(mut heard, limit: 100) is Ok(count) {
-          say("the server read ${count}")
+  match NetworkServer.listen_local(path) {
+    Ok(opened) => {
+      var listener = own opened
+      say("listening at the path ${listener.path() == path}")
+      if NetworkClient.connect_local(path) is Ok(made) {
+        var client = own made
+        if mut listener.accept() is Ok(moved) {
+          var server = own moved
+          let _ = mut client.write("ping".bytes())
+          var heard: List[UInt8] = []
+          if mut server.read(mut heard, limit: 100) is Ok(count) {
+            say("the server read ${count}")
+          }
         }
       }
+      if NetworkServer.listen_local(path) is Err(error) {
+        say("the path is taken ${error == SystemError.AddressInUse}")
+      }
     }
-    if NetworkServer.listen_local(path) is Err(error) {
-      say("the path is taken ${error == SystemError.AddressInUse}")
-    }
+    Err(error) => say("listening failed: ${error}")
   }
   if NetworkClient.connect_local(Path.new("${arguments[1]}.missing".slice())) is Err(_) {
     say("a missing path is refused")

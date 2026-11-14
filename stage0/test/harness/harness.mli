@@ -32,7 +32,8 @@ val expect_not_recomputed :
 
 val scratch : string -> string
 (** A new empty directory whose name starts with [name]. Each is inside one directory of this
-    process, which is removed when the process exits. *)
+    process under /tmp, which is removed when the process exits. The path is short enough to hold a
+    Unix socket. *)
 
 val write_files : string -> (string * string) list -> unit
 (** Writes files under a directory, each a path under it and its text, making directories as needed.

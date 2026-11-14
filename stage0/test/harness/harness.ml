@@ -123,9 +123,14 @@ let () =
       end
       else Printf.printf "%d tests pass\n" !count)
 
+(* The root is under /tmp, not TMPDIR. A test binds a Unix socket in its
+   scratch directory, and macOS limits a socket's path ([sun_path]) to 104
+   bytes. Dune on macOS sets TMPDIR for each action to a path of about 67
+   bytes, which leaves too few for the rest, so [listen_local] fails under
+   [dune test]. *)
 let scratch_root =
   lazy
-    (let root = Filename.temp_dir "truss-tests" "" in
+    (let root = Filename.temp_dir ~temp_dir:"/tmp" "truss-tests" "" in
      at_exit (fun () -> try File_system.remove root with Sys_error _ | Unix.Unix_error _ -> ());
      root)
 
