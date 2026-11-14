@@ -145,3 +145,10 @@ let note_line_break cursor line_break =
   if cursor.first_line_break <> None && cursor.line_is_blank then cursor.blank_line <- true;
   if cursor.first_line_break = None then cursor.first_line_break <- Some line_break;
   cursor.line_is_blank <- true
+
+(* Reports and skips [length] bytes that cannot start a token. *)
+let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message =
+  let start = cursor.position in
+  cursor.position <- start + length;
+  cursor.line_is_blank <- false;
+  report cursor ~code (span start (start + length)) message

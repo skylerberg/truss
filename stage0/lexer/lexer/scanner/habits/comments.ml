@@ -1,6 +1,6 @@
-(* The sequences from other languages that lex as whitespace: comments, `;`,
-   and characters Truss does not use. A comment or an attribute has no fix:
-   removing it would delete what its author wrote. *)
+(* The comments, attributes, and `;` of other languages, which lex as
+   whitespace. A comment or an attribute has no fix: removing it would delete
+   what its author wrote. *)
 
 open Cursor
 
@@ -66,43 +66,6 @@ let semicolon cursor =
     (span start (start + 1))
     "Statements end at a line break. Truss has no `;`."
 
-(* Reports and skips [length] bytes that cannot start a token. *)
-let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message =
-  let start = cursor.position in
-  cursor.position <- start + length;
-  cursor.line_is_blank <- false;
-  report cursor ~code (span start (start + length)) message
-
-let character_literal_end ?(after_prefix = false) cursor start =
-  let touches_name index =
-    let current = byte cursor index in
-    is_ascii_name_byte current || current >= 0x80
-  in
-  if (not after_prefix) && start > 0 && touches_name (start - 1) then None
-  else
-    let content = start + 1 in
-    let current = byte cursor content in
-    let close =
-      if current = Char.code '\\' then
-        let escaped = byte cursor (content + 1) in
-        if escaped = Char.code 'u' && byte cursor (content + 2) = Char.code '{' then
-          match String.index_from_opt cursor.text (content + 3) '}' with
-          | Some brace when brace - content <= 10 -> Some (brace + 1)
-          | _ -> None
-        else if List.mem escaped (List.map Char.code [ 'n'; 't'; 'r'; '0'; '\\'; '"'; '\'' ]) then
-          Some (content + 2)
-        else None
-      else if is_end_of_line current || current = Char.code '\'' then None
-      else
-        let packed = decode cursor content in
-        if packed < 0 || Unicode.is_forbidden (Unicode.decoded_code_point packed) then None
-        else Some (content + Unicode.decoded_length packed)
-    in
-    match close with
-    | Some close when byte cursor close = Char.code '\'' && not (touches_name (close + 1)) ->
-        Some (close + 1)
-    | _ -> None
-
 (* An attribute of Rust, `#[derive(...)]` or `#![...]`: like a comment, it
    lexes as nothing, up to the end of its line. *)
 let attribute cursor =
@@ -114,7 +77,42 @@ let attribute cursor =
     "Truss has no attributes. A type lists the traits it derives in a `derives` clause, and a test \
      is a `test` definition."
 
-(* Whether a run of `$` at [index] opens a raw string. *)
-let opens_raw_string cursor index =
-  let dollars = run_length cursor index dollar in
-  run_length cursor (index + dollars) quote >= 3
+(* A comment, an attribute, or a `;` at the cursor, skipped and reported.
+   Inside an interpolation, where it cannot end its line, it is rejected.
+   [false] when none starts there. *)
+let scan cursor ~inline =
+  let start = cursor.position in
+  let current = byte cursor start and next = byte cursor (start + 1) in
+  let is character = current = Char.code character in
+  let rejected ?code length message =
+    Source_text.reject ?code cursor ~length message;
+    true
+  in
+  if is '/' && (next = Char.code '/' || next = Char.code '*') then
+    if inline then rejected ~code:Comment 2 comment_message
+    else begin
+      if next = Char.code '/' then line_comment cursor else block_comment cursor;
+      true
+    end
+  else if
+    is '#'
+    && (next = Char.code '[' || (next = Char.code '!' && byte cursor (start + 2) = Char.code '['))
+  then
+    if inline then rejected ~code:Attribute 1 "Truss has no attributes."
+    else begin
+      attribute cursor;
+      true
+    end
+  else if is '#' then
+    if inline then rejected ~code:Comment 1 comment_message
+    else begin
+      line_comment cursor;
+      true
+    end
+  else if is ';' then
+    if inline then rejected ~code:Semicolon 1 "Truss has no `;`."
+    else begin
+      semicolon cursor;
+      true
+    end
+  else false
