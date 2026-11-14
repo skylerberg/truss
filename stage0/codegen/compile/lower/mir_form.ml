@@ -1,8 +1,8 @@
-(* Lowers a body from its MIR to the LIR, once {!Instance_mir} has inlined
+(* Lowers a body from its MIR to C, once {!Instance_mir} has inlined
    the lending and yielding methods it calls. The MIR has made every
    decision about the order of evaluation, the scope of temporaries and
    bindings, and the flow of patterns and loops, so this lowering decides
-   only what is the LIR's: pointers, layout, the calling convention, drops,
+   only what is C's: pointers, layout, the calling convention, drops,
    and the outlining of [parallel] and [concurrent] code.
 
    A body is lowered as regions. A region is the code of one body that is
@@ -15,7 +15,7 @@
 open Definitions
 open Lowering
 open Targets
-open Lir_builder
+open Emit_c.Builder
 
 let mir st =
   match st.frame.mir with Some mir -> mir | None -> bug "MIR lowering outside a MIR frame"
@@ -85,7 +85,7 @@ let result_slot st =
 (* Whether a pulled method's cursor keeps a local of the MIR. *)
 let is_kept st local = List.mem local (mir st).kept
 
-(* A new LIR local for a local of the MIR. A temporary that a [return]
+(* A new C local for a local of the MIR. A temporary that a [return]
    returns is the result's slot. *)
 let rec fresh_place st local : Lir.place =
   match result_slot st with
@@ -507,7 +507,7 @@ let rec owner_of region body block =
   if region.region_body == body && Hashtbl.mem region.lowered block then Some region
   else Option.bind region.enclosing (fun enclosing -> owner_of enclosing body block)
 
-(* The LIR block a jump from [region] to a block of the MIR goes to. A jump
+(* The C block a jump from [region] to a block of the MIR goes to. A jump
    to a block of an enclosing region leaves the scopes between. *)
 let jump ?entry st region target : Lir.block =
   match owner_of region region.region_body target with
@@ -1087,7 +1087,7 @@ let early_exit st region ~(tasks : (Core.task * Mir.statement list) list) ~(exit
       exits.exits <- { ends; remaining; exit; state = Moves.copy (mir st).state } :: exits.exits;
       let number = List.length exits.exits in
       let won = block st.builder and lost = block st.builder and after = block st.builder in
-      Lir_builder.branch st.builder (tasks_bool st "cancel" [ task.group ]) ~yes:won ~no:lost;
+      Emit_c.Builder.branch st.builder (tasks_bool st "cancel" [ task.group ]) ~yes:won ~no:lost;
       start st.builder won;
       emit st.builder (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
       (match (value, returned_type st) with
@@ -1170,7 +1170,7 @@ let spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : un
        ));
   let spawned = tasks_bool st "spawn" [ loop.group; at function_value; at loop.item ] in
   let next = block st.builder and cancelled = block st.builder in
-  Lir_builder.branch st.builder spawned ~yes:next ~no:cancelled;
+  Emit_c.Builder.branch st.builder spawned ~yes:next ~no:cancelled;
   start st.builder cancelled;
   not_spawned ();
   break_loop st;
@@ -1458,7 +1458,7 @@ and lower_statement st (statement : Mir.statement) =
   | Assert { condition; _ } ->
       let holds = value st condition in
       let failed = block st.builder and after = block st.builder in
-      Lir_builder.branch st.builder holds ~yes:after ~no:failed;
+      Emit_c.Builder.branch st.builder holds ~yes:after ~no:failed;
       start st.builder failed;
       let text =
         match condition with
@@ -2044,7 +2044,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
   | Branch { condition; yes; no; _ } ->
       let condition = in_statement st (fun () -> value st condition) in
       let yes = jump st region yes and no = jump st region no in
-      Lir_builder.branch st.builder condition ~yes ~no;
+      Emit_c.Builder.branch st.builder condition ~yes ~no;
       start st.builder (block st.builder)
   | Switch_variant { place = tested; cases } ->
       let tested = place st tested in
@@ -2179,7 +2179,7 @@ and yield st region ~mode ~part ~resume ~origin =
   give_option st (Some (owned st yielded ty));
   (* Dropped in this state, the cursor drops the values the method owns
      here. *)
-  Lir_builder.write_in st.builder cursor.drop (fun () ->
+  Emit_c.Builder.write_in st.builder cursor.drop (fun () ->
       let stop = block st.builder in
       cursor.stops <- stop :: cursor.stops;
       start st.builder stop;
@@ -2309,7 +2309,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
              Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value) ));
       let inside = block st.builder and after = block st.builder in
       let depth = List.length st.scopes in
-      Lir_builder.branch st.builder (Copy (at going)) ~yes:inside ~no:after;
+      Emit_c.Builder.branch st.builder (Copy (at going)) ~yes:inside ~no:after;
       start st.builder inside;
       let first = local st.builder ~name:"first" wide
       and last = local st.builder ~name:"last" wide in
@@ -2354,7 +2354,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
             let ended = local st.builder (Raw Bool) in
             emit st.builder (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
             let next = block st.builder in
-            Lir_builder.branch st.builder (Copy (at ended)) ~yes:done_ ~no:next;
+            Emit_c.Builder.branch st.builder (Copy (at ended)) ~yes:done_ ~no:next;
             start st.builder next;
             emit st.builder (Assign (at index, Binary (Add, Copy (at index), one)));
             finish st.builder (Goto again);
@@ -2385,7 +2385,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       let going = local st.builder (Raw Bool) in
       emit st.builder
         (Assign (at going, Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop)));
-      Lir_builder.branch st.builder (Copy (at going)) ~yes:inside ~no:after;
+      Emit_c.Builder.branch st.builder (Copy (at going)) ~yes:inside ~no:after;
       start st.builder inside;
       looping st ~continue_:step ~break_:after ~depth (fun () ->
           let run value =
@@ -2411,7 +2411,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
         let last = local st.builder (Raw Bool) in
         emit st.builder (Assign (at last, Binary (Equal, Copy index, Copy stop)));
         let next = block st.builder in
-        Lir_builder.branch st.builder (Copy (at last)) ~yes:after ~no:next;
+        Emit_c.Builder.branch st.builder (Copy (at last)) ~yes:after ~no:next;
         start st.builder next
       end;
       emit st.builder (Assign (index, Binary (Add, Copy index, constant 1)));
@@ -2451,7 +2451,7 @@ let fill_defaults st (mask : Lir.place) (body : Mir.body) (places : Lir.place li
             (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
           let fill = block builder and after = block builder in
           let unless_passed other =
-            Lir_builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
+            Emit_c.Builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
           in
           let pulled reason =
             if st.cursor <> None then

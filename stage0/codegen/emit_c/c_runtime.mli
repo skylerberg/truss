@@ -1,5 +1,7 @@
 type build = Development | Release
 type linkage = External | Internal
+type site = { definition : Path.t; line : int; column : int }
+type failure = Echo | Todo
 
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val anchor_symbol : Path.t -> string

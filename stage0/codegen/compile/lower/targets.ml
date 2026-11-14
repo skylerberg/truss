@@ -4,7 +4,7 @@
 
 open Definitions
 open Lowering
-open Lir_builder
+open Emit_c.Builder
 
 (* The [impl] that evidence stands for in this instance, with the type
    arguments for the [impl]'s generic parameters. *)
@@ -279,8 +279,8 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
     ~(captures : (Lir.place * Ground.ty) list)
     ~(body : state -> captures:Lir.place list -> (Lir.place * Ground.mode * Ground.ty) list -> unit)
     destination =
-  let index = List.length !(st.nested) in
-  st.nested := !(st.nested) @ [ None ];
+  let index = !(st.nested) in
+  incr st.nested;
   let captured =
     List.mapi
       (fun position (place, ty) -> (Printf.sprintf "capture%d" position, place, ty))
@@ -291,6 +291,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
       (fun (name, _, ty) -> (name, Lir.Pointer { target = Value ty; writable = false }))
       captured
   in
+  let builder = Emit_c.Builder.nested st.builder ~index ~environment in
   let environment_local = at (local st.builder (Environment index)) in
   List.iter
     (fun (name, place, _) ->
@@ -306,7 +307,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
              environment = Some (Address { place = environment_local; writable = false });
            } ));
   let inner =
-    enter st.context ~nested:st.nested
+    enter st.context ~nested:st.nested ~builder
       {
         st.frame with
         exit = None;
@@ -316,7 +317,6 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
           | None -> st.frame.code);
       }
   in
-  let builder = inner.builder in
   let environment_parameter = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty =
     match function_type.result with Returns ty -> ty | _ -> bug "a lambda that yields"
@@ -341,16 +341,9 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
            { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
          captured)
     (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
-  let function_ =
-    finish_function inner ~first:[ environment_parameter ]
-      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
-      ()
-  in
-  st.nested :=
-    List.mapi
-      (fun position nested_function ->
-        if position = index then Some { function_ with environment } else nested_function)
-      !(st.nested)
+  finish_function inner ~first:[ environment_parameter ]
+    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+    ()
 
 (* Calls a function value with arguments that are already in places, one for
    each parameter of its type, and the evidence for its type's capabilities. *)

@@ -15,7 +15,7 @@ let expect_bug ~saying work =
 let env = shape_env ()
 
 (* Prints an instance as C, which checks it. *)
-let emit env instance = ignore (Emit_c.fragment env (Lir.Code instance))
+let emit env instance = ignore (Emit_c.fragment env (Code (instance env)))
 
 (* A caller's call of a callee that takes one [Int32] and returns it, with
    these arguments under this signature. *)

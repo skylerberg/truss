@@ -1,6 +1,6 @@
 module Intrinsics = Compile.For_testing.Intrinsics
 
-(* The LIR, the C it becomes, and the intrinsic operations. *)
+(* Statements, the C they become, and the intrinsic operations. *)
 
 open Memory_layout
 open Codegen_support
@@ -11,7 +11,7 @@ open Codegen_support
 let c_file env instances =
   Emit_c.file env Development
     (List.map
-       (fun (instance, linkage) -> (Emit_c.fragment env (Lir.Code instance), linkage))
+       (fun (instance, linkage) -> (Emit_c.fragment env (Code (instance env)), linkage))
        instances)
 
 let () =
@@ -494,12 +494,14 @@ let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSl
 
 (* An [entry] built with the builder: [body] writes its statements and
    returns the local to exit with. *)
-let built_entry body =
-  let builder = Lir_builder.create () in
-  Lir_builder.start builder (Lir_builder.block builder);
+let built_entry body : instance =
+ fun env ->
+  let builder = Emit_c.Builder.create env ~key:(key "entry") in
+  Emit_c.Builder.start builder (Emit_c.Builder.block builder);
   let result = body builder in
-  Lir_builder.finish builder (Return (Some (Copy (Lir_builder.at result))));
-  instance "entry" (Lir_builder.build builder ~parameters:[] ~result:(Some (value int32)))
+  Emit_c.Builder.finish builder (Return (Some (Copy (Emit_c.Builder.at result))));
+  Emit_c.Builder.build builder ~parameters:[] ~result:(Some (value int32));
+  Emit_c.Builder.built builder
 
 let operate builder ?destination ?(type_arguments = [ int32 ]) ?value_arguments operation arguments
     =
@@ -509,7 +511,7 @@ let operate builder ?destination ?(type_arguments = [ int32 ]) ?value_arguments 
 
 let () =
   test "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty =
         Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
       in
@@ -562,7 +564,7 @@ let () =
               sum);
         ]);
   test "an array's elements are moved into new storage, in order" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty =
         Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
       in
@@ -600,7 +602,7 @@ let () =
               status);
         ]);
   test "a view of an array has the array's elements" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let array_ty =
         Ground.Named
           { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
@@ -642,7 +644,7 @@ let () =
               status);
         ]);
   test "an array made of a storage has its elements, and the storage's buffer is freed" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty = Storage.of_elements int32 in
       let array_ty =
         Ground.Named
@@ -686,7 +688,7 @@ let () =
       (* A storage of another length stops a checked build. *)
       expect_status ~anchors 101 (program_with [ 40; 5 ]));
   test "a float fits an integer type where the whole number it is cut down to does" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       (* Each case is a bit of the status, set where the answer is the one
          expected. *)
       let all_right cases =
@@ -735,7 +737,7 @@ let () =
           (0., uint8, true);
         ]);
   test "a storage is shortened in place, keeping its room, and a static one stays static" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
       let anchors =
         [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
@@ -792,7 +794,7 @@ let () =
       | _ -> fail "storage_shorten takes elements that are not known to be Plain");
   test "a checked build stops a storage or view operation whose precondition does not hold"
     (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
       let view_ty =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
@@ -878,7 +880,7 @@ let () =
           let popped = local builder (value uint8) in
           checked builder ~destination:(at popped) Storage_pop [ Place (at storage) ]));
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
       expect_status 197
         [
@@ -913,7 +915,7 @@ let () =
         ]);
   test "elements are changed through a view of storage, which is first given its own buffer"
     (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
       let view_ty =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
@@ -971,7 +973,7 @@ let () =
         ])
 
 let () =
-  let open Lir_builder in
+  let open Emit_c.Builder in
   let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
   let view_ty = Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] } in
   let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in

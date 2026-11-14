@@ -76,36 +76,39 @@ let () =
      environment" (fun () ->
       let int = Lir.Value int32 in
       let add left right = Lir.Binary (Add, copy left, copy right) in
-      let builder = Lir_builder.create () in
-      let parameter = Lir_builder.local builder int in
-      let sum = Lir_builder.local builder int in
-      let other = Lir_builder.local builder int in
-      Lir_builder.start builder (Lir_builder.block builder);
-      Lir_builder.emit builder (Assign (at parameter, Use (constant_int32 5)));
+      let env = shape_env () in
+      let builder = Emit_c.Builder.create env ~key:(key "entry") in
+      let parameter = Emit_c.Builder.local builder int in
+      let sum = Emit_c.Builder.local builder int in
+      let other = Emit_c.Builder.local builder int in
+      Emit_c.Builder.start builder (Emit_c.Builder.block builder);
+      Emit_c.Builder.emit builder (Assign (at parameter, Use (constant_int32 5)));
       let first =
-        Lir_builder.outline builder ~nested:0 ~parts:[] (fun () ->
-            let own = Lir_builder.local builder int in
-            Lir_builder.emit builder (Assign (at own, add parameter parameter));
-            Lir_builder.emit builder (Assign (at sum, add own parameter));
-            Lir_builder.finish builder (Return None))
+        Emit_c.Builder.outline builder ~nested:0 ~parts:[] (fun () ->
+            let own = Emit_c.Builder.local builder ~name:"own" int in
+            Emit_c.Builder.emit builder (Assign (at own, add parameter parameter));
+            Emit_c.Builder.emit builder (Assign (at sum, add own parameter));
+            Emit_c.Builder.finish builder (Return None))
       in
       let second =
-        Lir_builder.outline builder ~nested:1 ~parts:[] (fun () ->
-            Lir_builder.emit builder (Assign (at other, Use (copy parameter)));
-            Lir_builder.finish builder (Return None))
+        Emit_c.Builder.outline builder ~nested:1 ~parts:[] (fun () ->
+            Emit_c.Builder.emit builder (Assign (at other, Use (copy parameter)));
+            Emit_c.Builder.finish builder (Return None))
       in
       let address holder = Lir.Address { place = at holder; writable = false } in
-      Lir_builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
-      Lir_builder.emit builder (Assign (at sum, add sum other));
-      Lir_builder.finish builder (Return (Some (copy sum)));
-      let main = Lir_builder.build builder ~env:(shape_env ()) ~parameters:[] ~result:(Some int) in
-      let nested = List.map snd (List.sort compare (Lir_builder.outlined_functions builder)) in
+      Emit_c.Builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
+      Emit_c.Builder.emit builder (Assign (at sum, add sum other));
+      Emit_c.Builder.finish builder (Return (Some (copy sum)));
+      Emit_c.Builder.build builder ~parameters:[] ~result:(Some int);
+      let instance = Emit_c.Builder.built builder in
+      let c = Emit_c.For_testing.c (Emit_c.fragment env (Code instance)) in
+      (* Each function reaches two locals of the entry, and the first keeps
+         its own. *)
       List.iter
-        (fun (function_ : Lir.function_) ->
-          if List.map fst function_.environment <> [ "capture0"; "capture1" ] then
-            fail "an outlined function reaches %d locals, not 2" (List.length function_.environment))
-        nested;
-      expect_status 20 [ instance ~nested "entry" main ])
+        (fun text -> if not (contains c text) then fail "no %s in:\n%s" text c)
+        [ "f_capture0"; "f_capture1"; "l6_own = 0;" ];
+      if contains c "f_capture2" then fail "a function reaches three locals:\n%s" c;
+      expect_status 20 [ printed instance ])
 
 (* Coroutines *)
 

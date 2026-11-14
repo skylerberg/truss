@@ -63,7 +63,7 @@ val create :
   Build.settings ->
   t
 
-(* An instance's C, from its LIR, lowered or generated, or a constant's
+(* An instance's C, lowered or generated, or a constant's
    static data. Each is made once. *)
 
 (* How a test ended, as the runner names it. *)
@@ -115,7 +115,7 @@ val run_tests :
 
 (* Builds, at [output], a program that runs tests that are instances made
    by hand, in order, as [run_tests] builds one of tests in source. It is
-   for testing the runner on LIR no source compiles to, such as a test
+   for testing the runner on code no source compiles to, such as a test
    that leaves a block allocated. *)
 
 (* Each test's key: the hash of the code it can run and of the build's
@@ -197,7 +197,11 @@ module For_testing : sig
   val parse_report : string -> (record list, string) result
 
   val build_supplied_tests :
-    t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
+    t ->
+    time_limit:int ->
+    (Memory_layout.env -> Emit_c.Builder.instance) list ->
+    output:string ->
+    (unit, string) result
 
   val compiled : t -> Instance.key -> Emit_c.fragment
 

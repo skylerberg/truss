@@ -1,7 +1,7 @@
-(* Lowering: the core form of one instance to its LIR.
+(* Lowering: the core form of one instance to its C.
 
    Lowering reads a definition's core form, which gives every node's
-   meaning, and writes LIR with every choice made:
+   meaning, and writes C with every choice made:
    which instance each call reaches, how each argument is passed, which
    values move and which are copied, and what each owned local holds where
    it goes out of scope, on every path, which the move analysis of the
@@ -33,9 +33,9 @@ val context :
     [constant] from whatever keeps each constant's lowering, so that each is made once and its
     readers are known. *)
 
-(* The LIR of an instance of a function, a method, an [impl]'s method, or a
+(* The C of an instance of a function, a method, an [impl]'s method, or a
    test. *)
-val instance : context -> Instance.key -> Lir.t
+val instance : context -> Instance.key -> Emit_c.Builder.instance
 
 (* A constant's static data, where its value folds: literals, operators on
    numbers and on [Bool], other constants that fold, and records, variants,
@@ -48,18 +48,18 @@ val constant : context -> Path.t -> constant
 
 (* The [Evaluator] of a constant: its value computed and written out in
    its binary form. *)
-val evaluator : context -> Path.t -> Lir.t
+val evaluator : context -> Path.t -> Emit_c.Builder.instance
 
 (* The pulled version of a yielding method: a state machine over a cursor,
    which holds the method's arguments and the values it keeps from one
-   [yield] to the next. [next] takes a pointer to the cursor, then the
-   method's evidence, and runs the method to its next [yield], giving the
-   value yielded in [Some], or [None] once the method has returned. [drop]
-   takes a pointer to the cursor and drops what it holds. [fields] are the
-   cursor's: its state, a [UInt32], first. *)
+   [yield] to the next, as the C of two instances. [next] takes a pointer
+   to the cursor, then the method's evidence, and runs the method to its
+   next [yield], giving the value yielded in [Some], or [None] once the
+   method has returned. [drop] takes a pointer to the cursor and drops what
+   it holds. [fields] are the cursor's: its state, a [UInt32], first. *)
 type pulled = {
-  next : Lir.function_;
-  drop : Lir.function_;
+  next : Emit_c.fragment;
+  drop : Emit_c.fragment;
   fields : (string * Memory_layout.member) list;
 }
 
@@ -83,7 +83,8 @@ val test_key : Path.t -> Instance.key
    clauses that can run, each evaluated and written out as a [Bool], in
    order. A clause that reads the template's parts is not asked of it; the
    prover asks only those that read its literals. *)
-val template_check : context -> Instance.key -> from_template:Path.t -> texts:string list -> Lir.t
+val template_check :
+  context -> Instance.key -> from_template:Path.t -> texts:string list -> Emit_c.Builder.instance
 
 (* The positions, among a tag's [from_template]'s clauses, of those a
    template check evaluates, in order. *)
@@ -92,7 +93,8 @@ val template_checked : context -> Path.t -> int list
 (* Code run while compiling, for a call whose arguments are known: the
    function, which is not generic, called with each argument a constant, an
    integer or a [Bool] as 0 or 1, and its result written out. *)
-val call_evaluation : context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Lir.t
+val call_evaluation :
+  context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Emit_c.Builder.instance
 
 module For_testing : sig
   val constant_value : context -> Path.t -> Lir.static_value option

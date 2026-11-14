@@ -148,21 +148,6 @@ type terminator =
   | Unreachable
   | Fail of { failure : failure; message : operand; length : operand; site : site }
 
-type basic_block = { statements : statement list; terminator : terminator }
-type local_info = { ty : ty; name : string option }
-
-type function_ = {
-  parameters : local list;
-  written_result : local option;
-  result : ty option;
-  returns : bool;
-  locals : local_info array;
-  blocks : basic_block array;
-  environment : (string * ty) list;
-}
-
-type t = { key : Instance.key; main : function_; nested : function_ array }
-
 type static_value =
   | Static_scalar of constant
   | Static_record of (string * static_value) list
@@ -177,5 +162,3 @@ type table = {
   capability : Path.t option;
   entries : (Instance.key * signature) list;
 }
-
-type compiled = Code of t | Data of data | Table of table

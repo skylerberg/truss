@@ -22,8 +22,12 @@ let named_program ~entry_name ~helper_name returned =
 
 (* An instance of a small program, as C. *)
 let lookup instances key =
-  Emit_c.fragment (shape_env ())
-    (Lir.Code (List.find (fun (instance : Lir.t) -> Instance.equal instance.key key) instances))
+  let env = shape_env () in
+  Emit_c.fragment env
+    (Code
+       (List.find
+          (fun instance -> Instance.equal (Emit_c.Builder.instance_key instance) key)
+          (List.map (fun instance -> instance env) instances)))
 
 (* Each instance's references in a small program. *)
 let references program key = Emit_c.references (lookup program key)
@@ -78,7 +82,8 @@ let () =
       in
       let references =
         Emit_c.references
-          (Emit_c.fragment (shape_env ~extra:drop_shapes ()) (Code dropping_instance))
+          (let env = shape_env ~extra:drop_shapes () in
+           Emit_c.fragment env (Code (dropping_instance env)))
       in
       expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
@@ -120,9 +125,7 @@ let () =
       if reach_key (ping_pong 1) (key "start") = reach_key (ping_pong 2) (key "start") then
         fail "a change inside the group left the key the same");
   test "a group's key does not depend on its instances' names" (fun () ->
-      let renamed =
-        List.map (fun (instance : Lir.t) -> instance) (ping_pong ~ping:"alpha" ~pong:"omega" 1)
-      in
+      let renamed = ping_pong ~ping:"alpha" ~pong:"omega" 1 in
       if reach_key (ping_pong 1) (key "start") <> reach_key renamed (key "start") then
         fail "the keys differ")
 

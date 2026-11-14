@@ -24,7 +24,7 @@ syntax tree ──▶ type checker ──▶ core form ──▶ MIR builder ─
                                     │                          │
                               exhaustiveness   ┌───────────────┼─────────────────┐
                                              ▼                 ▼                 ▼
-                                      ownership check        prover     monomorphize ──▶ LIR ──▶ C
+                                      ownership check        prover     monomorphize ──▶ C
 ```
 
 The exhaustiveness check reads the core form, because it needs patterns as
@@ -35,7 +35,7 @@ written.
 | The MIR has | Because |
 |---|---|
 | Generic bodies, before monomorphization | The prover proves a generic function once, and code generation substitutes type arguments per instance. |
-| Places and values, not memory | The prover models values, and the ownership check has ruled out aliasing. Pointers and layout are the LIR's. |
+| Places and values, not memory | The prover models values, and the ownership check has ruled out aliasing. Pointers and layout are code generation's. |
 | Explicit temporaries, in evaluation order | The order is the order of statements. |
 | Temporaries that hold a borrowed place | `items[next()] += 5` lends `items[...]` once and writes through the loan, which the core form cannot hold across statements. |
 | Specifications as core expressions, and ghost statements | Only the prover reads them; the others skip them. |
@@ -46,7 +46,7 @@ written.
 | The MIR leaves out | Where it is |
 |---|---|
 | Drops | Code generation drops each place where its local ends, by what the move analysis of the MIR says it holds there. |
-| Instances, layout, the calling convention | The LIR |
+| Instances, layout, the calling convention | Code generation, as it writes C |
 | Unwinding | Nothing unwinds, so a call is a statement, not a terminator. |
 | Patterns as written | The core form |
 

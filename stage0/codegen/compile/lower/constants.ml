@@ -4,7 +4,7 @@
 open Definitions
 open Lowering
 open Targets
-open Lir_builder
+open Emit_c.Builder
 
 let ( let* ) = Option.bind
 
@@ -251,7 +251,8 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lir.static_value l
             type_arguments
         in
         let callee =
-          enter st.context (frame_of (code_of st.context path type_arguments) ~inlined:[])
+          enter st.context ~builder:st.builder
+            (frame_of (code_of st.context path type_arguments) ~inlined:[])
         in
         let* values =
           all
@@ -326,7 +327,9 @@ let constant_state context path =
       text = text_of context key;
     }
   in
-  let st = enter context (frame_of code ~inlined:[]) in
+  let st =
+    enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code ~inlined:[])
+  in
   (st, mir, ty)
 
 (* A constant's static data, where its value folds, and otherwise the type
@@ -375,7 +378,7 @@ let write_output st output =
 
 (* Code run while compiling: computes a constant's value and writes its
    binary form to standard output. *)
-let evaluator context path : Lir.t =
+let evaluator context path : Emit_c.Builder.instance =
   let st, mir, ty = constant_state context path in
   start st.builder (block st.builder);
   in_scope st (fun () ->
@@ -386,4 +389,4 @@ let evaluator context path : Lir.t =
         ~output:(Address { place = output; writable = true })
         ty place;
       write_output st output);
-  finish_instance st ~rest:[] (Evaluator path)
+  finish_instance st ~rest:[] ()

@@ -57,10 +57,3 @@ val owning :
 
 (* A view, of a view type, of [length] elements at [elements]. *)
 val view : Ground.ty -> elements:Lir.operand -> length:Lir.operand -> Lir.rvalue
-
-(* Writes a test of whether the storage at a place owns a buffer, and gives
-   its result, a [Bool]. *)
-val owns_buffer : Lir_builder.t -> Lir.place -> Lir.operand
-
-(* Writes a test of whether the storage at a place has no elements. *)
-val is_empty : Lir_builder.t -> Lir.place -> Lir.operand

@@ -56,10 +56,22 @@ let rec trivial glue ty =
       glue.trivial_types <- Types.add ty answer glue.trivial_types;
       answer
 
-open Lir_builder
+open Emit_c.Builder
 
 let loop glue builder ~count body = loop builder ~index_type:(Value glue.usize) ~count body
-let instance key main : Lir.t = { key; main; nested = [||] }
+
+(* Writes a test, and gives its result, a [Bool]. *)
+let test builder rvalue =
+  let result = local builder (Raw Bool) in
+  emit builder (Assign (at result, rvalue));
+  Lir.Copy (at result)
+
+(* Writes a test of whether the storage at a place owns a buffer. *)
+let owns_buffer builder storage =
+  test builder (Binary (Not_equal, Copy (Storage.capacity storage), usize 0))
+
+(* Writes a test of whether the storage at a place has no elements. *)
+let is_empty builder storage = test builder (Binary (Equal, Copy (Storage.length storage), usize 0))
 
 let variant_shapes glue ty =
   match glue.representation ty with
@@ -71,7 +83,7 @@ let droppable glue : Memory_layout.member -> bool = function
   | Raw _ -> false
 
 let drop glue ty =
-  let builder = create () in
+  let builder = create glue.env ~key:(Drop ty) in
   let pointer = local builder ~name:"value" (Pointer { target = Value ty; writable = true }) in
   let value : Lir.place = { root = Local pointer; projections = [ Deref ] } in
   start builder (block builder);
@@ -146,7 +158,7 @@ let drop glue ty =
         loop glue builder
           ~count:(Copy (Storage.length value))
           (fun index -> emit builder (Drop (Storage.at value (Copy (at index)))));
-      when_ builder (Storage.owns_buffer builder value) (fun () ->
+      when_ builder (owns_buffer builder value) (fun () ->
           emit builder
             (Call
                {
@@ -194,12 +206,13 @@ let drop glue ty =
       start builder after
   | _, Shape (Scalar _) -> ());
   finish builder (Return None);
-  instance (Drop ty) (build builder ~parameters:[ pointer ] ~result:None)
+  build builder ~parameters:[ pointer ] ~result:None;
+  built builder
 
 (* The drop in slot 0 of an [any] table, which takes the value's pointer
    untyped, as the slot is called. It calls the type's drop function. *)
 let any_drop glue ty =
-  let builder = create () in
+  let builder = create glue.env ~key:(Any_drop ty) in
   let untyped = local builder ~name:"value" (Raw (Pointer Opaque)) in
   start builder (block builder);
   if not (trivial glue ty) then begin
@@ -215,7 +228,8 @@ let any_drop glue ty =
          })
   end;
   finish builder (Return None);
-  instance (Any_drop ty) (build builder ~parameters:[ untyped ] ~result:None)
+  build builder ~parameters:[ untyped ] ~result:None;
+  built builder
 
 let copy_signature glue ty : Lir.signature =
   Convention.signature
@@ -253,7 +267,7 @@ let copied_field glue builder ~source (name, member) =
       (name, Lir.Move (at temporary))
 
 let copy glue ty =
-  let builder = create () in
+  let builder = create glue.env ~key:(Copy ty) in
   let convention = Convention.result glue.env ty in
   let result_pointer =
     match convention with
@@ -302,13 +316,13 @@ let copy glue ty =
          let layout = Memory_layout.of_type glue.env element in
          let share = block builder and owning = block builder and hollow = block builder in
          let allocate = block builder and after = block builder in
-         let owns = Storage.owns_buffer builder self in
+         let owns = owns_buffer builder self in
          branch builder owns ~yes:owning ~no:share;
          start builder share;
          emit builder (Assign (result, Use (Copy self)));
          finish builder (Goto after);
          start builder owning;
-         let empty = Storage.is_empty builder self in
+         let empty = is_empty builder self in
          branch builder empty ~yes:hollow ~no:allocate;
          start builder hollow;
          emit builder (Assign (result, Storage.empty ty));
@@ -393,10 +407,9 @@ let copy glue ty =
   | Some local -> finish builder (Return (Some (Move (at local))))
   | None -> finish builder (Return None));
   let parameters = Option.to_list result_pointer @ Option.to_list self_local in
-  instance (Copy ty)
-    (build ?written_result:result_pointer builder ~parameters
-       ~result:
-         (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None))
+  build builder ~parameters
+    ~result:(match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
+  built builder
 
 let builtin builtin : Ground.ty = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let output_ty = Storage.of_elements (builtin UInt8)
@@ -484,7 +497,7 @@ let scalar_debug glue builder ~output (scalar : Memory_layout.scalar) (place : L
   | Pointer _ | Nullable_pointer _ -> text glue builder ~output "pointer"
 
 let debug glue ty =
-  let builder = create () in
+  let builder = create glue.env ~key:(Debug ty) in
   let parameter =
     if Memory_layout.has_zero_size glue.env ty then None
     else Some (local builder ~name:"value" (Pointer { target = Value ty; writable = false }))
@@ -576,7 +589,8 @@ let debug glue ty =
           finish builder (Switch_variant { place = value; cases; default = None });
           start builder after));
   finish builder (Return None);
-  instance (Debug ty) (build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
+  build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None;
+  built builder
 
 (* A value's binary form, which code run while compiling writes its result
    in and the compiler reads back as static data: a scalar as its bytes, a
@@ -599,7 +613,7 @@ let encode_call glue builder ~output ty (place : Lir.place) =
          })
 
 let encode glue ty =
-  let builder = create () in
+  let builder = create glue.env ~key:(Encode ty) in
   let parameter =
     if Memory_layout.has_zero_size glue.env ty then None
     else Some (local builder ~name:"value" (Pointer { target = Value ty; writable = false }))
@@ -667,7 +681,8 @@ let encode glue ty =
          finish builder (Switch_variant { place = value; cases; default = None });
          start builder after);
   finish builder (Return None);
-  instance (Encode ty) (build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
+  build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None;
+  built builder
 
 module For_testing = struct
   let copy_signature = copy_signature

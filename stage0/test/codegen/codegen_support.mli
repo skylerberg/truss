@@ -38,26 +38,37 @@ val describe :
 
 val int32 : Ground.ty
 val usize : Ground.ty
-val local : ?name:string -> Lir.ty -> Lir.local_info
+
+(* A function written by hand, and an instance written as C once the
+   layouts it is printed with are known. *)
+type local_info
+type block
+type function_
+type instance = Memory_layout.env -> Emit_c.Builder.instance
+
+val local : ?name:string -> Lir.ty -> local_info
 val value : Ground.ty -> Lir.ty
 val at : ?projections:Lir.projection list -> Lir.local -> Lir.place
 val copy : ?projections:Lir.projection list -> Lir.local -> Lir.operand
 val constant_int32 : int -> Lir.operand
 val constant_int64 : int -> Lir.operand
-val block : Lir.statement list -> Lir.terminator -> Lir.basic_block
+val block : Lir.statement list -> Lir.terminator -> block
 
 val function_ :
   ?parameters:Lir.local list ->
   ?result:Lir.ty ->
   ?returns:bool ->
   ?environment:(string * Lir.ty) list ->
-  Lir.local_info list ->
-  Lir.basic_block list ->
-  Lir.function_
+  local_info list ->
+  block list ->
+  function_
 
 val key : string -> Instance.key
-val instance : ?nested:Lir.function_ list -> string -> Lir.function_ -> Lir.t
-val entry : ?nested:Lir.function_ list -> Lir.local_info list -> Lir.basic_block list -> Lir.t
+val instance : ?nested:function_ list -> string -> function_ -> instance
+val entry : ?nested:function_ list -> local_info list -> block list -> instance
+
+(* An instance already written as C. *)
+val printed : Emit_c.Builder.instance -> instance
 
 val call :
   string ->
@@ -81,14 +92,14 @@ val run_program :
   ?env:Memory_layout.env ->
   ?anchors:Positions.anchor list ->
   ?input:string ->
-  Lir.t list ->
+  instance list ->
   int * string * string
 
 val expect_status :
   ?extra:(string * Memory_layout.shape) list ->
   ?anchors:Positions.anchor list ->
   int ->
-  Lir.t list ->
+  instance list ->
   unit
 
 val example : Path.module_

@@ -1,17 +1,15 @@
-(* The lowered IR: a small typed control-flow graph for each instance, which
-   the C emitter prints.
+(* The statements that code generation writes and the C builder prints at
+   once: typed places, operands, calls, and terminators.
 
    Locals are mutable slots, not SSA. Every choice about how a value is
    passed is already explicit: a parameter that arrives as a pointer has a
    [Pointer] type, an argument passed by address is an [Address] operand,
    and a result too large to return comes back through a pointer parameter.
-   The emitter only prints. *)
+   The builder only prints. *)
 
 include module type of struct
   include Ir_types
 end
-
-val signature : function_ -> signature
 
 (* A local as a place, with no projections. *)
 val local_place : local -> place
@@ -22,27 +20,8 @@ val local_place : local -> place
 val projection_type :
   Memory_layout.env -> environment:(int -> (string * ty) list) -> ty -> projection -> ty option
 
-(* The type of a place in a function, or [None] where it has zero size. *)
-val place_type :
-  Memory_layout.env -> environment:(int -> (string * ty) list) -> function_ -> place -> ty option
-
-(* A statement or terminator with every place rewritten by [place], each
-   after the places inside its indexes, and every block number by [block]. *)
-val map_statement : place:(place -> place) -> block:(block -> block) -> statement -> statement
-val map_terminator : place:(place -> place) -> block:(block -> block) -> terminator -> terminator
-
-(* Visits every place and every operand of a statement or a terminator,
-   each after the places and operands inside it. *)
-type visitor = { place : place -> unit; operand : operand -> unit }
-
-val visit_statement : visitor -> statement -> unit
-val visit_terminator : visitor -> terminator -> unit
-
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list
 
 (* Whether a local of the type takes no room, so that no code names it. *)
 val erased : Memory_layout.env -> ty -> bool
-
-(* The operands a call's target reads, beyond its arguments. *)
-val target_operands : target -> operand list

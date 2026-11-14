@@ -25,15 +25,17 @@ let operate builder ?destination ?(type_arguments = []) operation arguments =
 
 (* An [entry] built with the builder: [body] writes its statements and
    returns the local to exit with. *)
-let built_entry body =
-  let builder = Lir_builder.create () in
-  Lir_builder.start builder (Lir_builder.block builder);
+let built_entry body : instance =
+ fun env ->
+  let builder = Emit_c.Builder.create env ~key:(key "entry") in
+  Emit_c.Builder.start builder (Emit_c.Builder.block builder);
   let result = body builder in
-  Lir_builder.finish builder (Return (Some (Copy (Lir_builder.at result))));
-  instance "entry" (Lir_builder.build builder ~parameters:[] ~result:(Some (value int32)))
+  Emit_c.Builder.finish builder (Return (Some (Copy (Emit_c.Builder.at result))));
+  Emit_c.Builder.build builder ~parameters:[] ~result:(Some (value int32));
+  Emit_c.Builder.built builder
 
 let view_of builder text =
-  let open Lir_builder in
+  let open Emit_c.Builder in
   let view = local builder (value view_ty) in
   emit builder
     (Assign
@@ -44,7 +46,7 @@ let view_of builder text =
 
 (* The C library's numbers, joined with [or]. *)
 let flags builder numbers =
-  let open Lir_builder in
+  let open Emit_c.Builder in
   let all = local builder (value int32) in
   emit builder (Assign (at all, Use (constant_int32 0)));
   List.iter
@@ -56,7 +58,7 @@ let flags builder numbers =
   all
 
 let free builder storage =
-  Lir_builder.emit builder
+  Emit_c.Builder.emit builder
     (Call
        {
          target = Intrinsic Free;
@@ -93,36 +95,22 @@ let () =
         fail "the check for macOS leaves out proc_pidpath";
       if checked linux then fail "the check for Linux looks for proc_pidpath");
   test "a call of a function the system lacks stops the program, and calls nothing" (fun () ->
-      let open Lir_builder in
-      let builder = create () in
+      let open Emit_c.Builder in
+      let env = Memory_layout.create (Memory_layout.target_64 linux) ~shape_of:(shapes extra) in
+      let builder = create env ~key:(key "entry") in
       start builder (block builder);
       let length = local builder (value int32) in
       let path = local builder (value bytes_ty) in
       ignore
-        (Intrinsics.lower
-           (Memory_layout.create (Memory_layout.target_64 linux) ~shape_of:(shapes extra))
-           builder intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
+        (Intrinsics.lower env builder intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
            [ Value (constant_int32 1); Place (at path); Value (usize 64) ]
            ~destination:(Some (at length))
            ~site:{ definition = definition "entry"; line = 0; column = 1 });
       finish builder (Return (Some (Copy (at length))));
-      let lowered = build builder ~parameters:[] ~result:(Some (value int32)) in
-      let blocks = Array.to_list lowered.blocks in
-      if
-        not
-          (List.exists
-             (fun (block : Lir.basic_block) ->
-               match block.terminator with Fail _ -> true | _ -> false)
-             blocks)
-      then fail "the call does not stop the program";
-      if
-        List.exists
-          (fun (block : Lir.basic_block) ->
-            List.exists
-              (function Lir.Call { target = Foreign _; _ } -> true | _ -> false)
-              block.statements)
-          blocks
-      then fail "the function is called");
+      build builder ~parameters:[] ~result:(Some (value int32));
+      let c = Emit_c.For_testing.c (Emit_c.fragment env (Code (built builder))) in
+      if not (contains c "t_runtime_panic(") then fail "the call does not stop the program:\n%s" c;
+      if contains c "proc_pidpath(" then fail "the function is called:\n%s" c);
   test "a function that takes a structure is declared with no header" (fun () ->
       expect_string ~expected:"struct timespec;\nint clock_gettime(int, struct timespec *);\n"
         (Libc.prototype (Libc.declaration linux Clock_gettime)));
@@ -179,7 +167,7 @@ let () =
 
 let () =
   test "a program writes a view's bytes with write" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let status, output, _ =
         run_program ~extra
           [
@@ -196,7 +184,7 @@ let () =
       expect_int ~expected:8 status;
       expect_string ~expected:"written\n" output);
   test "a request that a row fixes is passed, and is no argument of the Truss call" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let names =
         List.map
           (fun (parameter : Types.parameter_info) -> parameter.name)
@@ -222,7 +210,7 @@ let () =
         fail "the new descriptor is %d, which is less than the least asked for" status;
       expect_string ~expected:"through the copy\n" output);
   test "open is given its mode as C passes an argument through ..." (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let path = Filename.concat (Lazy.force scratch) "opened" in
       expect_status ~extra 0
         [
@@ -238,7 +226,7 @@ let () =
         ];
       expect_int ~expected:0o600 (Unix.stat path).st_perm);
   test "errno is the number at the address the C library returns" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_status ~extra (Libc.value host Enoent)
         [
           built_entry (fun builder ->
@@ -251,7 +239,7 @@ let () =
               error);
         ]);
   test "read fills the room storage has after its last element" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let status, _, _ =
         run_program ~extra ~input:"hello"
           [
@@ -278,7 +266,7 @@ let () =
       in
       expect_int ~expected:(Char.code 'h' + 5) status);
   test "a structure the C library writes arrives in the arguments named for its numbers" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_status ~extra 1
         [
           built_entry (fun builder ->
@@ -304,7 +292,7 @@ let () =
               status);
         ]);
   test "a number passed by address is read by the function and then written" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let uint32 = named "UInt32" in
       let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
       let operate builder ?destination operation arguments =
@@ -350,7 +338,7 @@ let () =
               status);
         ]);
   test "an argument a row fixes is no argument of the Truss call" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let uint64 = named "UInt64" in
       expect_status ~extra 1
         [
@@ -372,7 +360,7 @@ let () =
 
 let () =
   test "nothing after a call of a function that does not return is run" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_status ~extra 7
         [
           built_entry (fun builder ->
@@ -383,7 +371,7 @@ let () =
         ]);
   test "a pipe's two ends arrive in the arguments named for them, and poll finds the written data"
     (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let waited_ty = Storage.of_elements int32 in
       expect_status ~extra 1
         [
@@ -423,7 +411,7 @@ let () =
 (* With the standard library's own types, whose drop code generation makes. *)
 let () =
   test "dropping a handle closes its descriptor" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let path = Filename.concat (Lazy.force scratch) "held" in
       Out_channel.with_open_text path (fun channel -> output_string channel "held");
       let env = Memory_layout.create target_64 ~shape_of:(Monomorphic.shape standard_context) in
@@ -439,7 +427,7 @@ let () =
         { usize = Monomorphic.builtin USize; string_slice = standard "text" "StringSlice" () }
       in
       let entry =
-        let builder = Lir_builder.create () in
+        let builder = Emit_c.Builder.create env ~key:(key "entry") in
         start builder (block builder);
         let name = local builder (value view_ty) in
         let text = path ^ "\000" in
@@ -476,9 +464,12 @@ let () =
         emit builder (Assign (at same, Binary (Equal, Copy (at first), Copy (at second))));
         emit builder (Assign (at status, Convert (Copy (at same), Integer Int32)));
         finish builder (Return (Some (Copy (at status))));
-        instance "entry" (build builder ~parameters:[] ~result:(Some (value int32)))
+        build builder ~parameters:[] ~result:(Some (value int32));
+        built builder
       in
-      let status, _, errors = run_program ~env [ entry; Glue.drop glue handle_ty ] in
+      let status, _, errors =
+        run_program ~env [ printed entry; printed (Glue.drop glue handle_ty) ]
+      in
       if status <> 1 then fail "the descriptor was not free again (status %d, %s)" status errors)
 
 (* The checks of a build that does not wait for proofs *)
@@ -499,7 +490,7 @@ let expect_panic ~saying instances =
 
 let () =
   test "a checked build stops a C library call that is given less room than it writes" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_panic ~saying:"a call of the C library with less room than it writes"
         [
           built_entry (fun builder ->
@@ -516,7 +507,7 @@ let () =
         ]);
   test "a checked build stops a C library call that is given fewer elements than it reads"
     (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_panic ~saying:"a call of the C library with fewer elements than it reads"
         [
           built_entry (fun builder ->
@@ -529,7 +520,7 @@ let () =
               status);
         ]);
   test "a checked build stops a C library call whose text does not end with a zero" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_panic ~saying:"a call of the C library with text that does not end with a zero"
         [
           built_entry (fun builder ->
@@ -541,7 +532,7 @@ let () =
               descriptor);
         ]);
   test "a checked build passes a C library call whose arguments are large enough" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       expect_status ~extra ~anchors (Libc.value host Enoent)
         [
           built_entry (fun builder ->
@@ -554,7 +545,7 @@ let () =
               error);
         ]);
   test "a checked build stops a float converted to an integer type that cannot hold it" (fun () ->
-      let open Lir_builder in
+      let open Emit_c.Builder in
       let float64 = named "Float64" in
       let extra = extra @ [ (Ground.to_string float64, Memory_layout.Scalar Float64) ] in
       let convert builder number =

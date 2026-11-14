@@ -68,7 +68,6 @@
   storage
   unix
   monomorphic
-  lir_builder
   resolve
   diagnostic
   source

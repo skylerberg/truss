@@ -1,6 +1,6 @@
 (* Lowering the operations of [standard::intrinsic].
 
-   Every operation is written into the caller's LIR, never called: the
+   Every operation is written into the caller's code, never called: the
    arithmetic as primitive operations, which the C compiler sees whole, and
    the operations on [Storage] and [View] as a few statements over their
    fields. Growing storage is the one call, into the runtime, since it does
@@ -31,7 +31,7 @@ val lower :
   ?checks:bool ->
   ?value_arguments:Z.t list ->
   Memory_layout.env ->
-  Lir_builder.t ->
+  Emit_c.Builder.t ->
   types ->
   Intrinsic.operation ->
   type_arguments:Ground.ty list ->
