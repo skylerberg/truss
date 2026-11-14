@@ -1,0 +1,129 @@
+use standard::cron
+use standard::metrics
+use standard::simulation
+use standard::tasks
+use standard::trace
+
+test "a traceparent header parses, round-trips, and refuses the forms the W3C forbids" {
+  let header = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+  let context = trace::Context.parse(header).expect("a valid traceparent")
+  assert context.is_sampled
+  assert context.header() == header
+  assert context.trace_text() == "4bf92f3577b34da6a3ce929d0e0e4736" && context.span_text() == "00f067aa0ba902b7"
+  assert trace::Context.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00").expect("unsampled").is_sampled == false
+  assert trace::Context.parse("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later-fields") is Some(_)
+  assert trace::Context.parse("00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01") == None
+  assert trace::Context.parse("00-00000000000000000000000000000000-00f067aa0ba902b7-01") == None
+  assert trace::Context.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01") == None
+  assert trace::Context.parse("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01") == None
+  assert trace::Context.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra") == None
+  assert trace::Context.parse("00_4bf92f3577b34da6a3ce929d0e0e4736_00f067aa0ba902b7_01") == None
+  assert trace::Context.parse("00-4bf92f35") == None
+}
+
+test "a started trace parses back, and a child keeps the trace and takes a new span" {
+  provide simulation::World.new() {
+    let root = trace::Context.start()
+    assert trace::Context.parse(root.header().slice()) == Some(root.copy())
+    let child = root.child()
+    assert child.trace_id == root.trace_id && child.span_id != root.span_id && child.is_sampled
+  }
+}
+
+test "a registry counts, gauges, and buckets observations, one series per name and labels" {
+  provide simulation::World.new() {
+    let registry = metrics::Registry.new()
+    let requests = registry.counter("requests", labels: [metrics::Label(name: "route", value: "/a")])
+    requests.add()
+    requests.add(2.0)
+    requests.add(-5.0)
+    registry.counter("requests", labels: [metrics::Label(name: "route", value: "/a")]).add()
+    registry.counter("requests", labels: [metrics::Label(name: "route", value: "/b")]).add()
+    assert requests.value() == 4.0
+    let connections = registry.gauge("connections")
+    connections.set(10.0)
+    connections.add(-3.0)
+    assert connections.value() == 7.0
+    let latency = registry.histogram("latency", buckets: [1.0, 0.1, 10.0])
+    latency.observe(0.05)
+    latency.observe(0.5)
+    latency.observe(20.0)
+    let samples = registry.snapshot()
+    assert samples.length() == 4
+    assert samples[0] == metrics::Sample.CounterSample(name: "requests", labels: [metrics::Label(name: "route", value: "/a")], value: 4.0)
+    assert samples[1] == metrics::Sample.CounterSample(name: "requests", labels: [metrics::Label(name: "route", value: "/b")], value: 1.0)
+    assert samples[2] == metrics::Sample.GaugeSample(name: "connections", labels: [], value: 7.0)
+    assert samples[3] == metrics::Sample.HistogramSample(
+      name: "latency",
+      labels: [],
+      buckets: [metrics::Bucket(upper_bound: 0.1, count: 1), metrics::Bucket(upper_bound: 1.0, count: 2), metrics::Bucket(upper_bound: 10.0, count: 2)],
+      sum: 20.55,
+      count: 3,
+    )
+  }
+}
+
+test "concurrent tasks add to one counter without losing an increment" {
+  provide simulation::World.new() {
+    let registry = metrics::Registry.new()
+    let total = registry.counter("total")
+    let rounds: USize = 100
+    concurrent {
+      for _ in 0..rounds { total.add() }
+      for _ in 0..rounds { total.add() }
+      for _ in 0..rounds { total.add() }
+    }
+    assert total.value() == 300.0
+  }
+}
+
+fn at(seconds: Int64) -> Instant {
+  Instant.from_unix_seconds(seconds).unwrap_or(Instant.from_unix_nanoseconds(0))
+}
+
+test "a cron schedule finds its next minute, rolling over hours, days, weekends, and years" {
+  let working = cron::Schedule.parse("*/15 9-17 * * mon-fri").expect("a schedule")
+  assert working.next_after(at(1794588600)) == Some(at(1794589200))
+  assert working.next_after(at(1794592200)) == Some(at(1794819600))
+  let daily = cron::Schedule.parse("@daily").expect("a schedule")
+  assert daily.next_after(at(1794614340)) == Some(at(1794614400))
+  assert daily.next_after(at(1794614400)) == Some(at(1794614400 + 86400))
+  let leap = cron::Schedule.parse("0 0 29 FEB *").expect("a schedule")
+  assert leap.next_after(at(1772323200)) == Some(at(1835395200))
+  let either = cron::Schedule.parse("0 0 1 * 1").expect("a schedule")
+  assert either.next_after(at(1794643200)) == Some(at(1794787200))
+  assert either.next_after(at(1794787200)) == Some(at(1794787200 + 7 * 86400))
+  let sunday = cron::Schedule.parse("0 0 * * 7").expect("a schedule")
+  assert sunday == cron::Schedule.parse("0 0 * * 0").expect("a schedule")
+}
+
+test "a malformed cron expression is refused" {
+  assert cron::Schedule.parse("60 * * * *") is Err(_)
+  assert cron::Schedule.parse("* * *") is Err(_)
+  assert cron::Schedule.parse("*/0 * * * *") is Err(_)
+  assert cron::Schedule.parse("a * * * *") is Err(_)
+  assert cron::Schedule.parse("5-1 * * * *") is Err(_)
+  assert cron::Schedule.parse("* * 0 * *") is Err(_)
+}
+
+fn hourly_runs() -> Int64
+  uses Clock, Tasks, Panic
+{
+  let schedule = cron::Schedule.parse("@hourly").expect("a schedule")
+  let runs = tasks::Counter.new()
+  concurrent {
+    cron::run(schedule, work: fn() {
+      let _ = runs.add(1)
+    })
+    {
+      Clock.sleep(Duration.minutes(181))
+      return runs.value()
+    }
+  }
+}
+
+test "run calls the work at each time the schedule names" {
+  provide simulation::World.new() {
+    assert hourly_runs() == 3
+  }
+}
