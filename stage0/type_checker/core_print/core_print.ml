@@ -274,45 +274,12 @@ and pattern names (node : pattern) =
 and pattern_fields names fields =
   list (fun (name, inner) -> name ^ ": " ^ pattern names inner) fields
 
-(* The names of all locals in a definition: its parameters and every
-   pattern binding. *)
-let names_of (definition : definition) : names =
-  let names = Hashtbl.create 16 in
-  let parameter (written : parameter) =
-    Hashtbl.replace names written.local written.name;
-    Option.iter
-      (fun (contract : callback_contract) ->
-        List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
-      written.callback_contract
-  in
-  (match definition with
-  | Function { parameters; _ } -> List.iter parameter parameters
-  | Trait laws -> List.iter (fun (written : law) -> List.iter parameter written.parameters) laws
-  | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.definition
-    {
-      Core_walk.ignore_all with
-      pattern =
-        (fun (node : pattern) ->
-          match node.kind with
-          | Bind { local = bound; name; _ } -> Hashtbl.replace names bound name
-          | _ -> ());
-      expression =
-        (fun (node : expression) ->
-          match node.kind with
-          | Quantified { binder = Over_type { local = bound; name; _ }; _ } ->
-              Hashtbl.replace names bound name
-          | _ -> ());
-    }
-    definition;
-  names
-
 let parameter names (written : parameter) =
   Printf.sprintf "%s%s: %s%s" (mode written.mode) written.name (Types.show written.type_)
     (match written.default with Some value -> " = " ^ expression names value | None -> "")
 
 let definition (definition : definition) =
-  let names = names_of definition in
+  let names = Core_walk.local_names definition in
   let lines =
     match definition with
     | Function { parameters; contract; body } -> (

@@ -18,4 +18,6 @@
   manifest
   infer
   core
-  core_walk))
+  core_walk
+  intrinsic
+  intrinsic_signatures))

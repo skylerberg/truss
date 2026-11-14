@@ -69,8 +69,13 @@ let checked ~check database name =
    - every associated capability set that appears is of a generic
      parameter or of an associated type of one;
    - the expression of a [Lent] place is a call of a lending method;
-   - a [mut] parameter receives a place or a slice, and an [own] parameter
-     receives a value;
+   - a call has one argument per parameter of its callee, in parameter
+     order, each with the parameter's mode, and omits only an argument
+     whose parameter has a default;
+   - a [mut] parameter receives a place or a slice, an [own] parameter
+     receives a value, and a read-only parameter never receives a [Use],
+     which would move or copy the place it borrows, except a bound of a
+     [Slice];
    - a place that is assigned, passed [mut], or advanced as a cursor is
      mutable: it is not a constant, and every [Lent] place in it is lent
      [mut];
@@ -81,7 +86,17 @@ let checked ~check database name =
    - every use of a local has the type of the parameter or the pattern
      that binds it;
    - a [Yielding_call] is a call of a yielding method;
-   - the call of a [Slice] takes the slice's base as its first argument. *)
+   - the call of a [Slice] takes the slice's base as its first argument;
+   - [Current_target] appears once in each compound assignment, as the
+     first argument of the operation that computes the new value, and
+     nowhere else. *)
+let callee_name : Core.callee -> string = function
+  | Function { path; _ } -> Path.show path
+  | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
+  | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
+  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
+  | Indirect _ -> "a function value"
+
 let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
   let wrong format =
@@ -101,6 +116,11 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
       | _ -> []
     in
     declared key.path
+    (* A derived method has no interface of its own: its signature gives
+       the generics of the type and of the trait method. *)
+    @ (match Interface.Impls.signature database key.path with
+      | Some signature -> of_generics signature.generics
+      | None -> [])
     @
     match Query.demand database Resolve.Names.container key with
     | Some container -> declared container.path
@@ -172,6 +192,70 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
         List.iter (argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
+  (* Each parameter of a callee, a method's receiver first, with its mode
+     and whether it has a default. [None] if the callee has no signature. *)
+  let callee_parameters (callee : Core.callee) : (T.mode * bool) list option =
+    let of_signature ~has_receiver (signature : T.signature) =
+      let receiver =
+        match signature.receiver with
+        | Some (((Read | Mut | Own) as receiver), _) when has_receiver ->
+            [ ((match receiver with Read -> T.Read | Mut -> Mut | Own | Static -> Own), false) ]
+        | _ -> []
+      in
+      receiver
+      @ List.map
+          (fun (parameter : T.parameter_info) -> (parameter.mode, parameter.has_default))
+          signature.parameters
+    in
+    match callee with
+    | Function { path; _ } ->
+        Option.map (of_signature ~has_receiver:true) (Interface.Impls.signature database path)
+    | Trait_method { trait = reference; name; receiver; _ } ->
+        Option.map
+          (fun (method_ : T.trait_method) ->
+            of_signature ~has_receiver:true method_.method_signature)
+          (Infer.Members.trait_method database reference.trait name receiver)
+    | Capability_method { capability; name } -> (
+        (* A capability method's receiver is the capability, which no
+           argument passes. *)
+        match Infer.Members.trait_methods database capability name with
+        | [ method_ ] -> Some (of_signature ~has_receiver:false method_.method_signature)
+        | _ -> None)
+    | Intrinsic { operation; _ } ->
+        Some (of_signature ~has_receiver:true (Intrinsic_signatures.signature operation))
+    | Indirect function_value -> (
+        let function_type =
+          match function_value with
+          | Place core_place -> Core_walk.place_type core_place
+          | Value value -> value.type_
+        in
+        match function_type with
+        | Function { inputs; _ } -> Some (List.map (fun (mode, _) -> (mode, false)) inputs)
+        | _ -> None)
+  in
+  let arguments_fit (call : Core.call) =
+    let callee = callee_name call.callee in
+    match callee_parameters call.callee with
+    | None -> wrong "a call of `%s` has a callee with no signature" callee
+    | Some parameters when List.length parameters <> List.length call.arguments ->
+        wrong "a call of `%s` has %d arguments for %d parameters" callee
+          (List.length call.arguments) (List.length parameters)
+    | Some parameters ->
+        List.iteri
+          (fun position ((mode, has_default), (argument : Core.argument)) ->
+            match argument with
+            | Passed { mode = passed; _ } when passed <> mode ->
+                wrong "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
+                  position callee (T.show_mode passed) (T.show_mode mode)
+            | Default when not has_default ->
+                wrong "a call of `%s` omits argument %d, whose parameter has no default" callee
+                  position
+            | Passed _ | Default -> ())
+          (List.combine parameters call.arguments)
+  in
+  let compound_assignments = ref 0 and current_targets = ref 0 in
+  (* The calls that create a [Slice], whose bounds are passed as values. *)
+  let slice_calls = Hashtbl.create 8 in
   let local_types : (Core.local, T.ty) Hashtbl.t = Hashtbl.create 16 in
   let parameters =
     List.iter (fun (parameter : Core.parameter) ->
@@ -300,6 +384,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 fields
           | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
           | Slice { call } -> (
+              Hashtbl.replace slice_calls call.id ();
               match call.kind with
               | Call
                   {
@@ -337,7 +422,9 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                   | Mut, Place core_place -> mutable_place "a `provide`" core_place
                   | _, value -> operand value)
                 implementations
+          | Current_target -> incr current_targets
           | Call call ->
+              arguments_fit call;
               callee call.callee;
               capabilities "a call's `uses`" call.uses;
               (match call.callee with Indirect function_value -> operand function_value | _ -> ());
@@ -371,6 +458,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                       mutable_place "a `mut` argument" core_place
                   | Passed { mode = Own; value = Place _; _ } ->
                       wrong "an `own` parameter receives a place"
+                  | Passed { mode = Read; value = Value { kind = Use _; _ }; _ }
+                    when not (Hashtbl.mem slice_calls node.id) ->
+                      wrong
+                        "a read-only parameter of `%s` receives a `Use`, which moves or copies the \
+                         place"
+                        (callee_name call.callee)
                   | Passed { value; _ } -> operand value
                   | Default -> ())
                 call.arguments
@@ -379,8 +472,18 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
         (fun (node : Core.statement) ->
           unique node.id;
           match node.kind with
-          | Assign { target; _ } | Compound_assign { target; _ } ->
-              mutable_place "an assignment" target
+          | Assign { target; _ } -> mutable_place "an assignment" target
+          | Compound_assign { target; value; _ } -> (
+              mutable_place "an assignment" target;
+              incr compound_assignments;
+              match value.kind with
+              | Operator { arguments = { kind = Current_target; _ } :: _; _ }
+              | Call
+                  { arguments = Passed { value = Value { kind = Current_target; _ }; _ } :: _; _ }
+                ->
+                  ()
+              | _ ->
+                  wrong "a compound assignment's new value is not an operation on `Current_target`")
           | Let { pattern; value; _ } -> (
               binds_own "a `let`" value pattern;
               match (pattern.kind, value) with
@@ -420,7 +523,10 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
       callee;
       place = ignore;
     }
-    form.definition
+    form.definition;
+  if !current_targets <> !compound_assignments then
+    wrong "`Current_target` appears %d times in %d compound assignments" !current_targets
+      !compound_assignments
 
 (* Checks the core form of every definition in a file. Returns how many
    definitions had one. *)

@@ -255,6 +255,37 @@ let definition_children visit = function
 
 let definition visit core_definition = definition_children (deep visit) core_definition
 
+let local_names core_definition =
+  let names = Hashtbl.create 16 in
+  let parameter (declared : parameter) =
+    Hashtbl.replace names declared.local declared.name;
+    Option.iter
+      (fun (contract : callback_contract) ->
+        List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
+      declared.callback_contract
+  in
+  (match core_definition with
+  | Function { parameters; _ } | Law_proof { parameters; _ } -> List.iter parameter parameters
+  | Trait laws -> List.iter (fun (law : law) -> List.iter parameter law.parameters) laws
+  | Type _ | Constant _ | Test _ | Empty -> ());
+  definition
+    {
+      ignore_all with
+      pattern =
+        (fun (node : pattern) ->
+          match node.kind with
+          | Bind { local; name; _ } -> Hashtbl.replace names local name
+          | _ -> ());
+      expression =
+        (fun (node : expression) ->
+          match node.kind with
+          | Quantified { binder = Over_type { local; name; _ }; _ } ->
+              Hashtbl.replace names local name
+          | _ -> ());
+    }
+    core_definition;
+  names
+
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
