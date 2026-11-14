@@ -1,0 +1,225 @@
+use standard::intrinsic
+use standard::time
+
+public type Error(message: String)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("not a cron expression: ")
+    mut output.write(self.message.slice())
+  }
+}
+
+public opaque type Schedule(
+  minutes: UInt64,
+  hours: UInt64,
+  days: UInt64,
+  months: UInt64,
+  weekdays: UInt64,
+  is_day_restricted: Bool,
+  is_weekday_restricted: Bool,
+)
+  derives Equal
+
+fn failure(message: StringSlice) -> Error {
+  Error(message: message.to_string())
+}
+
+let month_names: Array[String, 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+let weekday_names: Array[String, 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+
+fn value_of(text: StringSlice, names: Slice[String], first_name: UInt64) -> Result[UInt64, Error] {
+  match UInt64.parse(text) {
+    Ok(value) => return Ok(value)
+    Err(_) => {}
+  }
+  let lower = text.to_ascii_lowercase()
+  for index in 0..names.length() {
+    if names[index] == lower {
+      let offset: UInt64 = intrinsic::convert(index)
+      return Ok(first_name.saturating_add(offset))
+    }
+  }
+  Err(failure("a field value that is not a number or a name"))
+}
+
+fn bit(value: UInt64) -> UInt64
+  requires value < 64
+{
+  1 << value
+}
+
+fn field_mask(text: StringSlice, low: UInt64, high: UInt64, names: Slice[String], first_name: UInt64) -> Result[UInt64, Error]
+  requires low <= high && high < 64
+{
+  var mask: UInt64 = 0
+  for item in text.split(",") {
+    let has_step = item.contains("/")
+    let range = match item.find("/") {
+      Some(slash) => item.split_at(slash).first
+      None => item
+    }
+    let step: UInt64 = match item.find("/") {
+      Some(slash) => {
+        let step_text = item.split_at(slash).second.strip_prefix("/").unwrap_or("")
+        if step_text.contains("/") {
+          return Err(failure("a field item with more than one step"))
+        }
+        match UInt64.parse(step_text) {
+          Ok(step) => if step == 0 { return Err(failure("a step of zero")) } else if step > 64 { 64 } else { step }
+          Err(_) => return Err(failure("a step that is not a number"))
+        }
+      }
+      None => 1
+    }
+    var start = low
+    var end = high
+    if range != "*".slice() {
+      match range.find("-") {
+        Some(dash) => {
+          let parts = range.split_at(dash)
+          start = value_of(parts.first, names: names, first_name: first_name)?
+          end = value_of(parts.second.strip_prefix("-").unwrap_or(""), names: names, first_name: first_name)?
+        }
+        None => {
+          start = value_of(range, names: names, first_name: first_name)?
+          end = if has_step { high } else { start }
+        }
+      }
+    }
+    if start < low || end > high || start > end {
+      return Err(failure("a field value out of its range"))
+    }
+    var value = start
+    while value <= end
+      invariant step >= 1 && step <= 64
+      invariant value <= high + 64
+      decreases high + 64 - value
+    {
+      if value < 64 {
+        mask = mask | bit(value)
+      }
+      if value > high {
+        break
+      }
+      value = value + step
+    }
+  }
+  Ok(mask)
+}
+
+fn expanded(expression: StringSlice) -> String {
+  let trimmed = expression.trim()
+  if trimmed == "@yearly".slice() || trimmed == "@annually".slice() {
+    "0 0 1 1 *"
+  } else if trimmed == "@monthly".slice() {
+    "0 0 1 * *"
+  } else if trimmed == "@weekly".slice() {
+    "0 0 * * 0"
+  } else if trimmed == "@daily".slice() || trimmed == "@midnight".slice() {
+    "0 0 * * *"
+  } else if trimmed == "@hourly".slice() {
+    "0 * * * *"
+  } else {
+    trimmed.to_string()
+  }
+}
+
+public fn Schedule.parse(expression: StringSlice) -> Result[Schedule, Error] {
+  var fields: List[StringSlice] = []
+  let text = expanded(expression)
+  for field in text.slice().split_whitespace() {
+    mut fields.push(field)
+  }
+  if fields.length() != 5 {
+    return Err(failure("an expression without five fields"))
+  }
+  let minutes = field_mask(fields[0], low: 0, high: 59, names: [], first_name: 0)?
+  let hours = field_mask(fields[1], low: 0, high: 23, names: [], first_name: 0)?
+  let days = field_mask(fields[2], low: 1, high: 31, names: [], first_name: 0)?
+  let months = field_mask(fields[3], low: 1, high: 12, names: month_names[..], first_name: 1)?
+  var weekdays = field_mask(fields[4], low: 0, high: 7, names: weekday_names[..], first_name: 0)?
+  if (weekdays & bit(7)) != 0 {
+    weekdays = (weekdays & (bit(7) ^ 18446744073709551615)) | bit(0)
+  }
+  Ok(Schedule(
+    minutes: minutes,
+    hours: hours,
+    days: days,
+    months: months,
+    weekdays: weekdays,
+    is_day_restricted: !fields[2].starts_with("*"),
+    is_weekday_restricted: !fields[4].starts_with("*"),
+  ))
+}
+
+fn has(mask: UInt64, value: UInt8) -> Bool {
+  value < 64 && (mask & bit(intrinsic::convert(value))) != 0
+}
+
+fn matches_day(schedule: Schedule, date: time::Date) -> Bool {
+  if !has(schedule.months, value: date.month().number()) {
+    return false
+  }
+  let weekday = date.weekday().number_from_monday() % 7
+  let day = has(schedule.days, value: date.day())
+  let on_weekday = has(schedule.weekdays, value: weekday)
+  if schedule.is_day_restricted && schedule.is_weekday_restricted {
+    day || on_weekday
+  } else if schedule.is_day_restricted {
+    day
+  } else if schedule.is_weekday_restricted {
+    on_weekday
+  } else {
+    true
+  }
+}
+
+public fn Schedule.next_after(self, after: Instant) -> Option[Instant] {
+  let start = after.date_time()
+  var date = start.date
+  let first_hour = start.time.hour()
+  let first_minute = start.time.minute() + 1
+  let horizon: USize = 2928
+  for day_index in 0..horizon {
+    if matches_day(self, date: date) {
+      let hours: UInt8 = 24
+      for hour in 0..hours {
+        if has(self.hours, value: hour) && (day_index > 0 || hour >= first_hour) {
+          let minutes: UInt8 = 60
+          for minute in 0..minutes {
+            let is_later = day_index > 0 || hour > first_hour || minute >= first_minute
+            if is_later && has(self.minutes, value: minute) {
+              match time::TimeOfDay.new(hour, minute: minute) {
+                Some(time) => return date.at(time).instant(0)
+                None => {}
+              }
+            }
+          }
+        }
+      }
+    }
+    date = date.plus_days(1)?
+  }
+  None
+}
+
+public fn run[capability Granted](schedule: Schedule, work: (fn() uses Granted))
+  uses Clock, Tasks, Granted
+{
+  while true {
+    let now = Clock.now()
+    let next = match schedule.next_after(now) {
+      Some(next) => next
+      None => return
+    }
+    Clock.sleep(next.duration_since(now))
+    if Tasks.cancelled() {
+      return
+    }
+    work()
+  }
+}
