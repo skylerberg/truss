@@ -306,9 +306,6 @@ type context = {
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
       (** Each [if] and [match] arm read so far, reversed. *)
-  mutable iteration_returns : (Core.origin * Types.ty option) list;
-      (** Each [return] from an iteration of a [concurrent for], by its loop, with the type of its
-          value: taken where the loop ends. *)
   mutable entry : Logic.symbol list;
       (** The symbols of the definition's parameters and [self] as they arrive. *)
   mutable cursors : (Logic.term * cursor) list;  (** Where each cursor value came from. *)
@@ -8735,23 +8732,7 @@ and iterations_so_far context head costs =
 and one_step (counter : Costs.counter) =
   match counter.resource with Time -> Logic.int 1 | _ -> Costs.zero
 
-and for_ ~(driven : driven) context frame =
-  let outer = context.iteration_returns in
-  context.iteration_returns <- [];
-  let ended = loop_over ~driven context frame in
-  let returning, others =
-    List.partition (fun (loop, _) -> loop = driven.loop_at) context.iteration_returns
-  in
-  context.iteration_returns <- outer @ others;
-  match (ended, returning) with
-  | Some ended, (_, ty) :: _ ->
-      (* Where an iteration returned, the function returns once the loop has
-         ended, on a path of its own. *)
-      let returned = fresh context ended "returned" Logic.Bool in
-      let value = Option.map (fun ty -> arrive context ended "result" ty) ty in
-      context.returns <- (restrict ended returned, value) :: context.returns;
-      Some (restrict ended (Logic.not_ returned))
-  | _ -> ended
+and for_ ~(driven : driven) context frame = loop_over ~driven context frame
 
 and loop_over ~(driven : driven) context frame =
   let clauses = driven.loop_clauses in
@@ -9317,6 +9298,9 @@ let mir_changes ?(also = []) run frame (blocks : Mir.block list) : changed =
       | For { iteration = Yielding call; _ } -> passed call
       | For { iteration = Pull { cursor; _ }; _ } -> note cursor
       | Yield { mode = Types.Mut; part; _ } -> lent part
+      | Cancel { winner; returned; _ } ->
+          note { root = Local winner; projections = [] };
+          Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
       | _ -> ())
     blocks;
   List.iter note also;
@@ -10025,62 +10009,23 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
   let run = { (empty_run body) with definitions; passed_lambdas } in
   let count = Array.length body.blocks in
   let incoming = Array.make count [] in
-  let task_exits =
-    List.filter_map
-      (fun (position, (block : Mir.basic_block)) ->
-        match block.terminator with
-        | Exit_tasks { tasks = { task = Branch _; _ } :: _ as tasks; exit } ->
-            Some (block.terminator_origin, (position, tasks, exit))
-        | _ -> None)
-      (List.mapi (fun position block -> (position, block)) (Array.to_list body.blocks))
-  in
-  let flagged_position origin =
-    match List.assoc_opt origin task_exits with
-    | Some (position, _, _) -> position
-    | None -> bug "an early exit of the MIR that is not known"
-  in
-  let exit_flag position = Core.Synthetic (-1_000_000 - position)
-  and exit_value position = Core.Synthetic (-2_000_000 - position) in
+  (* The local each early exit leaves its returned value in holds one on
+     every path, so that paths that meet agree on it. *)
   let start =
-    List.fold_left
-      (fun frame (_, (position, _, (exit : Mir.task_exit))) ->
-        let frame = bind frame (exit_flag position) Types.bool (Logic.Boolean false) in
-        match exit with
-        | Exit_return (Some returned) ->
-            let ty = mir_operand_type context frame returned in
-            bind frame (exit_value position) ty (arrive context frame "returned" ty)
+    Array.fold_left
+      (fun frame (block : Mir.basic_block) ->
+        match block.terminator with
+        | Resume { exits; _ } ->
+            List.fold_left
+              (fun frame (exit : Mir.early_exit) ->
+                match exit.returned with
+                | Some local ->
+                    let ty = substituted context frame body.locals.(local).type_ in
+                    bind frame (mir_key run local) ty (arrive context frame "returned" ty)
+                | None -> frame)
+              frame exits
         | _ -> frame)
-      start task_exits
-  in
-  let concurrent_end frame fork ~jump ~iteration_end =
-    List.fold_left
-      (fun frame (_, (position, (tasks : Mir.left_task list), (exit : Mir.task_exit))) ->
-        let rec from = function
-          | (left : Mir.left_task) :: outer -> (
-              match left.task with
-              | Branch { block; _ } when block = fork -> Some outer
-              | _ -> from outer)
-          | [] -> None
-        in
-        match from tasks with
-        | None -> frame
-        | Some outer ->
-            let flag = Locals.find (exit_flag position) frame.locals in
-            let exiting = restrict frame flag in
-            (match (outer, exit) with
-            | { task_end = Some target; _ } :: _, _ -> jump target exiting
-            | _ :: _, _ -> bug "an early exit to a task with no end"
-            | [], Exit_return returned ->
-                let value =
-                  match returned with
-                  | Some _ -> Locals.find_opt (exit_value position) exiting.locals
-                  | None -> None
-                in
-                context.returns <- (exiting, value) :: context.returns
-            | [], Exit_to target -> jump target exiting
-            | [], Exit_iteration _ -> iteration_end exiting);
-            restrict frame (Logic.not_ flag))
-      frame task_exits
+      start body.blocks
   in
   let ran = Array.make count false in
   let rec terminator frame (block : Mir.basic_block) ~jump ~iteration_end =
@@ -10091,18 +10036,7 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
        they can run in order. *)
     | Fork { branches = first :: _; _ } -> jump first.entry frame
     | Fork { branches = []; _ } -> ()
-    | Join { fork; next } ->
-        (* Where a [concurrent] block ends, the paths that left a branch early
-           take their exits. *)
-        let ends =
-          Array.exists
-            (fun (forking : Mir.basic_block) ->
-              match forking.terminator with
-              | Fork { fork = started; join = Some join; _ } -> started = fork && join = next
-              | _ -> false)
-            body.blocks
-        in
-        jump next (if ends then concurrent_end frame fork ~jump ~iteration_end else frame)
+    | Join { next; _ } -> jump next frame
     | Branch { condition; yes; no; is_if_condition } ->
         let test = mir_operand context frame run condition in
         if frame.checking && is_if_condition then begin
@@ -10272,36 +10206,45 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
           | Some after -> jump resume after
           | None -> ()
         end
-    | Exit_tasks { tasks = [ { task = Iteration { loop }; _ } ]; exit } ->
-        (* The iterations after it are cancelled and run to their ends, so
-           this one ends here, and the loop ends when they all have: a
-           [break] is then where the loop ends, and a [return] is taken
-           there, with a value known by its type. *)
-        (match exit with
-        | Exit_return returned ->
-            context.iteration_returns <-
-              (loop, Option.map (mir_operand_type context frame) returned)
-              :: context.iteration_returns
-        | Exit_to _ | Exit_iteration _ -> ());
-        iteration_end frame
-    | Exit_tasks { tasks = { task_end = Some target; _ } :: _; exit } ->
-        (* The exit is taken where the block it leaves ends, after the other
-           branches, which are cancelled and run to their own ends: the path
-           goes on from the task's end, with its flag set. *)
-        let position = flagged_position block.terminator_origin in
-        let frame = bind frame (exit_flag position) Types.bool (Logic.Boolean true) in
+    | Cancel { task; task_end; winner; number; returned } -> (
+        (* The branches of a group run in order, so the last exit that cancels
+           is the one that won. *)
         let frame =
-          match exit with
-          | Exit_return (Some returned) ->
-              bind frame (exit_value position)
-                (mir_operand_type context frame returned)
-                (mir_operand context frame run returned)
-          | _ -> frame
+          bind frame (mir_key run winner) (Types.builtin UInt32) (Logic.Integer (Z.of_int number))
         in
-        jump target frame
-    | Exit_tasks _ ->
-        unsupported span
-          "an early exit from an iteration of a `concurrent for` loop to tasks around it"
+        let frame =
+          match returned with
+          | Some (value, local) ->
+              bind frame (mir_key run local)
+                (mir_operand_type context frame value)
+                (mir_operand context frame run value)
+          | None -> frame
+        in
+        match (task, task_end) with
+        | Branch _, Some target -> jump target frame
+        | Branch _, None -> bug "a branch's early exit with no end"
+        | Iteration _, _ -> iteration_end frame)
+    | Resume { winner; exits; next } ->
+        let won =
+          mir_operand context frame run
+            (Use
+               {
+                 place = { root = Local winner; projections = [] };
+                 type_ = Types.builtin UInt32;
+                 node = block.terminator_origin;
+                 origin = block.terminator_origin;
+               })
+        in
+        let others =
+          List.fold_left
+            (fun frame (number, (exit : Mir.early_exit)) ->
+              let taken = Logic.equal won (Logic.Integer (Z.of_int number)) in
+              jump exit.resume (restrict frame taken);
+              restrict frame (Logic.not_ taken))
+            frame
+            (List.mapi (fun index exit -> (index + 1, exit)) exits)
+        in
+        jump next others
   and run_block position frame ~jump ~iteration_end =
     let block = body.blocks.(position) in
     let ended =
@@ -10579,7 +10522,6 @@ let new_context database ~home ~current ~terminates ~measures =
     equalities = [];
     known_calls = [];
     decisions = [];
-    iteration_returns = [];
     entry = [];
     cursors = [];
     proving = false;

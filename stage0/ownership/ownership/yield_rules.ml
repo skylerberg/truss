@@ -14,8 +14,7 @@ let add left right = match (left, right) with Zero, other | other, Zero -> other
    end goes back to its [for], which may run its body again or end, so the
    counts grow until they stop changing, which, with three counts, they
    do. A path that reaches [todo] is incomplete and one that reaches
-   [unreachable] has no end, so neither is counted. No [yield] runs in a
-   task, so an early exit from tasks takes its counts to where it goes. *)
+   [unreachable] has no end, so neither is counted. *)
 let yield_counts (body : Mir.body) : count list =
   let reaching = Array.make (Array.length body.blocks) [] in
   let returned = ref [] and pending = Queue.create () in
@@ -32,11 +31,10 @@ let yield_counts (body : Mir.body) : count list =
     let counts = reaching.(block) in
     match body.blocks.(block).terminator with
     | Yield { resume; _ } -> flow resume (List.map (add One) counts)
-    | Return _ | Exit_tasks { exit = Exit_return _; _ } -> returned := counts @ !returned
-    | Exit_tasks { exit = Exit_to target; _ } -> flow target counts
-    | Iteration_end { loop } | Exit_tasks { exit = Exit_iteration { loop }; _ } -> flow loop counts
-    | ( Goto _ | Branch _ | Switch_variant _ | For _ | Fork _ | Join _ | Todo | Unreachable
-      | Written_unreachable ) as terminator ->
+    | Return _ -> returned := counts @ !returned
+    | Iteration_end { loop } -> flow loop counts
+    | ( Goto _ | Branch _ | Switch_variant _ | For _ | Fork _ | Join _ | Cancel _ | Resume _ | Todo
+      | Unreachable | Written_unreachable ) as terminator ->
         List.iter (fun target -> flow target counts) (Mir.successors terminator)
   done;
   List.sort_uniq compare !returned

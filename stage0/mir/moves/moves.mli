@@ -8,6 +8,8 @@
     - An assignment moves each value it reads by value: the operand it assigns, a constructor's
       fields, an array's elements, an operation's operands, and the value made [any].
     - A [return], and a [yield], move the values they give.
+    - An early exit from a task moves the value it returns. The value is in the exit's local where
+      the code after the task's group takes the exit.
     - A loop that pulls values gives its part one at the start of each iteration.
 
     Code generation drops a path where its local ends, by what holds there: all of it, the parts

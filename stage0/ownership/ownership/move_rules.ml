@@ -186,7 +186,7 @@ let check_body context (body : Mir.body) moves ~returns =
       let at = span context basic.terminator_origin in
       check_uses state (Moves.terminator_uses moves basic);
       match basic.terminator with
-      | Return _ | Exit_tasks { exit = Exit_return _; _ } -> returned at state
+      | Return _ -> returned at state
       | Yield _ when context.yields ->
           check_given state ~locals:all_locals ~at:(Some at) (fun moved _ ->
               Printf.sprintf

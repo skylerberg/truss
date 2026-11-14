@@ -84,10 +84,12 @@ let terminator_reads : Mir.terminator -> Mir.local list = function
   | For { iteration = Range { start; stop; _ }; _ } -> operand_locals start @ operand_locals stop
   | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
   | Yield { part; _ } -> yielded_locals part
-  | Return (Some value) | Exit_tasks { exit = Exit_return (Some value); _ } -> operand_locals value
+  | Return (Some value) | Cancel { returned = Some (value, _); _ } -> operand_locals value
+  | Resume { winner; _ } -> [ winner ]
   | Goto _ | Fork _ | Join _ | Iteration_end _
   | Return None
-  | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
+  | Cancel { returned = None; _ }
+  | Unreachable | Written_unreachable | Todo ->
       []
 
 (* The validator *)
@@ -198,7 +200,8 @@ let validate definition (body : Mir.body) =
           List.iter
             (fun inner ->
               match body.blocks.(inner).terminator with
-              | Exit_tasks _ -> ()
+              (* An early exit from a task around the loop ends that task. *)
+              | Cancel _ -> ()
               | terminator ->
                   List.iter
                     (fun target ->
@@ -218,7 +221,6 @@ let validate definition (body : Mir.body) =
               List.iter
                 (fun inner ->
                   match body.blocks.(inner).terminator with
-                  | Exit_tasks _ -> ()
                   | Join { fork = joined; next = target } ->
                       if joined <> fork || Some target <> next then
                         problem "branch %d of the block at %d joins to %d" position index target
@@ -237,7 +239,7 @@ let validate definition (body : Mir.body) =
     Array.fold_left
       (fun held (basic : Mir.basic_block) ->
         match basic.terminator with
-        | Exit_tasks { exit = Exit_return (Some value); _ } -> operand_locals value @ held
+        | Cancel { returned = Some (value, _); _ } -> operand_locals value @ held
         | _ -> held)
       [] body.blocks
   in
@@ -340,16 +342,6 @@ let validate definition (body : Mir.body) =
     else
       let basic = body.blocks.(node) in
       List.iter (apply node) basic.statements;
-      (* The other tasks of an exit's group go on from the task's end with
-         the scopes around the task open; the exit ends them once taken. *)
-      (match basic.terminator with
-      | Exit_tasks { tasks = { task_end = Some target; _ } :: _; _ } ->
-          flow target (Array.copy state, Array.copy open_loans)
-      | _ -> ());
-      (match basic.terminator with
-      | Exit_tasks { tasks; _ } ->
-          List.iter (fun (left : Mir.left_task) -> List.iter (apply node) left.ends) tasks
-      | _ -> ());
       List.iter (read node) (terminator_reads basic.terminator);
       match basic.terminator with
       | For _ ->
@@ -358,11 +350,7 @@ let validate definition (body : Mir.body) =
           flow (count + node) (state, open_loans)
       | Iteration_end _ -> iteration_end node
       | Return value -> returns node value
-      | Exit_tasks { exit; _ } -> (
-          match exit with
-          | Exit_return value -> returns node value
-          | Exit_to target -> flow target (state, open_loans)
-          | Exit_iteration _ -> iteration_end node)
+      | Cancel { task = Iteration _; _ } -> iteration_end node
       | terminator ->
           List.iter (fun target -> flow target (state, open_loans)) (Mir.successors terminator)
   in
@@ -717,17 +705,37 @@ let () =
       | lambdas -> fail "%d lambdas" (Array.length lambdas));
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
+      let blocks = mir.body.blocks in
+      (* Where the exit that cancels with [number] goes on once its group of
+         tasks has ended. *)
+      let resume winner number =
+        Array.to_list blocks
+        |> List.find_map (fun (basic : Mir.basic_block) ->
+            match basic.terminator with
+            | Resume { winner = resumed; exits; _ } when resumed = winner ->
+                Some (List.nth exits (number - 1)).resume
+            | _ -> None)
+      in
+      (* What an exit does once every task it leaves has ended. *)
+      let rec taken winner number =
+        match resume winner number with
+        | None -> "lost"
+        | Some block -> (
+            match blocks.(block).terminator with
+            | Cancel { winner; number; _ } -> taken winner number
+            | Return _ -> "return"
+            | Goto _ -> "jump"
+            | Iteration_end _ -> "next"
+            | _ -> "other")
+      in
       let exits =
         List.filter_map
           (fun (_, terminator) ->
             match (terminator : Mir.terminator) with
-            | Exit_tasks { tasks = left :: _; exit } ->
+            | Cancel { task; winner; number; _ } ->
                 Some
-                  ( (match left.task with Branch _ -> "branch" | Iteration _ -> "iteration"),
-                    match exit with
-                    | Exit_return _ -> "return"
-                    | Exit_to _ -> "jump"
-                    | Exit_iteration _ -> "next" )
+                  ( (match task with Branch _ -> "branch" | Iteration _ -> "iteration"),
+                    taken winner number )
             | _ -> None)
           (terminators mir.body)
       in
@@ -735,7 +743,24 @@ let () =
         (fun expected ->
           if not (List.mem expected exits) then
             fail "no exit from a %s that is a %s" (fst expected) (snd expected))
-        [ ("branch", "return"); ("branch", "jump"); ("iteration", "return"); ("iteration", "jump") ])
+        [ ("branch", "return"); ("branch", "jump"); ("iteration", "return"); ("iteration", "jump") ];
+      (* Before a group's tasks start, its winner is given a value. *)
+      Array.iter
+        (fun (basic : Mir.basic_block) ->
+          match basic.terminator with
+          | Resume { winner; _ } ->
+              if
+                not
+                  (List.exists
+                     (fun (statement : Mir.statement) ->
+                       match statement.kind with
+                       | Assign { target = { root = Local local; projections = [] }; _ } ->
+                           local = winner
+                       | _ -> false)
+                     (statements mir.body))
+              then fail "the winner _%d of a group is never given a value" winner
+          | _ -> ())
+        blocks)
 
 (* The move analysis *)
 

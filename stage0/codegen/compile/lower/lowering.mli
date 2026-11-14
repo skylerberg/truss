@@ -40,32 +40,11 @@ and mir_frame = {
   mutable state : Moves.state;
 }
 
-type early_exits = {
-  winner : Lowered.place;
-  mutable return_value : Lowered.place option;
-  scope : scope;
-  mutable exits : early_exit list;
-}
-
-and early_exit = {
-  ends : Mir.statement list;
-  remaining : (Core.task * Mir.statement list) list;
-  exit : Mir.task_exit;
-  state : Moves.state;
-}
-
-type task = {
-  id : Core.task;
-  group : Lowered.place;
-  early_exits : early_exits;
-  end_block : Lowered.block;
-  scope_depth : int;
-}
+type task = { id : Core.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
 
 type spawn_loop = {
   origin : Core.origin;
   group : Lowered.place;
-  early_exits : early_exits;
   item : Lowered.local;
   element : Ground.ty;
 }
@@ -118,7 +97,6 @@ val held : state -> kept:bool -> ?name:string -> Lowered.ty -> Lowered.place
    given [parts] as its parameters. Gives the function's number and the
    operand for its environment. *)
 val outlined : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
-val new_early_exits : state -> early_exits
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
@@ -131,7 +109,6 @@ exception Unsupported of unsupported
 val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
 val source : state -> Syntax.span -> string
 val innermost_scope : state -> scope
-val owned_local : state -> ?name:string -> scope -> Ground.ty -> Lowered.place
 val temporary : state -> ?name:string -> Ground.ty -> Lowered.place
 val binding : state -> ?name:string -> Ground.ty -> Lowered.place
 

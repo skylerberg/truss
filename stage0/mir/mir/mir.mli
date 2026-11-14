@@ -172,15 +172,12 @@ type iteration =
       (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
           [next] is [None], or else the cursor type's [Cursor.next]. *)
 
-(** Where an early exit from [concurrent] code goes once its tasks end. *)
-type task_exit =
-  | Exit_return of operand option
-  | Exit_to of block
-  | Exit_iteration of { loop : block }
-      (** The end of the iteration of the enclosing {!For}, the terminator of [loop]. *)
-
-type left_task = { task : Core.task; ends : statement list; task_end : block option }
-(** A task an early exit leaves. *)
+type early_exit = {
+  resume : block;  (** Where the code after the group goes on, where this exit won *)
+  returned : local option;  (** For a [return] with a value, the local the value is in *)
+}
+(** An early exit that leaves a group of tasks: a [return], [break], or [continue] out of a branch
+    of a [concurrent] block or an iteration of a [concurrent for]. *)
 
 type branch = {
   entry : block;
@@ -210,9 +207,20 @@ type terminator =
       (** The end of an iteration of the enclosing {!For}, the terminator of [loop]. *)
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
-  | Exit_tasks of { tasks : left_task list; exit : task_exit }
-      (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
-          taken. The exit ends the scopes inside the innermost task before it. *)
+  | Cancel of {
+      task : Core.task;
+      task_end : block option;
+      winner : local;
+      number : int;
+      returned : (operand * local) option;
+    }
+      (** An early exit that leaves [task]: the task cancels its group and ends, at [task_end] for a
+          branch of a [concurrent] block, or where its iteration ends. The first task of the group
+          to cancel sets [winner] to [number], and moves a value it returns into the local; a later
+          one drops that value. The scopes inside the task end before it. *)
+  | Resume of { winner : local; exits : early_exit list; next : block }
+      (** Where a group of tasks has ended: the [resume] of the exit numbered [winner], counted from
+          1 in [exits], where one won, or else [next]. *)
   | Unreachable
   | Written_unreachable
   | Todo  (** A [todo] that is reached stops the program. *)
@@ -278,8 +286,7 @@ val conditional_lends : body -> local list
     lend ran. *)
 
 val iteration_loop : terminator -> block option
-(** The block of the {!For} whose iteration a terminator ends: an {!Iteration_end}'s, or an
-    {!Exit_tasks}' to {!Exit_iteration}. *)
+(** The block of the {!For} whose iteration an {!Iteration_end} ends. *)
 
 val block_successors : body -> block -> block list
 (** The blocks control goes to from the end of a block: its terminator's {!successors}, and, for the

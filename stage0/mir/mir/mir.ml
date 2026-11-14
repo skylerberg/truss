@@ -165,15 +165,12 @@ type iteration =
       (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
           [next] is [None], or else the cursor type's [Cursor.next]. *)
 
-(** Where an early exit from [concurrent] code goes once its tasks end. *)
-type task_exit =
-  | Exit_return of operand option
-  | Exit_to of block
-  | Exit_iteration of { loop : block }
-      (** The end of the iteration of the enclosing {!For}, the terminator of [loop]. *)
-
-type left_task = { task : Core.task; ends : statement list; task_end : block option }
-(** A task an early exit leaves. *)
+type early_exit = {
+  resume : block;  (** Where the code after the group goes on, where this exit won *)
+  returned : local option;  (** For a [return] with a value, the local the value is in *)
+}
+(** An early exit that leaves a group of tasks: a [return], [break], or [continue] out of a branch
+    of a [concurrent] block or an iteration of a [concurrent for]. *)
 
 type branch = {
   entry : block;
@@ -203,9 +200,20 @@ type terminator =
       (** The end of an iteration of the enclosing {!For}, the terminator of [loop]. *)
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
-  | Exit_tasks of { tasks : left_task list; exit : task_exit }
-      (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
-          taken. The exit ends the scopes inside the innermost task before it. *)
+  | Cancel of {
+      task : Core.task;
+      task_end : block option;
+      winner : local;
+      number : int;
+      returned : (operand * local) option;
+    }
+      (** An early exit that leaves [task]: the task cancels its group and ends, at [task_end] for a
+          branch of a [concurrent] block, or where its iteration ends. The first task of the group
+          to cancel sets [winner] to [number], and moves a value it returns into the local; a later
+          one drops that value. The scopes inside the task end before it. *)
+  | Resume of { winner : local; exits : early_exit list; next : block }
+      (** Where a group of tasks has ended: the [resume] of the exit numbered [winner], counted from
+          1 in [exits], where one won, or else [next]. *)
   | Unreachable
   | Written_unreachable
   | Todo  (** A [todo] that is reached stops the program. *)
@@ -287,6 +295,23 @@ type scope = {
    [while] binds a name that may alias a lent part; or for the condition
    alone. *)
 type condition_lends = For_statement | For_block | For_condition
+
+(* Where an early exit from tasks goes once they have ended. *)
+type task_exit =
+  | Exit_return of operand option
+  | Exit_to of block
+  | Exit_iteration of { loop : block }
+
+(* A group of tasks that early exits leave: the tasks of a [concurrent]
+   block or loop. *)
+type group = {
+  winner : local;
+  mutable exits : early_exit list;
+  mutable after : block list;
+      (** The blocks of the group's code that run once its tasks have ended *)
+  mutable resumed : block option;  (** The block that takes the exit that won *)
+}
+
 type target = Jump of block | Next_iteration of block
 
 type enclosing_loop = {
@@ -318,7 +343,12 @@ type builder = {
   mutable tasks : (Core.task * (int * block option)) list;
       (** The tasks around the code being built, innermost first, each with the number of scopes
           around its start and, for a branch of a [concurrent] block, the block where it ends. *)
-  task_exits : (block, (Core.task * (scope * int list) list) list) Hashtbl.t;
+  groups : (Core.origin, group) Hashtbl.t;
+      (** The groups of tasks that early exits leave, by the origin of their [concurrent] block or
+          loop *)
+  resume_ends : (block, (scope * int list) list) Hashtbl.t;
+      (** For the block where an early exit goes on once a group of tasks has ended, the scopes
+          between that group and the next one out, which end there *)
   mutable yield_count : int;  (** The [yield]s built so far. *)
   mutable through : Path.t list;  (** The yielding functions a loop that yields iterates over. *)
   mutable yields_places : bool;  (** Whether a [yield] lends a place that outlives the body. *)
@@ -342,7 +372,8 @@ let create ~lambdas =
     extended = [];
     binds_into = Bindings;
     tasks = [];
-    task_exits = Hashtbl.create 1;
+    groups = Hashtbl.create 1;
+    resume_ends = Hashtbl.create 1;
     yield_count = 0;
     through = [];
     yields_places = false;
@@ -539,6 +570,14 @@ let return_ b value origin =
   let value = Option.map (held_past_scopes b origin) value in
   leave_scopes b ~depth:0 origin;
   terminate b (Return value) origin
+
+let type_of_operand : operand -> Types.ty = function
+  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_
+
+(* The origin of the [concurrent] block or loop whose group a task is in. *)
+let group_key : Core.task -> Core.origin = function
+  | Branch { block; _ } -> block
+  | Iteration { loop } -> loop
 
 (* How many scopes stay when a task's exit is taken. *)
 let exit_depth b (exit : task_exit) =
@@ -1640,9 +1679,7 @@ and statement b (node : Core.statement) =
             List.mapi
               (fun index (branch : Core.statement) ->
                 let branch_entry = List.nth entries index in
-                let next =
-                  if index + 1 < List.length entries then List.nth entries (index + 1) else join
-                in
+                let last = index + 1 = List.length entries in
                 start b branch_entry;
                 let first = b.block_count in
                 if concurrent then begin
@@ -1656,16 +1693,25 @@ and statement b (node : Core.statement) =
                   start b branch_end
                 end
                 else statement b branch;
+                let next =
+                  if last then resumed b origin ~next:join else List.nth entries (index + 1)
+                in
                 terminate b (Join { fork = origin; next }) branch.origin;
                 {
                   entry = branch_entry;
                   blocks =
-                    branch_entry :: List.init (b.block_count - first) (fun index -> first + index);
+                    inside_group b origin
+                      (branch_entry
+                      :: List.init (b.block_count - first) (fun index -> first + index));
                 })
               branches
           in
           b.current <- entry;
-          terminate b (Fork { fork = origin; concurrent; branches; join = Some join }) origin;
+          start_group b origin origin;
+          terminate b
+            (Fork { fork = origin; concurrent; branches; join = Some (resumed b origin ~next:join) })
+            origin;
+          resume_group b origin ~next:join origin;
           start b join
       | Proof proof -> emit b (Proof proof) origin
       | Assert { condition = { value; executable = true }; by_bit_vector } -> (
@@ -1742,20 +1788,106 @@ and leave_tasks b tasks exit origin =
   (match starts with
   | innermost :: _ -> leave_scopes b ~depth:innermost origin
   | [] -> leave_scopes b ~depth:target_depth origin);
-  Option.iter
-    (fun block -> Hashtbl.replace b.task_exits block (List.combine tasks (around starts)))
-    b.current;
-  terminate b
-    (Exit_tasks
-       {
-         tasks =
-           List.map
-             (fun task ->
-               { task; ends = []; task_end = Option.bind (List.assoc_opt task b.tasks) snd })
-             tasks;
-         exit;
-       })
-    origin
+  (* Each task cancels its group. Where the exit wins, the code after the
+     group ends the scopes up to the next task out, which cancels its own
+     group, and so on until the exit is taken. *)
+  let rec cancel returned tasks scopes =
+    match (tasks, scopes) with
+    | task :: outer, scopes :: outer_scopes ->
+        let group = group_of b task origin in
+        let resume = new_block b in
+        let slot =
+          Option.map (fun value -> new_local b Temporary (type_of_operand value) origin) returned
+        in
+        group.exits <- group.exits @ [ { resume; returned = slot } ];
+        group.after <- resume :: group.after;
+        terminate b
+          (Cancel
+             {
+               task;
+               task_end = Option.bind (List.assoc_opt task b.tasks) snd;
+               winner = group.winner;
+               number = List.length group.exits;
+               returned =
+                 (match (returned, slot) with
+                 | Some value, Some slot -> Some (value, slot)
+                 | _ -> None);
+             })
+          origin;
+        start b resume;
+        Hashtbl.replace b.resume_ends resume scopes;
+        cancel
+          (match (returned, slot) with
+          | Some value, Some slot ->
+              Some (Use { place = at slot; type_ = type_of_operand value; node = origin; origin })
+          | _ -> None)
+          outer outer_scopes
+    | [], [] -> (
+        match exit with
+        | Exit_return _ -> terminate b (Return returned) origin
+        | Exit_to target -> goto b target origin
+        | Exit_iteration { loop } -> terminate b (Iteration_end { loop }) origin)
+    | _ -> bug "an early exit whose tasks and scopes differ in number"
+  in
+  if b.current <> None then
+    cancel
+      (match exit with Exit_return value -> value | Exit_to _ | Exit_iteration _ -> None)
+      tasks (around starts)
+
+(* The group of tasks a task belongs to, made where an early exit first
+   leaves it. *)
+and group_of b (task : Core.task) origin =
+  let key = group_key task in
+  match Hashtbl.find_opt b.groups key with
+  | Some group -> group
+  | None ->
+      let winner = new_local b Temporary (Types.builtin UInt32) origin in
+      let group = { winner; exits = []; after = []; resumed = None } in
+      Hashtbl.replace b.groups key group;
+      group
+
+(* The blocks of a region of the code with the origin [key], without those
+   that run once its group's tasks, or those of a group around it, have
+   ended. *)
+and inside_group b key blocks =
+  let after =
+    List.concat_map
+      (fun key -> match Hashtbl.find_opt b.groups key with Some group -> group.after | None -> [])
+      (key :: List.map (fun (task, _) -> group_key task) b.tasks)
+  in
+  List.filter (fun block -> not (List.mem block after)) blocks
+
+(* Where a group's tasks have ended: a block that takes the exit that won,
+   where an early exit leaves the group, or else [next]. *)
+and resumed b key ~next =
+  match Hashtbl.find_opt b.groups key with
+  | Some ({ exits = _ :: _; resumed = None; _ } as group) ->
+      let block = new_block b in
+      group.resumed <- Some block;
+      group.after <- block :: group.after;
+      block
+  | Some { resumed = Some block; _ } -> block
+  | Some { resumed = None; _ } | None -> next
+
+(* Before a group's tasks start, no exit has won. The winner is a
+   temporary of the statement around the group. *)
+and start_group b key origin =
+  match Hashtbl.find_opt b.groups key with
+  | Some { resumed = Some _; winner; _ } ->
+      add_temporary b winner;
+      assign b (at winner)
+        (Operand (Constant { value = Integer Z.zero; type_ = Types.builtin UInt32 }))
+        origin
+  | _ -> ()
+
+(* Once a group's tasks have ended, the exit that won goes on, and without
+   one, the code after the group. *)
+and resume_group b key ~next origin =
+  match Hashtbl.find_opt b.groups key with
+  | Some { resumed = Some block; winner; exits; _ } ->
+      start b block;
+      terminate b (Resume { winner; exits; next }) origin
+  | _ -> ()
 
 (* A loop over an integer range: a counter from the start, tested at the
    header against the stop, and stepped at the end of each iteration. An
@@ -1793,9 +1925,14 @@ and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~
           | Range _ -> bind ~owned:true b pattern (at part)
           | Yielding _ | Pull _ -> bind b pattern (at part)));
   terminate b (Iteration_end { loop = loop_block }) origin;
-  let blocks = inside :: List.init (b.block_count - first) (fun index -> first + index) in
+  let blocks =
+    inside_group b origin (inside :: List.init (b.block_count - first) (fun index -> first + index))
+  in
+  let ended = resumed b origin ~next:after in
   b.current <- entry;
-  terminate b (For { iteration; part; body = inside; blocks; after; loop }) origin;
+  start_group b origin origin;
+  terminate b (For { iteration; part; body = inside; blocks; after = ended; loop }) origin;
+  resume_group b origin ~next:after origin;
   start b after
 
 and range_loop b ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
@@ -1910,29 +2047,16 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
         let terminator, terminator_origin =
           match pending.ending with Some ending -> ending | None -> (Unreachable, 0)
         in
-        let terminator =
-          match (terminator, Hashtbl.find_opt b.task_exits index) with
-          | Exit_tasks { exit; tasks = left }, Some tasks ->
-              Exit_tasks
-                {
-                  tasks =
-                    List.map2
-                      (fun (left : left_task) (_, scopes) ->
-                        {
-                          left with
-                          ends =
-                            List.concat_map
-                              (fun (scope, loans) ->
-                                scope_ends { scope with loans } terminator_origin)
-                              scopes;
-                        })
-                      left tasks;
-                  exit;
-                }
-          | _ -> terminator
+        let ends =
+          match Hashtbl.find_opt b.resume_ends index with
+          | Some scopes ->
+              List.concat_map
+                (fun (scope, loans) -> scope_ends { scope with loans } terminator_origin)
+                scopes
+          | None -> []
         in
         {
-          statements = List.rev pending.statements;
+          statements = ends @ List.rev pending.statements;
           terminator;
           terminator_origin;
           header = pending.heading;
@@ -2017,24 +2141,20 @@ and canonical (blocks : basic_block array) =
           }
     | Join { fork; next } -> Join { fork; next = target next }
     | Yield yielded -> Yield { yielded with resume = target yielded.resume }
-    | Exit_tasks { tasks; exit } ->
-        Exit_tasks
+    | Cancel cancel ->
+        Cancel
           {
-            tasks =
-              List.map
-                (fun (left : left_task) ->
-                  {
-                    left with
-                    task_end =
-                      Option.bind left.task_end (fun task_end ->
-                          if visited.(task_end) then Some (target task_end) else None);
-                  })
-                tasks;
-            exit =
-              (match exit with
-              | Exit_to block -> Exit_to (target block)
-              | Exit_iteration _ -> Exit_iteration { loop = loop_of at }
-              | Exit_return _ -> exit);
+            cancel with
+            task_end =
+              Option.bind cancel.task_end (fun task_end ->
+                  if visited.(task_end) then Some (target task_end) else None);
+          }
+    | Resume { winner; exits; next } ->
+        Resume
+          {
+            winner;
+            exits = List.map (fun exit -> { exit with resume = target exit.resume }) exits;
+            next = target next;
           }
     | Iteration_end _ -> Iteration_end { loop = loop_of at }
     | (Return _ | Unreachable | Written_unreachable | Todo) as other -> other
@@ -2068,14 +2188,11 @@ and successors = function
   | Fork { branches = []; _ } -> []
   | Join { next; _ } -> [ next ]
   | Yield { resume; _ } -> [ resume ]
-  | Exit_tasks { exit; tasks } -> (
-      (match exit with Exit_to block -> [ block ] | Exit_return _ | Exit_iteration _ -> [])
-      @ match tasks with innermost :: _ -> Option.to_list innermost.task_end | [] -> [])
+  | Cancel { task_end; _ } -> Option.to_list task_end
+  | Resume { exits; next; _ } -> List.map (fun exit -> exit.resume) exits @ [ next ]
   | Iteration_end _ | Return _ | Unreachable | Written_unreachable | Todo -> []
 
-let iteration_loop = function
-  | Iteration_end { loop } | Exit_tasks { exit = Exit_iteration { loop }; _ } -> Some loop
-  | _ -> None
+let iteration_loop = function Iteration_end { loop } -> Some loop | _ -> None
 
 let block_successors (body : body) block =
   let terminator = body.blocks.(block).terminator in
@@ -2088,14 +2205,7 @@ let conditional_lends (body : body) =
   let ends_of part (statement : statement) =
     match statement.kind with Dead locals -> List.mem part locals | _ -> false
   in
-  let ends_in part (block : basic_block) =
-    List.exists (ends_of part) block.statements
-    ||
-    match block.terminator with
-    | Exit_tasks { tasks; _ } ->
-        List.exists (fun (left : left_task) -> List.exists (ends_of part) left.ends) tasks
-    | _ -> false
-  in
+  let ends_in part (block : basic_block) = List.exists (ends_of part) block.statements in
   let lends = ref [] in
   Array.iteri
     (fun index (block : basic_block) ->

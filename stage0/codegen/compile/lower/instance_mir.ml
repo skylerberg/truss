@@ -233,26 +233,28 @@ let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
       Yield
         { yielded with part = change_yielded change yielded.part; resume = block yielded.resume }
   | Return value -> Return (Option.map operand value)
-  | Exit_tasks { tasks; exit } ->
-      Exit_tasks
+  | Cancel { task; task_end; winner; number; returned } ->
+      Cancel
         {
-          tasks =
+          task =
+            (match task with
+            | Branch { block = fork; index } -> Branch { block = change.fork fork; index }
+            | Iteration _ -> task);
+          task_end = Option.map block task_end;
+          winner = change.local winner;
+          number;
+          returned = Option.map (fun (value, slot) -> (operand value, change.local slot)) returned;
+        }
+  | Resume { winner; exits; next } ->
+      Resume
+        {
+          winner = change.local winner;
+          exits =
             List.map
-              (fun (left : Mir.left_task) ->
-                {
-                  Mir.task =
-                    (match left.task with
-                    | Branch { block = fork; index } -> Branch { block = change.fork fork; index }
-                    | Iteration _ as task -> task);
-                  ends = List.map (change_statement change) left.ends;
-                  task_end = Option.map block left.task_end;
-                })
-              tasks;
-          exit =
-            (match exit with
-            | Exit_return value -> Exit_return (Option.map operand value)
-            | Exit_to target -> Exit_to (block target)
-            | Exit_iteration { loop } -> Exit_iteration { loop = block loop });
+              (fun (exit : Mir.early_exit) ->
+                { Mir.resume = block exit.resume; returned = Option.map change.local exit.returned })
+              exits;
+          next = block next;
         }
   | Iteration_end { loop } -> Iteration_end { loop = block loop }
   | (Unreachable | Written_unreachable | Todo) as terminator -> terminator
@@ -559,9 +561,8 @@ let rec yielded_into building ~part ~(mode : Types.mode) ~origin (yielded : Mir.
       statements @ [ assign (Construct { variant; fields }) ]
 
 (* The blocks of a loop's body that end its own iterations, not those of a
-   loop nested in it: with [exits], the early exits to its next iteration
-   too. *)
-let own_iteration_ends ?(exits = false) building (blocks : Mir.block list) =
+   loop nested in it. *)
+let own_iteration_ends building (blocks : Mir.block list) =
   let nested =
     List.concat_map
       (fun block ->
@@ -573,11 +574,7 @@ let own_iteration_ends ?(exits = false) building (blocks : Mir.block list) =
   List.filter
     (fun block ->
       (not (List.mem block nested))
-      &&
-      match (block_at building block).terminator with
-      | Iteration_end _ -> true
-      | Exit_tasks { exit = Exit_iteration _; _ } -> exits
-      | _ -> false)
+      && match (block_at building block).terminator with Iteration_end _ -> true | _ -> false)
     blocks
 
 (* The tasks that run in [blocks]: each iteration of a loop there and each
@@ -624,29 +621,11 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
         set_block building block
           (match basic.terminator with
           | Return _ -> { basic with statements = basic.statements @ [ dead ] }
-          | Exit_tasks { exit = Exit_iteration _; _ } -> basic
-          | Exit_tasks { exit = Exit_to target; _ } when stays target -> basic
-          | Exit_tasks { tasks; exit } -> (
-              match
-                List.length
-                  (List.filter (fun (left : Mir.left_task) -> List.mem left.task inside) tasks)
-              with
-              | 0 -> { basic with statements = basic.statements @ [ dead ] }
-              | count ->
-                  {
-                    basic with
-                    terminator =
-                      Exit_tasks
-                        {
-                          exit;
-                          tasks =
-                            List.mapi
-                              (fun index (left : Mir.left_task) ->
-                                if index = count - 1 then { left with ends = left.ends @ [ dead ] }
-                                else left)
-                              tasks;
-                        };
-                  })
+          (* An early exit that leaves a task around the region leaves the
+             region, once the groups inside it have ended. *)
+          | Cancel { task; _ } when not (List.mem task inside) ->
+              { basic with statements = basic.statements @ [ dead ] }
+          | Cancel _ | Iteration_end _ -> basic
           | terminator ->
               {
                 basic with
@@ -1131,18 +1110,20 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
         set_block building ending { ended with statements = kept; terminator = Goto dispatch })
       (ends_of building part ~from:continuation)
 
+(* Whether a lent part ends only in its own tasks' code, not where an early
+   exit goes on once a group of tasks has ended. *)
 let ends_only_in_statements building part =
   Dynarray.for_all
     (fun (basic : Mir.basic_block) ->
       match basic.terminator with
-      | Exit_tasks { tasks; _ } ->
+      | Resume { exits; _ } ->
           List.for_all
-            (fun (left : Mir.left_task) ->
+            (fun (exit : Mir.early_exit) ->
               List.for_all
                 (fun (statement : Mir.statement) ->
                   match statement.kind with Dead locals -> not (List.mem part locals) | _ -> true)
-                left.ends)
-            tasks
+                (block_at building exit.resume).statements)
+            exits
       | _ -> true)
     building.blocks
 
@@ -1155,7 +1136,7 @@ let end_loop_parts building =
           (fun ending ->
             let basic = block_at building ending in
             set_block building ending { basic with statements = basic.statements @ [ dead ] })
-          (own_iteration_ends ~exits:true building blocks);
+          (own_iteration_ends building blocks);
         end_on_exits building ~blocks
           ~stays:(fun inner -> List.mem inner blocks)
           ~locals:[ part ] ~iteration:None ~origin:loop.origin
