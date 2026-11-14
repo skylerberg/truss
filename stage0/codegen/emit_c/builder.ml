@@ -458,6 +458,7 @@ let build ?(returns = true) builder ~parameters ~result =
                 match ty with
                 | Value ty when is_struct context ty -> " = {0}"
                 | Value _ | Pointer _ | Raw _ -> " = 0"
+                | Lend | Lend_mark -> " = {0}"
                 | Environment _ | Evidence _ -> bug "a zeroed environment or evidence slot"
             in
             Buffer.add_string body

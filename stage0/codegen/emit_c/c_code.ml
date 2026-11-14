@@ -103,6 +103,19 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
       declare_prototype context symbol (Printf.sprintf "void %s(void);\n" symbol);
       symbol ^ "()"
   | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
+  | ( Lend_begin | Lend_called | Lend_release | Lend_transfer | Lend_allocate | Lend_defer_drop
+    | Lend_defer_write_back ) as lend ->
+      let name =
+        match lend with
+        | Lend_begin -> "_begin"
+        | Lend_called -> "_called"
+        | Lend_release -> "_release"
+        | Lend_transfer -> "_transfer"
+        | Lend_allocate -> "_allocate"
+        | Lend_defer_drop -> "_defer_drop"
+        | _ -> "_defer_write_back"
+      in
+      use_helper context "t_lend" ^ name ^ "(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
       declare_prototype context "environ" "extern char **environ;\n";
@@ -208,12 +221,6 @@ let call_c context fc (target : Lowered.target) arguments =
         evidence slot
         (String.concat ", " (evidence :: List.map fst arguments))
 
-let anchor_c context definition =
-  let symbol = anchor_symbol definition in
-  if not (List.mem_assoc symbol context.anchors) then
-    context.anchors <- (symbol, definition) :: context.anchors;
-  "&" ^ symbol
-
 let may_alias (first : Lowered.place) (second : Lowered.place) =
   let rec overlap (first : Lowered.projection list) (second : Lowered.projection list) =
     match (first, second) with
@@ -292,6 +299,12 @@ let statement_c context fc buffer (statement : Lowered.statement) =
       match place_c context fc place with
       | Some (text, Value sum) ->
           line "t_runtime_free(%s);" (block_pointer context text sum variant)
+      | _ -> bug "a block of a place that is not a sum type")
+  | Defer_free_block { lend; place; variant } -> (
+      match (operand_c context fc lend, place_c context fc place) with
+      | Some (lend, _), Some (text, Value sum) ->
+          line "%s_defer_free(%s, %s);" (use_helper context "t_lend") lend
+            (block_pointer context text sum variant)
       | _ -> bug "a block of a place that is not a sum type")
   | Fork { branches } ->
       let operand argument =
@@ -378,17 +391,28 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
       | None -> line "return;"
       | Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
-  | Fail { failure; message; length; site } ->
+  | Fail { failure; message; length; site; reported } -> (
       if match failure with Lowered.Todo -> true | Panic | Assertion -> false then
         context.failures <-
           (Todo, { definition = site.definition; line = site.line; column = site.column })
           :: context.failures;
-      line "%s(%s, %s, %s, %d, %d);"
-        (match failure with
+      let runtime =
+        match failure with
         | Panic -> "t_runtime_panic"
         | Assertion -> "t_runtime_assertion_failed"
-        | Todo -> "t_runtime_todo")
-        (fst (operand message))
-        (fst (operand length))
-        (anchor_c context site.definition)
-        site.line site.column
+        | Todo -> "t_runtime_todo"
+      in
+      match Option.map operand reported with
+      | Some (reported, _) ->
+          line "{";
+          line "  const struct t_site *site = %s;" reported;
+          line "  %s(%s, %s, site->anchor, site->line, site->column);" runtime
+            (fst (operand message))
+            (fst (operand length));
+          line "}"
+      | None ->
+          line "%s(%s, %s, %s, %d, %d);" runtime
+            (fst (operand message))
+            (fst (operand length))
+            (anchor_c context site.definition)
+            site.line site.column)

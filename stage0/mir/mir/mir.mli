@@ -246,17 +246,7 @@ type basic_block = {
   terminator : terminator;
   terminator_origin : Core.origin;
   header : natural_loop option;  (** The [while] loop this block heads. *)
-  inlined : inlined list;
-      (** For a block of a method inlined into the body, the methods it was inlined from, innermost
-          first. The block's origins are the innermost method's. Empty for the body's own blocks. *)
 }
-
-and inlined = {
-  method_ : Path.t;
-  type_arguments : Types.argument list;  (** The method's, as the instance has them. *)
-  call : Core.origin;  (** Where the call is, in the code around it. *)
-}
-(** A method inlined at a call. *)
 
 type body = {
   parameters : local list;
@@ -278,11 +268,6 @@ val canonical : basic_block array -> basic_block array
 
 val successors : terminator -> block list
 (** The blocks a terminator can jump to. *)
-
-val conditional_lends : body -> local list
-(** The parts of lending calls whose {!Dead} some path from the entry reaches without passing the
-    {!Lend}, as a lend in one arm of a [match] does. A consumer runs the lend's end only where the
-    lend ran. *)
 
 val iteration_loop : terminator -> block option
 (** The block of the {!For} whose iteration an {!Iteration_end} ends. *)

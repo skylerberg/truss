@@ -17,4 +17,12 @@ val expression_into :
 val fill_defaults :
   Lowering.state -> Lowered.place -> Mir.body -> Lowered.place list -> Lowered.place list
 
-val lower_code : Lowering.state -> Path.t -> parameters:Lowered.place list -> unit
+val lower_code :
+  Lowering.state ->
+  Path.t ->
+  parameters:Lowered.place list ->
+  ?lending:Lowering.lending ->
+  unit ->
+  unit
+(** Lowers the body of a function or a method. [lending] is a lending method's trailing parameters.
+*)

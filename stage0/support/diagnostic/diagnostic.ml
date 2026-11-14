@@ -194,8 +194,8 @@ module Code = struct
     | Needs_owned
     | Data_race
     | Lent_part_escapes
+    | Lends_other_parameter
     | Read_only_view
-    | Owned_beside_lent
     | Lent_mut_in_variant
     | Task_outlives_view
 
@@ -453,8 +453,8 @@ module Code = struct
     | Needs_owned -> "needs_owned"
     | Data_race -> "data_race"
     | Lent_part_escapes -> "lent_part_escapes"
+    | Lends_other_parameter -> "lends_other_parameter"
     | Read_only_view -> "read_only_view"
-    | Owned_beside_lent -> "owned_beside_lent"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Task_outlives_view -> "task_outlives_view"
 

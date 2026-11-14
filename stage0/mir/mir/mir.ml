@@ -238,17 +238,7 @@ type basic_block = {
   terminator : terminator;
   terminator_origin : Core.origin;
   header : natural_loop option;  (** The [while] loop this block heads. *)
-  inlined : inlined list;
-      (** For a block of a method inlined into the body, the methods it was inlined from, innermost
-          first. The block's origins are the innermost method's. Empty for the body's own blocks. *)
 }
-
-and inlined = {
-  method_ : Path.t;
-  type_arguments : Types.argument list;  (** The method's, as the instance has them. *)
-  call : Core.origin;  (** Where the call is, in the code around it. *)
-}
-(** A method inlined at a call. *)
 
 type body = {
   parameters : local list;
@@ -2050,7 +2040,6 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
           terminator;
           terminator_origin;
           header = pending.heading;
-          inlined = [];
         })
   in
   {
@@ -2063,8 +2052,7 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
 
 (* The blocks control can reach from the entry, in reverse postorder. The
    end of each iteration names the innermost loop it ends, of those
-   reached: a pass that moves or copies loops, as inlining does, leaves
-   that to this. *)
+   reached: a pass that adds blocks to a loop leaves that to this. *)
 and canonical (blocks : basic_block array) =
   let visited = Array.make (Array.length blocks) false and order = ref [] in
   let rec visit block =
@@ -2190,40 +2178,6 @@ let block_successors (body : body) block =
     | Some (For { body = first; after; _ }) -> [ first; after ]
     | _ -> [])
   @ successors terminator
-
-let conditional_lends (body : body) =
-  let ends_of part (statement : statement) =
-    match statement.kind with Dead locals -> List.mem part locals | _ -> false
-  in
-  let ends_in part (block : basic_block) = List.exists (ends_of part) block.statements in
-  let lends = ref [] in
-  Array.iteri
-    (fun index (block : basic_block) ->
-      List.iteri
-        (fun position (statement : statement) ->
-          match statement.kind with
-          | Lend { part; _ } -> lends := (part, index, position) :: !lends
-          | _ -> ())
-        block.statements)
-    body.blocks;
-  List.filter_map
-    (fun (part, lending, position) ->
-      let ended_before =
-        List.exists (ends_of part)
-          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
-      in
-      let visited = Array.make (Array.length body.blocks) false in
-      let rec reaches block =
-        block <> lending
-        && (not visited.(block))
-        && begin
-          visited.(block) <- true;
-          ends_in part body.blocks.(block)
-          || List.exists reaches (successors body.blocks.(block).terminator)
-        end
-      in
-      if ended_before || reaches 0 then Some part else None)
-    !lends
 
 let rec of_expression ?(parameters = []) (written : Core.expression) =
   let b = create ~lambdas:(ref []) in

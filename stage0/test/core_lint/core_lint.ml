@@ -680,35 +680,17 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
   in
   (* The constructs that a lending method lends: the operand of a [Yield],
      and each construct that is a field of one. Only they may have a field
-     that is a place. A lent construct that lends a place owns nothing, so
-     every value that it takes has a [Plain] type. *)
+     that is a place. *)
   let yielded = Hashtbl.create 8 in
-  let plain =
-    let bounds parameter =
-      match Query.demand database Interface.Environment.lowered_interface key with
-      | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds)
-      | None -> []
-    in
-    Interface.Impls.plain database ~bounds
-  in
-  let rec yielded_operand ~lends (mode : T.mode) (part : Core.operand) =
+  let rec yielded_operand (mode : T.mode) (part : Core.operand) =
     match part with
     | Place core_place ->
         if mode = Mut then mutable_place "a `Yield` with the mode `mut`" core_place
         else place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
-        List.iter (fun (_, field) -> Option.iter (yielded_operand ~lends mode) field) fields
-    | Value value ->
-        if lends && not (plain value.type_) then
-          wrong "a lent construct that lends a place takes a value of the type `%s`"
-            (T.show value.type_)
-  in
-  let rec lends_place : Core.operand -> bool = function
-    | Place _ -> true
-    | Value { kind = Construct { fields; _ }; _ } ->
-        List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends_place field) fields
-    | Value _ -> false
+        List.iter (fun (_, field) -> Option.iter (yielded_operand mode) field) fields
+    | Value _ -> ()
   in
   Core_walk.definition
     (located at
@@ -716,11 +698,7 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
          Core_walk.ignore_all with
          statement =
            (fun (node : Core.statement) ->
-             match node.kind with
-             | Yield { mode; part = Value { kind = Construct _; _ } as part } ->
-                 yielded_operand ~lends:(lends_place part) mode part
-             | Yield { mode; part } -> yielded_operand ~lends:false mode part
-             | _ -> ());
+             match node.kind with Yield { mode; part } -> yielded_operand mode part | _ -> ());
        })
     form.definition;
   let rec bindings (pattern : Core.pattern) : (Core.local * T.ty * T.mode) list =

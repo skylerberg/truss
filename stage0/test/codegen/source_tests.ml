@@ -99,6 +99,68 @@ let () =
       in
       if branches <> 2 then fail "expected a branch after each field, got %d:\n%s" branches c)
 
+(* A method of the standard library that only forwards to another lending
+   call is not called: the caller makes the inner call itself. An index of
+   a list, a slice, or an array, and a loop over one, then cost no call and
+   no lend record. *)
+let () =
+  test "an index of a list, a slice, or an array, and a loop over one, call no lending method"
+    (fun () ->
+      let _, compile =
+        load
+          "fn list_at(items: List[Int64]) -> Int64 {\n\
+          \  items[2]\n\
+           }\n\n\
+           fn slice_at(items: Slice[Int64]) -> Int64 {\n\
+          \  items[2]\n\
+           }\n\n\
+           fn array_at(items: Array[Int64, 4]) -> Int64 {\n\
+          \  items[2]\n\
+           }\n\n\
+           fn list_add(items: mut List[Int64]) {\n\
+          \  items[2] += 5\n\
+           }\n\n\
+           fn array_add(items: mut Array[Int64, 4]) {\n\
+          \  items[2] += 5\n\
+           }\n\n\
+           fn list_sum(items: List[Int64]) -> Int64 {\n\
+          \  var total: Int64 = 0\n\
+          \  for item in items {\n\
+          \    total += item\n\
+          \  }\n\
+          \  total\n\
+           }\n\n\
+           fn array_sum(items: Array[Int64, 4]) -> Int64 {\n\
+          \  var total: Int64 = 0\n\
+          \  for item in items {\n\
+          \    total += item\n\
+          \  }\n\
+          \  total\n\
+           }\n\n\
+           fn list_bump(items: mut List[Int64]) {\n\
+          \  for item in mut items {\n\
+          \    item += 1\n\
+          \  }\n\
+           }\n"
+      in
+      List.iter
+        (fun name ->
+          let function_ : Instance.key =
+            Code { path = Top { module_ = example; name }; type_arguments = [] }
+          in
+          let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile function_) in
+          if contains c "t_lend" then fail "expected no lend record in `%s`:\n%s" name c)
+        [
+          "list_at";
+          "slice_at";
+          "array_at";
+          "list_add";
+          "array_add";
+          "list_sum";
+          "array_sum";
+          "list_bump";
+        ])
+
 let () =
   test "negating the least value of a signed type panics, where the checks are on" (fun () ->
       expect_output Fixtures.Source.negating_the_least_value_of_a_signed_type_panics

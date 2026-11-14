@@ -105,7 +105,6 @@ let rec back : Ground.ty -> Types.ty = function
           trait_arguments = List.map back_argument arguments;
           associated = List.map (fun (name, ty) -> (name, back ty)) associated;
         }
-  | Lent lent -> bug "%s has no type in the checker" (Ground.to_string (Lent lent))
 
 and back_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (back ty)
@@ -128,12 +127,11 @@ let fields context substitution (fields : Types.field list) =
       (field.field_name, Memory_layout.Typed (ground context substitution field.field_type)))
     fields
 
-let rec shape context (ty : Ground.ty) : Memory_layout.shape =
+let shape context (ty : Ground.ty) : Memory_layout.shape =
   match ty with
   | Never -> Sum []
   | Function function_type -> Convention.function_value_shape function_type
   | Any _ -> Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ]
-  | Lent lent -> lent_shape context lent
   | Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, arguments) with
       | Some Int8, [] -> Scalar (Integer Int8)
@@ -180,37 +178,6 @@ let rec shape context (ty : Ground.ty) : Memory_layout.shape =
               | Builtin_type _ -> bug "a built-in type under a path that is not built in"
               | Todo_type -> bug "%s is a todo, which no build reaches" (Path.show path)
               | Error_shape _ -> bug "%s did not parse, which no build reaches" (Path.show path))))
-
-(* The shape of [base], with each lent field holding the address of a
-   place or a lent value of its own. A variant's fields are inline, since
-   the value owns no block. *)
-and lent_shape context ({ base; fields; _ } : Ground.lent) : Memory_layout.shape =
-  let member variant name (member : Memory_layout.member) : Memory_layout.member =
-    match
-      List.find_opt
-        (fun (lent : Ground.lent_field) -> lent.variant = variant && lent.field = name)
-        fields
-    with
-    | None -> member
-    | Some { holds = Nested lent; _ } -> Typed (Lent lent)
-    | Some { holds = Address; _ } -> (
-        match member with
-        | Typed ty -> Raw (Pointer (Data ty))
-        | Raw _ -> bug "a lent field %s of %s that no Truss type names" name (Ground.to_string base)
-        )
-  in
-  let members variant =
-    List.map (fun (name, yield_mode) -> (name, member variant name yield_mode))
-  in
-  match shape context base with
-  | Record fields -> Record (members None fields)
-  | Sum variants ->
-      Sum
-        (List.map
-           (fun (value : Memory_layout.variant_shape) ->
-             { value with indirect = false; fields = members (Some value.name) value.fields })
-           variants)
-  | Scalar _ | Array _ -> bug "a lent %s, which has no fields" (Ground.to_string base)
 
 let representation context ty : Memory_layout.representation =
   match (Storage.elements_of ty, ty) with

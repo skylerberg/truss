@@ -68,8 +68,16 @@ val call_through_any :
   name:string ->
   any:Lowered.place ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
+  ?lending:Lowered.operand list ->
   Lowered.place ->
   unit
+(** Calls a method through an [any] value. [lending] is a lending method's trailing arguments, and
+    the place then takes the pointer to the part. *)
+
+val any_substitution :
+  Definitions.context -> any:Types.trait_reference -> Path.t -> Types.substitution
+(** The instantiation of a trait's [Self] and parameters in a method called through an [any] type.
+*)
 
 val in_type_definition : Lowering.state -> Ground.ty -> (unit -> 'a) -> 'a
 val echo : Lowering.state -> Lowered.place -> Ground.ty -> site:Lowered.site -> unit
@@ -97,9 +105,12 @@ val call_instance :
   substitution:Types.substitution ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   ?mask:int ->
+  ?lending:Lowered.operand list ->
   destination:Lowered.place ->
   unit ->
   unit
+(** Calls an instance. [lending] is a lending method's trailing arguments, one for each of
+    {!Definitions.lending_parameters}, and [destination] then takes the pointer to the part. *)
 
 type literal = Integer_value of Z.t | Float_value of float
 

@@ -21,8 +21,8 @@ let consumed_places : Intrinsic.operation -> int list = function
   | Array_from_storage -> [ 0 ]
   | _ -> []
 
-let lower ?(checks = false) ?(value_arguments = []) env builder types operation ~type_arguments
-    arguments ~destination ~site =
+let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types operation
+    ~type_arguments arguments ~destination ~site =
   let set rvalue =
     Option.iter
       (fun destination_place -> emit builder (Assign (destination_place, rvalue)))
@@ -63,6 +63,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
            message = Constant (Bytes message);
            length = usize (String.length message);
            site;
+           reported;
          });
     start builder go_on
   in
@@ -153,6 +154,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  message = Constant (Bytes message);
                  length = usize (String.length message);
                  site;
+                 reported;
                });
           start builder (block builder)
       | None ->
@@ -738,6 +740,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  message = Copy (Storage.view_elements bytes);
                  length = Copy (Storage.view_length bytes);
                  site;
+                 reported;
                });
           start builder (block builder)
       | Handle_from ->
@@ -826,6 +829,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  message = Constant (Bytes message);
                  length = usize (String.length message);
                  site;
+                 reported;
                });
           start builder (block builder)
       | Libc function_ -> (

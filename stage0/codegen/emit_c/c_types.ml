@@ -165,6 +165,8 @@ let rec c_ty context symbol : Lowered.ty -> string = function
       let key = Evidence (max nested_index 1) in
       register context key;
       key_name key
+  | Lend -> "struct " ^ use_helper context "t_lend"
+  | Lend_mark -> "struct " ^ use_helper context "t_lend" ^ "_mark"
 
 let member_c context : Memory_layout.member -> string = function
   | Typed ty -> value_c context ty

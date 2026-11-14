@@ -7,7 +7,7 @@ let bug format = Compiler_bug.bug ~stage:"Lowered" format
 
 let erased env = function
   | Value ty -> Memory_layout.has_zero_size env ty
-  | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
+  | Pointer _ | Raw _ | Environment _ | Evidence _ | Lend | Lend_mark -> false
 
 let member_ty : Memory_layout.member -> ty = function
   | Typed ty -> Value ty

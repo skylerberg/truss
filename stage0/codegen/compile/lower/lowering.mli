@@ -2,8 +2,6 @@ type cleanup =
   | Drop_value of Lowered.place
   | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
   | Free_pointed of Lowered.place
-  | Free_blocks of { place : Lowered.place; variants : string list }
-  | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
   | Join_group of Lowered.statement
 
 type scope_kind = Bindings | Statement
@@ -16,11 +14,24 @@ type loop = {
   break_depth : int;
 }
 
+type lending = {
+  slot : Lowered.place option;
+  part : Ground.ty;
+  record : Lowered.operand;
+  site : Lowered.operand;
+}
+(** The trailing parameters of a lending method. [slot] is a pointer to storage of the caller's for
+    a part that the method builds, null where the caller has none: the method then allocates from
+    [record]. A part of zero size has no slot. [record] is a pointer to the caller's
+    {!Lowered.Lend}, and [site] a pointer to the call site. *)
+
+type lent_call = { mark : Lowered.place; record : Lowered.operand }
+(** A lending call: its {!Lowered.Lend_mark}, and a pointer to the {!Lowered.Lend} that the call
+    adds to. *)
+
 type frame = {
   code : Definitions.code;
   mutable self_place : Lowered.place option;
-  inlined : Path.t list;
-  reported : Lowered.site option;
   exit : (Lowered.block * int) option;
   mir : mir_frame option;
 }
@@ -38,6 +49,21 @@ and mir_frame = {
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
+  lending : lending option;  (** In a lending method, its trailing parameters *)
+  called_parts : Mir.local list;  (** The parts that calls of lending methods lend *)
+  lent_calls : (Mir.local, lent_call) Hashtbl.t;  (** The call that lends each of [called_parts] *)
+  placed_parts : (Mir.local, unit) Hashtbl.t;
+      (** Those of [called_parts] that were lowered with no call: the callee only forwards to an
+          intrinsic, which gives the part's place *)
+  mutable forwarded_locals : int;
+      (** How many locals the body has been given for the values that forwarding methods compute.
+          They are numbered below zero, so that none is a local of the MIR. *)
+  ended_after_lend : Mir.local list;
+      (** The locals that end after a lending method has lent its part. The part of a lending call
+          among them may still be lent then, and the method may forward it. *)
+  after_lend : bool array;
+      (** For each block, whether it runs after a lending method has lent its part *)
+  mutable block : Mir.block;  (** The block being lowered *)
 }
 
 type task = { id : Core.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
@@ -63,9 +89,11 @@ type state = {
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
+  mutable lend_record : Lowered.operand option;
+      (** A pointer to the {!Lowered.Lend} of the C function being written, once it has one *)
 }
 
-val frame_of : Definitions.code -> inlined:Path.t list -> frame
+val frame_of : Definitions.code -> frame
 val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
 val may_fork : state -> bool
 
@@ -130,7 +158,5 @@ val looping :
   state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit
 
 val place_type : state -> Lowered.place -> Lowered.ty option
-val lent_at : state -> Lowered.place -> Ground.lent option
-val project : state -> Lowered.place -> Lowered.projection -> Lowered.place
 val constant_int : Memory_layout.integer -> Z.t -> Lowered.operand
 val scalar_of : state -> Ground.ty -> Memory_layout.scalar

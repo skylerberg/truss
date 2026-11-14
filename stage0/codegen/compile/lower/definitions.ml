@@ -207,12 +207,38 @@ let result_of context substitution (result : Types.result) =
   | Returns Never -> (Convention.Nothing, false)
   | Returns ty ->
       (Convention.result context.env (Monomorphic.ground context.monomorphic substitution ty), true)
-  | Lends _ -> (Convention.Nothing, true)
+  | Lends (mode, ty) ->
+      (* A lending method returns a pointer to its part, or nothing for a
+         part of zero size. *)
+      let part = Monomorphic.ground context.monomorphic substitution ty in
+      ( (if Memory_layout.has_zero_size context.env part then Convention.Nothing
+         else Convention.Returned (Pointer { target = Value part; writable = mode = Mut })),
+        true )
+
+(* The trailing parameters of a lending method. The first is the slot: a
+   pointer to storage of the caller's, where the method builds a part that
+   is not a place it was passed, such as a constructor of such places or a
+   value that it made. It is null where the caller has no storage that
+   lasts as long as the lend: the method then allocates from the lend
+   record. A part of zero size has no slot. The second is a pointer to the
+   caller's {!Lowered.Lend}, where the method defers the lend's cleanup:
+   the values to drop and the places to write back. The third is a pointer
+   to the call site, where a lending method of the standard library
+   reports a check that fails in it: an index out of bounds is the
+   caller's error. *)
+let lending_parameters context substitution (result : Types.result) : Lowered.ty list =
+  match result with
+  | Lends (_, ty) ->
+      let part = Monomorphic.ground context.monomorphic substitution ty in
+      (if Memory_layout.has_zero_size context.env part then []
+       else [ Lowered.Pointer { target = Value part; writable = true } ])
+      @ [ Pointer { target = Lend; writable = true }; Raw (Pointer Opaque) ]
+  | Returns _ -> []
 
 (* The C signature of a function from its interface, after substitution:
    the result pointer when the result is too large, each parameter, the
-   mask of defaults passed when there are defaults, and then the evidence
-   for each capability it uses. *)
+   mask of defaults passed when there are defaults, the evidence for each
+   capability it uses, and then a lending method's trailing parameters. *)
 let c_signature context substitution ~(parameters : (Types.mode * Types.ty) list) ~has_defaults
     ?(uses = Types.no_capabilities) (result : Types.result) : Lowered.signature * Convention.result
     =
@@ -225,7 +251,8 @@ let c_signature context substitution ~(parameters : (Types.mode * Types.ty) list
   in
   let mask = if has_defaults then [ Lowered.Raw (Integer UInt64) ] else [] in
   let evidence = List.map (fun _ -> Convention.evidence) (evidence_for context substitution uses) in
-  (Convention.signature ~returns (written @ mask @ evidence) result_ty, result_ty)
+  let lending = lending_parameters context substitution result in
+  (Convention.signature ~returns (written @ mask @ evidence @ lending) result_ty, result_ty)
 
 let has_defaults (signature : Types.signature) =
   List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters

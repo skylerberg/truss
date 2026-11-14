@@ -7,7 +7,10 @@ type ty =
   | Raw of Memory_layout.scalar
   | Environment of int
   | Evidence of int
+  | Lend
+  | Lend_mark
 
+type site = { definition : Path.t; line : int; column : int }
 type root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
 
 type place = { root : root; projections : projection list }
@@ -34,6 +37,7 @@ and constant =
   | Bytes of string
   | Null
   | Symbol_address of Instance.key
+  | Site of site
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
@@ -109,6 +113,13 @@ type intrinsic =
   | Shared_unlock
   | Blocking_begin
   | Blocking_end
+  | Lend_begin
+  | Lend_called
+  | Lend_release
+  | Lend_transfer
+  | Lend_allocate
+  | Lend_defer_drop
+  | Lend_defer_write_back
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
@@ -127,7 +138,6 @@ type rvalue =
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-type site = { definition : Path.t; line : int; column : int }
 type failure = Panic | Assertion | Todo
 type destination = Discarded | Returned of place | Written of place
 
@@ -137,6 +147,7 @@ type statement =
   | Drop of place
   | Echo of { text : operand; length : operand; site : site }
   | Free_block of { place : place; variant : string }
+  | Defer_free_block of { lend : operand; place : place; variant : string }
   | Fork of { branches : (int * operand) list }
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
 
@@ -146,7 +157,13 @@ type terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable
-  | Fail of { failure : failure; message : operand; length : operand; site : site }
+  | Fail of {
+      failure : failure;
+      message : operand;
+      length : operand;
+      site : site;
+      reported : operand option;
+    }
 
 type static_value =
   | Static_scalar of constant

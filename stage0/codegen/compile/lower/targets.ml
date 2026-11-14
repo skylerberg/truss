@@ -111,11 +111,10 @@ let entry_signature context (signature : Types.signature) =
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
 (* Whether a trait's method has an entry in an [any] table: the checker
-   lets a call through [any] reach it, and it returns a value. *)
+   lets a call through [any] reach it. *)
 let callable_through_any trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
   && Interface.Impls.through_any ~trait trait_method = Callable
-  && match trait_method.method_signature.output with Returns _ -> true | _ -> false
 
 (* The methods of a trait an [any] table has an entry for, in order. *)
 let any_methods context trait =
@@ -315,7 +314,7 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
 (* Calls a method through an [any] value: the entry in its table, given the
    value's pointer, then the arguments, then the evidence the method uses. *)
 let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lowered.place)
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) destination =
+    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?(lending = []) destination =
   let slot, signature = dynamic_slot st.context trait name in
   let c_signature, result, capabilities =
     any_entry_signature st.context ~any:any_type ~trait signature
@@ -333,7 +332,11 @@ let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any :
   in
   emit st.builder
     (Call
-       { target; arguments = passed @ evidence; result = Convention.destination result destination });
+       {
+         target;
+         arguments = passed @ evidence @ lending;
+         result = Convention.destination result destination;
+       });
   if not c_signature.returns then unreachable_block st
 
 (* Runs [f] with the current frame set to the definition of a named type,
@@ -457,7 +460,8 @@ let all_passed (signature : Types.signature) =
   (1 lsl defaulted) - 1
 
 let call_instance st key ~(signature : Types.signature) ~substitution
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ~destination () =
+    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
+    () =
   let mask = match mask with Some mask -> mask | None -> all_passed signature in
   let c_signature, result =
     c_signature st.context substitution ~parameters:(interface_parameters signature)
@@ -470,7 +474,12 @@ let call_instance st key ~(signature : Types.signature) ~substitution
   in
   let target = Lowered.Direct { function_ = Instance key; signature = c_signature } in
   emit st.builder
-    (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
+    (Call
+       {
+         target;
+         arguments = passed @ mask @ lending;
+         result = Convention.destination result destination;
+       });
   if not c_signature.returns then unreachable_block st
 
 (* A number literal's value. *)

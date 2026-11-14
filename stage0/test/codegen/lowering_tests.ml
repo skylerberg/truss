@@ -47,9 +47,16 @@ let () =
   test "a requires clause is not evaluated when a test runs" (fun () ->
       expect_output Fixtures.Lowering.requires_clause_is_not_evaluated_when_a_test_runs
         "test 0 passed\n");
-  test "a check in the standard library's inlined code reports the program's position" (fun () ->
-      expect_output Fixtures.Lowering.check_in_the_standard_librarys_inlined_code
-        "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n")
+  (* The list's [at] only forwards to an intrinsic, so the index is checked
+     where it is written. *)
+  test "an index of a list out of bounds is reported where the index is written" (fun () ->
+      expect_output Fixtures.Lowering.index_out_of_bounds_is_reported_where_the_index_is
+        "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n");
+  (* [Map.at] is called, and is passed the call site, which it reports. *)
+  test "a check in a called lending method of the standard library reports the program's call site"
+    (fun () ->
+      expect_output Fixtures.Lowering.check_in_a_map_index_reports_the_programs_call_site
+        "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:11\n")
 
 let () =
   passes "an index, and a lending method with a default"
@@ -109,10 +116,8 @@ let () =
     Fixtures.Lowering.constructors_of_lent_places_lent_read_only_and
 
 let () =
-  passes
-    "a lent value is read and changed through the addresses it holds, and copied where it is used \
-     whole"
-    Fixtures.Lowering.lent_value_is_read_and_changed_through_the
+  passes "a lent constructor is read, mutated, and passed whole, and its places are written back"
+    Fixtures.Lowering.lent_constructor_is_read_mutated_and_passed_whole
 
 let () =
   passes
