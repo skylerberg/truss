@@ -1,0 +1,10 @@
+fn f(other: List[Int64]) -> USize {
+  var outer = other[..]
+  {
+    let list = make()
+    outer = list[0..2]
+    let size = outer.length()
+    outer = other[size..]
+  }
+  outer.length()
+}

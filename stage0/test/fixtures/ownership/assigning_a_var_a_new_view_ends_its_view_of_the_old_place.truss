@@ -1,0 +1,7 @@
+fn f(first: List[Int64], second: List[Int64]) -> USize {
+  var items = first.copy()
+  var part = items[..]
+  part = second[..]
+  mut items.push(1)
+  part.length()
+}
