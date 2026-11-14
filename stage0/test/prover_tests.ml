@@ -50,6 +50,13 @@ let () =
       if not (contains actual "`Number` is `UInt8`") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven Fixtures.Prover.requires_rules_out_the_overflow);
+  test "a requires clause read from its code holds or fails at a call as the clause written does"
+    (fun () ->
+      (* The clause can run, so the prover reads its MIR: a short circuit on each side, a field
+         read, and a pattern that binds a name the clause then reads. *)
+      proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call;
+      not_proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call_2
+        "prover.requires");
   test "a check in an if rules out the overflow" (fun () ->
       proven Fixtures.Prover.check_in_an_if_rules_out_the_overflow);
   test "a division by a value that may be zero" (fun () ->

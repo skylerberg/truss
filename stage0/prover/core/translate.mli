@@ -43,10 +43,12 @@ type source = {
   text : string Lazy.t;
 }
 
+type requirement = { written : Core.expression; code : Mir.t option }
+
 type part = {
   callee : source;
   parameters : Core.parameter list;
-  requires : Core.expression list;
+  requires : requirement list;
   ensures : Core.expression list;
   decreases : Core.expression list;
   costs : Core.cost list;
@@ -175,6 +177,7 @@ type context = {
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
   mutable lambda_bodies : (Core.id * (frame -> Logic.term list -> unit)) list;
+  run_code : frame -> Mir.t -> unit;
 }
 
 and open_axiom = {

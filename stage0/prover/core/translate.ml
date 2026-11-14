@@ -95,13 +95,17 @@ type source = {
 let home source =
   match source.key with Some key -> key | None -> bug "%s has no definition key" source.name
 
+(* A [requires] clause: as its definition writes it, and as code, where it
+   can run. *)
+type requirement = { written : expression; code : Mir.t option }
+
 (* One form's clauses about a callee: its own, or, for a method of an
    [impl], its trait's. Its parameters are in the order a call's arguments
    are, a method's receiver first. *)
 type part = {
   callee : source;
   parameters : Core.parameter list;
-  requires : expression list;
+  requires : requirement list;
   ensures : expression list;
   decreases : expression list;
   costs : Core.cost list;  (** Its cost clauses, but [cost time finite]. *)
@@ -347,6 +351,9 @@ type context = {
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
           through another's invariant is read once. *)
   mutable lambda_bodies : (Core.id * (frame -> Logic.term list -> unit)) list;
+  run_code : frame -> Mir.t -> unit;
+      (** Runs a body of the MIR that stands alone, such as a clause's, from a frame: each value it
+          returns joins [returns]. *)
 }
 
 and open_axiom = {
@@ -1370,15 +1377,27 @@ let trait_substitution database (trait : Types.trait_reference) (ty : Types.ty) 
   ({ Types.owner = trait.trait; name = "Self" }, Types.Type ty)
   :: pair generics trait.trait_arguments
 
-(* A form's clauses about its definition. *)
-let part_of ?(inherited = false) callee =
+(* The [requires] clauses of the function or method at a path, each with its
+   code, where it can run. *)
+let requirements database path (clauses : condition list) =
+  let code =
+    Option.value ~default:[] (Query.demand database Mir.executable_requires_of_path path)
+  in
+  List.mapi
+    (fun position (clause : condition) ->
+      { written = clause.value; code = List.assoc_opt position code })
+    clauses
+
+(* The clauses that the form of the function or method at a path states
+   about its definition. *)
+let part_of ?(inherited = false) database path callee =
   match callee.core.definition with
   | Function { parameters; contract; _ } ->
       Some
         {
           callee;
           parameters;
-          requires = List.map (fun (clause : condition) -> clause.value) contract.requires;
+          requires = requirements database path contract.requires;
           ensures = contract.ensures;
           decreases = contract.decreases;
           costs =
@@ -1529,13 +1548,13 @@ let function_contract ?reading_package database (path : Path.t) =
   Option.bind (source_at ?reading_package database path) (fun (callee, _, _) ->
       Option.map
         (fun own -> make_contract database path ~own ~others:[] ~body:(body_of callee))
-        (part_of callee))
+        (part_of database path callee))
 
 (* A trait's method's clauses. *)
 let trait_part database (trait : Path.t) name receiver =
-  Option.bind
-    (source_at database (Method { owner = trait; name; receiver }))
-    (fun (callee, _, _) -> part_of ~inherited:true callee)
+  let path = Path.Method { owner = trait; name; receiver } in
+  Option.bind (source_at database path) (fun (callee, _, _) ->
+      part_of ~inherited:true database path callee)
 
 (* A capability's method's contract. Its calls are never a function in the
    logic: two calls may give different results, since the prover never
@@ -1545,12 +1564,11 @@ let capability_contract database (capability : Path.t) name =
   Option.bind (source_at database path) (fun (callee, _, _) ->
       Option.map
         (fun own -> { (make_contract database path ~own ~others:[] ~body:None) with pure = false })
-        (part_of callee))
+        (part_of database path callee))
 
 let capability_part database (capability : Path.t) name =
-  Option.bind
-    (source_at database (Method { owner = capability; name; receiver = Static }))
-    (fun (callee, _, _) -> part_of callee)
+  let path = Path.Method { owner = capability; name; receiver = Static } in
+  Option.bind (source_at database path) (fun (callee, _, _) -> part_of database path callee)
 
 (* A trait method's body, when it provides one. *)
 let provided_body database (trait : Path.t) name receiver =
@@ -1573,7 +1591,7 @@ let method_contract ?reading_package database (trait : Types.trait_reference) na
             (fun own ->
               make_contract database path ~own ~others:(Option.to_list trait_side)
                 ~body:(body_of callee))
-            (part_of callee)
+            (part_of database path callee)
       | Some (_, _, Inherited _) | None ->
           (* A method the [impl] leaves to its trait: the trait's clauses and
              default body, with the [impl]'s signature for the method. *)
@@ -3896,6 +3914,52 @@ and add_lambda_facts context frame ~capture_free function_type term ~called ~arg
 and clause_value context frame (clause : expression) =
   without_costs context (fun () -> value context frame clause)
 
+(* The value of a [requires] clause: of its code, where it has any, and
+   otherwise of the clause as written. *)
+and requirement_value context frame (requirement : requirement) =
+  match requirement.code with
+  | Some code -> without_costs context (fun () -> code_value context frame code ~type_:Types.bool)
+  | None -> clause_value context frame requirement.written
+
+(* The value that a body of the MIR that stands alone returns, such as a
+   clause's, run from [frame]: it reads the frame's locals, and leaves the
+   frame as it was. *)
+and code_value context frame (code : Mir.t) ~type_ =
+  let is_foreign = frame.source.key <> Some context.home in
+  let saved_returns = context.returns
+  and saved_lambda_bodies = context.lambda_bodies
+  and saved_passed_values = context.passed_values in
+  context.returns <- [];
+  (* A node's id names it within its own definition, so the nodes that the
+     definition proven has recorded by id are none of another definition's. *)
+  if is_foreign then begin
+    context.lambda_bodies <- [];
+    context.passed_values <- []
+  end;
+  Fun.protect
+    ~finally:(fun () ->
+      context.returns <- saved_returns;
+      context.lambda_bodies <- saved_lambda_bodies;
+      context.passed_values <- saved_passed_values)
+    (fun () ->
+      (* The temporaries of the code around are not this body's: its own
+         are numbered from zero too. *)
+      let inside =
+        {
+          frame with
+          locals =
+            Locals.filter
+              (fun key _ -> match key with Core.Synthetic number -> number >= 0 | _ -> true)
+              frame.locals;
+        }
+      in
+      (try context.run_code inside code
+       with Unsupported (_, message) when is_foreign ->
+         raise (Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name)));
+      match join context ~value_type:type_ (List.rev context.returns) with
+      | Some (_, Some term) -> (frame, term)
+      | Some (_, None) | None -> raise (Foreign_unsupported "code that returns no value"))
+
 (* Reading code that never runs, as a specification, which spends nothing. *)
 and without_costs : 'a. _ -> (unit -> 'a) -> 'a =
  fun context read ->
@@ -4056,7 +4120,7 @@ and callback_facts context frame (invocation : Invocation.t) position known argu
       match
         Option.bind
           (source_at ?reading_package:(reading_package context) context.database path)
-          (fun (callee, _, _) -> part_of callee)
+          (fun (callee, _, _) -> part_of context.database path callee)
       with
       | Some part -> (
           match List.nth_opt part.parameters position with
@@ -4633,15 +4697,16 @@ and apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
             | _ -> false
           in
           List.iteri
-            (fun index (clause : expression) ->
+            (fun index (requirement : requirement) ->
               let evaluation =
-                if evaluable clause then Some { from_template = path; texts; clause = index }
+                if evaluable requirement.written then
+                  Some { from_template = path; texts; clause = index }
                 else None
               in
               oblige ?evaluation context frame Requires span
                 (Printf.sprintf "This template may not meet `%s`, which its tag requires."
-                   (quote own.callee clause.origin))
-                (snd (clause_value context entry clause)))
+                   (quote own.callee requirement.written.origin))
+                (snd (requirement_value context entry requirement)))
             own.requires;
           let result = arrive context frame "tagged" tag_type in
           assume_valid context frame tag_type result;
@@ -5065,14 +5130,15 @@ and named_function context frame (site : Invocation.site) path type_arguments co
             ~substitution:[]
         in
         List.iter
-          (fun (clause : expression) ->
+          (fun (requirement : requirement) ->
             oblige context frame Requires
               (span_of frame.source site.origin)
               (Printf.sprintf
                  "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its \
                   `%s` may not hold."
-                 (Path.show path) (Types.show ty) (quote own.callee clause.origin))
-              (snd (clause_value context inside clause)))
+                 (Path.show path) (Types.show ty)
+                 (quote own.callee requirement.written.origin))
+              (snd (requirement_value context inside requirement)))
           own.requires
       end
   | _ -> ());
@@ -5173,7 +5239,9 @@ and contract_for_every_argument context frame (contract : contract) parameters v
       Logic.conjunction
         (List.concat_map
            (fun (part : part) ->
-             List.map (fun clause -> snd (clause_value context (read part) clause)) part.requires)
+             List.map
+               (fun requirement -> snd (requirement_value context (read part) requirement))
+               part.requires)
            parts)
     in
     let required = requires_of requiring in
@@ -5214,13 +5282,14 @@ and check_named_callback context frame (invocation : Invocation.t) (passed : pas
              ~substitution:[]
          in
          List.iter
-           (fun (clause : expression) ->
+           (fun (requirement : requirement) ->
              oblige context at_call Requires span
                (Printf.sprintf
                   "`%s` may not accept every argument this parameter's type promises it: its `%s` \
                    may not hold."
-                  (Path.show path) (quote own.callee clause.origin))
-               (snd (clause_value context inside clause)))
+                  (Path.show path)
+                  (quote own.callee requirement.written.origin))
+               (snd (requirement_value context inside requirement)))
            own.requires);
       List.iter
         (fun (cost : Types.cost) ->
@@ -5965,8 +6034,9 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
       (fun (part : part) ->
         let entry = entry_frame part in
         List.map
-          (fun (clause : expression) ->
-            let _, term = clause_value context entry clause in
+          (fun (requirement : requirement) ->
+            let clause = requirement.written in
+            let _, term = requirement_value context entry requirement in
             oblige context frame Requires span
               ?cited:
                 (Option.map (fun key -> (key, span_of part.callee clause.origin)) part.callee.key)
@@ -5987,7 +6057,7 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
     else
       Logic.conjunction
         (List.map
-           (fun (clause : expression) -> snd (clause_value context (entry_frame part) clause))
+           (fun requirement -> snd (requirement_value context (entry_frame part) requirement))
            part.requires)
   in
   let after = havoc_mut frame in
@@ -6141,11 +6211,16 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
         (fun index sort -> (Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
         sorts
     in
-    let readable mark clause inside =
-      match snd (clause_value context inside clause) with
+    let readable_value mark read =
+      match snd (read ()) with
       | term when not (mentions_fresh_after context mark term) -> Some term
       | _ -> None
       | exception (Unsupported _ | Foreign_unsupported _) -> None
+    in
+    let readable mark clause inside =
+      readable_value mark (fun () -> clause_value context inside clause)
+    and readable_requirement mark requirement inside =
+      readable_value mark (fun () -> requirement_value context inside requirement)
     in
     (* An axiom holds only of arguments of the parameters' types: in their
        range and valid. Over every integer, a contract such as [append]'s,
@@ -6198,7 +6273,11 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
                     { outside with bound = List.map fst parameters; checking = false }
                     part ~arguments ~substitution:(substitution_of part)
                 in
-                let guard = List.map (fun clause -> readable mark clause inside) part.requires in
+                let guard =
+                  List.map
+                    (fun requirement -> readable_requirement mark requirement inside)
+                    part.requires
+                in
                 let valid = parameters_valid inside inputs in
                 if List.mem None guard || mentions_fresh_after context mark valid then None
                 else
@@ -6252,7 +6331,9 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
                         }
                       in
                       let required =
-                        List.map (fun clause -> readable mark clause inside) part.requires
+                        List.map
+                          (fun requirement -> readable_requirement mark requirement inside)
+                          part.requires
                       in
                       if List.mem None required then None
                       else
@@ -6412,7 +6493,9 @@ and contract_call context frame (site : Invocation.site) (invocation : Invocatio
                             }
                           in
                           let required =
-                            List.map (fun clause -> readable clause inside) part.requires
+                            List.map
+                              (fun requirement -> readable_requirement mark requirement inside)
+                              part.requires
                           in
                           match
                             List.filter_map (fun clause -> readable clause inside) part.ensures
@@ -9636,7 +9719,8 @@ let mir_statement context frame run (statement : Mir.statement) =
       (match target.root with
       | Local local -> (
           match run.body.locals.(local).kind with
-          | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ } ->
+          | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
+            when frame.source.key = Some context.home ->
               Hashtbl.replace context.local_names core name
           | Source _ | Temporary | Lent _ -> ())
       | Constant _ -> ());
@@ -10373,70 +10457,74 @@ let rec mir_run context start ~(lambdas : Mir.body array) (body : Mir.body) =
 (* Definitions *)
 
 let new_context database ~home ~current ~terminates ~measures =
-  {
-    home;
-    laws_assumed = [];
-    database;
-    current;
-    terminates;
-    measures;
-    declarations = [];
-    declared = Hashtbl.create 64;
-    datatypes = Hashtbl.create 16;
-    stated = Hashtbl.create 64;
-    facts = [];
-    scopes = [];
-    quantifier_facts = Hashtbl.create 16;
-    quantifier_symbols = [];
-    obligations = [];
-    fresh = 0;
-    values = [];
-    local_names = Hashtbl.create 16;
-    returns = [];
-    lent_back = [];
-    instantiating = [];
-    axiomatizing = [];
-    open_axioms = [];
-    axioms_of = Hashtbl.create 16;
-    axiom_clauses = Hashtbl.create 16;
-    defined_by_axiom = Hashtbl.create 16;
-    yielded_part = None;
-    yield_ensures = None;
-    parameters = [];
-    counters = [];
-    own_bounds = [];
-    fresh_order = Hashtbl.create 64;
-    logs = [];
-    powers = [];
-    lambda_times = [];
-    lambda_captures = [];
-    lambda_definitions = Hashtbl.create 8;
-    potentials = [];
-    models = Hashtbl.create 16;
-    holds_potential = Hashtbl.create 16;
-    buffers = Hashtbl.create 16;
-    equalities = [];
-    known_calls = [];
-    decisions = [];
-    entry = [];
-    proving = false;
-    holes = [];
-    unfinished = [];
-    call_targets = [];
-    passed_values = [];
-    reading_callback = false;
-    validating = [];
-    lambda_bodies = [];
-    ranking =
-      terminates && measures = []
-      && Call_graph.recursive database ~package:(Path.package current) current;
-    disjoint =
-      (match Query.demand database Ownership.ownership home with
-      | Some ownership -> ownership.disjoint
-      | None -> []);
-    indexes = [];
-    evaluated_keys = [];
-  }
+  let rec context =
+    {
+      run_code = (fun frame (code : Mir.t) -> mir_run context frame ~lambdas:code.lambdas code.body);
+      home;
+      laws_assumed = [];
+      database;
+      current;
+      terminates;
+      measures;
+      declarations = [];
+      declared = Hashtbl.create 64;
+      datatypes = Hashtbl.create 16;
+      stated = Hashtbl.create 64;
+      facts = [];
+      scopes = [];
+      quantifier_facts = Hashtbl.create 16;
+      quantifier_symbols = [];
+      obligations = [];
+      fresh = 0;
+      values = [];
+      local_names = Hashtbl.create 16;
+      returns = [];
+      lent_back = [];
+      instantiating = [];
+      axiomatizing = [];
+      open_axioms = [];
+      axioms_of = Hashtbl.create 16;
+      axiom_clauses = Hashtbl.create 16;
+      defined_by_axiom = Hashtbl.create 16;
+      yielded_part = None;
+      yield_ensures = None;
+      parameters = [];
+      counters = [];
+      own_bounds = [];
+      fresh_order = Hashtbl.create 64;
+      logs = [];
+      powers = [];
+      lambda_times = [];
+      lambda_captures = [];
+      lambda_definitions = Hashtbl.create 8;
+      potentials = [];
+      models = Hashtbl.create 16;
+      holds_potential = Hashtbl.create 16;
+      buffers = Hashtbl.create 16;
+      equalities = [];
+      known_calls = [];
+      decisions = [];
+      entry = [];
+      proving = false;
+      holes = [];
+      unfinished = [];
+      call_targets = [];
+      passed_values = [];
+      reading_callback = false;
+      validating = [];
+      lambda_bodies = [];
+      ranking =
+        terminates && measures = []
+        && Call_graph.recursive database ~package:(Path.package current) current;
+      disjoint =
+        (match Query.demand database Ownership.ownership home with
+        | Some ownership -> ownership.disjoint
+        | None -> []);
+      indexes = [];
+      evaluated_keys = [];
+    }
+  in
+  context
 
 let outcome context = { obligations = List.rev context.obligations; holes = List.rev context.holes }
 
@@ -10673,14 +10761,16 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
             } )
     | _ -> None
   in
-  let own_requires = List.map (fun (clause : condition) -> clause.value) contract.requires in
+  let own_requires = requirements database path contract.requires in
   (* The trait's precondition, on entry, under which its postcondition and
      cost clauses are promised. *)
   let trait_requires =
     match trait_frame start ~result:None with
     | Some (part, inside) ->
         Logic.conjunction
-          (List.map (fun clause -> snd (clause_value context inside clause)) part.requires)
+          (List.map
+             (fun requirement -> snd (requirement_value context inside requirement))
+             part.requires)
     | None -> Logic.Boolean true
   in
   (* Its cost clauses, and its trait's, each count from zero. *)
@@ -10714,27 +10804,27 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited ?(substitut
         else begin
           ignore
             (List.fold_left
-               (fun frame (clause : expression) ->
-                 let frame, term = clause_value context frame clause in
-                 oblige context frame Requires (at frame clause)
+               (fun frame (requirement : requirement) ->
+                 let frame, term = requirement_value context frame requirement in
+                 oblige context frame Requires (at frame requirement.written)
                    (Printf.sprintf
                       "`%s` may not follow from the trait's precondition, which callers through \
                        the trait show, and an `impl`'s precondition must."
-                      (quote source clause.origin))
+                      (quote source requirement.written.origin))
                    term;
                  frame)
                (restrict start trait_requires) own_requires);
           List.fold_left
-            (fun frame (clause : expression) ->
-              let frame, term = clause_value context frame clause in
+            (fun frame requirement ->
+              let frame, term = requirement_value context frame requirement in
               assume context frame term;
               frame)
             start own_requires
         end
     | _ ->
         List.fold_left
-          (fun frame (clause : expression) ->
-            let frame, term = clause_value context frame clause in
+          (fun frame requirement ->
+            let frame, term = requirement_value context frame requirement in
             assume context frame term;
             frame)
           start own_requires
