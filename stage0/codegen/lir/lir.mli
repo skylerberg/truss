@@ -46,18 +46,3 @@ val erased : Memory_layout.env -> ty -> bool
 
 (* The operands a call's target reads, beyond its arguments. *)
 val target_operands : target -> operand list
-
-(* The same function in canonical form: blocks in reverse postorder from
-   the entry, with unreachable blocks removed, and locals numbered with the
-   parameters first and then by first use, with unused locals removed. Two
-   lowerings of one definition that differ only in numbering give equal
-   canonical forms. *)
-val canonical_instance : t -> t
-
-(* A compact text form, for tests. *)
-
-module For_testing : sig
-  val canonical : function_ -> function_
-  val to_string : t -> string
-  val function_to_string : function_ -> string
-end

@@ -124,9 +124,6 @@ type discriminant =
 
 val discriminant : t -> string -> discriminant
 
-(* A compact, one-line description, for tests. *)
-val scalar_to_string : scalar -> string
-
 module For_testing : sig
   val target_32 : Libc.system -> target
   val to_string : t -> string

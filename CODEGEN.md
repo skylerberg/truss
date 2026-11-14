@@ -318,13 +318,16 @@ gives positions, which the key leaves out.
 | A valid program stage0 cannot build yet | An exception with the construct and its position, which the driver gives as the build's error |
 | A build that cannot be done | The C compiler's, linker's, or run's output |
 
-**`Verify` checks the LIR** before any C is emitted. Each instance is a C
-file of its own that declares its callees from its own side, so a caller and
-a callee that disagree would otherwise compile and link without complaint.
+**The C emitter checks each call against its target's signature** as it
+prints it. Each instance is a C file of its own that declares its callees
+from its own side, so a caller and a callee that disagree would otherwise
+compile and link without complaint. It also rejects a call whose result
+goes to a place the call is given, since every pointer a callee takes is
+`restrict`.
 
 ## Building
 
-- **An instance's LIR is a query,** so a test run after an edit lowers only
+- **An instance's C is a query,** so a test run after an edit lowers only
   the instances the edit reached.
 - **Object files are kept by an exact key:** the C's text, the C compiler's
   identity, and the flags. The C compiler's identity is only in the object

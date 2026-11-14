@@ -1,4 +1,8 @@
-type function_context = { symbol : string; function_ : Lir.function_ }
+type function_context = {
+  symbol : string;
+  function_ : Lir.function_;
+  named : (Lir.local, unit) Hashtbl.t;
+}
 
 val local_name : Lir.function_ -> int -> string
 val erased : C_types.context -> Lir.ty -> bool

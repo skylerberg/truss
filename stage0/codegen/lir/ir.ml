@@ -1,5 +1,5 @@
-(* The lowered IR's types, the queries over them, mapping a function's
-   places and blocks, and putting a function in canonical form. *)
+(* The lowered IR's types, the queries over them, and mapping a function's
+   places and blocks. *)
 
 include Ir_types
 
@@ -166,21 +166,6 @@ let successors = function
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Return _ | Unreachable | Fail _ -> []
 
-(* Blocks in reverse postorder of a depth-first walk that takes successors
-   in order. *)
-let reverse_postorder (blocks : basic_block array) =
-  let visited = Array.make (Array.length blocks) false in
-  let order = ref [] in
-  let rec visit block =
-    if not visited.(block) then begin
-      visited.(block) <- true;
-      List.iter visit (successors blocks.(block).terminator);
-      order := block :: !order
-    end
-  in
-  if Array.length blocks > 0 then visit 0;
-  !order
-
 (* Rewrites every place, each after the places in its indexes, and every
    block number. *)
 let rec map_place ~place ~block (lir_place : place) =
@@ -291,60 +276,3 @@ let map_terminator ~place ~block terminator =
   | Unreachable -> Unreachable
   | Fail { failure; message; length; site } ->
       Fail { failure; message = operand message; length = operand length; site }
-
-let rename map_local (lir_place : place) =
-  match lir_place.root with
-  | Local local -> { lir_place with root = Local (map_local local) }
-  | Static _ -> lir_place
-
-let canonical (function_ : function_) =
-  let order = reverse_postorder function_.blocks in
-  let block_number = Array.make (Array.length function_.blocks) (-1) in
-  List.iteri (fun index block -> block_number.(block) <- index) order;
-  let local_number = Array.make (Array.length function_.locals) (-1) in
-  let next = ref 0 in
-  let number local =
-    if local_number.(local) < 0 then begin
-      local_number.(local) <- !next;
-      incr next
-    end;
-    local
-  in
-  List.iter (fun local -> ignore (number local)) function_.parameters;
-  let identity block = block in
-  List.iter
-    (fun block_index ->
-      let { statements; terminator } = function_.blocks.(block_index) in
-      List.iter
-        (fun statement -> ignore (map_statement ~place:(rename number) ~block:identity statement))
-        statements;
-      ignore (map_terminator ~place:(rename number) ~block:identity terminator))
-    order;
-  let locals = Array.make !next { ty = Raw Bool; name = None } in
-  Array.iteri
-    (fun old index -> if index >= 0 then locals.(index) <- function_.locals.(old))
-    local_number;
-  let map_local local = local_number.(local) in
-  let map_block block = block_number.(block) in
-  let blocks =
-    Array.of_list
-      (List.map
-         (fun block ->
-           let { statements; terminator } = function_.blocks.(block) in
-           {
-             statements =
-               List.map (map_statement ~place:(rename map_local) ~block:map_block) statements;
-             terminator = map_terminator ~place:(rename map_local) ~block:map_block terminator;
-           })
-         order)
-  in
-  {
-    function_ with
-    parameters = List.map map_local function_.parameters;
-    written_result = Option.map map_local function_.written_result;
-    locals;
-    blocks;
-  }
-
-let canonical_instance lir =
-  { lir with main = canonical lir.main; nested = Array.map canonical lir.nested }

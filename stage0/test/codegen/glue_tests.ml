@@ -71,12 +71,17 @@ let () =
       let glue =
         Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~usize ()
       in
-      expect_string ~expected:"fn(_0: *mut Holder)\nb0: drop *_0.items; return"
-        (Lir.For_testing.function_to_string
-           (Lir.For_testing.canonical (Glue.drop glue (named "Holder")).main)));
+      let statements =
+        List.concat_map
+          (fun (block : Lir.basic_block) -> block.statements)
+          (Array.to_list (Glue.drop glue (named "Holder")).main.blocks)
+      in
+      match statements with
+      | [ Drop { root = Local 0; projections = [ Deref; Field "items" ] } ] -> ()
+      | _ -> fail "the drop does more than drop the items");
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->
       let calls =
-        Array.to_list (Lir.For_testing.canonical (Glue.copy glue (storage int32)).main).blocks
+        Array.to_list (Glue.copy glue (storage int32)).main.blocks
         |> List.concat_map (fun (block : Lir.basic_block) -> block.statements)
         |> List.filter_map (function
           | Lir.Call { target = Intrinsic index; _ } -> Some index

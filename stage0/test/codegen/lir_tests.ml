@@ -403,7 +403,27 @@ let () =
   test "the C checks each type's size and alignment against its layout" (fun () ->
       let pair_shape = ("Pair", Record [ field "first" int32; field "second" int64 ]) in
       let holder =
-        instance "holder" (function_ [ local (value pair) ] [ block [] (Return None) ])
+        instance "holder"
+          (function_
+             [ local (value pair) ]
+             [
+               block
+                 [
+                   Assign
+                     ( at 0,
+                       Build
+                         {
+                           ty = pair;
+                           variant = None;
+                           fields =
+                             [
+                               ("first", constant_int32 1);
+                               ("second", Constant (Integer (Int64, Z.of_int 2)));
+                             ];
+                         } );
+                 ]
+                 (Return None);
+             ])
       in
       let c_file = c_file (shape_env ~extra:[ pair_shape ] ()) [ (holder, External) ] in
       let expected =
@@ -413,23 +433,30 @@ let () =
   test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
       expect_string ~expected:(c_file (shape_env ()) instances) (c_file (shape_env ()) instances));
-  test "canonical form numbers blocks in reverse postorder and locals by first use" (fun () ->
-      let function_ =
-        function_ ~result:(value int32)
-          [
-            local ~name:"unused" (value int32);
-            local ~name:"late" (value int32);
-            local ~name:"early" (value int32);
-          ]
-          [
-            block [ Assign (at 2, Use (constant_int32 1)) ] (Goto 2);
-            block [] (Return (Some (copy 1)));
-            block [ Assign (at 1, Use (copy 2)) ] (Goto 1);
-          ]
+  test "the C has the blocks the entry reaches and the locals their code names" (fun () ->
+      let entry =
+        instance "entry"
+          (function_ ~result:(value int32)
+             [
+               local ~name:"unused" (value int32);
+               local ~name:"late" (value int32);
+               local ~name:"early" (value int32);
+               local ~name:"dead" (value int32);
+             ]
+             [
+               block [ Assign (at 2, Use (constant_int32 1)) ] (Goto 2);
+               block [] (Return (Some (copy 1)));
+               block [ Assign (at 1, Use (copy 2)) ] (Goto 1);
+               block [ Assign (at 3, Use (copy 2)) ] (Goto 1);
+             ])
       in
-      expect_string
-        ~expected:"fn() -> Int32\nb0: _0 = 1; goto b1\nb1: _1 = _0; goto b2\nb2: return _1"
-        (Lir.For_testing.function_to_string (Lir.For_testing.canonical function_)));
+      let c_file = c_file (shape_env ()) [ (entry, External) ] in
+      List.iter
+        (fun name -> if not (contains c_file name) then fail "no %s in:\n%s" name c_file)
+        [ "l1_late"; "l2_early" ];
+      List.iter
+        (fun name -> if contains c_file name then fail "%s in:\n%s" name c_file)
+        [ "l0_unused"; "l3_dead"; "b3:" ]);
   ()
 
 let () =

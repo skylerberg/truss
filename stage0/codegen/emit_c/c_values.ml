@@ -4,7 +4,13 @@
 open C_runtime
 open C_types
 
-type function_context = { symbol : string; function_ : Lir.function_ }
+(* The function being printed, and the locals its code names, which are the
+   ones it declares. *)
+type function_context = {
+  symbol : string;
+  function_ : Lir.function_;
+  named : (Lir.local, unit) Hashtbl.t;
+}
 
 let local_name (function_ : Lir.function_) local =
   match function_.locals.(local).name with
@@ -84,7 +90,9 @@ let block_pointer context text sum variant =
 let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   let root =
     match place.root with
-    | Local local -> (local_name fc.function_ local, fc.function_.locals.(local).ty)
+    | Local local ->
+        Hashtbl.replace fc.named local ();
+        (local_name fc.function_ local, fc.function_.locals.(local).ty)
     | Static { key; ty } ->
         let symbol = Instance.symbol key in
         declare_prototype context symbol
@@ -135,6 +143,8 @@ and address_c context fc (place : Lir.place) ~writable =
   | None -> bug "the address of a place of zero size"
 
 and operand_c context fc : Lir.operand -> (string * Lir.ty) option = function
+  | Move { root = Static { key; _ }; _ } | Moved_address { root = Static { key; _ }; _ } ->
+      bug "a move out of %s, which is static data" (Instance.to_string key)
   | Copy place | Move place -> place_c context fc place
   | Address { place; writable } -> address_c context fc place ~writable
   | Moved_address place -> address_c context fc place ~writable:true
@@ -317,6 +327,29 @@ type built =
 let build_c context fc ty variant (values : (string * Lir.operand) list) =
   let c_type = value_c context ty in
   let layout = layout context ty in
+  (* A field that has no size is left out, as one the layout does not have,
+     so a field the type does not have would be left out too. *)
+  (if layout.size > 0 then
+     let names =
+       match (Memory_layout.shape context.env ty, variant) with
+       | Record members, None -> Some (List.map fst members)
+       | Sum variants, Some name ->
+           Option.map
+             (fun (variant : Memory_layout.variant_shape) -> List.map fst variant.fields)
+             (List.find_opt
+                (fun (variant : Memory_layout.variant_shape) -> variant.name = name)
+                variants)
+       | _ -> None
+     in
+     match names with
+     | None -> bug "a value of %s built as another type" (Ground.to_string ty)
+     | Some names ->
+         List.iter
+           (fun (name, _) ->
+             if not (List.mem name names) then
+               bug "a value of %s built with a field %s, which it does not have"
+                 (Ground.to_string ty) name)
+           values);
   let block_of variant =
     let key = Block (ty, variant) in
     register context key;

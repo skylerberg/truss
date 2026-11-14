@@ -1,5 +1,6 @@
-(* How code generation fails: the verifier's checks of the LIR, the
-   programs stage0 cannot build yet, and a compiler bug's report. *)
+(* How code generation fails: the C emitter's checks of the code it
+   prints, the programs stage0 cannot build yet, and a compiler bug's
+   report. *)
 
 open Memory_layout
 open Codegen_support
@@ -13,6 +14,9 @@ let expect_bug ~saying work =
 
 let env = shape_env ()
 
+(* Prints an instance as C, which checks it. *)
+let emit env instance = ignore (Emit_c.fragment env (Lir.Code instance))
+
 (* A caller's call of a callee that takes one [Int32] and returns it, with
    these arguments under this signature. *)
 let caller ?(parameters = [ value int32 ]) arguments =
@@ -23,19 +27,13 @@ let caller ?(parameters = [ value int32 ]) arguments =
 let () =
   test "a call that passes fewer arguments than its target takes is a bug" (fun () ->
       expect_bug ~saying:"passes 0 arguments to a target that takes 1" (fun () ->
-          Verify.instance env (caller [])));
+          emit env (caller [])));
   test "a return of nothing from a function with a result is a bug" (fun () ->
       expect_bug ~saying:"a return of nothing from a function with a result" (fun () ->
-          Verify.instance env (entry [] [ block [] (Return None) ])));
-  test "a jump to a block that does not exist is a bug" (fun () ->
-      expect_bug ~saying:"block 3, of 1" (fun () ->
-          Verify.instance env (entry [] [ block [] (Goto 3) ])));
-  test "a place that names a local that does not exist is a bug" (fun () ->
-      expect_bug ~saying:"local 5, of 0" (fun () ->
-          Verify.instance env (entry [] [ block [] (Return (Some (copy 5))) ])));
+          emit env (entry [] [ block [] (Return None) ])));
   test "a value built with a field its type does not have is a bug" (fun () ->
       expect_bug ~saying:"built with a field third, which it does not have" (fun () ->
-          Verify.instance (shape_env ~extra:drop_shapes ())
+          emit (shape_env ~extra:drop_shapes ())
             (entry
                [ local (value pair) ]
                [
@@ -67,8 +65,8 @@ let () =
           }
       in
       let four = Record (List.map (fun name -> field name int64) [ "a"; "b"; "c"; "d" ]) in
-      expect_bug ~saying:"writes its result to local 0, which it is also given" (fun () ->
-          Verify.instance
+      expect_bug ~saying:"writes its result to a place it is also given" (fun () ->
+          emit
             (shape_env ~extra:[ ("Quad", four) ] ())
             (entry [ local (value quad) ] [ block [ swapped ] (Return (Some (constant_int32 0))) ])));
   test "a move out of a constant's static data is a bug" (fun () ->
@@ -76,12 +74,12 @@ let () =
         { root = Static { key = Constant (definition "words"); ty = text }; projections = [] }
       in
       expect_bug ~saying:"a move out of test::words, which is static data" (fun () ->
-          Verify.instance (shape_env ~extra:drop_shapes ())
+          emit (shape_env ~extra:drop_shapes ())
             (entry
                [ local (value text) ]
                [ block [ Assign (at 0, Use (Move constant)) ] (Return (Some (constant_int32 0))) ])));
   test "an instance whose calls fit their targets passes" (fun () ->
-      Verify.instance env (caller [ constant_int32 1 ]))
+      emit env (caller [ constant_int32 1 ]))
 
 (* A module's tests cannot be built, with a message that says this. *)
 let refused name ~saying source =

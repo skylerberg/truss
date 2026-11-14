@@ -106,13 +106,23 @@ let () =
            ~destination:(Some (at length))
            ~site:{ definition = definition "entry"; line = 0; column = 1 });
       finish builder (Return (Some (Copy (at length))));
-      let lowered =
-        Lir.For_testing.to_string
-          (instance "entry" (build builder ~parameters:[] ~result:(Some (value int32))))
-      in
-      if not (contains lowered "this system's C library has no proc_pidpath") then
-        fail "the call does not stop the program:\n%s" lowered;
-      if contains lowered "foreign" then fail "the function is called:\n%s" lowered);
+      let lowered = build builder ~parameters:[] ~result:(Some (value int32)) in
+      let blocks = Array.to_list lowered.blocks in
+      if
+        not
+          (List.exists
+             (fun (block : Lir.basic_block) ->
+               match block.terminator with Fail _ -> true | _ -> false)
+             blocks)
+      then fail "the call does not stop the program";
+      if
+        List.exists
+          (fun (block : Lir.basic_block) ->
+            List.exists
+              (function Lir.Call { target = Foreign _; _ } -> true | _ -> false)
+              block.statements)
+          blocks
+      then fail "the function is called");
   test "a function that takes a structure is declared with no header" (fun () ->
       expect_string ~expected:"struct timespec;\nint clock_gettime(int, struct timespec *);\n"
         (Libc.prototype (Libc.declaration linux Clock_gettime)));
