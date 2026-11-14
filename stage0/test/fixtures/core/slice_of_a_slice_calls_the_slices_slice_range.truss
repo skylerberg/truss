@@ -1,3 +1,0 @@
-fn g(items: Slice[Int64]) -> Slice[Int64] {
-  items[1..3]
-}

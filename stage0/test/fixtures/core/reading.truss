@@ -1,5 +1,0 @@
-use standard::serialization
-
-type Reading(sensor: String, value: Int64 = 0)
-  derives serialization::Serialize, serialization::Deserialize
-

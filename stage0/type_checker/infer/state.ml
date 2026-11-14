@@ -985,6 +985,43 @@ let check_resource state (resource : Syntax.resource) =
                 capability, and `%s` is neither."
                name.text))
 
+(* A slice expression, [base[start..stop]], of the type [viewed]. The node holds the call that
+   creates the view: the base type's [slice_range], or its [slice_from]
+   when the stop is missing, so that the base appears once. A missing
+   start is [0], and an inclusive stop is [stop + 1]. *)
+let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Core.kind =
+  let make = synthetic_expression state ~origin in
+  let usize = Types.builtin USize in
+  let path, type_arguments =
+    match Core_walk.place_type base with
+    | Types.Named { path; arguments } -> (path, arguments)
+    | type_ -> bug "a slice of `%s`" (Types.show type_)
+  in
+  let call name (arguments : Core.argument list) result =
+    make result
+      (Call
+         {
+           callee =
+             Function { path = Method { owner = path; name; receiver = Read }; type_arguments };
+           arguments;
+           lends = None;
+           uses = Types.no_capabilities;
+         })
+  in
+  let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
+  let bound value : Core.argument = Passed { mode = Read; value = Value value; mark = None } in
+  let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
+  match stop with
+  | None -> Slice { call = call "slice_from" [ receiver; bound start ] viewed }
+  | Some stop ->
+      let stop =
+        if inclusive then
+          make usize
+            (Operator { operation = Add; arguments = [ stop; make usize (Integer Z.one) ] })
+        else stop
+      in
+      Slice { call = call "slice_range" [ receiver; bound start; bound stop ] viewed }
+
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
 (* Checks a value of type [found] where [expected] is expected, and wraps
@@ -998,13 +1035,17 @@ type conversion = From_never | Owned_to_view | Function_widening | To_integer | 
      which the capability check solves. If the constants in the two types
      do not show that the costs are weaker, the prover must show it: at the
      call, for an argument, and as an obligation on [expression] otherwise.
-   - An argument that is an owned collection converts to its view. In a
+   - An argument that is an owned collection converts to its view: a list
+     passed to a [mut] parameter to a [Slice] of all of it, which the
+     callee may change, and otherwise to a call of the collection's
+     [slice]. [argument] is the parameter's mode. In a
      specification, an argument that is a built-in integer converts to
      [Integer], and an [Integer] converts to a built-in integer that it
      fits.
 
    In every other case, [actual] must unify with [expected]. *)
-let convert state env ?(argument = false) ?expression (span : span) ~actual ~expected =
+let convert state env ?argument ?expression (span : span) ~actual ~expected =
+  let is_argument = Option.is_some argument in
   (* Wraps the expression's core node in the conversion. The wrapped node
      has the expected type. *)
   let converted (conversion : conversion option) =
@@ -1028,8 +1069,18 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
-              (* An owned collection converts to its view by a call of its
-                 [slice], which borrows the collection. *)
+              (* An owned list passed [mut] converts to a mutable view of
+                 all of it, as [mut items[..]] does. *)
+              | Owned_to_view when argument = Some Types.Mut && Types.is_well_known List inner.type_
+                ->
+                  let base : Core.place =
+                    match inner.kind with Use place -> place | _ -> Temporary inner
+                  in
+                  synthetic_expression state ~origin:id expected
+                    (slice state ~origin:id ~viewed:expected base ~start:None ~stop:None
+                       ~inclusive:false)
+              (* Otherwise an owned collection converts to its view by a
+                 call of its [slice], which borrows the collection. *)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->
@@ -1071,7 +1122,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
   match (actual_type, wanted, expression) with
   | Types.Never, _, _ -> Some From_never
   | Types.Named actual_named, Types.Named wanted_named, _
-    when argument
+    when is_argument
          && List.exists
               (fun (owned, view) ->
                 Path.equal actual_named.path owned && Path.equal wanted_named.path view)
@@ -1082,7 +1133,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
       if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
       then mismatch state span ~expected ~actual;
       Some Owned_to_view
-  | Types.Integer, _, Some _ when argument && env.specification && integer_type state wanted ->
+  | Types.Integer, _, Some _ when is_argument && env.specification && integer_type state wanted ->
       Some From_integer
   (* A local of code whose literal type is undecided converts to [Integer]
      as a built-in integer does. *)
@@ -1109,7 +1160,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
           (Types.Function
              { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
         && (unlisted = Types.no_capabilities || unknown)
-        && (proven || argument || Option.is_some expression)
+        && (proven || is_argument || Option.is_some expression)
       then begin
         if unlisted <> Types.no_capabilities then
           state.capability_constraints <-

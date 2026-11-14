@@ -105,7 +105,7 @@ and check_argument state env (value : expression) (parameter : Types.parameter_i
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  coerce state env ~argument:true value ~actual ~expected:parameter.type_;
+  coerce state env ~argument:parameter.mode value ~actual ~expected:parameter.type_;
   check_mode state env value parameter actual;
   parameter.mode
 

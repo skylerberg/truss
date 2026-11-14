@@ -1,6 +1,0 @@
-fn g(count: Int64) -> Int64
-  uses Clock
-{
-  let _ = Clock.now()
-  count.copy()
-}

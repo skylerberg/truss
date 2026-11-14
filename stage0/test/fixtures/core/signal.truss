@@ -1,7 +1,0 @@
-use standard::serialization
-
-type Signal =
-  | Off
-  | Level(value: Int64)
-  derives serialization::Serialize, serialization::Deserialize
-

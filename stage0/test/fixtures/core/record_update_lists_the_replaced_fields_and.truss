@@ -1,5 +1,0 @@
-type Config(port: Int64, host: String)
-
-fn g(config: Config, port: Int64) -> Config {
-  config with (port)
-}

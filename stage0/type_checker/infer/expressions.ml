@@ -307,7 +307,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in
           let stop = Option.map (build_expression state) stop in
-          Form.slice state value base ~start ~stop
+          slice state ~origin:value.id ~viewed:(Form.type_of state value) base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match base_type with
       | Types.Named { path; arguments = Types.Type element :: _ }
@@ -339,7 +339,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                 let key_type = associated "Key" and output = associated "Output" in
                 (* The key is an argument for the parameter of [at]. *)
                 let actual = expression state env ~expected:key_type key in
-                coerce state env ~argument:true key ~actual ~expected:key_type;
+                coerce state env ~argument:Read key ~actual ~expected:key_type;
                 state.tables.calls.(value.id) <-
                   Some
                     {
