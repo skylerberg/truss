@@ -11,7 +11,7 @@
   session
   graph_types
   path
-  workspace
+  packages
   manifest
   project
   diagnostic

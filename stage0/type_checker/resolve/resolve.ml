@@ -161,7 +161,7 @@ let file_diagnostics =
   Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_file ~saved:true
     (fun database (path : Path.file) ->
       let module_ = path.module_ in
-      let file = Query.demand database Workspace.file path in
+      let file = Query.demand database Parsed.file path in
       let is_recovered (item : Syntax.definition Syntax.item) =
         match item.value with
         | { kind = Definition_error _; _ } -> true
@@ -176,7 +176,7 @@ let file_diagnostics =
             | None -> [])
           (Query.demand database Names.declarations_in path)
       in
-      let text = Source.text file.source in
+      let text = Source.text (Query.demand database Packages.source path) in
       let diagnostics = ref [] in
       let report ?fixes code span message =
         diagnostics := Diagnostic.make ?fixes ~code:(Resolve code) span message :: !diagnostics

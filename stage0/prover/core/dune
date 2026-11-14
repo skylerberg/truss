@@ -17,7 +17,7 @@
   resolve
   interface
   infer
-  workspace
+  packages
   diagnostic
   ownership
   mir

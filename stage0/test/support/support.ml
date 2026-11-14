@@ -47,7 +47,7 @@ let setup ?(dependencies = []) files =
 let parse_errors database file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (Query.demand database Workspace.file file).diagnostics
+    (Query.demand database Parsed.file file).diagnostics
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics

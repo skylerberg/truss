@@ -279,7 +279,7 @@ let load_files ?results files =
     ~dependencies:[] files;
   List.iter
     (fun (file, _) ->
-      let source = (Query.demand database Workspace.file file).source in
+      let source = Query.demand database Packages.source file in
       match Checks.diagnostics database file with
       | [] -> ()
       | diagnostics ->

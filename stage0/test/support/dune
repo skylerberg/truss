@@ -9,7 +9,7 @@
   prover
   solver
   path
-  workspace
+  parsed
   diagnostic
   documents
   types

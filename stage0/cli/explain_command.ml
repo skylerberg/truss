@@ -29,7 +29,8 @@ let run ~position =
   | Some written -> (
       let context = Database.context session in
       let offset =
-        Source.offset Source.Scalar_values (Query.demand context Workspace.file written).source
+        Source.offset Source.Scalar_values
+          (Query.demand context Packages.source written)
           ~line:(line - 1) ~column:(column - 1)
       in
       let symbol_at =

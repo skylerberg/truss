@@ -60,7 +60,8 @@
   unix
   path
   well_known
-  workspace
+  packages
+  parsed
   project
   resolve
   standard_library
