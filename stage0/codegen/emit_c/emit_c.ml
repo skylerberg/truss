@@ -1,6 +1,5 @@
 open C_runtime
 open C_types
-open C_code
 open C_data
 
 type build = C_runtime.build = Development | Release
@@ -11,9 +10,13 @@ let runtime_declarations = C_runtime.runtime_declarations
 let anchor_symbol = C_runtime.anchor_symbol
 let version = 26
 
-type site = { definition : Path.t; line : int; column : int }
-type failure = Echo | Todo
-type kind = Code of { nested : int; weight : int } | Data | Table of Path.t option
+type site = C_runtime.site = { definition : Path.t; line : int; column : int }
+type failure = C_runtime.failure = Echo | Todo
+
+type kind =
+  | Functions of { nested : int; weight : int }
+  | Static_data
+  | Table_entries of Path.t option
 
 type fragment = {
   key : Instance.key;
@@ -37,11 +40,16 @@ let references fragment = fragment.references
 let calls fragment = fragment.calls
 let called fragment = fragment.called
 let failures fragment = fragment.failures
-let table fragment = match fragment.kind with Table capability -> Some capability | _ -> None
+
+let table fragment =
+  match fragment.kind with Table_entries capability -> Some capability | _ -> None
+
 let small = 24
 
 let is_small fragment =
-  match fragment.kind with Code { nested; weight } -> nested = 0 && weight <= small | _ -> false
+  match fragment.kind with
+  | Functions { nested; weight } -> nested = 0 && weight <= small
+  | Static_data | Table_entries _ -> false
 
 (* A fragment's C with every name it holds written as a number: the
    instance's own symbol, which its nested functions' and statics' names
@@ -111,132 +119,21 @@ let text fragment =
   scan 0;
   Buffer.contents buffer
 
-(* The instances that the LIR of an instance names. *)
+module Builder = Builder
 
-let add key keys = if List.exists (Instance.equal key) keys then keys else key :: keys
-
-let rec place_keys (place : Lir.place) keys =
-  let keys = match place.root with Static { key; _ } -> add key keys | Local _ -> keys in
-  List.fold_left
-    (fun keys -> function Lir.Index operand -> operand_keys operand keys | _ -> keys)
-    keys place.projections
-
-and operand_keys (operand : Lir.operand) keys =
-  match operand with
-  | Copy place | Move place | Address { place; _ } | Moved_address place -> place_keys place keys
-  | Constant (Symbol_address key) -> add key keys
-  | Constant _ -> keys
-
-let function_ref_keys (function_ref : Lir.function_ref) keys =
-  match function_ref with Instance key -> add key keys | Nested _ -> keys
-
-let rvalue_keys (rvalue : Lir.rvalue) keys =
-  match rvalue with
-  | Use operand | Unary (_, operand) | Convert (operand, _) -> operand_keys operand keys
-  | Binary (_, left, right) -> operand_keys right (operand_keys left keys)
-  | Build { fields; _ } ->
-      List.fold_left (fun keys (_, operand) -> operand_keys operand keys) keys fields
-  | Is_variant (place, _) -> place_keys place keys
-  | Function_value { code; environment } ->
-      Option.fold ~none:keys
-        ~some:(fun environment_operand -> operand_keys environment_operand keys)
-        environment
-      |> function_ref_keys code
-
-let instance_references env (instance : Lir.t) =
-  let environment nested_index = instance.nested.(nested_index).environment in
-  let in_function keys (function_ : Lir.function_) =
-    Array.fold_left
-      (fun keys (block : Lir.basic_block) ->
-        let keys =
-          List.fold_left
-            (fun keys (statement : Lir.statement) ->
-              match statement with
-              | Assign (place, rvalue) -> rvalue_keys rvalue (place_keys place keys)
-              | Call { target; arguments; result } -> (
-                  let keys =
-                    match target with
-                    | Direct { function_ = called; _ } -> function_ref_keys called keys
-                    | _ ->
-                        List.fold_left
-                          (fun keys operand -> operand_keys operand keys)
-                          keys (Lir.target_operands target)
-                  in
-                  let keys =
-                    List.fold_left (fun keys operand -> operand_keys operand keys) keys arguments
-                  in
-                  match result with
-                  | Returned place | Written place -> place_keys place keys
-                  | Discarded -> keys)
-              | Drop place -> (
-                  let keys = place_keys place keys in
-                  match Lir.place_type env ~environment function_ place with
-                  | Some (Value ty) -> add (Drop ty) keys
-                  | _ -> keys)
-              | Free_block { place; _ } -> place_keys place keys
-              | Echo { text; length; _ } -> operand_keys length (operand_keys text keys)
-              | Fork { branches } ->
-                  List.fold_left (fun keys (_, operand) -> operand_keys operand keys) keys branches
-              | Fork_range { environment; first; last; _ } ->
-                  operand_keys last (operand_keys first (operand_keys environment keys)))
-            keys block.statements
-        in
-        match block.terminator with
-        | Switch { value; _ } -> operand_keys value keys
-        | Switch_variant { place; _ } -> place_keys place keys
-        | Return value ->
-            Option.fold ~none:keys ~some:(fun operand -> operand_keys operand keys) value
-        | Fail { message; length; _ } -> operand_keys length (operand_keys message keys)
-        | Goto _ | Unreachable -> keys)
-      keys function_.blocks
+let contains text part =
+  let length = String.length part and total = String.length text in
+  let rec matches position offset =
+    offset = length || (text.[position + offset] = part.[offset] && matches position (offset + 1))
   in
-  let keys = Array.fold_left in_function (in_function [] instance.main) instance.nested in
-  List.filter (fun key -> not (Instance.equal key instance.key)) (List.rev keys)
-
-let functions_of (instance : Lir.t) = instance.main :: Array.to_list instance.nested
-
-let statements_of instance =
-  List.concat_map
-    (fun (function_ : Lir.function_) ->
-      List.concat_map
-        (fun (block : Lir.basic_block) -> block.statements)
-        (Array.to_list function_.blocks))
-    (functions_of instance)
-
-let terminators_of instance =
-  List.concat_map
-    (fun (function_ : Lir.function_) ->
-      List.map (fun (block : Lir.basic_block) -> block.terminator) (Array.to_list function_.blocks))
-    (functions_of instance)
-
-let site_of (site : Lir.site) =
-  { definition = site.definition; line = site.line; column = site.column }
-
-(* A function's code size, for choosing the small ones: each statement,
-   and each block twice. *)
-let weight (function_ : Lir.function_) =
-  Array.fold_left
-    (fun total (block : Lir.basic_block) -> total + 2 + List.length block.statements)
-    0 function_.blocks
-
-(* Emitting *)
-
-let new_context env prefix =
-  {
-    env;
-    prefix;
-    order = [];
-    registered = Keys.empty;
-    environments = Keys.empty;
-    bytes = [];
-    prototypes = [];
-    anchors = [];
-    references = None;
-    helpers_used = [];
-    statics = [];
-  }
-
-let nested_name symbol position = Printf.sprintf "%s_Nested_%d" symbol position
+  let rec from position =
+    position + length <= total
+    &&
+    match String.index_from_opt text position part.[0] with
+    | Some found -> (found + length <= total && matches found 0) || from (found + 1)
+    | None -> false
+  in
+  length = 0 || from 0
 
 let bytes_definition (text, name) =
   let bytes =
@@ -246,34 +143,34 @@ let bytes_definition (text, name) =
     (max 1 (String.length text))
     (if bytes = [] then "0" else String.concat ", " bytes)
 
-let fragment env (compiled : Lir.compiled) =
-  let key =
+type compiled = Code of Builder.instance | Data of Lir.data | Table of Lir.table
+
+let fragment env (compiled : compiled) =
+  let key, context =
     match compiled with
-    | Code instance -> instance.key
-    | Data data -> data.data_key
-    | Table table -> table.table_key
+    | Code code -> (code.C_instance.key, code.context)
+    | Data data -> (data.data_key, new_context env (Instance.symbol data.data_key))
+    | Table table -> (table.table_key, new_context env (Instance.symbol table.table_key))
   in
-  let symbol = Instance.symbol key in
-  let context = new_context env symbol in
   let functions, definition, kind =
     match compiled with
-    | Code instance ->
-        Array.iteri
-          (fun position (function_ : Lir.function_) ->
-            context.environments <-
-              Keys.add (Environment (symbol, position)) function_.environment context.environments)
-          instance.nested;
+    | Code code ->
         let nested =
-          List.mapi
-            (fun position function_ ->
-              function_c context instance.key (nested_name symbol position) function_)
-            (Array.to_list instance.nested)
+          List.sort compare
+            (List.filter_map
+               (fun (nested, text) -> Option.map (fun nested -> (nested, text)) nested)
+               code.C_instance.functions)
         in
-        ( nested @ [ function_c context instance.key symbol instance.main ],
+        let main =
+          match List.assoc_opt None code.C_instance.functions with
+          | Some text -> text
+          | None -> Compiler_bug.bug ~stage:"Emit_c" "%s is not built" (Instance.to_string key)
+        in
+        ( List.map snd nested @ [ main ],
           "",
-          Code { nested = Array.length instance.nested; weight = weight instance.main } )
-    | Data data -> ([], data_c context data, Data)
-    | Table table -> ([], table_c context table, Table table.capability)
+          Functions { nested = List.length nested; weight = code.C_instance.weight } )
+    | Data data -> ([], data_c context data, Static_data)
+    | Table table -> ([], table_c context table, Table_entries table.capability)
   in
   let types = List.rev context.order in
   let environments =
@@ -281,46 +178,32 @@ let fragment env (compiled : Lir.compiled) =
       (fun key -> match key with Environment _ -> Some (key, define context key) | _ -> None)
       types
   in
-  let references, calls, called, failures =
-    match compiled with
-    | Code instance ->
-        ( instance_references env instance,
-          List.filter_map
-            (function
-              | Lir.Call { target = Evidence_call { capability; slot; _ }; _ } ->
-                  Some (capability, slot)
-              | _ -> None)
-            (statements_of instance),
-          List.filter_map
-            (function
-              | Lir.Call { target = Direct { function_ = Instance key; _ }; _ } -> Some key
-              | _ -> None)
-            (statements_of instance),
-          List.filter_map
-            (function Lir.Echo { site; _ } -> Some (Echo, site_of site) | _ -> None)
-            (statements_of instance)
-          @ List.filter_map
-              (function
-                | Lir.Fail { failure = Todo; site; _ } -> Some (Todo, site_of site) | _ -> None)
-              (terminators_of instance) )
-    | Data _ -> ([], [], [], [])
-    | Table table -> (List.map fst table.entries, [], [], [])
-  in
   {
     key;
     kind;
     functions;
     definition;
-    types = List.filter (function Environment _ -> false | _ -> true) (List.rev context.order);
+    types = List.filter (function Environment _ -> false | _ -> true) types;
     environments;
     prototypes = List.rev context.prototypes;
-    statics = List.rev_map bytes_definition context.bytes @ List.rev context.statics;
+    statics =
+      (* A text that only code no path reaches names is not defined. *)
+      List.rev_map bytes_definition
+        (List.filter
+           (fun (_, name) ->
+             List.exists (fun (_, body) -> contains body name) functions || contains definition name)
+           context.bytes)
+      @ List.rev context.statics;
     anchors = List.rev context.anchors;
     helpers = context.helpers_used;
-    references;
-    calls;
-    called;
-    failures;
+    references =
+      (match compiled with
+      | Table table -> List.map fst table.entries
+      | Code _ | Data _ ->
+          List.filter (fun other -> not (Instance.equal other key)) (List.rev context.instances));
+    calls = List.rev context.calls;
+    called = List.rev context.called;
+    failures = List.rev context.failures;
   }
 
 let anchors fragment = List.map snd fragment.anchors

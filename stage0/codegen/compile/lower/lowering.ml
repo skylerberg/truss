@@ -2,7 +2,7 @@
    temporaries, and the small helpers every part of lowering shares. *)
 
 open Definitions
-open Lir_builder
+open Emit_c.Builder
 
 type cleanup =
   | Drop_value of Lir.place  (** Drops the place's value, if the place still owns it. *)
@@ -120,8 +120,8 @@ type spawn_loop = {
    from one call to the next, and its drop function drops them. *)
 type cursor = {
   pointer : Lir.local;  (** [next]'s parameter, and the drop function's, that points to it *)
-  drop : Lir_builder.separate;  (** The cursor's drop function *)
-  mutable fields : (string * Lir.ty) list;  (** Its fields but its state, most recent first *)
+  drop : Emit_c.Builder.separate;  (** The cursor's drop function *)
+  fields : (string * Lir.ty) list ref;  (** Its fields but its state, most recent first *)
   mutable resumes : Lir.block list;
       (** Where [next] goes on in each state after the first, most recent first *)
   mutable stops : Lir.block list;
@@ -139,12 +139,11 @@ type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 type state = {
   context : context;
   mutable frame : frame;
-  builder : Lir_builder.t;
+  builder : Emit_c.Builder.t;
   mutable scopes : scope list;  (** Innermost first *)
   mutable loops : loop list;
   mutable result : result_slot;
-  nested : Lir.function_ option list ref;
-      (** The instance's nested functions, its lambdas and outlined code, in order *)
+  nested : int ref;  (** How many nested functions, lambdas and outlined code, the instance has *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
   cursor : cursor option;
       (** In a yielding method's pulled version, the cursor it keeps values in *)
@@ -158,13 +157,13 @@ type state = {
 let frame_of code ~inlined =
   { code; self_place = None; inlined; reported = None; exit = None; mir = None }
 
-(* The state to write one function in: a builder of its own and the
-   function's scope. A lambda shares [nested] with the function around it. *)
-let enter context ?cursor ?(nested = ref []) frame =
+(* The state to write one function in, with [builder], and the function's
+   scope. A lambda shares [nested] with the function around it. *)
+let enter context ?cursor ?(nested = ref 0) ~builder frame =
   {
     context;
     frame;
-    builder = Lir_builder.create ();
+    builder;
     scopes = [ { kind = Bindings; owned = [] } ];
     loops = [];
     result = No_result;
@@ -184,7 +183,7 @@ let may_fork st = st.cursor = None && st.frame.exit = None
 
 (* A field of the cursor, with the place it is at. *)
 let cursor_field (cursor : cursor) name ty : Lir.place =
-  if not (List.mem_assoc name cursor.fields) then cursor.fields <- (name, ty) :: cursor.fields;
+  if not (List.mem_assoc name !(cursor.fields)) then cursor.fields := (name, ty) :: !(cursor.fields);
   { root = Local cursor.pointer; projections = [ Deref; Field name ] }
 
 (* A place that holds a value [kept] across a [yield]: a new field of the
@@ -192,16 +191,16 @@ let cursor_field (cursor : cursor) name ty : Lir.place =
 let held st ~kept ?name ty : Lir.place =
   match st.cursor with
   | Some cursor when kept ->
-      cursor_field cursor (Printf.sprintf "held%d" (List.length cursor.fields)) ty
+      cursor_field cursor (Printf.sprintf "held%d" (List.length !(cursor.fields))) ty
   | _ -> at (local st.builder ?name ty)
 
 (* Writes code with [body] as an outlined function, nested in the instance,
    given [parts] as its parameters. Gives the function's number and the
    operand for its environment. *)
 let outlined st ~parts body =
-  let nested = List.length !(st.nested) in
-  st.nested := !(st.nested) @ [ None ];
-  let holder = Lir_builder.outline st.builder ~nested ~parts body in
+  let nested = !(st.nested) in
+  incr st.nested;
+  let holder = Emit_c.Builder.outline st.builder ~nested ~parts body in
   (nested, Lir.Address { place = at holder; writable = false })
 
 (* A record for the early exits of a block's branch or a loop's
@@ -402,37 +401,20 @@ let in_statement st body = with_scope st Statement body
    and its result returned. Its parameters are [first], which it is given
    before anything else, the pointer its result is written through, if it
    has one, and [rest]. *)
-let finish_function st ?(returns = true) ~first ~rest () : Lir.function_ =
+let finish_function st ?(returns = true) ~first ~rest () =
   (match st.scopes with [ scope ] -> drop_scope st scope | _ -> bug "a function ended in a scope");
   finish st.builder (if returns then return_result st else Unreachable);
   let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
   let result =
     match st.result with Returned_in local -> Some (local_type st.builder local) | _ -> None
   in
-  let built =
-    Lir_builder.build st.builder ?written_result:pointer ~env:st.context.env
-      ~parameters:(first @ Option.to_list pointer @ rest)
-      ~result
-  in
-  List.iter
-    (fun (index, region) ->
-      st.nested :=
-        List.mapi
-          (fun position nested -> if position = index then Some region else nested)
-          !(st.nested))
-    (Lir_builder.outlined_functions st.builder);
-  { built with returns }
+  build st.builder ~returns ~parameters:(first @ Option.to_list pointer @ rest) ~result
 
 (* The instance written: its function, which [finish_function] ends with
-   [rest] as its parameters, and the nested functions it made, in order. *)
-let finish_instance st ?returns ~rest key : Lir.t =
-  let main = finish_function st ?returns ~first:[] ~rest () in
-  let nested =
-    List.map
-      (function Some body -> body | None -> bug "a nested function left unfinished")
-      !(st.nested)
-  in
-  { key; main; nested = Array.of_list nested }
+   [rest] as its parameters, and the nested functions it made. *)
+let finish_instance st ?returns ~rest () =
+  finish_function st ?returns ~first:[] ~rest ();
+  built st.builder
 
 let unreachable_block st =
   finish st.builder Unreachable;
@@ -493,7 +475,7 @@ let place_type st (place : Lir.place) =
   | Some cursor, { root = Local pointer; projections = Deref :: Field field :: rest }
     when pointer = cursor.pointer -> (
       (* A field of the cursor that the code is writing the fields of. *)
-      match List.assoc_opt field cursor.fields with
+      match List.assoc_opt field !(cursor.fields) with
       | Some ty -> projected ty rest
       | None when field = Convention.cursor_state -> projected (Raw (Integer UInt32)) rest
       | None -> bug "the cursor has no field %s" field)

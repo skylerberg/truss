@@ -5,6 +5,12 @@
 type build = Development | Release
 type linkage = External | Internal
 
+(* A position in a definition, relative to the line it starts on. *)
+type site = { definition : Path.t; line : int; column : int }
+
+(* A point that a program that ships must not reach. *)
+type failure = Echo | Todo
+
 let bug format = Compiler_bug.bug ~stage:"Emit_c" format
 let anchor_symbol definition = "t_Anchor_" ^ Instance.path_symbol definition
 

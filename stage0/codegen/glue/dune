@@ -5,7 +5,7 @@
   intrinsic
   storage
   compiler_bug
-  lir_builder
+  emit_c
   ground
   instance
   memory_layout

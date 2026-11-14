@@ -1,2 +1,5 @@
-(* A function's header, with no linkage, and its body. *)
-val function_c : C_types.context -> Instance.key -> string -> Lir.function_ -> string * string
+(* Statements and terminators as C, written to a buffer, one line each. *)
+val statement_c : C_types.context -> C_values.function_context -> Buffer.t -> Lir.statement -> unit
+
+val terminator_c :
+  C_types.context -> C_values.function_context -> Buffer.t -> Lir.terminator -> unit

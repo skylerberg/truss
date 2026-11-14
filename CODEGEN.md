@@ -36,13 +36,20 @@ no way to say that pointers do not alias. C compilers have all of these, and
 Truss's guarantee of no aliasing is exactly C's `restrict`. Linking libc
 already needs the platform's C toolchain.
 
-### Why one IR before C
+### Why no IR between the MIR and C
 
-Lowering writes the LIR, a small typed control-flow graph that the C
-emitter prints, with every decision made: drops, outlined functions, and
-the state machines of cursors. The LIR is not SSA: locals are mutable
-slots, since the C compiler builds SSA itself, and slots make drops and
-state machines simpler.
+Lowering reads the MIR and writes C with a builder, a statement at a time,
+with every decision made where it writes the code: drops, outlined
+functions, and the state machines of cursors. A statement is typed:
+places, operands, and calls with their signatures, which the builder
+prints as C at once, checking each call against its target. Nothing is
+kept between the two, so no pass has a second form of the code to keep
+in step with the first. Locals are mutable slots, not SSA, since the C
+compiler builds SSA itself.
+
+A local's C names it once its function is written: a local that only an
+outlined function names belongs to that function, and one that a function
+around it also names is reached through the environment.
 
 Each instance is kept as its C, a fragment that also lists the types,
 prototypes, and instances it names. The fragment is what early cutoff
@@ -244,7 +251,7 @@ Only the standard library reaches the operating system, through
 `standard::intrinsic`, a module that exists in no source file and only
 `standard` can import. Its operations are one list that the type checker and
 code generation both match exhaustively, so a new one compiles only once
-both handle it. Each is written into the caller's LIR, never as a call.
+both handle it. Each is written into the caller's code, never as a call.
 
 **The C library functions are rows of one table** in the compiler, which
 gives each function's symbol and C types on each system, how each argument

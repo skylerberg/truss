@@ -1,6 +1,6 @@
 module Names = Resolve.Names
 
-(* Lowering is a query: each instance's LIR, for a target and whether the
+(* Lowering is a query: each instance's C, for a target and whether the
    build has run-time checks, kept current by the code database like any
    other result.
 
@@ -64,7 +64,7 @@ and pulled =
            (fun () -> Lower.pulled (fresh_context lowering database) yielding)))
 
 (* An instance's C, a constant's data, or a capability's table. *)
-and emitted (context : Lower.context) (compiled : Lir.compiled) =
+and emitted (context : Lower.context) (compiled : Emit_c.compiled) =
   Compiled (Emit_c.fragment (Lower.env context) compiled)
 
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
@@ -78,8 +78,8 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       match Lower.constant context path with
       | Folded data -> Folded data
       | Run ty -> Evaluate (path, ty))
-  | Drop (Cursor yielding) -> code { key; main = (pulled yielding).Lower.drop; nested = [||] }
-  | Cursor_next yielding -> code { key; main = (pulled yielding).Lower.next; nested = [||] }
+  | Drop (Cursor yielding) -> Compiled (pulled yielding).Lower.drop
+  | Cursor_next yielding -> Compiled (pulled yielding).Lower.next
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
@@ -240,7 +240,7 @@ let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build me
 (* The key that the result of a run from [root] is kept under, once [root]
    is wanted. It hashes the key of everything [root] can reach, code
    generation's version, the target, and the build's added C flags. The
-   target is part of it because [USize] is a [typedef] in the C, so the LIR
+   target is part of it because [USize] is a [typedef] in the C, so the C
    can be the same for two widths while [USize.maximum] is not. The flags
    are part of it because a sanitizer can stop a run that passes without
    one. *)
@@ -732,8 +732,9 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
 
 let build_supplied_tests compiler ~time_limit supplied ~output =
   reporting compiler @@ fun () ->
+  let supplied = List.map (fun instance -> instance (Lower.env compiler.context)) supplied in
   build_test_program compiler ~supplied ~time_limit
-    ~roots:(List.map (fun (instance : Lir.t) -> instance.key) supplied)
+    ~roots:(List.map Emit_c.Builder.instance_key supplied)
     ~output
 
 (* Code that cannot ship: a [todo] or an [echo] a program can reach. *)

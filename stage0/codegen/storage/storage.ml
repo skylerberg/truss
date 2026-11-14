@@ -1,5 +1,3 @@
-open Lir_builder
-
 let named builtin element : Ground.ty =
   Named { path = Intrinsic.builtin_path builtin; arguments = [ Type element ] }
 
@@ -35,6 +33,10 @@ let shape ~usize element : Memory_layout.shape =
 let view_shape ~usize element : Memory_layout.shape =
   Record [ (elements_field, Raw (Pointer (Data element))); (length_field, Typed usize) ]
 
+let ( / ) (place : Lir.place) projection : Lir.place =
+  { place with projections = place.projections @ [ projection ] }
+
+let usize number = Lir.Constant (Integer (USize, Z.of_int number))
 let buffer storage = storage / Lir.Field buffer_field
 let length storage = storage / Lir.Field length_field
 let capacity storage = storage / Lir.Field capacity_field
@@ -56,13 +58,3 @@ let empty ty = static ty ~elements:(Constant (Bytes "")) ~length:(usize 0)
 
 let view ty ~elements ~length : Lir.rvalue =
   Build { ty; variant = None; fields = [ (elements_field, elements); (length_field, length) ] }
-
-let test builder rvalue =
-  let result = local builder (Raw Bool) in
-  emit builder (Assign (Lir_builder.at result, rvalue));
-  Lir.Copy (Lir_builder.at result)
-
-let owns_buffer builder storage =
-  test builder (Binary (Not_equal, Copy (capacity storage), usize 0))
-
-let is_empty builder storage = test builder (Binary (Equal, Copy (length storage), usize 0))

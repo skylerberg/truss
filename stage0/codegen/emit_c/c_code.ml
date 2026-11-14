@@ -146,6 +146,12 @@ let call_c context fc (target : Lir.target) arguments =
   | Intrinsic _ | Foreign _ -> ());
   match target with
   | Direct { function_; signature } ->
+      (match function_ with
+      | Instance key ->
+          refer context key;
+          if not (List.exists (Instance.equal key) context.called) then
+            context.called <- key :: context.called
+      | Nested _ -> ());
       let symbol = function_ref_symbol fc function_ in
       let linkage = match function_ with Nested _ -> Internal | Instance _ -> External in
       declare_prototype context symbol
@@ -193,7 +199,8 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "((%s (*)(%s))((const void *const *)%s)[%d])(%s)" result
         (signature_parameters context fc.symbol signature.parameters None)
         table slot texts
-  | Evidence_call { evidence; slot; signature; _ } ->
+  | Evidence_call { evidence; capability; slot; signature } ->
+      context.calls <- (capability, slot) :: context.calls;
       let evidence =
         match operand_c context fc evidence with
         | Some (text, _) -> text
@@ -273,6 +280,7 @@ let statement_c context fc buffer (statement : Lir.statement) =
       match place_c context fc place with
       | None -> ()
       | Some (text, Value ty) ->
+          refer context (Drop ty);
           let symbol = Instance.symbol (Drop ty) in
           declare_prototype context symbol
             (prototype context fc.symbol symbol ~linkage:External (Convention.drop_signature ty)
@@ -280,6 +288,9 @@ let statement_c context fc buffer (statement : Lir.statement) =
           line "%s(&%s);" symbol text
       | Some _ -> bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
+      context.failures <-
+        (Echo, { definition = site.definition; line = site.line; column = site.column })
+        :: context.failures;
       let operand lir_operand =
         match operand_c context fc lir_operand with
         | Some (text, _) -> text
@@ -374,17 +385,17 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
                 cases;
               line "%s" (default otherwise))
       | Some _ -> bug "a variant switch on a place that is not a value")
-  | Return None -> (
-      match fc.function_.result with
-      | Some _ -> bug "a return of nothing from a function with a result"
-      | None -> line "return;")
+  | Return None -> line "return;"
   | Return (Some value) -> (
-      match (fc.function_.result, operand_c context fc value) with
-      | None, _ -> bug "a return of a value from a function with no result"
-      | _, None -> line "return;"
-      | Some _, Some (text, _) -> line "return %s;" text)
+      match operand_c context fc value with
+      | None -> line "return;"
+      | Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
   | Fail { failure; message; length; site } ->
+      if match failure with Lir.Todo -> true | Panic | Assertion -> false then
+        context.failures <-
+          (Todo, { definition = site.definition; line = site.line; column = site.column })
+          :: context.failures;
       line "%s(%s, %s, %s, %d, %d);"
         (match failure with
         | Panic -> "t_runtime_panic"
@@ -394,56 +405,3 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
         (fst (operand length))
         (anchor_c context site.definition)
         site.line site.column
-
-(* A function's C: the blocks its entry reaches, each labeled where a jump
-   goes to it, after a declaration of each local their code names. *)
-let function_c context key symbol (function_ : Lir.function_) =
-  let fc = { symbol = Instance.symbol key; function_; named = Hashtbl.create 32 } in
-  let names = List.map (local_name function_) function_.parameters in
-  let header =
-    prototype context fc.symbol symbol ~names ~linkage:External (Lir.signature function_)
-  in
-  let reached = Array.make (Array.length function_.blocks) false and targets = Hashtbl.create 16 in
-  let rec reach block =
-    if not reached.(block) then begin
-      reached.(block) <- true;
-      List.iter
-        (fun target ->
-          Hashtbl.replace targets target ();
-          reach target)
-        (Lir.successors function_.blocks.(block).terminator)
-    end
-  in
-  if Array.length function_.blocks > 0 then reach 0;
-  let body = Buffer.create 1024 in
-  Array.iteri
-    (fun index (block : Lir.basic_block) ->
-      if reached.(index) then begin
-        if Hashtbl.mem targets index then Buffer.add_string body (Printf.sprintf "b%d:;\n" index);
-        List.iter (statement_c context fc body) block.statements;
-        terminator_c context fc body block.terminator
-      end)
-    function_.blocks;
-  let buffer = Buffer.create 1024 in
-  Buffer.add_string buffer " {\n";
-  Array.iteri
-    (fun local (info : Lir.local_info) ->
-      if
-        Hashtbl.mem fc.named local
-        && (not (List.mem local function_.parameters))
-        && not (erased context info.ty)
-      then
-        let zero =
-          match info.ty with
-          | Value ty when is_struct context ty -> "{0}"
-          | Environment nested_index when environment_of context fc nested_index = [] -> "{}"
-          | Environment _ | Evidence _ -> "{0}"
-          | _ -> "0"
-        in
-        Buffer.add_string buffer
-          (Printf.sprintf "  %s %s = %s;\n" (c_ty context fc.symbol info.ty)
-             (local_name function_ local) zero))
-    function_.locals;
-  Buffer.add_buffer buffer body;
-  Buffer.add_string buffer "}\n";
-  (header, Buffer.contents buffer)

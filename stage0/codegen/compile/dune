@@ -39,5 +39,4 @@
   mir
   syntax
   infer
-  lir_builder
   convention))

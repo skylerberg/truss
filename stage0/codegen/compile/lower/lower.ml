@@ -1,6 +1,6 @@
-(* Lowering: the core form of one instance to its LIR. *)
+(* Lowering: the core form of one instance to its C. *)
 
-open Lir_builder
+open Emit_c.Builder
 open Definitions
 open Lowering
 open Targets
@@ -91,8 +91,8 @@ let begin_body st ~(body : Mir.body) =
     places )
 
 type pulled = {
-  next : Lir.function_;
-  drop : Lir.function_;
+  next : Emit_c.fragment;
+  drop : Emit_c.fragment;
   fields : (string * Memory_layout.member) list;
 }
 
@@ -113,7 +113,11 @@ let member : Lir.ty -> Memory_layout.member = function
 let pulled context (yielding : Ground.yielding) : pulled =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let body = (Mir_form.mir_of context yielding.method_).body in
-  let st = enter context (frame_of code ~inlined:[ yielding.method_ ]) in
+  let st =
+    enter context
+      ~builder:(create context.env ~key:(Cursor_next yielding))
+      (frame_of code ~inlined:[ yielding.method_ ])
+  in
   (* [next] starts in block 0, which builds the evidence the method's code
      reads on every call, then goes to the state's code. *)
   let entry = block st.builder in
@@ -124,12 +128,13 @@ let pulled context (yielding : Ground.yielding) : pulled =
   let cursor =
     {
       pointer;
-      drop = Lir_builder.separate st.builder ~parts:[ pointer ];
-      fields = [];
+      drop = Emit_c.Builder.separate st.builder ~key:(Drop (Cursor yielding)) ~parts:[ pointer ];
+      fields = ref [];
       resumes = [];
       stops = [];
     }
   in
+  describe_cursor st.builder yielding cursor.fields;
   let st = { st with cursor = Some cursor } in
   let bound, held = bind_parameters ~cursor st body in
   let mask =
@@ -164,7 +169,7 @@ let pulled context (yielding : Ground.yielding) : pulled =
   let ended = block st.builder in
   in_block st.builder ended (fun () -> Mir_form.give_option st None);
   in_block st.builder dispatch (fun () -> switch ~started:first ~ended cursor.resumes);
-  Lir_builder.write_in st.builder cursor.drop (fun () ->
+  Emit_c.Builder.write_in st.builder cursor.drop (fun () ->
       let unstarted = block st.builder and ended = block st.builder in
       start st.builder unstarted;
       List.iter
@@ -187,20 +192,20 @@ let pulled context (yielding : Ground.yielding) : pulled =
       finish st.builder (Return None);
       start st.builder ended;
       finish st.builder (Return None);
-      start st.builder (Lir_builder.separate_entry st.builder cursor.drop);
+      start st.builder (Emit_c.Builder.separate_entry st.builder cursor.drop);
       switch ~started:unstarted ~ended cursor.stops);
-  let next = finish_function st ~first:[] ~rest:(pointer :: evidence) () in
+  finish_function st ~first:[] ~rest:(pointer :: evidence) ();
   {
-    next;
-    drop = Lir_builder.separate_function st.builder cursor.drop;
+    next = Emit_c.fragment context.env (Code (built st.builder));
+    drop = Emit_c.fragment context.env (Code (built_separate st.builder cursor.drop));
     fields =
       (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
-      :: List.rev_map (fun (name, ty) -> (name, member ty)) cursor.fields;
+      :: List.rev_map (fun (name, ty) -> (name, member ty)) !(cursor.fields);
   }
 
-let code_state context path =
+let code_state context ~key path =
   let code = code_of context path [] in
-  (enter context (frame_of code ~inlined:[ path ]), code)
+  (enter context ~builder:(create context.env ~key) (frame_of code ~inlined:[ path ]), code)
 
 (* A tag's [from_template]: its one parameter and its [requires] clauses,
    from its core form. *)
@@ -217,8 +222,8 @@ let template_checked context from_template =
        (fun index (clause : Core.condition) -> if clause.executable then [ index ] else [])
        requires)
 
-let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
-  let st, _ = code_state context from_template in
+let template_check context (key : Instance.key) ~from_template ~texts : Emit_c.Builder.instance =
+  let st, _ = code_state context ~key from_template in
   let parameter, requires = from_template_contract context from_template in
   start st.builder (block st.builder);
   in_scope st (fun () ->
@@ -239,10 +244,10 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           end)
         requires;
       Constants.write_output st output);
-  finish_instance st ~rest:[] key
+  finish_instance st ~rest:[] ()
 
-let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
-  let st, _ = code_state context function_ in
+let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.Builder.instance =
+  let st, _ = code_state context ~key function_ in
   start st.builder (block st.builder);
   let signature = signature_of context function_ in
   in_scope st (fun () ->
@@ -275,20 +280,20 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
         ~output:(Address { place = output; writable = true })
         result_ty result;
       Constants.write_output st output);
-  finish_instance st ~rest:[] key
+  finish_instance st ~rest:[] ()
 
 (* Lowers a function or a test that has a body in source. *)
-let source_code context key ~path ~type_arguments : Lir.t =
+let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
   let code = code_of context path type_arguments in
   let body = (Mir_form.mir_of context path).body in
-  let st = enter context (frame_of code ~inlined:[ path ]) in
+  let st = enter context ~builder:(create context.env ~key) (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
   let parameter_locals, places = begin_body st ~body in
   Mir_form.lower_code st path ~parameters:places;
-  finish_instance st ~returns ~rest:parameter_locals key
+  finish_instance st ~returns ~rest:parameter_locals ()
 
-let instance context (key : Instance.key) : Lir.t =
+let instance context (key : Instance.key) : Emit_c.Builder.instance =
   match key with
   | Entry method_key -> entry context key method_key
   | Any_entry method_key -> any_entry context key method_key

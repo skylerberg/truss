@@ -70,8 +70,8 @@ type spawn_loop = {
 
 type cursor = {
   pointer : Lir.local;
-  drop : Lir_builder.separate;
-  mutable fields : (string * Lir.ty) list;
+  drop : Emit_c.Builder.separate;
+  fields : (string * Lir.ty) list ref;
   mutable resumes : Lir.block list;
   mutable stops : Lir.block list;
 }
@@ -82,11 +82,11 @@ type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 type state = {
   context : Definitions.context;
   mutable frame : frame;
-  builder : Lir_builder.t;
+  builder : Emit_c.Builder.t;
   mutable scopes : scope list;
   mutable loops : loop list;
   mutable result : result_slot;
-  nested : Lir.function_ option list ref;
+  nested : int ref;
   mutable evidence : (Path.t * Lir.operand) list;
   cursor : cursor option;
   mutable tasks : task list;
@@ -98,7 +98,12 @@ type state = {
 val frame_of : Definitions.code -> inlined:Path.t list -> frame
 
 val enter :
-  Definitions.context -> ?cursor:cursor -> ?nested:Lir.function_ option list ref -> frame -> state
+  Definitions.context ->
+  ?cursor:cursor ->
+  ?nested:int ref ->
+  builder:Emit_c.Builder.t ->
+  frame ->
+  state
 
 val may_fork : state -> bool
 
@@ -151,11 +156,13 @@ val in_scope : state -> (unit -> 'a) -> 'a
 val in_statement : state -> (unit -> 'a) -> 'a
 
 val finish_function :
-  state -> ?returns:bool -> first:Lir.local list -> rest:Lir.local list -> unit -> Lir.function_
+  state -> ?returns:bool -> first:Lir.local list -> rest:Lir.local list -> unit -> unit
 
 (* The instance written: its function, which [finish_function] ends with
-   [rest] as its parameters, and the nested functions it made, in order. *)
-val finish_instance : state -> ?returns:bool -> rest:Lir.local list -> Instance.key -> Lir.t
+   [rest] as its parameters, and the nested functions it made. *)
+val finish_instance :
+  state -> ?returns:bool -> rest:Lir.local list -> unit -> Emit_c.Builder.instance
+
 val unreachable_block : state -> unit
 val moved : state -> Lir.place -> Lir.operand
 val owned : state -> Lir.place -> Ground.ty -> Lir.operand

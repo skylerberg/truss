@@ -28,8 +28,15 @@ type context = {
   mutable references : key list option;
   mutable helpers_used : string list;
   mutable statics : string list;
+  mutable instances : Instance.key list;
+  mutable called : Instance.key list;
+  mutable calls : (Path.t * int) list;
+  mutable failures : (C_runtime.failure * C_runtime.site) list;
+  mutable cursors : (Ground.yielding * (string * Lir.ty) list ref) list;
 }
 
+val new_context : Memory_layout.env -> string -> context
+val refer : context -> Instance.key -> unit
 val use_helper : context -> string -> string
 val register : context -> Keys.key -> unit
 val layout : context -> Ground.ty -> Memory_layout.t

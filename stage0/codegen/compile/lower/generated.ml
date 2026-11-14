@@ -5,10 +5,10 @@
 open Definitions
 open Lowering
 open Targets
-open Lir_builder
+open Emit_c.Builder
 
-let generated_state context ~anchor ~substitution =
-  enter context
+let generated_state context ~key ~anchor ~substitution =
+  enter context ~builder:(create context.env ~key)
     (frame_of ~inlined:[]
        (unwritten
           ~definition_key:
@@ -32,7 +32,7 @@ let impl_capability context impl =
 
 (* An entry: unpacks the implementation and the evidence it captured from
    the evidence it is called with, and calls the [impl]'s method. *)
-let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
+let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Builder.instance =
   let path, type_arguments =
     match method_key with
     | Code { path; type_arguments } -> (path, type_arguments)
@@ -48,7 +48,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let _, result = entry_signature context capability_signature in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
-  let st = generated_state context ~anchor:impl ~substitution in
+  let st = generated_state context ~key ~anchor:impl ~substitution in
   let builder = st.builder in
   let evidence = local builder ~name:"evidence" Convention.evidence in
   result_slot st result;
@@ -96,16 +96,12 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
       ((self_mode, self_ty, { Lir.root = Local implementation; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
-  {
-    key;
-    main =
-      finish_function st
-        ~returns:(capability_signature.output <> Returns Never)
-        ~first:[ evidence ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
-        ();
-    nested = [||];
-  }
+  finish_function st
+    ~returns:(capability_signature.output <> Returns Never)
+    ~first:[ evidence ]
+    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
+    ();
+  built st.builder
 
 (* The entry of a capability's locking table for the method [name]. The
    evidence it is called with was built by a [provide mut] whose body can
@@ -114,10 +110,10 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
    second is the evidence for [Tasks]. The entry locks the mutex, calls
    the implementation's entry, and unlocks the mutex, so calls of one
    implementation by several tasks are mutually exclusive. *)
-let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
+let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder.instance =
   let slot, capability_signature = capability_method context capability name in
   let lir_signature, result = entry_signature context capability_signature in
-  let st = generated_state context ~anchor:capability ~substitution:[] in
+  let st = generated_state context ~key ~anchor:capability ~substitution:[] in
   let builder = st.builder in
   let evidence = local builder ~name:"evidence" Convention.evidence in
   result_slot st result;
@@ -184,16 +180,12 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
          result = Convention.destination result (passed_on st result_ty);
        });
   tasks_call "unlock";
-  {
-    key;
-    main =
-      finish_function st
-        ~returns:(capability_signature.output <> Returns Never)
-        ~first:[ evidence ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
-        ();
-    nested = [||];
-  }
+  finish_function st
+    ~returns:(capability_signature.output <> Returns Never)
+    ~first:[ evidence ]
+    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
+    ();
+  built st.builder
 
 (* A capability's locking table: a locking entry for each of the
    capability's methods, in the capability's order. *)
@@ -314,8 +306,8 @@ let text_copied_from = Well_known.path Text_copied_from
    [String]s, each made of an argument's bytes by the standard library; the
    real implementation of each capability [main] uses; and [main]'s
    [ExitCode] as the process's status. *)
-let program_main context (key : Instance.key) main_path : Lir.t =
-  let st = generated_state context ~anchor:main_path ~substitution:[] in
+let program_main context (key : Instance.key) main_path : Emit_c.Builder.instance =
+  let st = generated_state context ~key ~anchor:main_path ~substitution:[] in
   let builder = st.builder in
   let count = local builder ~name:"count" (Raw (Integer Int32)) in
   let arguments_pointer = local builder ~name:"arguments" (Raw (Pointer Opaque)) in
@@ -381,11 +373,12 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   | Record [ (field, _) ], Some status ->
       emit builder (Assign (status, Convert (Copy (exit / Field field), Integer Int32)))
   | _ -> bug "an ExitCode that is not a record of one field");
-  { key; main = finish_function st ~first:[ count; arguments_pointer ] ~rest:[] (); nested = [||] }
+  finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ();
+  built st.builder
 
 (* A named function as a value of a function type. *)
 let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Ground.function_type) :
-    Lir.t =
+    Emit_c.Builder.instance =
   let path, type_arguments =
     match function_ with
     | Code { path; type_arguments } -> (path, type_arguments)
@@ -393,7 +386,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   in
   let signature = signature_of context path in
   let substitution = bind signature.generics type_arguments in
-  let st = generated_state context ~anchor:path ~substitution in
+  let st = generated_state context ~key ~anchor:path ~substitution in
   let builder = st.builder in
   let environment = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty =
@@ -414,18 +407,14 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   call_instance st function_ ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
-  {
-    key;
-    main =
-      finish_function st ~returns:(result_ty <> Never) ~first:[ environment ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
-        ();
-    nested = [||];
-  }
+  finish_function st ~returns:(result_ty <> Never) ~first:[ environment ]
+    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+    ();
+  built st.builder
 
 (* An entry in an [any] table: the value's pointer as [self], then the
    method's arguments. *)
-let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
+let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Builder.instance =
   let path, type_arguments =
     match method_key with
     | Code { path; type_arguments } -> (path, type_arguments)
@@ -443,7 +432,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let substitution = bind method_signature.generics type_arguments in
   let any = Types.substitute_trait substitution interface.implements in
   let _, result, capabilities = any_entry_signature context ~any ~trait trait_signature in
-  let st = generated_state context ~anchor:impl ~substitution in
+  let st = generated_state context ~key ~anchor:impl ~substitution in
   let builder = st.builder in
   let value = local builder ~name:"value" (Raw (Pointer Opaque)) in
   result_slot st result;
@@ -472,16 +461,12 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
       ((self_mode, self_ty, { Lir.root = Local typed; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
-  {
-    key;
-    main =
-      finish_function st
-        ~returns:(method_signature.output <> Returns Never)
-        ~first:[ value ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
-        ();
-    nested = [||];
-  }
+  finish_function st
+    ~returns:(method_signature.output <> Returns Never)
+    ~first:[ value ]
+    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+    ();
+  built st.builder
 
 (* An [any] table: the type's drop in slot 0, then an entry for each method
    that can be called through [any]. *)

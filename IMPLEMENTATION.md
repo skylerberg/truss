@@ -67,7 +67,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   is a module of that library, so that nothing else can come to depend on
   it. It stays a library of its own when its short dependency list
   keeps it apart from a layer, as `session` knows no compiler stage and the
-  passes over LIR, such as `drops`, know nothing of the front end.
+  move analysis, `moves`, knows nothing of code generation.
 - **Each library belongs to one area of stage0,** a directory under
   `stage0`, and the dependency graph that `stage0/tools/docs/build.sh`
   draws colors libraries by area:

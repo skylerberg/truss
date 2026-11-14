@@ -74,7 +74,40 @@ type context = {
   mutable helpers_used : string list;
   mutable statics : string list;
       (** Static arrays and blocks that data refers to, most recent first *)
+  mutable instances : Instance.key list;  (** The instances the code names, most recent first *)
+  mutable called : Instance.key list;  (** The instances it calls by name, most recent first *)
+  mutable calls : (Path.t * int) list;
+      (** The methods of capabilities it calls: each capability, and the method's place *)
+  mutable failures : (failure * site) list;  (** Its [echo]s and [todo]s *)
+  mutable cursors : (Ground.yielding * (string * Lir.ty) list ref) list;
+      (** The fields but the state of each cursor whose pulled method this code is, which the code
+          names before the cursor's layout is known *)
 }
+
+let new_context env prefix =
+  {
+    env;
+    prefix;
+    order = [];
+    registered = Keys.empty;
+    environments = Keys.empty;
+    bytes = [];
+    prototypes = [];
+    anchors = [];
+    references = None;
+    helpers_used = [];
+    statics = [];
+    instances = [];
+    called = [];
+    calls = [];
+    failures = [];
+    cursors = [];
+  }
+
+(* Records that the code names an instance. *)
+let refer context key =
+  if not (List.exists (Instance.equal key) context.instances) then
+    context.instances <- key :: context.instances
 
 let use_helper context name =
   if not (List.mem name context.helpers_used) then
@@ -94,20 +127,30 @@ let layout context ty = Memory_layout.of_type context.env ty
 
 (* Whether a Truss type is a C [struct], which must be defined before
    anything holds it by value. *)
-let is_struct context ty =
-  match (layout context ty).form with
-  | Struct _ | Array _ | Tagged _ -> true
-  | Niche_encoded { dataful; _ } -> (
-      match dataful.payload.form with Struct _ -> true | _ -> false)
-  | Zero_size | Scalar _ | Tag_only _ -> false
+let is_struct context (ty : Ground.ty) =
+  match ty with
+  | Cursor _ -> true
+  | _ -> (
+      match (layout context ty).form with
+      | Struct _ | Array _ | Tagged _ -> true
+      | Niche_encoded { dataful; _ } -> (
+          match dataful.payload.form with Struct _ -> true | _ -> false)
+      | Zero_size | Scalar _ | Tag_only _ -> false)
 
-let rec value_c context ty =
-  match (layout context ty).form with
-  | Zero_size -> "void"
-  | Scalar scalar -> scalar_c context scalar
-  | _ ->
+(* A cursor is always a struct, which holds its state, so code over one is
+   written before its pulled method has decided its other fields. *)
+let rec value_c context (ty : Ground.ty) =
+  match ty with
+  | Cursor _ ->
       register context (Type ty);
       Instance.type_symbol ty
+  | _ -> (
+      match (layout context ty).form with
+      | Zero_size -> "void"
+      | Scalar scalar -> scalar_c context scalar
+      | _ ->
+          register context (Type ty);
+          Instance.type_symbol ty)
 
 and scalar_c context : Memory_layout.scalar -> string = function
   | Integer integer -> integer_c integer

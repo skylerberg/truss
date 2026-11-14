@@ -222,31 +222,6 @@ type terminator =
   | Fail of { failure : failure; message : operand; length : operand; site : site }
       (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
 
-type basic_block = { statements : statement list; terminator : terminator }
-
-type local_info = {
-  ty : ty;
-  name : string option;
-      (** Holds the bits of a value that something else owns, as a read-only parameter passed by
-          value does: nothing here drops it *)
-}
-
-type function_ = {
-  parameters : local list;  (** Locals that arrive as the parameters, in order *)
-  written_result : local option;
-      (** The parameter pointing to where a result too large to return is written, which holds no
-          value until the function writes it *)
-  result : ty option;
-  returns : bool;
-  locals : local_info array;
-  blocks : basic_block array;  (** Block 0 is the entry *)
-  environment : (string * ty) list;
-      (** For a nested function, the fields of its environment: a pointer to each local of the
-          function around it that it reads, and for a loop body the slots it reports through *)
-}
-
-type t = { key : Instance.key; main : function_; nested : function_ array }
-
 (* Static data: a constant's value, which the emitter writes as C
    initializers in a read-only place. *)
 type static_value =
@@ -269,6 +244,3 @@ type table = {
   capability : Path.t option;
   entries : (Instance.key * signature) list;
 }
-
-(* An instance's compiled form: code, static data, or a table of entries. *)
-type compiled = Code of t | Data of data | Table of table

@@ -1,4 +1,4 @@
-(* The LIR as C.
+(* Instances as C.
 
    Each instance is emitted on its own, as a fragment: its C, and what a file
    that holds it declares and defines for it. A file declares everything it
@@ -17,10 +17,16 @@ type build = Development | Release
 type linkage = External | Internal
 
 (* A position in a definition, relative to the line it starts on. *)
-type site = { definition : Path.t; line : int; column : int }
+type site = C_runtime.site = { definition : Path.t; line : int; column : int }
 
 (* A point that a program that ships must not reach. *)
-type failure = Echo | Todo
+type failure = C_runtime.failure = Echo | Todo
+
+(* Writing an instance's C one statement at a time. *)
+module Builder = Builder
+
+(* An instance's C, a constant's data, or a capability's table. *)
+type compiled = Code of Builder.instance | Data of Lir.data | Table of Lir.table
 
 (* The version of code generation, part of every key built from an
    instance's C. *)
@@ -29,7 +35,7 @@ val version : int
 (* An instance's C, a constant's data, or a capability's table. *)
 type fragment
 
-val fragment : Memory_layout.env -> Lir.compiled -> fragment
+val fragment : Memory_layout.env -> compiled -> fragment
 val key : fragment -> Instance.key
 
 (* The instances a fragment names, other than itself. *)

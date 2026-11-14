@@ -148,21 +148,6 @@ type terminator = Ir_types.terminator =
   | Unreachable
   | Fail of { failure : failure; message : operand; length : operand; site : site }
 
-type basic_block = Ir_types.basic_block = { statements : statement list; terminator : terminator }
-type local_info = Ir_types.local_info = { ty : ty; name : string option }
-
-type function_ = Ir_types.function_ = {
-  parameters : local list;
-  written_result : local option;
-  result : ty option;
-  returns : bool;
-  locals : local_info array;
-  blocks : basic_block array;
-  environment : (string * ty) list;
-}
-
-type t = Ir_types.t = { key : Instance.key; main : function_; nested : function_ array }
-
 type static_value = Ir_types.static_value =
   | Static_scalar of constant
   | Static_record of (string * static_value) list
@@ -178,24 +163,10 @@ type table = Ir_types.table = {
   entries : (Instance.key * signature) list;
 }
 
-type compiled = Ir_types.compiled = Code of t | Data of data | Table of table
-
 val local_place : local -> place
-val signature : function_ -> signature
 val erased : Memory_layout.env -> ty -> bool
 
 val projection_type :
   Memory_layout.env -> environment:(int -> (string * ty) list) -> ty -> projection -> ty option
 
-val place_type :
-  Memory_layout.env -> environment:(int -> (string * ty) list) -> function_ -> place -> ty option
-
-val target_operands : target -> operand list
-
-type visitor = { place : place -> unit; operand : operand -> unit }
-
-val visit_statement : visitor -> statement -> unit
-val visit_terminator : visitor -> terminator -> unit
 val successors : terminator -> block list
-val map_statement : place:(place -> place) -> block:'a -> statement -> statement
-val map_terminator : place:(place -> place) -> block:(block -> block) -> terminator -> terminator

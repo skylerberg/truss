@@ -1,4 +1,4 @@
-open Lir_builder
+open Emit_c.Builder
 
 let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
 

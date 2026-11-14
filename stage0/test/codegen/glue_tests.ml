@@ -71,29 +71,39 @@ let () =
       let glue =
         Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~usize ()
       in
-      let statements =
-        List.concat_map
-          (fun (block : Lir.basic_block) -> block.statements)
-          (Array.to_list (Glue.drop glue (named "Holder")).main.blocks)
+      let c =
+        Emit_c.For_testing.c
+          (Emit_c.fragment (shape_env ~extra ()) (Code (Glue.drop glue (named "Holder"))))
       in
-      match statements with
-      | [ Drop { root = Local 0; projections = [ Deref; Field "items" ] } ] -> ()
-      | _ -> fail "the drop does more than drop the items");
+      if not (contains c "f_items") then fail "the drop does not drop the items:\n%s" c;
+      if contains c "f_count" then fail "the drop reads the count:\n%s" c);
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->
-      let calls =
-        Array.to_list (Glue.copy glue (storage int32)).main.blocks
-        |> List.concat_map (fun (block : Lir.basic_block) -> block.statements)
-        |> List.filter_map (function
-          | Lir.Call { target = Intrinsic index; _ } -> Some index
-          | _ -> None)
+      let c =
+        Emit_c.For_testing.c
+          (Emit_c.fragment (shape_env ()) (Code (Glue.copy glue (storage int32))))
       in
-      if calls <> [ Allocate; Copy_bytes ] then fail "the copy makes other calls");
+      let count text =
+        let rec from position =
+          match String.index_from_opt c position text.[0] with
+          | None -> 0
+          | Some found ->
+              (if
+                 found + String.length text <= String.length c
+                 && String.sub c found (String.length text) = text
+               then 1
+               else 0)
+              + from (found + 1)
+        in
+        from 0
+      in
+      if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
+        fail "the copy does not allocate and copy once:\n%s" c);
   test "a copy of storage keeps its values when the original changes" (fun () ->
       let ty = storage int32 in
       expect_status 20
         [
-          Glue.copy glue ty;
-          Glue.drop glue ty;
+          printed (Glue.copy glue ty);
+          printed (Glue.drop glue ty);
           entry
             [
               local (value ty);
@@ -119,7 +129,7 @@ let () =
       let ty = storage uint8 in
       expect_status 0
         [
-          Glue.drop glue ty;
+          printed (Glue.drop glue ty);
           entry
             [ local (value ty) ]
             [
@@ -149,10 +159,10 @@ let () =
       let usize_constant number = Lir.Constant (Integer (USize, Z.of_int number)) in
       expect_status 4
         [
-          Glue.copy glue outer;
-          Glue.copy glue inner;
-          Glue.drop glue outer;
-          Glue.drop glue inner;
+          printed (Glue.copy glue outer);
+          printed (Glue.copy glue inner);
+          printed (Glue.drop glue outer);
+          printed (Glue.drop glue inner);
           entry
             [
               local (value inner);

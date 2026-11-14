@@ -4,20 +4,16 @@
 open C_runtime
 open C_types
 
-(* The function being printed, and the locals its code names, which are the
-   ones it declares. *)
-type function_context = {
-  symbol : string;
-  function_ : Lir.function_;
-  named : (Lir.local, unit) Hashtbl.t;
-}
+(* The function being printed: the symbol of its instance, and the C text
+   and type of each local its code names. *)
+type function_context = { symbol : string; local : Lir.local -> string * Lir.ty }
 
-let local_name (function_ : Lir.function_) local =
-  match function_.locals.(local).name with
+let local_name local = function
   | Some name -> Printf.sprintf "l%d_%s" local name
   | None -> Printf.sprintf "l%d" local
 
 let erased context : Lir.ty -> bool = function
+  | Value (Cursor _) -> false
   | Value ty -> (layout context ty).size = 0
   | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 
@@ -90,10 +86,9 @@ let block_pointer context text sum variant =
 let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   let root =
     match place.root with
-    | Local local ->
-        Hashtbl.replace fc.named local ();
-        (local_name fc.function_ local, fc.function_.locals.(local).ty)
+    | Local local -> fc.local local
     | Static { key; ty } ->
+        refer context key;
         let symbol = Instance.symbol key in
         declare_prototype context symbol
           (Printf.sprintf "extern const %s %s;\n" (value_c context ty) symbol);
@@ -114,12 +109,23 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
     | Index index, _ -> text ^ "[" ^ operand_c_exn context fc index ^ "]"
     | Variant_field _, _ -> bug "a variant of a place that is not a value"
   in
+  let projected (ty : Lir.ty) (projection : Lir.projection) =
+    match (ty, projection) with
+    | Value (Cursor yielding), Field field -> (
+        match List.assoc_opt yielding context.cursors with
+        | Some fields -> (
+            match List.assoc_opt field !fields with
+            | Some ty -> Some ty
+            | None when field = Convention.cursor_state -> Some (Raw (Integer UInt32))
+            | None -> bug "the cursor has no field %s" field)
+        | None ->
+            Lir.projection_type context.env ~environment:(environment_of context fc) ty projection)
+    | _ -> Lir.projection_type context.env ~environment:(environment_of context fc) ty projection
+  in
   let rec walk ((_, ty) as current) = function
     | [] -> Some current
     | projection :: rest -> (
-        match
-          Lir.projection_type context.env ~environment:(environment_of context fc) ty projection
-        with
+        match projected ty projection with
         | None -> None
         | Some next -> walk (text current projection, next) rest)
   in
@@ -134,8 +140,7 @@ and address_c context fc (place : Lir.place) ~writable =
          not convert implicitly. *)
       let text =
         match (place, ty) with
-        | { root = Local local; projections = [] }, Pointer _
-          when List.mem local fc.function_.parameters ->
+        | { root = Local _; projections = [] }, Pointer _ ->
             Printf.sprintf "((%s)&%s)" (c_ty context fc.symbol pointer) text
         | _ -> "(&" ^ text ^ ")"
       in
@@ -167,6 +172,7 @@ and constant_c context : Lir.constant -> string * Lir.ty = function
   | Alignment_of ty ->
       (Printf.sprintf "((t_usize)_Alignof(%s))" (value_c context ty), Raw (Integer USize))
   | Symbol_address key ->
+      refer context key;
       let symbol = Instance.symbol key in
       declare_prototype context symbol
         (match key with
@@ -324,7 +330,7 @@ type built =
   | Expression of string
   | Allocating of { block : key; fill : string; value : string -> string }
 
-let build_c context fc ty variant (values : (string * Lir.operand) list) =
+let build_laid_out_c context fc ty variant (values : (string * Lir.operand) list) =
   let c_type = value_c context ty in
   let layout = layout context ty in
   (* A field that has no size is left out, as one the layout does not have,
@@ -430,6 +436,23 @@ let prototype context current symbol ?names ~linkage (signature : Lir.signature)
     result symbol
     (signature_parameters context current signature.parameters names)
 
+(* A value built of fields. A cursor whose pulled method this code is has no
+   layout yet, and names its fields alone. *)
+let build_c context fc (ty : Ground.ty) variant (values : (string * Lir.operand) list) =
+  match ty with
+  | Cursor yielding when List.mem_assoc yielding context.cursors ->
+      Some
+        (Expression
+           (Printf.sprintf "((%s){ %s })" (value_c context ty)
+              (String.concat ", "
+                 (List.filter_map
+                    (fun (name, operand) ->
+                      Option.map
+                        (fun (text, _) -> Printf.sprintf ".f_%s = %s" name text)
+                        (operand_c context fc operand))
+                    values))))
+  | _ -> build_laid_out_c context fc ty variant values
+
 let rvalue_c context fc (target : Lir.ty) (rvalue : Lir.rvalue) : built option =
   let operand lir_operand =
     match operand_c context fc lir_operand with
@@ -460,7 +483,8 @@ let rvalue_c context fc (target : Lir.ty) (rvalue : Lir.rvalue) : built option =
       in
       let symbol = function_ref_symbol fc code in
       (match code with
-      | Instance _ ->
+      | Instance key ->
+          refer context key;
           declare_prototype context symbol
             (prototype context fc.symbol symbol ~linkage:External
                (Convention.function_value context.env function_)

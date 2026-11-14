@@ -32,15 +32,15 @@ val trivial : t -> Ground.ty -> bool
 
 (* The drop function of a type: [Instance.Drop ty], taking a writable
    pointer to the value. *)
-val drop : t -> Ground.ty -> Lir.t
+val drop : t -> Ground.ty -> Emit_c.Builder.instance
 
 (* The copy function of a type: [Instance.Copy ty], taking the value as a
    read-only parameter and returning the copy. *)
-val copy : t -> Ground.ty -> Lir.t
+val copy : t -> Ground.ty -> Emit_c.Builder.instance
 
 (* Slot 0 of an [any] table: [Instance.Any_drop ty], which takes the value's
    pointer untyped and drops the value. *)
-val any_drop : t -> Ground.ty -> Lir.t
+val any_drop : t -> Ground.ty -> Emit_c.Builder.instance
 
 (* The buffer a debug or an encode function appends to: storage of bytes, which
    its caller owns. Each takes the address of one to change, after the
@@ -50,23 +50,24 @@ val output_ty : Ground.ty
 (* The function that appends a value of a type in its binary form:
    [Instance.Encode ty], taking a read-only pointer to the value, and the
    output. *)
-val encode : t -> Ground.ty -> Lir.t
+val encode : t -> Ground.ty -> Emit_c.Builder.instance
 
 (* Writes, with the builder, a call to the encode function of the type on
    the value at the place, to append to [output]; nothing for a type of
    zero size. *)
-val encode_call : t -> Lir_builder.t -> output:Lir.operand -> Ground.ty -> Lir.place -> unit
+val encode_call : t -> Emit_c.Builder.t -> output:Lir.operand -> Ground.ty -> Lir.place -> unit
 
 (* Writes, with the builder, a copy of the value at [source] to
    [destination], both of the type: a memory copy for a trivial type, and
    otherwise a call to its copy function. *)
-val copy_into : t -> Lir_builder.t -> destination:Lir.place -> source:Lir.place -> Ground.ty -> unit
+val copy_into :
+  t -> Emit_c.Builder.t -> destination:Lir.place -> source:Lir.place -> Ground.ty -> unit
 
 (* The debug output function of a type: [Instance.Debug ty], which takes a
    read-only pointer to the value, unless the type has zero size, and the
    output, and appends the value's text with the standard library's
    functions that write numbers and quoted text. *)
-val debug : t -> Ground.ty -> Lir.t
+val debug : t -> Ground.ty -> Emit_c.Builder.instance
 val debug_signature : t -> Ground.ty -> Lir.signature
 
 module For_testing : sig

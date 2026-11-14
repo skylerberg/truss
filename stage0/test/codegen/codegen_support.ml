@@ -1,4 +1,4 @@
-(* Helpers for the codegen tests: building types, shapes, and LIR by hand,
+(* Helpers for the codegen tests: building types, shapes, and code by hand,
    compiling and running C, and compiling Truss source with the standard
    library and running it. *)
 
@@ -101,34 +101,69 @@ let layout ?(target = target_64) ?(extra = []) ty =
 
 let describe ?target ?extra ty = Memory_layout.For_testing.to_string (layout ?target ?extra ty)
 
-(* Building LIR by hand *)
+(* Writing code by hand *)
 
 let int32 = named "Int32"
 let usize = named "USize"
-let local ?name ty : Lir.local_info = { ty; name }
+
+(* A function written by hand: its locals and blocks, in the order a
+   builder numbers them, block 0 first. *)
+type local_info = { ty : Lir.ty; name : string option }
+type block = { statements : Lir.statement list; terminator : Lir.terminator }
+
+type function_ = {
+  parameters : Lir.local list;
+  result : Lir.ty option;
+  returns : bool;
+  environment : (string * Lir.ty) list;
+  locals : local_info list;
+  blocks : block list;
+}
+
+(* An instance, written as C once the layouts it is printed with are
+   known. *)
+type instance = Memory_layout.env -> Emit_c.Builder.instance
+
+let local ?name ty = { ty; name }
 let value ty = Lir.Value ty
 let at ?(projections = []) local : Lir.place = { root = Local local; projections }
 let copy ?projections local = Lir.Copy (at ?projections local)
 let constant_int32 number = Lir.Constant (Integer (Int32, Z.of_int number))
 let constant_int64 number = Lir.Constant (Integer (Int64, Z.of_int number))
-let block statements terminator : Lir.basic_block = { statements; terminator }
+let block statements terminator = { statements; terminator }
 
-let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) locals blocks :
-    Lir.function_ =
-  {
-    parameters;
-    written_result = None;
-    result;
-    returns;
-    locals = Array.of_list locals;
-    blocks = Array.of_list blocks;
-    environment;
-  }
+let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) locals blocks =
+  { parameters; result; returns; environment; locals; blocks }
 
 let key name = Instance.Code { path = definition name; type_arguments = [] }
 
-let instance ?(nested = []) name main : Lir.t =
-  { key = key name; main; nested = Array.of_list nested }
+(* Writes a function with a builder: its locals, then its blocks. *)
+let write builder (function_ : function_) =
+  let module Builder = Emit_c.Builder in
+  List.iter
+    (fun (info : local_info) -> ignore (Builder.local builder ?name:info.name info.ty))
+    function_.locals;
+  List.iter (fun _ -> ignore (Builder.block builder)) function_.blocks;
+  List.iteri
+    (fun index (block : block) ->
+      Builder.start builder index;
+      List.iter (Builder.emit builder) block.statements;
+      Builder.finish builder block.terminator)
+    function_.blocks;
+  Builder.build builder ~returns:function_.returns ~parameters:function_.parameters
+    ~result:function_.result
+
+let instance ?(nested = []) name main : instance =
+ fun env ->
+  let builder = Emit_c.Builder.create env ~key:(key name) in
+  List.iteri
+    (fun index (function_ : function_) ->
+      write (Emit_c.Builder.nested builder ~index ~environment:function_.environment) function_)
+    nested;
+  write builder main;
+  Emit_c.Builder.built builder
+
+let printed instance : instance = fun _ -> instance
 
 (* [entry] returns an [Int32], which the program exits with. *)
 let entry ?nested locals blocks =
@@ -203,7 +238,7 @@ let worker_counts =
 
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)
-let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t list) =
+let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : instance list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> shape_env ~extra () in
@@ -215,7 +250,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t lis
   in
   match
     Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-      ~files:[ List.map (fun instance -> Emit_c.fragment env (Lir.Code instance)) instances ]
+      ~files:[ List.map (fun instance -> Emit_c.fragment env (Code (instance env))) instances ]
       ~sources ~output
   with
   | Ok () -> Process.run ?input output []
