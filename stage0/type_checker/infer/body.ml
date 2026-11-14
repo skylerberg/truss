@@ -291,6 +291,26 @@ let check_function state ~broken_body (written : signature) (body_block : block 
         Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
+(* A derived [Deserialize] checks each invariant clause of the value it
+   reads, so every clause must run. A clause that cannot, such as one with
+   a quantifier, would leave a value read from data unchecked against it,
+   and every proof assumes the invariant of every value. *)
+let check_deserialized_invariants state (lowered : Environment.lowered_interface) (form : Core.t) =
+  match (form.definition, lowered.interface) with
+  | Type { invariants; _ }, Type_interface interface
+    when List.exists (Well_known.is Deserialize) interface.derives ->
+      let spans = lazy (Syntax_walk.spans state.definition) in
+      List.iter
+        (fun (invariant : Core.condition) ->
+          if not invariant.executable then
+            report state Cannot_derive
+              (Lazy.force spans).(invariant.value.origin)
+              "This invariant cannot be checked at run time, so `serialization::Deserialize` \
+               cannot be derived: a value read from data might break it. Write the `impl`, which \
+               checks the value another way.")
+        invariants
+  | _ -> ()
+
 let check_definition state (lowered : Environment.lowered_interface) =
   let definition = state.definition in
   let broken part = Resolve.Parts.broken definition part in
@@ -349,7 +369,9 @@ let check_definition state (lowered : Environment.lowered_interface) =
                   defaults;
                   invariants =
                     clause (function
-                      | Type_invariant value -> Some (build_expression state value)
+                      | Type_invariant value ->
+                          let value = build_expression state value in
+                          Some { Core.value; executable = Form.is_executable state value }
                       | _ -> None);
                   potential =
                     (match
@@ -790,7 +812,9 @@ let check database (key : Names.key) =
          variable is solved as the empty set. *)
       let form = if whole then Some (build ()) else None in
       (match form with
-      | Some form -> Capabilities.check state lowered form
+      | Some form ->
+          Capabilities.check state lowered form;
+          check_deserialized_invariants state lowered form
       | None -> state.capability_solution <- Some (Hashtbl.create 1));
       (* If there were capability variables, substitute their solutions
          into the recorded types and build the core form again from them. A

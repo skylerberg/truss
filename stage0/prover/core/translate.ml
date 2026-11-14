@@ -3346,6 +3346,19 @@ and apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
                     &&& equal (buffer_capacity context element storage) count);
                 storage
             | _ -> arrive context frame "storage" result_type)
+        | Holds_invariant, [ subject; clause ] -> (
+            (* One clause of the value's type's invariant, read with
+               [self] as the value. *)
+            match (clause.term, invariants_of context subject.type_) with
+            | Logic.Integer index, Some (source, written) -> (
+                match List.nth_opt written (Z.to_int index) with
+                | Some invariant ->
+                    let inner =
+                      type_frame context frame source subject.type_ ~self:(Some subject.term)
+                    in
+                    snd (clause_value context inner invariant)
+                | None -> arrive context frame "holds" result_type)
+            | _ -> arrive context frame "holds" result_type)
         | Array_from_storage, [ storage ] -> (
             (* The storage's elements, moved into an array, which must be
                exactly as many as the array's count. *)
@@ -5610,7 +5623,7 @@ and invariants_of context (ty : Types.ty) =
   match type_source context ty with
   | Some ({ core = { definition = Type { invariants = _ :: _ as invariants; _ }; _ }; _ } as source)
     ->
-      Some (source, invariants)
+      Some (source, List.map (fun (invariant : Core.condition) -> invariant.value) invariants)
   | _ -> None
 
 (* Whether a value meets its type's invariants, and with [deep] its
@@ -11025,8 +11038,8 @@ let type_ database (source : source) ~path =
       assume context start (validity context start ~assuming:true ~own:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
       List.iter
-        (fun invariant ->
-          let after, holds = clause_value context at_value invariant in
+        (fun (invariant : Core.condition) ->
+          let after, holds = clause_value context at_value invariant.value in
           assume context after holds)
         invariants;
       Option.iter

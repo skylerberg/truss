@@ -430,9 +430,9 @@ and calls_target =
 and bound = Finite | Order_of of expression | At_most of expression | Exactly of expression
 
 and condition = { value : expression; executable : bool }
-(** A [requires] clause or an [assert]. [executable] is true if the condition can be evaluated at
-    run time. It is false if the condition contains a quantifier, a value of type [Integer], [old],
-    [result], or a call of a specification-only function. *)
+(** A [requires] clause, an [assert], or a type's [invariant]. [executable] is true if the condition
+    can be evaluated at run time. It is false if the condition contains a quantifier, a value of
+    type [Integer], [old], [result], or a call of a specification-only function. *)
 
 and arm = { patterns : pattern list; guard : expression option; body : block; origin : origin }
 and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind }
@@ -488,7 +488,8 @@ type definition =
       defaults : (string option * string * expression) list;
           (** Field defaults: the variant name (for a sum type), the field name, and the default
               expression. *)
-      invariants : expression list;
+      invariants : condition list;
+          (** The [invariant] clauses, in written order. Each is read with [Self] as the value. *)
       potential : expression option;
     }
   | Trait of law list

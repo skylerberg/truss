@@ -1,0 +1,5 @@
+use standard::serialization
+
+type Bounds(low: Int32, high: Int32)
+  invariant low <= high
+  derives serialization::Deserialize

@@ -650,6 +650,103 @@ let form database (path : Path.t) : Core.t option =
                             uses = Types.no_capabilities;
                           }))
                 in
+                (* The type's [invariant] clauses, each with its position
+                   and its source text. A type that derives [Deserialize]
+                   has only clauses that run, and the method checks each
+                   against the value it read, after the record or variant
+                   ends, so that an error has the value's path. Without the
+                   check, data could make a value that breaks its type's
+                   invariant, which every proof assumes it meets. *)
+                let invariant_clauses =
+                  match Query.demand database Interface.Summary.key type_ with
+                  | None -> []
+                  | Some key -> (
+                      match Query.demand database Body.type_check_result key with
+                      | Some { core = Some { definition = Type { invariants; _ } }; _ } ->
+                          let spans =
+                            Option.value
+                              (Query.demand database Resolve.Names.spans key)
+                              ~default:[||]
+                          in
+                          let text =
+                            Option.value (Query.demand database Resolve.Names.text key) ~default:""
+                          in
+                          let quoted (origin : Core.origin) =
+                            if origin >= 0 && origin < Array.length spans then
+                              let span = spans.(origin) in
+                              if span.stop > span.start && span.stop <= String.length text then
+                                String.sub text span.start (span.stop - span.start)
+                              else "its type's invariant"
+                            else "its type's invariant"
+                          in
+                          List.mapi
+                            (fun index (invariant : Core.condition) ->
+                              if invariant.executable then
+                                Some (index, quoted invariant.value.origin)
+                              else None)
+                            invariants
+                          |> List.filter_map Fun.id
+                      | _ -> [])
+                in
+                (* [if !holds_invariant(built, clause) { return Err(...) }] *)
+                let invariant_check built_place (index, text) =
+                  let bool = Types.bool and usize = Types.builtin USize in
+                  let holds =
+                    node bool
+                      (Call
+                         {
+                           callee =
+                             Intrinsic
+                               {
+                                 operation = Holds_invariant;
+                                 type_arguments = [ Types.Type self_type ];
+                               };
+                           arguments =
+                             [
+                               Passed
+                                 { mode = Read; value = Place built_place; mode_keyword = None };
+                               Passed
+                                 {
+                                   mode = Read;
+                                   value = Value (node usize (Integer (Z.of_int index)));
+                                   mode_keyword = None;
+                                 };
+                             ];
+                           lends = None;
+                           uses = Types.no_capabilities;
+                         })
+                  in
+                  let error =
+                    trait_call ~trait:deserializer ~name:"error" ~receiver:Read
+                      ~self_type:source_type ~evidence:Bound
+                      [
+                        source_argument Read; text_argument ("breaks the invariant `" ^ text ^ "`");
+                      ]
+                      error_type
+                  in
+                  let refused =
+                    node Types.Never
+                      (Return
+                         (Some
+                            (node result
+                               (Construct
+                                  {
+                                    variant = Some "Err";
+                                    fields = [ ("error", Some (Core.Value error)) ];
+                                  }))))
+                  in
+                  statement
+                    (Evaluate
+                       (node unit
+                          (If
+                             {
+                               condition = node bool (Not holds);
+                               then_ =
+                                 { statements = [ statement (Evaluate refused) ]; value = None };
+                               else_ = None;
+                               binds_lent_part = false;
+                             })))
+                in
                 let bind_local local name type_ ~is_var value =
                   statement
                     (Let
@@ -778,7 +875,8 @@ let form database (path : Path.t) : Core.t option =
                       lets
                       @ [ bind_local built "built" self_type ~is_var:(defaulted <> []) construct ]
                       @ updates
-                      @ [ finish end_ ];
+                      @ [ finish end_ ]
+                      @ List.map (invariant_check built_place) invariant_clauses;
                     value =
                       Some
                         (node result

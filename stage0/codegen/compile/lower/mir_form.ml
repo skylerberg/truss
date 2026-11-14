@@ -1588,6 +1588,10 @@ and call_into st (call : Mir.call) destination ~origin =
             (Code { path; type_arguments })
             ~signature ~substitution ~arguments ~mask ~destination ()
       | Lends _ -> bug "a lending call that lends no part")
+  | None, Intrinsic { operation = Holds_invariant; _ } -> (
+      match call.arguments with
+      | [ value; clause ] -> holds_invariant st ~value ~clause ~destination
+      | _ -> bug "holds_invariant takes a value and a clause")
   | None, Intrinsic { operation; type_arguments } -> (
       match
         intrinsic st operation ~type_arguments call.arguments ~destination:(Some destination)
@@ -1708,6 +1712,46 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
       (List.combine arguments evaluated);
     st.frame <- caller
   end
+
+(* One [invariant] clause of a value's type, evaluated in the type's
+   definition with [self] bound to the value. *)
+and holds_invariant st ~value ~clause ~destination =
+  let _, value_ty, value_place = argument_place st value in
+  let index =
+    match clause with
+    | Passed { value = Constant { value = Integer index; _ }; _ } -> Z.to_int index
+    | _ -> bug "holds_invariant with a clause that is not a literal"
+  in
+  let path =
+    match value_ty with
+    | Named { path; _ } -> path
+    | ty -> bug "holds_invariant of %s, which has no invariant" (Ground.to_string ty)
+  in
+  let invariant =
+    match demand st.context Infer.core_of_path path with
+    | Some ({ definition = Type { invariants; _ }; _ }, _) -> (
+        match List.nth_opt invariants index with
+        | Some (invariant : Core.condition) when invariant.executable -> invariant.value
+        | _ -> bug "%s has no clause %d that runs" (Path.show path) index)
+    | _ -> bug "%s has no invariant" (Path.show path)
+  in
+  let generics =
+    match demand st.context Environment.type_interface path with
+    | Some interface -> interface.type_generics
+    | None -> bug "no interface for %s" (Path.show path)
+  in
+  let self : Core.parameter =
+    {
+      local = Self;
+      name = "self";
+      mode = Read;
+      type_ = Types.Named { path; arguments = Types.generic_arguments generics };
+      default = None;
+      callback_contract = None;
+    }
+  in
+  in_type_definition st value_ty (fun () ->
+      expression_into ~arguments:[ (self, value_place) ] st invariant destination)
 
 and lend st part (call : Mir.call) ~origin =
   match call.callee with

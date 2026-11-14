@@ -1981,7 +1981,7 @@ type Priority =
 | `Ordered` | Variants in declaration order, then fields in declaration order |
 | `Default` | Each field's default, for a record |
 | `serialization::Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
-| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None` |
+| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error at the value's path that quotes the clause |
 | `Copyable`, `Plain` | Nothing: an opaque type declares that it copies (see [Copying](#copying)) |
 
 - Every field has the trait, and a derived trait's required traits are
@@ -1989,6 +1989,11 @@ type Priority =
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
+- `serialization::Deserialize` is derived only for a type whose `invariant`
+  clauses can be evaluated at run time: none has a quantifier, a value of
+  type `Integer`, or a call of a specification-only function. Data then
+  cannot make a value that breaks its type's invariant, which every proof
+  assumes.
 - Every type has debug output, which needs no derive.
 
 ### Method lookup
