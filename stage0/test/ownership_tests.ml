@@ -152,6 +152,46 @@ let () =
            \  }\n\
            \  mut lengths.sort()\n\
            \  lengths[0]\n"));
+  (* A caller takes a part that is no view to be a part of the call's
+     receiver, and keeps only the receiver lent. *)
+  (let catalog = "type Catalog(titles: Map[String, String])\n\n" in
+   let lends name signature body =
+     catalog ^ "fn Catalog." ^ name ^ signature ^ " {\n" ^ body ^ "}\n"
+   in
+   test "a lending method lends on a part that a key it owns selects" (fun () ->
+       fine
+         (lends "title" "(self, prefix: String) lends String"
+            "  let key = prefix.copy()\n  self.titles[key]\n"));
+   test "a lending method lends on a part inside a constructor" (fun () ->
+       fine
+         (lends "find" "(self, prefix: String) lends Option[String]"
+            "  let key = prefix.copy()\n\
+            \  if self.titles.contains(key) {\n\
+            \    Some(self.titles[key])\n\
+            \  } else {\n\
+            \    None\n\
+            \  }\n"));
+   test "a lending method cannot lend on a part of a map it owns" (fun () ->
+       one_diagnostic ~says:"a view of `copied`"
+         (lends "title" "(self, key: String) lends String"
+            "  let copied = self.titles.copy()\n  copied[key]\n")
+         "ownership.view_escapes");
+   test "a lending method cannot lend on a part of a map it owns inside a constructor" (fun () ->
+       one_diagnostic ~says:"a view of `copied`"
+         (lends "find" "(self, key: String) lends Option[String]"
+            "  let copied = self.titles.copy()\n  Some(copied[key])\n")
+         "ownership.view_escapes");
+   test "a lending method cannot lend a part of a parameter that is not its first" (fun () ->
+       one_diagnostic ~says:"a part of `other`"
+         (lends "first_of" "(self, other: List[String]) lends String" "  other[0]\n")
+         "ownership.lends_other_parameter");
+   test "a lending method cannot lend on a part of a map that is not its first parameter" (fun () ->
+       one_diagnostic ~says:"a part of `other`"
+         (lends "title_in" "(self, other: Map[String, String], key: String) lends String"
+            "  other[key]\n")
+         "ownership.lends_other_parameter");
+   test "a lending method can lend a `Plain` part of a parameter that is not its first" (fun () ->
+       fine (lends "count_of" "(self, other: List[USize]) lends USize" "  other[0]\n")));
   test "a lent constructor is not lent one place `mut` twice" (fun () ->
       one_diagnostic
         (lends "both" "(mut self) lends mut Both"
