@@ -108,11 +108,11 @@ Each document has one job, and a fact is stated in one of them:
   define Truss,** its grammar and the rules of the language and of
   packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
   language, whether or not stage0 builds all of it yet.
-- **The Markdown files beside the modules of [`standard/`](standard)
-  document the standard library,** each its module's types and functions.
 - **This document holds the rules for working on stage0.**
 
-Stage0 has no documents of its own. Its code and interfaces describe it.
+Stage0 and the standard library have no documents of their own. Stage0's
+code and interfaces describe it, and the standard library's signatures and
+contracts describe it.
 
 A design document describes the design as it is. How it got there belongs in
 version control, in commit messages and pull request descriptions. A

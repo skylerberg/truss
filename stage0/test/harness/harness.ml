@@ -170,12 +170,10 @@ let rec files_under ~suffix directory =
       else [])
 
 let markdown_documents () =
-  let root =
-    Sys.readdir (workspace_path ".")
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".md")
-  in
-  List.sort compare (root @ files_under ~suffix:".md" "standard")
+  Sys.readdir (workspace_path ".")
+  |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".md")
+  |> List.sort compare
 
 let truss_files () =
   List.sort compare

@@ -2,9 +2,8 @@
 
 This document defines the Truss language: its grammar, and the rules that
 decide a program's semantics and whether it compiles. [DESIGN.md](DESIGN.md)
-gives the reasons for these rules, [PACKAGES.md](PACKAGES.md) defines
-packages, and the Markdown files beside the modules of
-[`standard/`](standard) document the standard library.
+gives the reasons for these rules, and [PACKAGES.md](PACKAGES.md) defines
+packages.
 
 ## Notation
 
@@ -1799,8 +1798,7 @@ uses a capability, so its mutexes cannot deadlock. An implementation
 provided without `mut` has no mutex.
 
 The standard library's `tasks` module holds channels, limits on how many
-tasks run at once, and cells that tasks update (see
-[`standard/tasks.md`](standard/tasks.md)).
+tasks run at once, and cells that tasks update.
 
 ## Strings
 
@@ -1980,6 +1978,8 @@ type Priority =
 | `Hash` | Combines the hashes of the fields |
 | `Ordered` | Variants in declaration order, then fields in declaration order |
 | `Default` | Each field's default, for a record |
+| `serialization::Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
+| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None` |
 | `Copyable`, `Plain` | Nothing: an opaque type declares that it copies (see [Copying](#copying)) |
 
 - Every field has the trait, and a derived trait's required traits are
@@ -1987,8 +1987,6 @@ type Priority =
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
-- `serialization::Serialize` and `serialization::Deserialize` can be derived
-  too (see [`standard/serialization.md`](standard/serialization.md)).
 - Every type has debug output, which needs no derive.
 
 ### Method lookup

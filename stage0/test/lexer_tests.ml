@@ -689,6 +689,6 @@ let () =
             (Printf.sprintf "%s block %d lexes cleanly" name (index + 1))
             (fun () -> equal_lists Fun.id "codes" [] (codes text)))
         (truss_blocks name))
-    (* Every document at the root of the repository and under standard/, so
-       a new one is covered without being listed here. *)
+    (* Every document at the root of the repository, so a new one is covered
+       without being listed here. *)
     (Harness.markdown_documents ())

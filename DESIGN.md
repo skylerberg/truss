@@ -1690,8 +1690,8 @@ hardware is available only through the standard library.
 
 ## The standard library
 
-The Markdown files beside the modules of [`standard/`](standard) document
-the library. This section gives the reasons for its scope and conventions.
+The signatures and contracts in [`standard/`](standard) describe the
+library. This section gives the reasons for its scope and conventions.
 
 Truss is batteries included: the standard library holds the modules that a
 command-line tool or a network service needs, so most programs need no other
