@@ -158,11 +158,11 @@ let () =
    let lends name signature body =
      catalog ^ "fn Catalog." ^ name ^ signature ^ " {\n" ^ body ^ "}\n"
    in
-   test "a lending method lends on a part that a key it owns selects" (fun () ->
+   test "a lending method forwards a part that a key it owns selects" (fun () ->
        fine
          (lends "title" "(self, prefix: String) lends String"
             "  let key = prefix.copy()\n  self.titles[key]\n"));
-   test "a lending method lends on a part inside a constructor" (fun () ->
+   test "a lending method forwards a part inside a constructor" (fun () ->
        fine
          (lends "find" "(self, prefix: String) lends Option[String]"
             "  let key = prefix.copy()\n\
@@ -171,12 +171,12 @@ let () =
             \  } else {\n\
             \    None\n\
             \  }\n"));
-   test "a lending method cannot lend on a part of a map it owns" (fun () ->
+   test "a lending method cannot forward a part of a map it owns" (fun () ->
        one_diagnostic ~says:"a view of `copied`"
          (lends "title" "(self, key: String) lends String"
             "  let copied = self.titles.copy()\n  copied[key]\n")
          "ownership.view_escapes");
-   test "a lending method cannot lend on a part of a map it owns inside a constructor" (fun () ->
+   test "a lending method cannot forward a part of a map it owns inside a constructor" (fun () ->
        one_diagnostic ~says:"a view of `copied`"
          (lends "find" "(self, key: String) lends Option[String]"
             "  let copied = self.titles.copy()\n  Some(copied[key])\n")
@@ -185,13 +185,31 @@ let () =
        one_diagnostic ~says:"a part of `other`"
          (lends "first_of" "(self, other: List[String]) lends String" "  other[0]\n")
          "ownership.lends_other_parameter");
-   test "a lending method cannot lend on a part of a map that is not its first parameter" (fun () ->
+   test "a lending method cannot forward a part of a map that is not its first parameter" (fun () ->
        one_diagnostic ~says:"a part of `other`"
          (lends "title_in" "(self, other: Map[String, String], key: String) lends String"
             "  other[key]\n")
          "ownership.lends_other_parameter");
    test "a lending method can lend a `Plain` part of a parameter that is not its first" (fun () ->
        fine (lends "count_of" "(self, other: List[USize]) lends USize" "  other[0]\n")));
+  (* An element of a list that a lending call lent is a part that the check
+     does not track either. *)
+  (let shelves = "type Shelves(titles: Map[String, List[String]])\n\n" in
+   let lends name signature body =
+     shelves ^ "fn Shelves." ^ name ^ signature ^ " {\n" ^ body ^ "}\n"
+   in
+   test "a lending method forwards an element of a list that a lending call lent" (fun () ->
+       fine (lends "first" "(self, shelf: String) lends String" "  self.titles[shelf][0]\n"));
+   test "a lending method cannot forward an element of a list in a map it owns" (fun () ->
+       one_diagnostic ~says:"a view of `copied`"
+         (lends "first" "(self, shelf: String) lends String"
+            "  let copied = self.titles.copy()\n  copied[shelf][0]\n")
+         "ownership.view_escapes");
+   test "an element of a list that a lending call lent is not bound with `let`" (fun () ->
+       one_diagnostic
+         (lends "first_length" "(self, shelf: String) -> USize"
+            "  let first = self.titles[shelf][0]\n  first.length()\n")
+         "ownership.lent_part_escapes"));
   test "a lent constructor is not lent one place `mut` twice" (fun () ->
       one_diagnostic
         (lends "both" "(mut self) lends mut Both"

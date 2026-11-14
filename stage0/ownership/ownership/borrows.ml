@@ -52,13 +52,14 @@ type action =
       lent : Place.t option list;
       views : view list;
       parts : Place.t list;
-      lent_on : view list;
+      forwarded : view list;
     }
       (** Where a lending method lends its part. [lent] is the places that the part lends, where
           [None] is a place that the check does not track. [views] is the views of the part, if it
           has a view type. [parts] is each place that the part lends by its address: a place whose
-          type is not [Plain]. [lent_on] is what each part of a lending call views that the method
-          lends on by its address, where the check does not track the part as a place. *)
+          type is not [Plain]. [forwarded] is the views of each part of a lending call that the
+          method forwards: lends by its address in turn, where the check does not track the part as
+          a place. *)
   | Bind_views of { locals : Core.local list; views : view list }
       (** A pattern binds [locals] to a value that has these views. *)
   | Store of { place : Place.t; views : view list; overwrites : bool }
@@ -709,14 +710,19 @@ let statement builder (statement : Mir.statement) =
         || Types.is_builtin Array type_
       in
       let is_loop_element = List.mem part builder.loop_elements in
+      (* The collection may itself be a part that a lending call lent and
+         that the check does not track. Its element is then such a part
+         too: it views what the collection views. *)
       let element_of collection collection_type =
-        let collection_place = tracked builder collection in
-        Some
-          ( Option.map
-              (fun (place : Place.t) ->
-                { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
-              collection_place,
-            (collection_place, collection_type) )
+        if is_lent_part builder collection then None
+        else
+          let collection_place = tracked builder collection in
+          Some
+            ( Option.map
+                (fun (place : Place.t) ->
+                  { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
+                collection_place,
+              (collection_place, collection_type) )
       in
       let element =
         match (called.callee, called.arguments) with
@@ -890,7 +896,7 @@ let terminator builder ~returns (basic : Mir.basic_block) =
           (fun leaf -> Option.bind (lent_by_address leaf) (tracked builder))
           (leaves part)
       in
-      let lent_on =
+      let forwarded =
         List.concat_map
           (fun (leaf : Mir.operand) ->
             match (lent_by_address leaf, operand_type leaf) with
@@ -915,7 +921,7 @@ let terminator builder ~returns (basic : Mir.basic_block) =
               (leaves part)
         | Built _ -> []
       in
-      emit_ builder (Yield_point { mode; lent; views; parts; lent_on }) origin
+      emit_ builder (Yield_point { mode; lent; views; parts; forwarded }) origin
   (* An early exit that returns a value hands it to the code after its
      group, which returns it. *)
   | Return value -> returning value
@@ -1678,13 +1684,13 @@ let check_body context (actions : actions) moves =
                         through."
                        (show context slice) (show context viewed.place) (show context slice))
               | None -> ()))
-      | Yield_point { views; parts; lent_on; _ } -> (
+      | Yield_point { views; parts; forwarded; _ } -> (
           (* The caller may store a lent view, so a method lends a view only
              of its parameters. *)
-          let lent_on = resolve context here.views lent_on in
+          let forwarded = resolve context here.views forwarded in
           let dangling =
             dangles context at
-              ~views:(resolve context here.views views @ lent_on)
+              ~views:(resolve context here.views views @ forwarded)
               ~doing:"lends" ~fix:"A method lends a view only of its parameters."
           in
           (* A part inside a value that the method owns is dropped with the
@@ -1698,7 +1704,7 @@ let check_body context (actions : actions) moves =
           in
           (* A caller takes a part that is no view to be a part of the call's
              receiver, and keeps only the receiver lent. A part of another
-             parameter could be changed or dropped while it is lent: a use
+             parameter could be mutated or dropped while it is lent: a use
              after free. *)
           let receiver =
             match List.rev context.parameters with first :: _ -> Some first | [] -> None
@@ -1713,7 +1719,7 @@ let check_body context (actions : actions) moves =
                        && kind context part.root <> Owned ->
                     Some part.root
                 | _ -> None)
-              (parts @ List.map (fun (view : view) -> view.place) lent_on)
+              (parts @ List.map (fun (view : view) -> view.place) forwarded)
           in
           match (owned, other_parameter) with
           | Some part, _ when not dangling ->
@@ -1729,7 +1735,7 @@ let check_body context (actions : actions) moves =
               report context Lends_other_parameter at
                 (Printf.sprintf
                    "This lends a part of `%s`, which is not the method's first parameter. A caller \
-                    keeps only the first argument lent, so it could change or drop `%s` while the \
+                    keeps only the first argument lent, so it could mutate or drop `%s` while the \
                     part is lent. A method lends a part of its first parameter, a copy of a \
                     `Plain` value, or a whole value that it made."
                    (show_root context root) (show_root context root))

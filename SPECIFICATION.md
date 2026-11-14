@@ -1017,7 +1017,7 @@ mut grid.cell(position).visit()
 - The part need not be stored in `self`: the method may lend a value it
   made, which is dropped when the lend ends.
 - **A method lends a part of its first parameter, or a whole value that it
-  made.** A caller keeps only the first argument lent, so it could change or
+  made.** A caller keeps only the first argument lent, so it could mutate or
   drop another argument while a part of it is lent, a use after free. The
   method does not lend a part inside a value it owns either, such as an
   element of a list it built: the method drops the value where it returns,
