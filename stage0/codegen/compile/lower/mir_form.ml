@@ -59,17 +59,8 @@ let info st local = (mir st).body.locals.(local)
 let core_local st local =
   match (info st local).kind with Source { local; _ } -> Some local | Temporary | Lent _ -> None
 
-(* Whether a local of the MIR owns its value, so that its end drops it: a
-   temporary, or a binding that took its value. Any other local is the place
-   it was lent or bound to. *)
-let owns st local =
-  let frame = mir st in
-  (not (Hashtbl.mem frame.aliases local))
-  &&
-  match (info st local).kind with
-  | Temporary | Source { mode = Own; _ } -> true
-  | Source { mode = Read | Mut; _ } | Lent _ -> false
-
+(* Binds a local of the MIR to its place. The place of [self] is also the
+   code's own, which the evidence of a capability it implements names. *)
 let bind_local st local place =
   Hashtbl.replace (mir st).places local place;
   if core_local st local = Some Self then st.frame.self_place <- Some place
@@ -165,55 +156,15 @@ let variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list
 
 let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~lambdas
     (body : Mir.body) : mir_frame =
-  let aliases = Hashtbl.create 8 and lent_values = Hashtbl.create 1 in
-  Array.iter
-    (fun (block : Mir.basic_block) ->
-      List.iter
-        (fun (statement : Mir.statement) ->
-          match statement.kind with
-          | Assign { target = { root = Local local; projections = [] }; value; _ } -> (
-              (match (body.locals.(local).kind, value) with
-              | ( (Lent (Read | Mut) | Source { mode = Read | Mut; _ }),
-                  (Construct _ | Operand (Borrow _)) ) ->
-                  Hashtbl.add lent_values local value
-              | _ -> ());
-              match value with
-              | Operand (Borrow _) ->
-                  Hashtbl.replace aliases local
-                    (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
-              | _ -> ())
-          | _ -> ())
-        block.statements)
-    body.blocks;
-  let built = Hashtbl.create 1 in
-  Hashtbl.iter
-    (fun local _ ->
-      let values = Hashtbl.find_all lent_values local in
-      if List.exists (function Mir.Construct _ -> true | _ -> false) values then
-        Hashtbl.replace built local values)
-    lent_values;
-  let parts =
-    Array.fold_left
-      (fun parts (block : Mir.basic_block) ->
-        match block.terminator with For { part; _ } -> part :: parts | _ -> parts)
-      [] body.blocks
-  in
   (* How each parameter is passed, where it is not as its binding says: a
      lambda's parameters are patterns, and its function type says how each
      is passed. *)
-  let passed_as local : Ground.mode option =
-    match passed with
-    | None -> None
-    | Some modes -> Option.map (List.nth modes) (List.find_index (Int.equal local) body.parameters)
-  in
-  let owns local =
-    (not (Hashtbl.mem aliases local))
-    && (not (List.mem local body.captures))
-    &&
-    match (passed_as local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Own
-    | None, (Temporary | Source { mode = Own; _ }) -> true
-    | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
+  let passed local : Types.mode option =
+    Option.bind passed (fun modes ->
+        Option.map
+          (fun position : Types.mode ->
+            match List.nth modes position with Ground.Read -> Read | Mut -> Mut | Own -> Own)
+          (List.find_index (Int.equal local) body.parameters))
   in
   let needs_drop (path : Moves.path) =
     let rec path_type ty = function
@@ -236,25 +187,12 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     | Some ty -> not (trivial st ty)
     | None -> false
   in
-  let lent_mut local =
-    (not (owns local))
-    && (not (Hashtbl.mem built local))
-    && (not (List.mem local parts))
-    && (not (List.mem local body.captures))
-    &&
-    match (passed_as local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Mut
-    | None, (Source { mode = Mut; _ } | Lent Mut) -> true
-    | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
-  in
-  let moves = Moves.analyse ~owns ~lent_mut ~needs_drop body in
+  let moves = Moves.analyse ~passed ~tracks:needs_drop body in
   let kept = if st.cursor <> None then Moves.kept_by_cursor moves body else [] in
   {
     body;
     lambdas;
     places = Hashtbl.create 32;
-    aliases;
-    built;
     owner;
     returns_into;
     provides = [];
@@ -1192,7 +1130,6 @@ let yielded_type_of_frame st =
   | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
 
 let rec built_lent st ~writable ty (values : Mir.rvalue list) : Ground.lent =
-  let built = (mir st).built in
   let lent_field_for variant (name, field_ty) : Ground.lent_field option =
     let fields =
       List.concat_map
@@ -1208,7 +1145,7 @@ let rec built_lent st ~writable ty (values : Mir.rvalue list) : Ground.lent =
         (fun (field : Mir.operand) ->
           match field with
           | Use { place = { root = Local part; projections = [] }; _ } ->
-              Option.value (Hashtbl.find_opt built part) ~default:[]
+              Option.value (Moves.built_values (mir st).moves part) ~default:[]
           | _ -> [])
         fields
     in
@@ -1266,7 +1203,10 @@ let make_owned_locals st =
   in
   Array.iteri
     (fun local _ ->
-      if owns st local && (not (List.mem local frame.body.parameters)) && not (List.mem local parts)
+      if
+        Moves.owns frame.moves local
+        && (not (List.mem local frame.body.parameters))
+        && not (List.mem local parts)
       then ignore (local_place st local))
     frame.body.locals
 
@@ -1324,7 +1264,7 @@ and lower_from st region block index =
       else Moves.apply frame.moves frame.state statement)
     basic.statements;
   let before = Moves.copy frame.state in
-  Moves.apply_terminator_moves frame.moves frame.state basic.terminator;
+  Moves.apply_terminator_moves frame.moves frame.state basic;
   update_flags st ~before;
   terminator st region basic.terminator ~origin:basic.terminator_origin
 
@@ -1501,10 +1441,10 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   let frame = mir st in
   match (target, value) with
   | { root = Local part; projections = [] }, (Construct _ | Operand (Borrow _))
-    when Hashtbl.mem frame.built part ->
+    when Moves.built_values frame.moves part <> None ->
       build_part st part value
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ })
-    when Hashtbl.mem frame.aliases local ->
+    when Moves.places_given frame.moves local > 0 ->
       alias st local (place st source) ~writable:(mode = Mut)
   | _ -> (
       let ty = target_type st target value in
@@ -1540,7 +1480,10 @@ and build_part st part (value : Mir.rvalue) =
     | None ->
         let { Mir.kind; type_; _ } = info st part in
         let writable = match kind with Lent Mut | Source { mode = Mut; _ } -> true | _ -> false in
-        let lent = built_lent st ~writable (ground st type_) (Hashtbl.find (mir st).built part) in
+        let lent =
+          built_lent st ~writable (ground st type_)
+            (Option.get (Moves.built_values (mir st).moves part))
+        in
         let slot = held st ~kept:(is_kept st part) (Value (Lent lent)) in
         bind_local st part slot;
         slot
@@ -1558,7 +1501,7 @@ and build_part st part (value : Mir.rvalue) =
               | Some (Borrow { place = written; _ }) ->
                   snapshot st ~kept:(is_kept st part) (place st written)
               | Some (Use { place = { root = Local nested; projections = [] } as written; _ })
-                when Hashtbl.mem (mir st).built nested ->
+                when Moves.built_values (mir st).moves nested <> None ->
                   place st written
               | Some field -> operand_place st field
               | None -> fst (field_default_place st lent.base ~variant ~field:name)
@@ -1595,7 +1538,7 @@ and reads (value : Mir.rvalue) local =
 
 and alias st local (source : Lowered.place) ~writable =
   let ty = ground st (info st local).type_ in
-  if Hashtbl.find (mir st).aliases local > 1 then begin
+  if Moves.places_given (mir st).moves local > 1 then begin
     let frame = mir st in
     let pointer =
       match Hashtbl.find_opt frame.places local with

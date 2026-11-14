@@ -2020,6 +2020,15 @@ let iteration_loops (body : body) =
     body.blocks;
   loops
 
+let block_successors (body : body) loops block =
+  (match Hashtbl.find_opt loops block with
+    | Some loop -> (
+        match body.blocks.(loop).terminator with
+        | For { body = first; after; _ } -> [ first; after ]
+        | _ -> [])
+    | None -> [])
+  @ successors body.blocks.(block).terminator
+
 let conditional_lends (body : body) =
   let ends_of part (statement : statement) =
     match statement.kind with Dead locals -> List.mem part locals | _ -> false

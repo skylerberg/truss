@@ -498,6 +498,9 @@ let () =
       fine Fixtures.Ownership.tagged_string_moves_its_parts_and_a_plain_string_4);
   test "a `Plain` place is copied, not moved" (fun () ->
       fine Fixtures.Ownership.plain_place_is_copied_not_moved);
+  test "a place moved by an argument cannot be read by a later argument of the same call" (fun () ->
+      one_diagnostic Fixtures.Ownership.place_moved_by_an_argument_cannot_be_read_by_a_later
+        "ownership.use_after_move");
   test "a place moved on one path cannot be used after the paths join" (fun () ->
       one_diagnostic
         (keep ^ Fixtures.Ownership.place_moved_on_one_path_cannot_be_used_after_the)

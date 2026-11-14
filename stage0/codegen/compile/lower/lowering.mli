@@ -28,8 +28,6 @@ and mir_frame = {
   body : Mir.body;
   lambdas : Mir.body array;
   places : (Mir.local, Lowered.place) Hashtbl.t;
-  aliases : (Mir.local, int) Hashtbl.t;
-  built : (Mir.local, Mir.rvalue list) Hashtbl.t;
   owner : scope option;
   returns_into : Lowered.place option;
   mutable provides : (Path.t * Lowered.operand) list list;

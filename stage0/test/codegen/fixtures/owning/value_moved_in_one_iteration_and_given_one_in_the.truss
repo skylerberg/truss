@@ -1,0 +1,13 @@
+fn keep(value: own String) -> USize {
+  value.length()
+}
+
+test "given a value, then moved, in each iteration" {
+  var text = "a${1}"
+  var total: USize = 0
+  for index in 0..3 {
+    text = "x${index}"
+    total += keep(own text)
+  }
+  assert total == 6
+}

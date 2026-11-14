@@ -682,17 +682,11 @@ let () =
 
 (* The move analysis *)
 
-(* The analysis of [g]'s MIR, with each temporary and [own] binding owning
-   its value, and each value that is not a number or a [Bool] having
-   something to drop. *)
+(* The analysis of [g]'s MIR, with each value that is not a number or a
+   [Bool] having something to drop. *)
 let moves_of_g text =
   let mir = mir_of_g text in
   let body = mir.body in
-  let owns local =
-    match body.locals.(local).kind with
-    | Temporary | Source { mode = Own; _ } -> true
-    | Source _ | Lent _ -> false
-  in
   let needs_drop (path : Moves.path) =
     path.steps <> []
     ||
@@ -701,7 +695,7 @@ let moves_of_g text =
     | Named { path = Path.Top { module_; _ }; _ } -> not (List.mem "intrinsic" module_.modules)
     | _ -> true
   in
-  (body, Moves.analyse ~owns ~lent_mut:(fun _ -> false) ~needs_drop body)
+  (body, Moves.analyse ~tracks:needs_drop body)
 
 (* What a path holds where its local is first ended. *)
 let status_where_ended (body : Mir.body) moves (path : Moves.path) =

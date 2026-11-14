@@ -277,6 +277,10 @@ val iteration_loops : body -> (block, block) Hashtbl.t
 (** For each block whose terminator ends an iteration, an {!Iteration_end} or an {!Exit_tasks} to
     {!Exit_iteration}, the block of the innermost {!For} whose body it ends. *)
 
+val block_successors : body -> (block, block) Hashtbl.t -> block -> block list
+(** The blocks control goes to from the end of a block. The end of an iteration goes to the loop's
+    next iteration and to the block after the loop. [loops] is {!iteration_loops} of the body. *)
+
 val of_definition : Core.definition -> t option
 (** The MIR of a definition whose code runs: a function's, a test's, or a law's proof. *)
 
