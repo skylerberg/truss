@@ -9,5 +9,5 @@ val anchor_struct : string
 val integer_c : Memory_layout.integer -> string
 val unsigned_c : Memory_layout.integer -> string
 val signed : Memory_layout.integer -> bool
-val runtime_declarations : Memory_layout.target -> string
+val runtime_declarations : string
 val helpers : (string * string) list

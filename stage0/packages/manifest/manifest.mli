@@ -7,7 +7,6 @@ type package = {
   name : Path.package;
   truss : string option;  (** The version of Truss the package is written for *)
   dependencies : dependency list;  (** Each dependency's name and the capabilities it is granted *)
-  usize_bits : int;  (** 64 when [[package]] says [usize_bits = 64], and 32 otherwise *)
 }
 
 type t = {

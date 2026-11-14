@@ -18,24 +18,14 @@ val option : Ground.ty -> Ground.ty
 val list : Ground.ty -> Ground.ty
 val array : Ground.ty -> int -> Ground.ty
 val host : Libc.system
-val target_64 : Memory_layout.target
-val target_32 : Memory_layout.target
 val field : 'a -> Ground.ty -> 'a * Memory_layout.member
 
 val variant :
   ?indirect:bool -> string -> (string * Memory_layout.member) list -> Memory_layout.variant_shape
 
 val shapes : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
-
-val layout :
-  ?target:Memory_layout.target ->
-  ?extra:(string * Memory_layout.shape) list ->
-  Ground.ty ->
-  Memory_layout.t
-
-val describe :
-  ?target:Memory_layout.target -> ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
-
+val layout : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
+val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
 val int32 : Ground.ty
 val usize : Ground.ty
 

@@ -71,7 +71,6 @@ type package = {
   dependencies : Manifest.dependency list;
   modules : Path.module_ list;  (** Each directory with a [.truss] file, in order *)
   files : Path.file list;
-  usize_bits : int;
 }
 
 val package : (Path.package, package option) Query.query

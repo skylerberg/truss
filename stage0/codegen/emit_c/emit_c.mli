@@ -69,7 +69,7 @@ val file : Memory_layout.env -> build -> (fragment * linkage) list -> string
 (* The C type and name of a struct, for the runtime and startup code that
    are written in C. *)
 val anchor_struct : string
-val runtime_declarations : Memory_layout.target -> string
+val runtime_declarations : string
 
 (* The C symbol of a definition's position anchor. *)
 val anchor_symbol : Path.t -> string

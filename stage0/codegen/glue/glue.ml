@@ -110,7 +110,7 @@ let drop glue ty =
       emit builder
         (Call
            {
-             target = Foreign (Libc.declaration (Memory_layout.target glue.env).system Close);
+             target = Foreign (Libc.declaration (Memory_layout.system glue.env) Close);
              arguments = [ Copy (value / Field "descriptor") ];
              result = Discarded;
            })

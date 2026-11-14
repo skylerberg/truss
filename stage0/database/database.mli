@@ -195,7 +195,6 @@ val reset : unit -> unit
     A test holds an engine of its own, which a driver never does. *)
 
 val load_package :
-  ?usize_bits:int ->
   Engine.t ->
   name:Path.package ->
   dependencies:Manifest.dependency list ->
@@ -216,12 +215,7 @@ module For_testing : sig
   (** Gives one file of a package set with {!load_package} another text, adding the file if it has
       none. *)
 
-  val set_manifest :
-    ?usize_bits:int ->
-    Engine.t ->
-    name:Path.package ->
-    dependencies:Manifest.dependency list ->
-    unit
+  val set_manifest : Engine.t -> name:Path.package -> dependencies:Manifest.dependency list -> unit
   (** Gives a package set with {!load_package} another manifest, and leaves its files as they are.
   *)
 

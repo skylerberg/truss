@@ -11,9 +11,9 @@ let toolchain () =
   | Error message -> Outcome.cannot_run "%s" message
 
 (* Stage0 builds programs for the system it runs on. *)
-let target () =
+let system () =
   match Libc.host with
-  | Some system -> Memory_layout.target_64 system
+  | Some system -> system
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let want session context lowering wanted =
@@ -27,7 +27,7 @@ let results () : Compile.results =
 (* A compiler that lowers code and compiles nothing, so it needs no C
    compiler. *)
 let lowering_only session context =
-  Compile.create ~want:(want session context) context (target ())
+  Compile.create ~want:(want session context) context (system ())
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
     { build = Development; optimization = O1; extra = c_flags () }
@@ -62,6 +62,6 @@ let create ?(checks = true) session packages build =
   Compile.create ~checks ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
     ~want:(want session (Database.context session))
     ~worked_on:(fun package -> List.mem package own)
-    (Database.context session) (target ()) toolchain
+    (Database.context session) (system ()) toolchain
     (Build.cache (Database.objects_directory ()))
     settings

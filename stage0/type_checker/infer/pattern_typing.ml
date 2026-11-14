@@ -378,7 +378,7 @@ and check_literal_fits state (value : expression) number type_ =
           (match
              match resolved with
              | Types.Parameter _ | Types.Projection _ -> state.unifier.integer_range resolved
-             | _ -> builtin_range ~usize_bits:(usize_bits state) resolved
+             | _ -> Types.integer_range resolved
            with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range value.span
@@ -386,12 +386,6 @@ and check_literal_fits state (value : expression) number type_ =
                    (Z.to_string number) (Types.show resolved) (Z.to_string low) (Z.to_string high))
           | _ -> ());
           true)
-
-(* The number of bits of [USize] and [ISize] that the package is checked
-   for: 32, unless the manifest says [usize_bits = 64]. Code checked for 32
-   bits is correct on every target. *)
-and usize_bits state = Query.demand state.database Packages.usize_bits state.package
-and builtin_range ?usize_bits type_ = Types.integer_range ?usize_bits type_
 
 (* [Character"a"] and [UInt8"\n"]: a character or byte literal is a tagged
    string with exactly one Unicode scalar value or one ASCII character, and
@@ -450,7 +444,7 @@ and literal_pattern state id (span : span) literal type_ =
           report state Mismatch span
             (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
         else
-          match builtin_range ~usize_bits:(usize_bits state) type_ with
+          match Types.integer_range type_ with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range span
                 (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))

@@ -332,13 +332,7 @@ let compare ~before ~after package =
           else Some (public_change path (Grows (Printf.sprintf "is new: %s" shown))))
         new_impls
   in
-  let targets =
-    Query.demand before Packages.exists package
-    && Query.demand after Packages.exists package
-    && Query.demand before Packages.usize_bits package = 32
-    && Query.demand after Packages.usize_bits package = 64
-  in
-  (definitions @ added @ impl_changes, targets)
+  definitions @ added @ impl_changes
 
 let breaks changes =
   List.filter_map

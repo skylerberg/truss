@@ -1,12 +1,5 @@
-(* The target code is built for: the width of the pointers of the machine it runs
-   on, the width of [USize] and [ISize], and the system whose C library it
-   calls. The widths differ only for code built to run while compiling for
-   a target whose [USize] is narrower than the host's pointers: such code
-   runs on the host, with the target's [USize], so that it computes the
-   target's results. *)
-type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
-
-val target_64 : Libc.system -> target
+(* Layouts are the same on every system code is built for: each has 64-bit
+   pointers, and [USize] and [ISize] have 64 bits. *)
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 
@@ -81,8 +74,10 @@ and step = Field of string | Tag
 (* Computes layouts, each once, from the shapes [shape_of] gives. *)
 type env
 
-val create : target -> shape_of:(Ground.ty -> shape) -> env
-val target : env -> target
+val create : Libc.system -> shape_of:(Ground.ty -> shape) -> env
+
+val system : env -> Libc.system
+(** The system code is built for, whose C library it calls *)
 
 (* A type's shape, from which the layouts are computed. *)
 val shape : env -> Ground.ty -> shape
@@ -95,11 +90,11 @@ val has_zero_size : env -> Ground.ty -> bool
    a [Struct]. Asked for separately, because a block may hold the type
    itself, which is why the variant is [indirect]. *)
 val block : env -> Ground.ty -> string -> t
-val scalar_size : target -> scalar -> int
-val integer_size : target -> integer -> int
+val scalar_size : scalar -> int
+val integer_size : integer -> int
 
-val integer_range : target -> integer -> Z.t * Z.t
-(** The least and the greatest value of an integer kind on a target. *)
+val integer_range : integer -> Z.t * Z.t
+(** The least and the greatest value of an integer kind. *)
 
 type discriminant =
   | Only  (** The type has one variant, or none with a size: nothing to test *)
@@ -110,6 +105,5 @@ type discriminant =
 val discriminant : t -> string -> discriminant
 
 module For_testing : sig
-  val target_32 : Libc.system -> target
   val to_string : t -> string
 end

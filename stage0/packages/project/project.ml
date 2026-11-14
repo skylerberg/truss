@@ -56,7 +56,6 @@ type package = {
   dependencies : Manifest.dependency list;
   modules : Path.module_ list;
   files : Path.file list;
-  usize_bits : int;
 }
 
 type layout = {
@@ -347,7 +346,6 @@ let package =
             modules =
               List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) files);
             files;
-            usize_bits = manifest.usize_bits;
           })
         (Query.demand database place name))
 
@@ -452,28 +450,15 @@ let problems =
             (fun (dependency : Manifest.dependency) ->
               if dependency.package = package.name then
                 problem directory "`%s` cannot depend on itself." (Path.show_package package.name)
-              else
-                let dependency_manifest =
-                  match (named dependency.package, selected_named dependency.package) with
-                  | Some (_, other), _ -> Some other
-                  | None, Some other -> Some other.manifest
-                  | None, None ->
-                      (* A dependency the registry would have, with no version
-                         known, is reported with the lock file. *)
-                      if dependency.package.owner = None then
-                        problem directory "`%s` is not a package of this project."
-                          (Path.show_package dependency.package);
-                      None
-                in
-                match dependency_manifest with
-                | Some other when package.usize_bits = 32 && other.usize_bits = 64 ->
-                    (* A package that claims to run on every target cannot
-                       rely on one that runs only on 64-bit targets. *)
-                    problem directory
-                      "`%s` runs only on 64-bit targets, so `%s` must say `usize_bits = 64` to \
-                       depend on it."
-                      (Path.show_package other.name) (Path.show_package package.name)
-                | _ -> ())
+                (* A dependency the registry would have, with no version
+                 known, is reported with the lock file. *)
+              else if
+                named dependency.package = None
+                && selected_named dependency.package = None
+                && dependency.package.owner = None
+              then
+                problem directory "`%s` is not a package of this project."
+                  (Path.show_package dependency.package))
             package.dependencies)
         packages;
       (match dependency_cycle packages with

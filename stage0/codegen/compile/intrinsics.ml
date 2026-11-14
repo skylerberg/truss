@@ -224,7 +224,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
             panic_when (Copy (at zero)) "division by zero";
             (match integer with
             | Int8 | Int16 | Int32 | Int64 | ISize ->
-                let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+                let bits = 8 * Memory_layout.integer_size integer in
                 let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
                 let by_minus_one = local builder (Raw Bool)
                 and of_least = local builder (Raw Bool) in
@@ -256,7 +256,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           | Integer integer -> integer
           | _ -> bug "a number of the C library that is not an integer"
         in
-        Constant (Integer (integer, Z.of_int (Libc.value (Memory_layout.target env).system number)))
+        Constant (Integer (integer, Z.of_int (Libc.value (Memory_layout.system env) number)))
       in
       (* The text at an address that may be null: the bytes up to a zero
          byte, as a view, with [is_present] saying whether the address was
@@ -287,7 +287,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           (* The least value of a signed type has no negation in the type. *)
           match integer_argument () with
           | Some ((Int8 | Int16 | Int32 | Int64 | ISize) as integer) when checks ->
-              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let bits = 8 * Memory_layout.integer_size integer in
               let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
               let of_least = local builder (Raw Bool) in
               emit builder
@@ -357,7 +357,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
              wrong value. The amount has a type of its own. *)
           (match (integer_argument (), scalar env (type_argument 1)) with
           | Some integer, Integer amount ->
-              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let bits = 8 * Memory_layout.integer_size integer in
               let constant number : Lowered.operand =
                 Constant (Integer (amount, Z.of_int number))
               in
@@ -369,12 +369,11 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           | _ -> ());
           binary (if operation = Shift_left then Shift_left else Shift_right)
       | Convert | Fits -> (
-          let target = Memory_layout.target env in
           let fits () : Lowered.rvalue =
             match (scalar env (type_argument 0), scalar env (type_argument 1)) with
             | Integer source, Integer target_integer -> (
-                let source_low, source_high = Memory_layout.integer_range target source in
-                let low, high = Memory_layout.integer_range target target_integer in
+                let source_low, source_high = Memory_layout.integer_range source in
+                let low, high = Memory_layout.integer_range target_integer in
                 let constant value = Lowered.Constant (Integer (source, value)) in
                 let tests =
                   (if Z.lt source_low low then [ (Lowered.Greater_equal, low) ] else [])
@@ -401,7 +400,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                  type holds exactly. Where the first is not held exactly,
                  no float lies between it and the least value. A float
                  that is not a number passes neither test. *)
-                let low, high = Memory_layout.integer_range target target_integer in
+                let low, high = Memory_layout.integer_range target_integer in
                 let held bound =
                   match source with
                   | Float32 ->
@@ -786,10 +785,9 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           call ?result:destination Tasks_spawn [ value 0; Copy (read (argument 1)); value 2 ]
       | Report_tests_to -> call Report_tests_to [ value 0 ]
       | Live_blocks -> call ?result:destination Live_blocks []
-      | System_is_os os -> set (Use (Constant (Bool ((Memory_layout.target env).system.os = os))))
+      | System_is_os os -> set (Use (Constant (Bool ((Memory_layout.system env).os = os))))
       | System_is_architecture architecture ->
-          set
-            (Use (Constant (Bool ((Memory_layout.target env).system.architecture = architecture))))
+          set (Use (Constant (Bool ((Memory_layout.system env).architecture = architecture))))
       | Environment_entry ->
           (* The entries are counted from the first each time, so the null
              address after the last is never passed. *)
@@ -813,7 +811,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
           finish builder (Goto test);
           start builder after;
           text_at entry ~is_present:(place (argument 1))
-      | Libc function_ when not (Libc.available (Memory_layout.target env).system function_) ->
+      | Libc function_ when not (Libc.available (Memory_layout.system env) function_) ->
           (* The standard library asks which system it is built for before
              it calls a function that only some have. *)
           let message =
@@ -971,9 +969,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                 | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
               passed
           end;
-          let target =
-            Lowered.Foreign (Libc.declaration (Memory_layout.target env).system function_)
-          in
+          let target = Lowered.Foreign (Libc.declaration (Memory_layout.system env) function_) in
           (* A call that can block is bracketed, so that the runtime knows
              the thread is blocked while it lasts. *)
           let bracket intrinsic =

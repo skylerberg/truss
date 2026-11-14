@@ -13,7 +13,7 @@ val operand_c :
 
 val constant_c : C_types.context -> Lowered.constant -> string * Lowered.ty
 val scalar_of : C_types.context -> Lowered.ty -> Memory_layout.scalar
-val bit_width : C_types.context -> Memory_layout.scalar -> int
+val bit_width : Memory_layout.scalar -> int
 val unsigned_of : C_types.context -> Memory_layout.scalar -> string
 val niche_value : C_types.context -> Memory_layout.niche -> Z.t -> string
 val is_variant_c : C_types.context -> string -> Ground.ty -> string -> string

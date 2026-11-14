@@ -98,13 +98,12 @@ val is_well_known : Well_known.t -> ty -> bool
 (** Whether a type is the well-known type or an instantiation of it: [is_well_known List] holds for
     [List[Int64]]. *)
 
-val integer_bits : ?usize_bits:int -> ty -> (int * bool) option
-(** The bits of a built-in integer type and whether it is signed. [USize] and [ISize] have
-    [usize_bits], 64 when it is not given. *)
+val integer_bits : ty -> (int * bool) option
+(** The bits of a built-in integer type and whether it is signed. [USize] and [ISize] have 64 bits
+    on every target. *)
 
-val integer_range : ?usize_bits:int -> ty -> (Z.t * Z.t) option
-(** The least and the greatest value of a built-in integer type, with [USize] and [ISize] as
-    {!integer_bits} has them. *)
+val integer_range : ty -> (Z.t * Z.t) option
+(** The least and the greatest value of a built-in integer type. *)
 
 val is_integer_type : ty -> bool
 val is_signed : ty -> bool

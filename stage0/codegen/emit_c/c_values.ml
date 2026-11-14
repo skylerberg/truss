@@ -181,9 +181,7 @@ let scalar_of context : Lowered.ty -> Memory_layout.scalar = function
   | Pointer _ | Environment _ | Evidence _ -> Pointer Opaque
 
 let is_float : Memory_layout.scalar -> bool = function Float32 | Float64 -> true | _ -> false
-
-let bit_width context (scalar : Memory_layout.scalar) =
-  8 * Memory_layout.scalar_size (Memory_layout.target context.env) scalar
+let bit_width (scalar : Memory_layout.scalar) = 8 * Memory_layout.scalar_size scalar
 
 let unsigned_of context (scalar : Memory_layout.scalar) =
   match scalar with Integer integer -> unsigned_c integer | _ -> scalar_c context scalar
@@ -205,7 +203,7 @@ let binary_c context (op : Lowered.binary) (left, a_ty) (right, _) =
     else Printf.sprintf "((%s)(%s %s %s))" c_type left symbol right
   in
   let compare symbol = boolean (Printf.sprintf "(%s %s %s)" left symbol right) in
-  let mask = bit_width context scalar - 1 in
+  let mask = bit_width scalar - 1 in
   match op with
   | Add -> arithmetic "+"
   | Subtract -> arithmetic "-"

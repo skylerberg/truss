@@ -9,11 +9,9 @@ type public_change = { path : Path.t; change : change }
 (** A change to a public definition, described by a predicate that completes a sentence about the
     definition. *)
 
-val compare :
-  before:Query.context -> after:Query.context -> Path.package -> public_change list * bool
+val compare : before:Query.context -> after:Query.context -> Path.package -> public_change list
 (** The changes to a package's public definitions between two states, each holding the package and
-    its dependencies, and whether the package ran on every target and now requires 64-bit targets,
-    which is incompatible for every user on other targets.
+    its dependencies.
 
     A signature's types are compared after type checking. A contract is compared syntactically: a
     release may remove a [requires] clause and add an [ensures] or cost clause, and any other change

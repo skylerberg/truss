@@ -1,21 +1,11 @@
 module Names = Resolve.Names
 
-type lowering = { target : Memory_layout.target; checks : bool }
+type lowering = { system : Libc.system; checks : bool }
 
 let show_lowering lowering =
-  Printf.sprintf "%d-bit %s%s" (lowering.target.usize_bytes * 8)
-    (Libc.system_name lowering.target.system)
+  Printf.sprintf "%s%s"
+    (Libc.system_name lowering.system)
     (if lowering.checks then ", checked" else "")
-
-(* The target as part of a key: a result that depends on the target is
-   keyed by all of it. *)
-let target_key (target : Memory_layout.target) =
-  Cbor.Array
-    [
-      Cbor.int target.pointer_bytes;
-      Cbor.int target.usize_bytes;
-      Cbor.Text (Libc.system_name target.system);
-    ]
 
 type lowered_outcome =
   | Compiled of Emit_c.fragment
@@ -29,7 +19,7 @@ let rec fresh_context lowering database =
       | Folded data -> Some data.value
       | Evaluate _ -> None
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
-    database lowering.target
+    database lowering.system
 
 (* An instance's C, a constant's data, or a capability's table. *)
 and emitted (context : Lower.context) (compiled : Emit_c.compiled) =
@@ -186,9 +176,8 @@ let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build me
 
 (* The key that the result of a run from [root] is kept under, once [root]
    is wanted. It hashes the key of everything [root] can reach, code
-   generation's version, the target, and the build's added C flags. The
-   target is part of it because [USize] is a [typedef] in the C, so the C
-   can be the same for two widths while [USize.maximum] is not. The flags
+   generation's version, the system, and the build's added C flags. The
+   system is part of it because a run calls that system's C library. The flags
    are part of it because a sanitizer can stop a run that passes without
    one. *)
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-13 result key"
@@ -199,7 +188,7 @@ let result_key compiler root =
        (Cbor.Array
           [
             Cbor.int Emit_c.version;
-            target_key compiler.lowering.target;
+            Cbor.Text (Libc.system_name compiler.lowering.system);
             Bytes (Query.demand compiler.database (Lazy.force reach) (compiler.lowering, root));
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
@@ -226,7 +215,6 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
 let decode compiler ty text : Lowered.static_value =
   let env = Lower.env compiler.context in
   let monomorphic = Lower.monomorphic compiler.context in
-  let target = Memory_layout.target env in
   let at = ref 0 in
   let take count =
     if !at + count > String.length text then bug "a value written out while compiling ends early";
@@ -242,7 +230,7 @@ let decode compiler ty text : Lowered.static_value =
     !value
   in
   let integer (kind : Memory_layout.integer) =
-    let size = Memory_layout.integer_size target kind in
+    let size = Memory_layout.integer_size kind in
     let value = unsigned (take size) in
     match kind with
     | Int8 | Int16 | Int32 | Int64 | ISize ->
@@ -340,8 +328,7 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
   in
   let paths = List.sort_uniq Path.compare (List.concat_map Emit_c.anchors units) in
   let anchors = List.filter_map (anchor compiler) paths in
-  let target = Memory_layout.target (Lower.env compiler.context) in
-  let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
+  let sources = [ ("startup", startup); ("anchors", Positions.anchors_file anchors) ] in
   let find key = Reachable.Keys.find_opt key units_by_key in
   let copied =
     match compiler.settings.build with
@@ -778,9 +765,9 @@ let run_key compiler root = reporting compiler @@ fun () -> run_key compiler roo
 
 let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_time_limit = 10_000)
     ?(programs = Filename.get_temp_dir_name ()) ~want
-    ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
+    ?(worked_on = fun package -> package <> Path.standard_package) database system toolchain cache
     settings =
-  let lowering = { target; checks } in
+  let lowering = { system; checks } in
   {
     database;
     lowering;

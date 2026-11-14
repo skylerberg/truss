@@ -14,7 +14,7 @@ let source = Fixtures.Shared.shared_probe
 let loaded =
   lazy
     (let engine = Engine.create () in
-     Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
+     Database.load_package engine ~name:Path.standard_package ~dependencies:[]
        (Standard_library.files @ [ (probe, source) ]);
      let database = Engine.context engine in
      let text = Query.demand database Packages.source probe in
@@ -28,7 +28,7 @@ let loaded =
          ~want:(fun lowering wanted ->
            Engine.set engine Compile.roots lowering
              (Compile.add_roots (Engine.context engine) lowering wanted))
-         database target_64 (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
+         database host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
 
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->
@@ -67,7 +67,7 @@ let () =
   test "Shared's operations require Tasks outside an impl, and its value must be Storable"
     (fun () ->
       let engine = Engine.create () in
-      Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
+      Database.load_package engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.files @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
       let text = Source.text (Query.demand database Packages.source checks) in

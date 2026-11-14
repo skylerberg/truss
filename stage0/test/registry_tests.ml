@@ -186,7 +186,6 @@ let load published name version ~hash =
                List.map
                  (fun (name, capabilities) -> { Manifest.package = package name; capabilities })
                  dependencies;
-             usize_bits = 32;
            }
             : Manifest.package),
           List.map
@@ -320,7 +319,6 @@ let () =
             List.map
               (fun (package, capabilities) -> { Manifest.package; capabilities })
               dependencies;
-          usize_bits = 32;
         };
       record = [];
     }

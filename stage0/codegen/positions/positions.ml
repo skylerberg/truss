@@ -14,8 +14,8 @@ let c_string text =
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
-let anchors_file target anchors =
-  Emit_c.runtime_declarations target
+let anchors_file anchors =
+  Emit_c.runtime_declarations
   ^ String.concat ""
       (List.map
          (fun anchor ->
