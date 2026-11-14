@@ -1,6 +1,6 @@
 ; A project's files as inputs, and queries derived from them: its
 ; packages, their modules and text, the errors between its manifests,
-; and the registry packages of its build. See DATABASE.md, "Inputs".
+; and the registry packages of its build.
 
 (library
  (name project)

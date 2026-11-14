@@ -14,8 +14,7 @@ behind these decisions, see [GOALS.md](GOALS.md).
   files.
 - **A change costs in proportion to its size.** GOALS.md asks that building,
   testing, and proving cost O(change), not O(project). The rules in this
-  section make that possible. [DATABASE.md](DATABASE.md) describes how the
-  toolchain caches results and finds a change's dependents.
+  section make that possible.
 - **Each top-level definition stands on its own.** A definition's identity
   does not depend on its file within its module, its position in the file,
   the definitions around it, or its layout, so reformatting a file or moving
@@ -701,7 +700,7 @@ combination needs parentheses.
   Swift's extensions of `FixedWidthInteger` are, where Rust's standard
   library generates each width with a macro.
 - **The integer traits are sealed,** so generic code over one is proven once
-  for each built-in type, with that type's range and bits (see PROVER.md).
+  for each built-in type, with that type's range and bits.
   For the same reason, a literal under such a bound fits every type that
   implements the trait.
 
@@ -989,7 +988,6 @@ Everything a program promises is proven at compile time.
 - **Verification is modular.** The prover knows other functions by their
   signatures, and reads a body only where it is a definition, so each proof
   looks at little code, which keeps proofs stable and checking O(change).
-  The prover's design is in [PROVER.md](PROVER.md).
 - **Proof checking is deterministic.** The solver runs within limits counted
   in steps, never in wall-clock time, and its version is pinned. A proof
   that passes once keeps passing, and a slow machine never fails a proof

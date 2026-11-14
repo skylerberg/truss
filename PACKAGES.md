@@ -2,8 +2,7 @@
 
 This document defines packages, projects, manifests, the lock file, and the
 registry. [SPECIFICATION.md](SPECIFICATION.md) defines the language, and
-[DESIGN.md](DESIGN.md#packages) gives the reasons for these rules. The
-commands that read and write these files are in [CLI.md](CLI.md).
+[DESIGN.md](DESIGN.md#packages) gives the reasons for these rules.
 
 ## Packages
 
@@ -223,10 +222,9 @@ added to them gets the next minor number. There are no 0.x versions.
 - **The registry keeps an append-only log of every version's hash,** and the
   toolchain checks that each hash it puts in a lock file is in the log.
 - **The registry signs the proofs and test results it computed for a
-  release,** under the keys those results always have (see
-  [DATABASE.md](DATABASE.md)). A build uses a signed result in place of
-  computing it. The toolchain trusts the registry's key unless a project
-  says otherwise.
+  release.** Each result is keyed by its inputs, so a build uses a signed
+  result in place of computing it. The toolchain trusts the registry's key
+  unless a project says otherwise.
 - **A release can be marked as one not to use,** by its owner or the
   registry, with the reason. Builds that use it still build. `truss upgrade`
   never chooses a marked release, and says when a project is on one.
