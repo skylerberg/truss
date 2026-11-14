@@ -790,7 +790,7 @@ Rules: [Methods](SPECIFICATION.md#methods).
 
 ### Overloads by receiver mode
 
-Rules: [Versions by receiver mode](SPECIFICATION.md#versions-by-receiver-mode),
+Rules: [Overloads by receiver mode](SPECIFICATION.md#overloads-by-receiver-mode),
 [Method lookup](SPECIFICATION.md#method-lookup).
 
 A method can be overloaded on the mode of `self`, and on nothing else. One
@@ -1386,7 +1386,7 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 
 ### Dynamic dispatch
 
-Rules: [Values of any type with a trait](SPECIFICATION.md#values-of-any-type-with-a-trait).
+Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
 
 | Need | Use |
 |---|---|
@@ -1692,8 +1692,8 @@ hardware is available only through the standard library.
 
 ## The standard library
 
-The Markdown files beside the modules of [`standard/`](standard) document
-the library. This section gives the reasons for its scope and conventions.
+The signatures and contracts in [`standard/`](standard) describe the
+library. This section gives the reasons for its scope and conventions.
 
 Truss is batteries included: the standard library holds the modules that a
 command-line tool or a network service needs, so most programs need no other

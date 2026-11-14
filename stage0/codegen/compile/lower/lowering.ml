@@ -14,7 +14,7 @@ type cleanup =
           dropping the block's contents. *)
   | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
       (** Moves the value at [source] into [destination], the place it was moved out of so that the
-          caller could change it. *)
+          caller could mutate it. *)
   | Join_group of Lowered.statement  (** Joins a task group with the call of [Tasks.join]. *)
 
 (* A scope owns the values dropped as it ends: the scope of a block's names,
@@ -315,7 +315,7 @@ let unreachable_block st =
 
 (* An operand for an owned position: a [var], an [own] argument, a field, a
    returned value. The type checker has made sure a place there is a
-   temporary or was marked [own], or copies implicitly. *)
+   temporary or was passed [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lowered.Copy place else moved st place
 
 let take st (place : Lowered.place) ty ~destination =

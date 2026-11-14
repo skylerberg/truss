@@ -42,7 +42,7 @@ type callee = operand Core.target
     {!Operation}. *)
 
 type argument =
-  | Passed of { mode : Types.mode; value : operand; mark : Core.mark option }
+  | Passed of { mode : Types.mode; value : operand; mode_keyword : Core.mode_keyword option }
   | Default  (** The callee fills in the parameter's default. *)
 
 type call = {
@@ -177,7 +177,7 @@ type branch = {
 type lent_element = {
   element : local;  (** The [Lent] local of the element. *)
   count : Core.expression;
-      (** The call of the collection's [count], which the prover reads: a loop that changes its
+      (** The call of the collection's [count], which the prover reads: a loop that mutates its
           elements leaves their number as it was. *)
   call : Core.expression;
       (** The call of the collection's [element] at the loop's position, which the prover reads: a
@@ -1052,11 +1052,11 @@ and call_of b (called : Core.call) ~node ~origin : call option =
       (fun (argument : Core.argument) ->
         match argument with
         | Default -> Default
-        | Passed { mode; mark; _ } -> (
+        | Passed { mode; mode_keyword; _ } -> (
             match !values with
             | value :: rest ->
                 values := rest;
-                Passed { mode; value; mark }
+                Passed { mode; value; mode_keyword }
             | [] -> bug "a call with fewer values than arguments"))
       called.arguments
   in
@@ -1276,7 +1276,7 @@ and scrutinee_place b (value : operand) type_ origin : place =
       at local
 
 (* The tests of a pattern against a place: control goes on where it
-   matches, and jumps to [fail] where it does not. Testing changes nothing,
+   matches, and jumps to [fail] where it does not. Testing mutates nothing,
    so bindings come after every test of an arm. *)
 and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
   let origin = pattern.origin in
@@ -1346,9 +1346,9 @@ and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
                                    mode = Read;
                                    origin = pattern.origin;
                                  };
-                             mark = None;
+                             mode_keyword = None;
                            };
-                         Passed { mode = Read; value; mark = None };
+                         Passed { mode = Read; value; mode_keyword = None };
                        ];
                      uses = Types.no_capabilities;
                      node = pattern.id;
@@ -1493,7 +1493,7 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
               | None -> arm current
               | Some guard ->
                   (* If the guard is false, later arms test the same
-                     scrutinees, so the guard cannot change them. *)
+                     scrutinees, so the guard cannot mutate them. *)
                   let loans =
                     List.filter_map
                       (fun value ->

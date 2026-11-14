@@ -280,9 +280,9 @@ and type_argument state scope = function
 and count_name state scope (name : name) =
   match String_map.find_opt name.text scope.values with
   | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
-  | hiding -> (
+  | shadowing -> (
       match module_item state name.text with
-      | Some item when item.kind = Constant && hiding = None ->
+      | Some item when item.kind = Constant && shadowing = None ->
           set state name
             (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
       | _ ->
@@ -425,11 +425,11 @@ and bracket state scope (value : expression) base items =
       | Item_constraint (_, type_) -> type_expression state scope type_)
     items
 
-(* Whether a marked expression starts with a place: a local, a parameter,
+(* Whether the operand of a mode keyword starts with a place: a local, a parameter,
    [self], or a constant, then fields and indexes, up to the first method
    call. After that call, the expression works on its result, so a [?] can
    follow it, as in [mut file.read_line()?]. *)
-and check_place state (marked : expression) (inner : expression) =
+and check_place state (written : expression) (inner : expression) =
   (* [`Place called]: [called] is whether the place is the receiver of a
      method call. *)
   let rec head (value : expression) =
@@ -457,14 +457,14 @@ and check_place state (marked : expression) (inner : expression) =
   | `Place _ | `Unknown -> ()
   | `Not_a_place _ ->
       let keyword_end = inner.span.start in
-      report state Not_a_place marked.span
+      report state Not_a_place written.span
         ~fixes:
           [
-            Diagnostic.fix "Remove the mark."
-              [ Diagnostic.delete (Span.make marked.span.start keyword_end) ];
+            Diagnostic.fix "Remove the keyword."
+              [ Diagnostic.delete (Span.make written.span.start keyword_end) ];
           ]
-        "Only a place, such as a variable, a field, or an element, can be marked `mut` or `own`. A \
-         temporary value is always handed over as owned."
+        "Only a place, such as a variable, a field, or an element, can take `mut` or `own`. A \
+         temporary value is always passed as owned."
 
 and expression state scope (value : expression) =
   match value.kind with
@@ -587,17 +587,17 @@ and arm state scope (arm_ : arm) =
   let guarded = match arm_.guard with Some guard -> condition state inner guard | None -> inner in
   ignore (statement state guarded arm_.body)
 
-(* Declares a value name, reporting it if it hides another. *)
+(* Declares a value name, reporting it if it shadows another. *)
 and declare_value state scope (name : name) =
-  let hides existing =
-    report state Hides_name name.span
-      (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
+  let shadows existing =
+    report state Shadowed_name name.span
+      (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
-  (* A local may hide a definition of the module, so adding a definition
+  (* A local may shadow a definition of the module, so adding a definition
      to one file breaks no local of another. *)
   (match String_map.find_opt name.text scope.values with
-  | Some (_, existing) -> hides existing
+  | Some (_, existing) -> shadows existing
   | None -> ());
   set state name Binding;
   {
@@ -748,10 +748,10 @@ and statement state scope (statement_ : statement) =
           String_map.iter
             (fun key _ ->
               if String_map.mem key after.values then
-                report state Hides_name branch.span
+                report state Shadowed_name branch.span
                   (Printf.sprintf
-                     "Another branch of this `%s` block already binds `%s`, and a name cannot hide \
-                      another. Choose another name."
+                     "Another branch of this `%s` block already binds `%s`, and a name cannot \
+                      shadow another. Choose another name."
                      word key))
             bound;
           { after with values = String_map.union (fun _ left _ -> Some left) after.values bound })
@@ -779,17 +779,17 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop
   | Loop_cost cost -> clause state scope { kind = Cost cost; span = written.span; id = written.id }
 
 let declare_type state scope (name : name) target =
-  let hides existing =
-    report state Hides_name name.span
-      (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
+  let shadows existing =
+    report state Shadowed_name name.span
+      (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
-  (if String_map.mem name.text scope.types then hides "a generic parameter here"
+  (if String_map.mem name.text scope.types then shadows "a generic parameter here"
    else
      match module_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
-         hides (Names.kind_name (Names.kind_of_named item.kind) ^ " of this module")
-     | _ -> if List.mem name.text Prelude.names then hides "a name in the prelude");
+         shadows (Names.kind_name (Names.kind_of_named item.kind) ^ " of this module")
+     | _ -> if List.mem name.text Prelude.names then shadows "a name in the prelude");
   set state name Binding;
   { scope with types = String_map.add name.text target scope.types }
 

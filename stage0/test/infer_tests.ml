@@ -296,22 +296,23 @@ let () =
 let () =
   test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       one_diagnostic Fixtures.Infer.mut_parameter_needs_mut_at_the_call_with_a_fix
-        "types.missing_mark"
+        "types.missing_mode"
         ~fixed:Fixtures.Infer.mut_parameter_needs_mut_at_the_call_with_a_fix_fixed);
   test "an own parameter needs own for a place that does not copy implicitly" (fun () ->
       one_diagnostic Fixtures.Infer.own_parameter_needs_own_for_a_place_that_does_not
-        "types.missing_mark"
+        "types.missing_mode"
         ~fixed:Fixtures.Infer.own_parameter_needs_own_for_a_place_that_does_not_fixed);
   test "own on a place that copies implicitly is redundant" (fun () ->
       one_diagnostic Fixtures.Infer.own_on_a_place_that_copies_implicitly_is_redundant
-        "types.redundant_mark"
+        "types.redundant_mode"
         ~fixed:Fixtures.Infer.own_on_a_place_that_copies_implicitly_is_redundant_fixed);
-  test "a mut receiver chooses the method's mut version" (fun () ->
-      fine Fixtures.Infer.mut_receiver_chooses_the_methods_mut_version);
-  test "a place calling a method that takes mut self needs the mark, with a fix that adds it"
+  test "a mut receiver chooses the method's mut overload" (fun () ->
+      fine Fixtures.Infer.mut_receiver_chooses_the_methods_mut_overload);
+  test
+    "a place calling a method that takes mut self needs the mode keyword, with a fix that adds it"
     (fun () ->
       one_diagnostic Fixtures.Infer.place_calling_a_method_that_takes_mut_self_needs
-        "types.missing_mark"
+        "types.missing_mode"
         ~fixed:Fixtures.Infer.place_calling_a_method_that_takes_mut_self_needs_fixed)
 
 (* Statements *)
@@ -330,8 +331,8 @@ let () =
       one_diagnostic Fixtures.Infer.let_cannot_be_assigned "types.not_assignable");
   List.iter
     (fun (construct, text) ->
-      test (construct ^ " cannot be marked `mut`") (fun () ->
-          one_diagnostic text "types.wrong_mark"))
+      test (construct ^ " cannot be passed `mut`") (fun () ->
+          one_diagnostic text "types.wrong_mode"))
     [
       ("a read-only parameter", Fixtures.Infer.read_only_parameter);
       ("an `own` parameter", Fixtures.Infer.own_parameter);
@@ -347,9 +348,9 @@ let () =
       ("`self` inside a lambda", Fixtures.Infer.self_inside_a_lambda);
       ("a local that a lambda captures", Fixtures.Infer.local_that_a_lambda_captures);
     ];
-  test "a `var`, a `mut` parameter, `mut self`, and a `mut` loop variable can be marked `mut`"
+  test "a `var`, a `mut` parameter, `mut self`, and a `mut` loop variable can be passed `mut`"
     (fun () -> fine Fixtures.Infer.var_a_mut_parameter_mut_self_and_a_mut_loop);
-  test "the variable of a loop over elements lent `mut` can be marked `mut`" (fun () ->
+  test "the variable of a loop over elements lent `mut` can be passed `mut`" (fun () ->
       fine Fixtures.Infer.variable_of_a_loop_over_elements_lent_mut_can);
   test "a var can be assigned" (fun () -> fine Fixtures.Infer.var_can_be_assigned);
   test "an empty list with nothing to decide its elements is an error" (fun () ->
@@ -444,7 +445,7 @@ let () =
   test "an assignment through an index of a map takes the key as an owned value" (fun () ->
       fine Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key;
       one_diagnostic Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key_2
-        "types.missing_mark";
+        "types.missing_mode";
       one_diagnostic Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key_3
         "types.not_assignable");
   test "`final(result)` is a lending method's part as the caller left it" (fun () ->
@@ -469,7 +470,7 @@ let () =
    test "an element of a type that implements `Index` alone is not passed `mut`" (fun () ->
        one_diagnostic ~says:"and not `IndexMut`"
          (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_not_passed_mut)
-         "types.wrong_mark");
+         "types.wrong_mode");
    test "an assignment through an index calls `assign` without `IndexMut`" (fun () ->
        fine
          (readings ^ assign
@@ -641,29 +642,29 @@ let () =
   test "a bitwise compound assignment works on integers only" (fun () ->
       one_diagnostic Fixtures.Infer.bitwise_compound_assignment_works_on_integers_only
         "types.no_impl");
-  test "a method written in full takes its receiver's mark" (fun () ->
-      one_diagnostic Fixtures.Infer.method_written_in_full_takes_its_receivers_mark
+  test "a method written in full takes its receiver's mode" (fun () ->
+      one_diagnostic Fixtures.Infer.method_written_in_full_takes_its_receivers_mode
         "types.wrong_receiver");
-  test "a for loop takes the `element` version from the type or from a trait" (fun () ->
+  test "a for loop takes the `element` overload from the type or from a trait" (fun () ->
       fine Fixtures.Infer.for_loop_takes_element_version_from_the_type_or_from);
-  test "a call picks a version among a type's own and its family of traits'" (fun () ->
-      fine Fixtures.Infer.call_picks_a_version_among_a_types_own_and_its);
-  test "two traits that give one version of a name are ambiguous at the call" (fun () ->
-      one_diagnostic Fixtures.Infer.two_traits_that_give_one_version_of_a_name_are
+  test "a call picks an overload among a type's own and its family of traits'" (fun () ->
+      fine Fixtures.Infer.call_picks_an_overload_among_a_types_own_and_its);
+  test "two traits that give one overload of a name are ambiguous at the call" (fun () ->
+      one_diagnostic Fixtures.Infer.two_traits_that_give_one_overload_of_a_name_are
         "types.ambiguous_method"
-        ~fixed:Fixtures.Infer.two_traits_that_give_one_version_of_a_name_are_fixed);
+        ~fixed:Fixtures.Infer.two_traits_that_give_one_overload_of_a_name_are_fixed);
   test "two unrelated traits that share a name are ambiguous however each takes self" (fun () ->
       one_diagnostic Fixtures.Infer.two_unrelated_traits_that_share_a_name_are
         "types.ambiguous_method");
-  test "two bounds that give one version of a name are ambiguous through the type" (fun () ->
-      one_diagnostic Fixtures.Infer.two_bounds_that_give_one_version_of_a_name_are
+  test "two bounds that give one overload of a name are ambiguous through the type" (fun () ->
+      one_diagnostic Fixtures.Infer.two_bounds_that_give_one_overload_of_a_name_are
         "types.ambiguous_method");
   test "two unrelated bounds that share a name are ambiguous however each takes self" (fun () ->
       one_diagnostic Fixtures.Infer.two_unrelated_bounds_that_share_a_name_are
         "types.ambiguous_method");
   test "a bound's method is picked from its family by how the call takes self" (fun () ->
       fine Fixtures.Infer.bounds_method_is_picked_from_its_family_by_how_the);
-  test "a trait's method written in full has no version for a mark it lacks" (fun () ->
+  test "a trait's method written in full has no overload for a mode it lacks" (fun () ->
       one_diagnostic Fixtures.Infer.traits_method_written_in_full_has_no_version_for_a
         "types.wrong_receiver");
   test "an associated type of an argument is normalized" (fun () ->
@@ -778,11 +779,11 @@ let () =
   test "a quantifier's body in code cannot return" (fun () ->
       one_diagnostic Fixtures.Infer.quantifiers_body_in_code_cannot_return
         "types.not_in_specification");
-  test "a quantifier's body cannot mark an argument mut" (fun () ->
-      one_diagnostic Fixtures.Infer.quantifiers_body_cannot_mark_an_argument_mut
+  test "a quantifier's body cannot pass an argument mut" (fun () ->
+      one_diagnostic Fixtures.Infer.quantifiers_body_cannot_pass_an_argument_mut
         "types.not_in_specification");
-  test "a contract cannot mark an argument mut" (fun () ->
-      one_diagnostic Fixtures.Infer.contract_cannot_mark_an_argument_mut
+  test "a contract cannot pass an argument mut" (fun () ->
+      one_diagnostic Fixtures.Infer.contract_cannot_pass_an_argument_mut
         "types.not_in_specification");
   test "a constant in a pattern needs structural equality" (fun () ->
       one_diagnostic Fixtures.Infer.constant_in_a_pattern_needs_structural_equality
@@ -791,7 +792,7 @@ let () =
       fine Fixtures.Infer.constant_of_a_derived_type_of_integers_in_a);
   test "a provided method without a time clause cannot be replaced" (fun () ->
       Support.one_diagnostic ~check:Checks.diagnostics
-        Fixtures.Infer.provided_method_without_a_time_clause_cannot_be "types.not_replaceable");
+        Fixtures.Infer.provided_method_without_a_time_clause_cannot_be "types.not_overridable");
   test "a loop's cost bound is checked" (fun () ->
       one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")
 

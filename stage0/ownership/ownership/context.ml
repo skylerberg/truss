@@ -8,7 +8,7 @@ type context = {
   database : Query.context;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
-  marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
+  mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, Types.ty) Hashtbl.t;
@@ -97,21 +97,21 @@ let show context (place : Place.t) =
       (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
 
 (* The names, kinds, and types of the definition's locals, which its MIR's
-   source locals carry, and the marks of its arguments. A lambda's capture
+   source locals carry, and the mode keywords of its arguments. A lambda's capture
    is its enclosing body's local, which that body describes. *)
 let collect context (mir : Mir.t) =
-  let mark (argument : Mir.argument) =
+  let record_mode_keyword (argument : Mir.argument) =
     match argument with
     | Passed
         {
           mode;
           value = Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ };
-          mark = Some mark;
+          mode_keyword = Some mode_keyword;
         } ->
-        Hashtbl.replace context.marks origin (mode, mark)
+        Hashtbl.replace context.mode_keywords origin (mode, mode_keyword)
     | Passed _ | Default -> ()
   in
-  let marks (call : Mir.call) = List.iter mark call.arguments in
+  let record_mode_keywords (call : Mir.call) = List.iter record_mode_keyword call.arguments in
   let body (body : Mir.body) =
     Array.iteri
       (fun local (info : Mir.local_info) ->
@@ -130,7 +130,7 @@ let collect context (mir : Mir.t) =
           (fun (statement : Mir.statement) ->
             match statement.kind with
             | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
-                marks call
+                record_mode_keywords call
             | _ -> ())
           block.statements)
       body.blocks
@@ -147,19 +147,19 @@ let collect context (mir : Mir.t) =
          mir.body.parameters)
 
 (* The edits that replace a move by a copy: insert [.copy()] after the place
-   and delete the [own] mark before it. *)
+   and delete the [own] keyword before it. *)
 let copy_at context (moved : Core.origin) =
-  (match Hashtbl.find_opt context.marks moved with
-    | Some (Own, { written; marked }) ->
+  (match Hashtbl.find_opt context.mode_keywords moved with
+    | Some (Own, { written; operand }) ->
         [
           Diagnostic.delete
-            (Syntax.Span.make (span context written).start (span context marked).start);
+            (Syntax.Span.make (span context written).start (span context operand).start);
         ]
     | Some ((Read | Mut), _) | None -> [])
   @ [ Diagnostic.insert (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
 
-(* The span of a place together with the [mut] or [own] mark before it. *)
-let with_mark context (place : Core.origin) : Syntax.span =
-  match Hashtbl.find_opt context.marks place with
+(* The span of a place together with the [mut] or [own] keyword before it. *)
+let with_mode_keyword context (place : Core.origin) : Syntax.span =
+  match Hashtbl.find_opt context.mode_keywords place with
   | Some (_, { written; _ }) -> span context written
   | None -> span context place

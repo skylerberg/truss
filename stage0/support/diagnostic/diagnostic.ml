@@ -14,7 +14,7 @@ module Code = struct
     | String_delimiter
     | Attribute
     | Foreign_operator
-    | Lookalike_character
+    | Confusable_character
     | Lifetime
     | Number_hexadecimal_float
     | Name_case
@@ -89,7 +89,7 @@ module Code = struct
     | Misplaced_assert
     | Misplaced_proof
     | Misplaced_loop_exit
-    | Leaves_parallel
+    | Exits_parallel
     | Echo_in_specification
     | Reserved_specification_name
 
@@ -101,7 +101,7 @@ module Code = struct
     | Duplicate_import
     | Unused_import
     | Intrinsic_import
-    | Hides_name
+    | Shadowed_name
     | Duplicate_definition
     | Not_a_place
     | Not_generic
@@ -122,9 +122,9 @@ module Code = struct
     | Missing_argument
     | Too_many_arguments
     | Repeated_argument
-    | Missing_mark
-    | Redundant_mark
-    | Wrong_mark
+    | Missing_mode
+    | Redundant_mode
+    | Wrong_mode
     | Unknown_member
     | Ambiguous_method
     | Private_field
@@ -145,7 +145,7 @@ module Code = struct
     | Specification_only
     | Not_in_specification
     | Not_structural
-    | Not_replaceable
+    | Not_overridable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in
@@ -187,24 +187,24 @@ module Code = struct
     | Not_owned
     | Not_reinitialized
     | Conflicting_loan
-    | Changed_while_viewed
+    | Mutated_while_viewed
     | View_escapes
     | Self_referential
     | View_crosses_capability
     | Needs_owned
     | Data_race
-    | Keeps_lent_part
+    | Lent_part_escapes
     | Lends_other_parameter
     | Read_only_view
     | Owned_beside_lent
     | Lent_mut_in_variant
-    | Task_keeps_view
+    | Task_outlives_view
 
   type capabilities =
     | Not_available
     | Lambda_uses
     | Not_granted
-    | Provide_mark
+    | Provide_mode
     | Not_an_implementation
     | Callback_may_deadlock
     | Monitor_needs_tasks
@@ -263,7 +263,7 @@ module Code = struct
     | String_delimiter -> "string_delimiter"
     | Attribute -> "attribute"
     | Foreign_operator -> "foreign_operator"
-    | Lookalike_character -> "lookalike_character"
+    | Confusable_character -> "confusable_character"
     | Lifetime -> "lifetime"
     | Number_hexadecimal_float -> "number_hexadecimal_float"
     | Name_case -> "name_case"
@@ -339,7 +339,7 @@ module Code = struct
     | Misplaced_assert -> "misplaced_assert"
     | Misplaced_proof -> "misplaced_proof"
     | Misplaced_loop_exit -> "misplaced_loop_exit"
-    | Leaves_parallel -> "leaves_parallel"
+    | Exits_parallel -> "exits_parallel"
     | Echo_in_specification -> "echo_in_specification"
     | Reserved_specification_name -> "reserved_specification_name"
 
@@ -352,7 +352,7 @@ module Code = struct
     | Duplicate_import -> "duplicate_import"
     | Unused_import -> "unused_import"
     | Intrinsic_import -> "intrinsic_import"
-    | Hides_name -> "hides_name"
+    | Shadowed_name -> "shadowed_name"
     | Duplicate_definition -> "duplicate_definition"
     | Not_a_place -> "not_a_place"
     | Not_generic -> "not_generic"
@@ -374,9 +374,9 @@ module Code = struct
     | Missing_argument -> "missing_argument"
     | Too_many_arguments -> "too_many_arguments"
     | Repeated_argument -> "repeated_argument"
-    | Missing_mark -> "missing_mark"
-    | Redundant_mark -> "redundant_mark"
-    | Wrong_mark -> "wrong_mark"
+    | Missing_mode -> "missing_mode"
+    | Redundant_mode -> "redundant_mode"
+    | Wrong_mode -> "wrong_mode"
     | Unknown_member -> "unknown_member"
     | Ambiguous_method -> "ambiguous_method"
     | Private_field -> "private_field"
@@ -395,7 +395,7 @@ module Code = struct
     | Not_a_record -> "not_a_record"
     | Unknown_variant -> "unknown_variant"
     | Not_structural -> "not_structural"
-    | Not_replaceable -> "not_replaceable"
+    | Not_overridable -> "not_overridable"
     | Specification_only -> "specification_only"
     | Not_in_specification -> "not_in_specification"
     | Wrong_receiver -> "wrong_receiver"
@@ -447,25 +447,25 @@ module Code = struct
     | Not_owned -> "not_owned"
     | Not_reinitialized -> "not_reinitialized"
     | Conflicting_loan -> "conflicting_loan"
-    | Changed_while_viewed -> "changed_while_viewed"
+    | Mutated_while_viewed -> "mutated_while_viewed"
     | View_escapes -> "view_escapes"
     | Self_referential -> "self_referential"
     | View_crosses_capability -> "view_crosses_capability"
     | Needs_owned -> "needs_owned"
     | Data_race -> "data_race"
-    | Keeps_lent_part -> "keeps_lent_part"
+    | Lent_part_escapes -> "lent_part_escapes"
     | Lends_other_parameter -> "lends_other_parameter"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
-    | Task_keeps_view -> "task_keeps_view"
+    | Task_outlives_view -> "task_outlives_view"
 
   let capabilities_name code =
     match code with
     | Not_available -> "not_available"
     | Lambda_uses -> "lambda_uses"
     | Not_granted -> "not_granted"
-    | Provide_mark -> "provide_mark"
+    | Provide_mode -> "provide_mode"
     | Not_an_implementation -> "not_an_implementation"
     | Callback_may_deadlock -> "callback_may_deadlock"
     | Monitor_needs_tasks -> "monitor_needs_tasks"

@@ -11,9 +11,9 @@ table. Every directory under it that holds a `.truss` file is one of its
 modules, and the files of a directory share one namespace (see
 [Module paths](SPECIFICATION.md#module-paths)).
 
-A package is the reach of `internal` and of `opaque`, where a type's methods
-and a trait's `impl`s may live, the unit a manifest grants capabilities to,
-and the unit that is published and given a version.
+A package is the scope of `internal` and of `opaque`, the home of a type's
+methods and of a trait's `impl`s, the unit that a manifest grants
+capabilities to, and the unit that is published and versioned.
 
 | Kind | Named | Its code | Its version |
 |---|---|---|---|
@@ -59,7 +59,7 @@ forecast = []
 
 - **`name`** is the package's name.
 - **`truss`** is the language version the package's files are read as, and
-  the least toolchain that can build it. A toolchain reads each package as
+  the minimum toolchain version that can build it. A toolchain reads each package as
   the version it names, so packages written for different versions build
   together.
 - **Each entry of `[dependencies]`** is a package's name and the list of
@@ -130,6 +130,37 @@ time_limit = 10
   name, for every package of the build.
 - A project's own packages have no versions.
 
+## Versions
+
+Every release under one name is compatible with the releases before it. A
+change that is not compatible is published under a new name, the old one
+with `_v2` after it, as in `acme::geometry_v2`. `acme::geometry` and
+`acme::geometry_v2` are two packages, and both can be in one build.
+
+The registry checks compatibility from the signatures. A release is
+compatible with the one before when:
+
+- every public definition is still there, at the same path
+- a function, method, or theorem has the same parameters and result, no
+  capability more in its `uses`, a `requires` that the old one implies, an
+  `ensures` that implies the old one, and no cost greater than before
+- a type that shows its fields has the same fields, variants, and invariant;
+  an opaque type may change everything inside it
+- a trait or capability has the same methods, associated types, required
+  traits, and laws, and gains at most methods that have bodies
+- every `impl` is still there
+- a constant has the same type and value
+- a package that ran on every target still does
+
+Bodies are not promised: a release may change a function's results within
+its contract, including a body that the prover reads as a definition and a
+parameter's default.
+
+The registry numbers each release. The first is `N.0.0`, where `N` is the
+number after `_v` in the package's name, or 1. After that, a release whose
+public signatures are unchanged gets the next patch number, and one that
+added to them gets the next minor number. There are no 0.x versions.
+
 ## The lock file
 
 `truss.lock`, beside the project's manifest, holds the version and content of
@@ -178,37 +209,6 @@ and those that they use in turn. This lock file is the package's *record*.
   it into the lock file.
 - There are no version ranges and no solver.
 
-## Versions
-
-Every release under one name is compatible with the releases before it. A
-change that is not compatible is published under a new name, the old one
-with `_v2` after it, as in `acme::geometry_v2`. `acme::geometry` and
-`acme::geometry_v2` are two packages, and both can be in one build.
-
-The registry checks compatibility from the signatures. A release is
-compatible with the one before when:
-
-- every public definition is still there, at the same path
-- a function, method, or theorem has the same parameters and result, no
-  capability more in its `uses`, a `requires` that the old one implies, an
-  `ensures` that implies the old one, and no cost greater than before
-- a type that shows its fields has the same fields, variants, and invariant;
-  an opaque type may change everything inside it
-- a trait or capability has the same methods, associated types, required
-  traits, and laws, and gains at most methods that have bodies
-- every `impl` is still there
-- a constant has the same type and value
-- a package that ran on every target still does
-
-Bodies are not promised: a release may change a function's results within
-its contract, including a body that the prover reads as a definition and a
-parameter's default.
-
-The registry numbers each release. The first is `N.0.0`, where `N` is the
-number after `_v` in the package's name, or 1. After that, a release whose
-public signatures are unchanged gets the next patch number, and one that
-added to them gets the next minor number. There are no 0.x versions.
-
 ## The registry
 
 - **A package is published as its source:** its manifest, its modules, its
@@ -224,8 +224,9 @@ added to them gets the next minor number. There are no 0.x versions.
   release.** Each result is keyed by its inputs, so a build uses a signed
   result in place of computing it. The toolchain trusts the registry's key
   unless a project says otherwise.
-- **A release can be marked as one not to use,** by its owner or the
-  registry, with the reason. Builds that use it still build. `truss upgrade`
-  never chooses a marked release, and says when a project is on one.
+- **A release can be yanked,** that is, marked as one not to use, by its
+  owner or the registry, with the reason. A build that uses a yanked release
+  still builds. `truss upgrade` never selects a yanked release, and reports
+  when a project uses one.
 - A dependency's external tests are never run by a project that depends on
   it.

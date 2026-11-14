@@ -31,11 +31,11 @@ let () =
   test "a type's own method cannot share a name with a trait's" (fun () ->
       one_diagnostic Fixtures.Package_checks.types_own_method_cannot_share_a_name_with_a_traits
         "package.method_name_clash");
-  test "a type's own method may be another version of a trait's" (fun () ->
+  test "a type's own method may be another overload of a trait's" (fun () ->
       fine Fixtures.Package_checks.types_own_method_may_be_another_version_of_a);
-  test "an impl that writes a method may make it another version of the type's own" (fun () ->
+  test "an impl that writes a method may make it another overload of the type's own" (fun () ->
       fine Fixtures.Package_checks.impl_that_writes_a_method_may_make_it_another);
-  test "a method an impl leaves to its trait cannot be a version of the type's own" (fun () ->
+  test "a method an impl leaves to its trait cannot be an overload of the type's own" (fun () ->
       one_diagnostic Fixtures.Package_checks.method_an_impl_leaves_to_its_trait_cannot_be_a
         "package.method_name_clash");
   test "a type's constant cannot share a name with a trait's method" (fun () ->
@@ -188,7 +188,7 @@ let () =
     (fun () ->
       one_diagnostic
         (shown ^ holder ^ Fixtures.Package_checks.arguments_of_an_impls_type_are_generic_parameters)
-        "resolve.hides_name");
+        "resolve.shadowed_name");
   test "an associated type cannot make a type contain itself through another impl's definition"
     (fun () ->
       one_diagnostic
@@ -211,7 +211,7 @@ let () =
       match codes (Checks.diagnostics database (file_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
-  test "an impl in another package cannot give a type another version of its method" (fun () ->
+  test "an impl in another package cannot give a type another overload of its method" (fun () ->
       let database =
         Support.setup
           ~dependencies:[ ("app", "lib") ]

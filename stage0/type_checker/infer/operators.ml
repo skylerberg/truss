@@ -196,7 +196,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
                     Tables.expression = inner.id;
                     parameter_index = 0;
                     mode = Types.Read;
-                    mark = None;
+                    mode_keyword = None;
                   };
                 ]
               state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
@@ -301,7 +301,12 @@ and built_in_operator state (value : expression) (operands : expression list) re
         arguments =
           List.mapi
             (fun index (operand : expression) ->
-              { Tables.expression = operand.id; parameter_index = index; mode = Read; mark = None })
+              {
+                Tables.expression = operand.id;
+                parameter_index = index;
+                mode = Read;
+                mode_keyword = None;
+              })
             operands;
         omitted_defaults = [];
         uses = Types.no_capabilities;
@@ -431,8 +436,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
                   };
               arguments =
                 [
-                  { expression = left.id; parameter_index = 0; mode = Read; mark = None };
-                  { expression = right.id; parameter_index = 1; mode = Read; mark = None };
+                  { expression = left.id; parameter_index = 0; mode = Read; mode_keyword = None };
+                  { expression = right.id; parameter_index = 1; mode = Read; mode_keyword = None };
                 ];
               omitted_defaults = [];
               uses = Types.no_capabilities;
@@ -528,13 +533,13 @@ and binary state env ?expected (value : expression) operator (left : expression)
                       Tables.expression = left.id;
                       parameter_index = 0;
                       mode = Types.Read;
-                      mark = None;
+                      mode_keyword = None;
                     };
                     {
                       Tables.expression = right.id;
                       parameter_index = 1;
                       mode = Types.Read;
-                      mark = None;
+                      mode_keyword = None;
                     };
                   ]
                 state value ~trait ~method_ ~left:left_type ~right:(Some right_type)

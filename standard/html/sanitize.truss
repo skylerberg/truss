@@ -1,0 +1,515 @@
+use standard::intrinsic
+
+public type AllowedAttribute(element: String, name: String)
+  derives Equal
+
+public type SanitizePolicy(
+  elements: List[String] = [
+    "a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "dd", "del", "dfn", "div", "dl", "dt", "em", "figcaption",
+    "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "ins", "kbd", "li", "mark", "ol", "p", "pre", "q", "s",
+    "samp", "small", "span", "strong", "sub", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "time", "tr", "u", "ul", "var",
+  ],
+  attributes: List[String] = ["title", "lang", "dir"],
+  element_attributes: List[AllowedAttribute] = [
+    AllowedAttribute(element: "a", name: "href"),
+    AllowedAttribute(element: "img", name: "src"),
+    AllowedAttribute(element: "img", name: "alt"),
+    AllowedAttribute(element: "img", name: "width"),
+    AllowedAttribute(element: "img", name: "height"),
+    AllowedAttribute(element: "td", name: "colspan"),
+    AllowedAttribute(element: "td", name: "rowspan"),
+    AllowedAttribute(element: "th", name: "colspan"),
+    AllowedAttribute(element: "th", name: "rowspan"),
+    AllowedAttribute(element: "th", name: "scope"),
+    AllowedAttribute(element: "ol", name: "start"),
+    AllowedAttribute(element: "blockquote", name: "cite"),
+    AllowedAttribute(element: "q", name: "cite"),
+    AllowedAttribute(element: "del", name: "datetime"),
+    AllowedAttribute(element: "ins", name: "datetime"),
+    AllowedAttribute(element: "time", name: "datetime"),
+  ],
+  link_rel: Option[String] = Some("nofollow noopener noreferrer"),
+)
+  derives Equal
+
+let void_elements: Array[String, 5] = ["br", "hr", "img", "wbr", "col"]
+
+let dropped_with_content: Array[String, 17] = [
+  "script", "style", "iframe", "object", "embed", "noscript", "noembed", "noframes", "template", "textarea", "title", "xmp",
+  "svg", "math", "select", "applet", "frameset",
+]
+
+fn listed_in(names: Slice[String], name: StringSlice) -> Bool {
+  for candidate in names {
+    if candidate.slice() == name {
+      return true
+    }
+  }
+  false
+}
+
+fn is_attribute_allowed(policy: SanitizePolicy, element: StringSlice, name: StringSlice) -> Bool {
+  if listed_in(policy.attributes.slice(), name: name) {
+    return true
+  }
+  for allowed in policy.element_attributes {
+    if allowed.element.slice() == element && allowed.name.slice() == name {
+      return true
+    }
+  }
+  false
+}
+
+fn is_url_name(name: StringSlice) -> Bool {
+  name == "href".slice() || name == "src".slice() || name == "cite".slice()
+}
+
+fn is_name_byte(byte: UInt8) -> Bool {
+  (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 58 || byte == 95
+}
+
+fn is_whitespace(byte: UInt8) -> Bool {
+  byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
+}
+
+fn entity_length(bytes: Slice[UInt8], at: USize) -> Option[USize]
+  requires at < bytes.length()
+  ensures match result {
+    Some(length) => length >= 1 && length <= bytes.length() - at
+    None => true
+  }
+{
+  var index = at + 1
+  if index < bytes.length() && bytes[index] == 35 {
+    index += 1
+    var is_hex = false
+    if index < bytes.length() && (bytes[index] == 120 || bytes[index] == 88) {
+      is_hex = true
+      index += 1
+    }
+    let digits_start = index
+    while index < bytes.length() && ((bytes[index] >= 48 && bytes[index] <= 57)
+      || (is_hex && ((bytes[index] >= 97 && bytes[index] <= 102) || (bytes[index] >= 65 && bytes[index] <= 70))))
+      invariant index <= bytes.length() && index >= digits_start && digits_start > at
+      decreases bytes.length() - index
+    {
+      index += 1
+    }
+    if index == digits_start {
+      return None
+    }
+  } else {
+    let name_start = index
+    while index < bytes.length() && ((bytes[index] >= 97 && bytes[index] <= 122) || (bytes[index] >= 65 && bytes[index] <= 90) || (bytes[index] >= 48 && bytes[index] <= 57))
+      invariant index <= bytes.length() && index >= name_start && name_start > at
+      decreases bytes.length() - index
+    {
+      index += 1
+    }
+    if index == name_start {
+      return None
+    }
+  }
+  if index < bytes.length() && bytes[index] == 59 { Some(index + 1 - at) } else { None }
+}
+
+fn push_text_escaped(output: mut List[UInt8], bytes: Slice[UInt8], is_attribute: Bool) {
+  var index: USize = 0
+  while index < bytes.length()
+    invariant index <= bytes.length()
+    decreases bytes.length() - index
+  {
+    let byte = bytes[index]
+    if byte == 38 {
+      match entity_length(bytes, at: index) {
+        Some(length) => {
+          let end = index + length
+          mut output.append_slice(bytes[index..end])
+          index = end
+          continue
+        }
+        None => mut output.append_slice("&amp;".bytes())
+      }
+    } else if byte == 60 {
+      mut output.append_slice("&lt;".bytes())
+    } else if byte == 62 {
+      mut output.append_slice("&gt;".bytes())
+    } else if byte == 34 && is_attribute {
+      mut output.append_slice("&quot;".bytes())
+    } else {
+      mut output.push(byte)
+    }
+    index += 1
+  }
+}
+
+fn hex_value(byte: UInt8) -> UInt32
+  ensures result < 16
+{
+  if byte >= 48 && byte <= 57 {
+    intrinsic::convert(byte - 48)
+  } else if byte >= 97 && byte <= 102 {
+    intrinsic::convert(byte - 87)
+  } else if byte >= 65 && byte <= 70 {
+    intrinsic::convert(byte - 55)
+  } else {
+    0
+  }
+}
+
+fn decoded_url(bytes: Slice[UInt8]) -> Option[String] {
+  var decoded: List[UInt8] = []
+  var index: USize = 0
+  while index < bytes.length()
+    invariant index <= bytes.length()
+    decreases bytes.length() - index
+  {
+    let byte = bytes[index]
+    if byte == 38 {
+      var end = index + 1
+      while end < bytes.length() && bytes[end] != 59 && end - index < 32
+        invariant end <= bytes.length() && end > index
+        decreases bytes.length() - end
+      {
+        end += 1
+      }
+      let has_semicolon = end < bytes.length() && bytes[end] == 59
+      let body = bytes[index + 1..end]
+      if body.length() >= 2 && body[0] == 35 {
+        var value: UInt32 = 0
+        let is_hex = body[1] == 120 || body[1] == 88
+        let digits = if is_hex { body[2..] } else { body[1..] }
+        for digit in digits {
+          if value < 1114112 && hex_value(digit) < 16 {
+            value = if is_hex { value * 16 + hex_value(digit) } else { value * 10 + hex_value(digit) }
+          }
+        }
+        if value == 0 || value >= 1114112 {
+          return None
+        }
+        if value < 128 {
+          let ascii: UInt8 = intrinsic::convert(value)
+          mut decoded.push(ascii)
+        } else {
+          mut decoded.push(63)
+        }
+      } else {
+        let name = String.from_utf8_lossy(body)
+        let replacement = if name == "amp" {
+          "&"
+        } else if name == "lt" {
+          "<"
+        } else if name == "gt" {
+          ">"
+        } else if name == "quot" {
+          "\""
+        } else if name == "apos" {
+          "'"
+        } else if name == "colon" {
+          ":"
+        } else if name == "Tab" {
+          "\t"
+        } else if name == "NewLine" {
+          "\n"
+        } else if name == "sol" {
+          "/"
+        } else {
+          return None
+        }
+        mut decoded.append_slice(replacement.slice().bytes())
+      }
+      index = if has_semicolon { end + 1 } else { end }
+      continue
+    }
+    if byte >= 32 && byte != 127 {
+      mut decoded.push(byte)
+    }
+    index += 1
+  }
+  Some(String.from_utf8_lossy(decoded.slice()))
+}
+
+fn is_safe_url_value(bytes: Slice[UInt8]) -> Bool {
+  match decoded_url(bytes) {
+    Some(decoded) => {
+      var compact: List[UInt8] = []
+      for byte in decoded.slice().bytes() {
+        if !is_whitespace(byte) {
+          mut compact.push(byte)
+        }
+      }
+      is_safe_url(String.from_utf8_lossy(compact.slice()).slice())
+    }
+    None => false
+  }
+}
+
+type Attribute(name: String, value: List[UInt8])
+
+type Tag(name: String, attributes: List[Attribute], is_end: Bool, end: USize)
+
+fn read_tag(bytes: Slice[UInt8], at: USize) -> Option[Tag]
+  requires at < bytes.length()
+{
+  var index = at + 1
+  var is_end = false
+  if index < bytes.length() && bytes[index] == 47 {
+    is_end = true
+    index += 1
+  }
+  let name_start = index
+  while index < bytes.length() && is_name_byte(bytes[index])
+    invariant index <= bytes.length() && index >= name_start
+    decreases bytes.length() - index
+  {
+    index += 1
+  }
+  if index == name_start {
+    return None
+  }
+  let name = String.from_utf8_lossy(bytes[name_start..index]).slice().to_ascii_lowercase()
+  var attributes: List[Attribute] = []
+  while index < bytes.length() && bytes[index] != 62
+    invariant index <= bytes.length()
+    decreases bytes.length() - index
+  {
+    if is_whitespace(bytes[index]) || bytes[index] == 47 {
+      index += 1
+      continue
+    }
+    let attribute_start = index
+    while index < bytes.length() && !is_whitespace(bytes[index]) && bytes[index] != 61 && bytes[index] != 62 && bytes[index] != 47
+      invariant index <= bytes.length() && index >= attribute_start
+      decreases bytes.length() - index
+    {
+      index += 1
+    }
+    if index == attribute_start {
+      index += 1
+      continue
+    }
+    let attribute_name = String.from_utf8_lossy(bytes[attribute_start..index]).slice().to_ascii_lowercase()
+    while index < bytes.length() && is_whitespace(bytes[index])
+      invariant index <= bytes.length()
+      decreases bytes.length() - index
+    {
+      index += 1
+    }
+    var value: List[UInt8] = []
+    if index < bytes.length() && bytes[index] == 61 {
+      index += 1
+      while index < bytes.length() && is_whitespace(bytes[index])
+        invariant index <= bytes.length()
+        decreases bytes.length() - index
+      {
+        index += 1
+      }
+      if index < bytes.length() && (bytes[index] == 34 || bytes[index] == 39) {
+        let quote = bytes[index]
+        index += 1
+        let value_start = index
+        while index < bytes.length() && bytes[index] != quote
+          invariant index <= bytes.length() && index >= value_start
+          decreases bytes.length() - index
+        {
+          index += 1
+        }
+        value = bytes[value_start..index].to_list()
+        if index < bytes.length() {
+          index += 1
+        }
+      } else {
+        let value_start = index
+        while index < bytes.length() && !is_whitespace(bytes[index]) && bytes[index] != 62
+          invariant index <= bytes.length() && index >= value_start
+          decreases bytes.length() - index
+        {
+          index += 1
+        }
+        value = bytes[value_start..index].to_list()
+      }
+    }
+    mut attributes.push(Attribute(name: own attribute_name, value: own value))
+  }
+  if index >= bytes.length() {
+    return None
+  }
+  Some(Tag(name: own name, attributes: own attributes, is_end: is_end, end: index + 1))
+}
+
+fn find_from(bytes: Slice[UInt8], start: USize, pattern: Slice[UInt8]) -> Option[USize]
+  ensures match result {
+    Some(found) => found <= bytes.length() && bytes.length() - found >= pattern.length()
+    None => true
+  }
+{
+  if pattern.is_empty() || pattern.length() > bytes.length() {
+    return None
+  }
+  var index = start
+  while index < bytes.length() && bytes.length() - index >= pattern.length()
+    decreases bytes.length() - index
+  {
+    var is_match = true
+    for offset in 0..pattern.length() {
+      if index + offset < bytes.length() && lowered(bytes[index + offset]) != pattern[offset] {
+        is_match = false
+      }
+    }
+    if is_match {
+      return Some(index)
+    }
+    index += 1
+  }
+  None
+}
+
+fn skip_dropped(bytes: Slice[UInt8], start: USize, name: StringSlice) -> USize
+  ensures result <= bytes.length()
+{
+  let closing = "</${name}".slice().bytes().to_list()
+  match find_from(bytes, start: start, pattern: closing.slice()) {
+    Some(found) => {
+      var index = found + closing.length()
+      while index < bytes.length() && bytes[index] != 62
+        decreases bytes.length() - index
+      {
+        index += 1
+      }
+      if index < bytes.length() { index + 1 } else { bytes.length() }
+    }
+    None => bytes.length()
+  }
+}
+
+fn push_tag(output: mut List[UInt8], tag: Tag, policy: SanitizePolicy) {
+  mut output.push(60)
+  mut output.append_slice(tag.name.slice().bytes())
+  for attribute in tag.attributes {
+    let name = attribute.name.slice()
+    if !is_attribute_allowed(policy, element: tag.name.slice(), name: name) {
+      continue
+    }
+    if is_url_name(name) && !is_safe_url_value(attribute.value.slice()) {
+      continue
+    }
+    mut output.push(32)
+    mut output.append_slice(name.bytes())
+    mut output.append_slice("=\"".bytes())
+    push_text_escaped(mut output, bytes: attribute.value.slice(), is_attribute: true)
+    mut output.push(34)
+  }
+  if tag.name == "a" {
+    match policy.link_rel {
+      Some(rel) => {
+        mut output.append_slice(" rel=\"".bytes())
+        push_text_escaped(mut output, bytes: rel.slice().bytes(), is_attribute: true)
+        mut output.push(34)
+      }
+      None => {}
+    }
+  }
+  mut output.push(62)
+}
+
+fn push_end_tag(output: mut List[UInt8], name: StringSlice) {
+  mut output.append_slice("</".bytes())
+  mut output.append_slice(name.bytes())
+  mut output.push(62)
+}
+
+public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()) -> Html {
+  let bytes = input.bytes()
+  var output: List[UInt8] = []
+  var open: List[String] = []
+  var text_start: USize = 0
+  var index: USize = 0
+  while index < bytes.length()
+    invariant text_start <= index && index <= bytes.length()
+    decreases bytes.length() - index
+  {
+    if bytes[index] != 60 {
+      index += 1
+      continue
+    }
+    push_text_escaped(mut output, bytes: bytes[text_start..index], is_attribute: false)
+    if index + 3 < bytes.length() && bytes[index + 1] == 33 && bytes[index + 2] == 45 && bytes[index + 3] == 45 {
+      index = match find_from(bytes, start: index + 4, pattern: "-->".bytes()) {
+        Some(end) => end + 3
+        None => bytes.length()
+      }
+      text_start = index
+      continue
+    }
+    if index + 1 < bytes.length() && (bytes[index + 1] == 33 || bytes[index + 1] == 63) {
+      var end = index + 1
+      while end < bytes.length() && bytes[end] != 62
+        decreases bytes.length() - end
+      {
+        end += 1
+      }
+      index = if end < bytes.length() { end + 1 } else { bytes.length() }
+      text_start = index
+      continue
+    }
+    match read_tag(bytes, at: index) {
+      Some(tag) => {
+        let next = if tag.end > index && tag.end <= bytes.length() { tag.end } else { bytes.length() }
+        if tag.is_end {
+          var depth = open.length()
+          var position: Option[USize] = None
+          while depth > 0
+            decreases depth
+          {
+            depth -= 1
+            if depth < open.length() && open[depth] == tag.name && position is None {
+              position = Some(depth)
+            }
+          }
+          match position {
+            Some(target) => {
+              while open.length() > target
+                decreases open.length()
+              {
+                match mut open.pop() {
+                  Some(name) => push_end_tag(mut output, name: name.slice())
+                  None => {}
+                }
+              }
+            }
+            None => {}
+          }
+          index = next
+        } else if listed_in(dropped_with_content[..], name: tag.name.slice()) {
+          index = if next <= bytes.length() { skip_dropped(bytes, start: next, name: tag.name.slice()) } else { bytes.length() }
+          if index < next {
+            index = next
+          }
+        } else {
+          if listed_in(policy.elements.slice(), name: tag.name.slice()) {
+            push_tag(mut output, tag: tag, policy: policy)
+            if !listed_in(void_elements[..], name: tag.name.slice()) && open.length() < 256 {
+              mut open.push(tag.name.copy())
+            }
+          }
+          index = next
+        }
+      }
+      None => {
+        mut output.append_slice("&lt;".bytes())
+        index += 1
+      }
+    }
+    text_start = index
+  }
+  push_text_escaped(mut output, bytes: bytes[text_start..bytes.length()], is_attribute: false)
+  while open.length() > 0
+    decreases open.length()
+  {
+    match mut open.pop() {
+      Some(name) => push_end_tag(mut output, name: name.slice())
+      None => {}
+    }
+  }
+  Html(text: String.from_utf8_lossy(output.slice()))
+}
