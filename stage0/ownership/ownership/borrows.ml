@@ -434,10 +434,10 @@ let call_result builder (call : Mir.call) =
         (viewable_arguments builder call);
   }
 
-(* What the part of a lending call holds. A part that is no view is a part
-   of the call's receiver, its first argument, or a value that the callee
-   made: it views what the receiver views. A part that is a view may be a
-   view of any argument, as a returned view may. *)
+(* The views that the part of a lending call holds. A part that is no view
+   is a part of the call's receiver, its first argument, or a value that
+   the callee made: it has the receiver's views. A part that is a view may
+   be a view of any argument, as a returned view may. *)
 let lent_part builder (call : Mir.call) ~part_type =
   if is_view builder.context part_type then call_result builder call
   else
@@ -712,7 +712,7 @@ let statement builder (statement : Mir.statement) =
       let is_loop_element = List.mem part builder.loop_elements in
       (* The collection may itself be a part that a lending call lent and
          that the check does not track. Its element is then such a part
-         too: it views what the collection views. *)
+         too, with the collection's views. *)
       let element_of collection collection_type =
         if is_lent_part builder collection then None
         else
@@ -884,7 +884,7 @@ let terminator builder ~returns (basic : Mir.basic_block) =
       (* A place whose type is [Plain] is lent as a copy. Any other place is
          lent where it is, so it outlives the method: a part of a value that
          the method owns would dangle. The part of a lending call that the
-         check does not track is a part of what the call's receiver views. *)
+         check does not track has the views of the call's receiver. *)
       let lent_by_address (operand : Mir.operand) =
         match operand with
         | Use { place; type_; _ } | Borrow { place; type_; _ } | Take { place; type_; _ } ->
