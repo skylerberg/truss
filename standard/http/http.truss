@@ -3003,7 +3003,7 @@ public type Message =
 
 type Sending(outbound: tasks::Channel[flow::Outbound], ack: tasks::Channel[Bool], masks: Option[random::Generator], is_closed: Bool)
 
-fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_final: Bool) -> Result[Unit, Error]
+fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_final: Bool, is_compressed: Bool = false) -> Result[Unit, Error]
   uses Tasks
 {
   if sending.is_closed {
@@ -3021,7 +3021,7 @@ fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_fin
     }
     None => None
   }
-  let bytes = websocket::encode(opcode, payload: payload, is_final: is_final, mask: mask)
+  let bytes = websocket::encode(opcode, payload: payload, is_final: is_final, mask: mask, is_compressed: is_compressed)
   if opcode == websocket::close_opcode {
     sending.is_closed = true
   }
@@ -3039,13 +3039,30 @@ public opaque type WebSocketReader(
   buffer: List[UInt8],
   fragments: List[UInt8],
   fragment_opcode: UInt8,
+  is_fragment_compressed: Bool,
   limit: USize,
   is_server: Bool,
+  is_deflate: Bool,
   sending: Sending,
   close_code: Option[UInt16],
 )
 
-public opaque type WebSocketWriter(sending: Sending)
+public opaque type WebSocketWriter(sending: Sending, compresses: Bool)
+
+let compression_minimum: USize = 256
+
+fn send_message(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], compresses: Bool) -> Result[Unit, Error]
+  uses Tasks
+{
+  if compresses && payload.length() >= compression_minimum {
+    var packed = compression::compress(payload, format: compression::Format.Deflate, level: compression::Level.Fastest)
+    mut packed.push(0)
+    if packed.length() < payload.length() {
+      return send_frame(mut sending, opcode: opcode, payload: packed.slice(), is_final: true, is_compressed: true)
+    }
+  }
+  send_frame(mut sending, opcode: opcode, payload: payload, is_final: true)
+}
 
 public type WebSocketParts(reader: WebSocketReader, writer: WebSocketWriter)
 
@@ -3067,7 +3084,7 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
     return Ok(None)
   }
   while true {
-    match websocket::parse(self.buffer.slice(), is_server: self.is_server, limit: self.limit) {
+    match websocket::parse(self.buffer.slice(), is_server: self.is_server, limit: self.limit, is_deflate: self.is_deflate) {
       Incomplete => {
         let count = mut self.body.read(mut self.buffer, limit: 65536)?
         if count == 0 {
@@ -3104,15 +3121,25 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
             return Err(fail_socket(mut self, code: websocket::protocol_error, reason: "a new message in the middle of a fragmented one"))
           } else {
             self.fragment_opcode = opcode
+            self.is_fragment_compressed = frame.is_compressed
           }
           if self.fragments.length() > self.limit || frame.payload.length() > self.limit - self.fragments.length() {
             return Err(fail_socket(mut self, code: websocket::message_too_big, reason: "a message larger than the limit"))
           }
           mut self.fragments.append(own frame.payload)
           if frame.is_final {
-            let bytes = map::exchange(mut self.fragments, value: [])
+            var bytes = map::exchange(mut self.fragments, value: [])
             let kind = self.fragment_opcode
             self.fragment_opcode = 0
+            if self.is_fragment_compressed {
+              self.is_fragment_compressed = false
+              mut bytes.append_slice([0, 0, 255, 255][..])
+              bytes = match compression::inflate_flushed(bytes.slice(), limit: self.limit) {
+                Ok(plain) => own plain
+                Err(TooLarge(_)) => return Err(fail_socket(mut self, code: websocket::message_too_big, reason: "a message larger than the limit"))
+                Err(_) => return Err(fail_socket(mut self, code: websocket::invalid_data, reason: "a compressed message that does not decompress"))
+              }
+            }
             if kind == websocket::text_opcode {
               return match String.from_utf8(own bytes) {
                 Ok(text) => Ok(Some(Message.Text(text: own text)))
@@ -3135,21 +3162,21 @@ public fn WebSocketWriter.send(mut self, message: Message) -> Result[Unit, Error
   uses Tasks
 {
   match message {
-    Text(text) => send_frame(mut self.sending, opcode: websocket::text_opcode, payload: text.slice().bytes(), is_final: true)
-    Binary(bytes) => send_frame(mut self.sending, opcode: websocket::binary_opcode, payload: bytes.slice(), is_final: true)
+    Text(text) => send_message(mut self.sending, opcode: websocket::text_opcode, payload: text.slice().bytes(), compresses: self.compresses)
+    Binary(bytes) => send_message(mut self.sending, opcode: websocket::binary_opcode, payload: bytes.slice(), compresses: self.compresses)
   }
 }
 
 public fn WebSocketWriter.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
   uses Tasks
 {
-  send_frame(mut self.sending, opcode: websocket::text_opcode, payload: text.bytes(), is_final: true)
+  send_message(mut self.sending, opcode: websocket::text_opcode, payload: text.bytes(), compresses: self.compresses)
 }
 
 public fn WebSocketWriter.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
   uses Tasks
 {
-  send_frame(mut self.sending, opcode: websocket::binary_opcode, payload: bytes, is_final: true)
+  send_message(mut self.sending, opcode: websocket::binary_opcode, payload: bytes, compresses: self.compresses)
 }
 
 public fn WebSocketWriter.ping(mut self, payload: Slice[UInt8] = []) -> Result[Unit, Error]
@@ -3219,6 +3246,7 @@ fn new_socket(
   masks: own Option[random::Generator],
   protocol: own Option[String],
   limit: USize,
+  deflate: Option[websocket::Deflate],
 ) -> WebSocket {
   let reader_masks = match masks {
     Some(generator) => {
@@ -3232,12 +3260,18 @@ fn new_socket(
     buffer: [],
     fragments: [],
     fragment_opcode: 0,
+    is_fragment_compressed: false,
     limit: limit,
     is_server: is_server,
+    is_deflate: deflate is Some(_),
     sending: Sending(outbound: outbound.copy(), ack: tasks::Channel.new(capacity: 1), masks: reader_masks, is_closed: false),
     close_code: None,
   )
-  let writer = WebSocketWriter(sending: Sending(outbound: outbound.copy(), ack: tasks::Channel.new(capacity: 1), masks: masks, is_closed: false))
+  let compresses = match deflate {
+    Some(agreed) => agreed.compresses
+    None => false
+  }
+  let writer = WebSocketWriter(sending: Sending(outbound: outbound.copy(), ack: tasks::Channel.new(capacity: 1), masks: masks, is_closed: false), compresses: compresses)
   WebSocket(reader: own reader, writer: own writer, protocol: own protocol)
 }
 
@@ -3263,6 +3297,7 @@ public fn websocket(
   responder: mut Responder,
   protocols: Slice[String] = [],
   message_limit: USize = 16777216,
+  compresses: Bool = true,
 ) -> Result[WebSocket, Error]
   uses Tasks
 {
@@ -3288,8 +3323,16 @@ public fn websocket(
     Some(name) => mut fields.push(hpack::Field(name: "Sec-WebSocket-Protocol", value: name.copy()))
     None => {}
   }
+  let acceptance = if compresses { websocket::accepted_deflate(request.headers.get("Sec-WebSocket-Extensions")) } else { None }
+  let deflate = match acceptance {
+    Some(accepted) => {
+      mut fields.push(hpack::Field(name: "Sec-WebSocket-Extensions", value: accepted.response.copy()))
+      Some(accepted.deflate)
+    }
+    None => None
+  }
   mut responder.switch_protocols(own fields)?
-  Ok(new_socket(own request.body, outbound: responder.outbound, is_server: true, masks: None, protocol: own protocol, limit: message_limit))
+  Ok(new_socket(own request.body, outbound: responder.outbound, is_server: true, masks: None, protocol: own protocol, limit: message_limit, deflate: deflate))
 }
 
 public type Event(data: String, name: Option[String] = None, id: Option[String] = None, retry_milliseconds: Option[UInt64] = None)
@@ -3489,6 +3532,7 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   protocols: Slice[String],
   limits: Limits,
   message_limit: USize,
+  is_deflate_offered: Bool,
   seed: UInt64,
   session: (fn(mut WebSocket) -> Output uses Granted),
 ) -> Result[Output, Error]
@@ -3511,6 +3555,10 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
     }
     None => None
   }
+  let deflate = match websocket::agreed_deflate(opening.headers.get("Sec-WebSocket-Extensions"), is_offered: is_deflate_offered) {
+    Ok(agreed) => agreed
+    Err(reason) => return Err(malformed(reason.slice()))
+  }
   let unlimited: USize = 18446744073709551615
   let chunks = tasks::Channel[flow::Chunk].new(capacity: 16)
   let outbound = tasks::Channel[flow::Outbound].new(capacity: 16)
@@ -3526,6 +3574,7 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
         masks: Some(random::Generator.seeded(seed)),
         protocol: own protocol,
         limit: message_limit,
+        deflate: deflate,
       )
       let output = session(mut socket)
       outbound.close()
@@ -3543,6 +3592,7 @@ public fn Client.websocket[Output, capability Granted](
   headers: Headers = Headers(entries: []),
   protocols: List[String] = [],
   message_limit: USize = 16777216,
+  compresses: Bool = true,
 ) -> Result[Output, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
 {
@@ -3578,6 +3628,9 @@ public fn Client.websocket[Output, capability Granted](
     }
     mut upgrade.set("Sec-WebSocket-Protocol", value: offered.slice())
   }
+  if compresses {
+    mut upgrade.set("Sec-WebSocket-Extensions", value: websocket::deflate_offer.slice())
+  }
   var request = request_head(Method.Get, url: url, headers: upgrade, body_length: 0)
   let ending = request.length().saturating_subtract(2)
   mut request.truncate(ending)
@@ -3589,9 +3642,9 @@ public fn Client.websocket[Output, capability Granted](
       if forwarding is Some(_) {
         return Err(Error.Unsupported(message: "a ws:// WebSocket through an HTTP proxy"))
       }
-      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
+      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     }
-    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, seed: seed, session: session)
+    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     Multiplexed(..) => Err(Error.Unsupported(message: "a WebSocket over HTTP/2"))
   }
 }
