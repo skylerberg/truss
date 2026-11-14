@@ -90,17 +90,8 @@ type kind =
    nearest to its files: its stamp when read, its text, and its fingerprint. *)
 type read_file = { stamp : string; text : string; print : string }
 
-(* The database's state for a session of the session layer. [read_ahead]
-   holds the files read to open the session, which its first scan takes
-   instead of reading them again. *)
-type project = {
-  kind : kind;
-  update : Session.t -> unit;
-  files : Files.t;
-  mutable retried : bool;
-  mutable read_ahead : (string, read_file) Hashtbl.t;
-}
-
+(* The database's state for a session of the session layer. *)
+type project = { kind : kind; update : Session.t -> unit; files : Files.t; mutable retried : bool }
 type Session.attachment += Project of project
 type session = Session.t
 
@@ -221,11 +212,11 @@ let resolve_registry session ~before =
       end)
     before
 
-let scan (files : Files.t) session =
+(* Brings a session's inputs up to date with its files. [read_ahead] holds
+   the files read to open the session, which the first scan takes instead of
+   reading them again, and empties. *)
+let scan ~read_ahead (files : Files.t) session =
   let engine = Session.engine session in
-  let project = project session in
-  let read_ahead = project.read_ahead in
-  project.read_ahead <- Hashtbl.create 0;
   (* A file read ahead whose stamp has changed since is read again. *)
   let read path stamp =
     match Hashtbl.find_opt read_ahead path with
@@ -250,6 +241,7 @@ let scan (files : Files.t) session =
               Session.note_file session path (Some print)
           | None -> ()))
     (files.list ());
+  Hashtbl.reset read_ahead;
   List.iter
     (fun path ->
       if not (Hashtbl.mem present path) then begin
@@ -283,7 +275,7 @@ let fingerprints (files : Files.t) read_ahead () =
     (files.list ())
 
 let attach_project ?(read_ahead = Hashtbl.create 0) session ~kind (files : Files.t) =
-  Session.attach session (Project { kind; update = scan files; files; retried = false; read_ahead })
+  Session.attach session (Project { kind; update = scan ~read_ahead files; files; retried = false })
 
 (* The session for a set of files: its own state if it has one, else the
    nearest saved state, else a new one over the standard library. This is
@@ -668,13 +660,7 @@ let open_library ?(files = Standard_library.files) name =
   | Ok (session, _) ->
       Session.attach session
         (Project
-           {
-             kind = Library;
-             update = set_library files;
-             files = Files.of_texts [];
-             retried = true;
-             read_ahead = Hashtbl.create 0;
-           });
+           { kind = Library; update = set_library files; files = Files.of_texts []; retried = true });
       update session;
       Ok session
 
