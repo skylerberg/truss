@@ -788,7 +788,7 @@ Rules: [Methods](SPECIFICATION.md#methods).
 
 ### Overloads by receiver mode
 
-Rules: [Versions by receiver mode](SPECIFICATION.md#versions-by-receiver-mode),
+Rules: [Overloads by receiver mode](SPECIFICATION.md#overloads-by-receiver-mode),
 [Method lookup](SPECIFICATION.md#method-lookup).
 
 A method can be overloaded on the mode of `self`, and on nothing else. One
@@ -1384,7 +1384,7 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 
 ### Dynamic dispatch
 
-Rules: [Values of any type with a trait](SPECIFICATION.md#values-of-any-type-with-a-trait).
+Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
 
 | Need | Use |
 |---|---|
