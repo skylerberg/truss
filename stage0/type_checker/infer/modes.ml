@@ -92,27 +92,58 @@ let rec immutable state env (value : expression) : immutable option =
   | _ -> Some Not_a_place
 
 (* Records that a place is mutated: every index expression in the place
-   uses the [mut self] version of [at], which lends its element [mut]. *)
-let rec use_mutable_indexes state (value : expression) =
+   is a call of [IndexMut.at], which lends its element [mut]. A collection
+   whose type implements [Index] alone lends each element read-only, so an
+   element of it cannot be changed in place. That is reported with [code]
+   where the place is otherwise one that can change. *)
+let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) (value : expression)
+    =
   match value.kind with
-  | Member (base, _) | Parenthesized base | Mode (_, base) -> use_mutable_indexes state base
+  | Member (base, _) | Parenthesized base | Mode (_, base) ->
+      use_mutable_indexes state ~report_with base
   | Bracket (base, _) ->
       (match state.tables.calls.(value.id) with
-      | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                call with
-                callee = Trait_method { method_ with receiver = Mut };
-                arguments =
-                  List.map
-                    (fun (argument : Tables.argument) ->
-                      if argument.parameter_index = 0 then { argument with mode = Types.Mut }
-                      else argument)
-                    arguments;
-              }
+      | Some
+          ({ callee = Trait_method ({ name = "at"; self_type; _ } as method_); arguments; _ } as
+           call) -> (
+          let index_mut = trait_reference (Well_known.path Index_mut) in
+          match implements state self_type index_mut with
+          | Some evidence ->
+              state.tables.calls.(value.id) <-
+                Some
+                  {
+                    call with
+                    callee =
+                      Trait_method
+                        {
+                          method_ with
+                          trait = index_mut;
+                          receiver = Mut;
+                          evidence = evidence_of evidence;
+                        };
+                    arguments =
+                      List.map
+                        (fun (argument : Tables.argument) ->
+                          if argument.parameter_index = 0 then { argument with mode = Types.Mut }
+                          else argument)
+                        arguments;
+                  }
+          | None ->
+              Option.iter
+                (fun code ->
+                  let assigns =
+                    Option.is_some
+                      (implements state self_type (trait_reference (Well_known.path Index_assign)))
+                  in
+                  report state code value.span
+                    (Printf.sprintf
+                       "An element of `%s` cannot be changed in place: `%s` implements `Index`, \
+                        which lends an element read-only, and not `IndexMut`.%s"
+                       (show state self_type) (show state self_type)
+                       (if assigns then " Assign the whole element with `=`." else "")))
+                report_with)
       | _ -> ());
-      use_mutable_indexes state base
+      use_mutable_indexes state ~report_with base
   | _ -> ()
 
 type mutation =
@@ -156,6 +187,10 @@ let mutate state env ~(by : mutation) (value : expression) =
         "Only a place, such as a variable, a field, or an element, can be assigned."
   | Some (Lent_read_only | Not_a_place), Mut_mark -> ());
   use_mutable_indexes state value
+    ~report_with:
+      (match immutable state env value with
+      | None when not (is_formula env) -> Some code
+      | _ -> None)
 
 let rec is_part_of_constant state (value : expression) =
   match value.kind with

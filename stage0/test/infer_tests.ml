@@ -447,6 +447,28 @@ let () =
         "types.missing_mark";
       one_diagnostic Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key_3
         "types.not_assignable");
+  (* [Index] lends an element read-only, [IndexMut] lends it [mut], and
+     [IndexAssign] replaces it. *)
+  (let readings = Fixtures.Infer.readings in
+   let assign = Fixtures.Infer.readings_assign in
+   test "an element of a type that implements `Index` alone is read" (fun () ->
+       fine (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_read));
+   test "an element of a type that implements `Index` alone is not assigned" (fun () ->
+       one_diagnostic ~says:"and not `IndexMut`"
+         (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_not_assigned)
+         "types.not_assignable");
+   test "an element of a type that implements `Index` alone is not passed `mut`" (fun () ->
+       one_diagnostic ~says:"and not `IndexMut`"
+         (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_not_passed_mut)
+         "types.wrong_mark");
+   test "an assignment through an index calls `assign` without `IndexMut`" (fun () ->
+       fine
+         (readings ^ assign
+        ^ Fixtures.Infer.assignment_through_an_index_calls_assign_without_index_mut));
+   test "a compound assignment through an index needs `IndexMut`" (fun () ->
+       one_diagnostic ~says:"Assign the whole element with `=`."
+         (readings ^ assign ^ Fixtures.Infer.compound_assignment_through_an_index_needs_index_mut)
+         "types.not_assignable"));
   (let keep = Fixtures.Infer.keep in
    test "a type that holds no view is Storable" (fun () ->
        fine (keep ^ Fixtures.Infer.type_that_holds_no_view_is_storable));

@@ -1,0 +1,3 @@
+fn f(readings: Readings) -> Int64 {
+  readings[0] + readings[1]
+}

@@ -1,0 +1,19 @@
+type Readings(values: List[Int64])
+
+impl Index for Readings {
+  type Key = USize
+  type Output = Int64
+
+  fn contains_key(self, key: USize) -> Bool {
+    key < self.values.length()
+  }
+
+  fn at(self, key: USize) lends Int64 {
+    self.values[key]
+  }
+}
+
+fn raise(reading: mut Int64) {
+  reading += 1
+}
+

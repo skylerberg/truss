@@ -412,15 +412,19 @@ caller's statement, as Swift's `_read` and `_modify` accessors do; it is how
   update a cached total, but every reader of a call would then follow code
   that runs after the statement, and the checker and the prover would need
   rules for a statement that leaves early. A type that must update other
-  state when a part changes takes the new value in a method, as `BitSet.set`
-  does.
+  state when a part changes takes the new value in a method, as
+  `IndexAssign.assign` does for `bits[i] = true`.
 - **User collections are not second-class.** `[]` works through `Index`, and
   `for` through `count` and `element`, so a user's `Grid` gets the same
   syntax and proof rules as a `List`.
 - **A lent part need not be stored in `self`.** A method can lend a value it
-  computes. A change to such a value is not written back, so a collection
-  that packs its elements, such as a set of bits, is read with one method
-  and changed with another.
+  computes. A change to such a value is not written back.
+- **Reading an element and changing it in place are separate traits.**
+  `Index` lends an element read-only, and `IndexMut` lends it `mut`. A
+  collection that packs its elements, such as a set of bits, has no place
+  to lend `mut`, so it implements `Index` to read an element and
+  `IndexAssign` to replace one. Rust's `Index` returns a reference, so there
+  such a collection cannot be indexed.
 - **A lending call lends its whole receiver,** since the method was proven
   as if nothing else touches `self` while the part is lent. `List`, `Slice`,
   and `Array` can lend two parts because their elements at different

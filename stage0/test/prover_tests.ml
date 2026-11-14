@@ -290,6 +290,13 @@ let () =
      alone. *)
   test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
       proven Fixtures.Prover.loop_over_a_cursor_counts_a_body_that_calls_an);
+  (let samples = Fixtures.Prover.samples in
+   test "an assignment through an index is to a key the collection accepts" (fun () ->
+       proven (samples ^ Fixtures.Prover.assignment_through_an_index_is_to_a_key_the_collection));
+   test "an assignment through an index to a key the collection does not accept" (fun () ->
+       not_proven
+         (samples ^ Fixtures.Prover.assignment_through_an_index_to_a_key_the_collection_does)
+         "prover.requires"));
   test "a later arm sees an earlier arm's guard's changes" (fun () ->
       proven Fixtures.Prover.later_arm_sees_an_earlier_arms_guards_changes);
   test "assigning an element changes only that element" (fun () ->

@@ -225,7 +225,9 @@ impl Index for collections::Deque[Element] {
       self.back[key - self.front.length()]
     }
   }
+}
 
+impl IndexMut for collections::Deque[Element] {
   fn at(mut self, key: USize) lends mut Element
     requires key < self.length()
     cost time O(1)

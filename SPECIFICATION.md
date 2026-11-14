@@ -1421,10 +1421,17 @@ map_entry = expression ":" expression ;
 | `ports[own name] = 8080` | Inserts or replaces the value for `name` |
 
 - A type supports `[]` by implementing the prelude trait `Index` (see
-  [Associated types](#associated-types)).
-- `collection[key] = value` inserts a missing key when the type implements
-  `IndexAssign`. For any other type, it replaces the element that `Index`
-  lends, so the key is there.
+  [Associated types](#associated-types)), which lends an element read-only.
+- A type whose elements change in place also implements `IndexMut`, whose
+  `at(mut self, key)` lends an element `mut`. `items[i].name = text`,
+  `items[i] += 1`, and `mut items[i]` need it.
+- `collection[key] = value` calls `assign` when the type implements
+  `IndexAssign`. The collection must accept the key, by its `accepts_key`:
+  a `Map` accepts every key and inserts a missing one, and a `BitSet`
+  accepts the keys it has. For any other type, the assignment replaces the
+  element that `IndexMut` lends, so the key is there.
+- A type that computes its elements, such as a `BitSet`, implements `Index`
+  and `IndexAssign` and not `IndexMut`: it has no place to lend `mut`.
 - Strings cannot be indexed.
 
 ## Expressions
@@ -1916,8 +1923,6 @@ trait Index {
     cost time finite
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
-  fn at(mut self, key: Self.Key) lends mut Self.Output
-    requires self.contains_key(key)
 }
 ```
 
@@ -2240,8 +2245,8 @@ The prelude is in scope in every file, and all its names are
 - the built-in types, `Option` and `Result`, and `List`, `Slice`, `Map`, and
   `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Copyable`, `Plain`, `Storable`, `Index`, `IndexAssign`, `Iterable`,
-  `Cursor`, `FromTemplate`, `Model`, and the arithmetic traits
+  `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
+  `Iterable`, `Cursor`, `FromTemplate`, `Model`, and the arithmetic traits
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`

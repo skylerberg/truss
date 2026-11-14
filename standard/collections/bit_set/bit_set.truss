@@ -447,21 +447,44 @@ public fn collections::BitSet.complement(mut self)
   clear_unused_bits(mut self.words, length: self.length)
 }
 
-public fn collections::BitSet.is_set(self, index: USize) -> Bool
-  requires index < self.length()
-  cost time O(1)
-  cost allocations == 0
-{
-  self.bit(index)
+impl Index for collections::BitSet {
+  type Key = USize
+  type Output = Bool
+
+  fn contains_key(self, key: USize) -> Bool
+    ensures result == (key < self.length())
+    cost time O(1)
+    cost allocations == 0
+  {
+    key < self.length
+  }
+
+  fn at(self, key: USize) lends Bool
+    requires key < self.length()
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.bit(key)
+  }
 }
 
-public fn collections::BitSet.set(mut self, index: USize, value: Bool)
-  requires index < self.length()
-  ensures self.length() == old(self.length())
-  cost time O(1)
-  cost allocations == 0
-{
-  mut self.assign_bit(index, value: value)
+impl IndexAssign for collections::BitSet {
+  fn accepts_key(self, key: USize) -> Bool
+    ensures result == (key < self.length())
+    cost time O(1)
+    cost allocations == 0
+  {
+    key < self.length
+  }
+
+  fn assign(mut self, key: own USize, value: own Bool)
+    requires key < self.length()
+    ensures self.length() == old(self.length())
+    cost time O(1)
+    cost allocations == 0
+  {
+    mut self.assign_bit(key, value: value)
+  }
 }
 
 impl Iterable for collections::BitSet {

@@ -12,6 +12,7 @@ type t =
   | Display
   | Default
   | Index
+  | Index_mut
   | Index_assign
   | Cursor
   | Model

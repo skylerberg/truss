@@ -9,6 +9,7 @@ type t =
   | Display
   | Default
   | Index
+  | Index_mut
   | Index_assign
   | Cursor
   | Model
@@ -64,6 +65,7 @@ let all =
     Display;
     Default;
     Index;
+    Index_mut;
     Index_assign;
     Cursor;
     Model;
@@ -119,6 +121,7 @@ let modules_and_name = function
   | Display -> ([ "core" ], "Display")
   | Default -> ([ "core" ], "Default")
   | Index -> ([ "core" ], "Index")
+  | Index_mut -> ([ "core" ], "IndexMut")
   | Index_assign -> ([ "core" ], "IndexAssign")
   | Cursor -> ([ "core" ], "Cursor")
   | Model -> ([ "core" ], "Model")
