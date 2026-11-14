@@ -1315,10 +1315,10 @@ let () =
       | Ok cached ->
           let request = Solver.request query in
           if
-            Solver.read request (List.hd (Solver.ask_all cached [ (request, query) ]))
+            Solver.read request (List.hd (Solver.solve_all cached [ (request, query) ]))
             <> Solver.Proven
           then fail "expected the stored answer";
-          if (Unix.stat file).st_mtime < 2. then fail "the answer's file was not marked as asked");
+          if (Unix.stat file).st_mtime < 2. then fail "the answer's file was not marked as read");
   test "a query's text names nothing by its Truss name" (fun () ->
       let database =
         Support.setup [ ("app::main", Fixtures.Prover.querys_text_names_nothing_by_its_truss_name) ]
@@ -1613,7 +1613,7 @@ let again before after =
   | actual -> fail "before the edit: %s" (String.concat "; " (Support.codes actual)));
   Database.For_testing.set_text engine file after;
   Engine.For_testing.clear_log engine;
-  let solved = Solver.solved solver in
+  let runs_before = Solver.queries_run solver in
   (match prove () with
   | [] -> ()
   | actual -> fail "after the edit: %s" (String.concat "; " (Support.codes actual)));
@@ -1625,7 +1625,7 @@ let again before after =
         else None)
       (Engine.For_testing.computed engine Prover.proof)
   in
-  (List.sort_uniq compare proven, Solver.solved solver - solved)
+  (List.sort_uniq compare proven, Solver.queries_run solver - runs_before)
 
 let expect_again before after ~proven ~solved =
   let actual, count = again before after in

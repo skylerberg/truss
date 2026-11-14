@@ -635,11 +635,12 @@ let run_response (evaluator : evaluator) run code_key =
 let responses (evaluator : evaluator) database solver requests =
   (* Questions of different definitions can ask the same query, which is
      run once. *)
-  let asked = Hashtbl.create 64 in
+  let distinct_requests = Hashtbl.create 64 in
   List.iter
     (function
-      | Solve (question, request) when not (Hashtbl.mem asked (Solver.request_key request)) ->
-          Hashtbl.replace asked (Solver.request_key request) (question, request)
+      | Solve (question, request)
+        when not (Hashtbl.mem distinct_requests (Solver.request_key request)) ->
+          Hashtbl.replace distinct_requests (Solver.request_key request) (question, request)
       | Solve _ | Run _ -> ())
     requests;
   let solver_requests =
@@ -648,13 +649,13 @@ let responses (evaluator : evaluator) database solver requests =
         match question_query database question with
         | Some (query, _, _) -> (request, query) :: solver_requests
         | None -> Compiler_bug.bug ~stage:"Prover" "a pending question asks no query")
-      asked []
+      distinct_requests []
   in
   let answers = Hashtbl.create (List.length solver_requests) in
   List.iter2
     (fun (request, _) answer -> Hashtbl.replace answers (Solver.request_key request) answer)
     solver_requests
-    (Solver.ask_all solver solver_requests);
+    (Solver.solve_all solver solver_requests);
   List.map
     (fun request ->
       ( request_key request,

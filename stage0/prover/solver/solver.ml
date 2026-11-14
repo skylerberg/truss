@@ -5,7 +5,7 @@ let version = "5.3.3"
 (* The limit in steps every query runs with. *)
 let steps = 1_000_000
 
-type t = { program : string; cache : string option; mutable solved : int }
+type t = { program : string; cache : string option; mutable queries_run : int }
 
 let find ?cache () =
   let program =
@@ -20,7 +20,7 @@ let find ?cache () =
            version program)
   | 0, output, _ ->
       let expected = "Z3 version " ^ version in
-      if String.starts_with ~prefix:expected output then Ok { program; cache; solved = 0 }
+      if String.starts_with ~prefix:expected output then Ok { program; cache; queries_run = 0 }
       else
         Error
           (Printf.sprintf
@@ -90,7 +90,7 @@ let rec show_sexp = function
   | Atom atom -> atom
   | List items -> "(" ^ String.concat " " (List.map show_sexp items) ^ ")"
 
-(* A query as the solver is asked it: its key, and for each symbol whose
+(* A query as it is sent to the solver: its key, and for each symbol whose
    value a counterexample should give, the canonical name the text calls it
    by. It holds no text: a query's text is about 100 KB, and a run keeps
    every request it makes, so the text is rendered again from the query
@@ -98,7 +98,7 @@ let rec show_sexp = function
 type request = {
   key : string;
   requested : (Logic.symbol * string) list;
-  asked : string list;  (** The [get-value] argument for each of [requested], in order. *)
+  value_arguments : string list;  (** The [get-value] argument for each of [requested], in order. *)
 }
 
 (* An answer in the canonical names, the same for every query with the
@@ -108,10 +108,10 @@ type canonical = Proven_canonical | Values of (string * string) list | Out_of_st
 let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
 
 (* Queries are solved on several domains at once, which share the cache
-   and the count of solved queries. *)
+   and the count of queries run. *)
 let lock = Mutex.create ()
 let locked work = Mutex.protect lock work
-let key_of_asked text asked = key_of_text text ^ String.concat "," asked
+let request_key_of_text text value_arguments = key_of_text text ^ String.concat "," value_arguments
 
 let request ?(values = []) ?(terms = []) query =
   let rendering = Logic.render query in
@@ -129,8 +129,13 @@ let request ?(values = []) ?(terms = []) query =
       terms
     |> List.mapi (fun index (name, text) -> ((name, Printf.sprintf "#%d" index), text))
   in
-  let requested = List.map fst (symbols @ terms) and asked = List.map snd (symbols @ terms) in
-  { key = key_of_asked (Logic.rendered_text rendering) asked; requested; asked }
+  let requested = List.map fst (symbols @ terms)
+  and value_arguments = List.map snd (symbols @ terms) in
+  {
+    key = request_key_of_text (Logic.rendered_text rendering) value_arguments;
+    requested;
+    value_arguments;
+  }
 
 let request_key request = request.key
 
@@ -144,11 +149,12 @@ let read request = function
              Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
            request.requested)
 
-(* Runs one request, or reads its answer from a cache. The query is the
-   one the request was made from, and is rendered only to be run. *)
-let ask solver (request, query) =
+(* Solves one request: reads its answer from a cache, or else runs the
+   solver. The query is the one the request was made from, and is rendered
+   only to be run. *)
+let solve solver (request, query) =
   let file = Option.map (fun directory -> Filename.concat directory request.key) solver.cache in
-  let stored =
+  let cached_answer =
     match file with
     | Some file when Sys.file_exists file -> (
         (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
@@ -170,19 +176,19 @@ let ask solver (request, query) =
         | _ -> None)
     | _ -> None
   in
-  match (locked (fun () -> Hashtbl.find_opt cache request.key), stored) with
+  match (locked (fun () -> Hashtbl.find_opt cache request.key), cached_answer) with
   | Some answer, _ | None, Some answer -> answer
   | None, None ->
       let text = Logic.text query in
-      if key_of_asked text request.asked <> request.key then
-        invalid_arg "Solver.ask_all: the query is not the one its request was made from";
+      if request_key_of_text text request.value_arguments <> request.key then
+        invalid_arg "Solver.solve_all: the query is not the one its request was made from";
       let input =
         header ^ text
         ^
         if request.requested = [] then ""
-        else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.asked)
+        else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
       in
-      locked (fun () -> solver.solved <- solver.solved + 1);
+      locked (fun () -> solver.queries_run <- solver.queries_run + 1);
       let _, output, _ = Process.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
@@ -191,7 +197,7 @@ let ask solver (request, query) =
             Values
               (match rest with
               | List pairs :: _ ->
-                  (* In the order asked. *)
+                  (* In the order of [value_arguments]. *)
                   List.filteri
                     (fun index _ -> index < List.length request.requested)
                     (List.mapi
@@ -207,7 +213,7 @@ let ask solver (request, query) =
         | _ ->
             (* An error is a query the prover built wrong, not one the
                solver could not answer, and is never kept as an answer. *)
-            failwith ("Solver.ask: the solver rejected a query: " ^ String.trim output)
+            failwith ("Solver.solve_all: the solver rejected a query: " ^ String.trim output)
       in
       locked (fun () -> Hashtbl.replace cache request.key answer);
       (match file with
@@ -230,24 +236,24 @@ let ask solver (request, query) =
       | None -> ());
       answer
 
-let ask_all solver requests =
+let solve_all solver requests =
   let requests = Array.of_list requests in
   let answers = Array.make (Array.length requests) Out_of_steps_canonical in
   let next = Atomic.make 0 in
   let rec work () =
     let index = Atomic.fetch_and_add next 1 in
     if index < Array.length requests then begin
-      answers.(index) <- ask solver requests.(index);
+      answers.(index) <- solve solver requests.(index);
       work ()
     end
   in
-  let others = min (Array.length requests) (Domain.recommended_domain_count ()) - 1 in
-  let domains = List.init (max 0 others) (fun _ -> Domain.spawn work) in
+  let helper_domains = min (Array.length requests) (Domain.recommended_domain_count ()) - 1 in
+  let domains = List.init (max 0 helper_domains) (fun _ -> Domain.spawn work) in
   work ();
   List.iter Domain.join domains;
   Array.to_list answers
 
-let solved solver = locked (fun () -> solver.solved)
+let queries_run solver = locked (fun () -> solver.queries_run)
 
 module For_testing = struct
   let key = key
