@@ -76,8 +76,8 @@ awk '
     print "const LIBRARIES = ["
     for (library in dir) {
       area = dir[library]
-      sub(/^stage0\/?/, "", area)
-      area = (area ~ /\//) ? substr(area, 1, index(area, "/") - 1) : ""
+      sub(/^stage0\//, "", area)
+      sub(/\/.*/, "", area)
       printf "  { name: \"%s\", dir: \"%s\", area: \"%s\", page: \"%s\", deps: [%s] },\n",
         library, dir[library], area, page[library], deps[library]
     }
@@ -118,16 +118,15 @@ sed -f "$work/node_attributes.sed" "$work/dependencies.dot" | {
   cat
 } | neato -n2 -Tsvg | sed -n '/^<svg/,$p' > "$work/graph.svg"
 
-# The areas: one node for each directory under stage0 that holds libraries,
-# and one for each library directly under stage0, which puts the areas
-# together. An edge from one area to another is labeled with the number of
+# The areas: one node for each directory under stage0 that holds libraries.
+# An edge from one area to another is labeled with the number of
 # dependencies of a library in the first on a library in the second. The
 # tests and the tools are left out: they depend on every area.
 awk '
   FNR == NR {
     area = $2
-    sub(/^stage0\/?/, "", area)
-    area = (area ~ /\//) ? substr(area, 1, index(area, "/") - 1) : $1
+    sub(/^stage0\//, "", area)
+    sub(/\/.*/, "", area)
     if (area == "test" || area == "tools") next
     of[$1] = area
     libraries[area]++

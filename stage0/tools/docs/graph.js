@@ -28,19 +28,15 @@
     return seen;
   };
 
-  // A library directly under stage0 has the area "". Every other area takes a
-  // color by its place in the sorted list of areas.
+  // An area's color is its place in the sorted list of areas.
   const areas = [...new Set(LIBRARIES.map((library) => library.area))].sort(byName);
-  const namedAreas = areas.filter((area) => area !== "");
-  const areaColor = (area) =>
-    area === "" ? "var(--area-0)" : `var(--area-${(namedAreas.indexOf(area) % 13) + 1})`;
-  const areaLabel = (area) => (area === "" ? "stage0" : `stage0/${area}`);
+  const areaColor = (area) => `var(--area-${areas.indexOf(area) % 14})`;
 
   const nodes = new Map();
   for (const node of svg.querySelectorAll("g.node")) {
     const name = node.id.replace(/^lib-/, "");
     nodes.set(name, node);
-    node.style.setProperty("--area", areaColor(libraries.get(name)?.area ?? ""));
+    node.style.setProperty("--area", areaColor(libraries.get(name).area));
   }
   const edges = [...svg.querySelectorAll("g.edge")].map((edge) => {
     const [source, target] = edge
@@ -57,9 +53,9 @@
 
   const chip = (name) => {
     const library = libraries.get(name);
-    const color = areaColor(library?.area ?? "");
+    const color = areaColor(library.area);
     const label = `<span class="dot" style="--area: ${color}"></span>${escape(name)}`;
-    return library?.page
+    return library.page
       ? `<a class="chip" href="${escape(library.page)}">${label}</a>`
       : `<span class="chip">${label}</span>`;
   };
@@ -85,7 +81,7 @@
         .map(
           (area) =>
             `<div data-area="${escape(area)}"><span class="dot" style="--area: ${areaColor(area)}"></span>` +
-            `${escape(areaLabel(area))}<span class="count">${counts.get(area)}</span></div>`,
+            `stage0/${escape(area)}<span class="count">${counts.get(area)}</span></div>`,
         )
         .join("")}</div>`;
   };
@@ -122,7 +118,7 @@
   const highlightArea = (area) => {
     clearHighlight();
     svg.classList.add("focused");
-    const areaOf = (name) => libraries.get(name)?.area ?? "";
+    const areaOf = (name) => libraries.get(name).area;
     for (const [name, node] of nodes) {
       if (areaOf(name) === area) node.classList.add("member");
     }

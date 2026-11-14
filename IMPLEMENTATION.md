@@ -69,26 +69,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   keeps it independent of a layer, as `session` knows no compiler stage and the
   move analysis, `moves`, knows nothing of code generation.
 - **Each library belongs to one area of stage0,** a directory under
-  `stage0`, and the dependency graph that `stage0/tools/docs/build.sh`
-  draws colors libraries by area:
-
-  | Area | Holds |
-  |---|---|
-  | `support` | Leaf libraries every area uses: sources, diagnostics, paths, encodings, hashing, and the operating system |
-  | `standard_library` | What the compiler knows of the standard library: its embedded source, the definitions it names, its intrinsics, and the C library it calls |
-  | `packages` | Manifests, the registry, and a build's packages and files |
-  | `query` | The incremental query engine, its phases, sessions, and the saved store |
-  | `lexer`, `parser` | Text to tokens, and tokens to syntax trees |
-  | `type_checker` | Syntax trees to the core form, and the checks of patterns, use, and packages |
-  | `mir` | The MIR and its builder |
-  | `ownership`, `prover`, `codegen` | The MIR's three consumers |
-  | `tools`, `test` | Executables that are not shipped, and the tests |
-
-  The libraries at the top of `stage0` compose the areas: `checks`
-  runs every check before the prover, `database` is the project's layer over
-  sessions, `evaluator` gives the prover code generation, `inspect` indexes
-  definitions for the tools, and `cli` is the
-  command line. No area depends on them, so the areas form no cycle.
+  `stage0`. The dependencies between areas form no cycle.
 - **A unit of several modules inside a library is a subdirectory.** The
   library's `dune` file sets `(include_subdirs qualified)`, the
   subdirectory's module of its own name is its interface, and its other
