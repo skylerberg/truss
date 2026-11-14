@@ -12,7 +12,7 @@
 
 (* An argument: a place, for an operation on [Storage] or [View], which reads
    or changes it there, or a value. *)
-type argument = Place of Lir.place | Value of Lir.operand
+type argument = Place of Lowered.place | Value of Lowered.operand
 
 (* The ground types the lowering needs. *)
 type types = { usize : Ground.ty; string_slice : Ground.ty }
@@ -36,6 +36,6 @@ val lower :
   Intrinsic.operation ->
   type_arguments:Ground.ty list ->
   argument list ->
-  destination:Lir.place option ->
-  site:Lir.site ->
-  Lir.place option
+  destination:Lowered.place option ->
+  site:Lowered.site ->
+  Lowered.place option

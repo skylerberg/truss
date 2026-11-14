@@ -56,9 +56,9 @@ val query :
     the store, and each is a fact that a state finds once it has held a result of the same key; its
     keys and values must then hold no functions. With [~portable:true] a state that has never held
     one finds it too, which suits results that many states come to need without starting from one
-    another, such as an instance of the standard library's LIR. [equal] decides whether a result
-    came out the same, and defaults to structural equality, so a value must not hold functions
-    unless [equal] is given. Reading a query of a later phase raises [Invalid_argument]. *)
+    another, such as an instance of the standard library's C. [equal] decides whether a result came
+    out the same, and defaults to structural equality, so a value must not hold functions unless
+    [equal] is given. Reading a query of a later phase raises [Invalid_argument]. *)
 
 val find : context -> ('key, 'value) input -> 'key -> 'value option
 (** An input's value, or [None] if it is not set. *)

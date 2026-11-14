@@ -13,7 +13,7 @@ type context = {
   types : Intrinsics.types;
   bool : Ground.ty;
   checks : bool;
-  constant : Path.t -> Lir.static_value option;
+  constant : Path.t -> Lowered.static_value option;
 }
 
 (* The standard library's text types print as quoted text and its lists and
@@ -224,8 +224,9 @@ let result_of context substitution (result : Types.result) =
    the result pointer when the result is too large, each parameter, the
    mask of defaults passed when there are defaults, and then the evidence
    for each capability it uses. *)
-let lir_signature context substitution ~(parameters : (Types.mode * Types.ty) list) ~has_defaults
-    ?(uses = Types.no_capabilities) (result : Types.result) : Lir.signature * Convention.result =
+let c_signature context substitution ~(parameters : (Types.mode * Types.ty) list) ~has_defaults
+    ?(uses = Types.no_capabilities) (result : Types.result) : Lowered.signature * Convention.result
+    =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
   let result_ty, returns = result_of context substitution result in
   let written =
@@ -233,7 +234,7 @@ let lir_signature context substitution ~(parameters : (Types.mode * Types.ty) li
       (fun (mode, ty) -> Convention.parameter context.env (Monomorphic.mode mode) (ground ty))
       parameters
   in
-  let mask = if has_defaults then [ Lir.Raw (Integer UInt64) ] else [] in
+  let mask = if has_defaults then [ Lowered.Raw (Integer UInt64) ] else [] in
   let evidence = List.map (fun _ -> Convention.evidence) (evidence_for context substitution uses) in
   (Convention.signature ~returns (written @ mask @ evidence) result_ty, result_ty)
 

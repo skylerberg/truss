@@ -21,7 +21,7 @@ type context = {
   prefix : string;
   mutable order : key list;
   mutable registered : unit Keys.t;
-  mutable environments : (string * Lir.ty) list Keys.t;
+  mutable environments : (string * Lowered.ty) list Keys.t;
   mutable bytes : (string * string) list;
   mutable prototypes : (string * string) list;
   mutable anchors : (string * Path.t) list;
@@ -32,7 +32,7 @@ type context = {
   mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
   mutable failures : (C_runtime.failure * C_runtime.site) list;
-  mutable cursors : (Ground.yielding * (string * Lir.ty) list ref) list;
+  mutable cursors : (Ground.yielding * (string * Lowered.ty) list ref) list;
 }
 
 val new_context : Memory_layout.env -> string -> context
@@ -43,6 +43,6 @@ val layout : context -> Ground.ty -> Memory_layout.t
 val is_struct : context -> Ground.ty -> bool
 val value_c : context -> Ground.ty -> string
 val scalar_c : context -> Memory_layout.scalar -> string
-val c_ty : context -> string -> Lir.ty -> string
-val signature_parameters : context -> string -> Lir.ty list -> string list option -> string
+val c_ty : context -> string -> Lowered.ty -> string
+val signature_parameters : context -> string -> Lowered.ty list -> string list option -> string
 val define : context -> Keys.key -> defined

@@ -20,7 +20,7 @@ let all values =
 (* An integer of a kind, if the kind holds it. *)
 let integer st (kind : Memory_layout.integer) value =
   let low, high = Memory_layout.integer_range (Memory_layout.target st.context.env) kind in
-  if Z.leq low value && Z.leq value high then Some (Lir.Static_scalar (Integer (kind, value)))
+  if Z.leq low value && Z.leq value high then Some (Lowered.Static_scalar (Integer (kind, value)))
   else None
 
 (* The integer kind a type is, if it is one. *)
@@ -29,13 +29,13 @@ let integer_kind st ty =
   | Scalar (Integer kind) -> Some kind
   | _ -> None
 
-let truth value = Some (Lir.Static_scalar (Bool value))
+let truth value = Some (Lowered.Static_scalar (Bool value))
 
 (* An arithmetic or bitwise operation on two folded numbers, where the
    result equals the result of running the operation. Anything else, such
    as a sum that does not fit its type, is left to be run. *)
-let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
-    (right : Lir.static_value) =
+let arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_value)
+    (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
       let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
@@ -59,7 +59,7 @@ let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
       | Shift_right -> shift Z.shift_right
       | _ -> None)
   | Static_scalar (Float64 x), Static_scalar (Float64 y) -> (
-      let number value = Some (Lir.Static_scalar (Float64 (Int64.bits_of_float value))) in
+      let number value = Some (Lowered.Static_scalar (Float64 (Int64.bits_of_float value))) in
       let x = Int64.float_of_bits x and y = Int64.float_of_bits y in
       match operation with
       | Add -> number (x +. y)
@@ -68,7 +68,7 @@ let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
       | Divide -> number (x /. y)
       | _ -> None)
   | Static_scalar (Float32 x), Static_scalar (Float32 y) -> (
-      let number value = Some (Lir.Static_scalar (Float32 (Int32.bits_of_float value))) in
+      let number value = Some (Lowered.Static_scalar (Float32 (Int32.bits_of_float value))) in
       let x = Int32.float_of_bits x and y = Int32.float_of_bits y in
       match operation with
       | Add -> number (x +. y)
@@ -78,17 +78,20 @@ let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
       | _ -> None)
   | _ -> None
 
-let negated st (value : Lir.static_value) =
+let negated st (value : Lowered.static_value) =
   match value with
   | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
   | Static_scalar (Float64 x) ->
-      Some (Lir.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
+      Some
+        (Lowered.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
   | Static_scalar (Float32 x) ->
-      Some (Lir.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
+      Some
+        (Lowered.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
   | _ -> None
 
 (* A comparison of two folded integers or two folded [Bool]s. *)
-let compared (comparison : Core.comparison) (left : Lir.static_value) (right : Lir.static_value) =
+let compared (comparison : Core.comparison) (left : Lowered.static_value)
+    (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->
       truth
@@ -112,7 +115,7 @@ let call_depth = 8
 let step_limit = 10_000
 
 (* The part of a folded value that projections name. *)
-let rec part (value : Lir.static_value) (projections : Mir.projection list) =
+let rec part (value : Lowered.static_value) (projections : Mir.projection list) =
   match (projections, value) with
   | [], _ -> Some value
   | Field name :: rest, Static_record fields ->
@@ -127,7 +130,7 @@ let rec part (value : Lir.static_value) (projections : Mir.projection list) =
 let literal st ty (constant : Mir.constant) =
   let number literal =
     match constant_of st ty literal with
-    | Constant scalar -> Some (Lir.Static_scalar scalar)
+    | Constant scalar -> Some (Lowered.Static_scalar scalar)
     | _ -> None
   in
   match constant with
@@ -139,10 +142,10 @@ let literal st ty (constant : Mir.constant) =
       | Record [ (field, Typed _) ] ->
           let bytes =
             List.init (String.length text) (fun index ->
-                Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
+                Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
           in
           Some
-            (Lir.Static_record
+            (Lowered.Static_record
                [
                  ( field,
                    Static_storage
@@ -159,7 +162,7 @@ let literal st ty (constant : Mir.constant) =
    Anything else, such as a sum that overflows, an [echo], a lending call, or
    more steps than [steps] has left, leaves the value to be found by running
    it. Running defines a constant's value; folding only saves the run. *)
-let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lir.static_value list) =
+let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_value list) =
   let body = mir.body in
   let locals = Hashtbl.create 16 in
   let* () =
@@ -178,11 +181,11 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lir.static_value l
     in
     part whole place.projections
   in
-  let operand : Mir.operand -> Lir.static_value option = function
+  let operand : Mir.operand -> Lowered.static_value option = function
     | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read place
     | Constant { value; type_ } -> literal st (ground st type_) value
   in
-  let rvalue target : Mir.rvalue -> Lir.static_value option = function
+  let rvalue target : Mir.rvalue -> Lowered.static_value option = function
     | Operand value | Copy value -> operand value
     | Operation { operation = Negate; operands = [ inner ]; _ } ->
         let* inner = operand inner in
@@ -209,11 +212,11 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lir.static_value l
                fields)
         in
         match variant with
-        | Some variant -> Some (Lir.Static_variant (variant, fields))
+        | Some variant -> Some (Lowered.Static_variant (variant, fields))
         | None -> Some (Static_record fields))
     | Array elements ->
         let* elements = all (List.map operand elements) in
-        Some (Lir.Static_array elements)
+        Some (Lowered.Static_array elements)
     | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
     | Value_parameter _ ->
         None
@@ -230,7 +233,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lir.static_value l
     match (called.callee, called.arguments) with
     | Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] }, _ ->
         assign destination
-          (Lir.Static_storage { element = ground st element; elements = []; owned = true })
+          (Lowered.Static_storage { element = ground st element; elements = []; owned = true })
     | ( Intrinsic { operation = Storage_push; _ },
         [
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
@@ -334,7 +337,7 @@ let constant_state context path =
 
 (* A constant's static data, where its value folds, and otherwise the type
    of the value its evaluator computes. *)
-type constant = Folded of Lir.data | Run of Ground.ty
+type constant = Folded of Lowered.data | Run of Ground.ty
 
 let constant context path =
   let st, mir, ty = constant_state context path in

@@ -6,13 +6,13 @@ open C_types
 
 (* The function being printed: the symbol of its instance, and the C text
    and type of each local its code names. *)
-type function_context = { symbol : string; local : Lir.local -> string * Lir.ty }
+type function_context = { symbol : string; local : Lowered.local -> string * Lowered.ty }
 
 let local_name local = function
   | Some name -> Printf.sprintf "l%d_%s" local name
   | None -> Printf.sprintf "l%d" local
 
-let erased context : Lir.ty -> bool = function
+let erased context : Lowered.ty -> bool = function
   | Value (Cursor _) -> false
   | Value ty -> (layout context ty).size = 0
   | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
@@ -53,7 +53,7 @@ let bytes_name context text =
       context.bytes <- (text, name) :: context.bytes;
       name
 
-let function_ref_symbol fc : Lir.function_ref -> string = function
+let function_ref_symbol fc : Lowered.function_ref -> string = function
   | Instance key -> Instance.symbol key
   | Nested nested_index -> Printf.sprintf "%s_Nested_%d" fc.symbol nested_index
 
@@ -83,7 +83,7 @@ let block_pointer context text sum variant =
   | Niche_encoded _ -> text
   | _ -> bug "a block of %s, which is not a sum type" (Ground.to_string sum)
 
-let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
+let rec place_c context fc (place : Lowered.place) : (string * Lowered.ty) option =
   let root =
     match place.root with
     | Local local -> fc.local local
@@ -92,9 +92,9 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
         let symbol = Instance.symbol key in
         declare_prototype context symbol
           (Printf.sprintf "extern const %s %s;\n" (value_c context ty) symbol);
-        (symbol, Lir.Value ty)
+        (symbol, Lowered.Value ty)
   in
-  let text (text, (ty : Lir.ty)) (projection : Lir.projection) =
+  let text (text, (ty : Lowered.ty)) (projection : Lowered.projection) =
     match (projection, ty) with
     | Deref, _ -> "(*" ^ text ^ ")"
     | Field name, _ -> text ^ ".f_" ^ name
@@ -109,7 +109,7 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
     | Index index, _ -> text ^ "[" ^ operand_c_exn context fc index ^ "]"
     | Variant_field _, _ -> bug "a variant of a place that is not a value"
   in
-  let projected (ty : Lir.ty) (projection : Lir.projection) =
+  let projected (ty : Lowered.ty) (projection : Lowered.projection) =
     match (ty, projection) with
     | Value (Cursor yielding), Field field -> (
         match List.assoc_opt yielding context.cursors with
@@ -119,8 +119,10 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
             | None when field = Convention.cursor_state -> Some (Raw (Integer UInt32))
             | None -> bug "the cursor has no field %s" field)
         | None ->
-            Lir.projection_type context.env ~environment:(environment_of context fc) ty projection)
-    | _ -> Lir.projection_type context.env ~environment:(environment_of context fc) ty projection
+            Lowered.projection_type context.env ~environment:(environment_of context fc) ty
+              projection)
+    | _ ->
+        Lowered.projection_type context.env ~environment:(environment_of context fc) ty projection
   in
   let rec walk ((_, ty) as current) = function
     | [] -> Some current
@@ -131,10 +133,10 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   in
   if erased context (snd root) then None else walk root place.projections
 
-and address_c context fc (place : Lir.place) ~writable =
+and address_c context fc (place : Lowered.place) ~writable =
   match place_c context fc place with
   | Some (text, ty) ->
-      let pointer = Lir.Pointer { target = ty; writable } in
+      let pointer = Lowered.Pointer { target = ty; writable } in
       (* A pointer parameter is declared [restrict]. The cast removes the
          qualifier from the type of the parameter's address, which C does
          not convert implicitly. *)
@@ -147,7 +149,7 @@ and address_c context fc (place : Lir.place) ~writable =
       Some (text, pointer)
   | None -> bug "the address of a place of zero size"
 
-and operand_c context fc : Lir.operand -> (string * Lir.ty) option = function
+and operand_c context fc : Lowered.operand -> (string * Lowered.ty) option = function
   | Move { root = Static { key; _ }; _ } | Moved_address { root = Static { key; _ }; _ } ->
       bug "a move out of %s, which is static data" (Instance.to_string key)
   | Copy place | Move place -> place_c context fc place
@@ -160,7 +162,7 @@ and operand_c_exn context fc operand =
   | Some (text, _) -> text
   | None -> bug "an operand of zero size"
 
-and constant_c context : Lir.constant -> string * Lir.ty = function
+and constant_c context : Lowered.constant -> string * Lowered.ty = function
   | Integer (integer, value) -> (integer_literal integer value, Raw (Integer integer))
   | Float32 bits -> (float32_literal bits, Raw Float32)
   | Float64 bits -> (float64_literal bits, Raw Float64)
@@ -182,7 +184,7 @@ and constant_c context : Lir.constant -> string * Lir.ty = function
       ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))
 
 (* The scalar a value of a type is, for operators. *)
-let scalar_of context : Lir.ty -> Memory_layout.scalar = function
+let scalar_of context : Lowered.ty -> Memory_layout.scalar = function
   | Value ty -> (
       match (layout context ty).form with
       | Scalar scalar -> scalar
@@ -207,7 +209,7 @@ let lawful_equal left right =
 let lawful_less left right =
   Printf.sprintf "(%s < %s || (%s == %s && %s != %s))" left right left left right right
 
-let binary_c context (op : Lir.binary) (left, a_ty) (right, _) =
+let binary_c context (op : Lowered.binary) (left, a_ty) (right, _) =
   let scalar = scalar_of context a_ty in
   let c_type = scalar_c context scalar in
   let boolean text = Printf.sprintf "((uint8_t)%s)" text in
@@ -246,7 +248,7 @@ let binary_c context (op : Lir.binary) (left, a_ty) (right, _) =
   | Ieee_less -> compare "<"
   | Ieee_less_equal -> compare "<="
 
-let unary_c context (op : Lir.unary) (operand_text, a_ty) =
+let unary_c context (op : Lowered.unary) (operand_text, a_ty) =
   let scalar = scalar_of context a_ty in
   let c_type = scalar_c context scalar in
   match op with
@@ -304,7 +306,7 @@ let is_variant_c context text sum variant =
    read-only pointer stored in one, as a cursor keeps a read-only argument,
    is cast to the plain pointer type. *)
 let initializers context fc prefix (fields : Memory_layout.field list)
-    (values : (string * Lir.operand) list) =
+    (values : (string * Lowered.operand) list) =
   String.concat ", "
     (List.filter_map
        (fun (name, operand) ->
@@ -312,7 +314,7 @@ let initializers context fc prefix (fields : Memory_layout.field list)
          | None -> None
          | Some _ -> (
              match operand_c context fc operand with
-             | Some (text, Lir.Pointer { target; writable = false }) ->
+             | Some (text, Lowered.Pointer { target; writable = false }) ->
                  Some
                    (Printf.sprintf "%s.f_%s = ((%s)%s)" prefix name
                       (c_ty context fc.symbol (Pointer { target; writable = true }))
@@ -330,7 +332,7 @@ type built =
   | Expression of string
   | Allocating of { block : key; fill : string; value : string -> string }
 
-let build_laid_out_c context fc ty variant (values : (string * Lir.operand) list) =
+let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) list) =
   let c_type = value_c context ty in
   let layout = layout context ty in
   (* A field that has no size is left out, as one the layout does not have,
@@ -428,7 +430,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lir.operand) list
         end
   | _ -> bug "building %s" (Ground.to_string ty)
 
-let prototype context current symbol ?names ~linkage (signature : Lir.signature) =
+let prototype context current symbol ?names ~linkage (signature : Lowered.signature) =
   let result = match signature.result with None -> "void" | Some ty -> c_ty context current ty in
   Printf.sprintf "%s%s%s %s(%s)"
     (match linkage with Internal -> "static inline " | External -> "")
@@ -438,7 +440,7 @@ let prototype context current symbol ?names ~linkage (signature : Lir.signature)
 
 (* A value built of fields. A cursor whose pulled method this code is has no
    layout yet, and names its fields alone. *)
-let build_c context fc (ty : Ground.ty) variant (values : (string * Lir.operand) list) =
+let build_c context fc (ty : Ground.ty) variant (values : (string * Lowered.operand) list) =
   match ty with
   | Cursor yielding when List.mem_assoc yielding context.cursors ->
       Some
@@ -453,22 +455,20 @@ let build_c context fc (ty : Ground.ty) variant (values : (string * Lir.operand)
                     values))))
   | _ -> build_laid_out_c context fc ty variant values
 
-let rvalue_c context fc (target : Lir.ty) (rvalue : Lir.rvalue) : built option =
-  let operand lir_operand =
-    match operand_c context fc lir_operand with
+let rvalue_c context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : built option =
+  let operand argument =
+    match operand_c context fc argument with
     | Some expression -> expression
     | None -> bug "an operand of zero size"
   in
   match rvalue with
-  | Use lir_operand ->
-      Option.map (fun (text, _) -> Expression text) (operand_c context fc lir_operand)
-  | Unary (op, lir_operand) -> Some (Expression (unary_c context op (operand lir_operand)))
+  | Use argument -> Option.map (fun (text, _) -> Expression text) (operand_c context fc argument)
+  | Unary (op, argument) -> Some (Expression (unary_c context op (operand argument)))
   | Binary (op, left, right) ->
       Some (Expression (binary_c context op (operand left) (operand right)))
-  | Convert (lir_operand, scalar) ->
+  | Convert (argument, scalar) ->
       Some
-        (Expression
-           (Printf.sprintf "((%s)%s)" (scalar_c context scalar) (fst (operand lir_operand))))
+        (Expression (Printf.sprintf "((%s)%s)" (scalar_c context scalar) (fst (operand argument))))
   | Build { ty; variant; fields } -> build_c context fc ty variant fields
   | Is_variant (place, variant) -> (
       match place_c context fc place with

@@ -14,13 +14,13 @@ type context = {
       (** Whether the program checks, as it runs, each operation that is undefined or wrong where
           its precondition does not hold: an index, a slice, arithmetic, a shift, a call of the C
           library, and [unreachable]. No [requires] clause is evaluated. *)
-  constant : Path.t -> Lir.static_value option;
+  constant : Path.t -> Lowered.static_value option;
 }
 
 val context :
   ?checks:bool ->
   cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
-  constant:(context -> Path.t -> Lir.static_value option) ->
+  constant:(context -> Path.t -> Lowered.static_value option) ->
   Query.context ->
   Memory_layout.target ->
   context
@@ -58,14 +58,14 @@ val panic_path : Path.t
 val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 val result_of : context -> Types.substitution -> Types.result -> Convention.result * bool
 
-val lir_signature :
+val c_signature :
   context ->
   Types.substitution ->
   parameters:(Types.mode * Types.ty) list ->
   has_defaults:bool ->
   ?uses:Types.capability_set ->
   Types.result ->
-  Lir.signature * Convention.result
+  Lowered.signature * Convention.result
 
 val has_defaults : Types.signature -> bool
 val interface_parameters : Types.signature -> (Types.mode * Types.ty) list

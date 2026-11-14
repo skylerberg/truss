@@ -46,19 +46,19 @@ type block
 type function_
 type instance = Memory_layout.env -> Emit_c.Builder.instance
 
-val local : ?name:string -> Lir.ty -> local_info
-val value : Ground.ty -> Lir.ty
-val at : ?projections:Lir.projection list -> Lir.local -> Lir.place
-val copy : ?projections:Lir.projection list -> Lir.local -> Lir.operand
-val constant_int32 : int -> Lir.operand
-val constant_int64 : int -> Lir.operand
-val block : Lir.statement list -> Lir.terminator -> block
+val local : ?name:string -> Lowered.ty -> local_info
+val value : Ground.ty -> Lowered.ty
+val at : ?projections:Lowered.projection list -> Lowered.local -> Lowered.place
+val copy : ?projections:Lowered.projection list -> Lowered.local -> Lowered.operand
+val constant_int32 : int -> Lowered.operand
+val constant_int64 : int -> Lowered.operand
+val block : Lowered.statement list -> Lowered.terminator -> block
 
 val function_ :
-  ?parameters:Lir.local list ->
-  ?result:Lir.ty ->
+  ?parameters:Lowered.local list ->
+  ?result:Lowered.ty ->
   ?returns:bool ->
-  ?environment:(string * Lir.ty) list ->
+  ?environment:(string * Lowered.ty) list ->
   local_info list ->
   block list ->
   function_
@@ -72,11 +72,11 @@ val printed : Emit_c.Builder.instance -> instance
 
 val call :
   string ->
-  ?result:Lir.ty option ->
-  ?parameters:Lir.ty list ->
-  Lir.operand list ->
-  Lir.place option ->
-  Lir.statement
+  ?result:Lowered.ty option ->
+  ?parameters:Lowered.ty list ->
+  Lowered.operand list ->
+  Lowered.place option ->
+  Lowered.statement
 
 val shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
 val scratch : string lazy_t

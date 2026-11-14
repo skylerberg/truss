@@ -64,7 +64,7 @@ let loop glue builder ~count body = loop builder ~index_type:(Value glue.usize) 
 let test builder rvalue =
   let result = local builder (Raw Bool) in
   emit builder (Assign (at result, rvalue));
-  Lir.Copy (at result)
+  Lowered.Copy (at result)
 
 (* Writes a test of whether the storage at a place owns a buffer. *)
 let owns_buffer builder storage =
@@ -85,7 +85,7 @@ let droppable glue : Memory_layout.member -> bool = function
 let drop glue ty =
   let builder = create glue.env ~key:(Drop ty) in
   let pointer = local builder ~name:"value" (Pointer { target = Value ty; writable = true }) in
-  let value : Lir.place = { root = Local pointer; projections = [ Deref ] } in
+  let value : Lowered.place = { root = Local pointer; projections = [ Deref ] } in
   start builder (block builder);
   (match (ty, glue.representation ty) with
   | Any _, _ ->
@@ -123,7 +123,7 @@ let drop glue ty =
   | _, Shared inner ->
       (* The last reference drops the value, by a call of its type's drop
          function, and frees the block. *)
-      let pointer = Lir.Copy (value / Field "value") in
+      let pointer = Lowered.Copy (value / Field "value") in
       let last = local builder (Raw Bool) in
       emit builder
         (Call
@@ -231,7 +231,7 @@ let any_drop glue ty =
   build builder ~parameters:[ untyped ] ~result:None;
   built builder
 
-let copy_signature glue ty : Lir.signature =
+let copy_signature glue ty : Lowered.signature =
   Convention.signature
     (Option.to_list (Convention.parameter glue.env Read ty))
     (Convention.result glue.env ty)
@@ -242,11 +242,11 @@ let copy_into glue builder ~destination ~source ty =
     let signature = copy_signature glue ty in
     let argument =
       match Convention.parameter glue.env Read ty with
-      | Some (Pointer _) -> [ Lir.Address { place = source; writable = false } ]
-      | Some _ -> [ Lir.Copy source ]
+      | Some (Pointer _) -> [ Lowered.Address { place = source; writable = false } ]
+      | Some _ -> [ Lowered.Copy source ]
       | None -> []
     in
-    let target = Lir.Direct { function_ = Instance (Copy ty); signature } in
+    let target = Lowered.Direct { function_ = Instance (Copy ty); signature } in
     emit builder
       (Call
          {
@@ -259,12 +259,12 @@ let copy_into glue builder ~destination ~source ty =
    type is not trivial. *)
 let copied_field glue builder ~source (name, member) =
   match member with
-  | Memory_layout.Raw _ -> (name, Lir.Copy source)
-  | Typed ty when trivial glue ty -> (name, Lir.Copy source)
+  | Memory_layout.Raw _ -> (name, Lowered.Copy source)
+  | Typed ty when trivial glue ty -> (name, Lowered.Copy source)
   | Typed ty ->
       let temporary = local builder (Value ty) in
       copy_into glue builder ~destination:(at temporary) ~source ty;
-      (name, Lir.Move (at temporary))
+      (name, Lowered.Move (at temporary))
 
 let copy glue ty =
   let builder = create glue.env ~key:(Copy ty) in
@@ -276,7 +276,7 @@ let copy glue ty =
   in
   let parameter = Convention.parameter glue.env Read ty in
   let self_local = Option.map (fun ty -> local builder ~name:"self" ty) parameter in
-  let self : Lir.place =
+  let self : Lowered.place =
     match (parameter, self_local) with
     | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }
     | Some _, Some local -> at local
@@ -287,7 +287,7 @@ let copy glue ty =
     | None -> Some (local builder ~name:"copy" (Value ty))
     | Some _ -> None
   in
-  let result : Lir.place =
+  let result : Lowered.place =
     match (result_pointer, result_local) with
     | Some pointer, _ -> { root = Local pointer; projections = [ Deref ] }
     | None, Some local -> at local
@@ -420,11 +420,11 @@ let output_parameter glue =
   | Some parameter -> parameter
   | None -> bug "storage of no size"
 
-let debug_signature glue ty : Lir.signature =
+let debug_signature glue ty : Lowered.signature =
   {
     parameters =
       (if Memory_layout.has_zero_size glue.env ty then []
-       else [ Lir.Pointer { target = Value ty; writable = false } ])
+       else [ Lowered.Pointer { target = Value ty; writable = false } ])
       @ [ output_parameter glue ];
     result = None;
     returns = true;
@@ -433,11 +433,11 @@ let debug_signature glue ty : Lir.signature =
 (* A call of one of the standard library's functions that append to the
    output, each in [standard::writing]: it takes the output, and a value of
    [ty] to write, which is at [place]. *)
-let write glue builder ~output name ty (place : Lir.place) =
+let write glue builder ~output name ty (place : Lowered.place) =
   let key = Instance.Code { path = Path.standard [ "writing" ] name; type_arguments = [] } in
   let parameter, written =
     match Convention.parameter glue.env Read ty with
-    | Some (Pointer _ as parameter) -> (parameter, Lir.Address { place; writable = false })
+    | Some (Pointer _ as parameter) -> (parameter, Lowered.Address { place; writable = false })
     | Some parameter -> (parameter, Copy place)
     | None -> bug "%s is written, and has no size" (Ground.to_string ty)
   in
@@ -465,10 +465,10 @@ let text glue builder ~output value =
     write glue builder ~output "append" bytes_ty
       (bytes builder ~elements:(Constant (Bytes value)) ~length:(usize (String.length value)))
 
-let debug_call glue builder ~output ty (place : Lir.place) =
+let debug_call glue builder ~output ty (place : Lowered.place) =
   let arguments =
     if Memory_layout.has_zero_size glue.env ty then []
-    else [ Lir.Address { place; writable = false } ]
+    else [ Lowered.Address { place; writable = false } ]
   in
   emit builder
     (Call
@@ -478,7 +478,7 @@ let debug_call glue builder ~output ty (place : Lir.place) =
          result = Discarded;
        })
 
-let scalar_debug glue builder ~output (scalar : Memory_layout.scalar) (place : Lir.place) =
+let scalar_debug glue builder ~output (scalar : Memory_layout.scalar) (place : Lowered.place) =
   let widened name wide =
     let value = local builder (Value (builtin wide)) in
     emit builder
@@ -502,13 +502,13 @@ let debug glue ty =
     if Memory_layout.has_zero_size glue.env ty then None
     else Some (local builder ~name:"value" (Pointer { target = Value ty; writable = false }))
   in
-  let value : Lir.place =
+  let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
     | None -> at 0
   in
   let out = local builder ~name:"output" (output_parameter glue) in
-  let output = Lir.Copy (at out) in
+  let output = Lowered.Copy (at out) in
   let text = text glue builder ~output in
   let debug_call = debug_call glue builder ~output in
   start builder (block builder);
@@ -518,9 +518,9 @@ let debug glue ty =
         let later = local builder (Raw Bool) in
         emit builder (Assign (at later, Binary (Not_equal, Copy (at index), usize 0)));
         when_ builder (Copy (at later)) (fun () -> text ", ");
-        debug_call element (element_at (Lir.Copy (at index))));
+        debug_call element (element_at (Lowered.Copy (at index))));
     text "]"
-  and storage_or_view field_ty (place : Lir.place) ~as_text =
+  and storage_or_view field_ty (place : Lowered.place) ~as_text =
     let element, buffer, count =
       match (Storage.elements_of field_ty, Storage.viewed field_ty) with
       | Some element, _ -> (element, Storage.buffer place, Storage.length place)
@@ -601,14 +601,14 @@ let debug glue ty =
    needs nothing more. *)
 let encode_signature glue ty = debug_signature glue ty
 
-let encode_call glue builder ~output ty (place : Lir.place) =
+let encode_call glue builder ~output ty (place : Lowered.place) =
   if not (Memory_layout.has_zero_size glue.env ty) then
     emit builder
       (Call
          {
            target =
              Direct { function_ = Instance (Encode ty); signature = encode_signature glue ty };
-           arguments = [ Lir.Address { place; writable = false }; output ];
+           arguments = [ Lowered.Address { place; writable = false }; output ];
            result = Discarded;
          })
 
@@ -618,17 +618,17 @@ let encode glue ty =
     if Memory_layout.has_zero_size glue.env ty then None
     else Some (local builder ~name:"value" (Pointer { target = Value ty; writable = false }))
   in
-  let value : Lir.place =
+  let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
     | None -> at 0
   in
   let out = local builder ~name:"output" (output_parameter glue) in
-  let output = Lir.Copy (at out) in
+  let output = Lowered.Copy (at out) in
   let encode_call = encode_call glue builder ~output in
   start builder (block builder);
   (* The value's own bytes, read as bytes whatever it is. *)
-  let bytes (place : Lir.place) size =
+  let bytes (place : Lowered.place) size =
     let first = local builder (Raw (Pointer (Data (builtin UInt8)))) in
     emit builder
       (Assign

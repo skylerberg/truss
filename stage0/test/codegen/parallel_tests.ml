@@ -74,8 +74,8 @@ let () =
   test
     "an outlined function's own local goes with it, and a shared one is reached through its \
      environment" (fun () ->
-      let int = Lir.Value int32 in
-      let add left right = Lir.Binary (Add, copy left, copy right) in
+      let int = Lowered.Value int32 in
+      let add left right = Lowered.Binary (Add, copy left, copy right) in
       let env = shape_env () in
       let builder = Emit_c.Builder.create env ~key:(key "entry") in
       let parameter = Emit_c.Builder.local builder int in
@@ -95,7 +95,7 @@ let () =
             Emit_c.Builder.emit builder (Assign (at other, Use (copy parameter)));
             Emit_c.Builder.finish builder (Return None))
       in
-      let address holder = Lir.Address { place = at holder; writable = false } in
+      let address holder = Lowered.Address { place = at holder; writable = false } in
       Emit_c.Builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
       Emit_c.Builder.emit builder (Assign (at sum, add sum other));
       Emit_c.Builder.finish builder (Return (Some (copy sum)));
@@ -121,9 +121,9 @@ let () =
       let work : Ground.function_type =
         { parameters = [ (Read, named "UInt64") ]; result = Returns (named "Unit"); uses = [] }
       in
-      let environment = [ ("count", Lir.Pointer { target = value int32; writable = true }) ] in
+      let environment = [ ("count", Lowered.Pointer { target = value int32; writable = true }) ] in
       let count = at ~projections:[ Deref; Field "count"; Deref ] 2 in
-      let add amount = Lir.Assign (count, Binary (Add, Copy count, amount)) in
+      let add amount = Lowered.Assign (count, Binary (Add, Copy count, amount)) in
       let coroutine =
         function_ ~parameters:[ 0; 1 ] ~environment
           [
@@ -144,7 +144,7 @@ let () =
               (Return None);
           ]
       in
-      let resume into : Lir.statement =
+      let resume into : Lowered.statement =
         Call
           {
             target = Intrinsic Coroutine_resume;
@@ -152,7 +152,7 @@ let () =
             result = Returned (at into);
           }
       in
-      let plus amount = Lir.Assign (at 6, Binary (Add, copy 6, amount)) in
+      let plus amount = Lowered.Assign (at 6, Binary (Add, copy 6, amount)) in
       expect_status 112
         [
           entry ~nested:[ coroutine ]

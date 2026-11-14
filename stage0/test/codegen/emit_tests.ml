@@ -110,7 +110,7 @@ let () =
         block
           (statements
           @ [
-              Lir.Assign
+              Lowered.Assign
                 (at (List.length locals), Convert (copy (List.length locals - 1), Integer Int32));
             ])
           (Return (Some (copy (List.length locals))));
@@ -156,7 +156,7 @@ let () =
         ] )
   in
   test "an indirect variant is built in its block and read through it" (fun () ->
-      let leaf = Lir.Build { ty = tree; variant = Some "Leaf"; fields = [] } in
+      let leaf = Lowered.Build { ty = tree; variant = Some "Leaf"; fields = [] } in
       expect_status ~extra:[ tree_shape ] 42
         [
           entry
@@ -202,7 +202,7 @@ let () =
              (Return None);
          ])
   in
-  let bump_signature = [ Lir.Pointer { target = value int32; writable = true } ] in
+  let bump_signature = [ Lowered.Pointer { target = value int32; writable = true } ] in
   test "a mut parameter is a pointer the callee writes through" (fun () ->
       expect_status 4
         [
@@ -228,7 +228,9 @@ let () =
     ({ parameters = [ (Read, int32) ]; result = Returns int32; uses = [] } : Ground.function_type)
   in
   test "a lambda reads a local of its caller through its environment" (fun () ->
-      let environment = [ ("offset", Lir.Pointer { target = value int32; writable = false }) ] in
+      let environment =
+        [ ("offset", Lowered.Pointer { target = value int32; writable = false }) ]
+      in
       let lambda =
         function_ ~parameters:[ 0; 1 ] ~result:(value int32) ~environment
           [
@@ -283,7 +285,7 @@ let () =
                 (Return (Some (copy 3)));
             ];
         ]);
-  let float64_constant value = Lir.Constant (Float64 (Int64.bits_of_float value)) in
+  let float64_constant value = Lowered.Constant (Float64 (Int64.bits_of_float value)) in
   test "float equality treats every NaN as equal" (fun () ->
       expect_status 1
         [
@@ -331,8 +333,9 @@ let () =
                   Assign
                     ( at 0,
                       Binary
-                        (Shift_left, constant_int64 1, Lir.Constant (Integer (USize, Z.of_int 65)))
-                    );
+                        ( Shift_left,
+                          constant_int64 1,
+                          Lowered.Constant (Integer (USize, Z.of_int 65)) ) );
                   Assign (at 1, Convert (copy 0, Integer Int32));
                 ]
                 (Return (Some (copy 1)));
@@ -349,7 +352,7 @@ let () =
                   target = Intrinsic Add_overflow;
                   arguments =
                     [
-                      Lir.Constant (Integer (Int32, Z.of_string "2147483647"));
+                      Lowered.Constant (Integer (Int32, Z.of_string "2147483647"));
                       constant_int32 1;
                       Address { place = at 0; writable = true };
                     ];
@@ -542,7 +545,7 @@ let () =
               ignore (operate builder ~destination:(at popped) Storage_pop [ Place (at storage) ]);
               let element index weight =
                 match operate builder Storage_at [ Place (at storage); Value (usize index) ] with
-                | Some place -> Lir.Binary (Multiply, Copy place, constant_int32 weight)
+                | Some place -> Lowered.Binary (Multiply, Copy place, constant_int32 weight)
                 | None -> failwith "storage_at lends nothing"
               in
               emit builder (Assign (at sum, Use (constant_int32 0)));
@@ -809,7 +812,7 @@ let () =
              ~type_arguments:[ uint8 ] arguments ~destination
              ~site:{ definition = definition "entry"; line = 0; column = 1 })
       in
-      let byte : Lir.operand = Constant (Integer (UInt8, Z.of_int 1)) in
+      let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
       (* [operation] is given a storage of three elements with room for no
          more, and a view of them. *)
       let stops saying operation =
@@ -953,7 +956,7 @@ let () =
               | Some middle ->
                   emit builder (Assign (middle, Use (Constant (Integer (UInt8, Z.of_int 100)))))
               | None -> failwith "view_at_mut lends nothing");
-              let element index : Lir.operand =
+              let element index : Lowered.operand =
                 let read = local builder (value int32) in
                 emit builder
                   (Assign

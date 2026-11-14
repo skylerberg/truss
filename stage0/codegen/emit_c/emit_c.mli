@@ -26,7 +26,7 @@ type failure = C_runtime.failure = Echo | Todo
 module Builder = Builder
 
 (* An instance's C, a constant's data, or a capability's table. *)
-type compiled = Code of Builder.instance | Data of Lir.data | Table of Lir.table
+type compiled = Code of Builder.instance | Data of Lowered.data | Table of Lowered.table
 
 (* The version of code generation, part of every key built from an
    instance's C. *)

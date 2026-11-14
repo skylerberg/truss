@@ -66,7 +66,7 @@ type context = {
       (** The symbol of the instance being emitted, which its statics' names start with *)
   mutable order : key list;  (** Registered keys, most recent first *)
   mutable registered : unit Keys.t;
-  mutable environments : (string * Lir.ty) list Keys.t;
+  mutable environments : (string * Lowered.ty) list Keys.t;
   mutable bytes : (string * string) list;  (** Text and name, most recent first *)
   mutable prototypes : (string * string) list;  (** Symbol and declaration, most recent first *)
   mutable anchors : (string * Path.t) list;
@@ -79,7 +79,7 @@ type context = {
   mutable calls : (Path.t * int) list;
       (** The methods of capabilities it calls: each capability, and the method's place *)
   mutable failures : (failure * site) list;  (** Its [echo]s and [todo]s *)
-  mutable cursors : (Ground.yielding * (string * Lir.ty) list ref) list;
+  mutable cursors : (Ground.yielding * (string * Lowered.ty) list ref) list;
       (** The fields but the state of each cursor whose pulled method this code is, which the code
           names before the cursor's layout is known *)
 }
@@ -170,7 +170,7 @@ and pointee_c context : Memory_layout.pointee -> string = function
       key_name (Code function_type)
   | Opaque -> "void *"
 
-let rec c_ty context symbol : Lir.ty -> string = function
+let rec c_ty context symbol : Lowered.ty -> string = function
   | Value ty -> value_c context ty
   | Pointer { target; writable } ->
       (if writable then "" else "const ") ^ c_ty context symbol target ^ " *"
@@ -201,7 +201,7 @@ let field_declarations context (fields : Memory_layout.field list) =
     List.concat_map (fun (field : Memory_layout.field) -> holds_member context field.member) fields
   )
 
-let signature_parameters context symbol (parameters : Lir.ty list) names =
+let signature_parameters context symbol (parameters : Lowered.ty list) names =
   match parameters with
   | [] -> "void"
   | _ ->
@@ -209,7 +209,7 @@ let signature_parameters context symbol (parameters : Lir.ty list) names =
         (List.mapi
            (fun position ty ->
              let order = c_ty context symbol ty in
-             let qualified = match ty with Lir.Pointer _ -> order ^ "restrict" | _ -> order in
+             let qualified = match ty with Lowered.Pointer _ -> order ^ "restrict" | _ -> order in
              match names with
              | None -> qualified
              | Some names -> qualified ^ " " ^ List.nth names position)
@@ -309,6 +309,6 @@ and define_text context key =
           holds =
             List.concat_map
               (fun (_, ty) ->
-                match ty with Lir.Value ty when is_struct context ty -> [ Type ty ] | _ -> [])
+                match ty with Lowered.Value ty when is_struct context ty -> [ Type ty ] | _ -> [])
               fields;
         }

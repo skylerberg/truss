@@ -34,7 +34,7 @@ let target_key (target : Memory_layout.target) =
    fold, that its evaluator is to be run. *)
 type lowered_outcome =
   | Compiled of Emit_c.fragment
-  | Folded of Lir.data
+  | Folded of Lowered.data
   | Evaluate of Path.t * Ground.ty
 
 (* A lowering context of its own for one computation, which reads a pulled
@@ -278,7 +278,7 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
 
 (* A value read back from its binary form, as [Glue.encode] writes it, as
    static data. *)
-let decode compiler ty text : Lir.static_value =
+let decode compiler ty text : Lowered.static_value =
   let env = Lower.env compiler.context in
   let monomorphic = Lower.monomorphic compiler.context in
   let target = Memory_layout.target env in
@@ -305,7 +305,7 @@ let decode compiler ty text : Lir.static_value =
         else value
     | _ -> value
   in
-  let rec value ty : Lir.static_value =
+  let rec value ty : Lowered.static_value =
     if Memory_layout.has_zero_size env ty then empty ty
     else
       match Monomorphic.representation monomorphic ty with
@@ -329,7 +329,7 @@ let decode compiler ty text : Lir.static_value =
         | Typed field_ty -> (name, value field_ty)
         | Raw _ -> bug "a raw field computed while compiling")
       members
-  and scalar_value (scalar : Memory_layout.scalar) : Lir.constant =
+  and scalar_value (scalar : Memory_layout.scalar) : Lowered.constant =
     match scalar with
     | Integer kind -> Integer (kind, integer kind)
     | Float32 -> Float32 (Z.to_int32_unsigned (unsigned (take 4)))
@@ -338,7 +338,7 @@ let decode compiler ty text : Lir.static_value =
     | Character -> Character (Z.to_int (unsigned (take 4)))
     | _ -> bug "a pointer computed while compiling"
   (* A value of zero size, which is written as nothing. *)
-  and empty ty : Lir.static_value =
+  and empty ty : Lowered.static_value =
     match Monomorphic.shape monomorphic ty with
     | Record members ->
         Static_record (List.map (fun (name, member) -> (name, empty_member member)) members)
@@ -347,7 +347,7 @@ let decode compiler ty text : Lir.static_value =
           (variant.name, List.map (fun (name, member) -> (name, empty_member member)) variant.fields)
     | Array (element, count) -> Static_array (List.init count (fun _ -> empty element))
     | _ -> bug "%s has no one value of zero size" (Ground.to_string ty)
-  and empty_member : Memory_layout.member -> Lir.static_value = function
+  and empty_member : Memory_layout.member -> Lowered.static_value = function
     | Typed ty -> empty ty
     | Raw _ -> bug "a raw field of zero size"
   in
@@ -473,7 +473,7 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
 (* An instance's C from the query, or, for a constant the query could not
    fold, the data of the value its evaluator computes. *)
 and compiled compiler key =
-  let data (data : Lir.data) = Emit_c.fragment (Lower.env compiler.context) (Data data) in
+  let data (data : Lowered.data) = Emit_c.fragment (Lower.env compiler.context) (Data data) in
   let compiled =
     match Query.demand compiler.database (Lazy.force lowered) (compiler.lowering, key) with
     | Compiled fragment -> fragment
@@ -873,7 +873,7 @@ let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_
 module For_testing = struct
   module Lower = struct
     type context = Lower.context
-    type constant = Lower.constant = Folded of Lir.data | Run of Ground.ty
+    type constant = Lower.constant = Folded of Lowered.data | Run of Ground.ty
 
     let context ?checks ~cursor_fields ~constant database target =
       Lower.context ?checks ~cursor_fields ~constant database target

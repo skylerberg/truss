@@ -1,7 +1,7 @@
 (tests
  (names
   layout_tests
-  lir_tests
+  emit_tests
   glue_tests
   build_tests
   source_tests
@@ -20,7 +20,7 @@
   codegen_support
   fixtures
   layout_tests
-  lir_tests
+  emit_tests
   glue_tests
   build_tests
   source_tests
@@ -45,7 +45,7 @@
   ground
   memory_layout
   instance
-  lir
+  lowered
   convention
   emit_c
   toolchain

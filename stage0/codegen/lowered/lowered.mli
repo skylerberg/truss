@@ -8,7 +8,7 @@
    The builder only prints. *)
 
 include module type of struct
-  include Ir_types
+  include Lowered_types
 end
 
 (* A local as a place, with no projections. *)
