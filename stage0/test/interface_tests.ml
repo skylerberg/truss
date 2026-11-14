@@ -163,9 +163,9 @@ let () =
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
       one_diagnostic Fixtures.Interface.trait_cannot_redeclare_a_method_of_a_trait_it
         "types.redeclared_method");
-  test "a trait may add a version of a method of a trait it requires" (fun () ->
+  test "a trait may add an overload of a method of a trait it requires" (fun () ->
       no_diagnostics
-        [ ("app::main", Fixtures.Interface.trait_may_add_a_version_of_a_method_of_a_trait_it) ])
+        [ ("app::main", Fixtures.Interface.trait_may_add_an_overload_of_a_method_of_a_trait_it) ])
 
 (* Properties *)
 

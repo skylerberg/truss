@@ -1,0 +1,95 @@
+use standard::files
+use standard::simulation
+use standard::tasks
+
+type Connection(serial: Int64)
+
+fn borrow(pool: tasks::Pool[Connection], opened: tasks::Counter, fails: Bool) -> String
+  uses Tasks, Clock
+{
+  let outcome = pool.using(open: fn() {
+    let serial = opened.add(1)
+    Ok(Connection(serial: serial))
+  }, work: fn(connection) {
+    if fails { Err("broken") } else { Ok(connection.serial) }
+  })
+  match own outcome {
+    Some(Ok(serial)) => "${serial}"
+    Some(Err(failure)) => own failure
+    None => "cancelled"
+  }
+}
+
+test "a pool reuses an idle resource, discards one whose work failed, and forgets one that idled too long" {
+  provide simulation::World.new() {
+    let opened = tasks::Counter.new()
+    let pool = tasks::Pool[Connection].new(tasks::PoolOptions(maximum: 2, idle_seconds: 60))
+    assert borrow(pool, opened: opened, fails: false) == "1"
+    assert borrow(pool, opened: opened, fails: false) == "1"
+    assert pool.idle_count() == 1
+    assert borrow(pool, opened: opened, fails: true) == "broken"
+    assert pool.idle_count() == 0
+    assert borrow(pool, opened: opened, fails: false) == "2"
+    Clock.sleep(Duration.seconds(61))
+    assert borrow(pool, opened: opened, fails: false) == "3"
+    assert opened.value() == 3
+  }
+}
+
+fn hold(pool: tasks::Pool[Connection], opened: tasks::Counter, active: tasks::Counter, peak: tasks::Counter)
+  uses Tasks, Clock
+{
+  let _ = pool.using(open: fn() {
+    let serial = opened.add(1)
+    Ok(Connection(serial: serial))
+  }, work: fn(connection) {
+    let now_active = active.add(1)
+    if now_active > peak.value() {
+      let _ = peak.add(now_active - peak.value())
+    }
+    Clock.sleep(Duration.seconds(1))
+    let _ = active.add(-1)
+    if connection.serial > 0 { Ok(Unit) } else { Err(Unit) }
+  })
+}
+
+test "a pool lends at most its maximum at once, and the others wait for one to come back" {
+  provide simulation::World.new() {
+    let opened = tasks::Counter.new()
+    let active = tasks::Counter.new()
+    let peak = tasks::Counter.new()
+    let pool = tasks::Pool[Connection].new(tasks::PoolOptions(maximum: 2))
+    concurrent {
+      hold(pool, opened: opened, active: active, peak: peak)
+      hold(pool, opened: opened, active: active, peak: peak)
+      hold(pool, opened: opened, active: active, peak: peak)
+      hold(pool, opened: opened, active: active, peak: peak)
+    }
+    assert peak.value() == 2
+    assert opened.value() == 2
+    assert Clock.monotonic() >= Duration.seconds(2)
+  }
+}
+
+type Seen(checks: String, path: String)
+
+test "a temporary directory is writable while the work runs and is removed afterwards" {
+  provide simulation::World.from(simulation::Setup.new().with_file(Path.new("/tmp/.keep"), contents: "")) {
+    let outcome = files::with_temporary_directory(fn(directory) {
+      let file = directory.join("note.txt")
+      let is_written = FileWrite.write_text(file, contents: "hello") is Ok(_)
+      let is_read = FileRead.read_text(file).ok() == Some("hello")
+      Seen(checks: "${is_written} ${is_read}", path: "${directory}")
+    })
+    let seen = own outcome.expect("a temporary directory")
+    assert seen.checks == "true true"
+    assert seen.path.slice().starts_with("/tmp/truss-")
+    assert !files::is_present(Path.new(seen.path.slice()))
+    let file_outcome = files::with_temporary_file(fn(path) {
+      Seen(checks: "${FileRead.read_text(path).ok() == Some("")}", path: "${path}")
+    })
+    let file_seen = own file_outcome.expect("a temporary file")
+    assert file_seen.checks == "true"
+    assert !files::is_present(Path.new(file_seen.path.slice()))
+  }
+}

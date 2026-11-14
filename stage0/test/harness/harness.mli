@@ -49,8 +49,7 @@ val expect_strings : expected:string list -> string list -> unit
 (** Fails the running test unless the lists are equal. *)
 
 val markdown_documents : unit -> string list
-(** The paths of the Markdown documents at the root of the repository and under [standard/], in
-    order. *)
+(** The paths of the Markdown documents at the root of the repository, in order. *)
 
 val truss_files : unit -> string list
 (** The paths of the Truss files under [standard/] and [stage0/test/fixtures/], in order. *)

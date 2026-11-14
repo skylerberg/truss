@@ -132,7 +132,7 @@ type state = {
   mutable frames : frame list;
   mutable references : id list;  (** Locals read, newest first, for lambdas' captures. *)
   mutable receiver_modes : (id * Types.mode) list;
-      (** Method calls whose receiver a mark covers. *)
+      (** Method calls whose receiver a mode keyword applies to. *)
   yielded : (id, Types.mode) Hashtbl.t;
       (** The part that a lending method lends, and each field of a constructor that is in this
           table, with the mode the method lends with. A field in this table that is a place is lent
@@ -169,7 +169,7 @@ let report state ?fixes code span message = ignore (reported state ?fixes code s
 (* Whether the code is read as a formula: a specification, a proof, the
    body of a function for specifications only, or a quantifier's body. A
    formula states a fact, so it holds no loop, [var], or early exit, and
-   changes nothing, which would have no meaning in the prover's logic. *)
+   mutates nothing, which would have no meaning in the prover's logic. *)
 let is_formula env = env.specification || env.in_quantifier
 
 let reject_in_formula state env span what =
@@ -313,11 +313,13 @@ let register_statement state (written : statement) kind =
     Some (fun () -> { Core.id = fresh_node_id state; origin = written.id; kind = kind () })
 
 let build_statement state (written : statement) : Core.statement =
-  let rec unmarked (value : expression) =
-    match value.kind with Mode (_, inner) | Parenthesized inner -> unmarked inner | _ -> value
+  let rec without_mode_keyword (value : expression) =
+    match value.kind with
+    | Mode (_, inner) | Parenthesized inner -> without_mode_keyword inner
+    | _ -> value
   in
   let hole (value : expression) =
-    let value = unmarked value in
+    let value = without_mode_keyword value in
     if was_hole state (fun tables -> tables.types) value.id then Some value else None
   in
   match
@@ -952,15 +954,15 @@ let rec is_place state (value : expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-(* In a marked expression such as [mut config.servers.sort()], the mark
+(* In an expression with a mode keyword, such as [mut config.servers.sort()], the keyword
    applies to the receiver of the first method call whose receiver is a
    place. Returns the id of that call. *)
-let rec marked_call state (value : expression) =
+let rec call_with_mode_keyword state (value : expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
   | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-      if is_place state base then Some value.id else marked_call state base
-  | Member (base, _) | Bracket (base, _) | Try base -> marked_call state base
+      if is_place state base then Some value.id else call_with_mode_keyword state base
+  | Member (base, _) | Bracket (base, _) | Try base -> call_with_mode_keyword state base
   | _ -> None
 
 (* Checks the target of a [calls] clause: a function-typed parameter, a
@@ -1029,8 +1031,10 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
            uses = Types.no_capabilities;
          })
   in
-  let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
-  let bound value : Core.argument = Passed { mode = Read; value = Value value; mark = None } in
+  let receiver : Core.argument = Passed { mode = Read; value = Place base; mode_keyword = None } in
+  let bound value : Core.argument =
+    Passed { mode = Read; value = Value value; mode_keyword = None }
+  in
   let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
   match stop with
   | None -> Slice { call = call "slice_from" [ receiver; bound start ] viewed }
@@ -1058,7 +1062,7 @@ type conversion = From_never | Owned_to_view | Function_widening | To_integer | 
      call, for an argument, and as an obligation on [expression] otherwise.
    - An argument that is an owned collection converts to its view: a list
      passed to a [mut] parameter to a [Slice] of all of it, which the
-     callee may change, and otherwise to a call of the collection's
+     callee may mutate, and otherwise to a call of the collection's
      [slice]. [argument] is the parameter's mode. In a
      specification, an argument that is a built-in integer converts to
      [Integer], and an [Integer] converts to a built-in integer that it
@@ -1123,7 +1127,7 @@ let convert state env ?argument ?expression (span : span) ~actual ~expected =
                                        (match inner.kind with
                                        | Use place -> Place place
                                        | _ -> Value inner);
-                                     mark = None;
+                                     mode_keyword = None;
                                    };
                                ];
                              lends = None;

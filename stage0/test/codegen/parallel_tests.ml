@@ -15,7 +15,7 @@ let same_with_any_workers text ~expected =
   List.iter (fun workers -> expect_string ~expected (output_with ~workers text)) worker_counts
 
 let () =
-  test "branches give results through lets, change their own parts, and call a lambda" (fun () ->
+  test "branches give results through lets, mutate their own parts, and call a lambda" (fun () ->
       same_with_any_workers ~expected:"2500050000 2500000000 2 n100000 300000\n"
         Fixtures.Parallel.branches_give_results_through_lets_change_their);
   test "a branch forks again at every depth of a recursion" (fun () ->
@@ -30,9 +30,9 @@ let () =
 let board = Fixtures.Parallel.board
 
 let () =
-  test "a parallel for over a list changes each element once" (fun () ->
+  test "a parallel for over a list mutates each element once" (fun () ->
       same_with_any_workers ~expected:"7905322 same\n"
-        (board ^ Fixtures.Parallel.parallel_for_over_a_list_changes_each_element_once));
+        (board ^ Fixtures.Parallel.parallel_for_over_a_list_mutates_each_element_once));
   test "a region reads a parameter that the function is passed by pointer" (fun () ->
       same_with_any_workers ~expected:"2 4 6 8\n"
         Fixtures.Parallel.region_reads_a_parameter_that_the_function_is);

@@ -124,7 +124,7 @@ let uses =
         (Query.demand database Parsed.file file).uses)
 
 (* Whether an occurrence refers to a definition or, for a method, to any
-   version of it. *)
+   overload of it. *)
 let names_definition (definition : Path.t) target =
   match (target, definition) with
   | Definition (Method { owner; name; _ }), Method { owner = other_owner; name = other_name; _ } ->

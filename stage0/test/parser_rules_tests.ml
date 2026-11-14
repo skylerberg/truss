@@ -248,15 +248,15 @@ let () =
       statement "while true {\n  if a { break } else { continue }\n}"
         "(while true (block (if a (block break) (block continue))))");
   test "return leaving a parallel block" (fun () ->
-      body_error "parallel {\n  return\n}" ~code:Leaves_parallel ~at:"return");
+      body_error "parallel {\n  return\n}" ~code:Exits_parallel ~at:"return");
   test "? leaving a parallel for" (fun () ->
-      body_error "parallel for x in s {\n  let y = f(x)?\n}" ~code:Leaves_parallel ~at:"?");
+      body_error "parallel for x in s {\n  let y = f(x)?\n}" ~code:Exits_parallel ~at:"?");
   test "break in a parallel for" (fun () ->
-      body_error "parallel for x in s {\n  break\n}" ~code:Leaves_parallel ~at:"break");
+      body_error "parallel for x in s {\n  break\n}" ~code:Exits_parallel ~at:"break");
   test "continue in a parallel for" (fun () ->
       statement "parallel for x in s {\n  continue\n}" "(parallel-for x s (block continue))");
   test "break leaving a branch" (fun () ->
-      body_error "while a {\n  parallel {\n    break\n  }\n}" ~code:Leaves_parallel ~at:"break");
+      body_error "while a {\n  parallel {\n    break\n  }\n}" ~code:Exits_parallel ~at:"break");
   test "a loop inside a branch" (fun () ->
       statement "parallel {\n  for x in s { break }\n}" "(parallel (block (for x s (block break))))");
   test "return in a lambda inside a branch" (fun () ->
@@ -270,7 +270,7 @@ let () =
       statement "while a {\n  concurrent {\n    break\n  }\n}"
         "(while a (block (concurrent (block break))))");
   test "return leaving a parallel block inside a concurrent one" (fun () ->
-      body_error "concurrent {\n  parallel {\n    return\n  }\n}" ~code:Leaves_parallel ~at:"return");
+      body_error "concurrent {\n  parallel {\n    return\n  }\n}" ~code:Exits_parallel ~at:"return");
   test "echo in a specification" (fun () ->
       error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification ~at:"echo");
   test "a statement rule applies in every block" (fun () ->

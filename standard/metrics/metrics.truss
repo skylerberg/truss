@@ -1,0 +1,200 @@
+use standard::tasks
+
+public type Label(name: String, value: String)
+  derives Equal
+
+public type Bucket(upper_bound: Float64, count: UInt64)
+  derives Equal
+
+public type Sample =
+  | CounterSample(name: String, labels: List[Label], value: Float64)
+  | GaugeSample(name: String, labels: List[Label], value: Float64)
+  | HistogramSample(name: String, labels: List[Label], buckets: List[Bucket], sum: Float64, count: UInt64)
+  derives Equal
+
+type Kind = Counting | Gauging | Distributing
+  derives Equal
+
+type Entry(
+  name: String,
+  labels: List[Label],
+  kind: Kind,
+  value: Float64,
+  bounds: List[Float64],
+  counts: List[UInt64],
+  sum: Float64,
+  count: UInt64,
+)
+
+public opaque type Registry(entries: tasks::Cell[List[Entry]])
+
+public opaque type Counter(entries: tasks::Cell[List[Entry]], index: USize)
+
+public opaque type Gauge(entries: tasks::Cell[List[Entry]], index: USize)
+
+public opaque type Histogram(entries: tasks::Cell[List[Entry]], index: USize)
+
+public fn Registry.new() -> Registry {
+  Registry(entries: tasks::Cell.new([]))
+}
+
+public fn Registry.copy(self) -> Registry {
+  Registry(entries: self.entries.copy())
+}
+
+fn index_of(entries: tasks::Cell[List[Entry]], name: StringSlice, labels: Slice[Label], kind: Kind, bounds: Slice[Float64]) -> USize
+  uses Tasks
+{
+  let wanted = name.to_string()
+  let wanted_labels = labels.to_list()
+  let wanted_bounds = bounds.to_list()
+  entries.update(fn(listed) {
+    for index in 0..listed.length() {
+      if listed[index].name == wanted && listed[index].labels == wanted_labels && listed[index].kind == kind {
+        return index
+      }
+    }
+    mut listed.push(Entry(
+      name: wanted.copy(),
+      labels: wanted_labels.copy(),
+      kind: kind,
+      value: 0.0,
+      bounds: wanted_bounds.copy(),
+      counts: List.filled(0, count: wanted_bounds.length()),
+      sum: 0.0,
+      count: 0,
+    ))
+    listed.length() - 1
+  })
+}
+
+public fn Registry.counter(self, name: StringSlice, labels: List[Label] = []) -> Counter
+  uses Tasks
+{
+  Counter(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels.slice(), kind: Kind.Counting, bounds: []))
+}
+
+public fn Registry.gauge(self, name: StringSlice, labels: List[Label] = []) -> Gauge
+  uses Tasks
+{
+  Gauge(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels.slice(), kind: Kind.Gauging, bounds: []))
+}
+
+public fn Registry.histogram(self, name: StringSlice, labels: List[Label] = [], buckets: List[Float64] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]) -> Histogram
+  uses Tasks
+{
+  let bounds = ascending(buckets.slice())
+  Histogram(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels.slice(), kind: Kind.Distributing, bounds: bounds.slice()))
+}
+
+fn ascending(values: Slice[Float64]) -> List[Float64] {
+  var sorted: List[Float64] = []
+  for value in values {
+    var at = sorted.length()
+    while at > 0 && sorted[at - 1] > value
+      invariant at <= sorted.length()
+      decreases at
+    {
+      at -= 1
+    }
+    mut sorted.insert_at(at, item: value)
+  }
+  sorted
+}
+
+fn change(entries: tasks::Cell[List[Entry]], index: USize, amount: Float64, is_set: Bool)
+  uses Tasks
+{
+  entries.update(fn(listed) {
+    if index < listed.length() {
+      listed[index].value = if is_set { amount } else { listed[index].value + amount }
+    }
+  })
+}
+
+fn read(entries: tasks::Cell[List[Entry]], index: USize) -> Float64
+  uses Tasks
+{
+  entries.read(fn(listed) { if index < listed.length() { listed[index].value } else { 0.0 } })
+}
+
+public fn Counter.add(self, amount: Float64 = 1.0)
+  uses Tasks
+{
+  if amount > 0.0 {
+    change(self.entries, index: self.index, amount: amount, is_set: false)
+  }
+}
+
+public fn Counter.value(self) -> Float64
+  uses Tasks
+{
+  read(self.entries, index: self.index)
+}
+
+public fn Gauge.set(self, value: Float64)
+  uses Tasks
+{
+  change(self.entries, index: self.index, amount: value, is_set: true)
+}
+
+public fn Gauge.add(self, amount: Float64)
+  uses Tasks
+{
+  change(self.entries, index: self.index, amount: amount, is_set: false)
+}
+
+public fn Gauge.value(self) -> Float64
+  uses Tasks
+{
+  read(self.entries, index: self.index)
+}
+
+public fn Histogram.observe(self, value: Float64)
+  uses Tasks
+{
+  let index = self.index
+  self.entries.update(fn(listed) {
+    if index < listed.length() {
+      let bounds = listed[index].bounds.copy()
+      var counts = listed[index].counts.copy()
+      for bound in 0..bounds.length() {
+        if bound < counts.length() && value <= bounds[bound] {
+          counts[bound] = counts[bound].saturating_add(1)
+        }
+      }
+      let sum = listed[index].sum + value
+      let count = listed[index].count.saturating_add(1)
+      if index < listed.length() {
+        listed[index].counts = own counts
+        listed[index].sum = sum
+        listed[index].count = count
+      }
+    }
+  })
+}
+
+public fn Registry.snapshot(self) -> List[Sample]
+  uses Tasks
+{
+  self.entries.read(fn(listed) {
+    var samples: List[Sample] = []
+    for entry in listed {
+      let sample = match entry.kind {
+        Counting => Sample.CounterSample(name: entry.name.copy(), labels: entry.labels.copy(), value: entry.value)
+        Gauging => Sample.GaugeSample(name: entry.name.copy(), labels: entry.labels.copy(), value: entry.value)
+        Distributing => {
+          var buckets: List[Bucket] = []
+          for bound in 0..entry.bounds.length() {
+            if bound < entry.counts.length() {
+              mut buckets.push(Bucket(upper_bound: entry.bounds[bound], count: entry.counts[bound]))
+            }
+          }
+          Sample.HistogramSample(name: entry.name.copy(), labels: entry.labels.copy(), buckets: own buckets, sum: entry.sum, count: entry.count)
+        }
+      }
+      mut samples.push(own sample)
+    }
+    samples
+  })
+}
