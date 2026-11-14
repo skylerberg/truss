@@ -16,13 +16,8 @@ type hole = {
 let of_definition session source (declaration : Names.declaration) =
   let context = Database.context session in
   let key = Names.key_of declaration in
-  match
-    ( Query.demand context Names.definition key,
-      Query.demand context Resolve.resolved key,
-      Query.demand context Infer.type_check_result key,
-      Query.demand context Names.base key )
-  with
-  | Some definition, Some resolved, Some { tables; _ }, Some (_, base) ->
+  match Query.demand context Names.base key with
+  | Some (_, base) ->
       List.map
         (fun (hole : Inspect.hole) ->
           let line, column = Source.position source (base + hole.offset) in
@@ -35,8 +30,8 @@ let of_definition session source (declaration : Names.declaration) =
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes definition resolved tables)
-  | _ -> []
+        (Inspect.holes context key)
+  | None -> []
 
 let gather session packages paths =
   List.concat_map
