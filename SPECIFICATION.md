@@ -4,9 +4,7 @@ This document defines the Truss language: its grammar, and the rules that
 decide a program's semantics and whether it compiles. [DESIGN.md](DESIGN.md)
 gives the reasons for these rules, [PACKAGES.md](PACKAGES.md) defines
 packages, and the Markdown files beside the modules of
-[`standard/`](standard) document the standard library. The documents of
-stage0's stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists, say how
-much of the language stage0 builds.
+[`standard/`](standard) document the standard library.
 
 ## Notation
 
