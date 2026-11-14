@@ -573,7 +573,15 @@ within each function.
   `Slice`, or `Array` can be passed `mut` side by side, as in
   `sort(mut items[..middle])` and `sort(mut items[middle..])`, when the
   prover shows that they do not overlap.
-- A view of a temporary cannot be bound with `let`.
+- **A temporary is dropped at the end of its statement,** except where a
+  `let` keeps it until the end of the block that holds the `let`. A `let`
+  keeps the base of a slice that it binds, directly or through fields. It
+  also keeps such a base in a field of a record or variant that its value
+  constructs, in a field that a `with` replaces, and in an element of an
+  array literal. So `let middle = make_list()[1..4]` keeps the list for as
+  long as `middle` can be used. A `let` keeps no other temporary, such as the
+  receiver in `let part = make_list().slice()`. A view cannot be used after
+  the temporary or the local that it views is dropped.
 - **The one implicit conversion** is a `List` passed to a `Slice` parameter,
   or a `String` to a `StringSlice` parameter, which becomes a view of it.
 

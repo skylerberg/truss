@@ -1,0 +1,7 @@
+fn f(items: List[String], other: String) -> USize {
+  var outer = other.slice()
+  for item in items {
+    outer = item.slice()
+  }
+  outer.length()
+}

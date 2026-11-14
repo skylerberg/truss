@@ -689,11 +689,41 @@ let () =
       fine (same ^ Fixtures.Ownership.cursor_may_view_a_named_value));
   test "a cursor may view a string literal, which has static storage" (fun () ->
       fine (same ^ Fixtures.Ownership.cursor_may_view_a_string_literal_which_has_static));
-  test "a slice cannot view a temporary list" (fun () ->
-      one_diagnostic Fixtures.Ownership.slice_cannot_view_a_temporary_list
-        "ownership.views_temporary");
   test "a value computed from a temporary's view is fine" (fun () ->
-      fine Fixtures.Ownership.value_computed_from_a_temporarys_view_is_fine)
+      fine Fixtures.Ownership.value_computed_from_a_temporarys_view_is_fine);
+  test "a view of a temporary cannot be returned" (fun () ->
+      one_diagnostic
+        (Fixtures.Ownership.make ^ Fixtures.Ownership.view_of_a_temporary_cannot_be_returned)
+        "ownership.view_escapes")
+
+(* Temporaries that a [let] keeps until its bindings end *)
+
+let () =
+  let make = Fixtures.Ownership.make in
+  test "a `let` can bind a slice of a temporary list" (fun () ->
+      fine Fixtures.Ownership.let_can_bind_a_slice_of_a_temporary_list);
+  test "a `let` keeps a temporary that a record field it constructs slices" (fun () ->
+      fine (make ^ Fixtures.Ownership.let_keeps_a_temporary_sliced_in_a_record_field));
+  test "a `let` does not keep a temporary that is a method's receiver" (fun () ->
+      one_diagnostic
+        (make ^ Fixtures.Ownership.let_does_not_keep_a_receiver_temporary)
+        "ownership.views_temporary");
+  test "a slice of a temporary cannot outlive the `let` that keeps the temporary" (fun () ->
+      one_diagnostic Fixtures.Ownership.slice_of_a_temporary_cannot_outlive_the_let_that_keeps_it
+        "ownership.views_temporary")
+
+(* Views of locals that end before the holder *)
+
+let () =
+  test "a view of a local cannot outlive the local's block" (fun () ->
+      one_diagnostic
+        (Fixtures.Ownership.make ^ Fixtures.Ownership.view_of_a_local_cannot_outlive_its_block)
+        "ownership.view_escapes");
+  test "a view of a part that a loop owns cannot outlive the iteration" (fun () ->
+      one_diagnostic Fixtures.Ownership.view_of_an_owned_loop_part_cannot_outlive_its_iteration
+        "ownership.view_escapes");
+  test "a view of a part that a loop lends can outlive the iteration" (fun () ->
+      fine Fixtures.Ownership.view_of_a_lent_loop_part_can_outlive_its_iteration)
 
 (* Pulling views of places *)
 

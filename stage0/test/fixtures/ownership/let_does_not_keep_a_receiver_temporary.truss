@@ -1,0 +1,4 @@
+fn f() -> USize {
+  let part = make().slice()
+  part.length()
+}

@@ -9,8 +9,9 @@
    forward analysis over the actions gives, before each action, the views
    each holder may store and the loans that are open. A place is in use
    where an open loan borrows it, or where a live holder stores a view of
-   it. Specifications and [proof] blocks have no actions, because they do
-   not run. *)
+   it. A view dangles where the MIR drops the local or the temporary that
+   it views while a live holder stores it. Specifications and [proof]
+   blocks have no actions, because they do not run. *)
 open Context
 
 (* A loan: a borrow of a place that lasts for a region of code, as the MIR's
@@ -55,10 +56,9 @@ type action =
       (** A value that has these views is stored in the place: by an assignment, or by a call that
           borrows the place [mut] and may store one of its view arguments there. *)
   | Return_view of view list  (** The function returns a value that has these views. *)
-  | View_of_temporary of Place.t option
-      (** A dangling view: a temporary is dropped when the statement ends, but a view of it is bound
-          by the statement ([None]) or stored in the given place. The action's origin is the
-          temporary. *)
+  | Drop of (Place.root * Core.origin) list
+      (** The MIR ends these owners of values: each with where it is made, a temporary's expression
+          or a local's binding. A view of one of them dangles from here. *)
   | Bind_lent_part of Types.ty
       (** A [let] binds a part that a lending call lent. The loan ends with the statement. *)
   | Pass_owned_function of view list
@@ -89,15 +89,14 @@ type step = { action : action; origin : Core.origin }
 type held = {
   place : Place.t option;  (** The tracked place it is, for a lent part or an alias. *)
   views : view list;  (** The views of the value it holds, for a temporary. *)
-  temporaries : Core.origin list;
-      (** The owned temporaries the value it holds views, which end with their statement. *)
   slice : Place.t option;  (** For a slice, the elements it views. *)
   lent : Place.t option list;  (** For a constructed value, the places its fields lend. *)
   collection : (Place.t option * Types.ty) option;
       (** For an element of a collection, the collection and its type. *)
   fresh : bool;
-      (** For a temporary, whether its value is a new one, which the statement drops: not a string
-          literal, a lambda, or a value read out of a named place. *)
+      (** For a temporary, whether its value is a new one, which is dropped where the temporary is
+          [Dead]: not a string literal, a lambda, a value read out of a named place, or a part that
+          a loop's callee lends. *)
   alias : Mir.place option;
   part : bool;  (** Whether it is the part a loop over a yielding call is given. *)
 }
@@ -106,7 +105,6 @@ let nothing =
   {
     place = None;
     views = [];
-    temporaries = [];
     slice = None;
     lent = [];
     collection = None;
@@ -200,11 +198,20 @@ let views_of_copy builder (place : Mir.place) =
   | None -> ( match place.root with Local local -> (held builder local).views | Constant _ -> [])
 
 (* The views of a borrow of a place: the place itself. A place of a [Plain]
-   type is copied, not borrowed. *)
+   type is copied, not borrowed. A temporary that owns a new value is a
+   place of its own, which the MIR drops where the temporary is [Dead]. *)
 let views_of_borrow builder (place : Mir.place) type_ =
   match tracked builder place with
   | Some place -> [ { place; copied_out = plain builder.context type_ } ]
-  | None -> ( match place.root with Local local -> (held builder local).views | Constant _ -> [])
+  | None -> (
+      match (place.root, temporary_of builder place) with
+      | Local _, Some temporary
+        when (held builder temporary).fresh
+             && (not (plain builder.context type_))
+             && not (is_view builder.context type_) ->
+          [ { place = { root = Temporary temporary; steps = [] }; copied_out = false } ]
+      | Local local, _ -> (held builder local).views
+      | Constant _, _ -> [])
 
 let operand_type : Mir.operand -> Types.ty option = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } -> Some type_
@@ -215,6 +222,13 @@ let views_of_operand builder (operand : Mir.operand) =
   | Use { place; _ } | Take { place; _ } -> views_of_copy builder place
   | Borrow { place; type_; _ } -> views_of_borrow builder place type_
   | Constant _ -> []
+
+(* The views of an argument. A value passed to a read-only or [mut]
+   parameter is borrowed for the call, as a place is. *)
+let views_of_argument builder (mode : Types.mode) (operand : Mir.operand) =
+  match operand with
+  | Use { place; type_; _ } when mode <> Own -> views_of_borrow builder place type_
+  | _ -> views_of_operand builder operand
 
 (* The views of a part of a value, if it has a view type. *)
 let views_of_part builder (operand : Mir.operand) =
@@ -236,31 +250,18 @@ let operand_borrows builder (operand : Mir.operand) =
 let result_may_view builder (mode : Types.mode) type_ =
   (mode <> Own && not (plain builder.context type_)) || is_view builder.context type_
 
+(* The arguments that a call's result may view, each with its parameter's
+   mode. *)
 let viewable_arguments builder (call : Mir.call) =
   List.filter_map
     (fun (argument : Mir.argument) ->
       match argument with
       | Passed { mode; value; _ } -> (
           match operand_type value with
-          | Some type_ when result_may_view builder mode type_ -> Some value
+          | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
           | _ -> None)
       | Default -> None)
     call.arguments
-
-(* The owned temporaries an operand passed read-only views: a value with no
-   name that the statement drops. *)
-let owned_temporaries builder (mode : Types.mode) (operand : Mir.operand) =
-  match operand with
-  | (Borrow { place; type_; _ } | Use { place; type_; _ }) when mode = Read -> (
-      match temporary_of builder place with
-      | Some local when not (plain builder.context type_) ->
-          if is_view builder.context type_ then (held builder local).temporaries
-          else if (held builder local).fresh then [ (local_info builder local).origin ]
-          else []
-      | _ -> [])
-  | Use { place; type_; _ } when is_view builder.context type_ -> (
-      match place.root with Local local -> (held builder local).temporaries | Constant _ -> [])
-  | _ -> []
 
 (* The slice that a mutation of a place writes through, if any: the place
    itself where it is a slice borrowed [mut] whole, or the innermost slice
@@ -285,7 +286,7 @@ let writes_through builder ~whole (place : Mir.place) type_ origin =
 let is_captured builder (place : Place.t) =
   match place.root with
   | Local local -> List.mem local builder.captured
-  | Constant _ | Environment -> false
+  | Temporary _ | Constant _ | Environment -> false
 
 (* A read of a place: a copy, or a move out of it, as the move analysis
    says. A read-only borrow reads the place, and a [mut] borrow starts where
@@ -323,12 +324,6 @@ let borrow_mut builder (operand : Mir.operand) =
           Option.iter (fun slice -> emit_ builder (Mutate slice) origin) (held builder local).slice
       | Constant _ -> ())
   | _ -> ()
-
-(* Stores views in a place. None of them may be a view of a temporary,
-   which is dropped when the statement ends. *)
-let store_views builder (place : Place.t) origin ~views ~temporaries =
-  List.iter (fun origin -> emit_ builder (View_of_temporary (Some place)) origin) temporaries;
-  emit_ builder (Store { place; views }) origin
 
 (* A call, once its reads are written: its [mut] borrows, the aliasing of
    what it borrows, the views it may store in a [mut] argument, and the
@@ -391,14 +386,14 @@ let call builder (call : Mir.call) origin =
                   (fun other ->
                     other != target
                     && (match operand_type other with
-                      | Some t -> is_view builder.context t
+                      | Some type_ -> is_view builder.context type_
                       | None -> false)
                     && can_store_in type_ other)
-                  (viewable_arguments builder call)
+                  (List.map snd (viewable_arguments builder call))
               in
-              store_views builder place origin
-                ~views:(List.concat_map (views_of_operand builder) others)
-                ~temporaries:(List.concat_map (owned_temporaries builder Own) others)
+              emit_ builder
+                (Store { place; views = List.concat_map (views_of_operand builder) others })
+                origin
           | None -> ())
       | _ -> ())
     call.arguments;
@@ -413,17 +408,12 @@ let call builder (call : Mir.call) origin =
 
 (* What a call's result holds: views of the arguments it may view. *)
 let call_result builder (call : Mir.call) =
-  let viewable = viewable_arguments builder call in
   {
     nothing with
-    views = List.concat_map (views_of_operand builder) viewable;
-    temporaries =
+    views =
       List.concat_map
-        (fun (argument : Mir.argument) ->
-          match argument with
-          | Passed { mode; value; _ } -> owned_temporaries builder mode value
-          | Default -> [])
-        call.arguments;
+        (fun (mode, value) -> views_of_argument builder mode value)
+        (viewable_arguments builder call);
   }
 
 let hold builder (place : Mir.place) (value : held) =
@@ -435,7 +425,6 @@ let hold builder (place : Mir.place) (value : held) =
           place = (match value.place with Some _ -> value.place | None -> known.place);
           views =
             known.views @ List.filter (fun view -> not (List.mem view known.views)) value.views;
-          temporaries = known.temporaries @ value.temporaries;
           slice = (match value.slice with Some _ -> value.slice | None -> known.slice);
           lent = (match value.lent with [] -> known.lent | lent -> lent);
           collection =
@@ -461,11 +450,6 @@ let rvalue builder (value : Mir.rvalue) : held =
   match value with
   | Operand operand ->
       let views = views_of_operand builder operand in
-      let temporaries =
-        match operand with
-        | Use { place = { root = Local local; _ }; _ } -> (held builder local).temporaries
-        | _ -> []
-      in
       let lent = lent_places builder operand in
       let slice, fresh =
         match operand with
@@ -474,29 +458,15 @@ let rvalue builder (value : Mir.rvalue) : held =
         | Use _ | Take _ | Borrow _ -> (None, false)
         | Constant _ -> (None, false)
       in
-      {
-        nothing with
-        views;
-        temporaries;
-        lent = (match operand with Borrow _ -> [] | _ -> lent);
-        slice;
-        fresh;
-      }
+      { nothing with views; lent = (match operand with Borrow _ -> [] | _ -> lent); slice; fresh }
   | Operation _ | Compare _ -> nothing
   | Not operand | Convert { value = operand; _ } | To_any { value = operand; _ } | Copy operand ->
-      let temporaries =
-        match operand with
-        | Use { place = { root = Local local; _ } as place; _ } when is_temporary builder place ->
-            (held builder local).temporaries
-        | _ -> []
-      in
-      { nothing with views = views_of_operand builder operand; temporaries }
+      { nothing with views = views_of_operand builder operand }
   | Construct { fields; _ } ->
       let given = List.filter_map snd fields in
       {
         nothing with
         views = List.concat_map (views_of_part builder) given;
-        temporaries = List.concat_map (owned_temporaries builder Own) given;
         lent = List.concat_map (lent_places builder) given;
       }
   | Array elements -> { nothing with views = List.concat_map (views_of_part builder) elements }
@@ -557,8 +527,6 @@ let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rva
       List.map (fun (view : view) -> { view with copied_out = true }) views
     else views
   in
-  if holds_views then
-    List.iter (fun at -> emit_ builder (View_of_temporary None) at) result.temporaries;
   if holds_views || views <> [] then emit_ builder (Bind_views { locals = [ core ]; views }) origin
 
 let returned_temporaries (body : Mir.body) =
@@ -627,6 +595,19 @@ let statement builder (statement : Mir.statement) =
           if List.mem part locals && not (List.mem binding locals) then
             emit_ builder (Bind_lent_part part_type) at)
         builder.keeps_lent;
+      (* A local bound [own] and a temporary own their values, which end
+         here. A local bound to a place, and a lent part, own nothing. *)
+      let dropped =
+        List.filter_map
+          (fun local ->
+            let info = local_info builder local in
+            match info.kind with
+            | Temporary -> Some (Place.Temporary local, info.origin)
+            | Source { local = core; mode = Own; _ } -> Some (Place.Local core, info.origin)
+            | Source _ | Lent _ -> None)
+          locals
+      in
+      if dropped <> [] then emit_ builder (Drop dropped) origin;
       builder.keeps_lent <-
         List.filter
           (fun (binding, part, _, _) -> not (List.mem binding locals || List.mem part locals))
@@ -678,7 +659,7 @@ let statement builder (statement : Mir.statement) =
           emit_ builder (Assign place) origin;
           match type_ with
           | Some type_ when is_view builder.context type_ ->
-              store_views builder place origin ~views:result.views ~temporaries:result.temporaries
+              emit_ builder (Store { place; views = result.views }) origin
           | _ -> ())
       | None -> hold builder { target with projections = [] } result)
   | Call { destination; call = called } ->
@@ -750,15 +731,7 @@ let statement builder (statement : Mir.statement) =
             ]
         | None -> views_of_borrow builder base (Option.value ~default:Types.unit base_type)
       in
-      let temporaries =
-        match temporary_of builder base with
-        | Some local
-          when (held builder local).fresh
-               && not (plain builder.context (Option.value ~default:Types.unit base_type)) ->
-            [ (local_info builder local).origin ]
-        | _ -> []
-      in
-      hold builder destination { nothing with views; slice = elements; temporaries }
+      hold builder destination { nothing with views; slice = elements }
   | Pull { destination; cursor } ->
       (* A pull changes the cursor. *)
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor);
@@ -809,11 +782,23 @@ let terminator builder ~returns (basic : Mir.basic_block) =
           read_uses builder uses;
           call builder called origin;
           pull builder iteration origin;
-          hold builder part_place { (call_result builder called) with part = true }
+          (* A part that the callee lends is not a new value. *)
+          hold builder part_place
+            {
+              (call_result builder called) with
+              part = true;
+              fresh = yields_own builder.context called.callee;
+            }
       | Range _ -> read_uses builder uses
       | Pull { cursor; _ } ->
           pull builder iteration origin;
-          hold builder part_place { nothing with views = views_of_copy builder cursor })
+          let fresh =
+            match cursor with
+            | { root = Local local; projections = [] } ->
+                cursor_yields_own builder.context (local_info builder local).type_
+            | _ -> false
+          in
+          hold builder part_place { nothing with views = views_of_copy builder cursor; fresh })
   | Yield { mode; part; _ } ->
       (* A constructor built where it is yielded lends each place among its
          leaves, and its other leaves are values. A temporary yielded is
@@ -892,7 +877,13 @@ let terminator builder ~returns (basic : Mir.basic_block) =
    for], whose iterations may. [keyword] names it in messages. A loop's
    [bound] is the locals its pattern binds. *)
 type fork_join_block = { keyword : string; branches : position list list }
-type fork_join_loop = { keyword : string; body : position list; bound : Core.local list }
+
+type fork_join_loop = {
+  keyword : string;
+  body : position list;
+  bound : Core.local list;
+  temporaries : Mir.local list;  (** The temporaries that the body makes. *)
+}
 
 type actions = {
   body : Mir.body;
@@ -988,6 +979,19 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
                       | Live locals -> List.filter_map (source builder) locals
                       | _ -> [])
                     body.blocks.(inside).statements;
+                temporaries =
+                  List.concat_map
+                    (fun block ->
+                      List.concat_map
+                        (fun statement ->
+                          List.filter_map
+                            (fun (path : Moves.path) ->
+                              if (local_info builder path.local).kind = Temporary then
+                                Some path.local
+                              else None)
+                            (Moves.given_by statement))
+                        body.blocks.(block).statements)
+                    blocks;
               }
         | _ -> None)
   in
@@ -1014,7 +1018,7 @@ let aliases_place context (root : Place.root) =
   match root with
   | Local local ->
       local <> Self && (not (List.mem local context.parameters)) && kind context root <> Owned
-  | Constant _ | Environment -> false
+  | Temporary _ | Constant _ | Environment -> false
 
 (* Expands views through the holders that they name, so that the result
    names the places that own the borrowed data.
@@ -1038,13 +1042,14 @@ let resolve context (held_views : held_views) (views : view list) : view list =
     views
 
 (* Whether the viewed place is dropped when the function returns, so that a
-   view of it would dangle in the caller: a local, a lambda's environment
-   record, or an [own] parameter. A copy of a view that an [own] parameter
-   stores is not: it borrows the caller's data, which outlives the function. *)
+   view of it would dangle in the caller: a local, a temporary, a lambda's
+   environment record, or an [own] parameter. A copy of a view that an
+   [own] parameter stores is not: it borrows the caller's data, which
+   outlives the function. *)
 let lifetime_ends_at_return context (view : view) =
   match view.place.root with
   | Constant _ -> false
-  | Environment -> true
+  | Temporary _ | Environment -> true
   | Local local ->
       if local = Self || List.mem local context.parameters then
         kind context view.place.root = Owned && not view.copied_out
@@ -1057,7 +1062,7 @@ let outlives_function context (place : Place.t) =
   &&
   match place.root with
   | Local local -> List.mem local context.parameters
-  | Constant _ | Environment -> false
+  | Temporary _ | Constant _ | Environment -> false
 
 (* The analysis *)
 
@@ -1095,8 +1100,7 @@ let transfer context (step : step) (before : state) : state =
   | End_loans ended ->
       { before with loans = List.filter (fun (loan, _) -> not (List.mem loan ended)) before.loans }
   | Read _ | Move _ | Move_out_of_lent _ | Mutate _ | Assign _ | Yield_point _ | Return_view _
-  | View_of_temporary _ | Bind_lent_part _ | Pass_owned_function _ | Write_through _ | Arguments _
-    ->
+  | Drop _ | Bind_lent_part _ | Pass_owned_function _ | Write_through _ | Arguments _ ->
       before
 
 (* Merges a state into a known one: the merged state, where it grew. *)
@@ -1237,6 +1241,13 @@ let dangles context at ~views ~doing ~fix =
             stack frame, so the lambda would dangle. %s"
            doing fix);
       true
+  | Some { place = { root = Temporary _; _ }; _ } ->
+      report_view
+        (Printf.sprintf
+           "This %s a view of a temporary, which is dropped before the function returns, so the \
+            view would dangle. %s"
+           doing fix);
+      true
   | Some view ->
       report_view
         (Printf.sprintf
@@ -1323,6 +1334,9 @@ let check_body context (actions : actions) moves : task_hazard option =
       here.loans
   in
   let is_mut ((loan : loan), _) = loan.mode = Mut in
+  (* The values, by where each is made, whose dangling views are reported:
+     a value can end on more than one path. *)
+  let dangled = Hashtbl.create 4 in
   (* Reports a use of a place that a [mut] loan covers. *)
   let check_use (here : here) (place : Place.t) =
     match List.find_opt is_mut (covering here place) with
@@ -1348,7 +1362,7 @@ let check_body context (actions : actions) moves : task_hazard option =
               match holder with
               | Local local when not (outlives_function context { root = holder; steps = [] }) ->
                   here.is_live local
-              | Local _ | Constant _ | Environment -> true
+              | Local _ | Temporary _ | Constant _ | Environment -> true
             in
             if in_use && List.exists (fun (viewed : view) -> overlaps viewed.place place) viewed
             then
@@ -1423,25 +1437,57 @@ let check_body context (actions : actions) moves : task_hazard option =
                          (show context passed.place)))
                 places)
             views
-      | View_of_temporary holder ->
-          report context Views_temporary at
-            (match holder with
-            | None ->
-                "This temporary is dropped at the end of the statement, but the statement binds a \
-                 view of it, which would dangle. Bind the temporary to a name first, so that it \
-                 outlives the view."
-            (* A synthetic local, such as the list that a list literal
-               builds, has no name in the source. *)
-            | Some { root = Local (Synthetic _); _ } ->
-                "This temporary is dropped at the end of the statement, but the collection built \
-                 here may store a view of it, which would dangle. Bind the temporary to a name \
-                 first, so that it outlives the view."
-            | Some place ->
-                Printf.sprintf
-                  "This temporary is dropped at the end of the statement, but `%s` may store a \
-                   view of it, which would dangle. Bind the temporary to a name first, so that it \
-                   outlives the view."
-                  (show_root context place.root))
+      | Drop dropped ->
+          (* A dangling view: a live holder stores a view of a value that
+             ends here. A place that outlives the function cannot store a
+             view of a local at all, which [Store] reports. *)
+          List.iter
+            (fun ((root : Place.root), made) ->
+              let views_root ((holder : Place.root), viewed) =
+                (match holder with
+                  | Local local ->
+                      here.is_live local
+                      && not (outlives_function context { root = holder; steps = [] })
+                  | Temporary _ | Constant _ | Environment -> false)
+                && List.exists
+                     (fun (view : view) -> view.place.root = root && not view.copied_out)
+                     viewed
+              in
+              match List.find_opt views_root here.views with
+              | Some (holder, _) when not (Hashtbl.mem dangled made) -> (
+                  Hashtbl.replace dangled made ();
+                  (* A synthetic local, such as the list that a list
+                     literal builds, has no name in the source. *)
+                  let named_holder =
+                    match holder with
+                    | Local local when Hashtbl.mem context.names local ->
+                        Some (show_root context holder)
+                    | _ -> None
+                  in
+                  let holder =
+                    match named_holder with
+                    | Some name -> Printf.sprintf "`%s`" name
+                    | None -> "the value built here"
+                  in
+                  match root with
+                  | Temporary _ ->
+                      report context Views_temporary (span context made)
+                        (Printf.sprintf
+                           "This temporary is dropped while %s may still store a view of it, which \
+                            would dangle. Bind the temporary to a name with `let`%s, so that it \
+                            outlives the view."
+                           holder
+                           (match named_holder with
+                           | Some name -> Printf.sprintf " in the block that declares `%s`" name
+                           | None -> ""))
+                  | Local _ | Constant _ | Environment ->
+                      report context View_escapes (span context made)
+                        (Printf.sprintf
+                           "`%s` is dropped at the end of its scope while %s may still store a \
+                            view of it, which would dangle."
+                           (show_root context root) holder))
+              | _ -> ())
+            dropped
       | Bind_lent_part type_ ->
           report context Keeps_lent_part at
             ~fixes:(Move_rules.copy_fix context "Copy it." type_ at)
@@ -1456,7 +1502,7 @@ let check_body context (actions : actions) moves : task_hazard option =
               (fun (viewed : view) ->
                 match viewed.place.root with
                 | Environment -> true
-                | Constant _ -> false
+                | Temporary _ | Constant _ -> false
                 | Local _ -> kind context viewed.place.root <> Owned)
               (resolve context here.views views)
           with
@@ -1508,7 +1554,7 @@ let check_body context (actions : actions) moves : task_hazard option =
                   match Hashtbl.find_opt context.types local with
                   | Some type_ -> not (is_view context type_)
                   | None -> false)
-              | Local _ | Constant _ | Environment -> false
+              | Local _ | Temporary _ | Constant _ | Environment -> false
             in
             (* The caller of a capability's method cannot see the
                implementation, so the caller's ownership check cannot track
@@ -1519,7 +1565,7 @@ let check_body context (actions : actions) moves : task_hazard option =
               &&
               match view.place.root with
               | Local local -> local <> Self && List.mem local context.parameters
-              | Constant _ | Environment -> false
+              | Temporary _ | Constant _ | Environment -> false
             in
             if
               not
@@ -1567,6 +1613,7 @@ let check_body context (actions : actions) moves : task_hazard option =
              type checker checks. *)
           let mutable_root (root : Place.root) =
             match root with
+            | Temporary _ -> true
             | Constant _ | Environment -> false
             | Local local -> (
                 match kind context root with
@@ -1604,7 +1651,7 @@ let check_body context (actions : actions) moves : task_hazard option =
              let safe (view : view) =
                match view.place.root with
                | Constant _ -> true
-               | Environment -> false
+               | Temporary _ | Environment -> false
                | Local local ->
                    (local = Self || List.mem local context.parameters)
                    && kind context view.place.root = Borrowed
@@ -1688,9 +1735,10 @@ let check_body context (actions : actions) moves : task_hazard option =
     actions.fork_join_blocks;
   (* Data races between the iterations of a [parallel for] or [concurrent
      for]: the body can mutate only the locals of one iteration, which are
-     the loop's pattern variables and the locals that the body binds. *)
+     the loop's pattern variables, the locals that the body binds, and the
+     temporaries that it makes. *)
   List.iter
-    (fun ({ keyword; body; bound } : fork_join_loop) ->
+    (fun ({ keyword; body; bound; temporaries } : fork_join_loop) ->
       let bound = ref bound in
       each_step body (fun _ (step : step) ->
           match step.action with Bind locals -> bound := locals @ !bound | _ -> ());
@@ -1700,6 +1748,7 @@ let check_body context (actions : actions) moves : task_hazard option =
             match place.root with
             | Constant _ | Environment | Local Self -> true
             | Local local -> not (List.mem local !bound)
+            | Temporary local -> not (List.mem local temporaries)
           in
           if outside then
             report context Data_race (span context origin)

@@ -14,7 +14,9 @@ type local_kind =
           it was bound to, not a copy of it. *)
   | Temporary
       (** A value with no name. It is [Dead] at the end of the statement that makes it, unless it is
-          the value of a block, which the enclosing statement reads. *)
+          the value of a block, which the enclosing statement reads, or a [let] extends it, which
+          makes it [Dead] where the [let]'s bindings are, as the base of a slice that the [let]
+          binds is. *)
   | Lent of Types.mode
       (** The part that a lending call lends, or the target of a compound assignment: the place
           itself, until it is [Dead]. *)
