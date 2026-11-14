@@ -1,0 +1,16 @@
+let primes: Array[Int64, 4] = [2, 3, 5, 7]
+
+fn f() -> Int64
+  ensures result >= 0
+{
+  var seen = 0
+  for prime in primes
+    invariant seen >= 0
+    invariant seen <= 4
+  {
+    if seen < 4 && prime > 0 {
+      seen += 1
+    }
+  }
+  seen
+}

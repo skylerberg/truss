@@ -104,13 +104,14 @@ let change_rvalue change : Mir.rvalue -> Mir.rvalue =
           evidence = change_evidence change any.evidence;
         }
   | Copy value -> Copy (operand value)
-  | Function_value { path; type_arguments } ->
-      Function_value { path; type_arguments = List.map change.argument type_arguments }
+  | Function_value { path; type_arguments; is_argument } ->
+      Function_value { path; type_arguments = List.map change.argument type_arguments; is_argument }
   | Lambda lambda ->
       Lambda
         {
           lambda with
           body = change.lambda lambda.body;
+          value_type = Option.map change.ty lambda.value_type;
           captures =
             List.map
               (fun (capture : Mir.capture) ->
@@ -127,6 +128,7 @@ let change_rvalue change : Mir.rvalue -> Mir.rvalue =
           Operand (Constant { value = Integer number; type_ = Types.builtin USize })
       | Value (Value_parameter parameter) -> Value_parameter parameter
       | _ -> bug "a value parameter that is no value")
+  | Specification _ -> bug "a specification's expression in code that runs"
 
 let rec change_yielded change : Mir.yielded -> Mir.yielded = function
   | Part value -> Part (change_operand change value)
@@ -268,13 +270,15 @@ let change_block change (basic : Mir.basic_block) : Mir.basic_block =
             natural with
             body = change.block natural.body;
             after = Option.map change.block natural.after;
+            blocks = List.map change.block natural.blocks;
+            condition = List.map change.block natural.condition;
+            exits = List.map change.block natural.exits;
           })
         basic.header;
   }
 
 let change_body change (body : Mir.body) : Mir.body =
   {
-    body with
     parameters = List.map change.local body.parameters;
     captures = List.map change.local body.captures;
     locals =
@@ -294,22 +298,7 @@ let substituted (substitution : Types.substitution) (mir : Mir.t) : Mir.t =
       argument = Types.substitute_argument substitution;
     }
   in
-  {
-    body =
-      {
-        (change_body change mir.body) with
-        defaults =
-          List.map
-            (fun (local, (default : Mir.t)) ->
-              ( local,
-                {
-                  Mir.body = change_body change default.body;
-                  lambdas = Array.map (change_body change) default.lambdas;
-                } ))
-            mir.body.defaults;
-      };
-    lambdas = Array.map (change_body change) mir.lambdas;
-  }
+  { body = change_body change mir.body; lambdas = Array.map (change_body change) mir.lambdas }
 
 (* Inlining *)
 
@@ -412,7 +401,7 @@ let bind_parameter building ~origin ~temporaries ~is_default parameter (value : 
   | _ -> [ assign parameter (Operand value) ]
 
 let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : change) (mir : Mir.t)
-    (arguments : Mir.argument list) ~entry =
+    ~(defaults : (int * Mir.t) list) (arguments : Mir.argument list) ~entry =
   let parameters = List.map change.local mir.body.parameters in
   let temporaries = ref [] in
   let bound =
@@ -428,11 +417,11 @@ let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : c
   (* Each default runs in turn, from the last, so that the first runs first. *)
   let first =
     List.fold_right2
-      (fun (local, parameter) (argument : Mir.argument) next ->
+      (fun (position, parameter) (argument : Mir.argument) next ->
         match argument with
         | Passed _ -> next
         | Default -> (
-            match List.assoc_opt local mir.body.defaults with
+            match List.assoc_opt position defaults with
             | None -> bug "%s is given no argument for a parameter" (Path.show path)
             | Some default ->
                 let _, _, offset, count =
@@ -454,7 +443,7 @@ let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : c
                   | _ -> ()
                 done;
                 offset))
-      (List.combine mir.body.parameters parameters)
+      (List.mapi (fun position parameter -> (position, parameter)) parameters)
       arguments entry
   in
   (bound, first, !temporaries)
@@ -630,7 +619,12 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
 
 (* A method the instance calls, ready to inline: its path, its type
    arguments, and its MIR with them substituted. *)
-type callee = { path : Path.t; type_arguments : Types.argument list; mir : Mir.t }
+type callee = {
+  path : Path.t;
+  type_arguments : Types.argument list;
+  mir : Mir.t;
+  defaults : (int * Mir.t) list;
+}
 
 let copied_locals (change : change) (mir : Mir.t) ~temporaries =
   let first = change.local 0 and count = Array.length mir.body.locals in
@@ -734,7 +728,8 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
   in
   let bound, first, temporaries =
     bind_parameters building ~path:callee.path ~type_arguments:callee.type_arguments ~origin
-      ~inlined:basic.inlined ~change callee.mir call.arguments ~entry:offset
+      ~inlined:basic.inlined ~change callee.mir ~defaults:callee.defaults call.arguments
+      ~entry:offset
   in
   set_block building at { basic with statements = before @ bound; terminator = Goto first };
   let yields =

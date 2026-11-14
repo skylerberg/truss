@@ -67,7 +67,7 @@ let rvalue_uses ~moving ~origin (rvalue : Mir.rvalue) =
   | Is_variant { place; _ } -> [ read ~origin place ]
   | Lambda { captures; _ } ->
       List.map (fun (capture : Mir.capture) -> read ~origin capture.place) captures
-  | Function_value _ | Value_parameter _ -> []
+  | Function_value _ | Value_parameter _ | Specification _ -> []
 
 (* A call moves each argument passed to an [own] parameter whose type
    moves. *)

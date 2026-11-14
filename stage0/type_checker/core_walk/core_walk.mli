@@ -46,10 +46,6 @@ val local_names : Core.definition -> (Core.local, string) Hashtbl.t
     callback contracts name, every pattern binding, and every variable a quantifier over a type
     binds. A synthetic local has no name. *)
 
-val block_exists :
-  ?expression:(Core.expression -> bool) -> ?statement:(Core.statement -> bool) -> Core.block -> bool
-(** Whether some expression or statement of a block, to any depth, satisfies its test. *)
-
 val expression_exists :
   ?expression:(Core.expression -> bool) ->
   ?statement:(Core.statement -> bool) ->

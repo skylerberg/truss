@@ -3,10 +3,12 @@
     A definition that uses a construct the prover does not support yet is reported as
     [prover.unsupported], and none of its obligations count as proven. *)
 
-module Translate = Translate
+module State = State
+module Facts = Facts
+module Contracts = Contracts
 
 type proof =
-  | Obligations of Translate.outcome
+  | Obligations of State.outcome
   | Unsupported of Syntax.span * string
       (** The definition uses something the prover cannot translate yet, at this span. *)
   | Not_proven_here
@@ -18,7 +20,7 @@ val proof : (Resolve.Names.key, proof) Query.query
 
 (** A run of compiled code that decides part of a proof: a template's check, or a call whose
     arguments are known. *)
-type run = Template_check of Translate.evaluation | Call of Translate.known_call
+type run = Template_check of State.evaluation | Call of State.known_call
 
 (** A run's result: an integer, or a [Bool] as 0 or 1; that it timed out; or that it was not run,
     since its code cannot be built. *)

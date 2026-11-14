@@ -16,7 +16,7 @@
   types
   intrinsic
   interface
-  core
+  mir
   checks
   solver
   prover

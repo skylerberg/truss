@@ -50,6 +50,18 @@ let () =
       if not (contains actual "`Number` is `UInt8`") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven Fixtures.Prover.requires_rules_out_the_overflow);
+  test "a requires clause read from its code holds or fails at a call as the clause written does"
+    (fun () ->
+      (* The clause can run, so the prover reads its MIR: a short circuit on each side, a field
+         read, and a pattern that binds a name the clause then reads. *)
+      proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call;
+      not_proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call_2
+        "prover.requires");
+  test "a name that `is` binds in an `&&` is read by the operands after it" (fun () ->
+      (* [a && b is Ok(x) && c] is [(a && b is Ok(x)) && c], so [c] reads a name that the
+         right operand of the first [&&] binds. The callee's [ensures] says nothing where the
+         prover cannot read it, so the proof needs it read. *)
+      proven Fixtures.Prover.name_that_is_binds_in_an_and_is_read_after_it);
   test "a check in an if rules out the overflow" (fun () ->
       proven Fixtures.Prover.check_in_an_if_rules_out_the_overflow);
   test "a division by a value that may be zero" (fun () ->
@@ -240,7 +252,10 @@ let () =
   test "a loop's element is the list's element at its position" (fun () ->
       proven Fixtures.Prover.loops_element_is_the_lists_element_at_its_position);
   test "a loop over a list does not run once more" (fun () ->
-      not_proven Fixtures.Prover.loop_over_a_list_does_not_run_once_more "prover.ensures")
+      not_proven Fixtures.Prover.loop_over_a_list_does_not_run_once_more "prover.ensures");
+  test "a loop over the elements of a constant is proven" (fun () ->
+      (* The collection's place is the constant itself, which has the type the constant declares. *)
+      proven Fixtures.Prover.loop_over_the_elements_of_a_constant_is_proven)
 
 let couple = Fixtures.Prover.couple
 
@@ -1198,7 +1213,12 @@ let () =
   test "a proof for a generic impl names its own generic parameters" (fun () ->
       proven Fixtures.Prover.proof_for_a_generic_impl_names_its_own_generic);
   test "a law's proof names the law's parameters, where its requires hold" (fun () ->
-      proven Fixtures.Prover.laws_proof_names_the_laws_parameters_where_its)
+      proven Fixtures.Prover.laws_proof_names_the_laws_parameters_where_its);
+  test "a law's proof reads the specifications that its own body holds" (fun () ->
+      (* The proof is run while its [impl] is proven, and its body holds an [assert] of a
+         quantifier and an [assert] that bit vectors prove: each is read by its id in the proof's
+         definition, not in the [impl]'s. *)
+      proven Fixtures.Prover.laws_proof_reads_the_specifications_that_its_own)
 
 (* Concurrent code *)
 
@@ -1433,7 +1453,7 @@ let () =
         match Query.demand database Prover.proof (Resolve.Names.key_of key) with
         | Obligations { obligations; _ } ->
             List.fold_left
-              (fun most (obligation : Prover.Translate.obligation) ->
+              (fun most (obligation : Prover.State.obligation) ->
                 let text = Logic.text obligation.query in
                 let rec count from actual =
                   match String.index_from_opt text from '1' with
