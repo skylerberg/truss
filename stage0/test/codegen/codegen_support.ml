@@ -53,8 +53,6 @@ open Memory_layout
 let host =
   match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
 
-let target_64 = target_64 host
-let target_32 = Memory_layout.For_testing.target_32 host
 let field name ty = (name, Typed ty)
 let variant ?(indirect = false) name fields : variant_shape = { name; indirect; fields }
 
@@ -96,10 +94,8 @@ let shapes extra (ty : Ground.ty) : shape =
       | Some shape -> shape
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
 
-let layout ?(target = target_64) ?(extra = []) ty =
-  of_type (create target ~shape_of:(shapes extra)) ty
-
-let describe ?target ?extra ty = Memory_layout.For_testing.to_string (layout ?target ?extra ty)
+let layout ?(extra = []) ty = of_type (create host ~shape_of:(shapes extra)) ty
+let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 
 (* Writing code by hand *)
 
@@ -182,7 +178,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
 
 (* Compiling and running generated C *)
 
-let shape_env ?(extra = []) () = create target_64 ~shape_of:(shapes extra)
+let shape_env ?(extra = []) () = create host ~shape_of:(shapes extra)
 let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =
@@ -300,7 +296,7 @@ let load_files ?results files =
       ~want:(fun lowering wanted ->
         Engine.set (Engine.of_context database) Compile.roots lowering
           (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
-      database target_64 (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
+      database host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
 
 let load ?results text = load_files ?results [ (example_file, text) ]
 
@@ -375,4 +371,4 @@ let standard module_ name ?(arguments = []) () =
 
 let standard_layout ty =
   Memory_layout.For_testing.to_string
-    (Memory_layout.of_type (create target_64 ~shape_of:(Monomorphic.shape standard_context)) ty)
+    (Memory_layout.of_type (create host ~shape_of:(Monomorphic.shape standard_context)) ty)

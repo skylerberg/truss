@@ -92,14 +92,13 @@ let () =
               [ field "left" (named "Tree"); field "value" int64; field "right" (named "Tree") ];
           ]
       in
-      let env = create target_64 ~shape_of:(shapes [ ("Tree", tree) ]) in
+      let env = create host ~shape_of:(shapes [ ("Tree", tree) ]) in
       expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (For_testing.to_string (Memory_layout.block env (named "Tree") "Node")));
   test "an Array holds its elements in place" (fun () ->
       expect_string ~expected:"32/1 array(32 x 1/1 UInt8)" (describe (array uint8 32)));
-  test "USize has 64 bits on a target whose pointers have 32" (fun () ->
-      expect_int ~expected:24 (layout (list int64)).size;
-      expect_int ~expected:24 (layout ~target:target_32 (list int64)).size);
+  test "a List holds a pointer and two 64-bit USize fields" (fun () ->
+      expect_int ~expected:24 (layout (list int64)).size);
   test "a variant whose fields have zero size counts as having none" (fun () ->
       expect_string ~expected:"1/1 tag(UInt8: Some None) niche . 2+254" (describe (option unit)));
   test "a sum type with one variant has no tag" (fun () ->
@@ -127,7 +126,7 @@ let () =
   test "the standard library's Option of a Bool is one byte" (fun () ->
       expect_int ~expected:1
         (Memory_layout.of_type
-           (create target_64 ~shape_of:(Monomorphic.shape standard_context))
+           (create host ~shape_of:(Monomorphic.shape standard_context))
            (option bool))
           .size);
   test "a String is its storage's buffer, length, and capacity" (fun () ->
@@ -136,7 +135,7 @@ let () =
   test "storage is not trivial, and an Option of an integer is" (fun () ->
       let glue =
         Glue.create
-          (create target_64 ~shape_of:(Monomorphic.shape standard_context))
+          (create host ~shape_of:(Monomorphic.shape standard_context))
           ~representation:(Monomorphic.representation standard_context)
           ~usize:(Monomorphic.builtin USize) ()
       in

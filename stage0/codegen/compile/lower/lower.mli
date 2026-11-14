@@ -17,7 +17,7 @@ val context :
   ?checks:bool ->
   constant:(context -> Path.t -> Lowered.static_value option) ->
   Query.context ->
-  Memory_layout.target ->
+  Libc.system ->
   context
 
 (* The C of an instance of a function, a method, an [impl]'s method, or a

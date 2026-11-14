@@ -1,10 +1,5 @@
 let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
 
-type target = { pointer_bytes : int; system : Libc.system }
-
-let target_64 system = { pointer_bytes = 8; system }
-let target_32 system = { pointer_bytes = 4; system }
-
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 
 type pointee =
@@ -57,14 +52,14 @@ module Types = Map.Make (struct
 end)
 
 type env = {
-  target : target;
+  system : Libc.system;
   shape_of : Ground.ty -> shape;
   mutable done_ : t Types.t;
   mutable in_progress : unit Types.t;
 }
 
-let create target ~shape_of = { target; shape_of; done_ = Types.empty; in_progress = Types.empty }
-let target env = env.target
+let create system ~shape_of = { system; shape_of; done_ = Types.empty; in_progress = Types.empty }
+let system env = env.system
 let shape env ty = env.shape_of ty
 
 let integer_size = function
@@ -80,13 +75,13 @@ let integer_range integer =
       (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
 
-let scalar_size target = function
+let scalar_size = function
   | Integer integer -> integer_size integer
   | Float32 -> 4
   | Float64 -> 8
   | Bool -> 1
   | Character -> 4
-  | Pointer _ | Nullable_pointer _ -> target.pointer_bytes
+  | Pointer _ | Nullable_pointer _ -> 8
 
 let zero_size = { size = 0; alignment = 1; form = Zero_size; niche = None }
 let round_up value alignment = (value + alignment - 1) / alignment * alignment
@@ -101,8 +96,8 @@ let scalar_niche = function
   | Pointer _ as scalar -> Some { path = []; scalar; start = Z.zero; count = Z.one }
   | Integer _ | Float32 | Float64 | Nullable_pointer _ -> None
 
-let of_scalar target scalar =
-  let size = scalar_size target scalar in
+let of_scalar scalar =
+  let size = scalar_size scalar in
   { size; alignment = size; form = Scalar scalar; niche = scalar_niche scalar }
 
 (* The smallest unsigned integer that numbers [count] variants. *)
@@ -165,16 +160,14 @@ let rec of_type env ty =
       env.done_ <- Types.add ty layout env.done_;
       layout
 
-and of_member env = function
-  | Typed ty -> of_type env ty
-  | Raw scalar -> of_scalar env.target scalar
+and of_member env = function Typed ty -> of_type env ty | Raw scalar -> of_scalar scalar
 
 and fields env fields =
   place (List.map (fun (name, member) -> (name, member, of_member env member)) fields)
 
 and of_shape env ty (shape : shape) =
   match shape with
-  | Scalar scalar -> of_scalar env.target scalar
+  | Scalar scalar -> of_scalar scalar
   | Record fields' -> fields env fields'
   | Array (_, 0) -> zero_size
   | Array (element, count) ->
@@ -190,7 +183,7 @@ and of_shape env ty (shape : shape) =
   | Sum variants -> of_sum env ty variants
 
 and payload env ty (variant : variant_shape) =
-  if variant.indirect then of_scalar env.target (Pointer (Block (ty, variant.name)))
+  if variant.indirect then of_scalar (Pointer (Block (ty, variant.name)))
   else fields env variant.fields
 
 and of_sum env ty shapes =
@@ -349,6 +342,5 @@ let rec to_string layout =
 let has_zero_size env ty = (of_type env ty).size = 0
 
 module For_testing = struct
-  let target_32 = target_32
   let to_string = to_string
 end

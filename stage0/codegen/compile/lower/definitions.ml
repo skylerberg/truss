@@ -26,7 +26,7 @@ let debug_form : Ground.ty -> Glue.debug_form = function
       | _ -> Structure)
   | _ -> Structure
 
-let context ?(checks = false) ~constant database target =
+let context ?(checks = false) ~constant database system =
   let rec monomorphic : Monomorphic.context =
     {
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
@@ -35,7 +35,7 @@ let context ?(checks = false) ~constant database target =
     }
   and context =
     lazy
-      (let env = Memory_layout.create target ~shape_of:(Monomorphic.shape monomorphic) in
+      (let env = Memory_layout.create system ~shape_of:(Monomorphic.shape monomorphic) in
        let usize = Monomorphic.builtin USize in
        {
          database;

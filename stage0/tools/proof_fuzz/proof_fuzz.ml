@@ -40,9 +40,9 @@ let compiler =
 let cache = lazy (Build.cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
 let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
 
-let target =
+let system =
   match Libc.host with
-  | Some system -> Memory_layout.target_64 system
+  | Some system -> system
   | None -> failwith "the fuzzer runs programs, so it runs only on Linux and macOS"
 
 let load text =
@@ -61,7 +61,7 @@ let load text =
              ~want:(fun lowering wanted ->
                Engine.set engine Compile.roots lowering
                  (Compile.add_roots (Engine.context engine) lowering wanted))
-             database target (Lazy.force compiler) (Lazy.force cache) settings) )
+             database system (Lazy.force compiler) (Lazy.force cache) settings) )
 
 (* The bits and signedness of a built-in integer type, or of [Bool] as one
    bit. *)

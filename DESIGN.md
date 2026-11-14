@@ -264,10 +264,11 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 
 **`USize` has 64 bits on every target.** A proof about a `USize` therefore
 holds on every target, a cached proof needs no target in its key, and every
-package runs on every target. A target whose pointers have 32 bits still has
-a 64-bit `USize`. A length never exceeds the address space, and the
-target's allocator fails a size that does not fit in a pointer, as it fails
-any request it cannot meet.
+package runs on every target. Truss builds for x86-64 and ARM64, which have
+64-bit pointers. A target with 32-bit pointers, such as 32-bit WebAssembly,
+would keep a 64-bit `USize`: a length never exceeds the address space, and
+the target's allocator would fail a size that does not fit in a pointer, as
+it fails any request it cannot meet.
 
 A `USize` of the pointer's width would need every proof to hold for both
 widths. Each package would then carry overflow obligations for 32-bit

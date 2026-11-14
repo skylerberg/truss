@@ -14,8 +14,5 @@ val files : (Path.module_, Path.file list) Query.query
 val dependencies : (Path.package, Manifest.dependency list) Query.query
 (** A package's dependencies, each with its grants. *)
 
-val exists : (Path.package, bool) Query.query
-(** Whether there is a package of that name. *)
-
 val split_module : Query.context -> string list -> Path.module_ option
 val module_exists : (Path.module_, bool) Query.query

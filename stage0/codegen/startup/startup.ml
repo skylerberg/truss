@@ -1008,7 +1008,7 @@ static void t_run_taken(struct t_job *job) {
 
 static void t_rest(unsigned idle) {
   if (idle < 32) {
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__)
     __builtin_ia32_pause();
 #elif defined(__aarch64__)
     __asm__ __volatile__("yield");

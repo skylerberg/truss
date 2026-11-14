@@ -21,7 +21,7 @@ val context :
   ?checks:bool ->
   constant:(context -> Path.t -> Lowered.static_value option) ->
   Query.context ->
-  Memory_layout.target ->
+  Libc.system ->
   context
 
 val test_key : Path.t -> Instance.key

@@ -10,7 +10,7 @@
 
 type t
 
-(* How instances are lowered: for which target, and whether the build has
+(* How instances are lowered: for which system, and whether the build has
    run-time checks. *)
 type lowering
 
@@ -32,7 +32,7 @@ val create :
   want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
   Query.context ->
-  Memory_layout.target ->
+  Libc.system ->
   Toolchain.t ->
   Build.cache ->
   Build.settings ->
@@ -109,7 +109,7 @@ val build_program : t -> main:Path.t -> output:string -> (unit, string) result
    its tasks and [parallel] branches run sequentially. *)
 
 (* The key a run of code while compiling is kept under: the hash of the
-   code the root can reach, code generation's version, the target, and the
+   code the root can reach, code generation's version, the system, and the
    build's added C flags, which changes exactly when the run's result
    may. *)
 val run_key : t -> Instance.key -> (string, string) result
@@ -133,7 +133,7 @@ module For_testing : sig
       ?checks:bool ->
       constant:(context -> Path.t -> Lowered.static_value option) ->
       Query.context ->
-      Memory_layout.target ->
+      Libc.system ->
       context
 
     val constant : context -> Path.t -> constant

@@ -7,7 +7,7 @@ open C_values
 let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * Lowered.ty) list) =
   let argument position = fst (List.nth arguments position) in
   let scalar position = scalar_of context (snd (List.nth arguments position)) in
-  let width position = bit_width context (scalar position) in
+  let width position = bit_width (scalar position) in
   let unsigned position =
     Printf.sprintf "((%s)%s)" (unsigned_of context (scalar position)) (argument position)
   in

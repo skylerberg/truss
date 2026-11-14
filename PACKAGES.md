@@ -145,7 +145,6 @@ compatible with the one before when:
   traits, and laws, and gains at most methods that have bodies
 - every `impl` is still there
 - a constant has the same type and value
-- a package that ran on every target still does
 
 Bodies are not promised: a release may change a function's results within
 its contract, including a body that the prover reads as a definition and a

@@ -35,6 +35,7 @@ let dependencies =
     (fun database name ->
       match package database name with Some package -> package.dependencies | None -> [])
 
+(* Whether there is a package of that name. *)
 let exists =
   Query.query ~name:"package_exists" ~phase:Phases.project ~show:Path.show_package
     (fun database name -> Option.is_some (package database name))
