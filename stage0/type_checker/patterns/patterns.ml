@@ -2,8 +2,8 @@
    ("Warnings for pattern matching", 2007), over the matched values as a
    vector, so a [match] over several values is checked as one.
 
-   The check reads the core form, so it checks the patterns that the prover
-   and code generation read.
+   The check reads the core form, so it checks the patterns that the MIR is
+   built from.
 
    Constructors are the variants of a sum type, a record's one shape,
    [true] and [false], and for integers and [Character] the intervals that

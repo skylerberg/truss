@@ -494,7 +494,7 @@ let rvalue builder (value : Mir.rvalue) : held =
                      { place = { root = Local capture.local; steps = [] }; copied_out = false })
                    captures;
           })
-  | Function_value _ | Value_parameter _ -> nothing
+  | Function_value _ | Value_parameter _ | Specification _ -> nothing
 
 (* A local the body is about to bind: its first assignment is its value. *)
 let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin ~is_var

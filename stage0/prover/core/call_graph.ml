@@ -113,12 +113,12 @@ let dispatched (called : _ Core.target) =
   | Trait_method { evidence = Bound; self_type = Parameter { name = "Self"; _ }; _ } -> true
   | _ -> false
 
-(* The edges of one body: each call, each function named as a value, and
-   each [impl] an [any] value is made with. *)
-let edges database impls (body : Core.block) =
-  let body_edges = ref [] in
-  let add edges = body_edges := List.rev_append edges !body_edges in
-  let callee (called : Core.callee) =
+(* The edges of the code of one definition: each call, each function named
+   as a value, and each [impl] an [any] value is made with. *)
+let edges database impls (code : Mir.t) =
+  let code_edges = ref [] in
+  let add edges = code_edges := List.rev_append edges !code_edges in
+  let callee (called : Mir.callee) =
     match called with
     | Function { path; _ } ->
         add (Calls path :: List.map (fun impl -> Uses_impl impl) (impls_used database impls called))
@@ -167,25 +167,22 @@ let edges database impls (body : Core.block) =
     | Trait_method _ -> ()
     | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
-  Core_walk.block
-    (Core_walk.deep
-       {
-         Core_walk.ignore_all with
-         expression =
-           (fun (node : Core.expression) ->
-             match node.kind with
-             | Call { callee = called; _ } -> callee called
-             | Function_value { path; _ } -> add [ Calls path ]
-             | To_any { value; trait; _ } ->
-                 add
-                   (List.map
-                      (fun impl -> Uses_impl impl)
-                      (impls_for impls (traits_with_required database trait.trait) value.type_))
-             | _ -> ());
-         callee;
-       })
-    body;
-  List.rev !body_edges
+  Mir.iter_code code
+    ~statement:(fun (statement : Mir.statement) ->
+      match statement.kind with
+      | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+          callee call.callee
+      | Assign { value = Function_value { path; _ }; _ } -> add [ Calls path ]
+      | Assign { value = To_any { value; trait; _ }; _ } ->
+          add
+            (List.map
+               (fun impl -> Uses_impl impl)
+               (impls_for impls
+                  (traits_with_required database trait.trait)
+                  (Mir.operand_type value)))
+      | _ -> ())
+    ~terminator:(function For { iteration = Pull { next; _ }; _ } -> callee next | _ -> ());
+  List.rev !code_edges
 
 let build database package =
   let modules = Query.demand database Packages.modules package in
@@ -195,10 +192,9 @@ let build database package =
       List.concat_map
         (fun (declaration : Names.declaration) ->
           let key = Names.key_of declaration in
-          match (declaration.kind, Query.demand database Infer.core key) with
-          | (Function | Method | Theorem), Some { definition = Function { body = Some body; _ }; _ }
-            ->
-              [ (declaration.path, edges database impls body) ]
+          match (declaration.kind, Query.demand database Mir.mir key) with
+          | (Function | Method | Theorem), Some code ->
+              [ (declaration.path, edges database impls code) ]
           | _ -> [])
         (Query.demand database Names.declarations module_))
     modules

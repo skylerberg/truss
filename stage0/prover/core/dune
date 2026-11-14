@@ -1,5 +1,6 @@
 (library
  (name prover)
+ (modules_without_implementation state)
  (libraries
   manifest
   source
@@ -12,7 +13,6 @@
   well_known
   types
   core
-  core_walk
   syntax
   resolve
   interface

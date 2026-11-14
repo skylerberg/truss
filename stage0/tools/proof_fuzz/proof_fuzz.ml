@@ -92,16 +92,17 @@ let runnable database =
       let key = Resolve.Names.key_of declaration in
       match
         ( Query.demand database Interface.Environment.signature declaration.path,
-          Prover.Translate.source_at_key database key )
+          Prover.Contracts.source_at_key database key,
+          Query.demand database Mir.contract_of_path declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
-          Some
-            ({ core = { definition = Function { contract = { requires; _ }; _ }; _ }; _ } as source)
-        )
+          Some source,
+          Some { requires; _ } )
         when uses = Types.no_capabilities
              && integer output <> None
-             && List.for_all (fun (condition : Core.condition) -> condition.executable) requires
-        -> (
+             && List.for_all
+                  (fun (requirement : Mir.requirement) -> requirement.code <> None)
+                  requires -> (
           let ranges =
             List.map
               (fun (parameter : Types.parameter_info) -> integer parameter.type_)
@@ -109,8 +110,8 @@ let runnable database =
           in
           let admits =
             List.map
-              (fun (condition : Core.condition) ->
-                "(" ^ Prover.Translate.quote source condition.value.origin ^ ")")
+              (fun (requirement : Mir.requirement) ->
+                "(" ^ Prover.Facts.quote source requirement.clause.origin ^ ")")
               requires
           in
           (* [admitting] writes each clause as code, where [==>] is not

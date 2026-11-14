@@ -23,7 +23,14 @@ let call_locals (call : Mir.call) =
       (function Mir.Passed { value; _ } -> operand_locals value | Default -> [])
       call.arguments
 
-let rvalue_locals : Mir.rvalue -> Mir.local list = function
+(* A write to a whole local gives it a value; a write to a part of one reads
+   the local. *)
+let written (place : Mir.place) =
+  match place with
+  | { root = Local local; projections = [] } -> ([], [ local ])
+  | _ -> (place_locals place, [])
+
+let rec rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
       operand_locals value
   | Operation { operands; _ } | Array operands -> List.concat_map operand_locals operands
@@ -34,22 +41,47 @@ let rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Lambda { captures; _ } ->
       List.concat_map (fun (capture : Mir.capture) -> place_locals capture.place) captures
   | Function_value _ | Value_parameter _ -> []
+  | Specification (Result | Yielded) -> []
+  | Specification (Entry local) -> [ local ]
+  | Specification (Identical (first, second)) -> operand_locals first @ operand_locals second
+  | Specification (Applied { arguments; _ }) -> List.concat_map operand_locals arguments
+  | Specification (Method_time callee) -> (
+      match callee with Indirect callee -> operand_locals callee | _ -> [])
+  | Specification (Map entries) ->
+      List.concat_map (fun (key, value) -> operand_locals key @ operand_locals value) entries
+  | Specification (Quantified { range; parameter; matches; body; _ }) ->
+      (match range with
+        | Over_type _ -> []
+        | Over_range { start; stop; _ } -> operand_locals start @ operand_locals stop
+        | Over_collection collection -> operand_locals collection)
+      @ List.filter
+          (fun local -> local <> parameter)
+          (block_locals { statements = matches.statements @ body.statements; value = body.value })
+  | Specification (Conditional { condition; then_; else_; _ }) ->
+      operand_locals condition @ block_locals then_ @ block_locals else_
+  | Specification (Cases cases) ->
+      List.concat_map
+        (fun (case : Mir.case) ->
+          block_locals case.tests
+          @ Option.fold ~none:[] ~some:block_locals case.guard
+          @ block_locals case.value)
+        cases
+  | Specification (Connective { left; right; _ }) -> operand_locals left @ block_locals right
 
-let rec yielded_locals : Mir.yielded -> Mir.local list = function
-  | Part value -> operand_locals value
-  | Built { fields; _ } ->
-      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:yielded_locals field) fields
-
-(* A write to a whole local gives it a value; a write to a part of one reads
-   the local. *)
-let written (place : Mir.place) =
-  match place with
-  | { root = Local local; projections = [] } -> ([], [ local ])
-  | _ -> (place_locals place, [])
+(* The locals a block of a formula reads that the code before it gives values. *)
+and block_locals (block : Mir.value_block) =
+  let read, given =
+    List.fold_left
+      (fun (read, given) statement ->
+        let reads, gives, _ = effects statement in
+        (List.filter (fun local -> not (List.mem local given)) reads @ read, gives @ given))
+      ([], []) block.statements
+  in
+  List.filter (fun local -> not (List.mem local given)) (operand_locals block.value) @ read
 
 (* The locals a statement reads, the locals it gives values, and the locals
    it ends. *)
-let effects (statement : Mir.statement) =
+and effects (statement : Mir.statement) =
   match statement.kind with
   | Assign { target; value; _ } ->
       let read, given = written target in
@@ -73,6 +105,11 @@ let effects (statement : Mir.statement) =
         [] )
   | Loan_start { borrowed; _ } -> (operand_locals borrowed, [], [])
   | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [], [])
+
+let rec yielded_locals : Mir.yielded -> Mir.local list = function
+  | Part value -> operand_locals value
+  | Built { fields; _ } ->
+      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:yielded_locals field) fields
 
 let terminator_reads : Mir.terminator -> Mir.local list = function
   | Branch { condition; _ } -> operand_locals condition
@@ -135,7 +172,8 @@ let validate definition (body : Mir.body) =
                     | Copy _ -> "copy"
                     | Function_value _ -> "function"
                     | Lambda _ -> "lambda"
-                    | Value_parameter _ -> "value_parameter")
+                    | Value_parameter _ -> "value_parameter"
+                    | Specification _ -> "specification")
               | None, Call { destination = Some { root = Local l; projections = [] }; _ }
                 when l = local ->
                   Some "call"
@@ -699,6 +737,194 @@ let () =
                  (statements mir.body))
           then fail "the lambda value does not capture g's offset"
       | lambdas -> fail "%d lambdas" (Array.length lambdas));
+  test "a method an impl inherits shares its trait's default method's MIR" (fun () ->
+      let database =
+        setup [ ("app::main", Fixtures.Mir.method_an_impl_inherits_shares_its_traits_default) ]
+      in
+      let module_ = module_of "app::main" in
+      let method_of owner name : Path.t = Method { owner; name; receiver = Read } in
+      let impl_for type_name : Path.t =
+        Impl { module_; trait = "Shape"; for_type = { type_name; generics = [] } }
+      in
+      let by_path path =
+        match Query.demand database Mir.of_path path with
+        | Some mir -> mir
+        | None -> failwith (Path.show path ^ " has no MIR")
+      in
+      let default_method = method_of (Top { module_; name = "Shape" }) "doubled" in
+      let default_mir =
+        match
+          Option.bind (Query.demand database Interface.Summary.key default_method) (mir_of database)
+        with
+        | Some mir -> mir
+        | None -> failwith "the default method has no MIR"
+      in
+      (* Physical equality: the inherited methods hold the default method's MIR itself, not a
+         MIR built again for each [impl]. *)
+      List.iter
+        (fun type_name ->
+          if by_path (method_of (impl_for type_name) "doubled") != default_mir then
+            fail "`%s` has a MIR of its own for the method it inherits" type_name)
+        [ "Square"; "Cube" ];
+      if by_path default_method != default_mir then
+        fail "the default method's MIR by its path is not its definition's";
+      (* A method an [impl] writes has its own definition's MIR. *)
+      if
+        by_path (method_of (impl_for "Square") "side")
+        == by_path (method_of (impl_for "Cube") "side")
+      then fail "two written methods share one MIR");
+  test "defaults have bodies of their own, apart from the MIR of any function's body" (fun () ->
+      let database = setup [ ("app::main", Fixtures.Mir.defaults_have_bodies_of_their_own) ] in
+      let module_ = module_of "app::main" in
+      let top name : Path.t = Top { module_; name } in
+      let defaults_of path =
+        match Query.demand database Mir.defaults_of_path path with
+        | Some defaults -> defaults
+        | None -> failwith (Path.show path ^ " has no defaults")
+      in
+      (* The value a default's body returns, where it is a literal. *)
+      let returned (default : Mir.t) =
+        validate "a default" default.body;
+        List.find_map
+          (fun (_, (terminator : Mir.terminator)) ->
+            match terminator with
+            | Return (Some (Constant { value = Integer value; _ })) -> Some (Z.to_int value)
+            | _ -> None)
+          (terminators default.body)
+      in
+      let positions = function
+        | Mir.Parameter_defaults defaults ->
+            List.map (fun (position, default) -> (position, returned default)) defaults
+        | Field_defaults _ -> failwith "a function with field defaults"
+      in
+      (* A capability's method has no body, and its callers evaluate its default. *)
+      let add : Path.t = Method { owner = top "Tally"; name = "add"; receiver = Static } in
+      if Query.demand database Mir.of_path add <> None then fail "`Tally.add` has a body's MIR";
+      if positions (defaults_of add) <> [ (0, Some 5) ] then
+        fail "`Tally.add` does not have its default at position 0";
+      (* A method's positions count [self] first, as a call's arguments do. *)
+      let advance : Path.t = Method { owner = top "Counter"; name = "advance"; receiver = Mut } in
+      if positions (defaults_of advance) <> [ (1, Some 3) ] then
+        fail "`Counter.advance` does not have its default at position 1";
+      match defaults_of (top "Counter") with
+      | Field_defaults [ { variant = None; field = "step"; value; _ } ] ->
+          if returned value <> Some 2 then fail "the default of `step` is not 2"
+      | Field_defaults defaults -> fail "`Counter` has %d field defaults" (List.length defaults)
+      | Parameter_defaults _ -> fail "a type with parameter defaults");
+  test "a contract's clauses are formulas that take the function's parameters" (fun () ->
+      let database = setup [ ("app::main", Fixtures.Mir.contracts_clauses_are_formulas) ] in
+      let g : Path.t = Top { module_ = module_of "app::main"; name = "g" } in
+      let parameters (clause : Mir.formula) =
+        List.map
+          (fun parameter ->
+            match clause.locals.(parameter).kind with
+            | Source { name; _ } -> name
+            | Temporary | Lent _ -> None)
+          clause.parameters
+      in
+      (* Every value of a specification in a clause, the ones in its blocks included. *)
+      let specifications (clause : Mir.formula) =
+        let found = ref [] in
+        Mir.iter_formula clause ~statement:(fun (statement : Mir.statement) ->
+            match statement.kind with
+            | Assign { value = Specification specification; _ } -> found := specification :: !found
+            | _ -> ());
+        List.rev !found
+      in
+      let computes_a_comparison (block : Mir.value_block) =
+        List.exists
+          (fun (statement : Mir.statement) ->
+            match statement.kind with Assign { value = Compare _; _ } -> true | _ -> false)
+          block.statements
+      in
+      match Query.demand database Mir.contract_of_path g with
+      | Some { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ } -> (
+          List.iter
+            (fun clause ->
+              if parameters clause <> [ Some "count"; Some "items" ] then
+                fail "a clause does not take `count` and `items`")
+            [ quantified.clause; connected.clause; chosen.clause; ensured ];
+          (* A clause that can run is code too, which a template's check runs. *)
+          if quantified.code <> None then fail "the quantified clause can run";
+          (match connected.code with
+          | Some code -> validate "a clause that runs" code.body
+          | None -> fail "the clause of comparisons cannot run");
+          (* [result], and [count] as it was on entry. *)
+          (match specifications ensured with
+          | [ Result; Entry count ] | [ Entry count; Result ] ->
+              if not (List.mem count ensured.parameters) then fail "`old` reads no parameter"
+          | values -> fail "the `ensures` holds %d specification values" (List.length values));
+          (* [&&] is one value: its right operand is a block, which holds the comparison
+             that is read only where the left operand holds. *)
+          (match specifications connected.clause with
+          | [ Connective { connective = And; right; _ } ] ->
+              if not (computes_a_comparison right) then
+                fail "the right operand of `&&` is not computed in its block"
+          | values -> fail "the clause of comparisons holds %d values" (List.length values));
+          (* [if] is one value, with a block for each case. *)
+          (match specifications chosen.clause with
+          | [ Conditional { then_; else_; if_condition = Some _; _ } ] ->
+              if not (computes_a_comparison then_ && computes_a_comparison else_) then
+                fail "a case of the `if` is not computed in its block"
+          | values -> fail "the clause with an `if` holds %d values" (List.length values));
+          (* The quantifier is a formula over a range. Its body is a block of the clause
+             that reads the index in a local of the clause, and is no body of its own. *)
+          if quantified.clause.lambdas <> [||] then
+            fail "the quantifier's body is a body of its own";
+          match specifications quantified.clause with
+          | [ Quantified { quantifier = Forall; range = Over_range _; parameter; body; _ } ] ->
+              if quantified.clause.locals.(parameter).kind <> Temporary then
+                fail "the quantifier's index is no temporary of the clause";
+              if not (computes_a_comparison body) then
+                fail "the quantifier's body is not computed in its block"
+          | values -> fail "the quantified clause holds %d values" (List.length values))
+      | Some contract ->
+          fail "%d `requires` and %d `ensures`" (List.length contract.requires)
+            (List.length contract.ensures)
+      | None -> fail "`g` has no contract");
+  test "a loop holds its clauses as formulas, and a `proof` block's statement its body" (fun () ->
+      let database = setup [ ("app::main", Fixtures.Mir.loop_holds_its_clauses_as_formulas) ] in
+      let module_ = module_of "app::main" in
+      let g : Path.t = Top { module_; name = "g" } in
+      let key =
+        match Query.demand database Interface.Summary.key g with
+        | Some key -> key
+        | None -> failwith "the program has no g"
+      in
+      let mir =
+        match mir_of database key with Some mir -> mir | None -> failwith "g has no MIR"
+      in
+      (match
+         List.filter_map
+           (fun (block : Mir.basic_block) -> block.header)
+           (Array.to_list mir.body.blocks)
+       with
+      | [ { loop = { clauses = [ Invariant invariant ]; _ }; compared; _ } ] -> (
+          (* The invariant reads [index] and [items], which are its formula's parameters. *)
+          if List.length invariant.parameters <> 2 then
+            fail "the invariant's formula takes %d locals" (List.length invariant.parameters);
+          (* The condition compares functional operands, from which a measure is guessed. *)
+          match compared with
+          | Some { comparison = Less; _ } -> ()
+          | Some _ -> fail "the loop's condition is another comparison"
+          | None -> fail "the loop's condition is no comparison")
+      | loops -> fail "%d `while` loops with one invariant" (List.length loops));
+      (match
+         List.filter_map
+           (fun (statement : Mir.statement) ->
+             match statement.kind with Proof body -> Some body | _ -> None)
+           (statements mir.body)
+       with
+      | [ proof ] -> validate "the proof block" proof.body
+      | proofs -> fail "%d proof blocks" (List.length proofs));
+      (* A functional body is its function's definition, and a body with a loop is none. *)
+      let doubled : Path.t =
+        Method { owner = Top { module_; name = "Shape" }; name = "doubled"; receiver = Read }
+      in
+      if Query.demand database Mir.definition_of_path doubled = None then
+        fail "the functional body of `doubled` is no definition";
+      if Query.demand database Mir.definition_of_path g <> None then
+        fail "the body of `g`, which has a loop, is a definition");
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
       let blocks = mir.body.blocks in

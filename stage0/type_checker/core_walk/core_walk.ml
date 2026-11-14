@@ -212,15 +212,10 @@ let expression visit node = (deep visit).expression node
 
 exception Found
 
-let exists walk ?(expression = fun _ -> false) ?(statement = fun _ -> false) node =
+let expression_exists ?(expression = fun _ -> false) ?(statement = fun _ -> false) node =
   let test check node = if check node then raise Found in
   let visit = deep { ignore_all with expression = test expression; statement = test statement } in
-  match walk visit node with () -> false | exception Found -> true
-
-let block_exists ?expression ?statement node = exists block ?expression ?statement node
-
-let expression_exists ?expression ?statement node =
-  exists (fun visit -> visit.expression) ?expression ?statement node
+  match visit.expression node with () -> false | exception Found -> true
 
 let parameter visit (parameter : parameter) =
   Option.iter visit.expression parameter.default;

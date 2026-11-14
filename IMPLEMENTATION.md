@@ -100,6 +100,24 @@ develop as well as make it easier to bootstrap the compiler in parts.
   interface that exports only the values tests and tools read. CI rejects a
   use anywhere else.
 
+### Stages
+
+- **Every stage after the type checker reads the MIR.** The MIR builder
+  lowers code that runs to a control-flow graph, and a specification to a
+  formula: one block whose `if`, `match`, short-circuit operators, and
+  quantifiers are each one value. Ownership, the prover, and code
+  generation read no core expression.
+- **No stage rebuilds what an earlier stage had.** The builder records a
+  fact where it has it: a loop's blocks, a loop's collection, a lambda
+  written as an argument, the formula of a clause. A stage that would
+  search the MIR for such a fact, or join paths to recover a value, adds
+  the fact to the MIR instead.
+- **A module of the prover opens only the modules before it:** `State`,
+  `Facts`, `Contracts`, the rules from `Validity` to `Loops`, `Reader`, and
+  `Translate`. A rule reads a body or a formula through the context, which
+  `Reader` fills, so the one cycle, between a call and a formula that holds
+  calls, is in one place.
+
 ### Documents
 
 Each document has one job, and a fact is stated in one of them:

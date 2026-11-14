@@ -1,11 +1,13 @@
 (* The prover's entry point. *)
 
 open Syntax
-module Translate = Translate
+module State = State
+module Facts = Facts
+module Contracts = Contracts
 module Names = Resolve.Names
 module Symbol = Logic.Symbol
 
-type proof = Obligations of Translate.outcome | Unsupported of span * string | Not_proven_here
+type proof = Obligations of State.outcome | Unsupported of span * string | Not_proven_here
 
 (* The trait's clauses an [impl]'s method keeps, with the [impl]'s type as
    [Self] and its arguments for the trait's parameters, and the body the
@@ -19,15 +21,15 @@ let inherited database (path : Path.t) =
           let substitution =
             Option.value ~default:[] (Interface.Impls.trait_substitution database impl)
           in
-          match Translate.trait_part database implemented name receiver with
+          match Contracts.trait_part database implemented name receiver with
           | Some part ->
-              Some (part, substitution, Translate.provided_body database implemented name receiver)
+              Some (part, substitution, Contracts.provided_body database implemented name receiver)
           | None ->
               (* A capability's method takes no [self], so it is found with no
                  receiver. *)
               Option.map
                 (fun part -> (part, substitution, None))
-                (Translate.capability_part database implemented name))
+                (Contracts.capability_part database implemented name))
       | _ -> None)
   | _ -> None
 
@@ -35,12 +37,12 @@ let inherited database (path : Path.t) =
 let impl_laws database (key : Names.key) source =
   match Query.demand database Interface.Environment.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
-    when not (Translate.impl_unfinished database key) ->
+    when not (Contracts.impl_unfinished database key) ->
       [
         Translate.laws database source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
-            (Translate.law_proofs database (Path.package key.path) interface.implements
+            (Contracts.law_proofs database (Path.package key.path) interface.implements
                interface.for_type)
           ~at:(Translate.definition_span source);
       ]
@@ -121,7 +123,7 @@ let integer_instances database (path : Path.t) =
 (* The value a derived [Default] builds, from each field's default or its
    type's [default()], meets the type's invariant. The derived method has
    no source of its own, so its obligations are reported at the type. *)
-let derived_default database (key : Names.key) (source : Translate.source) =
+let derived_default database (key : Names.key) (source : State.source) =
   let derives_default =
     match Query.demand database Interface.Environment.type_interface key.path with
     | Some interface -> List.exists (Well_known.is Default) interface.derives
@@ -135,35 +137,36 @@ let derived_default database (key : Names.key) (source : Translate.source) =
         receiver = Static;
       }
   in
-  match if derives_default then Query.demand database Infer.derived path else None with
-  | Some core ->
-      let outcome = Translate.function_ database { source with core } ~path in
-      let span = Translate.definition_span source in
-      List.map
-        (fun (obligation : Translate.obligation) ->
-          let message =
-            match obligation.code with
-            | Invariant ->
-                "The value that the derived `Default` builds from the fields' defaults may not \
-                 meet this type's invariant."
-            | _ -> "In the derived `Default`: " ^ obligation.message
-          in
-          { obligation with span; message })
-        outcome.obligations
-  | _ -> []
+  if derives_default && Option.is_some (Query.demand database Mir.of_path path) then
+    let outcome = Translate.function_ database source ~path in
+    let span = Translate.definition_span source in
+    List.map
+      (fun (obligation : State.obligation) ->
+        let message =
+          match obligation.code with
+          | Invariant ->
+              "The value that the derived `Default` builds from the fields' defaults may not meet \
+               this type's invariant."
+          | _ -> "In the derived `Default`: " ^ obligation.message
+        in
+        { obligation with span; message })
+      outcome.obligations
+  else []
 
 let prove database (key : Names.key) =
-  match (declaration database key, Translate.source_at_key database key) with
+  match (declaration database key, Contracts.source_at_key database key) with
   | _ when is_specification_module key -> Not_proven_here
   | Some declaration, Some source -> (
       try
-        match (declaration.kind, source.core.definition) with
-        | (Function | Method), Function { body = None; _ } -> Not_proven_here
-        | Theorem, Function _ -> Obligations (Translate.theorem database source ~path:key.path)
-        | (Function | Method), Function { body = Some _; _ } -> (
+        match declaration.kind with
+        | (Function | Method) when Query.demand database Mir.mir key = None ->
+            (* A function or a method without a body. *)
+            Not_proven_here
+        | Theorem -> Obligations (Translate.theorem database source ~path:key.path)
+        | Function | Method -> (
             let prove_with substitution =
               Translate.function_
-                ~updating_helper:(Translate.is_updating_helper database key.path)
+                ~updating_helper:(Contracts.is_updating_helper database key.path)
                 ?inherited:(inherited database key.path) ~substitution database source
                 ~path:key.path
             in
@@ -177,9 +180,9 @@ let prove database (key : Names.key) =
                       let prefix = "Where " ^ String.concat " and " shown ^ ": " in
                       {
                         outcome with
-                        Translate.obligations =
+                        State.obligations =
                           List.map
-                            (fun (obligation : Translate.obligation) ->
+                            (fun (obligation : State.obligation) ->
                               { obligation with message = prefix ^ obligation.message })
                             outcome.obligations;
                       })
@@ -189,40 +192,43 @@ let prove database (key : Names.key) =
                   {
                     obligations =
                       List.concat_map
-                        (fun (outcome : Translate.outcome) -> outcome.obligations)
+                        (fun (outcome : State.outcome) -> outcome.obligations)
                         outcomes;
                     holes =
                       List.sort_uniq compare
-                        (List.concat_map
-                           (fun (outcome : Translate.outcome) -> outcome.holes)
-                           outcomes);
+                        (List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes);
                   })
-        | Test, Test _ -> Obligations (Translate.test database source ~path:key.path)
-        | Constant, Constant _ -> Obligations (Translate.constant database source ~path:key.path)
-        | Impl, _ ->
+        | Test -> Obligations (Translate.test database source ~path:key.path)
+        | Constant -> Obligations (Translate.constant database source ~path:key.path)
+        | Impl ->
             let outcomes = impl_laws database key source in
             Obligations
               {
                 obligations =
-                  List.concat_map
-                    (fun (outcome : Translate.outcome) -> outcome.obligations)
-                    outcomes;
-                holes =
-                  List.concat_map (fun (outcome : Translate.outcome) -> outcome.holes) outcomes;
+                  List.concat_map (fun (outcome : State.outcome) -> outcome.obligations) outcomes;
+                holes = List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes;
               }
-        | Type, Type { invariants = _ :: _; _ } ->
-            let outcome = Translate.type_ database source ~path:key.path in
-            Obligations
-              {
-                outcome with
-                obligations = outcome.obligations @ derived_default database key source;
-              }
-        | Type, Type { potential = Some _; _ } | Type, Type { defaults = _ :: _; _ } ->
-            Obligations (Translate.type_ database source ~path:key.path)
-        | _ -> Not_proven_here
+        | Type -> (
+            let has_defaults () =
+              match Query.demand database Mir.defaults_of_path key.path with
+              | Some (Field_defaults (_ :: _)) -> true
+              | Some (Field_defaults [] | Parameter_defaults _) | None -> false
+            in
+            match Query.demand database Mir.type_clauses_of_path key.path with
+            | Some { invariants = _ :: _; _ } ->
+                let outcome = Translate.type_ database source ~path:key.path in
+                Obligations
+                  {
+                    outcome with
+                    obligations = outcome.obligations @ derived_default database key source;
+                  }
+            | Some { potential; _ } when Option.is_some potential || has_defaults () ->
+                Obligations (Translate.type_ database source ~path:key.path)
+            | Some _ | None -> Not_proven_here)
+        | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
       with
-      | Translate.Unsupported (span, message) -> Unsupported (span, message)
-      | Translate.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
+      | Facts.Unsupported (span, message) -> Unsupported (span, message)
+      | Facts.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
   | _ -> Not_proven_here
 
 let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key prove
@@ -364,7 +370,7 @@ let truss_value members text =
   fst (one tokens)
 
 (* The parameters' values, in order, then the locals'. *)
-let counterexample members (obligation : Translate.obligation) answer_values =
+let counterexample members (obligation : State.obligation) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
@@ -405,7 +411,7 @@ let clamp_to_definition database (key : Names.key) (span : span) =
    that decides it, or that it timed out, or none yet, while a response it
    needs is pending. *)
 type answer = Solved of Solver.answer | Ran_true | Ran_false | Run_timed_out | Pending_answer
-type run = Template_check of Translate.evaluation | Call of Translate.known_call
+type run = Template_check of State.evaluation | Call of State.known_call
 type run_result = Returned of Z.t | Timed_out | Not_run
 
 (* The caller gives the evaluator, since the prover does not depend on
@@ -417,8 +423,8 @@ let no_evaluator = { code_key = (fun _ -> None); run = (fun _ -> Not_run) }
 
 type oracles = {
   solve : index:int -> with_locals:bool -> solver_response;
-  check_template : Translate.evaluation -> run_result;
-  call : Translate.known_call -> Z.t option;
+  check_template : State.evaluation -> run_result;
+  call : State.known_call -> Z.t option;
 }
 
 (* The solver's response to one query: its answer, or none yet. *)
@@ -427,9 +433,9 @@ and solver_response = Answered of Solver.answer | Unanswered
 (* The values of the calls a query mentions that running them gave, as
    facts, which are only as true as the compiled code, which the prover
    trusts. *)
-let call_facts ~call (obligation : Translate.obligation) =
+let call_facts ~call (obligation : State.obligation) =
   List.filter_map
-    (fun (known : Translate.known_call) ->
+    (fun (known : State.known_call) ->
       Option.map
         (fun value ->
           Logic.equal known.term
@@ -441,14 +447,14 @@ let call_facts ~call (obligation : Translate.obligation) =
 (* An obligation's query, with the results of running its calls. The same
    query, not a copy, when nothing is added, so the solver finds its earlier
    answer. *)
-let query_of ~call (obligation : Translate.obligation) =
+let query_of ~call (obligation : State.obligation) =
   match call_facts ~call obligation with
   | [] -> obligation.query
   | added -> { obligation.query with facts = obligation.query.facts @ added }
 
-let answers (oracles : oracles) (obligations : Translate.obligation list) =
+let answers (oracles : oracles) (obligations : State.obligation list) =
   List.mapi
-    (fun index (obligation : Translate.obligation) ->
+    (fun index (obligation : State.obligation) ->
       let answer =
         match Option.map oracles.check_template obligation.evaluation with
         | Some (Returned value) -> if Z.equal value Z.zero then Ran_false else Ran_true
@@ -496,7 +502,7 @@ let definition_states oracles database (key : Names.key) =
       ]
   | Obligations outcome ->
       List.map
-        (fun ((obligation : Translate.obligation), (answer : answer)) ->
+        (fun ((obligation : State.obligation), (answer : answer)) ->
           let span = clamp_to_definition obligation.span in
           (* These fixes change the code's semantics, so they are named, not
              applied. *)
@@ -594,7 +600,7 @@ let runs =
       | Obligations outcome ->
           List.sort_uniq compare
             (List.concat_map
-               (fun (obligation : Translate.obligation) ->
+               (fun (obligation : State.obligation) ->
                  Option.to_list
                    (Option.map (fun evaluation -> Template_check evaluation) obligation.evaluation)
                  @ List.map (fun call -> Call call) obligation.known_calls)

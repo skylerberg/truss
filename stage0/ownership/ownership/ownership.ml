@@ -43,7 +43,15 @@ let inputs database (key : Resolve.Names.key) =
           must_be_disjoint = [];
         }
       in
-      let mir = Query.demand database Mir.mir key in
+      (* A function for specifications only never runs, so it has no moves or
+         borrows to check. *)
+      let mir =
+        match lowered.interface with
+        | (Function_interface signature | Theorem_interface signature)
+          when signature.specification_only ->
+            None
+        | _ -> Query.demand database Mir.mir key
+      in
       Option.iter (Context.collect context) mir;
       Some (context, lowered, mir)
   | _ -> None

@@ -57,33 +57,6 @@ type capture = { local : Core.local; type_ : Types.ty; place : place }
 (** A local that a lambda captures: its core local, its type, and its place in the enclosing body.
 *)
 
-type rvalue =
-  | Operand of operand
-  | Operation of {
-      operation : Intrinsic.operation;
-      type_arguments : Types.argument list;
-          (** The intrinsic's type arguments: for an operator, the types of its operands. *)
-      operands : operand list;
-    }
-      (** A primitive operation on built-in types, written as an operator or as a call of the
-          intrinsic. *)
-  | Compare of { comparison : Core.comparison; left : operand; right : operand }
-  | Not of operand
-  | Construct of { variant : string option; fields : (string * operand option) list }
-      (** A record or a variant, with every field in evaluation order. [None] takes the field's
-          default. A [Borrow] field lends its place to the value, as a yielded construct does. *)
-  | Array of operand list
-  | Is_variant of { place : place; variant : string }
-  | Convert of { conversion : Core.conversion; value : operand }
-  | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
-  | Copy of operand  (** A [copy()] that the compiler implements. *)
-  | Function_value of { path : Path.t; type_arguments : Types.argument list }
-  | Lambda of { body : int; captures : capture list; written : Core.expression }
-      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
-          the order of its body's {!body.captures}. [written] is the lambda as written, which the
-          prover reads as a function's definition. *)
-  | Value_parameter of Types.parameter
-
 type yielded =
   | Part of operand
   | Built of {
@@ -112,47 +85,6 @@ type loan_duration =
       (** An evaluated operand stays borrowed until its operation runs, so that a later operand
           cannot mutate it. *)
 
-type statement = { kind : statement_kind; origin : Core.origin }
-
-and statement_kind =
-  | Assign of { target : place; value : rvalue; node : Core.id option }
-      (** [node] is the core expression whose value the assignment computes, where it computes one,
-          for the prover's messages. *)
-  | Call of { destination : place option; call : call }
-  | Lend of { part : local; call : call }
-      (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
-  | Slice of { destination : place; base : place; call : call }
-      (** A call of [slice_range], whose result views [base]. *)
-  | Template of { destination : place; literals : string list; call : call }
-      (** A tagged string: the call of the tag's [from_template], with the literal texts. *)
-  | Live of local list  (** These locals start to hold values here. *)
-  | Dead of local list  (** These locals hold nothing from here on. *)
-  | Assert of { condition : operand; bit_vector : Core.expression option }
-      (** An [assert] that can run. One proven by bit vectors has its condition as written in
-          [bit_vector], which the prover reads as a formula. *)
-  | Echo of operand
-  | Provide of { provided : provided list; can_use_tasks : bool }
-  | Provide_end
-  | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
-      (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
-  | Loan_end of int list
-  | Ghost_assert of { condition : Core.expression; by_bit_vector : bool }
-      (** An [assert] that cannot run. Only the prover reads it. *)
-  | Matched of { patterns : Core.origin list }
-      (** An arm of a [match] whose patterns, by their origins, matched here, before its guard. Only
-          the prover reads it, to tell which arm a counterexample takes. *)
-  | Proof of Core.block  (** Only the prover reads it. *)
-
-type loop = {
-  clauses : Core.loop_clause list;
-  schedule : Core.loop_mode;
-  origin : Core.origin;
-  formula : Core.expression option;
-      (** The formula the prover reads for the loop: the quantifier a loop runs, or a [while] loop's
-          condition, from which it guesses a measure that decreases. *)
-}
-(** The clauses of a loop, which its header carries. *)
-
 (** What a [for] loop iterates over. *)
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
@@ -174,18 +106,137 @@ type branch = {
 }
 (** A branch of a [parallel] or [concurrent] block. *)
 
-type lent_element = {
-  element : local;  (** The [Lent] local of the element. *)
-  count : Core.expression;
-      (** The call of the collection's [count], which the prover reads: a loop that mutates its
-          elements leaves their number as it was. *)
-  call : Core.expression;
-      (** The call of the collection's [element] at the loop's position, which the prover reads: a
-          loop that reads its elements was lent the values of this call at the positions before. *)
+type inlined = {
+  method_ : Path.t;
+  type_arguments : Types.argument list;  (** The method's, as the instance has them. *)
+  call : Core.origin;  (** Where the call is, in the code around it. *)
 }
-(** The element that an iteration of a loop over a collection is lent. *)
+(** A method inlined at a call. *)
 
-type terminator =
+type connective = And | Or | Implies
+
+type rvalue =
+  | Operand of operand
+  | Operation of {
+      operation : Intrinsic.operation;
+      type_arguments : Types.argument list;
+          (** The intrinsic's type arguments: for an operator, the types of its operands. *)
+      operands : operand list;
+    }
+      (** A primitive operation on built-in types, written as an operator or as a call of the
+          intrinsic. *)
+  | Compare of { comparison : Core.comparison; left : operand; right : operand }
+  | Not of operand
+  | Construct of { variant : string option; fields : (string * operand option) list }
+      (** A record or a variant, with every field in evaluation order. [None] takes the field's
+          default. A [Borrow] field lends its place to the value, as a yielded construct does. *)
+  | Array of operand list
+  | Is_variant of { place : place; variant : string }
+  | Convert of { conversion : Core.conversion; value : operand }
+  | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
+  | Copy of operand  (** A [copy()] that the compiler implements. *)
+  | Function_value of { path : Path.t; type_arguments : Types.argument list; is_argument : bool }
+  | Lambda of {
+      body : int;
+      captures : capture list;
+      definition : formula option;
+      value_type : Types.ty option;
+      is_argument : bool;
+    }
+      (** A function value made from a lambda. [body] indexes {!t.lambdas}, and [captures] are in
+          the order of its body's {!body.captures}. *)
+  | Value_parameter of Types.parameter
+  | Specification of specification
+
+and specification =
+  | Result
+  | Entry of local
+  | Yielded
+  | Identical of operand * operand
+  | Applied of {
+      function_ : Core.specification_function;
+      arguments : operand list;
+      unconverted : Types.ty list;
+    }
+  | Method_time of callee
+  | Map of (operand * operand) list
+  | Quantified of {
+      quantifier : Syntax.quantifier;
+      range : quantifier_range;
+      parameter : local;
+      matches : value_block;
+      body : value_block;
+    }
+  | Conditional of {
+      condition : operand;
+      then_ : value_block;
+      else_ : value_block;
+      if_condition : Core.origin option;
+    }
+  | Cases of case list
+  | Connective of { connective : connective; left : operand; right : value_block }
+
+and case = { tests : value_block; guard : value_block option; value : value_block }
+
+and quantifier_range =
+  | Over_type of Types.ty
+  | Over_range of { start : operand; stop : operand; inclusive : bool }
+  | Over_collection of operand
+
+and value_block = { statements : statement list; value : operand }
+
+and formula = {
+  parameters : local list;
+  locals : local_info array;
+  value : value_block;
+  type_ : Types.ty;
+  origin : Core.origin;
+  lambdas : body array;
+}
+
+and bound = Finite | Order_of of formula | At_most of formula | Exactly of formula
+and cost = { origin : Core.origin; amortized : bool; resource : Core.resource; bound : bound }
+and loop_clause = Invariant of formula | Decreases of formula list | Cost of cost
+and quantified = { quantifier : formula; decides : local }
+
+and loop = {
+  clauses : loop_clause list;
+  schedule : Core.loop_mode;
+  origin : Core.origin;
+  quantified : quantified option;
+}
+
+and lent_element = { element : local; collection : place; count : formula; call : formula }
+and compared = { comparison : Core.comparison; left : formula; right : formula }
+and statement = { kind : statement_kind; origin : Core.origin }
+
+and statement_kind =
+  | Assign of { target : place; value : rvalue; node : Core.id option }
+      (** [node] is the core expression whose value the assignment computes, where it computes one,
+          for the prover's messages. *)
+  | Call of { destination : place option; call : call }
+  | Lend of { part : local; call : call }
+      (** A call of a lending method. The [Lent] local [part] is the part it lends. *)
+  | Slice of { destination : place; base : place; call : call }
+      (** A call of [slice_range], whose result views [base]. *)
+  | Template of { destination : place; literals : string list; call : call }
+      (** A tagged string: the call of the tag's [from_template], with the literal texts. *)
+  | Live of local list  (** These locals start to hold values here. *)
+  | Dead of local list  (** These locals hold nothing from here on. *)
+  | Assert of { condition : operand; bit_vector : formula option }
+  | Echo of operand
+  | Provide of { provided : provided list; can_use_tasks : bool }
+  | Provide_end
+  | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
+      (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
+  | Loan_end of int list
+  | Ghost_assert of { condition : formula; by_bit_vector : bool }
+  | Matched of { patterns : Core.origin list }
+      (** An arm of a [match] whose patterns, by their origins, matched here, before its guard. Only
+          the prover reads it, to tell which arm a counterexample takes. *)
+  | Proof of t
+
+and terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block; is_if_condition : bool }
       (** [is_if_condition]: the condition is an [if]'s, as written, which the prover names where it
@@ -198,6 +249,7 @@ type terminator =
           (** In a loop over the elements of a collection, the element that each iteration is lent.
               [part] is then the element's position. *)
       body : block;
+      binding_count : int;
       blocks : block list;  (** Every block of the body, [body] first, nested loops' included. *)
       after : block;
       loop : loop;
@@ -228,12 +280,17 @@ type terminator =
   | Written_unreachable
   | Todo  (** A [todo] that is reached stops the program. *)
 
-type natural_loop = { loop : loop; body : block; after : block option }
-(** A [while] loop, which its header block carries: its clauses, the first block of its body, which
-    the loop's condition goes to where it holds, and the block it exits to where the condition does
-    not hold or a [break] leaves. *)
+and natural_loop = {
+  loop : loop;
+  body : block;
+  after : block option;
+  compared : compared option;
+  blocks : block list;
+  condition : block list;
+  exits : block list;
+}
 
-type basic_block = {
+and basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
@@ -243,18 +300,8 @@ type basic_block = {
           first. The block's origins are the innermost method's. Empty for the body's own blocks. *)
 }
 
-and inlined = {
-  method_ : Path.t;
-  type_arguments : Types.argument list;  (** The method's, as the instance has them. *)
-  call : Core.origin;  (** Where the call is, in the code around it. *)
-}
-(** A method inlined at a call. *)
-
-type body = {
+and body = {
   parameters : local list;
-  defaults : (local * t) list;
-      (** For each parameter with a default, the MIR of the default, which the callee runs where the
-          argument is left out. *)
   captures : local list;
       (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
           order. *)
@@ -264,7 +311,205 @@ type body = {
 
 and t = { body : body; lambdas : body array }
 
+type field_default = { variant : string option; field : string; type_ : Types.ty; value : t }
+type defaults = Parameter_defaults of (int * t) list | Field_defaults of field_default list
+type requirement = { clause : formula; code : t option; names : (Core.local * Core.origin) list }
+type callback = { inputs : (Core.local * string) list; requires : formula list }
+
+type parameter = {
+  local : Core.local;
+  name : string;
+  mode : Types.mode;
+  type_ : Types.ty;
+  has_default : bool;
+}
+
+type contract = {
+  parameters : parameter list;
+  requires : requirement list;
+  ensures : formula list;
+  decreases : formula list;
+  costs : cost list;
+  callbacks : (int * callback) list;
+}
+
+type type_clauses = { invariants : requirement list; potential : formula option }
+type definition = Functional of formula | Not_functional
+
+type law = {
+  name : string;
+  parameters : (Core.local * Types.ty) list;
+  requires : formula list;
+  states : formula;
+}
+
 let bug format = Compiler_bug.bug ~stage:"MIR" format
+
+(* Each place that a block of a formula reads: by its statements, by its
+   value, and by the blocks that its values hold. *)
+let rec iter_places_read visit (block : value_block) =
+  let operand = function
+    | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
+    | Constant _ -> ()
+  in
+  let callee : callee -> unit = function Indirect callee -> operand callee | _ -> () in
+  let call (call : call) =
+    callee call.callee;
+    List.iter (function Passed { value; _ } -> operand value | Default -> ()) call.arguments
+  in
+  let specification = function
+    | Result | Yielded -> ()
+    | Entry local -> visit { root = Local local; projections = [] }
+    | Identical (first, second) ->
+        operand first;
+        operand second
+    | Applied { arguments; _ } -> List.iter operand arguments
+    | Method_time method_ -> callee method_
+    | Map entries ->
+        List.iter
+          (fun (key, value) ->
+            operand key;
+            operand value)
+          entries
+    | Quantified { range; matches; body; _ } ->
+        (match range with
+        | Over_type _ -> ()
+        | Over_range { start; stop; _ } ->
+            operand start;
+            operand stop
+        | Over_collection collection -> operand collection);
+        iter_places_read visit matches;
+        iter_places_read visit body
+    | Cases cases ->
+        List.iter
+          (fun (case : case) ->
+            iter_places_read visit case.tests;
+            Option.iter (iter_places_read visit) case.guard;
+            iter_places_read visit case.value)
+          cases
+    | Conditional { condition; then_; else_; _ } ->
+        operand condition;
+        iter_places_read visit then_;
+        iter_places_read visit else_
+    | Connective { left; right; _ } ->
+        operand left;
+        iter_places_read visit right
+  in
+  let rvalue = function
+    | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
+        operand value
+    | Operation { operands; _ } | Array operands -> List.iter operand operands
+    | Compare { left; right; _ } ->
+        operand left;
+        operand right
+    | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter operand field) fields
+    | Is_variant { place; _ } -> visit place
+    | Lambda { captures; _ } -> List.iter (fun (capture : capture) -> visit capture.place) captures
+    | Function_value _ | Value_parameter _ -> ()
+    | Specification value -> specification value
+  in
+  List.iter
+    (fun (statement : statement) ->
+      match statement.kind with
+      | Assign { value; _ } -> rvalue value
+      | Call { call = called; _ } | Lend { call = called; _ } | Template { call = called; _ } ->
+          call called
+      | Slice { base; call = called; _ } ->
+          visit base;
+          call called
+      | Assert { condition = value; _ } | Echo value | Loan_start { borrowed = value; _ } ->
+          operand value
+      | Provide { provided; _ } ->
+          List.iter (fun (provided : provided) -> operand provided.value) provided
+      | Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ())
+    block.statements;
+  operand block.value
+
+type visit = { statement : statement -> unit; terminator : terminator -> unit }
+
+let rec visit_statements visit (statements : statement list) =
+  let block (block : value_block) = visit_statements visit block.statements in
+  List.iter
+    (fun (statement : statement) ->
+      visit.statement statement;
+      match statement.kind with
+      | Assign { value = Specification (Quantified { matches; body; _ }); _ } ->
+          block matches;
+          block body
+      | Assign { value = Specification (Cases cases); _ } ->
+          List.iter
+            (fun (case : case) ->
+              block case.tests;
+              Option.iter block case.guard;
+              block case.value)
+            cases
+      | Assign { value = Specification (Conditional { then_; else_; _ }); _ } ->
+          block then_;
+          block else_
+      | Assign { value = Specification (Connective { right; _ }); _ } -> block right
+      | Assign { value = Lambda { definition; _ }; _ } ->
+          Option.iter (visit_formula visit) definition
+      | Assert { bit_vector; _ } -> Option.iter (visit_formula visit) bit_vector
+      | Ghost_assert { condition; _ } -> visit_formula visit condition
+      | Proof code -> visit_code visit code
+      | Assign _ | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Echo _ | Provide _
+      | Provide_end | Loan_start _ | Loan_end _ | Matched _ ->
+          ())
+    statements
+
+and visit_formula visit (formula : formula) =
+  visit_statements visit formula.value.statements;
+  Array.iter (visit_body visit) formula.lambdas
+
+and visit_loop visit (loop : loop) =
+  List.iter
+    (function
+      | Invariant clause -> visit_formula visit clause
+      | Decreases measures -> List.iter (visit_formula visit) measures
+      | Cost { bound = Finite; _ } -> ()
+      | Cost { bound = Order_of amount | At_most amount | Exactly amount; _ } ->
+          visit_formula visit amount)
+    loop.clauses;
+  Option.iter
+    (fun (quantified : quantified) -> visit_formula visit quantified.quantifier)
+    loop.quantified
+
+and visit_body visit (body : body) =
+  Array.iter
+    (fun (block : basic_block) ->
+      Option.iter
+        (fun (header : natural_loop) ->
+          visit_loop visit header.loop;
+          Option.iter
+            (fun (compared : compared) ->
+              visit_formula visit compared.left;
+              visit_formula visit compared.right)
+            header.compared)
+        block.header;
+      visit_statements visit block.statements;
+      visit.terminator block.terminator;
+      match block.terminator with
+      | For { lent; loop; _ } ->
+          Option.iter
+            (fun (lent : lent_element) ->
+              visit_formula visit lent.count;
+              visit_formula visit lent.call)
+            lent;
+          visit_loop visit loop
+      | Goto _ | Branch _ | Switch_variant _ | Fork _ | Join _ | Iteration_end _ | Yield _
+      | Return _ | Cancel _ | Resume _ | Unreachable | Written_unreachable | Todo ->
+          ())
+    body.blocks
+
+and visit_code visit (code : t) =
+  visit_body visit code.body;
+  Array.iter (visit_body visit) code.lambdas
+
+let iter_code ?(statement = ignore) ?(terminator = ignore) code =
+  visit_code { statement; terminator } code
+
+let iter_formula ?(statement = ignore) ?(terminator = ignore) formula =
+  visit_formula { statement; terminator } formula
 
 (* The builder *)
 
@@ -349,10 +594,36 @@ type builder = {
       (** For the block where an early exit goes on once a group of tasks has ended, the scopes
           between that group and the next one out, which end there *)
   mutable if_conditions : Core.origin list;  (** The conditions of the [if]s built so far. *)
+  held_places : (local, place) Hashtbl.t;
+      (** For each temporary that holds a borrow of a place until its operation runs, the place. *)
+  mutable as_argument : bool;
+      (** Whether the expression being built is an argument of a call, written as a function or a
+          lambda. *)
+  is_specification : bool;
+      (** Whether the code is a specification, which never runs: a quantifier in it is a formula,
+          not a loop. *)
+  mutable in_formula : bool;
+      (** Whether the expression being built is inside a formula: a functional expression of a
+          specification, in which an [if], a [match], and a short-circuit operator are each one
+          value and nothing jumps. *)
+  entry_locals : Core.local list;
+      (** The parameters whose values on entry [old] reads, in a specification. *)
+  mutable in_old : bool;  (** Whether the expression being built is inside an [old]. *)
+  takes_free_locals : bool;
+      (** Whether a local that nothing in the body binds is a parameter of the body: for an
+          expression built apart from the code around it, such as a loop's clause. *)
+  mutable free : local list;  (** Such parameters so far, in reverse. *)
 }
 
-let create ~lambdas =
+let create ?(is_specification = false) ?(entry_locals = []) ?(takes_free_locals = false) ~lambdas ()
+    =
   {
+    takes_free_locals;
+    free = [];
+    is_specification;
+    in_formula = false;
+    entry_locals;
+    in_old = false;
     infos = Hashtbl.create 16;
     local_count = 0;
     pending = Hashtbl.create 16;
@@ -371,6 +642,8 @@ let create ~lambdas =
     groups = Hashtbl.create 1;
     resume_ends = Hashtbl.create 1;
     if_conditions = [];
+    held_places = Hashtbl.create 8;
+    as_argument = false;
   }
 
 let new_local b kind type_ origin =
@@ -425,9 +698,19 @@ let hold ?node b type_ origin value =
       assign ?node b (at local) value origin;
       Some (Use { place = at local; type_; node = Option.value node ~default:origin; origin })
 
-let source b (local : Core.local) =
+(* The local a core local is. A body may read a local that nothing in it
+   binds: the local is then a parameter of the body, of the type and at the
+   origin it is read with. *)
+let free_source b (local : Core.local) ~type_ ~origin =
   match Hashtbl.find_opt b.sources local with
-  | Some found -> found
+  | Some local -> local
+  | None when b.takes_free_locals ->
+      let free =
+        new_local b (Source { local; mode = Read; name = None; is_var = false }) type_ origin
+      in
+      Hashtbl.replace b.sources local free;
+      b.free <- free :: b.free;
+      free
   | None -> bug "a local that nothing binds"
 
 (* The scope that new bindings belong to. *)
@@ -454,16 +737,19 @@ let bind_source ?name ?(is_var = false) b (local : Core.local) mode type_ origin
       found
 
 (* Starts a loan of what [borrowed] borrows or views. A jump out of the
-   innermost scope ends it. *)
+   innermost scope ends it. A specification has no loans: it never runs, and
+   the ownership check, which reads loans, does not read it. *)
 let start_loan b borrowed mode duration origin =
   let loan = b.loan_count in
-  b.loan_count <- loan + 1;
-  emit b (Loan_start { loan; borrowed; mode; duration }) origin;
-  (match b.scopes with scope :: _ -> scope.loans <- loan :: scope.loans | [] -> ());
+  if not b.is_specification then begin
+    b.loan_count <- loan + 1;
+    emit b (Loan_start { loan; borrowed; mode; duration }) origin;
+    match b.scopes with scope :: _ -> scope.loans <- loan :: scope.loans | [] -> ()
+  end;
   loan
 
 let end_loans b loans origin =
-  if loans <> [] then begin
+  if loans <> [] && not b.is_specification then begin
     emit b (Loan_end loans) origin;
     List.iter
       (fun scope -> scope.loans <- List.filter (fun loan -> not (List.mem loan loans)) scope.loans)
@@ -525,7 +811,7 @@ let in_statement b origin f =
 
 let ( let* ) = Option.bind
 
-let operand_type : Core.operand -> Types.ty = function
+let core_operand_type : Core.operand -> Types.ty = function
   | Place found -> Core_walk.place_type found
   | Value value -> value.type_
 
@@ -564,7 +850,7 @@ let return_ b value origin =
   leave_scopes b ~depth:0 origin;
   terminate b (Return value) origin
 
-let type_of_operand : operand -> Types.ty = function
+let operand_type : operand -> Types.ty = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_
 
 (* The origin of the [concurrent] block or loop whose group a task is in. *)
@@ -611,6 +897,56 @@ and extended_base (base : Core.place) =
 
 (* Expressions *)
 
+(* Whether a body is functional, so that it can be the function's
+   definition: [let], [if], [match], [is], calls, fields, building values,
+   [with], operators, and quantifiers, with no [var], assignment, loop,
+   [return], argument lent to change, or expression that never returns.
+   Without [enters_lambdas], the bodies of the lambdas written in it are
+   not read: a lambda is a value, and whatever its body does, the expression
+   around it jumps nowhere. *)
+let is_functional ?(enters_lambdas = true) walk =
+  let fine = ref true in
+  let rec visit =
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable -> fine := false
+          | _ when diverges node.type_ -> fine := false
+          | Lambda _ when not enters_lambdas -> ()
+          | Call { arguments; _ } ->
+              if
+                List.exists
+                  (function
+                    | Core.Passed { mode = Types.Mut; _ } -> true
+                    | Core.Passed _ | Core.Default -> false)
+                  arguments
+              then fine := false;
+              Core_walk.expression_children visit node
+          | _ -> Core_walk.expression_children visit node);
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | Let { pattern; else_ = None; _ } when not (binds_variable pattern) ->
+              Core_walk.statement_children visit node
+          | Evaluate _ -> Core_walk.statement_children visit node
+          | _ -> fine := false);
+      pattern = (fun node -> Core_walk.pattern_children visit node);
+    }
+  and binds_variable (pattern : Core.pattern) =
+    let child_binds = ref false in
+    Core_walk.pattern_children
+      {
+        Core_walk.ignore_all with
+        pattern = (fun inner -> if binds_variable inner then child_binds := true);
+      }
+      pattern;
+    !child_binds || match pattern.kind with Bind { is_var; _ } -> is_var | _ -> false
+  in
+  walk visit;
+  !fine
+
 let rec expression b (node : Core.expression) : operand option =
   let origin = node.origin in
   let hold value = hold ~node:node.id b node.type_ origin value in
@@ -634,14 +970,31 @@ let rec expression b (node : Core.expression) : operand option =
       | Copy copied ->
           let* copied = operand b Read copied in
           hold (Copy copied)
-      | Function_value { path; type_arguments } -> hold (Function_value { path; type_arguments })
+      | Function_value { path; type_arguments } ->
+          let is_argument = b.as_argument in
+          b.as_argument <- false;
+          hold (Function_value { path; type_arguments; is_argument })
       | Value_parameter parameter -> hold (Value_parameter parameter)
       | Lambda { parameters; captures; body; _ } ->
+          let is_argument = b.as_argument in
+          b.as_argument <- false;
           let index = lambda b parameters captures body in
+          (* The type of the body's value before any conversion to [Integer],
+             which may be narrower than the lambda's own result type. *)
+          let rec unconverted (value : Core.expression) =
+            match value.kind with
+            | Convert { conversion = To_integer; value = inner } -> unconverted inner
+            | _ -> value.type_
+          in
           hold
             (Lambda
                {
-                 written = node;
+                 definition =
+                   (if is_functional (fun visit -> Core_walk.block visit body) then
+                      Some (lambda_definition b parameters body)
+                    else None);
+                 value_type = Option.map unconverted body.value;
+                 is_argument;
                  body = index;
                  captures =
                    List.map
@@ -649,7 +1002,7 @@ let rec expression b (node : Core.expression) : operand option =
                        {
                          local = capture.local;
                          type_ = capture.type_;
-                         place = at (source b capture.local);
+                         place = at (free_source b capture.local ~type_:capture.type_ ~origin);
                        })
                      captures;
                })
@@ -704,6 +1057,24 @@ let rec expression b (node : Core.expression) : operand option =
       | To_any { value; trait; evidence } ->
           let* value = expression b value in
           hold (To_any { value; trait; evidence })
+      | If { condition = tested; then_; else_; _ } when is_formula b node ->
+          in_formula b (fun () ->
+              (* The names that an [is] in the condition binds are bound in this block, and
+                 each arm reads them. *)
+              let* condition = expression b tested in
+              let arm (body : Core.block option) =
+                value_block b (fun () ->
+                    match body with
+                    | Some body -> block b body
+                    | None -> Some (Constant { value = Unit; type_ = Types.unit }))
+              in
+              let* then_ = arm (Some then_) in
+              let* else_ = arm else_ in
+              hold
+                (Specification
+                   (Conditional { condition; then_; else_; if_condition = Some tested.origin })))
+      | Match { scrutinees; arms } when is_formula b node ->
+          in_formula b (fun () -> formula_match b node scrutinees arms)
       | If { condition = tested; then_; else_; binds_lent_part } ->
           b.if_conditions <- tested.origin :: b.if_conditions;
           let result = value_local b node in
@@ -828,22 +1199,51 @@ let rec expression b (node : Core.expression) : operand option =
           match b.compound_target with
           | Some target -> Some (Take { place = target; type_ = node.type_; origin = node.origin })
           | None -> bug "the old value of a target outside a compound assignment")
+      | Quantified { quantifier; binder; body } when b.is_specification ->
+          quantified b node quantifier binder body
       | Quantified { quantifier; binder = Over_range { pattern; start; stop; inclusive }; body } ->
-          quantifier_loop b node quantifier pattern body (fun ~each ->
-              range_loop b ~origin ~pattern ~start ~stop ~inclusive
-                ~loop:{ (no_clauses origin) with formula = Some node }
-                ~each)
+          quantifier_loop b node quantifier body (fun ~loop ~each ->
+              range_loop b ~origin ~pattern ~start ~stop ~inclusive ~loop ~each)
       | Quantified { quantifier; binder = Over_elements { pattern; elements }; body } ->
-          quantifier_loop b node quantifier pattern body (fun ~each ->
-              elements_loop b ~origin ~pattern ~elements
-                ~loop:{ (no_clauses origin) with formula = Some node }
-                ~each)
-      | Collection_literal { construction = Specification_only; _ }
-      | Map_literal _ | Result | Old _ | Quantified _ | Yielded | Identical _
-      | Specification_function _ | Method_time _ ->
-          bug "a specification's expression in code that runs")
-
-and no_clauses origin = { clauses = []; schedule = Sequential; origin; formula = None }
+          quantifier_loop b node quantifier body (fun ~loop ~each ->
+              elements_loop b ~origin ~pattern ~elements ~loop ~each)
+      | Collection_literal { elements; construction = Specification_only } ->
+          (* The node's type says which collection the elements make, as for an array. *)
+          let* elements = operands b elements in
+          hold (Array elements)
+      | Map_literal { entries } ->
+          let* values = operands b (List.concat_map (fun (key, value) -> [ key; value ]) entries) in
+          let rec paired = function
+            | key :: value :: rest -> (key, value) :: paired rest
+            | _ -> []
+          in
+          hold (Specification (Map (paired values)))
+      | Result -> hold (Specification Result)
+      | Yielded -> hold (Specification Yielded)
+      | Old inner ->
+          let enclosing = b.in_old in
+          b.in_old <- true;
+          let value = expression b inner in
+          b.in_old <- enclosing;
+          value
+      | Identical (first, second) -> (
+          let* compared = operands b [ first; second ] in
+          match compared with
+          | [ first; second ] -> hold (Specification (Identical (first, second)))
+          | _ -> bug "an identity without two operands")
+      | Specification_function { function_; arguments } ->
+          let rec unconverted (argument : Core.expression) =
+            match argument.kind with
+            | Convert { conversion = To_integer; value } -> unconverted value
+            | _ -> argument.type_
+          in
+          let unconverted = List.map unconverted arguments in
+          let* arguments = operands b arguments in
+          hold (Specification (Applied { function_; arguments; unconverted }))
+      | Method_time callee ->
+          let* callee = callee_of b callee in
+          hold (Specification (Method_time callee))
+      | Quantified _ -> bug "a quantifier over a type or a collection in code that runs")
 
 and operands b nodes =
   in_order b
@@ -900,11 +1300,24 @@ and held b (value : operand) type_ origin =
       let local = temporary b type_ origin in
       assign b (at local) (Operand value) origin;
       Use { place = at local; type_; node; origin }
-  | Borrow { mode; _ } ->
+  | Borrow { place; mode; _ } ->
       let local = new_local b (Lent Read) type_ origin in
       add_temporary b local;
+      Hashtbl.replace b.held_places local place;
       assign b (at local) (Operand value) origin;
       Borrow { place = at local; type_; mode; origin }
+
+(* The place that a place stands for: through each temporary that holds a
+   borrow of a place until its operation runs. *)
+and borrowed_place b (place : place) =
+  match place.root with
+  | Local local -> (
+      match Hashtbl.find_opt b.held_places local with
+      | Some held ->
+          let held = borrowed_place b held in
+          { held with projections = held.projections @ place.projections }
+      | None -> place)
+  | Constant _ -> place
 
 (* The fields of a constructor, in evaluation order. *)
 and construct_fields b fields =
@@ -922,7 +1335,7 @@ and construct_fields b fields =
                      "a constructor field that is a place, in a construct that no lending method \
                       lends"
                | Value value -> expression b value),
-             operand_type field,
+             core_operand_type field,
              operand_origin field ))
          given)
   in
@@ -953,7 +1366,7 @@ and yielded b (mode : Types.mode) (part : Core.operand) : yielded option =
         match field with
         | Value { kind = Construct { fields; _ }; _ } when lends field ->
             List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
-        | _ -> [ ((fun () -> operand b mode field), operand_type field, operand_origin field) ]
+        | _ -> [ ((fun () -> operand b mode field), core_operand_type field, operand_origin field) ]
       in
       let* values = in_order b (leaves part) in
       let remaining = ref values in
@@ -998,7 +1411,12 @@ and place b (found : Core.place) : place option =
   | None -> None
   | Some _ -> (
       match found with
-      | Local { local; _ } -> Some (at (source b local))
+      | Local { local; type_; origin } when b.in_old && List.mem local b.entry_locals ->
+          (* Inside [old], a parameter is its value on entry. *)
+          let entry = temporary b type_ origin in
+          assign b (at entry) (Specification (Entry (free_source b local ~type_ ~origin))) origin;
+          Some (at entry)
+      | Local { local; type_; origin } -> Some (at (free_source b local ~type_ ~origin))
       | Constant { path; _ } -> Some { root = Constant path; projections = [] }
       | Field { base; field; _ } ->
           let* base = place b base in
@@ -1043,7 +1461,23 @@ and call_of b (called : Core.call) ~node ~origin : call option =
          (function
            | Core.Default -> None
            | Passed { mode; value; _ } ->
-               Some ((fun () -> operand b mode value), operand_type value, operand_origin value))
+               Some
+                 ( (fun () ->
+                     (* A function or a lambda written as the argument, which a conversion to
+                        the parameter's type may hold. *)
+                     let rec is_function (written : Core.expression) =
+                       match written.kind with
+                       | Function_value _ | Lambda _ -> true
+                       | Convert { conversion = Widen; value } -> is_function value
+                       | _ -> false
+                     in
+                     b.as_argument <-
+                       (match value with Value written -> is_function written | Place _ -> false);
+                     let passed = operand b mode value in
+                     b.as_argument <- false;
+                     passed),
+                   core_operand_type value,
+                   operand_origin value ))
          called.arguments)
   in
   let values = ref values in
@@ -1071,7 +1505,7 @@ and call_value b (node : Core.expression) (called : Core.call) =
           (List.map
              (function
                | Core.Passed { value; mode; _ } ->
-                   ((fun () -> operand b mode value), operand_type value, operand_origin value)
+                   ((fun () -> operand b mode value), core_operand_type value, operand_origin value)
                | Default -> bug "a primitive operation with a default argument")
              called.arguments)
       in
@@ -1092,8 +1526,236 @@ and call_value b (node : Core.expression) (called : Core.call) =
         emit b (Call { destination = Some (at local); call }) origin;
         Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
 
+(* Whether an expression of a specification is a formula: functional, so
+   that it has one value and jumps nowhere. Every expression inside a formula
+   is one. *)
+and is_formula b (node : Core.expression) =
+  b.is_specification
+  && (b.in_formula
+     || is_functional ~enters_lambdas:false (fun visit -> Core_walk.expression visit node))
+
+(* Builds a formula: what [build] builds is inside one. *)
+and in_formula : 'built. builder -> (unit -> 'built) -> 'built =
+ fun b build ->
+  let enclosing = b.in_formula in
+  b.in_formula <- true;
+  Fun.protect ~finally:(fun () -> b.in_formula <- enclosing) build
+
+(* A block of a formula: the statements [build] emits, and the value it
+   gives. The locals it binds and its temporaries belong to the scope around
+   it, which ends after the value that holds the block is read. *)
+and value_block b (build : unit -> operand option) : value_block option =
+  let* enclosing = b.current in
+  let block = new_block b in
+  start b block;
+  let value = build () in
+  if b.current <> Some block then bug "a block of a formula that jumps";
+  let pending = Hashtbl.find b.pending block in
+  let statements = List.rev pending.statements in
+  (* The block is no block of the control-flow graph: nothing jumps to it. *)
+  pending.statements <- [];
+  b.current <- Some enclosing;
+  Option.map (fun value -> { statements; value }) value
+
+(* A short-circuit operator or an [is] of a formula, as one value. The right
+   operand is a block, read only where the left leaves the value open. *)
+and formula_truth b (node : Core.expression) : operand option =
+  let connective connective (left : Core.expression) (right : Core.expression) =
+    let* left = expression b left in
+    let* right = value_block b (fun () -> expression b right) in
+    hold ~node:node.id b node.type_ node.origin
+      (Specification (Connective { connective; left; right }))
+  in
+  match node.kind with
+  | And (left, right) -> connective And left right
+  | Or (left, right) -> connective Or left right
+  | Implies (left, right) -> connective Implies left right
+  | Matches { value; pattern } ->
+      let* scrutinee = scrutinee b value in
+      formula_patterns b [ pattern ] [ scrutinee ] node.origin
+  | _ -> bug "a condition that is no short-circuit operator and no `is`"
+
+(* The tests of patterns against places in a formula, as one [Bool]: each
+   test after the first is in the right operand of an [&&], so that it reads
+   a part only where the tests before it show the part is there. *)
+and formula_tests b (patterns : Core.pattern list) places : operand option =
+  let opened = ref [] in
+  let branch_on value origin =
+    match (value, b.current) with
+    | Some left, Some enclosing ->
+        let block = new_block b in
+        start b block;
+        opened := (left, enclosing, block, origin) :: !opened
+    | _ -> ()
+  in
+  List.iter2 (fun pattern found -> test b pattern found ~branch_on) patterns places;
+  List.fold_left
+    (fun tested (left, enclosing, block, origin) ->
+      let pending = Hashtbl.find b.pending block in
+      let statements = List.rev pending.statements in
+      pending.statements <- [];
+      b.current <- Some enclosing;
+      match (tested, statements) with
+      | None, _ -> None
+      | Some (Constant { value = Boolean true; _ }), [] -> Some left
+      | Some value, _ ->
+          hold b Types.bool origin
+            (Specification (Connective { connective = And; left; right = { statements; value } })))
+    (Some (Constant { value = Boolean true; type_ = Types.bool }))
+    !opened
+
+(* Tests patterns against places in a formula, and binds their names in the
+   block being built, where every later block reads them. Gives whether the
+   patterns match. A name is read only where they do, so it is bound to its
+   part whether or not they match: a formula never runs, and a part that is
+   not there is an unspecified value that nothing reads. Where a pattern has
+   alternatives, each name is bound to its part in the first alternative that
+   matches. *)
+and formula_patterns b (patterns : Core.pattern list) places origin : operand option =
+  match expansions patterns with
+  | [ patterns ] ->
+      let tested = formula_tests b patterns places in
+      List.iter2 (bind b) patterns places;
+      tested
+  | alternatives ->
+      let tests = List.map (fun patterns -> formula_tests b patterns places) alternatives in
+      if List.mem None tests then None
+      else begin
+        let tests = List.filter_map Fun.id tests in
+        (* The names of an alternative, each with its part. *)
+        let rec names (pattern : Core.pattern) (scrutinee : place) =
+          match pattern.kind with
+          | Wildcard | Literal _ | Range _ | Equal_to _ -> []
+          | Bind _ -> [ (pattern, scrutinee) ]
+          | Variant { variant; fields } ->
+              List.concat_map
+                (fun (field, inner) ->
+                  names inner (project scrutinee (Variant_field { variant; field })))
+                fields
+          | Record fields ->
+              List.concat_map
+                (fun (field, inner) -> names inner (project scrutinee (Field field)))
+                fields
+          | Alternatives _ -> bug "alternatives are expanded before they are bound"
+        in
+        let named =
+          List.map (fun patterns -> List.concat (List.map2 names patterns places)) alternatives
+        in
+        let read ((pattern : Core.pattern), part) =
+          Use { place = part; type_ = pattern.type_; node = pattern.id; origin = pattern.origin }
+        in
+        (match named with
+        | [] -> ()
+        | first :: _ ->
+            List.iteri
+              (fun position ((pattern : Core.pattern), _) ->
+                match pattern.kind with
+                | Bind { local; name; is_var; _ } ->
+                    let parts = List.map (fun names -> List.nth names position) named in
+                    (* The part in the last alternative, where no alternative before it
+                       matches. *)
+                    let value =
+                      List.fold_left2
+                        (fun otherwise part condition ->
+                          match otherwise with
+                          | None -> Some (read part)
+                          | Some otherwise ->
+                              hold b pattern.type_ pattern.origin
+                                (Specification
+                                   (Conditional
+                                      {
+                                        condition;
+                                        then_ = { statements = []; value = read part };
+                                        else_ = { statements = []; value = otherwise };
+                                        if_condition = None;
+                                      })))
+                        None (List.rev parts) (List.rev tests)
+                    in
+                    let bound =
+                      bind_source ~name ~is_var b local Own pattern.type_ pattern.origin
+                    in
+                    emit b (Live [ bound ]) pattern.origin;
+                    Option.iter
+                      (fun value -> assign b (at bound) (Operand value) pattern.origin)
+                      value
+                | _ -> ())
+              first);
+        (* One of the alternatives matches. *)
+        List.fold_left
+          (fun matched test ->
+            match matched with
+            | None -> Some test
+            | Some matched ->
+                hold b Types.bool origin
+                  (Specification
+                     (Connective
+                        {
+                          connective = Or;
+                          left = test;
+                          right = { statements = []; value = matched };
+                        })))
+          None (List.rev tests)
+      end
+
+(* A [match] of a formula, as one value: its cases, each with the tests of
+   its patterns, its guard, and its value. Each way an arm's patterns can
+   match is a case of its own, so that the arm's names are the parts of the
+   alternative that matches. *)
+and formula_match b (node : Core.expression) scrutinees (arms : Core.arm list) : operand option =
+  let* evaluated =
+    in_order b
+      (List.map
+         (fun (found : Core.operand) ->
+           ((fun () -> operand b Read found), core_operand_type found, operand_origin found))
+         scrutinees)
+  in
+  let places =
+    List.map2
+      (fun (found : Core.operand) value ->
+        scrutinee_place b value (core_operand_type found) (operand_origin found))
+      scrutinees evaluated
+  in
+  let case patterns (arm : Core.arm) =
+    let bound read =
+      value_block b (fun () ->
+          List.iter2 (bind b) patterns places;
+          read ())
+    in
+    let* tests = value_block b (fun () -> formula_tests b patterns places) in
+    let* guard =
+      match arm.guard with
+      | Some guard -> Option.map Option.some (bound (fun () -> expression b guard))
+      | None -> Some None
+    in
+    let* value =
+      bound (fun () ->
+          if arm.patterns <> [] then
+            emit b
+              (Matched
+                 {
+                   patterns = List.map (fun (pattern : Core.pattern) -> pattern.origin) arm.patterns;
+                 })
+              arm.origin;
+          block b arm.body)
+    in
+    Some { tests; guard; value }
+  in
+  let cases =
+    List.concat_map
+      (fun (arm : Core.arm) ->
+        List.map (fun patterns -> case patterns arm) (expansions arm.patterns))
+      arms
+  in
+  if List.mem None cases then None
+  else
+    hold ~node:node.id b node.type_ node.origin
+      (Specification (Cases (List.filter_map Fun.id cases)))
+
 (* A [Bool] value of a condition: true on the path where it holds. *)
 and truth b (node : Core.expression) =
+  if is_formula b node then in_formula b (fun () -> formula_truth b node) else truth_of_paths b node
+
+and truth_of_paths b (node : Core.expression) =
   let local = temporary b node.type_ node.origin in
   let yes = new_block b and no = new_block b and joined = new_block b in
   condition b node ~yes ~no;
@@ -1258,7 +1920,7 @@ and scrutinee b (found : Core.operand) : place option =
   | Place found -> place b found
   | Value value ->
       let* value = expression b value in
-      let local = temporary b (operand_type found) (operand_origin found) in
+      let local = temporary b (core_operand_type found) (operand_origin found) in
       assign b (at local) (Operand value) (operand_origin found);
       Some (at local)
 
@@ -1275,45 +1937,49 @@ and scrutinee_place b (value : operand) type_ origin : place =
       assign b (at local) (Operand value) origin;
       at local
 
-(* The tests of a pattern against a place: control goes on where it
-   matches, and jumps to [fail] where it does not. Testing mutates nothing,
-   so bindings come after every test of an arm. *)
-and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
+(* Goes on where a test holds, and jumps to [fail] where it does not. *)
+and branch_or_fail b ~fail value origin =
+  let passed = new_block b in
+  (match value with
+  | Some condition ->
+      terminate b (Branch { condition; yes = passed; no = fail; is_if_condition = false }) origin
+  | None -> ());
+  start b passed
+
+(* The tests of a pattern against a place. [branch_on] takes each test's
+   value: the code built after it is read only where the test holds. Testing
+   mutates nothing, so bindings come after every test of an arm. *)
+and test b (pattern : Core.pattern) (scrutinee : place) ~branch_on =
   let origin = pattern.origin in
-  let branch_on value =
-    let passed = new_block b in
-    (match value with
-    | Some condition ->
-        terminate b (Branch { condition; yes = passed; no = fail; is_if_condition = false }) origin
-    | None -> ());
-    start b passed
-  in
+  let branch value = branch_on value origin in
   let read =
     Use { place = scrutinee; type_ = pattern.type_; node = pattern.id; origin = pattern.origin }
   in
   match pattern.kind with
   | Wildcard | Bind _ -> ()
   | Variant { variant; fields } ->
-      branch_on (hold b Types.bool origin (Is_variant { place = scrutinee; variant }));
+      branch (hold b Types.bool origin (Is_variant { place = scrutinee; variant }));
       List.iter
         (fun (field, inner) ->
-          test b inner (project scrutinee (Variant_field { variant; field })) ~fail)
+          test b inner (project scrutinee (Variant_field { variant; field })) ~branch_on)
         fields
   | Record fields ->
-      List.iter (fun (field, inner) -> test b inner (project scrutinee (Field field)) ~fail) fields
+      List.iter
+        (fun (field, inner) -> test b inner (project scrutinee (Field field)) ~branch_on)
+        fields
   | Literal literal -> (
       match expression b literal with
       | Some value ->
-          branch_on
+          branch
             (hold b Types.bool origin (Compare { comparison = Equal; left = read; right = value }))
       | None -> ())
   | Range { start = low; stop = high; inclusive } -> (
       match (expression b low, expression b high) with
       | Some low, Some high ->
-          branch_on
+          branch
             (hold b Types.bool origin
                (Compare { comparison = Greater_equal; left = read; right = low }));
-          branch_on
+          branch
             (hold b Types.bool origin
                (Compare
                   {
@@ -1356,7 +2022,7 @@ and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
                    };
                })
             origin;
-          branch_on
+          branch
             (Some
                (Use
                   {
@@ -1447,7 +2113,9 @@ and match_patterns b patterns places ~fail ~matched origin =
   List.iteri
     (fun index patterns ->
       let failed = if index = count - 1 then fail else new_block b in
-      List.iter2 (fun pattern found -> test b pattern found ~fail:failed) patterns places;
+      List.iter2
+        (fun pattern found -> test b pattern found ~branch_on:(branch_or_fail b ~fail:failed))
+        patterns places;
       List.iter2 (bind b) patterns places;
       goto b matched origin;
       if index < count - 1 then start b failed)
@@ -1461,7 +2129,7 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
     in_order b
       (List.map
          (fun (found : Core.operand) ->
-           ((fun () -> operand b Read found), operand_type found, operand_origin found))
+           ((fun () -> operand b Read found), core_operand_type found, operand_origin found))
          scrutinees)
   in
   match evaluated with
@@ -1470,7 +2138,7 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
       let places =
         List.map2
           (fun (found : Core.operand) value ->
-            scrutinee_place b value (operand_type found) (operand_origin found))
+            scrutinee_place b value (core_operand_type found) (operand_origin found))
           scrutinees evaluated
       in
       List.iter
@@ -1533,6 +2201,16 @@ and statement b (node : Core.statement) =
   let origin = node.origin in
   in_statement b origin (fun () ->
       match node.kind with
+      | Let { pattern; value; else_ = None } when b.in_formula ->
+          (* In a formula, a [let] binds where it is: its pattern covers every value, and
+             nothing jumps. *)
+          let enclosing = b.extended in
+          b.extended <- extended_temporaries value;
+          let scrutinee = scrutinee b value in
+          b.extended <- enclosing;
+          Option.iter
+            (fun scrutinee -> ignore (formula_patterns b [ pattern ] [ scrutinee ] origin))
+            scrutinee
       | Let { pattern; value; else_ } -> (
           let enclosing = b.extended in
           b.extended <- extended_temporaries value;
@@ -1581,7 +2259,7 @@ and statement b (node : Core.statement) =
               let local =
                 new_local b
                   (Source { local = bound; mode; name = None; is_var = false })
-                  (operand_type right) origin
+                  (core_operand_type right) origin
               in
               Hashtbl.replace b.sources bound local;
               add_temporary b local;
@@ -1590,8 +2268,10 @@ and statement b (node : Core.statement) =
               let bound_value =
                 match right_value with
                 | Borrow _ ->
-                    Borrow { place = at local; type_ = operand_type right; mode = Read; origin }
-                | _ -> Use { place = at local; type_ = operand_type right; node = origin; origin }
+                    Borrow
+                      { place = at local; type_ = core_operand_type right; mode = Read; origin }
+                | _ ->
+                    Use { place = at local; type_ = core_operand_type right; node = origin; origin }
               in
               let loans = [ start_loan b bound_value Read Operand_evaluation origin ] in
               let target = place b target in
@@ -1607,7 +2287,9 @@ and statement b (node : Core.statement) =
                   | Some updated -> assign b target (Operand updated) origin
                   | None -> ())))
       | For { pattern; iteration; clauses; body; mode } -> (
-          let loop = { clauses; schedule = mode; origin; formula = None } in
+          let loop =
+            { clauses = loop_clauses b clauses; schedule = mode; origin; quantified = None }
+          in
           let each ~bind_part =
             let is_task = mode = Concurrent_loop in
             if is_task then
@@ -1633,9 +2315,26 @@ and statement b (node : Core.statement) =
           (Hashtbl.find b.pending header).heading <-
             Some
               {
-                loop = { clauses; schedule = Sequential; origin; formula = Some tested };
+                loop =
+                  {
+                    clauses = loop_clauses b clauses;
+                    schedule = Sequential;
+                    origin;
+                    quantified = None;
+                  };
                 body = inside;
                 after = Some after;
+                blocks = [];
+                condition = [];
+                exits = [];
+                compared =
+                  (* The operands of a comparison, from which the prover guesses a measure. *)
+                  (match tested.kind with
+                  | Compare { comparison; left; right }
+                    when is_functional (fun visit -> Core_walk.expression visit left)
+                         && is_functional (fun visit -> Core_walk.expression visit right) ->
+                      Some { comparison; left = attached b left; right = attached b right }
+                  | _ -> None);
               };
           start b header;
           let held =
@@ -1689,16 +2388,20 @@ and statement b (node : Core.statement) =
             origin;
           resume_group b origin ~next:join origin;
           start b join
-      | Proof proof -> emit b (Proof proof) origin
+      | Proof proof -> emit b (Proof (of_proof ~entry_locals:b.entry_locals proof)) origin
       | Assert { condition = { value; executable = true }; by_bit_vector } -> (
           match expression b value with
           | Some condition ->
               emit b
-                (Assert { condition; bit_vector = (if by_bit_vector then Some value else None) })
+                (Assert
+                   {
+                     condition;
+                     bit_vector = (if by_bit_vector then Some (attached b value) else None);
+                   })
                 origin
           | None -> ())
       | Assert { condition = { value; executable = false }; by_bit_vector } ->
-          emit b (Ghost_assert { condition = value; by_bit_vector }) origin
+          emit b (Ghost_assert { condition = attached b value; by_bit_vector }) origin
       | Yield { mode; part = written } -> (
           match yielded b mode written with
           | Some part ->
@@ -1770,7 +2473,7 @@ and leave_tasks b tasks exit origin =
         let group = group_of b task origin in
         let resume = new_block b in
         let slot =
-          Option.map (fun value -> new_local b Temporary (type_of_operand value) origin) returned
+          Option.map (fun value -> new_local b Temporary (operand_type value) origin) returned
         in
         group.exits <- group.exits @ [ { resume; returned = slot } ];
         group.after <- resume :: group.after;
@@ -1792,7 +2495,7 @@ and leave_tasks b tasks exit origin =
         cancel
           (match (returned, slot) with
           | Some value, Some slot ->
-              Some (Use { place = at slot; type_ = type_of_operand value; node = origin; origin })
+              Some (Use { place = at slot; type_ = operand_type value; node = origin; origin })
           | _ -> None)
           outer outer_scopes
     | [], [] -> (
@@ -1878,6 +2581,7 @@ and for_loop ?cursor_type ?(lent = ref None) b ~origin ~(pattern : Core.pattern)
   let loop_block = match entry with Some block -> block | None -> new_block b in
   start b inside;
   let first = b.block_count in
+  let binding_count = ref 0 in
   looping b ~break_:after ~continue_:(Next_iteration loop_block) (fun () ->
       each (fun () ->
           (match iteration with
@@ -1893,9 +2597,10 @@ and for_loop ?cursor_type ?(lent = ref None) b ~origin ~(pattern : Core.pattern)
                       })
                    Read Loop_body origin)
           | Range _ -> ());
-          match iteration with
+          (match iteration with
           | Range _ -> bind ~owned:true b pattern (at part)
-          | Pull _ -> bind b pattern (at part)));
+          | Pull _ -> bind b pattern (at part));
+          binding_count := List.length (Hashtbl.find b.pending inside).statements));
   terminate b (Iteration_end { loop = loop_block }) origin;
   let blocks =
     inside_group b origin (inside :: List.init (b.block_count - first) (fun index -> first + index))
@@ -1904,7 +2609,17 @@ and for_loop ?cursor_type ?(lent = ref None) b ~origin ~(pattern : Core.pattern)
   b.current <- entry;
   start_group b origin origin;
   terminate b
-    (For { iteration; part; lent = !lent; body = inside; blocks; after = ended; loop })
+    (For
+       {
+         iteration;
+         part;
+         lent = !lent;
+         body = inside;
+         binding_count = !binding_count;
+         blocks;
+         after = ended;
+         loop;
+       })
     origin;
   resume_group b origin ~next:after origin;
   start b after
@@ -1935,12 +2650,43 @@ and elements_loop b ~origin ~(pattern : Core.pattern) ~(elements : Core.elements
               Option.iter
                 (fun (part : place) ->
                   (match part.root with
-                  | Local element -> lent_part := Some { element; count; call = lending }
+                  | Local element ->
+                      lent_part :=
+                        Option.map
+                          (fun collection ->
+                            {
+                              element;
+                              collection;
+                              count = attached b count;
+                              call = of_lent ~entry_locals:b.entry_locals lending;
+                            })
+                          (lent_from b element)
                   | Constant _ -> ());
                   bind b pattern part)
                 (lent b lending ~duration:Loop_body)))
   | Some _, _ -> bug "a loop over elements that no call lends"
   | None, _ -> ()
+
+(* The place that a lending call lends a part of: its receiver's, as the
+   call that lends [part] in the block being built borrows it. *)
+and lent_from b part =
+  Option.bind b.current (fun block ->
+      List.find_map
+        (fun (statement : statement) ->
+          match statement.kind with
+          | Lend
+              {
+                part = lent;
+                call =
+                  {
+                    arguments = Passed { value = Borrow { place; _ } | Use { place; _ }; _ } :: _;
+                    _;
+                  };
+              }
+            when lent = part ->
+              Some (borrowed_place b place)
+          | _ -> None)
+        (Hashtbl.find b.pending block).statements)
 
 (* A loop that pulls a cursor until it has no next value. *)
 and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
@@ -1956,16 +2702,24 @@ and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
 
 (* A quantifier that runs: a loop that stops at the first element that
    decides it. *)
-and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) _pattern
+and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier)
     (body : Core.expression) run =
   let origin = node.origin in
   let result = temporary b Types.bool origin in
+  let loop =
+    {
+      clauses = [];
+      schedule = Sequential;
+      origin;
+      quantified = Some { quantifier = attached b node; decides = result };
+    }
+  in
   let deciding = quantifier = Exists in
   assign b (at result)
     (Operand (Constant { value = Boolean (not deciding); type_ = Types.bool }))
     origin;
   let after = new_block b in
-  run ~each:(fun bind_part ->
+  run ~loop ~each:(fun bind_part ->
       in_scope b origin (fun () ->
           bind_part ();
           let decided = new_block b and undecided = new_block b in
@@ -1985,10 +2739,55 @@ and quantifier_loop b (node : Core.expression) (quantifier : Syntax.quantifier) 
   start b after;
   Some (Use { place = at result; type_ = Types.bool; node = node.id; origin })
 
+(* A quantifier as a formula: its range, evaluated here, and its body, a
+   block that reads one value of the range in a local of its own. *)
+and quantified b (node : Core.expression) (quantifier : Syntax.quantifier) (binder : Core.binder)
+    (body : Core.expression) =
+  let origin = node.origin in
+  let range, value_type =
+    match binder with
+    | Over_type { type_; _ } -> (Some (Over_type type_), type_)
+    | Over_range { pattern; start; stop; inclusive } -> (
+        match operands b [ start; stop ] with
+        | Some [ start; stop ] -> (Some (Over_range { start; stop; inclusive }), pattern.type_)
+        | _ -> (None, pattern.type_))
+    | Over_collection { pattern; collection } ->
+        ( Option.map (fun collection -> Over_collection collection) (expression b collection),
+          pattern.type_ )
+    | Over_elements { pattern; elements } -> (
+        (* The collection is the argument of the call of its [count]. *)
+        match elements.count.kind with
+        | Call { arguments = [ Passed { value = collection; _ } ]; _ } ->
+            ( Option.map (fun collection -> Over_collection collection) (operand b Read collection),
+              pattern.type_ )
+        | _ -> bug "a quantifier over elements whose count takes no collection")
+  in
+  let* range = range in
+  in_formula b (fun () ->
+      let parameter, matches =
+        match binder with
+        | Over_type { local; name; type_ } ->
+            ( bind_source ~name b local Own type_ origin,
+              Some
+                { statements = []; value = Constant { value = Boolean true; type_ = Types.bool } }
+            )
+        | Over_range { pattern; _ } | Over_collection { pattern; _ } | Over_elements { pattern; _ }
+          ->
+            let parameter = new_local b Temporary value_type origin in
+            ( parameter,
+              value_block b (fun () -> formula_patterns b [ pattern ] [ at parameter ] origin) )
+      in
+      let* matches = matches in
+      let* body = value_block b (fun () -> expression b body) in
+      hold ~node:node.id b node.type_ origin
+        (Specification (Quantified { quantifier; range; parameter; matches; body })))
+
 (* Lambdas *)
 
 and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (body : Core.block) =
-  let inner = create ~lambdas:b.lambdas in
+  let inner =
+    create ~is_specification:b.is_specification ~entry_locals:b.entry_locals ~lambdas:b.lambdas ()
+  in
   let capture_locals =
     List.map
       (fun (capture : Core.capture) ->
@@ -2030,7 +2829,131 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
   b.lambdas := body :: !(b.lambdas);
   List.length !(b.lambdas) - 1
 
-and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
+(* A functional lambda as a function's definition: a formula that takes the
+   lambda's parameters and gives its body's value. It reads a capture as a
+   local that nothing in it binds, by the capture's core local. *)
+and lambda_definition b (parameters : Core.pattern list) (body : Core.block) : formula =
+  let inner =
+    create ~is_specification:true ~entry_locals:b.entry_locals ~takes_free_locals:true
+      ~lambdas:(ref []) ()
+  in
+  inner.in_old <- b.in_old;
+  formula_built inner ~origin:0 ~type_:(block_type body) (fun () ->
+      let locals =
+        List.map
+          (fun (pattern : Core.pattern) ->
+            match pattern.kind with
+            | Bind { local; mode; name; is_var } ->
+                bind_source ~name ~is_var inner local mode pattern.type_ pattern.origin
+            | _ -> new_local inner Temporary pattern.type_ pattern.origin)
+          parameters
+      in
+      List.iter2
+        (fun (pattern : Core.pattern) local ->
+          match pattern.kind with
+          | Bind _ -> ()
+          | _ -> ignore (formula_patterns inner [ pattern ] [ at local ] pattern.origin))
+        parameters locals;
+      (locals, block inner body))
+
+(* The formula that [build] builds in a new builder's entry block: [build]
+   gives the formula's parameters, or [None] where they are the locals it
+   reads that nothing in it binds, and its value. *)
+and formula_built b ~origin ~type_ (build : unit -> local list * operand option) : formula =
+  start b (new_block b);
+  b.in_formula <- true;
+  let built = ref None in
+  in_scope b origin (fun () ->
+      in_statement b origin (fun () ->
+          let parameters, value = build () in
+          match (value, b.current) with
+          | Some value, Some 0 ->
+              (* The statements up to here: the scopes around end after the value is read. *)
+              built :=
+                Some
+                  {
+                    parameters;
+                    locals = [||];
+                    value = { statements = List.rev (Hashtbl.find b.pending 0).statements; value };
+                    type_;
+                    origin;
+                    lambdas = [||];
+                  }
+          | _ -> bug "a formula that jumps or gives no value"));
+  match !built with
+  | Some formula ->
+      {
+        formula with
+        locals = Array.init b.local_count (Hashtbl.find b.infos);
+        lambdas = Array.of_list (List.rev !(b.lambdas));
+      }
+  | None -> bug "a formula that was not built"
+
+and block_type (body : Core.block) =
+  match body.value with Some value -> value.type_ | None -> Types.unit
+
+(* A [proof] block as a body of its own, built as a specification, whose
+   parameters are the locals it reads, as [of_specification] gives an
+   expression's. Its statements can jump, as an [assert] in one arm of an
+   [if] makes them, so it is a body and no formula. *)
+and of_proof ~entry_locals (written : Core.block) =
+  let b =
+    create ~is_specification:true ~entry_locals ~takes_free_locals:true ~lambdas:(ref []) ()
+  in
+  start b (new_block b);
+  in_scope b 0 (fun () -> Option.iter (fun value -> return_ b (Some value) 0) (block b written));
+  let body = finish b ~parameters:(List.rev b.free) in
+  { body; lambdas = Array.of_list (List.rev !(b.lambdas)) }
+
+(* A formula of its own, whose parameters are the locals it reads that
+   nothing in it binds, in the order it first reads them. *)
+and free_formula ~entry_locals ~origin ~type_ (build : builder -> operand option) =
+  let b =
+    create ~is_specification:true ~entry_locals ~takes_free_locals:true ~lambdas:(ref []) ()
+  in
+  formula_built b ~origin ~type_ (fun () ->
+      let value = build b in
+      (List.rev b.free, value))
+
+(* An expression of a specification as a formula of its own. *)
+and of_specification ~entry_locals (written : Core.expression) =
+  free_formula ~entry_locals ~origin:written.origin ~type_:written.type_ (fun b ->
+      expression b written)
+
+(* A functional block as a formula of its own, which gives the block's
+   value: a function's body as its definition, and what a law states. *)
+and of_functional_block ~entry_locals (written : Core.block) =
+  free_formula ~entry_locals ~origin:0 ~type_:(block_type written) (fun b -> block b written)
+
+(* The part that a lending call lends, as a formula that gives its value. *)
+and of_lent ~entry_locals (lending : Core.expression) =
+  free_formula ~entry_locals ~origin:lending.origin ~type_:lending.type_ (fun b ->
+      Option.map
+        (fun part ->
+          Use { place = part; type_ = lending.type_; node = lending.id; origin = lending.origin })
+        (lent b lending ~duration:Rest_of_statement))
+
+(* An expression of a specification that code holds, as a formula of its
+   own, whose parameters are the locals of the code that it reads. *)
+and attached b (written : Core.expression) = of_specification ~entry_locals:b.entry_locals written
+
+(* A loop's clauses, each as a formula. *)
+and loop_clauses b (clauses : Core.loop_clause list) : loop_clause list =
+  let bound : Core.bound -> bound = function
+    | Finite -> Finite
+    | Order_of amount -> Order_of (attached b amount)
+    | At_most amount -> At_most (attached b amount)
+    | Exactly amount -> Exactly (attached b amount)
+  in
+  List.map
+    (function
+      | Core.Invariant invariant -> Invariant (attached b invariant)
+      | Decreases measures -> Decreases (List.map (attached b) measures)
+      | Cost { origin; amortized; resource; bound = written } ->
+          Cost { origin; amortized; resource; bound = bound written })
+    clauses
+
+and finish ?(captures = []) b ~parameters : body =
   let blocks =
     Array.init b.block_count (fun index ->
         let pending = Hashtbl.find b.pending index in
@@ -2055,7 +2978,6 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
   in
   {
     parameters;
-    defaults;
     captures;
     locals = Array.init b.local_count (Hashtbl.find b.infos);
     blocks = canonical blocks;
@@ -2149,25 +3071,87 @@ and canonical (blocks : basic_block array) =
     | Iteration_end _ -> Iteration_end { loop = loop_of at }
     | (Return _ | Unreachable | Written_unreachable | Todo) as other -> other
   in
-  Array.of_list
-    (List.map
-       (fun block ->
-         {
-           (blocks.(block)) with
-           terminator = renumber block blocks.(block).terminator;
-           header =
-             Option.map
-               (fun (natural : natural_loop) ->
-                 {
-                   natural with
-                   body = target natural.body;
-                   after =
-                     Option.bind natural.after (fun after ->
-                         if visited.(after) then Some (target after) else None);
-                 })
-               blocks.(block).header;
-         })
-       !order)
+  let renumbered =
+    Array.of_list
+      (List.map
+         (fun block ->
+           {
+             (blocks.(block)) with
+             terminator = renumber block blocks.(block).terminator;
+             header =
+               Option.map
+                 (fun (natural : natural_loop) ->
+                   {
+                     natural with
+                     body = target natural.body;
+                     after =
+                       Option.bind natural.after (fun after ->
+                           if visited.(after) then Some (target after) else None);
+                   })
+                 blocks.(block).header;
+           })
+         !order)
+  in
+  Array.mapi
+    (fun header (block : basic_block) ->
+      match block.header with
+      | Some natural -> { block with header = Some (loop_blocks renumbered header natural) }
+      | None -> block)
+    renumbered
+
+(* The blocks of a [while] loop, which every stage reads the same: its own,
+   those of its condition, and those its exits pass. *)
+and loop_blocks (blocks : basic_block array) header (natural : natural_loop) =
+  let count = Array.length blocks in
+  (* The blocks that [from] reaches, itself included, without entering one that [avoids] holds
+     of. *)
+  let reached ~from ~avoids =
+    let seen = Array.make count false in
+    let rec visit block =
+      if (not seen.(block)) && not (avoids block) then begin
+        seen.(block) <- true;
+        List.iter visit (successors blocks.(block).terminator)
+      end
+    in
+    visit from;
+    seen
+  in
+  (* The blocks that reach a block of a set, with the set, among those that [candidate] holds
+     of. *)
+  let reaching set ~candidate =
+    let changed = ref true in
+    while !changed do
+      changed := false;
+      Array.iteri
+        (fun position (block : basic_block) ->
+          if
+            candidate position
+            && (not set.(position))
+            && List.exists (fun successor -> set.(successor)) (successors block.terminator)
+          then begin
+            set.(position) <- true;
+            changed := true
+          end)
+        blocks
+    done;
+    set
+  in
+  let listed set = List.filter (fun block -> set.(block)) (List.init count Fun.id) in
+  let forward = reached ~from:header ~avoids:(fun block -> Some block = natural.after) in
+  let inside =
+    let only_header = Array.make count false in
+    only_header.(header) <- true;
+    reaching only_header ~candidate:(fun block -> forward.(block))
+  in
+  let condition =
+    reached ~from:header ~avoids:(fun block -> block = natural.body || not inside.(block))
+  in
+  let exits =
+    let only_after = Array.make count false in
+    Option.iter (fun after -> only_after.(after) <- true) natural.after;
+    reaching only_after ~candidate:(fun block -> not inside.(block))
+  in
+  { natural with blocks = listed inside; condition = listed condition; exits = listed exits }
 
 and successors = function
   | Goto block -> [ block ]
@@ -2225,8 +3209,15 @@ let conditional_lends (body : body) =
       if ended_before || reaches 0 then Some part else None)
     !lends
 
-let rec of_expression ?(parameters = []) (written : Core.expression) =
-  let b = create ~lambdas:(ref []) in
+(* An expression that runs, as a body that takes [parameters] and returns its
+   value: a default, a constant's value, or a clause that a template's check
+   evaluates. *)
+let of_expression ?(parameters = []) (written : Core.expression) =
+  let b =
+    create
+      ~entry_locals:(List.map (fun (parameter : Core.parameter) -> parameter.local) parameters)
+      ~lambdas:(ref []) ()
+  in
   let parameters =
     List.map
       (fun (parameter : Core.parameter) ->
@@ -2240,7 +3231,36 @@ let rec of_expression ?(parameters = []) (written : Core.expression) =
   let body = finish b ~parameters in
   { body; lambdas = Array.of_list (List.rev !(b.lambdas)) }
 
-and of_definition (definition : Core.definition) =
+(* Each place of an expression that names a local, with the name's origin,
+   in the order written. *)
+let names_of (written : Core.expression) =
+  let names = ref [] in
+  Core_walk.expression
+    {
+      Core_walk.ignore_all with
+      place =
+        (function Local { local; origin; _ } -> names := (local, origin) :: !names | _ -> ());
+    }
+    written;
+  List.rev !names
+
+(* A clause of a contract as a formula that takes the function's parameters. *)
+let of_clause ~(parameters : Core.parameter list) (written : Core.expression) =
+  let b =
+    create ~is_specification:true
+      ~entry_locals:(List.map (fun (parameter : Core.parameter) -> parameter.local) parameters)
+      ~lambdas:(ref []) ()
+  in
+  let locals =
+    List.map
+      (fun (parameter : Core.parameter) ->
+        bind_source ~name:parameter.name b parameter.local parameter.mode parameter.type_ 0)
+      parameters
+  in
+  formula_built b ~origin:written.origin ~type_:written.type_ (fun () ->
+      (locals, expression b written))
+
+let of_definition ?(is_specification = false) (definition : Core.definition) =
   let code =
     match definition with
     | Function { parameters; body = Some body; _ } -> Some (parameters, body, true)
@@ -2250,36 +3270,25 @@ and of_definition (definition : Core.definition) =
   in
   Option.map
     (fun ((parameters : Core.parameter list), (body : Core.block), returns) ->
-      let b = create ~lambdas:(ref []) in
+      let b =
+        create ~is_specification
+          ~entry_locals:(List.map (fun (parameter : Core.parameter) -> parameter.local) parameters)
+          ~lambdas:(ref []) ()
+      in
       let locals =
         List.map
           (fun (parameter : Core.parameter) ->
             bind_source ~name:parameter.name b parameter.local parameter.mode parameter.type_ 0)
           parameters
       in
-      let defaults =
-        List.concat
-          (List.map2
-             (fun (parameter : Core.parameter) local ->
-               match parameter.default with
-               | Some default -> [ (local, of_expression default) ]
-               | None -> [])
-             parameters locals)
-      in
       start b (new_block b);
       in_scope b 0 (fun () ->
           Option.iter
             (fun value -> return_ b (if returns then Some value else None) 0)
             (block b body));
-      let finished = finish b ~parameters:locals ~defaults in
+      let finished = finish b ~parameters:locals in
       { body = finished; lambdas = Array.of_list (List.rev !(b.lambdas)) })
     code
-
-let of_path =
-  Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->
-      Option.bind (Query.demand database Infer.core_of_path path)
-        (fun ((form : Core.t), substitution) ->
-          Option.map (fun mir -> (mir, substitution)) (of_definition form.definition)))
 
 let mir =
   Query.query ~name:"mir" ~phase:Phases.bodies ~show:Resolve.Names.show_key (fun database key ->
@@ -2287,13 +3296,230 @@ let mir =
         ( Query.demand database Infer.core key,
           Query.demand database Interface.Environment.lowered_interface key )
       with
-      | Some form, Some lowered -> (
-          match lowered.interface with
-          | (Function_interface signature | Theorem_interface signature)
-            when signature.specification_only ->
-              None
-          | _ -> of_definition form.definition)
+      | Some form, Some lowered ->
+          (* Code that never runs is a specification: a quantifier in it is a
+             formula, and it may hold what only a specification can. *)
+          let is_specification =
+            match lowered.interface with
+            | Function_interface signature -> signature.specification_only
+            | Theorem_interface _ | Law_proof_interface _ -> true
+            | _ -> false
+          in
+          of_definition ~is_specification form.definition
       | _ -> None)
+
+let is_lowered database key = Option.is_some (Query.demand database Infer.core key)
+
+(* What [of_form] gives of the core form of the function, method, or type at
+   a path: of the definition that writes the form, from [of_definition], which
+   computes it once for that definition. *)
+let by_path database path ~of_definition ~of_form =
+  Option.bind (Query.demand database Infer.form_origin path) (fun (origin, _) ->
+      match origin with
+      | Infer.Written key | Inherited key -> Query.demand database of_definition key
+      | Generated ->
+          Option.bind (Query.demand database Infer.derived path) (fun (form : Core.t) ->
+              of_form form.definition))
+
+let of_path =
+  Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->
+      by_path database path ~of_definition:mir ~of_form:of_definition)
+
+let defaults_of (definition : Core.definition) =
+  match definition with
+  | Function { parameters; _ } ->
+      Some
+        (Parameter_defaults
+           (List.concat
+              (List.mapi
+                 (fun position (parameter : Core.parameter) ->
+                   match parameter.default with
+                   | Some default -> [ (position, of_expression default) ]
+                   | None -> [])
+                 parameters)))
+  | Type { defaults; _ } ->
+      Some
+        (Field_defaults
+           (List.map
+              (fun (variant, field, (default : Core.expression)) ->
+                { variant; field; type_ = default.type_; value = of_expression default })
+              defaults))
+  | Test _ | Law_proof _ -> Some (Parameter_defaults [])
+  | Trait _ | Constant _ | Empty -> None
+
+let defaults =
+  Query.query ~name:"mir_defaults" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.bind (Query.demand database Infer.core key) (fun (form : Core.t) ->
+          defaults_of form.definition))
+
+let defaults_of_path =
+  Query.query ~name:"mir_defaults_of_path" ~phase:Phases.bodies ~show:Path.show
+    (fun database path -> by_path database path ~of_definition:defaults ~of_form:defaults_of)
+
+let parameter ({ local; name; mode; type_; default; _ } : Core.parameter) : parameter =
+  { local; name; mode; type_; has_default = default <> None }
+
+let contract_of (definition : Core.definition) =
+  match definition with
+  | Function { parameters; contract; _ } ->
+      Some
+        {
+          parameters = List.map parameter parameters;
+          requires =
+            List.map
+              (fun (written : Core.condition) ->
+                {
+                  clause = of_clause ~parameters written.value;
+                  code =
+                    (if written.executable then Some (of_expression ~parameters written.value)
+                     else None);
+                  names = names_of written.value;
+                })
+              contract.requires;
+          ensures = List.map (of_clause ~parameters) contract.ensures;
+          decreases = List.map (of_clause ~parameters) contract.decreases;
+          costs =
+            List.map
+              (fun ({ origin; amortized; resource; bound } : Core.cost) ->
+                let bound : bound =
+                  match bound with
+                  | Finite -> Finite
+                  | Order_of amount -> Order_of (of_clause ~parameters amount)
+                  | At_most amount -> At_most (of_clause ~parameters amount)
+                  | Exactly amount -> Exactly (of_clause ~parameters amount)
+                in
+                { origin; amortized; resource; bound })
+              contract.costs;
+          callbacks =
+            (let entry_locals =
+               List.map (fun (parameter : Core.parameter) -> parameter.local) parameters
+             in
+             List.concat
+               (List.mapi
+                  (fun position (parameter : Core.parameter) ->
+                    match parameter.callback_contract with
+                    | Some { inputs; requires } ->
+                        [
+                          ( position,
+                            {
+                              inputs;
+                              requires = List.map (of_specification ~entry_locals) requires;
+                            } );
+                        ]
+                    | None -> [])
+                  parameters));
+        }
+  | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
+
+let contract =
+  Query.query ~name:"mir_contract" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.bind (Query.demand database Infer.core key) (fun (form : Core.t) ->
+          contract_of form.definition))
+
+let contract_of_path =
+  Query.query ~name:"mir_contract_of_path" ~phase:Phases.bodies ~show:Path.show
+    (fun database path -> by_path database path ~of_definition:contract ~of_form:contract_of)
+
+let definition_of (definition : Core.definition) =
+  match definition with
+  | Function { parameters; body = Some body; _ } ->
+      Some
+        (if is_functional (fun visit -> Core_walk.block visit body) then
+           Functional
+             (of_functional_block
+                ~entry_locals:
+                  (List.map (fun (parameter : Core.parameter) -> parameter.local) parameters)
+                body)
+         else Not_functional)
+  | Function _ | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
+
+let definition =
+  Query.query ~name:"mir_definition" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.bind (Query.demand database Infer.core key) (fun (form : Core.t) ->
+          definition_of form.definition))
+
+(* The body at a path as its definition, where the specification that a
+   caller reads holds the body. *)
+let visible_definition specification database path =
+  match Query.demand database specification path with
+  | Some (({ definition = Function { body = Some _; _ }; _ } : Core.t), _) ->
+      by_path database path ~of_definition:definition ~of_form:definition_of
+  | Some _ | None -> None
+
+let definition_of_path =
+  Query.query ~name:"mir_definition_of_path" ~phase:Phases.bodies ~show:Path.show
+    (visible_definition Infer.specification_of_path)
+
+let exported_definition_of_path =
+  Query.query ~name:"mir_exported_definition_of_path" ~phase:Phases.bodies ~show:Path.show
+    (visible_definition Infer.exported_specification_of_path)
+
+let laws =
+  Query.query ~name:"mir_laws" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      match Query.demand database Infer.core key with
+      | Some { definition = Trait laws } ->
+          List.map
+            (fun (law : Core.law) ->
+              let entry_locals =
+                List.map (fun (parameter : Core.parameter) -> parameter.local) law.parameters
+              in
+              {
+                name = law.name;
+                parameters =
+                  List.map
+                    (fun (parameter : Core.parameter) -> (parameter.local, parameter.type_))
+                    law.parameters;
+                requires = List.map (of_specification ~entry_locals) law.requires;
+                states = of_functional_block ~entry_locals law.body;
+              })
+            laws
+      | Some _ | None -> [])
+
+let type_clauses_of_path =
+  Query.query ~name:"mir_type_clauses_of_path" ~phase:Phases.bodies ~show:Path.show
+    (fun database path ->
+      match
+        ( Query.demand database Infer.core_of_path path,
+          Query.demand database Interface.Environment.type_interface path )
+      with
+      | Some ({ definition = Type { invariants; potential; _ }; _ }, _), Some interface ->
+          let self : Core.parameter =
+            {
+              local = Self;
+              name = "self";
+              mode = Read;
+              type_ =
+                Types.Named { path; arguments = Types.generic_arguments interface.type_generics };
+              default = None;
+              callback_contract = None;
+            }
+          in
+          Some
+            {
+              invariants =
+                List.map
+                  (fun (invariant : Core.condition) ->
+                    {
+                      clause = of_specification ~entry_locals:[] invariant.value;
+                      code =
+                        (if invariant.executable then
+                           Some (of_expression ~parameters:[ self ] invariant.value)
+                         else None);
+                      names = names_of invariant.value;
+                    })
+                  invariants;
+              potential = Option.map (of_specification ~entry_locals:[]) potential;
+            }
+      | _ -> None)
+
+let is_generated database path =
+  match Query.demand database Infer.form_origin path with
+  | Some (Generated, _) -> true
+  | Some ((Written _ | Inherited _), _) | None -> false
 
 let of_constant =
   Query.query ~name:"mir_of_constant" ~phase:Phases.bodies ~show:Path.show (fun database path ->
