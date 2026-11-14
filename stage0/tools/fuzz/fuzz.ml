@@ -236,55 +236,34 @@ let check_parsers_agree text =
         (if reference_rejects then "rejects" else "accepts")
         (Diagnostic.quote text)
 
-let rec contained smaller larger =
-  match (smaller, larger) with
-  | [], _ -> true
-  | _ :: _, [] -> false
-  | first :: rest, candidate :: larger_rest ->
-      if first = candidate then contained rest larger_rest
-      else if first > candidate then contained smaller larger_rest
-      else false
-
-(* Applying a fix removes its diagnostic and adds no other: the remaining
-   diagnostics are the others, or fewer. *)
+(* Applying a fix removes its diagnostic and adds no other. A lexer's fix is
+   judged by the lexer's diagnostics alone: it can bring back a parser error
+   that a closer the lexer inserted was hiding. *)
 let check_fixes_work text =
   let all text =
     let _, _, diagnostics = parse text in
     diagnostics
   in
-  (* A lexer's fix is judged by the lexer alone: it can bring back a parser
-     error that a closer the lexer inserted was hiding. *)
-  let codes ~lexer_only text =
-    List.sort compare
-      (List.filter_map
-         (fun (diagnostic : Diagnostic.t) ->
-           match diagnostic.code with
-           | Lexer _ -> Some diagnostic.code
-           | _ when lexer_only -> None
-           | _ -> Some diagnostic.code)
-         (all text))
+  let is_lexer (diagnostic : Diagnostic.t) =
+    match diagnostic.code with Lexer _ -> true | _ -> false
   in
+  let diagnostics = all text in
   List.iter
     (fun (diagnostic : Diagnostic.t) ->
-      let lexer_only = match diagnostic.code with Lexer _ -> true | _ -> false in
-      let before = codes ~lexer_only text in
-      let codes = codes ~lexer_only in
+      let judged = if is_lexer diagnostic then List.filter is_lexer else Fun.id in
+      let before = judged (List.filter (fun other -> other != diagnostic) diagnostics) in
       List.iter
         (fun (fix : Diagnostic.span Diagnostic.fix) ->
-          let rec remove_one = function
-            | [] -> []
-            | code :: rest -> if code = diagnostic.code then rest else code :: remove_one rest
-          in
           match Diagnostic.apply_fix text fix with
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
           | fixed ->
-              if not (contained (codes fixed) (remove_one before)) then
+              if not (Diagnostic.adds_none ~before ~after:(judged (all fixed))) then
                 fail "the fix %S for %s leaves or adds an error in %s" fix.title
                   (Diagnostic.Code.name diagnostic.code)
                   (Diagnostic.quote text))
         diagnostic.fixes)
-    (all text)
+    diagnostics
 
 (* The lexer's machine-applicable fixes, applied together, add no error. *)
 let check_machine_fixes_work text =

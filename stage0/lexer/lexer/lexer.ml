@@ -163,9 +163,8 @@ let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
   in
   walk (tokens written) (tokens fixed)
 
-(* Whether applying [fixes], each a diagnostic's fix, works: the fixed text
-   adds no error and joins or splits no neighboring token. [Error] gives the
-   spans of the tokens a fix joined or split. *)
+(* The tokens of the text with [fixes] applied, each a diagnostic's fix, if
+   that text adds no error and joins or splits no neighboring token. *)
 let works source tokens diagnostics fixes =
   let edits =
     List.concat_map (fun (_, (fix : Diagnostic.span Diagnostic.fix)) -> fix.edits) fixes
@@ -181,8 +180,8 @@ let works source tokens diagnostics fixes =
       diagnostics
   in
   match joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens with
-  | [] when Diagnostic.adds_none ~before:others ~after:remaining -> Ok fixed_tokens
-  | joined -> Error joined
+  | [] when Diagnostic.adds_none ~before:others ~after:remaining -> Some fixed_tokens
+  | _ -> None
 
 (* A fix that joins or splits a neighboring token, or adds an error, is
    withheld, and the file is lexed again without it. *)
@@ -206,49 +205,29 @@ let rec recover source tokens diagnostics =
              diagnostics)
       in
       match works source tokens diagnostics fixes with
-      | Ok fixed_tokens -> (
-          (* A fix beside another may work only with it, as `..<` fixed to `..`
-             before `.0` does; it must work alone too. *)
-          let beside (_, (fix : Diagnostic.span Diagnostic.fix)) =
-            List.exists
-              (fun (_, (other : Diagnostic.span Diagnostic.fix)) ->
-                other != fix
-                && List.exists
-                     (fun (edit : Diagnostic.span Diagnostic.edit) ->
-                       List.exists
-                         (fun (neighbor : Diagnostic.span Diagnostic.edit) ->
-                           edit.span.start <= neighbor.span.stop
-                           && neighbor.span.start <= edit.span.stop)
-                         other.edits)
-                     fix.edits)
-              fixes
-          in
-          match
-            List.filter
-              (fun fix -> beside fix && Result.is_error (works source tokens diagnostics [ fix ]))
-              fixes
-          with
-          | [] -> (fixed_tokens, diagnostics)
-          | wrong -> withhold wrong)
-      | Error joined ->
-          let touches (edit : Diagnostic.span Diagnostic.edit) =
-            List.exists
-              (fun (span : Source.span) ->
-                span.start <= edit.span.stop && edit.span.start <= span.stop)
-              joined
-          in
+      | Some fixed_tokens -> (
+          (* A fix may work only with another, as `..<` fixed to `..` before
+             `.0` does; each must work alone too. *)
+          match fixes with
+          | [ _ ] -> (fixed_tokens, diagnostics)
+          | _ -> (
+              match
+                List.filter
+                  (fun fix -> Option.is_none (works source tokens diagnostics [ fix ]))
+                  fixes
+              with
+              | [] -> (fixed_tokens, diagnostics)
+              | wrong -> withhold wrong))
+      | None ->
+          (* Each fix that breaks the ones before it. *)
           let wrong =
-            match List.filter (fun (_, fix) -> List.exists touches fix.Diagnostic.edits) fixes with
-            | [] ->
-                (* Each fix that breaks the ones before it. *)
-                snd
-                  (List.fold_left
-                     (fun (accepted, wrong) fix ->
-                       if Result.is_ok (works source tokens diagnostics (fix :: accepted)) then
-                         (fix :: accepted, wrong)
-                       else (accepted, fix :: wrong))
-                     ([], []) fixes)
-            | touching -> touching
+            snd
+              (List.fold_left
+                 (fun (accepted, wrong) fix ->
+                   if Option.is_some (works source tokens diagnostics (fix :: accepted)) then
+                     (fix :: accepted, wrong)
+                   else (accepted, fix :: wrong))
+                 ([], []) fixes)
           in
           if wrong = [] then (tokens, diagnostics) else withhold wrong)
 
@@ -262,7 +241,7 @@ let with_working_alternatives source tokens diagnostics =
       | _ :: _ :: _ -> (
           match
             List.filter
-              (fun fix -> Result.is_ok (works source tokens diagnostics [ (diagnostic, fix) ]))
+              (fun fix -> Option.is_some (works source tokens diagnostics [ (diagnostic, fix) ]))
               diagnostic.fixes
           with
           | _ :: _ :: _ as fixes -> { diagnostic with fixes }

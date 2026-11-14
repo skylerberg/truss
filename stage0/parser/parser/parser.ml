@@ -140,7 +140,7 @@ let rec one_definition ?(checks_fixes = true) source tokens piece parse =
    [impl], or a capability. Each method is a separate definition, with its
    own tokens, base, and node ids, so that an edit to one method changes no
    other definition's tree. *)
-let methods source tokens (container : Syntax.definition) token_ranges =
+let methods ?(checks_fixes = true) source tokens (container : Syntax.definition) token_ranges =
   let kind : Parse_definition.container option =
     match container.kind with
     | Trait _ -> Some In_trait
@@ -153,14 +153,18 @@ let methods source tokens (container : Syntax.definition) token_ranges =
       List.map
         (fun (first, stop) ->
           fst
-            (one_definition source tokens { first; stop }
+            (one_definition ~checks_fixes source tokens { first; stop }
                (Parse_definition.method_ ~container:kind ~visibility:container.visibility)))
         token_ranges
   | None -> []
 
-let definition source tokens piece =
-  let parsed, token_ranges = one_definition source tokens piece Parse_definition.definition in
-  (parsed, methods source tokens parsed.value.value token_ranges)
+let parse_definition ~checks_fixes source tokens piece =
+  let parsed, token_ranges =
+    one_definition ~checks_fixes source tokens piece Parse_definition.definition
+  in
+  (parsed, methods ~checks_fixes source tokens parsed.value.value token_ranges)
+
+let definition source tokens piece = parse_definition ~checks_fixes:true source tokens piece
 
 (* [use standard::file_system]. *)
 let use_path cursor : Syntax.path option =
@@ -202,7 +206,7 @@ let use_after_definition source (line : _ Syntax.item) ~destination =
           ];
       ]
 
-let parse source tokens =
+let rec parse_file ~checks_fixes source tokens =
   let text = Source.text source in
   (* Where a [use] line found after a definition moves to: the start of the
      line after the last [use] line before any definition, or else the
@@ -233,7 +237,7 @@ let parse source tokens =
           ~diagnostics:((line_diagnostics @ moved) :: diagnostics)
           ~destination
     | piece :: rest ->
-        let parsed, methods = definition source tokens piece in
+        let parsed, methods = parse_definition ~checks_fixes source tokens piece in
         let destination =
           match (definitions, destination) with
           | [], None -> Some (Source.line_start source parsed.value.base)
@@ -251,10 +255,38 @@ let parse source tokens =
   let uses, definitions, diagnostics =
     gather (split tokens) ~uses:[] ~definitions:[] ~diagnostics:[] ~destination:None
   in
+  (* A [use] line's move, made over the whole file, keeps its fix only if the
+     moved file, lexed and parsed again, adds no error. *)
+  let diagnostics =
+    if not checks_fixes then diagnostics
+    else
+      let lexer_diagnostics = lazy (snd (Lexer.lex source)) in
+      List.map
+        (fun (diagnostic : Diagnostic.t) ->
+          match diagnostic.code with
+          | Parser Use_after_definition ->
+              let works fix =
+                let moved =
+                  Source.create ~path:(Source.path source) (Diagnostic.apply_fix text fix)
+                in
+                let moved_tokens, moved_lexer = Lexer.lex moved in
+                let _, moved_parser = parse_file ~checks_fixes:false moved moved_tokens in
+                Diagnostic.adds_none
+                  ~before:
+                    (Lazy.force lexer_diagnostics
+                    @ List.filter (fun other -> other != diagnostic) diagnostics)
+                  ~after:(moved_lexer @ moved_parser)
+              in
+              { diagnostic with fixes = List.filter works diagnostic.fixes }
+          | _ -> diagnostic)
+        diagnostics
+  in
   ( { Syntax.uses; definitions },
     List.stable_sort
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       diagnostics )
+
+let parse source tokens = parse_file ~checks_fixes:true source tokens
 
 type example = Example_definition | Example_signature
 
@@ -277,7 +309,7 @@ let rec parse_example_definition ~checks_fixes source tokens piece =
     match container with
     | Some container ->
         List.concat_map diagnostics_in_file
-          (methods source tokens container (List.rev !(cursor.methods)))
+          (methods ~checks_fixes source tokens container (List.rev !(cursor.methods)))
     | None -> []
   in
   let diagnostics =
