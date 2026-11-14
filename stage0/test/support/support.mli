@@ -18,8 +18,6 @@ val setup : ?dependencies:(string * string) list -> (string * string) list -> Qu
     every test shares, so it is checked once per run. *)
 
 val standard : Engine.t Lazy.t
-(** That base. *)
-
 val parse_errors : Query.context -> Path.file -> string list
 val codes : Diagnostic.t list -> string list
 

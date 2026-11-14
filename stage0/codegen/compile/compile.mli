@@ -14,40 +14,15 @@ type t
    run-time checks. *)
 type lowering
 
-(* The instances whose keys have been asked for, for each way of lowering.
-   Finding the instances that reach each other starts from these, so a
-   driver's [want] adds to this input before a key is asked for. Only the
-   database sets it. *)
 val roots : (lowering, Instance.key list) Query.input
-
 val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key list
-(** The roots with more wanted, which a driver sets {!roots} to before it asks for those instances'
-    keys: a query cannot set an input. *)
 
-(* Where the results of runs are kept, by the key of the code that ran:
-   each test that passed with nothing to show, and the output of each run
-   of code while compiling. The database keeps them in its store. *)
 type results = { find : string -> string option; add : string -> string -> unit }
 
 (* The result of a run of code while compiling, or that it ran past the
    compiler's time limit. *)
 type 'a ran = Ran of 'a | Ran_too_long
 
-(* With [checks], the default, the program checks at run time each
-   primitive operation that is undefined or wrong where its precondition
-   does not hold: an index, a slice, arithmetic, a shift, and a call of
-   the C library. It evaluates no [requires] clause. A build with checks
-   does not wait for proofs. [file_name] names the file of each position the
-   program reports, and is [Path.show_file] unless a
-   driver shows files another way. [want] is told which instances' keys are
-   about to be asked for, and adds them to [roots]. [worked_on] says whether a package is one of the
-   project's own, whose code a development build never copies into
-   another's file; without it, every package but the standard library is.
-   [results] keeps the results of runs between compilers.
-   [evaluation_time_limit], in milliseconds, stops each run of code while
-   compiling, and is 10 seconds by default. [programs] is the directory each
-   built program is written to, and is the system's temporary directory by
-   default. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.file -> string) ->
@@ -84,14 +59,6 @@ type record = {
   cached : bool;
 }
 
-(* A test program's whole report, one record a test, in the order of the tests however they ended, or why
-   it cannot be read. *)
-
-(* How a test run is getting on: lowering the instances the tests reach, compiling
-   the C files that are not cached, out of how many, running the tests that
-   have no kept result, and each test's start and end, by its place in the
-   list given. A test with a kept result is reported as ended before any
-   test runs. *)
 type progress =
   | Lowering
   | Compiling of { compiled : int; total : int }
@@ -99,12 +66,6 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-(* Builds a program that runs the tests, each named by its path, runs it,
-   and returns each test's record in the order given. With the compiler's
-   results, each test that passes with nothing to show is kept there under
-   the key of the code it can run, and is not built or run again until that
-   code changes; with [rerun], every test runs, and passes are kept again.
-   [progress] is told of each step as it happens. *)
 val run_tests :
   ?rerun:bool ->
   ?progress:(progress -> unit) ->
@@ -112,11 +73,6 @@ val run_tests :
   time_limit:int ->
   Path.t list ->
   (record list, string) result
-
-(* Builds, at [output], a program that runs tests that are instances made
-   by hand, in order, as [run_tests] builds one of tests in source. It is
-   for testing the runner on code no source compiles to, such as a test
-   that leaves a block allocated. *)
 
 (* Each test's key: the hash of the code it can run and of the build's
    added C flags, which changes exactly when the test's outcome may. A test
@@ -158,11 +114,6 @@ val build_program : t -> main:Path.t -> output:string -> (unit, string) result
    may. *)
 val run_key : t -> Instance.key -> (string, string) result
 
-(* Evaluates a tagged template's check by running it: each of the tag's
-   [from_template]'s clauses that can run, for a template of these literal
-   texts and no parts, by its position among the clauses, with whether it
-   holds. The prover asks it only of clauses that read the template's
-   literals alone. *)
 val check_template :
   t -> from_template:Path.t -> texts:string list -> ((int * bool) list ran, string) result
 

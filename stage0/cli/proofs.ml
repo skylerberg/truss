@@ -41,10 +41,6 @@ let diagnostics session packages files =
   let checked = checked session packages files in
   fun file -> fst (checked file)
 
-(* Each hole in the proofs of the definitions that [main] reaches, a [todo]
-   or a law that an impl leaves unshown: the definition, and the hole's
-   file, as the current directory shows it, line, and column. A program
-   with one cannot be built. *)
 let holes_reached session packages main =
   let reached = List.hd (Database.reachable session [ main ]) in
   List.concat_map

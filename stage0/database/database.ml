@@ -30,8 +30,6 @@ let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
             (String.concat ", " (List.map (Printf.sprintf "%S") dependency.capabilities)))
         dependencies)
 
-(* A package given by itself, as a root of its own: its manifest and its
-   files. *)
 let set_package engine ~root ~usize_bits ~name ~dependencies (files : (Path.file * string) list) =
   set_root engine root
     (("truss.toml", manifest_text ~usize_bits ~name ~dependencies)
@@ -82,7 +80,6 @@ let standard_base () =
    changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-(* The source of a session's files, for the questions asked of git. *)
 type kind =
   | Worktree of string  (** A project's root *)
   | Commit of { repository : string; commit : string }
@@ -90,14 +87,7 @@ type kind =
   | Published  (** A published package with the packages it was published with *)
 
 (* The database's state for a session of the session layer. *)
-type project = {
-  kind : kind;
-  update : Session.t -> unit;  (** Brings the inputs in line with the session's files *)
-  files : Files.t;
-  mutable retried : bool;
-      (** Whether this process has tried again to fetch the packages that could not be had *)
-}
-
+type project = { kind : kind; update : Session.t -> unit; files : Files.t; mutable retried : bool }
 type Session.attachment += Project of project
 type session = Session.t
 
@@ -181,12 +171,6 @@ let load_published name version ~hash =
           Error
             (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name)))
 
-(* Gives the build the files of the registry packages it selects. Which
-   those are is a query, which names each package whose files are not
-   inputs yet; this fetches them and sets them, which reaches the query, and
-   asks again, since a package's record can name more. A package's files
-   never change, so they are set once, and removed when the build no longer
-   selects the package. *)
 let resolve_registry session ~before =
   let engine = Session.engine session in
   let project = project session in
@@ -224,12 +208,6 @@ let resolve_registry session ~before =
       end)
     before
 
-(* Brings a session's inputs in line with its files: reads the files whose
-   stamps changed, and sets each one's text, by its path. Everything else
-   about the project follows from those as queries. A file that cannot be
-   read, such as one deleted since its directory was listed, is not there.
-   A stamp is set with its file's text, so a scan that fails leaves the
-   file to be read by the next. *)
 let scan (files : Files.t) session =
   let engine = Session.engine session in
   let observer = Session.observer session in
@@ -294,7 +272,6 @@ let open_files ~key ?pointer ?home ~kind (files : Files.t) =
       | Ok (session, start) ->
           attach_project session ~kind files;
           if start = Session.Near then
-            (* The stamps it carries are another set of files'. *)
             List.iter (fun path -> Session.remove session stamps path) (held_files session);
           Ok session)
 
@@ -402,8 +379,6 @@ let context session = Session.context session
 let set = Session.set
 let problems session = demand session Project.problems ()
 
-(* The errors in a package's manifest that only its code shows, which
-   checks the package. *)
 let manifest_problems session names =
   List.concat_map
     (fun (directory, name) ->
@@ -415,8 +390,6 @@ let manifest_problems session names =
            with Not_found -> []))
     (packages session)
 
-(* A file's path from the project's root: where it is, or for a file the
-   project does not have, as messages show it. *)
 let file_path session (file : Path.file) =
   match demand session Project.place file.module_.package with
   | Some { root; directory; _ } when root = Project.project_root ->
@@ -457,7 +430,6 @@ let open_session directory =
         | Error message -> Error message
         | Ok session ->
             Session.touch session;
-            (* Before any command holds the session's engine. *)
             Session.compact ~waited_for:true session;
             update session;
             (* The state is written when the command is done, with the
@@ -569,9 +541,6 @@ let git_place root =
       Hashtbl.replace git_places root place;
       place
 
-(* A snapshot is of the state the background process saves, brought up to
-   date with the worktree's files. The same project in another worktree is
-   at the same place under its worktree's top. *)
 let other_worktrees session =
   let root = root session in
   let common, prefix = git_place root in
@@ -671,8 +640,6 @@ let open_library ?(files = Standard_library.files) name =
       Session.attach session
         (Project
            { kind = Library; update = set_library files; files = Files.of_texts []; retried = true });
-      (* A process that opens the state pays its size already, so this is
-         when its differences are folded into one whole state. *)
       Session.compact session;
       update session;
       Ok session
@@ -896,7 +863,6 @@ module For_testing = struct
   let prepare_store = prepare_store
   let open_library = open_library
 
-  (* Gives one file of a package given by itself another text. *)
   let set_text engine (file : Path.file) text =
     let root = Project.package_root file.module_.package in
     let path = Project.file_path ~directory:"" file in
@@ -905,8 +871,6 @@ module For_testing = struct
     if not (List.mem path files) then
       Engine.set engine Project.tree root (List.sort compare (path :: files))
 
-  (* Gives a package given by itself another manifest, and leaves its
-     files as they are. *)
   let set_manifest ?(usize_bits = 32) engine ~name ~dependencies =
     let root = Project.package_root name in
     Engine.set engine Project.text (root, "truss.toml")

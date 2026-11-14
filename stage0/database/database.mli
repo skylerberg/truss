@@ -1,16 +1,3 @@
-(** The code database, as a project sees it: a session for each project's files, kept current as the
-    files change, with the project's packages and modules as its inputs; the questions a session's
-    graph answers; and the background process that holds sessions between commands.
-
-    This is the project's layer over {!Session}, which keeps states in the store and knows no
-    compiler stage. This layer knows manifests, packages, the registry, and git. It names no stage's
-    inputs but the project's own: a driver sets a stage's input with {!set}.
-
-    The database answers with data. The command's use of it, and how it is shown, is the command
-    line's, in [stage0/cli]; the background process runs the command line's own handler, so a
-    command's answer is the same whether a session is in the background process or in the command's
-    own. *)
-
 (** {1 Sessions} *)
 
 type session = Session.t
@@ -49,8 +36,6 @@ val problems : session -> string list
 
 val manifest_problems :
   session -> Path.package list -> (string * Path.package * Checks.manifest_problem) list
-(** The errors in the named packages' manifests that only their code shows: each one's file,
-    relative to the project's root, its package, and the problem. Asking checks those packages. *)
 
 val packages : session -> (string * Path.package) list
 (** Every package of the project: its directory relative to the root, and its name. *)
@@ -63,9 +48,6 @@ val registry_packages : session -> (Path.package * Registry.Version.t * string) 
     and the hash of its files. *)
 
 val lock_fix : session -> string option
-(** The lock file the project's manifests give, when the one that is written is another, which is a
-    problem whose fix is to write this one. *)
-
 val package_modules : session -> Path.package -> Path.module_ list
 val package_files : session -> Path.package -> Path.file list
 
@@ -76,7 +58,6 @@ val diagnostics : session -> Path.file -> Diagnostic.t list
 (** A file's diagnostics, kept current and saved. *)
 
 val code_packages : session -> Path.package -> Path.package list
-(** The packages a package's code uses, its tests apart. *)
 
 val sessions : unit -> (string * int) list
 (** Each open session, by its name, with how many results it holds. *)
@@ -97,8 +78,6 @@ val open_commit_of : session -> string -> (session, string) result
 (** A session of the worktree's repository at a commit. *)
 
 val published : Path.package -> Registry.Version.t -> (session, string) result
-(** A published package at a version, as a session of its own with the packages it was published
-    with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
 
 (** {1 The store} *)
 
@@ -145,8 +124,6 @@ val find_definitions : session -> string -> Path.t list
 (** {1 Comparing} *)
 
 val changes : session -> session -> (Path.t * string option * Graph_types.difference) list
-(** Every part of a definition that a change between the two could reach, in the first, with how it
-    compares with the same part in the second. *)
 
 (** {1 Parallel work} *)
 
@@ -155,7 +132,6 @@ val other_worktrees : session -> session list
     process, and a snapshot of each that a background process serves. *)
 
 val overlap_with : session -> session -> (Graph_types.overlap list, string) result
-(** Where two sessions' changes from their common commit meet. *)
 
 val merge_preview : session -> session -> ((string * string * string) list, string) result
 (** The diagnostics a merge of the two would have that neither has: each one's file, code, and
@@ -199,10 +175,6 @@ val call :
   progress:(string -> unit) ->
   'request ->
   ('response, string) result
-(** Answers a request through the background process of a key, which is that of the current
-    directory unless given, starting it from [program], this executable unless given, with the
-    arguments [__serve] and the key, if it is not running, unless [start_server] is false, and
-    handing each piece of progress to [progress] as it arrives. *)
 
 val servers : unit -> string list
 (** The keys of this compiler's background processes that are running. *)
@@ -213,7 +185,6 @@ val recovering : (unit -> 'a) -> 'a
     the command is run once more, from the files. {!serve} does this for each request. *)
 
 val stop : unit -> unit
-(** Ends the background process once the request being answered is. *)
 
 val reset : unit -> unit
 (** Saves and closes every session and the store, so that the next request starts as a new process
@@ -230,8 +201,6 @@ val load_package :
   dependencies:Manifest.dependency list ->
   (Path.file * string) list ->
   unit
-(** Gives an engine a package by itself, as a root of its own: a manifest that says the name, the
-    dependencies, and [usize_bits], which is 32 unless given, and its files with their texts. *)
 
 val load_standard : Engine.t -> unit
 (** Gives an engine the [standard] package, built into the compiler. *)
@@ -242,12 +211,6 @@ module For_testing : sig
       first session opened in a new store does. *)
 
   val open_library : ?files:(Path.file * string) list -> string -> (session, string) result
-  (** The standard library as a state of its own, for working on the library: the [standard] package
-      is the session's own inputs, over no base, set from [files], which are the sources built into
-      this compiler unless given. The state is opened from the pointer of that name, so each caller
-      that gives its own name keeps its own state, and is kept under {!Compiler_version.digest}, so
-      it is found again after an edit to the library, and by a test as by the command line. An error
-      says that another process has the state open. *)
 
   val set_text : Engine.t -> Path.file -> string -> unit
   (** Gives one file of a package set with {!load_package} another text, adding the file if it has

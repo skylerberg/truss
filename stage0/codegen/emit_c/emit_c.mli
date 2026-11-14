@@ -18,8 +18,6 @@ type linkage = External | Internal
 
 (* A position in a definition, relative to the line it starts on. *)
 type site = C_runtime.site = { definition : Path.t; line : int; column : int }
-
-(* A point that a program that ships must not reach. *)
 type failure = C_runtime.failure = Echo | Todo
 
 (* Writing an instance's C one statement at a time. *)

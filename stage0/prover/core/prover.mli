@@ -45,13 +45,6 @@ val solve_ahead :
   Solver.t ->
   Path.file list ->
   unit
-(** Decides every definition of the files. Each run whose code key changed since it ran, or that
-    timed out, is run again, so that no proof keeps a value the current code would not give. Then
-    the requests the outcomes are pending on are sent together, the solver's queries several at
-    once, one for each core, and [record] sets {!oracle_response} to the responses, which the driver
-    does, since only the database sets a session's inputs. A caller that will ask for many files'
-    proofs calls it once with all of them, which keeps every core busy where one file's queries are
-    few. *)
 
 type 'span state = {
   code : Diagnostic.Code.prover;

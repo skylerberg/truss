@@ -19,7 +19,7 @@ let instance_key (instance : instance) = instance.key
 type function_ = {
   code : instance;  (** The instance it is part of *)
   nested : int option;  (** Its number among the instance's nested functions *)
-  parent : int;  (** The function it is written in; -1 for the builder's own *)
+  parent : int;
   parts : Lowered.local list;  (** The locals of [parent] it takes as parameters *)
   holder : Lowered.local option;  (** The local of [parent] that holds its environment *)
   environment : Lowered.local option;  (** Its local that points to its environment *)
@@ -27,11 +27,9 @@ type function_ = {
   prologue : Buffer.t;  (** Statements that run before its entry block *)
   mutable mentioned : Locals.t;  (** The locals its prologue names *)
   mutable returns : bool list;  (** For each [return], whether it gives a value *)
-  mutable size : int;  (** Its statements, and two for each block *)
+  mutable size : int;
 }
 
-(* What a block's code names and runs into, which counts only where the
-   block is reached. *)
 type facts = {
   mutable instances : Instance.key list;
   mutable called : Instance.key list;
@@ -47,8 +45,8 @@ type t = {
   texts : string option Dynarray.t;  (** Each block's C, once it is finished *)
   mentions : Locals.t Dynarray.t;  (** The locals each block's code names *)
   successors : Lowered.block list Dynarray.t;  (** The blocks each block goes to *)
-  facts : facts Dynarray.t;  (** What each block's code names *)
-  owners : int Dynarray.t;  (** The function each block is written in, -1 until it starts *)
+  facts : facts Dynarray.t;
+  owners : int Dynarray.t;
   mutable current : Lowered.block;
   mutable pending : Buffer.t;  (** The C of the current block's statements *)
   functions : function_ Dynarray.t;
@@ -154,7 +152,6 @@ let start builder block =
   builder.current <- block;
   builder.pending <- Buffer.create 256
 
-(* Prints with [print], keeping what it names as the current block's. *)
 let in_block_facts builder (context : C_types.context) print =
   let facts = Dynarray.get builder.facts builder.current in
   let instances = context.instances
@@ -326,8 +323,6 @@ let build ?(returns = true) builder ~parameters ~result =
   let count = Array.length functions in
   let texts = Dynarray.to_array builder.texts and owners = Dynarray.to_array builder.owners in
   let successors = Dynarray.to_array builder.successors in
-  (* Each function's code is the blocks its entry reaches: a block no jump
-     reaches is no code at all, and names nothing. *)
   let reached = Array.make (Array.length texts) false and targets = ref Blocks.empty in
   Array.iter
     (fun (function_ : function_) ->
@@ -384,9 +379,6 @@ let build ?(returns = true) builder ~parameters ~result =
     || Hashtbl.find_opt home local = Some number
     || Lowered.erased builder.env (local_type builder local)
   in
-  (* The locals each function reaches through its environment: those that
-     it, or a function outlined from it, names, and that a function around
-     it owns. *)
   let captured = Array.make count Locals.empty in
   Array.iteri
     (fun number (function_ : function_) ->

@@ -256,7 +256,6 @@ let expect_problem files part =
   if not (List.exists (fun problem -> contains problem part) problems_reported) then
     fail "problems: [%s]" (String.concat "; " problems_reported)
 
-(* The same, of a directory that is there already. *)
 let expect_problem_in root part =
   let problems_reported = report_problems (gather (Command_packages.load root)) in
   if not (List.exists (fun problem -> contains problem part) problems_reported) then

@@ -107,10 +107,6 @@ let selected session packages paths =
             wanted)
         (files session packages)
 
-(* A file's text as a source named by its path relative to the current
-   directory, which every command uses for positions, for a file of
-   [packages]. Offsets match the database's source. A file of another
-   package, such as the standard library's, keeps its database name. *)
 let source session packages (file : Path.file) =
   let source = Query.demand (Database.context session) Packages.source file in
   if List.mem file.module_.package packages then

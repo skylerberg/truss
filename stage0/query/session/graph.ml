@@ -167,8 +167,6 @@ let changes mine theirs =
       | None -> None)
     (compare_nodes mine theirs)
 
-(* Where two states' changes from a common base meet: each node both
-   changed, and each node one changed that depends on a node the other changed. *)
 let overlaps ~base mine theirs =
   let changed engine =
     List.filter_map

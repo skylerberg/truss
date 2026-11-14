@@ -125,10 +125,6 @@ let shadow engine (base : node) =
       | None -> ());
       own
 
-(* The readers of one of an engine's own nodes: its own readers, and, when
-   it is a copy, the base node's readers in the bases, each copied into the
-   engine unless it already was, since its copy is then among the own
-   readers if it still reads this. [phase] narrows to one phase. *)
 let readers_here engine (node : node) ~phase =
   let in_phase (reader : node) =
     match phase with Some wanted_phase -> reader.phase = wanted_phase | None -> true
@@ -185,12 +181,6 @@ let seed engine (node : node) =
       end)
     (readers_here engine node ~phase:None)
 
-(* Records a read. A query's read is an edge. A driver's read makes the
-   result a root, unless the driver only observes: a root is part of the
-   state, so it is written, though the node's result is as it was. A base's
-   node is copied into the engine to be its root there, since a base never
-   changes. A fixed base's node that the engine has not copied is current
-   in the state and is never collected, so it needs no root. *)
 let record_read (context : context) (node : node) =
   match context.frame with
   | Some frame ->

@@ -1,12 +1,3 @@
-(* Lowering: the core form of one instance to its C.
-
-   Lowering reads a definition's core form, which gives every node's
-   meaning, and writes C with every choice made:
-   which instance each call reaches, how each argument is passed, which
-   values move and which are copied, and what each owned local holds where
-   it goes out of scope, on every path, which the move analysis of the
-   instance's MIR says, and drops exactly that. *)
-
 (* A valid program stage0 cannot lower yet: the construct, and its position
    if one is known. It is not a compiler bug: the driver reports it as a
    limit of stage0. *)
@@ -29,9 +20,6 @@ val context :
   Query.context ->
   Memory_layout.target ->
   context
-(** The driver gives [cursor_fields], a pulled method's cursor fields, from its pulled lowering, and
-    [constant] from whatever keeps each constant's lowering, so that each is made once and its
-    readers are known. *)
 
 (* The C of an instance of a function, a method, an [impl]'s method, or a
    test. *)
@@ -50,13 +38,6 @@ val constant : context -> Path.t -> constant
    its binary form. *)
 val evaluator : context -> Path.t -> Emit_c.Builder.instance
 
-(* The pulled version of a yielding method: a state machine over a cursor,
-   which holds the method's arguments and the values it keeps from one
-   [yield] to the next, as the C of two instances. [next] takes a pointer
-   to the cursor, then the method's evidence, and runs the method to its
-   next [yield], giving the value yielded in [Some], or [None] once the
-   method has returned. [drop] takes a pointer to the cursor and drops what
-   it holds. [fields] are the cursor's: its state, a [UInt32], first. *)
 type pulled = {
   next : Emit_c.fragment;
   drop : Emit_c.fragment;
@@ -78,11 +59,6 @@ val locked_table : context -> Instance.key -> capability:Path.t -> Lowered.table
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key
 
-(* Code run while compiling, for a tagged template's check: a template of
-   the literal texts and no parts, given to the tag's [from_template]'s
-   clauses that can run, each evaluated and written out as a [Bool], in
-   order. A clause that reads the template's parts is not asked of it; the
-   prover asks only those that read its literals. *)
 val template_check :
   context -> Instance.key -> from_template:Path.t -> texts:string list -> Emit_c.Builder.instance
 

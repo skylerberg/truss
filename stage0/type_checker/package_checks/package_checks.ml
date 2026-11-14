@@ -705,9 +705,6 @@ let used_packages =
         (Query.demand database Infer.core key);
       List.sort_uniq compare (named @ !called))
 
-(* The packages a package's code uses, its tests apart. A dependency that is
-   not among them is one only its tests use, which a project that uses the
-   package once it is published does not take on. *)
 let code_packages =
   Query.query ~name:"code_packages" ~phase:Phases.checks ~saved:true ~show:Path.show_package
     (fun database package_name ->

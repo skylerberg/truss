@@ -1,9 +1,3 @@
-(** The interfaces of definitions, as queries.
-
-    [lowered_interface] lowers a definition's outward-facing part and keeps lowering's diagnostics.
-    The other queries project one interface out of it by path, so a definition's diagnostics
-    changing never re-checks a definition that reads its interface. *)
-
 type interface =
   | Function_interface of Types.signature
   | Type_interface of Types.type_interface
@@ -19,7 +13,6 @@ type interface =
       for_type : Types.ty;
     }  (** The subject of a law's proof: a law of a trait, for a type's [impl]. *)
   | Error_interface of Diagnostic.reported
-      (** A definition whose header did not parse: everything is accepted of it. *)
 
 type lowered_interface = {
   interface : interface;
@@ -55,8 +48,6 @@ val signature : (Path.t, Types.signature option) Query.query
 
 val signature_or_report :
   Query.context -> Path.t -> (Types.signature, Diagnostic.reported) result option
-(** A function's signature for checking a use of it, or, when its header or its member of a trait
-    did not parse, the report of that, since everything is accepted of it. *)
 
 val trait_interface : (Path.t, Types.trait_interface option) Query.query
 val impl_interface : (Path.t, Types.impl_interface option) Query.query

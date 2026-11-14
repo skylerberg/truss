@@ -222,8 +222,6 @@ and block = { statements : statement list; span : span; id : id }
 and statement = statement_kind line
 (** {1 Statements} *)
 
-(** How the iterations of a [for] loop run: one after another, at the same time with no
-    capabilities, or each as a task. *)
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
 and statement_kind =

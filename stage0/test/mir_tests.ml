@@ -92,7 +92,6 @@ let terminator_reads : Mir.terminator -> Mir.local list = function
 
 (* The validator *)
 
-(* What may hold for a local or a loan on the paths that reach a point. *)
 let alive = 1
 let ended = 2
 
@@ -233,8 +232,6 @@ let validate definition (body : Mir.body) =
             branches
       | _ -> ())
     body.blocks;
-  (* The values exits from tasks return, which each holds until it is taken,
-     while the other tasks of its group run on. *)
   let held_by_exits =
     Array.fold_left
       (fun held (basic : Mir.basic_block) ->
@@ -243,9 +240,6 @@ let validate definition (body : Mir.body) =
         | _ -> held)
       [] body.blocks
   in
-  (* Locals and loans, forward from the entry. Node [count + block] is the
-     head of the loop whose [For] ends [block]: the iterations' ends go back
-     to it. *)
   let locals_in = Array.init (2 * count) (fun _ -> Array.make locals 0)
   and loans_in = Array.init (2 * count) (fun _ -> Array.make loans 0)
   and reached = Array.make (2 * count) false in

@@ -98,7 +98,6 @@ let rec expression cursor context (value : expression) =
         body
   | _ -> parts cursor context value
 
-(* Everything inside an expression whose context does not change it. *)
 and parts cursor context value =
   Syntax_walk.expression_parts ~expression:(expression cursor context)
     ~statement:(statement cursor context) value
@@ -203,7 +202,6 @@ and statement cursor context (statement : statement) =
       statement_parts cursor context statement
   | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
 
-(* Everything inside a statement whose context does not change it. *)
 and statement_parts cursor context (parent : statement) =
   Syntax_walk.statement_parts ~expression:(expression cursor context)
     ~statement:(statement cursor context) parent

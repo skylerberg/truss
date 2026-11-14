@@ -190,10 +190,6 @@ val show_output : result -> string
 (** A function's result as a signature writes it after the parameters: [" -> Int64"],
     [" yields mut Element"], or nothing for unit. *)
 
-(** {1 Interfaces}
-
-    The part other definitions may depend on: the checked outward-facing part of each definition. *)
-
 type generic_kind =
   | Type_generic of trait_reference list  (** Bounds. *)
   | Value_generic  (** A [USize] value, as in [count: USize]. *)

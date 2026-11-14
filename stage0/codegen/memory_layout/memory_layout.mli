@@ -1,12 +1,3 @@
-(* The memory layout of every ground type: its size, its alignment, where its
-   fields go, how its variants are told apart, and which of its values are
-   spare for an enclosing type to use.
-
-   No program can observe a layout, so the compiler is free to choose it.
-   The rules are: fields placed by alignment, largest first, then by name; sum types as a tag and a union of
-   their variants; and niches that remove the tag where a field has spare
-   values. *)
-
 (* The target code is built for: the width of the pointers of the machine it runs
    on, the width of [USize] and [ISize], and the system whose C library it
    calls. The widths differ only for code built to run while compiling for
@@ -41,10 +32,6 @@ type scalar =
    names, such as the code pointer of a function value. *)
 type member = Typed of Ground.ty | Raw of scalar
 
-(* A type's shape, which the code that knows the type checker's type
-   shapes provides, after substituting type arguments. Fields and variants
-   are in declaration order. [Unit] and every record with no fields are
-   [Record []]; [Never] is [Sum []]. *)
 type shape =
   | Scalar of scalar
   | Record of (string * member) list
@@ -114,8 +101,6 @@ val integer_size : target -> integer -> int
 val integer_range : target -> integer -> Z.t * Z.t
 (** The least and the greatest value of an integer kind on a target. *)
 
-(* The index of a variant in a sum type's layout, and how it is told apart:
-   by its tag value, or by the value stored at the niche. *)
 type discriminant =
   | Only  (** The type has one variant, or none with a size: nothing to test *)
   | Tag_value of Z.t

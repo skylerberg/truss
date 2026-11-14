@@ -41,10 +41,6 @@ val copy : t -> Ground.ty -> Emit_c.Builder.instance
 (* Slot 0 of an [any] table: [Instance.Any_drop ty], which takes the value's
    pointer untyped and drops the value. *)
 val any_drop : t -> Ground.ty -> Emit_c.Builder.instance
-
-(* The buffer a debug or an encode function appends to: storage of bytes, which
-   its caller owns. Each takes the address of one to change, after the
-   value. *)
 val output_ty : Ground.ty
 
 (* The function that appends a value of a type in its binary form:

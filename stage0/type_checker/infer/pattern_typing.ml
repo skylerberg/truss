@@ -314,9 +314,6 @@ and constant_pattern state id span path type_ =
              | _ -> "the_constant"))
   | None -> ()
 
-(* Whether a type has structural equality: values that are equal cannot be
-   told apart. This holds for built-in equality, and for a derived [Equal]
-   if every field has structural equality. *)
 and structural ?(seen = []) state (type_ : Types.ty) =
   if
     integer_type state type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_

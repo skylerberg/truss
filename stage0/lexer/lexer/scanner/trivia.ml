@@ -90,11 +90,6 @@ let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message
   cursor.line_is_blank <- false;
   report cursor ~code (span start (start + length)) message
 
-(* The end of a character literal from another language, such as `'a'` or
-   `'\n'`, that starts at [start], or [None] if there is none there. The
-   habit is a literal that touches no name, so the quotes in
-   `value's'debug` are not one. With [after_prefix], the literal follows a
-   prefix, as in `b'a'`, which is the one name it may touch. *)
 let character_literal_end ?(after_prefix = false) cursor start =
   let touches_name index =
     let current = byte cursor index in

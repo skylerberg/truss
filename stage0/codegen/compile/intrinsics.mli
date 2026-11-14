@@ -17,16 +17,8 @@ type argument = Place of Lowered.place | Value of Lowered.operand
 (* The ground types the lowering needs. *)
 type types = { usize : Ground.ty; string_slice : Ground.ty }
 
-(* The positions of the arguments an operation passed by place takes as its
-   own, moving their values out of their places. *)
 val consumed_places : Intrinsic.operation -> int list
 
-(* Writes the operation, with its type arguments in the order the intrinsic
-   module declares them, into the builder. [value_arguments] are its generic
-   value arguments, such as an array's length, in the same order. The
-   result, if any, goes to [destination]. A lending operation instead
-   returns the place it lends. An operation that never returns, [crash],
-   leaves the builder in a new block that nothing reaches. *)
 val lower :
   ?checks:bool ->
   ?value_arguments:Z.t list ->

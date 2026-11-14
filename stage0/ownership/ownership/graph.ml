@@ -94,13 +94,7 @@ type point = {
 }
 
 type fork_join_block = { keyword : string; branches : int list list }
-(** A [parallel] or [concurrent] block: a fork-join of its branches, which may run at the same time.
-    [keyword] is "parallel" or "concurrent", for error messages. *)
-
 type fork_join_loop = { keyword : string; body : int list; bound : Core.local list }
-(** A [parallel for] or [concurrent for]: a fork-join of its iterations, which may run at the same
-    time. [body] is the points of the loop body, and [bound] is the locals that the loop's pattern
-    binds. *)
 
 type t = {
   points : point array;
@@ -134,7 +128,7 @@ type held = {
   fresh : bool;
       (** For a temporary, whether its value is a new one, which the statement drops: not a string
           literal, a lambda, or a value read out of a named place. *)
-  alias : Mir.place option;  (** For an operand held where it is evaluated, the place it is. *)
+  alias : Mir.place option;
   part : bool;  (** Whether it is the part a loop over a yielding call is given. *)
 }
 
@@ -167,7 +161,6 @@ type builder = {
   held : (Mir.local, held) Hashtbl.t;
   mutable returned : Mir.local list;  (** The temporaries whose value the body returns. *)
   mutable aliases : Mir.local list;
-      (** The lent locals that an assignment made: an operand held where it is evaluated. *)
   mutable binding : Mir.local list;  (** The locals made live and not yet given a value. *)
   mutable storage_lend : bool;
       (** Whether the last lend was of an element of a collection, which lends nothing for the

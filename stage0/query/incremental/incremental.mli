@@ -184,8 +184,6 @@ val identity : node -> string
 (** A node's name in every engine: a hash of its input or query and its key. *)
 
 val current_in : node -> t -> node option
-(** The same, computed there if it is a result the other engine does not have; for an input, the
-    same input if the other engine has a cell for it. *)
 
 val same_outcome : t -> node -> t -> node -> bool
 (** Whether two nodes of the same query or input and key, each in its engine, hold equal results. *)

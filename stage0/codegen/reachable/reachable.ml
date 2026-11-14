@@ -7,11 +7,6 @@ end)
 
 let bug format = Compiler_bug.bug ~stage:"Reachable" format
 
-(* Breadth-first, so an instance's number depends only on the shape of the
-   walk up to it. Each key in the queue carries the way it was reached,
-   nearest first. With [by_call], an entry of a capability's table is
-   reached by a call of its method, with the caller's way, and only once
-   the table is reached too; without, a table reaches its every entry. *)
 let walk ~lookup ~by_call roots =
   let seen = Table.create 256 in
   let queue = Queue.create () in
@@ -53,8 +48,6 @@ let walk ~lookup ~by_call roots =
   done;
   List.rev !reached
 
-(* The same instances in the same order, each with the first way the walk
-   reached it: the keys from a root to the instance, both included. *)
 let running ~lookup roots = walk ~lookup ~by_call:true roots
 let reachable ~lookup roots = List.map fst (walk ~lookup ~by_call:false roots)
 let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own hash"
@@ -130,12 +123,6 @@ let key_of parts = derive_reach_key (Cbor.encode (Cbor.Array parts))
 let unit_key ~own reached =
   key_of [ Text "unit"; Bytes own; Cbor.Array (List.map (fun key -> Cbor.Bytes key) reached) ]
 
-(* The key of everything an instance of a group can reach. The group's
-   instances are numbered in the order a walk from the instance first
-   reaches them, and each is written as its own hash and its references:
-   a number for an instance of the group, and the key of everything it can
-   reach for any other. [link] gives an instance's own hash and its
-   references, and [deep] the key of an instance outside the group. *)
 let group_key ~link ~deep ~members start =
   let inside key = List.exists (Instance.equal key) members in
   let order = Table.create 8 in

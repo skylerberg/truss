@@ -312,9 +312,6 @@ val closest : string -> string list -> string option
     name's letters away, and at least one. *)
 
 type reported
-(** Proof that an error was reported. A result that stands for something wrong, such as the type of
-    an expression that did not check, holds one, so it cannot be made where nothing was reported.
-    Everything is accepted of such a result, and that never accepts a mistake silently. *)
 
 val reported : _ diagnostic -> reported
 (** The diagnostic is the report. *)

@@ -103,7 +103,6 @@ type t = {
   parameters : Mir.local list;
   owner : Mir.local -> bool;
   loop_parts : (Mir.block, Mir.local list) Hashtbl.t;
-      (** The parts that the way into each loop's body gives values *)
   entries : state array;  (** The state where each block starts *)
   mutable flagged : int list;
 }
@@ -212,8 +211,6 @@ let inside analysis path =
         (fun inner -> if inner = position then None else Some analysis.paths.(inner))
         analysis.inside.(position)
 
-(* The tracked paths inside a path that no other tracked path inside it
-   holds. *)
 let children analysis position =
   let within = List.filter (fun inner -> inner <> position) analysis.inside.(position) in
   List.filter
@@ -225,9 +222,6 @@ let children analysis position =
            within))
     within
 
-(* Marks the paths whose drop here needs a flag: one that may or may not
-   hold a value, and each part of one that may hold a value that may not,
-   since such a part is dropped on its own. *)
 let rec need_flags analysis state position =
   if state.maybe_holds.(position) then begin
     if state.maybe_empty.(position) && not (List.mem position analysis.flagged) then
@@ -265,10 +259,6 @@ let given_on_entry analysis block =
         (affected_local analysis local))
     (Option.value (Hashtbl.find_opt analysis.loop_parts block) ~default:[])
 
-(* The state a terminator passes to one of its successors: a loop that pulls
-   values gives its part one on the way into its body, and an exit from
-   tasks ends the scopes it leaves on the way to its target, not where the
-   task ends without it. *)
 let into analysis state (terminator : Mir.terminator) successor =
   match terminator with
   | For { iteration = Pull _; part; body; _ } when successor = body ->
@@ -501,9 +491,6 @@ let rec yielded_reads : Mir.yielded -> Mir.local list = function
   | Built { fields; _ } ->
       List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:yielded_reads field) fields
 
-(* The locals a statement reads and those it gives a whole value, in
-   [state], where it runs. An end of a local that may hold a value with
-   something to drop reads it, since its drop does. *)
 let reads_and_writes analysis state (statement : Mir.statement) =
   let destination = function Some place -> written place | None -> ([], []) in
   let combine (reads, writes) (more_reads, more_writes) =
@@ -571,8 +558,6 @@ let kept_by_cursor analysis (body : Mir.body) =
     | local :: rest -> with_sources (local :: seen) (sources.(local) @ rest)
   in
   let reads locals = with_sources [] locals in
-  (* What each statement reads and writes, which the moves before it
-     decide for an end. *)
   let effects =
     Array.mapi
       (fun block (basic : Mir.basic_block) ->
@@ -590,9 +575,6 @@ let kept_by_cursor analysis (body : Mir.body) =
   let union into locals =
     Array.iteri (fun local is_live -> if is_live then into.(local) <- true) locals
   in
-  (* What is live where a loop goes on to its next iteration: its body less
-     its part, which the loop gives a value, what follows it, and the cursor
-     it pulls from. *)
   let next_iteration block =
     let after = Array.make count false in
     (match body.blocks.(block).terminator with
@@ -636,8 +618,6 @@ let kept_by_cursor analysis (body : Mir.body) =
       end
     done
   done;
-  (* At each [yield]: what the code after it reads, and what may hold a
-     value with something to drop, which dropping the cursor there drops. *)
   let kept = Array.make count false in
   List.iter (fun local -> kept.(local) <- true) body.parameters;
   Array.iteri

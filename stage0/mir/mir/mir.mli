@@ -89,8 +89,6 @@ type rvalue =
           prover reads as a function's definition. *)
   | Value_parameter of Types.parameter
 
-(** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
-    place: it is built where it is yielded, and is no value of its own. *)
 type yielded =
   | Part of operand
   | Built of {
@@ -141,8 +139,6 @@ and statement_kind =
           [bit_vector], which the prover reads as a formula. *)
   | Echo of operand
   | Provide of { provided : provided list; can_use_tasks : bool }
-      (** The start of a [provide] block. [can_use_tasks] says whether its body can use [Tasks], so
-          that tasks may call a [mut] implementation at the same time. *)
   | Provide_end
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
@@ -180,16 +176,7 @@ type task_exit =
   | Exit_to of block
   | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
-type left_task = {
-  task : Core.task;
-  ends : statement list;
-      (** The ends of the scopes between it and the next task, or the exit's target, which run in
-          the code around the task once it has ended *)
-  task_end : block option;
-      (** Where the task's code ends, which the other tasks of its group go on from: the start of
-          the next branch of a [concurrent] block, or the block's end. An iteration of a
-          [concurrent for] has none. *)
-}
+type left_task = { task : Core.task; ends : statement list; task_end : block option }
 (** A task an early exit leaves. *)
 
 type branch = {
@@ -212,14 +199,7 @@ type terminator =
       after : block;
       loop : loop;
     }
-      (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
-          {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
-          [loop]'s schedule says. *)
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
-      (** A [parallel] or [concurrent] block, which [fork] names by its statement's origin. Its
-          branches run at the same time, and each ends with a {!Join}; read in order, each runs
-          after the one before it. [join] is where the block ends, if a branch reaches it. A branch
-          that no path reaches is not listed. *)
   | Join of { fork : Core.origin; next : block }
       (** The end of a branch of the {!Fork} [fork]. Read in order, [next] runs after it: the next
           branch's entry, or the block's end after the last branch. *)
@@ -229,9 +209,8 @@ type terminator =
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
       (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
           taken. The exit ends the scopes inside the innermost task before it. *)
-  | Unreachable  (** A point that no path reaches, as the type checker has shown. *)
+  | Unreachable
   | Written_unreachable
-      (** An [unreachable] written in code, which the prover shows no path reaches. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
 type natural_loop = { loop : loop; body : block; after : block option }
@@ -273,9 +252,6 @@ and t = { body : body; lambdas : body array; yielding : yielding }
 
 and yielding = {
   by_position : bool;
-      (** The body is one [for] loop over a range of integers, and the loop body is one [yield]. The
-          iterations share no state, so a [parallel for] or a [concurrent for] over the method can
-          run the range loop's iterations at the same time. *)
   through : Path.t list;
       (** The yielding functions it delegates to: those a [for] loop iterates over where the loop
           body yields. *)
@@ -310,9 +286,6 @@ val of_path : (Path.t, (t * Types.substitution) option) Query.query
     [impl] inherits from its trait, has the MIR of its generated or inherited core form. *)
 
 val of_expression : ?parameters:Core.parameter list -> Core.expression -> t
-(** The MIR of one expression that runs on its own, such as a default or a constant's value: a body
-    that returns the expression's value. [parameters] are the locals of the code around that the
-    expression reads, such as the template a [requires] clause of a tag's [from_template] checks. *)
 
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs. The body of a function for specifications only never

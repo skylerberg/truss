@@ -27,17 +27,11 @@ val analyse :
   needs_drop:(path -> bool) ->
   Mir.body ->
   t
-(** The analysis of a body, whose locals that [owns] holds of own their values, and whose parameters
-    hold values on entry. The places of the locals that [lent_mut] holds of are another owner's,
-    lent to be changed: a value may be moved out of one, which is given a value again before the
-    local ends, and none is dropped where it ends. A path is tracked where its value has something
-    to drop. *)
 
 val owns : t -> Mir.local -> bool
 (** Whether a local owns its value, which its end drops. *)
 
 type state
-(** What may hold a value at one point. *)
 
 val entry : t -> Mir.block -> state
 (** The state where a block starts, which the caller may change. *)
@@ -74,11 +68,4 @@ val held_at_entry : t -> path list
 (** The flagged paths that hold a value on entry: the parameters'. *)
 
 val given_on_entry : t -> Mir.block -> path list
-(** The flagged paths that the way into a block gives a value: a loop's part, where the block is the
-    body of a loop that pulls values. *)
-
 val kept_by_cursor : t -> Mir.body -> Mir.local list
-(** The locals that the cursor of a pulled method keeps from one call of its [next] to the next: its
-    parameters, each local that code after a [yield] reads, and each that may hold a value with
-    something to drop where a [yield] stops, which a cursor dropped there drops. A read of a local
-    that views other locals' places reads those too. *)

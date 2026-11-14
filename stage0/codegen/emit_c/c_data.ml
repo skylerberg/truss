@@ -35,8 +35,6 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
       | Struct fields -> fields
       | _ -> []
     in
-    (* The parts first, which are static objects of their own, then this
-       one's name, so no two share one. *)
     let block_value = fields_c block_fields fields "" in
     let name = static_name context in
     context.statics <-

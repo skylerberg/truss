@@ -39,8 +39,6 @@ type t = {
       (** The tokens are an interpolation that a line break ended, an error the lexer already
           reported, so no missing token is reported at their end. *)
   mutable line_ended : bool;
-      (** A habit consumed a token, such as the [,] after a [match] arm, after which the lexer emits
-          no [Newline], so the next token starts a new item. *)
 }
 
 (* Nesting is limited, so that hostile input cannot make the parser, or any
@@ -129,10 +127,6 @@ let peek cursor = token_at cursor cursor.index
 let peek_kind cursor = (peek cursor).kind
 let peek_ahead cursor count = (token_at cursor (cursor.index + count)).kind
 
-(* Records a recovery at the token at [index]. One with no width, at the
-   end of the slice or at a closer the lexer inserted, would sit on the
-   boundary after the part it is in, so it reaches back to the start of the
-   token before it, which lies in that part. *)
 let record_recovery cursor ~index (span : Source.span) =
   let span =
     if span.start = span.stop && index > cursor.first then

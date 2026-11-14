@@ -84,8 +84,6 @@ type rvalue =
           prover reads as a function's definition. *)
   | Value_parameter of Types.parameter
 
-(** What a [yield] yields. A constructor that has a place among its fields, to any depth, lends the
-    place: it is built where it is yielded, and is no value of its own. *)
 type yielded =
   | Part of operand
   | Built of {
@@ -136,8 +134,6 @@ and statement_kind =
           [bit_vector], which the prover reads as a formula. *)
   | Echo of operand
   | Provide of { provided : provided list; can_use_tasks : bool }
-      (** The start of a [provide] block. [can_use_tasks] says whether its body can use [Tasks], so
-          that tasks may call a [mut] implementation at the same time. *)
   | Provide_end
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
       (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
@@ -175,16 +171,7 @@ type task_exit =
   | Exit_to of block
   | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
-type left_task = {
-  task : Core.task;
-  ends : statement list;
-      (** The ends of the scopes between it and the next task, or the exit's target, which run in
-          the code around the task once it has ended *)
-  task_end : block option;
-      (** Where the task's code ends, which the other tasks of its group go on from: the start of
-          the next branch of a [concurrent] block, or the block's end. An iteration of a
-          [concurrent for] has none. *)
-}
+type left_task = { task : Core.task; ends : statement list; task_end : block option }
 (** A task an early exit leaves. *)
 
 type branch = {
@@ -207,14 +194,7 @@ type terminator =
       after : block;
       loop : loop;
     }
-      (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
-          {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
-          [loop]'s schedule says. *)
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
-      (** A [parallel] or [concurrent] block, which [fork] names by its statement's origin. Its
-          branches run at the same time, and each ends with a {!Join}; read in order, each runs
-          after the one before it. [join] is where the block ends, if a branch reaches it. A branch
-          that no path reaches is not listed. *)
   | Join of { fork : Core.origin; next : block }
       (** The end of a branch of the {!Fork} [fork]. Read in order, [next] runs after it: the next
           branch's entry, or the block's end after the last branch. *)
@@ -224,9 +204,8 @@ type terminator =
   | Exit_tasks of { tasks : left_task list; exit : task_exit }
       (** An early exit from [concurrent] code: these tasks end, innermost first, then the exit is
           taken. The exit ends the scopes inside the innermost task before it. *)
-  | Unreachable  (** A point that no path reaches, as the type checker has shown. *)
+  | Unreachable
   | Written_unreachable
-      (** An [unreachable] written in code, which the prover shows no path reaches. *)
   | Todo  (** A [todo] that is reached stops the program. *)
 
 type natural_loop = { loop : loop; body : block; after : block option }
@@ -267,9 +246,6 @@ and t = { body : body; lambdas : body array; yielding : yielding }
 
 and yielding = {
   by_position : bool;
-      (** The body is one [for] loop over a range of integers, and the loop body is one [yield]. The
-          iterations share no state, so a [parallel for] or a [concurrent for] over the method can
-          run the range loop's iterations at the same time. *)
   through : Path.t list;
       (** The yielding functions it delegates to: those a [for] loop iterates over where the loop
           body yields. *)
@@ -324,7 +300,6 @@ type builder = {
   pending : (block, pending) Hashtbl.t;
   mutable block_count : int;
   mutable current : block option;
-      (** The block being built, or [None] where control does not reach. *)
   sources : (Core.local, local) Hashtbl.t;
   mutable scopes : scope list;  (** Innermost first. *)
   mutable loops : enclosing_loop list;
@@ -339,10 +314,6 @@ type builder = {
       (** The tasks around the code being built, innermost first, each with the number of scopes
           around its start and, for a branch of a [concurrent] block, the block where it ends. *)
   task_exits : (block, (Core.task * (scope * int list) list) list) Hashtbl.t;
-      (** For each block that an early exit from tasks ends: each task with the scopes between it
-          and the next task or the exit's target, and the loans of each at the exit. The scopes'
-          ends are read once the body is built, since a later branch can still bind a local in one.
-      *)
   mutable yield_count : int;  (** The [yield]s built so far. *)
   mutable through : Path.t list;  (** The yielding functions a loop that yields iterates over. *)
   mutable yields_places : bool;  (** Whether a [yield] lends a place that outlives the body. *)
@@ -416,8 +387,6 @@ let terminate b terminator origin =
 let goto b target origin = terminate b (Goto target) origin
 let assign ?node b target value origin = emit b (Assign { target; value; node }) origin
 
-(* A new temporary that holds a value, or [None] where control does not
-   reach. [node] is the core expression whose value it is. *)
 let hold ?node b type_ origin value =
   match b.current with
   | None -> None
@@ -431,9 +400,6 @@ let source b (local : Core.local) =
   | Some found -> found
   | None -> bug "a local that nothing binds"
 
-(* Makes a binding dead where its scope ends: the innermost scope of the
-   frame it binds into, or for an [is] in a block's value, which no
-   statement encloses, the innermost scope around the condition. *)
 let register_binding b local =
   let scope =
     match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
@@ -473,7 +439,6 @@ let end_loans b loans origin =
       b.scopes
   end
 
-(* What leaving a scope ends. *)
 let scope_ends scope origin =
   List.map
     (fun kind -> { kind; origin })
@@ -485,9 +450,6 @@ let scope_ends scope origin =
 let end_scope b scope origin =
   List.iter (fun (ended : statement) -> emit b ended.kind ended.origin) (scope_ends scope origin)
 
-(* Runs [f] in a new scope, and ends the scope's bindings where control
-   leaves it normally. The scope also ends [held]: what a condition before it
-   handed over, its names, lent temporaries, and loans. *)
 let in_scope ?(provides = false) ?(held = ([], [], [])) b origin f =
   let names, lent, loans = held in
   let scope = { frame = Bindings; bound = names; loans; temporaries = lent; provides } in
@@ -926,9 +888,6 @@ and construct_fields b fields =
              | [] -> bug "a constructor with fewer values than fields"))
        fields)
 
-(* What a [yield] yields, with its mode. A constructor that has a place
-   among its fields, to any depth, is built where it is yielded: its leaves,
-   each place it lends and each value, are evaluated in order. *)
 and yielded b (mode : Types.mode) (part : Core.operand) : yielded option =
   let rec lends : Core.operand -> bool = function
     | Place _ -> true
@@ -1090,9 +1049,6 @@ and truth b (node : Core.expression) =
   start b joined;
   Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
 
-(* Jumps to [yes] where a condition holds, and to [no] where it does not. A
-   short-circuit operator evaluates its right operand only from the side of
-   its left operand that does not decide it. *)
 and condition b (node : Core.expression) ~yes ~no =
   match node.kind with
   | And (left, right) ->
@@ -1139,11 +1095,6 @@ and condition b (node : Core.expression) ~yes ~no =
             node.origin
       | None -> ())
 
-(* A condition, whose temporaries end before either way out. Its lent
-   temporaries and loans last as [lends] says. The result is what the
-   guarded block's scope must end, as [in_scope]'s [held]: with [For_block],
-   the names the condition binds, its lent temporaries, and its loans, so
-   that no name outlives the part it aliases. *)
 and scoped_condition ~lends b (node : Core.expression) ~yes ~no =
   let naming = List.find_opt (fun scope -> scope.frame = Statement) b.scopes in
   let named_before = match naming with Some scope -> scope.bound | None -> [] in
@@ -1158,15 +1109,10 @@ and scoped_condition ~lends b (node : Core.expression) ~yes ~no =
       scope.temporaries
   in
   let loans = scope.loans in
-  (* A guard's lends last for the rest of the [match]'s statement, so that
-     what [is] binds of a lent part can be used in the arm. *)
   if lends = For_statement then begin
     List.iter (add_temporary b) (List.rev lent);
     match b.scopes with enclosing :: _ -> enclosing.loans <- loans @ enclosing.loans | [] -> ()
   end;
-  (* With [For_block], the names the condition binds move to the guarded
-     block's scope. Where the condition is false, they end with the lent
-     temporaries, since a name may be bound there too, as after [&&]. *)
   let names =
     match (lends, naming) with
     | For_block, Some named ->
@@ -1655,9 +1601,6 @@ and statement b (node : Core.statement) =
                 start b branch_entry;
                 let first = b.block_count in
                 if concurrent then begin
-                  (* The branch's task ends at its [Join], which the
-                      other branches go on from whether or not this one
-                      leaves early. *)
                   let branch_end = new_block b in
                   b.tasks <-
                     (Core.Branch { block = origin; index }, (List.length b.scopes, Some branch_end))
@@ -2077,11 +2020,6 @@ let iteration_loops (body : body) =
     body.blocks;
   loops
 
-(* The parts of lending calls whose [Dead] some path from the entry reaches
-   without passing the [Lend]: a temporary lives to its statement's end, so
-   a lend in one arm of a [match], or on one side of [&&], leaves a path to
-   the part's end that never lent it. Its lend's end then runs only where the
-   lend did. *)
 let conditional_lends (body : body) =
   let ends_of part (statement : statement) =
     match statement.kind with Dead locals -> List.mem part locals | _ -> false

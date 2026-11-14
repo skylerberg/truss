@@ -1,7 +1,3 @@
-(* Calls and the evidence they need: a trait method's implementation, how each
-   argument is passed, capabilities' and [any] values' tables, and calling
-   an instance; with literals and the standard types lowering builds. *)
-
 open Definitions
 open Lowering
 open Emit_c.Builder
@@ -157,14 +153,6 @@ let any_substitution context ~(any : Types.trait_reference) trait : Types.substi
       Interface.Properties.trait_substitution interface ~self:(Types.Any any) reference
   | None -> bug "no interface for %s" (Path.show trait)
 
-(* An entry in an [any] table: its C signature, which is the value's
-   pointer, then the method's own, with the evidence for its capabilities; how
-   its result is passed; and the capabilities that the evidence is for. The
-   method is [trait]'s, read for the [any] type. An associated capability
-   set of an [any] type is empty, so a method that uses [Self.Uses] takes
-   no evidence for it: the caller cannot name the capabilities of the type
-   that the value hides, and the checker converts a value to [any] only
-   where each set of its type is empty. *)
 let any_entry_signature context ~any ~trait (signature : Types.signature) =
   let substitution = any_substitution context ~any trait in
   let entry, result =
@@ -176,9 +164,6 @@ let any_entry_signature context ~any ~trait (signature : Types.signature) =
     result,
     evidence_for context substitution signature.uses )
 
-(* Evidence on the stack that a capability is implemented by the value
-   [implementation] points at: its [impl]'s table, and the evidence the
-   [impl] uses, which the code here has. *)
 let implementation_evidence st ~impl ~type_arguments ~implementation =
   let outer =
     List.map
@@ -202,10 +187,6 @@ let implementation_evidence st ~impl ~type_arguments ~implementation =
        });
   Lowered.Address { place = at slot; writable = false }
 
-(* The evidence for a capability, where the code being lowered has it. In a
-   method of an [impl] of the capability that does not use it, a function
-   value that uses it means the implementation itself, so the evidence is
-   the implementation's own: its [self]. *)
 let evidence_of st capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
   | Some (_, operand) -> operand
@@ -263,16 +244,6 @@ let cursor_into st ~path ~type_arguments ~(signature : Types.signature)
              fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
            } ))
 
-(* Writes a lambda's function value to [destination], and lowers the lambda
-   as a nested function of the instance. The enclosing function fills an
-   environment with a pointer to each captured variable, given as its key,
-   its place, and its type. In the lambda's own state, [bind_capture] binds
-   each captured variable to the place the environment gives it, and [body]
-   lowers the body, given the place, the mode, and the type of each
-   parameter. The lambda is given its environment, then its type's
-   parameters, then the evidence for its type's capabilities, which its
-   caller passes: that is the only evidence its code can reach. [output] is
-   the lambda's result, which a [?] in it returns early. *)
 let nested_function st ~(function_type : Ground.function_type) ~(output : Types.result option)
     ~(captures : (Lowered.place * Ground.ty) list)
     ~(body :
@@ -508,8 +479,6 @@ let provided_evidence st ~(implementation : Lowered.operand) provides =
       (capability, implementation_evidence st ~impl ~type_arguments ~implementation))
     provides
 
-(* The instance that a method's key is called as. The [next] of a cursor
-   over a yielding function is the function's state machine. *)
 let called (key : Instance.key) : Instance.key =
   match key with
   | Code { path = Method { owner; name = "next"; _ }; type_arguments } -> (
@@ -529,9 +498,6 @@ let all_passed (signature : Types.signature) =
   in
   (1 lsl defaulted) - 1
 
-(* Calls an instance with an argument in a place for each parameter. [mask]
-   says which of the parameters with defaults were passed, where the call
-   left some to the callee; without it every argument is one to use. *)
 let call_instance st key ~(signature : Types.signature) ~substitution
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ~destination () =
   let mask = match mask with Some mask -> mask | None -> all_passed signature in
@@ -680,11 +646,6 @@ let call_next st (yielding : Ground.yielding) cursor destination =
          result = Convention.destination convention destination;
        })
 
-(* Pulls a cursor until it ends, running [body] with the place of each
-   value. [call_next] calls the cursor's [next], which writes an [Option] of
-   type [option] to the place it is given. The loop's part, the value, ends
-   where the MIR ends it, so the [Option] holds nothing else to drop. The
-   [Option] is [kept] across a [yield] in the body. *)
 let pull_loop st ~kept ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =
   in_scope st (fun () ->

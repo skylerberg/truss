@@ -85,5 +85,3 @@ val storage_index : Core.expression -> Core.place option
     collection's [at], which lends the element. *)
 
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
-(** A callee with what a call through a function value gives changed, such as the core form's
-    operand to the MIR's; [None] where [change] gives none. *)

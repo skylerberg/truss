@@ -136,11 +136,6 @@ let explain_name ~(path : Path.t) (definition : definition) (resolved : Resolve.
   in
   { text = name.text; meaning; refers_to; type_ }
 
-(* The name or expression at an offset in the definition [path], relative
-   to the definition, and its meaning. The innermost [Name], [Member],
-   [Call], or [Bracket] expression at the offset is explained, or else the
-   innermost expression. A name at the offset that the expression does not
-   write, such as the declared name or a parameter, is explained instead. *)
 let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) ~text offset =
   let innermost = ref None in
