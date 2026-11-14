@@ -22,8 +22,15 @@ let mir st =
 
 let mir_of context path : Mir.t =
   match demand context Mir.of_path path with
-  | Some (mir, _) -> mir
+  | Some mir -> mir
   | None -> bug "%s has no MIR" (Path.show path)
+
+(* The MIR of each default of the parameters of the function or method at a
+   path, by the parameter's position. *)
+let parameter_defaults context path : (int * Mir.t) list =
+  match demand context Mir.defaults_of_path path with
+  | Some (Parameter_defaults defaults) -> defaults
+  | Some (Field_defaults _) | None -> bug "%s is not a function" (Path.show path)
 
 (* A parameter's mode, name, and type, from its local. *)
 let parameter_of (body : Mir.body) local =
@@ -622,6 +629,11 @@ let inlinable st (callee : Mir.callee) : Instance_mir.callee option =
               path;
               type_arguments = List.map Monomorphic.back_argument type_arguments;
               mir = Instance_mir.substituted code.substitution (mir_of st.context path);
+              defaults =
+                List.map
+                  (fun (position, default) ->
+                    (position, Instance_mir.substituted code.substitution default))
+                  (parameter_defaults st.context path);
             }
       | Returns _ -> None)
   | None -> None
@@ -774,19 +786,21 @@ let intrinsic st (operation : Intrinsic.operation) ~type_arguments (arguments : 
       Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.builder
         st.context.types operation ~type_arguments arguments ~destination ~site
 
-(* The default of a field, from the core form of the type's definition. *)
-let field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
+(* The default of a field of a type. *)
+let field_default st (ty : Ground.ty) ~variant ~field : Mir.field_default =
   let path =
     match ty with Named { path; _ } -> path | _ -> bug "defaults of %s" (Ground.to_string ty)
   in
-  match demand st.context Infer.core_of_path path with
-  | Some ({ definition = Type { defaults; _ }; _ }, _) -> (
+  match demand st.context Mir.defaults_of_path path with
+  | Some (Field_defaults defaults) -> (
       match
-        List.find_opt (fun (of_variant, name, _) -> of_variant = variant && name = field) defaults
+        List.find_opt
+          (fun (default : Mir.field_default) -> default.variant = variant && default.field = field)
+          defaults
       with
-      | Some (_, _, default) -> default
+      | Some default -> default
       | None -> bug "%s has no default for %s" (Path.show path) field)
-  | _ -> bug "%s has no core form" (Path.show path)
+  | Some (Parameter_defaults _) | None -> bug "%s is not a type" (Path.show path)
 
 (* Tasks *)
 
@@ -1534,7 +1548,7 @@ and field_default_place st ty ~variant ~field =
   in_type_definition st ty (fun () ->
       let default_ty = ground st default.type_ in
       let place = temporary st default_ty in
-      expression_into st default place;
+      mir_into st default.value place;
       (place, default_ty))
 
 (* Evaluates a core expression that runs on its own, such as a default, and
@@ -1661,12 +1675,7 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
           | None -> bug "%s has no method %s" (Path.show capability) name)
       | None -> bug "no interface for %s" (Path.show capability)
     in
-    let path : Path.t = Method { owner = capability; name; receiver } in
-    let parameters =
-      match demand st.context Infer.core_of_path path with
-      | Some ({ definition = Function { parameters; _ }; _ }, _) -> parameters
-      | _ -> bug "%s has no core form" (Path.show path)
-    in
+    let defaults = parameter_defaults st.context (Method { owner = capability; name; receiver }) in
     let key = key_of st.context capability in
     let caller = st.frame in
     st.frame <-
@@ -1683,16 +1692,17 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
           };
         self_place = None;
       };
-    List.iter2
-      (fun (parameter : Core.parameter) ((argument : Mir.argument), (_, ty, place)) ->
-        match (argument, parameter.default) with
+    List.iteri
+      (fun position ((argument : Mir.argument), (_, ty, place)) ->
+        match (argument, List.assoc_opt position defaults) with
         | Default, Some default ->
-            expression_into st default place;
+            mir_into st default place;
             if not (trivial st ty) then
               (innermost_scope st).owned <- Drop_value place :: (innermost_scope st).owned
-        | Default, None -> bug "%s is omitted and has no default" parameter.name
+        | Default, None ->
+            bug "the argument at position %d of `%s.%s` is omitted and has no default" position
+              (Path.show capability) name
         | Passed _, _ -> ())
-      parameters
       (List.combine arguments evaluated);
     st.frame <- caller
   end
@@ -2023,13 +2033,14 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
       finish st.builder (Goto test);
       start st.builder after
 
-let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.place list) =
+let fill_defaults st (mask : Lowered.place) (body : Mir.body) ~(defaults : (int * Mir.t) list)
+    (places : Lowered.place list) =
   let builder = st.builder in
   let bit = ref (-1) in
-  List.map2
-    (fun parameter arrived ->
+  List.mapi
+    (fun position (parameter, arrived) ->
       let mode, name, type_ = parameter_of body parameter in
-      match List.assoc_opt parameter body.defaults with
+      match List.assoc_opt position defaults with
       | None -> arrived
       | Some default ->
           incr bit;
@@ -2079,7 +2090,7 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
           finish builder (Goto after);
           start builder after;
           place)
-    body.parameters places
+    (List.combine body.parameters places)
 
 (* Lowers the MIR of the code at [path] in the current frame, with its
    parameters in [parameters], in order. *)

@@ -252,9 +252,6 @@ and inlined = {
 
 type body = {
   parameters : local list;
-  defaults : (local * t) list;
-      (** For each parameter with a default, the MIR of the default, which the callee runs where the
-          argument is left out. *)
   captures : local list;
       (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
           order. *)
@@ -262,7 +259,9 @@ type body = {
   blocks : basic_block array;  (** The entry is block 0. *)
 }
 
-and t = { body : body; lambdas : body array }
+type t = { body : body; lambdas : body array }
+type field_default = { variant : string option; field : string; type_ : Types.ty; value : t }
+type defaults = Parameter_defaults of (int * t) list | Field_defaults of field_default list
 
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
@@ -2030,7 +2029,7 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
   b.lambdas := body :: !(b.lambdas);
   List.length !(b.lambdas) - 1
 
-and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
+and finish ?(captures = []) b ~parameters : body =
   let blocks =
     Array.init b.block_count (fun index ->
         let pending = Hashtbl.find b.pending index in
@@ -2055,7 +2054,6 @@ and finish ?(captures = []) ?(defaults = []) b ~parameters : body =
   in
   {
     parameters;
-    defaults;
     captures;
     locals = Array.init b.local_count (Hashtbl.find b.infos);
     blocks = canonical blocks;
@@ -2225,7 +2223,7 @@ let conditional_lends (body : body) =
       if ended_before || reaches 0 then Some part else None)
     !lends
 
-let rec of_expression ?(parameters = []) (written : Core.expression) =
+let of_expression ?(parameters = []) (written : Core.expression) =
   let b = create ~lambdas:(ref []) in
   let parameters =
     List.map
@@ -2240,7 +2238,7 @@ let rec of_expression ?(parameters = []) (written : Core.expression) =
   let body = finish b ~parameters in
   { body; lambdas = Array.of_list (List.rev !(b.lambdas)) }
 
-and of_definition (definition : Core.definition) =
+let of_definition (definition : Core.definition) =
   let code =
     match definition with
     | Function { parameters; body = Some body; _ } -> Some (parameters, body, true)
@@ -2257,21 +2255,12 @@ and of_definition (definition : Core.definition) =
             bind_source ~name:parameter.name b parameter.local parameter.mode parameter.type_ 0)
           parameters
       in
-      let defaults =
-        List.concat
-          (List.map2
-             (fun (parameter : Core.parameter) local ->
-               match parameter.default with
-               | Some default -> [ (local, of_expression default) ]
-               | None -> [])
-             parameters locals)
-      in
       start b (new_block b);
       in_scope b 0 (fun () ->
           Option.iter
             (fun value -> return_ b (if returns then Some value else None) 0)
             (block b body));
-      let finished = finish b ~parameters:locals ~defaults in
+      let finished = finish b ~parameters:locals in
       { body = finished; lambdas = Array.of_list (List.rev !(b.lambdas)) })
     code
 
@@ -2289,16 +2278,52 @@ let mir =
           | _ -> of_definition form.definition)
       | _ -> None)
 
+(* What [of_form] gives of the core form of the function, method, or type at
+   a path: of the definition that writes the form, from [of_definition], which
+   computes it once for that definition. *)
+let by_path database path ~of_definition ~of_form =
+  Option.bind (Query.demand database Infer.form_origin path) (fun (origin, _) ->
+      match origin with
+      | Infer.Written key | Inherited key -> Query.demand database of_definition key
+      | Generated ->
+          Option.bind (Query.demand database Infer.derived path) (fun (form : Core.t) ->
+              of_form form.definition))
+
 let of_path =
   Query.query ~name:"mir_of_path" ~phase:Phases.bodies ~show:Path.show (fun database path ->
-      Option.bind (Query.demand database Infer.form_origin path) (fun (origin, substitution) ->
-          Option.map
-            (fun mir -> (mir, substitution))
-            (match origin with
-            | Infer.Written key | Inherited key -> Query.demand database mir key
-            | Generated ->
-                Option.bind (Query.demand database Infer.derived path) (fun (form : Core.t) ->
-                    of_definition form.definition))))
+      by_path database path ~of_definition:mir ~of_form:of_definition)
+
+let defaults_of (definition : Core.definition) =
+  match definition with
+  | Function { parameters; _ } ->
+      Some
+        (Parameter_defaults
+           (List.concat
+              (List.mapi
+                 (fun position (parameter : Core.parameter) ->
+                   match parameter.default with
+                   | Some default -> [ (position, of_expression default) ]
+                   | None -> [])
+                 parameters)))
+  | Type { defaults; _ } ->
+      Some
+        (Field_defaults
+           (List.map
+              (fun (variant, field, (default : Core.expression)) ->
+                { variant; field; type_ = default.type_; value = of_expression default })
+              defaults))
+  | Test _ | Law_proof _ -> Some (Parameter_defaults [])
+  | Trait _ | Constant _ | Empty -> None
+
+let defaults =
+  Query.query ~name:"mir_defaults" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.bind (Query.demand database Infer.core key) (fun (form : Core.t) ->
+          defaults_of form.definition))
+
+let defaults_of_path =
+  Query.query ~name:"mir_defaults_of_path" ~phase:Phases.bodies ~show:Path.show
+    (fun database path -> by_path database path ~of_definition:defaults ~of_form:defaults_of)
 
 let of_constant =
   Query.query ~name:"mir_of_constant" ~phase:Phases.bodies ~show:Path.show (fun database path ->

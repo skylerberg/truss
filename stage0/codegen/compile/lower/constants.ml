@@ -237,7 +237,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
             Some ()
         | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
-        let* callee_mir = demand st.context Mir.of_path path |> Option.map fst in
+        let* callee_mir = demand st.context Mir.of_path path in
         let type_arguments =
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
@@ -247,16 +247,17 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
           enter st.context ~builder:st.builder
             (frame_of (code_of st.context path type_arguments) ~inlined:[])
         in
+        let defaults = Mir_form.parameter_defaults st.context path in
         let* values =
           all
-            (List.map2
-               (fun (argument : Mir.argument) parameter ->
+            (List.mapi
+               (fun position (argument : Mir.argument) ->
                  match argument with
                  | Passed { value; _ } -> operand value
                  | Default ->
-                     let* default = List.assoc_opt parameter callee_mir.body.defaults in
+                     let* default = List.assoc_opt position defaults in
                      fold_body ~depth:(depth - 1) ~steps callee default [])
-               arguments callee_mir.body.parameters)
+               arguments)
         in
         let* value = fold_body ~depth:(depth - 1) ~steps callee callee_mir values in
         assign destination value

@@ -27,18 +27,18 @@ let table = Generated.table
 let locked_table = Generated.locked_table
 let any_table = Generated.any_table
 
-let bind_parameters st (body : Mir.body) =
-  let defaults = ref 0 in
-  List.map
-    (fun local ->
+let bind_parameters st (body : Mir.body) ~(defaults : (int * Mir.t) list) =
+  let filled = ref 0 in
+  List.mapi
+    (fun position local ->
       let mode, _, type_ = Mir_form.parameter_of body local in
       let ty = ground st type_ in
       let bit =
         Option.map
           (fun _ ->
-            incr defaults;
-            !defaults - 1)
-          (List.assoc_opt local body.defaults)
+            incr filled;
+            !filled - 1)
+          (List.assoc_opt position defaults)
       in
       let arrives, place =
         Lowering.parameter st ~in_scope:false
@@ -48,9 +48,9 @@ let bind_parameters st (body : Mir.body) =
       (arrives, bit, place))
     body.parameters
 
-let begin_body st ~(body : Mir.body) =
+let begin_body st ~(body : Mir.body) ~defaults =
   let code = st.frame.code in
-  let bound = bind_parameters st body in
+  let bound = bind_parameters st body ~defaults in
   let places = List.map (fun (_, _, place) -> place) bound in
   let mask =
     if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
@@ -61,7 +61,9 @@ let begin_body st ~(body : Mir.body) =
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   let places =
-    match mask with Some mask -> Mir_form.fill_defaults st (at mask) body places | None -> places
+    match mask with
+    | Some mask -> Mir_form.fill_defaults st (at mask) body ~defaults places
+    | None -> places
   in
   (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
 
@@ -151,7 +153,9 @@ let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
   let st = enter context ~builder:(create context.env ~key) (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
-  let parameter_locals, places = begin_body st ~body in
+  let parameter_locals, places =
+    begin_body st ~body ~defaults:(Mir_form.parameter_defaults context path)
+  in
   Mir_form.lower_code st path ~parameters:places;
   finish_instance st ~returns ~rest:parameter_locals ()
 

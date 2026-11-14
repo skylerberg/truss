@@ -710,7 +710,7 @@ let () =
       in
       let by_path path =
         match Query.demand database Mir.of_path path with
-        | Some (mir, _) -> mir
+        | Some mir -> mir
         | None -> failwith (Path.show path ^ " has no MIR")
       in
       let default_method = method_of (Top { module_; name = "Shape" }) "doubled" in
@@ -735,6 +735,44 @@ let () =
         by_path (method_of (impl_for "Square") "side")
         == by_path (method_of (impl_for "Cube") "side")
       then fail "two written methods share one MIR");
+  test "defaults have bodies of their own, apart from the MIR of any function's body" (fun () ->
+      let database = setup [ ("app::main", Fixtures.Mir.defaults_have_bodies_of_their_own) ] in
+      let module_ = module_of "app::main" in
+      let top name : Path.t = Top { module_; name } in
+      let defaults_of path =
+        match Query.demand database Mir.defaults_of_path path with
+        | Some defaults -> defaults
+        | None -> failwith (Path.show path ^ " has no defaults")
+      in
+      (* The value a default's body returns, where it is a literal. *)
+      let returned (default : Mir.t) =
+        validate "a default" default.body;
+        List.find_map
+          (fun (_, (terminator : Mir.terminator)) ->
+            match terminator with
+            | Return (Some (Constant { value = Integer value; _ })) -> Some (Z.to_int value)
+            | _ -> None)
+          (terminators default.body)
+      in
+      let positions = function
+        | Mir.Parameter_defaults defaults ->
+            List.map (fun (position, default) -> (position, returned default)) defaults
+        | Field_defaults _ -> failwith "a function with field defaults"
+      in
+      (* A capability's method has no body, and its callers evaluate its default. *)
+      let add : Path.t = Method { owner = top "Tally"; name = "add"; receiver = Static } in
+      if Query.demand database Mir.of_path add <> None then fail "`Tally.add` has a body's MIR";
+      if positions (defaults_of add) <> [ (0, Some 5) ] then
+        fail "`Tally.add` does not have its default at position 0";
+      (* A method's positions count [self] first, as a call's arguments do. *)
+      let advance : Path.t = Method { owner = top "Counter"; name = "advance"; receiver = Mut } in
+      if positions (defaults_of advance) <> [ (1, Some 3) ] then
+        fail "`Counter.advance` does not have its default at position 1";
+      match defaults_of (top "Counter") with
+      | Field_defaults [ { variant = None; field = "step"; value; _ } ] ->
+          if returned value <> Some 2 then fail "the default of `step` is not 2"
+      | Field_defaults defaults -> fail "`Counter` has %d field defaults" (List.length defaults)
+      | Parameter_defaults _ -> fail "a type with parameter defaults");
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
       let blocks = mir.body.blocks in

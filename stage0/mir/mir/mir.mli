@@ -260,9 +260,6 @@ and inlined = {
 
 type body = {
   parameters : local list;
-  defaults : (local * t) list;
-      (** For each parameter with a default, the MIR of the default, which the callee runs where the
-          argument is left out. *)
   captures : local list;
       (** For a lambda's body, the local of each value it captures, which its {!Lambda} gives, in
           order. *)
@@ -270,7 +267,21 @@ type body = {
   blocks : basic_block array;  (** The entry is block 0. *)
 }
 
-and t = { body : body; lambdas : body array }
+type t = { body : body; lambdas : body array }
+
+type field_default = {
+  variant : string option;  (** The field's variant, for a sum type. *)
+  field : string;
+  type_ : Types.ty;  (** The default's type, in the type's own generic parameters. *)
+  value : t;
+}
+
+(** The defaults a definition writes, each as a body that takes nothing and returns the value. *)
+type defaults =
+  | Parameter_defaults of (int * t) list
+      (** A function's: each parameter that has a default, by its position among the parameters,
+          [self] first, as a call's arguments are numbered. A test and a law's proof have none. *)
+  | Field_defaults of field_default list  (** A type's. *)
 
 val canonical : basic_block array -> basic_block array
 (** The blocks control can reach from the entry, block 0, in reverse postorder, numbered in that
@@ -298,11 +309,19 @@ val mir : (Resolve.Names.key, t option) Query.query
     once for the definition. The body of a function for specifications only never runs, so it has
     none. *)
 
-val of_path : (Path.t, (t * Types.substitution) option) Query.query
-(** The MIR of the function or method at a path that has code to run, with the substitution to apply
-    to it, as [Infer.form_origin] gives it. A written method has its definition's {!mir}, and so
-    does a method that an [impl] inherits from its trait: the default method's, which every such
-    [impl] shares. A method of a derived [impl] has the MIR of its generated core form. *)
+val of_path : (Path.t, t option) Query.query
+(** The MIR of the function or method at a path that has code to run, in the generic parameters of
+    the definition that writes it, as [Infer.form_origin] names it. A written method has its
+    definition's {!mir}, and so does a method that an [impl] inherits from its trait: the default
+    method's, which every such [impl] shares. A method of a derived [impl] has the MIR of its
+    generated core form. *)
+
+val defaults_of_path : (Path.t, defaults option) Query.query
+(** The defaults of the function, method, or type at a path, from the definition that writes them,
+    as {!of_path} gives a body's MIR. They are built once for that definition, and are no part of a
+    body's MIR: a function has its defaults whether or not it has a body, as a capability's method
+    has none, and a caller that reads them reads nothing of the body. [None] for a definition with
+    an error, or one that has neither parameters nor fields. *)
 
 val of_constant : (Path.t, t option) Query.query
 (** The MIR of a constant's value: a body that returns it. *)
