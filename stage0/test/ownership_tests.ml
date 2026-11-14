@@ -725,6 +725,19 @@ let () =
   test "a view of a part that a loop lends can outlive the iteration" (fun () ->
       fine Fixtures.Ownership.view_of_a_lent_loop_part_can_outlive_its_iteration)
 
+(* An assignment of a whole variable replaces the views it stores *)
+
+let () =
+  test "assigning a `var` a new view ends its view of a local" (fun () ->
+      fine
+        (Fixtures.Ownership.make
+       ^ Fixtures.Ownership.assigning_a_var_a_new_view_ends_its_view_of_a_local));
+  test "assigning a `var` a new view ends its view of the old place" (fun () ->
+      fine Fixtures.Ownership.assigning_a_var_a_new_view_ends_its_view_of_the_old_place);
+  test "assigning a field a new view keeps the record's other views" (fun () ->
+      one_diagnostic Fixtures.Ownership.assigning_a_field_a_new_view_keeps_the_records_other_views
+        "ownership.changed_while_viewed")
+
 (* Pulling views of places *)
 
 let () =

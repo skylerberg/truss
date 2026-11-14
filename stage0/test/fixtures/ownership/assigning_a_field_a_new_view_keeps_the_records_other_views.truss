@@ -1,0 +1,9 @@
+type Pair(left: Slice[Int64], right: Slice[Int64])
+
+fn f(other: List[Int64]) -> USize {
+  var items = other.copy()
+  var pair = Pair(left: items[..], right: other[..])
+  pair.right = other[..]
+  mut items.push(1)
+  pair.left.length()
+}

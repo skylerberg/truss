@@ -52,9 +52,10 @@ type action =
           check does not track. [views] is the views of the yielded value, if it has a view type. *)
   | Bind_views of { locals : Core.local list; views : view list }
       (** A pattern binds [locals] to a value that has these views. *)
-  | Store of { place : Place.t; views : view list }
+  | Store of { place : Place.t; views : view list; overwrites : bool }
       (** A value that has these views is stored in the place: by an assignment, or by a call that
-          borrows the place [mut] and may store one of its view arguments there. *)
+          borrows the place [mut] and may store one of its view arguments there. If [overwrites],
+          the value replaces the whole value of the place's root, whose views end. *)
   | Return_view of view list  (** The function returns a value that has these views. *)
   | Drop of (Place.root * Core.origin) list
       (** The MIR ends these owners of values: each with where it is made, a temporary's expression
@@ -392,7 +393,12 @@ let call builder (call : Mir.call) origin =
                   (List.map snd (viewable_arguments builder call))
               in
               emit_ builder
-                (Store { place; views = List.concat_map (views_of_operand builder) others })
+                (Store
+                   {
+                     place;
+                     views = List.concat_map (views_of_operand builder) others;
+                     overwrites = false;
+                   })
                 origin
           | None -> ())
       | _ -> ())
@@ -659,7 +665,9 @@ let statement builder (statement : Mir.statement) =
           emit_ builder (Assign place) origin;
           match type_ with
           | Some type_ when is_view builder.context type_ ->
-              emit_ builder (Store { place; views = result.views }) origin
+              emit_ builder
+                (Store { place; views = result.views; overwrites = place.steps = [] })
+                origin
           | _ -> ())
       | None -> hold builder { target with projections = [] } result)
   | Call { destination; call = called } ->
@@ -1090,10 +1098,14 @@ let transfer context (step : step) (before : state) : state =
               (Place.Local holder, viewed) :: List.remove_assoc (Place.Local holder) held_views)
             before.views locals;
       }
-  | Store { place; views } -> (
-      match resolve context before.views views with
-      | [] -> before
-      | viewed -> { before with views = add_views before.views place.root viewed })
+  | Store { place; views; overwrites } -> (
+      let viewed = resolve context before.views views in
+      if overwrites then
+        { before with views = (place.root, viewed) :: List.remove_assoc place.root before.views }
+      else
+        match viewed with
+        | [] -> before
+        | viewed -> { before with views = add_views before.views place.root viewed })
   | Start_loan { loan; loans } ->
       if List.mem_assoc loan before.loans then before
       else { before with loans = (loan, loans) :: before.loans }
@@ -1538,7 +1550,7 @@ let check_body context (actions : actions) moves : task_hazard option =
               "This returns a view of the capability implementation's own state. The caller cannot \
                see the implementation, so nothing stops the next call from mutating that state \
                while the view is in use. Return a copy."
-      | Store { place; views } -> (
+      | Store { place; views; _ } -> (
           if outlives_function context place then
             let resolved = resolve context here.views views in
             (* The caller assumes that a [mut] argument stores only the
