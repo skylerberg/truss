@@ -2,6 +2,7 @@ use standard::http
 use standard::network
 use standard::url
 use standard::simulation
+use standard::tasks
 use standard::tls
 use standard::x509
 
@@ -12,6 +13,16 @@ let intermediate_pem: String = "-----BEGIN CERTIFICATE-----\nMIICHTCCAcSgAwIBAgI
 let root_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBZzCCAQ2gAwIBAgIBATAKBggqhkjOPQQDAjAaMRgwFgYDVQQDDA9UcnVzcyBU\nZXN0IFJvb3QwIBcNMjYxMTEyMjIyMTIyWhgPMjEyNjEwMTkyMjIxMjJaMBoxGDAW\nBgNVBAMMD1RydXNzIFRlc3QgUm9vdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA\nBCfhX1Qdf96EEGtKWroHZr+BKXqWBBA2wlcyEokMJ8/YdaZaZuhy5WrmSA9g86KI\nvvtFrzu+27/Pxx6vVJU4F/CjQjBAMB0GA1UdDgQWBBSCaJNI2d3QmDK3XykacsXN\nZTG9QjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQD\nAgNIADBFAiEA8pe+1IlvjVklgXclN5mofhk3LB4GlbXcQ8O/qh1+iBACIDUH1nvd\npxBpi5fLaZ/7HZdobxHaII3PnGetZ0IWCRK9\n-----END CERTIFICATE-----\n"
 
 let leaf_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDBy766aCiN2LsAG1Jlw\nKI4tX3IoEJowFwLE4gwHaedWy839HnUeAhUrSKib+bG7Uv6hZANiAAS/O8o7HPkL\n3df45fFCunf8XR23GHd4r2kiilwGdXWBWMpjMziYq3jlRD/MYN2FII4AQ4HNQuin\nWTdAjqEzu8NOW1Y/iYgKlwtbZodFx8xFIOEu7NeVW2w5/NmWkWdWxMY=\n-----END PRIVATE KEY-----\n"
+
+let client_ca_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBUDCB+KADAgECAgEKMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMMFFRydXNzIFRl\nc3QgQ2xpZW50IENBMCAXDTI2MTExNDA3MzUyOFoYDzIxMjYxMDIxMDczNTI4WjAf\nMR0wGwYDVQQDDBRUcnVzcyBUZXN0IENsaWVudCBDQTBZMBMGByqGSM49AgEGCCqG\nSM49AwEHA0IABDK21qq84yVFZajQlNlRm2/SYoDszmXu+vd4zQ60hageK9xJghkM\nlhMoqbU4K7j+VL2+nUbQn4OYMXGVGSfYPo+jIzAhMA8GA1UdEwEB/wQFMAMBAf8w\nDgYDVR0PAQH/BAQDAgEGMAoGCCqGSM49BAMCA0cAMEQCIG5+7jKqbSTOexh1WaK9\nxSN1SlG4i7XuqkKgVq9+O5ebAiAynRaZtwW7CvUqeItw1drVIbj9lEBIC+6UeyK8\nHhW+rA==\n-----END CERTIFICATE-----\n"
+
+let client_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBXzCCAQWgAwIBAgICRCowCgYIKoZIzj0EAwIwHzEdMBsGA1UEAwwUVHJ1c3Mg\nVGVzdCBDbGllbnQgQ0EwIBcNMjYxMTE0MDczNTI4WhgPMjEyNjEwMjEwNzM1Mjha\nMBwxGjAYBgNVBAMMEVRydXNzIFRlc3QgY2xpZW50MFkwEwYHKoZIzj0CAQYIKoZI\nzj0DAQcDQgAEnKmd7Dytk/Q3lyueaBrb//c5L/McII1Zl69ud+X5DEZZ5YlyBNXR\nswsIR0evT3Wa2uJAhF8zwbj/3kkQ8/pd3KMyMDAwCQYDVR0TBAIwADAOBgNVHQ8B\nAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwIwCgYIKoZIzj0EAwIDSAAwRQIg\naO4Hbf5Xbuj/RgG3Zk0VMa9ltF+iN8/BjxcQeJKujrcCIQCPrNTYNOoyBPPCgz0H\nNa7ffpbHh1qcGlU7EcwMeqtfWg==\n-----END CERTIFICATE-----\n"
+
+let client_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgaq1o/JhUA66AFu4E\n8a466jWesaj8rKZqgfzrCux78q+hRANCAAScqZ3sPK2T9DeXK55oGtv/9zkv8xwg\njVmXr2535fkMRlnliXIE1dGzCwhHR69PdZra4kCEXzPBuP/eSRDz+l3c\n-----END PRIVATE KEY-----\n"
+
+let server_only_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBZTCCAQqgAwIBAgICRCowCgYIKoZIzj0EAwIwHzEdMBsGA1UEAwwUVHJ1c3Mg\nVGVzdCBDbGllbnQgQ0EwIBcNMjYxMTE0MDczNTI4WhgPMjEyNjEwMjEwNzM1Mjha\nMCExHzAdBgNVBAMMFlRydXNzIFRlc3Qgc2VydmVyX29ubHkwWTATBgcqhkjOPQIB\nBggqhkjOPQMBBwNCAAR+V9yewmBjExK0/C47szZWLpHLx1w19FZgEEM9OfvaDuQz\nEG31bfqZ2gAUZza4NpcEGaEl46eqBkDx5qrVJrtQozIwMDAJBgNVHRMEAjAAMA4G\nA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDATAKBggqhkjOPQQDAgNJ\nADBGAiEAikm0iwsO0FUk+ZepFlEOqLwcB1311jaMzP1+H4x1F0cCIQDC1DqIcJCn\nZCi6wjjGJAhlCsBpOdfJY0XXg49ySpMVhQ==\n-----END CERTIFICATE-----\n"
+
+let server_only_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgmqpb8yVPdFvL4hZ2\niyHwM35h1EwbLA5AzYPH6Ng6wWWhRANCAAR+V9yewmBjExK0/C47szZWLpHLx1w1\n9FZgEEM9OfvaDuQzEG31bfqZ2gAUZza4NpcEGaEl46eqBkDx5qrVJrtQ\n-----END PRIVATE KEY-----\n"
 
 fn certificate(text: StringSlice) -> x509::Certificate
   uses Panic
@@ -42,7 +53,7 @@ fn world() -> simulation::World
 }
 
 fn serve_once(listener: mut network::Listener) -> String
-  uses Handles, Tasks, Random, Panic
+  uses Handles, Tasks, Random, Clock, Panic
 {
   var connection = mut listener.accept().expect("a client connects")
   let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
@@ -234,5 +245,156 @@ test "a client keeps an HTTP/1.1 connection open between requests" {
     assert seen[3] == "204 0 "
     assert seen[4] == "200 70000"
     assert seen[5] == "200 0 "
+  }
+}
+
+fn identity(certificate_text: StringSlice, key_text: StringSlice) -> tls::Identity
+  uses Panic
+{
+  let blocks = x509::pem_blocks(key_text, label: "PRIVATE KEY")
+  let key = x509::parse_private_key(blocks[0].slice()).expect("a key")
+  tls::Identity(chain: [certificate(certificate_text)], key: own key)
+}
+
+fn mutual(port: UInt16, required: tls::ClientCertificates, protocols: List[String], presented: Option[tls::Identity]) -> String
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: port)).expect("the port is free")
+  var config = server_config()
+  config.protocols = protocols.copy()
+  config.client_certificates = required
+  config.client_roots = [certificate(client_ca_pem.slice())]
+  concurrent {
+    http::serve_tls(mut listener, config: config, handler: fn(request, responder) {
+      let name = match request.client_certificates.first() {
+        Some(leaf) => leaf.common_name().unwrap_or("unnamed").to_string()
+        None => "none"
+      }
+      let _ = mut responder.send(http::Response.text("${request.client_certificates.length()} ${name}".slice()))
+    })
+    {
+      var client = http::Client.new(http::ClientOptions(roots: Some([certificate(root_pem.slice())]), identity: presented.copy()))
+      return match mut client.get("https://example.test:${port}/".slice()) {
+        Ok(response) => response.text_body().unwrap_or("")
+        Err(_) => "refused"
+      }
+    }
+  }
+}
+
+test "a server that requires a client certificate accepts one its roots signed, and refuses others" {
+  provide world() {
+    let client = identity(client_pem.slice(), key_text: client_key_pem.slice())
+    let server_only = identity(server_only_pem.slice(), key_text: server_only_key_pem.slice())
+    assert mutual(8450, required: tls::ClientCertificates.Required, protocols: ["http/1.1"], presented: Some(client.copy())) == "1 Truss Test client"
+    assert mutual(8451, required: tls::ClientCertificates.Required, protocols: ["h2"], presented: Some(client.copy())) == "1 Truss Test client"
+    assert mutual(8452, required: tls::ClientCertificates.Required, protocols: ["http/1.1"], presented: None) == "refused"
+    assert mutual(8453, required: tls::ClientCertificates.Required, protocols: ["http/1.1"], presented: Some(own server_only)) == "refused"
+    assert mutual(8454, required: tls::ClientCertificates.Verified, protocols: ["http/1.1"], presented: None) == "0 none"
+  }
+}
+
+fn read_proxy_head(connection: network::Connection) -> String
+  uses Handles, Tasks
+{
+  var received: List[UInt8] = []
+  while !String.from_utf8_lossy(received.slice()).slice().contains("\r\n\r\n") {
+    match connection.receive(mut received, limit: 4096) {
+      Ok(count) => if count == 0 { return String.from_utf8_lossy(received.slice()) }
+      Err(_) => return String.from_utf8_lossy(received.slice())
+    }
+  }
+  String.from_utf8_lossy(received.slice())
+}
+
+fn pump(from: network::Connection, to: network::Connection)
+  uses Handles, Tasks
+{
+  while true {
+    var piece: List[UInt8] = []
+    match from.receive(mut piece, limit: 16384) {
+      Ok(count) => {
+        if count == 0 {
+          let _ = to.close_sending()
+          return
+        }
+      }
+      Err(_) => return
+    }
+    if to.send_all(piece.slice()) is Err(_) {
+      return
+    }
+  }
+}
+
+fn proxied() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var origin = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8455)).expect("the port is free")
+  var proxy = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 3128)).expect("the port is free")
+  let tunnels = tasks::Cell[List[String]].new([])
+  concurrent {
+    http::serve_tls(mut origin, config: server_config(), handler: routes)
+    {
+      while true {
+        let client_side = match mut proxy.accept() {
+          Ok(connection) => own connection
+          Err(_) => return []
+        }
+        let head = read_proxy_head(client_side)
+        let first = head.slice().lines().first().unwrap_or("").to_string()
+        if first.slice().starts_with("CONNECT ") {
+          let line = first.copy()
+          tunnels.update(fn(listed) { mut listed.push(line.copy()) })
+          let _ = client_side.send_all("HTTP/1.1 200 Connection established\r\n\r\n".bytes())
+          let target = network::connect("example.test", port: 8455).expect("the origin accepts")
+          concurrent {
+            pump(from: client_side, to: target)
+            pump(from: target, to: client_side)
+          }
+        } else {
+          var authorization = "none"
+          for line in head.slice().lines() {
+            match line.strip_prefix("Proxy-Authorization: ") {
+              Some(value) => authorization = value.to_string()
+              None => {}
+            }
+          }
+          let body = "${first}|${authorization}"
+          let reply = "HTTP/1.1 200 OK\r\nContent-Length: ${body.length()}\r\nConnection: close\r\n\r\n${body}"
+          let _ = client_side.send_all(reply.slice().bytes())
+          let _ = client_side.close_sending()
+        }
+      }
+    }
+    {
+      let through = http::Proxy(
+        http: url::parse("http://user:secret@example.test:3128").ok(),
+        https: url::parse("http://example.test:3128").ok(),
+      )
+      var seen: List[String] = []
+      var client = http::Client.new(http::ClientOptions(roots: Some([certificate(root_pem.slice())]), proxy: Some(through.copy())))
+      mut seen.push(summary(mut client.get("http://origin.test/path?q=1")))
+      let secured = summary(mut client.get("https://example.test:8455/first"))
+      for line in tunnels.read(fn(listed) { listed.copy() }) {
+        mut seen.push(line.copy())
+      }
+      mut seen.push(own secured)
+      let skipping = http::Proxy(https: url::parse("http://example.test:3128").ok(), excluded: ["example.test"])
+      var direct = http::Client.new(http::ClientOptions(roots: Some([certificate(root_pem.slice())]), proxy: Some(own skipping)))
+      mut seen.push(summary(mut direct.get("https://example.test:8455/second")))
+      return seen
+    }
+  }
+}
+
+test "a client sends plain requests to its proxy in absolute form and tunnels TLS through CONNECT" {
+  provide world() {
+    let seen = proxied()
+    assert seen.length() == 4
+    assert seen[0] == "200 63 GET http://origin.test/path?q=1 HTTP/1.1|Basic dXNlcjpzZWNyZXQ="
+    assert seen[1] == "CONNECT example.test:8455 HTTP/1.1"
+    assert seen[2] == "200 13 served /first"
+    assert seen[3] == "200 14 served /second"
   }
 }
