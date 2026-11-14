@@ -1,0 +1,222 @@
+use standard::http
+use standard::network
+use standard::simulation
+use standard::tasks
+
+fn loopback(port: UInt16) -> network::SocketAddress {
+  network::SocketAddress(address: network::IpAddress.loopback, port: port)
+}
+
+fn exchange(port: UInt16, raw: StringSlice) -> String
+  uses NetworkClient, Handles, Panic
+{
+  var connection = network::connect("localhost", port: port).expect("the server accepts")
+  let _ = mut connection.write_all(raw.bytes())
+  var reply: List[UInt8] = []
+  let _ = mut connection.read_to_end(mut reply)
+  String.from_utf8_lossy(reply.slice())
+}
+
+type Stalled(reply: String, waited: Duration)
+
+fn stalled_head() -> Stalled
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8099)).expect("the port is free")
+  let started = Clock.monotonic()
+  concurrent {
+    http::serve(mut listener, handler: fn(_, responder) {
+      let _ = mut responder.send(http::Response.text("ok"))
+    }, options: http::ServerOptions(head_timeout_seconds: 2))
+    {
+      let reply = exchange(8099, raw: "GET / HTTP/1.1\r\nHo")
+      return Stalled(reply: own reply, waited: Clock.monotonic() - started)
+    }
+  }
+}
+
+test "a client that stalls inside its headers is closed after the head deadline" {
+  provide simulation::World.new() {
+    let stalled = stalled_head()
+    assert stalled.reply == ""
+    assert stalled.waited >= Duration.seconds(2) && stalled.waited < Duration.seconds(30)
+  }
+}
+
+fn second_waits_for_first() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8100)).expect("the port is free")
+  let started = Clock.monotonic()
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut listener, handler: fn(_, responder) {
+      let _ = mut responder.send(http::Response.text("ok"))
+    }, options: http::ServerOptions(timeout_seconds: 5, connection_limit: 1))
+    {
+      var idle = network::connect("localhost", port: 8100).expect("the server accepts")
+      Clock.sleep(Duration.milliseconds(100))
+      let reply = exchange(8100, raw: "GET / HTTP/1.1\r\nConnection: close\r\n\r\n")
+      mut seen.push("${reply.slice().ends_with("ok")} ${Clock.monotonic() - started >= Duration.seconds(5)}")
+      let _ = mut idle.shut_down(network::Direction.Sending)
+      return seen
+    }
+  }
+}
+
+test "a server at its connection limit accepts the next connection only once one closes" {
+  provide simulation::World.new() {
+    assert second_waits_for_first() == ["true true"]
+  }
+}
+
+fn slow(request: own http::Request, responder: mut http::Responder, finished: tasks::Counter)
+  uses Tasks, Clock
+{
+  if request.target == "/streaming" {
+    let _ = mut responder.start(http::Status.ok)
+    let _ = mut responder.write("part".bytes())
+  }
+  let started = Clock.monotonic()
+  Clock.sleep(Duration.seconds(60))
+  if Clock.monotonic() - started >= Duration.seconds(60) {
+    let _ = finished.add(1)
+  }
+  let _ = mut responder.send(http::Response.text("late"))
+}
+
+fn deadlines() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8101)).expect("the port is free")
+  let finished = tasks::Counter.new()
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut listener, handler: fn(request, responder) {
+      slow(own request, mut responder, finished: finished)
+    }, options: http::ServerOptions(request_timeout_seconds: 1))
+    {
+      let unstarted = exchange(8101, raw: "GET / HTTP/1.1\r\nConnection: close\r\n\r\n")
+      mut seen.push("${unstarted.slice().starts_with("HTTP/1.1 503")}")
+      let started = exchange(8101, raw: "GET /streaming HTTP/1.1\r\nConnection: close\r\n\r\n")
+      mut seen.push("${started.slice().starts_with("HTTP/1.1 200")} ${started.slice().contains("part")} ${started.slice().ends_with("0\r\n\r\n")}")
+      Clock.sleep(Duration.seconds(120))
+      mut seen.push("${finished.value()}")
+      return seen
+    }
+  }
+}
+
+test "a handler past its deadline gets a 503 if it sent nothing, and a cut connection if it had begun" {
+  provide simulation::World.new() {
+    let seen = deadlines()
+    assert seen.length() == 3
+    assert seen[0] == "true"
+    assert seen[1] == "true true false"
+    assert seen[2] == "0"
+  }
+}
+
+fn abandoned() -> Int64
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8102)).expect("the port is free")
+  let finished = tasks::Counter.new()
+  concurrent {
+    http::serve(mut listener, handler: fn(request, responder) {
+      slow(own request, mut responder, finished: finished)
+    })
+    {
+      var connection = network::connect("localhost", port: 8102).expect("the server accepts")
+      let _ = mut connection.write_all("GET / HTTP/1.1\r\nHost: x\r\n\r\n".bytes())
+      Clock.sleep(Duration.seconds(1))
+      let _ = mut connection.shut_down(network::Direction.Both)
+      Clock.sleep(Duration.seconds(120))
+      return finished.value()
+    }
+  }
+}
+
+test "a handler whose HTTP/1.1 client disconnects is cancelled" {
+  provide simulation::World.new() {
+    let finished = abandoned()
+    let _ = echo "${finished}"
+    assert finished == 0
+  }
+}
+
+fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> List[UInt8] {
+  var bytes: List[UInt8] = [0, 0, UInt8.try_from(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
+  mut bytes.append(payload.to_list())
+  bytes
+}
+
+fn reset_over_http_two() -> Int64
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  var listener = NetworkServer.listen(loopback(8103)).expect("the port is free")
+  let finished = tasks::Counter.new()
+  concurrent {
+    http::serve(mut listener, handler: fn(request, responder) {
+      slow(own request, mut responder, finished: finished)
+    })
+    {
+      var connection = network::connect("localhost", port: 8103).expect("the server accepts")
+      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().to_list()
+      mut opening.append(frame(4, flags: 0, stream: 0, payload: []))
+      let block: List[UInt8] = [130, 134, 65, 1, 120, 132]
+      mut opening.append(frame(1, flags: 5, stream: 1, payload: block.slice()))
+      let _ = mut connection.write_all(opening.slice())
+      Clock.sleep(Duration.seconds(1))
+      let cancel: List[UInt8] = [0, 0, 0, 8]
+      let _ = mut connection.write_all(frame(3, flags: 0, stream: 1, payload: cancel.slice()).slice())
+      Clock.sleep(Duration.seconds(120))
+      return finished.value()
+    }
+  }
+}
+
+test "a handler whose HTTP/2 stream the client resets is cancelled" {
+  provide simulation::World.new() {
+    let finished = reset_over_http_two()
+    let _ = echo "${finished}"
+    assert finished == 0
+  }
+}
+
+fn clients_seen() -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+{
+  let local = network::IpNetwork.new(network::IpAddress.loopback, prefix_length: 8).expect("a network")
+  let private = network::IpNetwork.new(network::IpAddress.Version4([10, 0, 0, 0]), prefix_length: 8).expect("a network")
+  var trusting = NetworkServer.listen(loopback(8104)).expect("the port is free")
+  var doubting = NetworkServer.listen(loopback(8105)).expect("the port is free")
+  var seen: List[String] = []
+  concurrent {
+    http::serve(mut trusting, handler: fn(request, responder) {
+      let _ = mut responder.send(http::Response.text(http::peer_key(request).slice()))
+    }, options: http::ServerOptions(trusted_proxies: [local, private]))
+    http::serve(mut doubting, handler: fn(request, responder) {
+      let _ = mut responder.send(http::Response.text(http::peer_key(request).slice()))
+    })
+    {
+      let forwarded_for = "GET / HTTP/1.1\r\nX-Forwarded-For: 198.51.100.4, 203.0.113.7, 10.0.0.5\r\nConnection: close\r\n\r\n"
+      let forwarded = "GET / HTTP/1.1\r\nForwarded: for=192.0.2.60;proto=http, for=\"[2001:db8::1]:4711\"\r\nConnection: close\r\n\r\n"
+      let everyone_trusted = "GET / HTTP/1.1\r\nX-Forwarded-For: 10.1.2.3\r\nConnection: close\r\n\r\n"
+      let garbled = "GET / HTTP/1.1\r\nX-Forwarded-For: 203.0.113.7, nonsense\r\nConnection: close\r\n\r\n"
+      for raw in [forwarded_for.copy(), forwarded.copy(), everyone_trusted.copy(), garbled.copy()] {
+        let reply = exchange(8104, raw: raw.slice())
+        mut seen.push(reply.slice().lines().last().unwrap_or("").to_string())
+      }
+      let ignored = exchange(8105, raw: forwarded_for.slice())
+      mut seen.push(ignored.slice().lines().last().unwrap_or("").to_string())
+      return seen
+    }
+  }
+}
+
+test "a client address comes from forwarding headers only when a trusted proxy sent them" {
+  provide simulation::World.new() {
+    assert clients_seen() == ["203.0.113.7", "2001:db8::1", "10.1.2.3", "127.0.0.1", "127.0.0.1"]
+  }
+}

@@ -16,6 +16,8 @@ let stream_closed: UInt32 = 5
 
 let frame_size_error: UInt32 = 6
 
+let internal_error: UInt32 = 2
+
 let refused_stream: UInt32 = 7
 
 let compression_error: UInt32 = 9
@@ -289,7 +291,58 @@ fn block_of(frame: Frame) -> Result[List[UInt8], Failure] {
   strip_padding(frame.payload.slice(), flags: frame.flags, skip: skip)
 }
 
-internal type Arrival(stream: UInt32, fields: List[hpack::Field], chunks: tasks::Channel[flow::Chunk], outbound: tasks::Channel[flow::Outbound])
+internal type Arrival(
+  stream: UInt32,
+  fields: List[hpack::Field],
+  chunks: tasks::Channel[flow::Chunk],
+  outbound: tasks::Channel[flow::Outbound],
+  cancelled: tasks::Channel[Unit],
+)
+
+type Cancel(stream: UInt32, cancelled: tasks::Channel[Unit])
+
+fn cancel_stream(reading: mut Reading, stream: UInt32)
+  uses Tasks
+{
+  for entry in reading.cancels {
+    if entry.stream == stream {
+      entry.cancelled.close()
+    }
+  }
+}
+
+fn cancel_all(reading: mut Reading)
+  uses Tasks
+{
+  for entry in reading.cancels {
+    entry.cancelled.close()
+  }
+  reading.cancels = []
+}
+
+fn watch_stream(reading: mut Reading, stream: UInt32, cancelled: tasks::Channel[Unit])
+  uses Tasks
+{
+  var index: USize = 0
+  while index < reading.cancels.length() {
+    if reading.cancels[index].cancelled.is_closed() {
+      let _ = mut reading.cancels.remove_at(index)
+    } else {
+      index += 1
+    }
+  }
+  mut reading.cancels.push(Cancel(stream: stream, cancelled: cancelled.copy()))
+}
+
+internal fn abort_stream(outbound: tasks::Channel[flow::Outbound], stream: UInt32)
+  uses Tasks
+{
+  var frame: List[UInt8] = []
+  let code = window_increment(intrinsic::convert(internal_error))
+  frame_bytes(mut frame, kind: reset_frame, flags: 0, stream: stream, payload: code.slice())
+  let _ = outbound.send(flow::Outbound.Reset(stream: stream))
+  let _ = outbound.send(flow::Outbound.Frame(bytes: own frame))
+}
 
 type Inflow(stream: UInt32, chunks: tasks::Channel[flow::Chunk], block: List[UInt8], has_headers: Bool, is_ending: Bool, is_refused: Bool)
 
@@ -303,6 +356,7 @@ type Reading(
   is_going_away: Bool,
   header_limit: USize,
   admission: tasks::Cell[Admission],
+  cancels: List[Cancel],
 )
 
 fn inflow_index(inflows: Slice[Inflow], stream: UInt32) -> Option[USize] {
@@ -349,8 +403,10 @@ fn complete_headers(reading: mut Reading, index: USize, arrivals: tasks::Channel
   }
   if !reading.inflows[index].has_headers {
     reading.inflows[index].has_headers = true
-    let chunks = reading.inflows[index].chunks
-    let _ = arrivals.send(Arrival(stream: stream, fields: own fields, chunks: chunks.copy(), outbound: outbound.copy()))
+    let chunks = reading.inflows[index].chunks.copy()
+    let cancelled = tasks::Channel[Unit].new()
+    watch_stream(mut reading, stream: stream, cancelled: cancelled)
+    let _ = arrivals.send(Arrival(stream: stream, fields: own fields, chunks: own chunks, outbound: outbound.copy(), cancelled: own cancelled))
   } else if !reading.inflows[index].is_ending {
     return Err(violation(protocol_error, message: "trailers that do not end the stream"))
   }
@@ -527,6 +583,7 @@ fn serve_frame(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[
       Some(index) => close_inflow(mut reading, index: index, chunk: flow::Chunk.Failed(message: "the client reset the stream"))
       None => {}
     }
+    cancel_stream(mut reading, stream: frame.stream)
     let _ = outbound.send(flow::Outbound.Reset(stream: frame.stream))
     Ok(Unit)
   } else if kind == goaway_frame {
@@ -879,6 +936,7 @@ internal fn serve[Stream: streams::Duplex, capability Granted](
     is_going_away: false,
     header_limit: header_limit,
     admission: admission.copy(),
+    cancels: [],
   )
   concurrent {
     {
@@ -886,12 +944,15 @@ internal fn serve[Stream: streams::Duplex, capability Granted](
       while !reading.inflows.is_empty() {
         close_inflow(mut reading, index: 0, chunk: flow::Chunk.Failed(message: "the connection closed"))
       }
+      cancel_all(mut reading)
       let _ = outbound.send(flow::Outbound.Goaway(last_stream: reading.last_stream, code: failure_code(failure)))
       arrivals.close()
     }
     {
       concurrent for arrival in arrivals.messages() {
+        let cancelled = arrival.cancelled.copy()
         respond(own arrival)
+        cancelled.close()
         let is_drained = admission.update(fn(state) {
           if state.active > 0 {
             state.active -= 1
