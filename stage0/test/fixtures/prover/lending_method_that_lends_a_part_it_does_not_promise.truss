@@ -1,0 +1,7 @@
+type Couple(first: Int64, second: Int64)
+
+fn Couple.larger(self) lends Int64
+  ensures result >= self.first && result >= self.second
+{
+  self.first
+}

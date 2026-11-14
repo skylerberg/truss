@@ -93,21 +93,23 @@ let () =
   test "a concurrent for over mut elements gives each task its own element" (fun () ->
       expect_main ~expected:"2 4 6\n2 4 3 at 3\n"
         Fixtures.Concurrent.concurrent_for_over_mut_elements_gives_each_task);
-  test "a concurrent for over a cursor and over a method that yields owned values" (fun () ->
+  test "a concurrent for over a stored cursor and over a temporary cursor of owned values"
+    (fun () ->
       expect_main
-        ~expected:"pulled left 3\npulled left 2\npulled left 1\ninlined left 4\ninlined left 3\n2\n"
-        Fixtures.Concurrent.concurrent_for_over_a_cursor_and_over_a_method);
-  test "a task gets a copy of a trivial value that a method yields read-only" (fun () ->
+        ~expected:
+          "stored left 3\nstored left 2\nstored left 1\ntemporary left 4\ntemporary left 3\n2\n"
+        Fixtures.Concurrent.concurrent_for_over_a_stored_cursor_and_over_a);
+  test "a task gets a copy of a trivial value that a collection lends read-only" (fun () ->
       expect_main ~expected:"saw 5\nsaw 6\nsaw 7\n"
-        Fixtures.Concurrent.task_gets_a_copy_of_a_trivial_value_that_a_method)
+        Fixtures.Concurrent.task_gets_a_copy_of_a_trivial_value_that_a)
 
 (* Ownership of items and return values *)
 
 let () =
-  passes_in_order "a task borrows an element that a method lends from a read-only parameter"
-    ~count:3 Fixtures.Concurrent.task_borrows_an_element_that_a_method_lends_from_a;
-  passes_in_order "a task owns a value that a method computes, and copies a plain one" ~count:2
-    Fixtures.Concurrent.task_owns_a_value_that_a_method_computes_and
+  passes_in_order "a task borrows an element that a collection lends from a read-only parameter"
+    ~count:3 Fixtures.Concurrent.task_borrows_an_element_that_a_collection_lends;
+  passes_in_order "a task owns a value that a cursor computes, and copies a plain one" ~count:2
+    Fixtures.Concurrent.task_owns_a_value_that_a_cursor_computes_and
 
 let () =
   passes_in_order "a task owns its item, and an item whose task is not spawned is dropped" ~count:2
@@ -236,18 +238,3 @@ let () =
   test "on threads, a cancelled task returns from a wait for a child's output" (fun () ->
       expect_threaded ~expected:"run: cancelled\ntimed out\n"
         Fixtures.Concurrent.on_threads_a_cancelled_task_returns_from_a_wait)
-
-(* Programs that are reported as not built *)
-
-let unsupported name ~message text =
-  test name (fun () ->
-      match run_main text with
-      | exception Failure raised -> expect_string ~expected:message raised
-      | _ -> fail "the program was built")
-
-let () =
-  unsupported "concurrent code in a pulled method"
-    ~message:
-      "example/main.truss:5:3: Stage0 cannot build this yet: `concurrent` code in a yielding \
-       method that is pulled."
-    Fixtures.Concurrent.concurrent_code_in_a_pulled_method

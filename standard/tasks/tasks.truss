@@ -183,12 +183,21 @@ public fn Channel[Message: Storable].is_closed(self) -> Bool
   })
 }
 
-public fn Channel[Message: Storable].messages(self) yields own Message
-  uses Tasks
-{
-  while self.receive() is Some(message) {
-    yield own message
+public type Messages[Message: Storable](channel: Channel[Message])
+
+impl Cursor for Messages[Message: Storable] {
+  type Element = Message
+  capability Uses = Tasks
+
+  fn next(mut self) -> Option[Message]
+    uses Self.Uses
+  {
+    self.channel.receive()
   }
+}
+
+public fn Channel[Message: Storable].messages(self) -> Messages[Message] {
+  Messages(channel: self.copy())
 }
 
 public fn with_timeout[Output, capability Granted](limit: Duration, work: (fn() -> Output uses Granted)) -> Option[Output]

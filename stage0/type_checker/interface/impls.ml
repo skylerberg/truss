@@ -95,80 +95,6 @@ let impls_in =
 
 let cursor_trait = Well_known.path Cursor
 
-(* The cursor of a yielding function or method implements [Cursor], and no
-   [impl] is written for it. Its [impl] is a derived one, named by the
-   function. *)
-let cursor_impl (method_ : Path.t) : Path.t = Derived { type_ = method_; trait = cursor_trait }
-
-let cursor_uses database (type_ : Types.ty) =
-  match type_ with
-  | Types.Cursor { method_; arguments } -> (
-      match Query.demand database Environment.signature method_ with
-      | Some signature -> (
-          match Types.substitution_of signature.generics arguments with
-          | Some substitution -> (Types.substitute_signature substitution signature).uses
-          | None -> signature.uses)
-      | None -> Types.no_capabilities)
-  | _ -> Types.no_capabilities
-
-let cursor_of_impl : Path.t -> Path.t option = function
-  | Derived { type_ = method_; trait } when Path.equal trait cursor_trait -> Some method_
-  | _ -> None
-
-(* The interface of a cursor's [impl]. Its generic parameters are the
-   yielding method's, its [Element] is the method's yielded type, and its
-   methods are the trait's methods with [Self] substituted. Every method
-   except [next] is a provided method of the trait. [next] runs the method's
-   own code up to its next [yield], so the associated capability set of the
-   [impl] is the method's [uses]. *)
-let cursor_interface database ~method_ =
-  match
-    ( Query.demand database Environment.signature method_,
-      Query.demand database Environment.trait_interface cursor_trait )
-  with
-  | Some ({ output = Yields (_, element); _ } as signature), Some trait_interface ->
-      let impl_generics = signature.generics in
-      let for_type =
-        Types.Cursor { method_; arguments = Types.generic_arguments signature.generics }
-      in
-      let self : Types.substitution =
-        [ ({ owner = cursor_trait; name = "Self" }, Types.Type for_type) ]
-      in
-      let of_cursor (declared : Types.signature) =
-        let declared = Types.substitute_signature self declared in
-        {
-          declared with
-          uses =
-            Types.flat_map_capabilities
-              (function
-                | Types.Capability_projection { base; trait; _ }
-                  when Types.equal base for_type && Path.equal trait.trait cursor_trait ->
-                    (signature.uses :> Types.capability list)
-                | capability -> [ capability ])
-              declared.uses;
-        }
-      in
-      Some
-        {
-          Types.impl_generics;
-          implements =
-            { trait = cursor_trait; trait_arguments = []; associated = [ ("Element", element) ] };
-          for_type;
-          impl_uses = Types.no_capabilities;
-          capability_sets =
-            List.map (fun name -> (name, signature.uses)) trait_interface.associated_capabilities;
-          impl_methods =
-            List.map
-              (fun (method_ : Types.trait_method) ->
-                ( method_.method_name,
-                  method_.method_receiver,
-                  Types.method_in_impl ~impl_generics ~impl_uses:Types.no_capabilities
-                    (of_cursor method_.method_signature) ))
-              trait_interface.methods;
-          impl_broken = false;
-        }
-  | _ -> None
-
 (* The interface of a derived [impl]: the type's generic parameters, each
    bound by the trait, as [impl Equal for Option[Value: Equal]], and the
    trait's methods with [Self] replaced. *)
@@ -177,8 +103,6 @@ let derived_interface database ~type_ ~trait =
     ( Query.demand database Environment.type_interface type_,
       Query.demand database Environment.trait_interface trait )
   with
-  | _ when Option.is_some (cursor_of_impl (Derived { type_; trait })) ->
-      cursor_interface database ~method_:type_
   | Some type_interface, Some trait_interface ->
       let trait_reference : Types.trait_reference =
         { trait; trait_arguments = []; associated = [] }
@@ -299,14 +223,6 @@ let through_any ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
   then Names_self
   else Callable
 
-let cursor_element database (method_ : Path.t) arguments =
-  match Query.demand database Environment.signature method_ with
-  | Some ({ output = Yields (_, element); _ } as signature) ->
-      Option.map
-        (fun substitution -> Types.substitute substitution element)
-        (Types.substitution_of signature.generics arguments)
-  | _ -> None
-
 let copyable_path = Properties.copyable_trait
 let plain_path = Properties.plain_trait
 
@@ -384,13 +300,6 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
   else
     match type_ with
     | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
-    | Types.Cursor { method_; arguments } ->
-        if Path.equal wanted.trait cursor_trait then
-          Option.bind (Query.demand database Environment.signature method_) (fun signature ->
-              Option.map
-                (fun substitution -> From_impl { impl = cursor_impl method_; substitution })
-                (Types.substitution_of signature.generics arguments))
-        else None
     | Types.Never | Types.Integer | Types.Literal _ | Types.Function _ -> None
     | Types.Parameter _ | Types.Projection _ ->
         if

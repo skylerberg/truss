@@ -1,6 +1,4 @@
 fn length() -> USize {
-  var cursor = provide Fixed(value: 7) {
-    readings(3)
-  }
+  var cursor = readings(3)
   own cursor.count()
 }

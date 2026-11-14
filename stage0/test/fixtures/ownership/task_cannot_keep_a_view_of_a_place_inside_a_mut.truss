@@ -1,4 +1,0 @@
-fn Pair.words(mut self) yields own StringSlice {
-  yield self.text.slice()
-  mut self.text.clear()
-}

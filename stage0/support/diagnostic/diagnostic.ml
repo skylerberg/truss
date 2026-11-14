@@ -88,7 +88,6 @@ module Code = struct
     | Specification_only
     | Misplaced_assert
     | Misplaced_proof
-    | Misplaced_yield
     | Misplaced_loop_exit
     | Leaves_parallel
     | Echo_in_specification
@@ -143,7 +142,6 @@ module Code = struct
     | Lambda_needs_type
     | Not_a_record
     | Unknown_variant
-    | Wrong_yield
     | Specification_only
     | Not_in_specification
     | Not_structural
@@ -194,14 +192,12 @@ module Code = struct
     | Self_referential
     | View_crosses_capability
     | Needs_owned
-    | Yield_count
-    | Not_pullable
     | Data_race
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
     | Lent_mut_in_variant
-    | Task_outlives_yield
+    | Task_keeps_view
 
   type capabilities =
     | Not_available
@@ -341,7 +337,6 @@ module Code = struct
     | Specification_only -> "specification_only"
     | Misplaced_assert -> "misplaced_assert"
     | Misplaced_proof -> "misplaced_proof"
-    | Misplaced_yield -> "misplaced_yield"
     | Misplaced_loop_exit -> "misplaced_loop_exit"
     | Leaves_parallel -> "leaves_parallel"
     | Echo_in_specification -> "echo_in_specification"
@@ -398,7 +393,6 @@ module Code = struct
     | Lambda_needs_type -> "lambda_needs_type"
     | Not_a_record -> "not_a_record"
     | Unknown_variant -> "unknown_variant"
-    | Wrong_yield -> "wrong_yield"
     | Not_structural -> "not_structural"
     | Not_replaceable -> "not_replaceable"
     | Specification_only -> "specification_only"
@@ -457,14 +451,12 @@ module Code = struct
     | Self_referential -> "self_referential"
     | View_crosses_capability -> "view_crosses_capability"
     | Needs_owned -> "needs_owned"
-    | Yield_count -> "yield_count"
-    | Not_pullable -> "not_pullable"
     | Data_race -> "data_race"
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
-    | Task_outlives_yield -> "task_outlives_yield"
+    | Task_keeps_view -> "task_keeps_view"
 
   let capabilities_name code =
     match code with

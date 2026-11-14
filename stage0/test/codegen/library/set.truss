@@ -83,10 +83,10 @@ test "a set is made from a list or a cursor, and gives its elements away" {
   let items: List[Int64] = [4, 4, 2, 4, 9]
   let numbers: Set[Int64] = Set.from(items.copy())
   assert order(numbers) == "4 2 9 "
-  var collected: Set[Int64] = Set.collect(items.each())
+  var collected: Set[Int64] = Set.collect(items.cursor())
   assert collected == numbers
   let more: List[Int64] = [9, 1]
-  mut collected.extend(more.each())
+  mut collected.extend(more.cursor())
   assert order(collected) == "4 2 9 1 "
   var sum: Int64 = 0
   for element in own collected {

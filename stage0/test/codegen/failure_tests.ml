@@ -90,9 +90,9 @@ let refused name ~saying source =
       | Error message -> if not (contains message saying) then fail "got %S" message)
 
 let () =
-  refused "a lambda in a yielding method that is pulled is refused"
-    ~saying:"a lambda in a yielding method that is pulled"
-    Fixtures.Failure.lambda_in_a_yielding_method_that_is_pulled_is;
+  refused "a lending method that calls itself is refused"
+    ~saying:"a lending method that calls itself"
+    Fixtures.Failure.lending_method_that_calls_itself_is_refused;
   test "a compiler bug says which instance was being lowered" (fun () ->
       let _, compile = load "type Point(x: Int64)\n" in
       let not_code =

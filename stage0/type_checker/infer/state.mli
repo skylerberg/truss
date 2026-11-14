@@ -77,6 +77,7 @@ type state = {
   mutable references : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
+  lent_tails : (Syntax.id, unit) Hashtbl.t;
   binding_spans : (Syntax.id, Syntax.span) Hashtbl.t;
   mutable lambdas : Syntax.span list;
   mutable unsolved : Diagnostic.reported option;
@@ -119,6 +120,7 @@ val build_statement : state -> Syntax.statement -> Core.statement
 val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) -> unit
 val build_pattern : state -> Syntax.pattern -> Core.pattern
 val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
+val mark_lent_tails : state -> Syntax.expression -> unit
 val place_of : Core.expression -> Core.place
 val fresh_synthetic_local : state -> Core.local
 val fix : string -> Syntax.span Diagnostic.edit list -> Syntax.span Diagnostic.fix
@@ -177,7 +179,6 @@ val mismatched : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty ->
 val mismatch : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> unit
 val is_place : state -> Syntax.expression -> bool
 val marked_call : state -> Syntax.expression -> Syntax.id option
-val called : Syntax.expression -> Syntax.expression option
 val check_resource : state -> Syntax.resource -> unit
 
 val slice :

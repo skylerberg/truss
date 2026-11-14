@@ -8,6 +8,8 @@ public opaque type Deque[Element](front: List[Element], back: List[Element])
 public opaque type Heap[Element: Ordered](items: List[Element], largest_first: Bool)
   derives Copyable
 
+public opaque type HeapCursor[Element: Ordered](heap: Heap[Element])
+
 public opaque type SortedMap[Key: Ordered, Value](entries: List[map::Entry[Key, Value]])
   invariant forall i in 0..entries.length() => forall j in 0..entries.length() =>
     i < j ==> entries.model()[i].key < entries.model()[j].key

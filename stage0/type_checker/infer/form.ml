@@ -132,8 +132,8 @@ let constructor_fields state type_ variant type_arguments =
 
 (* The core node for a call expression. Most calls become a [Call]. A call
    of a lending method becomes a [Use] of the [Lent] place. A constructor
-   becomes a [Construct]. A call of a built-in method becomes a [Copy], a
-   [Cursor_next], an [Operator], or a [Compare].
+   becomes a [Construct]. A call of a built-in method becomes a [Copy], an
+   [Operator], or a [Compare].
 
    [lends] overrides the mode the checker recorded for a lending call.
    [function_value] is the callee expression of an indirect call. *)
@@ -148,14 +148,6 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       match recorded.arguments with
       | [ receiver ] -> Copy (operand Read (build_expression_by_id state receiver.expression))
       | _ -> bug "`copy` does not have exactly one argument")
-  (* The [next] of a yielding method's cursor runs the method's own code.
-     The trait's other methods on such a cursor are ordinary calls of the
-     trait's provided methods. *)
-  | Trait_method { name = "next"; evidence = Impl { impl; _ }; _ }
-    when Option.is_some (Impls.cursor_of_impl impl) -> (
-      match recorded.arguments with
-      | [ receiver ] -> Cursor_next (place_of (build_expression_by_id state receiver.expression))
-      | _ -> bug "`next` does not have exactly one argument")
   | Trait_method { trait; name; self_type; _ }
     when Option.is_some (built_in_operation trait name self_type) ->
       Operator
@@ -836,8 +828,8 @@ let is_executable state (condition : Core.expression) =
         (fun (node : Core.expression) ->
           if node.type_ = Types.Integer then executable := false;
           match node.kind with
-          | Quantified _ | Result | Old _ | Yielded | Finished | Identical _
-          | Specification_function _ | Method_time _
+          | Quantified _ | Result | Old _ | Yielded | Identical _ | Specification_function _
+          | Method_time _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
           | Call { callee; _ } -> if specification_only callee then executable := false
@@ -902,65 +894,269 @@ let compound_assign state (written : statement) (target : expression) (value : e
       value = synthetic_expression state ~origin:written.id target_type kind;
     }
 
-let cursor_type (call : Tables.call) : Types.ty =
-  match call.callee with
-  | Function { path; type_arguments } -> Types.Cursor { method_ = path; arguments = type_arguments }
-  | Trait_method { trait; name; receiver; type_arguments; _ } ->
-      Types.Cursor
-        { method_ = Method { owner = trait.trait; name; receiver }; arguments = type_arguments }
-  | _ -> bug "a loop iterates over a call that cannot yield"
+(* The statements that lend the value of [value], a tail expression of a
+   lending method: a [Yield] of the part in each branch that computes one.
+   A branch that diverges lends nothing. *)
+let rec lend_statements state (mode : Types.mode) (value : Core.expression) : Core.statement list =
+  let statement kind : Core.statement list =
+    [ { id = fresh_node_id state; origin = value.origin; kind } ]
+  in
+  let branching kind =
+    let type_ = if value.type_ = Types.Never then Types.Never else Types.unit in
+    statement (Evaluate { value with type_; kind })
+  in
+  match value.kind with
+  | If { condition; then_; else_ = Some else_; binds_lent_part } ->
+      branching
+        (If
+           {
+             condition;
+             then_ = lend_block state mode then_;
+             else_ = Some (lend_block state mode else_);
+             binds_lent_part;
+           })
+  | Match { scrutinees; arms } ->
+      branching
+        (Match
+           {
+             scrutinees;
+             arms =
+               List.map
+                 (fun (arm : Core.arm) -> { arm with body = lend_block state mode arm.body })
+                 arms;
+           })
+  | Block body -> branching (Block (lend_block state mode body))
+  | _ when value.type_ = Types.Never -> statement (Evaluate value)
+  | _ -> statement (Yield { mode; part = operand mode value })
 
-(* The iteration of a [for] loop. *)
-(* The call of a value's [each] that a loop over the value makes. *)
-let each_of state (call : Tables.call) (mode : Types.mode) (iterable : expression) : Core.expression
-    =
-  let receiver = build_expression state iterable in
-  synthetic_expression state ~origin:iterable.id (cursor_type call)
-    (Call
-       {
-         callee = callee call.callee;
-         arguments = [ Passed { mode; value = operand mode receiver; mark = None } ];
-         lends = None;
-         uses = call.uses;
-       })
+(* A block of a lending method whose value is the part the method lends,
+   as a block that lends the part and has no value. *)
+and lend_block state mode (body : Core.block) : Core.block =
+  match body.value with
+  | None -> body
+  | Some value -> { statements = body.statements @ lend_statements state mode value; value = None }
 
-let iteration state (written : statement) (iterable : expression) : Core.iteration =
+(* Whether evaluating a place twice names one value and runs no code. *)
+let rec is_fixed_place : Core.place -> bool = function
+  | Local _ | Constant _ -> true
+  | Field { base; _ } -> is_fixed_place base
+  | Lent _ | Temporary _ -> false
+
+(* The collection that a loop visits by position, as a place that the calls
+   of its [count] and [element] both name. A collection that is not a
+   place, or whose place a call lends, is the scrutinee of a [match] of one
+   arm, which binds it for the loop: [wrap] puts the loop's block in that
+   arm. *)
+let collection_place state (iterable : expression) (mode : Types.mode) :
+    Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
+  let collection = build_expression state iterable in
+  match collection.kind with
+  | Use place when is_fixed_place place -> (place, None)
+  | _ ->
+      let local = fresh_synthetic_local state and origin = iterable.id in
+      let scrutinee = operand mode collection in
+      let pattern : Core.pattern =
+        {
+          id = fresh_node_id state;
+          origin;
+          type_ = collection.type_;
+          kind =
+            Bind
+              {
+                local;
+                name = "collection";
+                is_var = false;
+                mode = (match scrutinee with Place _ -> mode | Value _ -> Own);
+              };
+        }
+      in
+      ( Local { local; type_ = collection.type_; origin },
+        Some
+          (fun ~type_:_ body ->
+            Match
+              {
+                scrutinees = [ scrutinee ];
+                arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
+              }) )
+
+(* How a loop visits the elements of the collection at a place. *)
+let elements_at state ~origin (collection : Core.place) ~(count : Tables.call)
+    ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
+  let usize = Types.builtin USize in
+  let local = fresh_synthetic_local state in
+  let receiver mode : Core.argument = Passed { mode; value = Place collection; mark = None } in
+  let position =
+    synthetic_expression state ~origin usize (Use (Local { local; type_ = usize; origin }))
+  in
+  {
+    count =
+      synthetic_expression state ~origin usize
+        (Call
+           {
+             callee = callee count.callee;
+             arguments = [ receiver Read ];
+             lends = None;
+             uses = count.uses;
+           });
+    position =
+      {
+        id = fresh_node_id state;
+        origin;
+        type_ = usize;
+        kind = Bind { local; name = "position"; is_var = false; mode = Own };
+      };
+    element =
+      Lent
+        (synthetic_expression state ~origin element.callee_result
+           (Call
+              {
+                callee = callee element.callee;
+                arguments =
+                  [
+                    receiver lends;
+                    Passed { mode = Read; value = operand Read position; mark = None };
+                  ];
+                lends = Some lends;
+                uses = element.uses;
+              }));
+  }
+
+(* A quantifier that runs as a loop over the elements of a collection.
+   [quantified] makes the quantifier from how the loop visits them. *)
+let over_elements state (collection : expression) ~count ~element ~lends ~origin quantified :
+    Core.kind =
+  let place, wrap = collection_place state collection lends in
+  let kind = quantified (elements_at state ~origin:collection.id place ~count ~element ~lends) in
+  match wrap with
+  | None -> kind
+  | Some wrap ->
+      wrap ~type_:Types.bool
+        { statements = []; value = Some (synthetic_expression state ~origin Types.bool kind) }
+
+(* The [next] that a loop over a cursor calls: its type's [Cursor.next]. *)
+let cursor_next state (cursor : Types.ty) : Core.callee =
+  let trait = trait_reference Impls.cursor_trait in
+  match implements state cursor trait with
+  | Some implementation ->
+      Trait_method
+        {
+          trait;
+          name = "next";
+          receiver = Mut;
+          self_type = cursor;
+          type_arguments = [];
+          evidence = evidence (evidence_of implementation);
+        }
+  | None -> bug "a loop iterates over `%s`, which does not implement `Cursor`" (Types.show cursor)
+
+(* The core form of a [for] loop. A loop over the elements of a collection
+   that is not a place is in the [match] that binds the collection. *)
+let for_loop state (written : statement) (iterable : expression) ~pattern ~clauses ~body ~mode :
+    Core.statement_kind =
+  let loop iteration : Core.statement_kind = For { pattern; iteration; clauses; body; mode } in
   match (state.tables.loops.(written.id), iterable.kind) with
   | Some (Integer_range { inclusive; _ }), Range { start = Some start; stop = Some stop; _ } ->
       let start = build_expression state start in
-      Integer_range { start; stop = build_expression state stop; inclusive }
-  | Some (Yielding { call; mode }), _ -> (
-      match (State.called iterable, type_of state iterable) with
-      (* The iterable is itself a call of a yielding method, which makes a
-         cursor: the loop iterates over that call. *)
-      | Some written_call, Types.Cursor _ -> Yielding_call (build_expression state written_call)
-      | _ ->
-          (* The iterable is a value, even if a call computes it: the loop
-             calls the value's [each]. *)
-          Yielding_call (each_of state call mode iterable))
-  | Some (Pulled { cursor }), _ ->
-      let next : Core.callee option =
-        match cursor with
-        | Types.Cursor _ -> None
-        | _ -> (
-            let trait = trait_reference Impls.cursor_trait in
-            match implements state cursor trait with
-            | Some implementation ->
-                Some
-                  (Trait_method
-                     {
-                       trait;
-                       name = "next";
-                       receiver = Mut;
-                       self_type = cursor;
-                       type_arguments = [];
-                       evidence = evidence (evidence_of implementation);
-                     })
-            | None ->
-                bug "a loop iterates over `%s`, which does not implement `Cursor`"
-                  (Types.show cursor))
+      loop (Integer_range { start; stop = build_expression state stop; inclusive })
+  | Some (Elements { count; element; lends }), _ -> (
+      let place, wrap = collection_place state iterable lends in
+      let made =
+        loop (Elements (elements_at state ~origin:iterable.id place ~count ~element ~lends))
       in
-      Cursor { cursor = place_of (build_expression state iterable); next }
+      match wrap with
+      | None -> made
+      | Some wrap ->
+          let statement : Core.statement =
+            { id = fresh_node_id state; origin = written.id; kind = made }
+          in
+          Evaluate
+            (synthetic_expression state ~origin:written.id Types.unit
+               (wrap ~type_:Types.unit { statements = [ statement ]; value = None })))
+  | Some (Pulled { cursor; made_by; remaining }), _ -> (
+      let collection = build_expression state iterable in
+      (* In a loop that consumes a collection, the cursor is the value of
+         the call of the collection's [cursor], which owns the collection. *)
+      let pulled =
+        match made_by with
+        | None -> collection
+        | Some made_by ->
+            synthetic_expression state ~origin:iterable.id cursor
+              (Call
+                 {
+                   callee = callee made_by.callee;
+                   arguments =
+                     [ Passed { mode = Own; value = operand Own collection; mark = None } ];
+                   lends = None;
+                   uses = made_by.uses;
+                 })
+      in
+      let next = cursor_next state cursor in
+      let states_measure = List.exists (function Core.Decreases _ -> true | _ -> false) clauses in
+      (* The loop's measure, where it states none: the bound that the
+         cursor's [remaining] gives on the values it has left. *)
+      let over ?remaining (place : Core.place) : Core.statement_kind =
+        let measure =
+          Option.map
+            (fun (remaining : Tables.call) ->
+              Core.Decreases
+                [
+                  synthetic_expression state ~origin:iterable.id (Types.builtin USize)
+                    (Call
+                       {
+                         callee = callee remaining.callee;
+                         arguments = [ Passed { mode = Read; value = Place place; mark = None } ];
+                         lends = None;
+                         uses = remaining.uses;
+                       });
+                ])
+            remaining
+        in
+        For
+          {
+            pattern;
+            iteration = Cursor { cursor = place; next };
+            clauses = clauses @ Option.to_list measure;
+            body;
+            mode;
+          }
+      in
+      match (pulled.kind, if states_measure then None else remaining) with
+      | Use place, remaining when is_fixed_place place -> over ?remaining place
+      | _, None -> over (place_of pulled)
+      | _, Some remaining ->
+          (* A cursor that is not a place is the scrutinee of a [match] of one
+             arm, which binds it for the loop, so that the measure names it. *)
+          let local = fresh_synthetic_local state and origin = iterable.id in
+          let binding : Core.pattern =
+            {
+              id = fresh_node_id state;
+              origin;
+              type_ = pulled.type_;
+              kind = Bind { local; name = "cursor"; is_var = true; mode = Own };
+            }
+          in
+          let statement : Core.statement =
+            {
+              id = fresh_node_id state;
+              origin = written.id;
+              kind = over ~remaining (Local { local; type_ = pulled.type_; origin });
+            }
+          in
+          Evaluate
+            (synthetic_expression state ~origin:written.id Types.unit
+               (Match
+                  {
+                    scrutinees = [ Value pulled ];
+                    arms =
+                      [
+                        {
+                          patterns = [ binding ];
+                          guard = None;
+                          body = { statements = [ statement ]; value = None };
+                          origin;
+                        };
+                      ];
+                  })))
   | _ -> bug "the checker recorded no iteration for a `for` loop"
 
 (* The resource a cost clause counts, with the names in [calls(...)]

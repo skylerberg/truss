@@ -1,0 +1,87 @@
+type Counter(count: Int64)
+
+type Labels(index: Int64, count: Int64)
+
+impl Cursor for Labels {
+  type Element = String
+
+  fn next(mut self) -> Option[String] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some("label ${self.index - 1}")
+  }
+}
+
+fn Counter.labels(self) -> Labels {
+  Labels(index: 0, count: self.count)
+}
+
+impl Cursor for Counter {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.count <= 0 {
+      return None
+    }
+    self.count -= 1
+    Some(self.count + 1)
+  }
+}
+
+fn label_lengths(counter: Counter, stop: Int64) -> USize
+  uses Tasks
+{
+  concurrent for label in counter.labels() {
+    if label == "label ${stop}" {
+      return label.length()
+    }
+  }
+  0
+}
+
+fn sum_steps(counter: mut Counter) -> Int64
+  uses Tasks, Tally
+{
+  concurrent for step in mut counter {
+    Tally.add(step)
+  }
+  Tally.total()
+}
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+type Sum(total: Int64)
+
+impl Tally for Sum {
+  fn add(mut self, amount: Int64) {
+    self.total += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.total
+  }
+}
+
+test "a computed value is dropped by its task or by the loop" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  provide mut tasks {
+    assert label_lengths(Counter(count: 4), stop: 2) == 7
+    assert label_lengths(Counter(count: 3), stop: 9) == 0
+  }
+}
+
+test "a plain value pulled from a cursor in a mut parameter is copied" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  var sum = Sum(total: 0)
+  var counter = Counter(count: 4)
+  let total = provide mut tasks, mut sum {
+    sum_steps(mut counter)
+  }
+  assert total == 10
+  assert counter.count == 0
+}

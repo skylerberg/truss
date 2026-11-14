@@ -197,7 +197,7 @@ public fn Option[Value].get_or_insert(mut self, value: own Value) lends mut Valu
     self = Some(own value)
   }
   match mut self {
-    Some(inner) => yield mut inner
+    Some(inner) => mut inner
     None => unreachable
   }
 }

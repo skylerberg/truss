@@ -27,43 +27,31 @@ let table = Generated.table
 let locked_table = Generated.locked_table
 let any_table = Generated.any_table
 
-let bind_parameters ?cursor st (body : Mir.body) =
-  let defaults = ref 0 and held = ref 0 in
-  let bound =
-    List.map
-      (fun local ->
-        let mode, _, type_ = Mir_form.parameter_of body local in
-        let ty = ground st type_ in
-        let bit =
-          Option.map
-            (fun _ ->
-              incr defaults;
-              !defaults - 1)
-            (List.assoc_opt local body.defaults)
-        in
-        let arrives, place =
-          match cursor with
-          | None ->
-              Lowering.parameter st ~in_scope:false
-                ~owned:(mode = Own && bit = None)
-                (Monomorphic.mode mode) ty
-          | Some cursor -> (
-              match Convention.held st.context.env (Monomorphic.mode mode) ty with
-              | None -> (None, temporary st ty)
-              | Some ty -> (
-                  let field = cursor_field cursor (Convention.cursor_parameter !held) ty in
-                  incr held;
-                  (None, match ty with Pointer _ -> field / Deref | _ -> field)))
-        in
-        (arrives, mode, ty, bit, place))
-      body.parameters
-  in
-  (bound, !held)
+let bind_parameters st (body : Mir.body) =
+  let defaults = ref 0 in
+  List.map
+    (fun local ->
+      let mode, _, type_ = Mir_form.parameter_of body local in
+      let ty = ground st type_ in
+      let bit =
+        Option.map
+          (fun _ ->
+            incr defaults;
+            !defaults - 1)
+          (List.assoc_opt local body.defaults)
+      in
+      let arrives, place =
+        Lowering.parameter st ~in_scope:false
+          ~owned:(mode = Own && bit = None)
+          (Monomorphic.mode mode) ty
+      in
+      (arrives, bit, place))
+    body.parameters
 
 let begin_body st ~(body : Mir.body) =
   let code = st.frame.code in
-  let bound, _ = bind_parameters st body in
-  let places = List.map (fun (_, _, _, _, place) -> place) bound in
+  let bound = bind_parameters st body in
+  let places = List.map (fun (_, _, place) -> place) bound in
   let mask =
     if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
     else None
@@ -75,113 +63,7 @@ let begin_body st ~(body : Mir.body) =
   let places =
     match mask with Some mask -> Mir_form.fill_defaults st (at mask) body places | None -> places
   in
-  ( List.filter_map (fun (arrives, _, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence,
-    places )
-
-type pulled = {
-  next : Emit_c.fragment;
-  drop : Emit_c.fragment;
-  fields : (string * Memory_layout.member) list;
-}
-
-let member : Lowered.ty -> Memory_layout.member = function
-  | Value ty -> Typed ty
-  | Raw scalar -> Raw scalar
-  | Pointer { target = Value ty; _ } -> Raw (Pointer (Data ty))
-  | Pointer _ | Environment _ | Evidence _ -> bug "a value a cursor cannot hold"
-
-let pulled context (yielding : Ground.yielding) : pulled =
-  let code = code_of context yielding.method_ yielding.type_arguments in
-  let body = (Mir_form.mir_of context yielding.method_).body in
-  let st =
-    enter context
-      ~builder:(create context.env ~key:(Cursor_next yielding))
-      (frame_of code ~inlined:[ yielding.method_ ])
-  in
-  (* [next] starts in block 0, which builds the evidence the method's code
-     reads on every call, then goes to the state's code. *)
-  let entry = block st.builder in
-  result_slot st (Convention.result context.env (cursor_result context yielding));
-  let pointer =
-    local st.builder ~name:"cursor" (Pointer { target = Value (Cursor yielding); writable = true })
-  in
-  let cursor =
-    {
-      pointer;
-      drop = Emit_c.Builder.separate st.builder ~key:(Drop (Cursor yielding)) ~parts:[ pointer ];
-      fields = ref [];
-      resumes = [];
-      stops = [];
-    }
-  in
-  describe_cursor st.builder yielding cursor.fields;
-  let st = { st with cursor = Some cursor } in
-  let bound, held = bind_parameters ~cursor st body in
-  let mask =
-    if code.has_defaults then
-      Some (cursor_field cursor (Convention.cursor_parameter held) (Raw (Integer UInt64)))
-    else None
-  in
-  let evidence = evidence_parameters st (evidence_for st.context code.substitution code.uses) in
-  start st.builder entry;
-  st.evidence <-
-    st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
-  let dispatch = block st.builder and first = block st.builder in
-  finish st.builder (Goto dispatch);
-  start st.builder first;
-  let places = List.map (fun (_, _, _, _, place) -> place) bound in
-  let places =
-    match mask with Some mask -> Mir_form.fill_defaults st mask body places | None -> places
-  in
-  Mir_form.lower_code st yielding.method_ ~parameters:places;
-  let state = Mir_form.cursor_state cursor in
-  let switch ~started ~ended blocks =
-    finish st.builder
-      (Switch
-         {
-           value = Copy state;
-           cases =
-             [ (Z.zero, started); (Z.one, ended) ]
-             @ List.mapi (fun index block -> (Z.of_int (index + 2), block)) (List.rev blocks);
-           default = None;
-         })
-  in
-  let ended = block st.builder in
-  in_block st.builder ended (fun () -> Mir_form.give_option st None);
-  in_block st.builder dispatch (fun () -> switch ~started:first ~ended cursor.resumes);
-  Emit_c.Builder.write_in st.builder cursor.drop (fun () ->
-      let unstarted = block st.builder and ended = block st.builder in
-      start st.builder unstarted;
-      List.iter
-        (fun (_, mode, ty, bit, place) ->
-          if mode = Types.Own && not (trivial st ty) then
-            match (bit, mask) with
-            | None, _ -> emit st.builder (Drop place)
-            | Some bit, Some mask ->
-                let bits = local st.builder (Raw (Integer UInt64))
-                and passed = local st.builder (Raw Bool) in
-                emit st.builder
-                  (Assign
-                     ( at bits,
-                       Binary (Bit_and, Copy mask, constant_int UInt64 (Z.shift_left Z.one bit)) ));
-                emit st.builder
-                  (Assign (at passed, Binary (Not_equal, Copy (at bits), constant_int UInt64 Z.zero)));
-                when_ st.builder (Copy (at passed)) (fun () -> emit st.builder (Drop place))
-            | Some _, None -> bug "a default with no mask")
-        bound;
-      finish st.builder (Return None);
-      start st.builder ended;
-      finish st.builder (Return None);
-      start st.builder (Emit_c.Builder.separate_entry st.builder cursor.drop);
-      switch ~started:unstarted ~ended cursor.stops);
-  finish_function st ~first:[] ~rest:(pointer :: evidence) ();
-  {
-    next = Emit_c.fragment context.env (Code (built st.builder));
-    drop = Emit_c.fragment context.env (Code (built_separate st.builder cursor.drop));
-    fields =
-      (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
-      :: List.rev_map (fun (name, ty) -> (name, member ty)) !(cursor.fields);
-  }
+  (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
 
 let code_state context ~key path =
   let code = code_of context path [] in

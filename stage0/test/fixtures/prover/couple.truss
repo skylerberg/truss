@@ -1,12 +1,21 @@
 type Couple(first: Int64, second: Int64)
 
-fn Couple.each(self) yields Int64
-  ensures result == self.first || result == self.second
-  ensures yielded.length() <= 2
-  ensures finished ==> yielded.length() == 2
-  cost time finite
+fn Couple.count(self) -> USize
+  ensures result == 2
+  cost time O(1)
 {
-  yield self.first
-  yield self.second
+  2
+}
+
+fn Couple.element(self, position: USize) lends Int64
+  requires position < 2
+  ensures result == self.first || result == self.second
+  cost time O(1)
+{
+  if position == 0 {
+    self.first
+  } else {
+    self.second
+  }
 }
 

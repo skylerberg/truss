@@ -30,16 +30,15 @@ let () =
 let board = Fixtures.Parallel.board
 
 let () =
-  test "a parallel for over a method that yields by position changes each element once" (fun () ->
+  test "a parallel for over a list changes each element once" (fun () ->
       same_with_any_workers ~expected:"7905322 same\n"
-        (board ^ Fixtures.Parallel.parallel_for_over_a_method_that_yields_by_position));
+        (board ^ Fixtures.Parallel.parallel_for_over_a_list_changes_each_element_once));
   test "a region reads a parameter that the function is passed by pointer" (fun () ->
       same_with_any_workers ~expected:"2 4 6 8\n"
         Fixtures.Parallel.region_reads_a_parameter_that_the_function_is);
-  test "a parallel for over a list, whose each keeps a count between yields, runs in order"
-    (fun () ->
+  test "a parallel for over a list leaves each element at its position" (fun () ->
       same_with_any_workers ~expected:"5050\n"
-        Fixtures.Parallel.parallel_for_over_a_list_whose_each_keeps_a_count);
+        Fixtures.Parallel.parallel_for_over_a_list_leaves_each_element_at_its);
   test "a panic in an iteration of a parallel for over a range ends the program" (fun () ->
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =

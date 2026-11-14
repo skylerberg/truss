@@ -1,0 +1,20 @@
+type Bag(items: List[Int64])
+
+impl Iterable for Bag {
+  type Element = Int64
+  fn count(self) -> USize { self.items.count() }
+  fn element(self, position: USize) lends Int64 { self.items[position] }
+}
+
+fn Bag.element(mut self, position: USize) lends mut Int64 { mut self.items[position] }
+
+fn f(bag: mut Bag) -> Int64 {
+  for item in mut bag {
+    item = 0
+  }
+  var last: Int64 = 0
+  for item in bag {
+    last = item
+  }
+  last
+}

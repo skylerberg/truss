@@ -426,8 +426,9 @@ and arm_value state env ?expected (body : statement) =
       Types.unit
 
 (* The element type of a quantifier's range or collection. In executable
-   code, a quantifier over a collection is a loop, so the call of the
-   collection's [each] is recorded for the quantifier, as for a [for] loop. *)
+   code, a quantifier over a collection is a loop, so how the loop visits
+   the collection's elements is recorded for the quantifier, as for a [for]
+   loop. *)
 and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with
@@ -435,10 +436,9 @@ and element_of_collection state env ~(quantifier : expression) (collection : exp
       element
   | Types.Error _ | Types.Hole -> collection_type
   | _ -> (
-      match each_call state collection.span collection_type Types.Read with
-      | Some (call, element) ->
-          if runs env then
-            state.tables.loops.(quantifier.id) <- Some (Yielding { call; mode = Read });
+      match elements_calls state collection.span collection_type Types.Read with
+      | Some (loop, element, _) ->
+          if runs env then state.tables.loops.(quantifier.id) <- Some loop;
           element
       | None ->
           error state Not_indexable collection.span

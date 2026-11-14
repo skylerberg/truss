@@ -1,3 +1,0 @@
-fn f(names: List[String]) -> List[String] {
-  List.collect(names.each())
-}

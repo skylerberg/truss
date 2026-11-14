@@ -131,7 +131,7 @@ let makers =
           ( [ Printf.sprintf "let built%s: fn() -> USize = fn() { %s.length() }" suffix place ],
             "built" ^ suffix ));
     };
-    { maker = "a cursor"; type_ = None; make = (fun ~suffix:_ place -> ([], place ^ ".each()")) };
+    { maker = "a cursor"; type_ = None; make = (fun ~suffix:_ place -> ([], place ^ ".cursor()")) };
     {
       maker = "an any value";
       type_ = Some "any Sized";

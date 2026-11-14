@@ -10,9 +10,9 @@ open Parse_support
 let () =
   test "a method, its receiver, and its result" (fun () ->
       definition
-        "fn List[Element: Ordered].sort(mut self, by: Order = Order.Ascending) yields mut Element \
+        "fn List[Element: Ordered].least(mut self, by: Order = Order.Ascending) lends mut Element \
          {}"
-        "(fn List[Element: Ordered].sort (mut self (by: Order (= (. Order Ascending)))) yields mut \
+        "(fn List[Element: Ordered].least (mut self (by: Order (= (. Order Ascending)))) lends mut \
          Element (block))";
       definition "fn hourly::Forecast.summary(self) -> String { todo }"
         "(fn hourly::Forecast.summary (self) -> String (block todo))");
@@ -207,10 +207,10 @@ let () =
     (fun () ->
       definition Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
         "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
-  test "a yielding method's parameter cannot be named yielded or finished" (fun () ->
-      error Fixtures.Parser_rules.yielding_methods_parameter_cannot_be_named_yielded
+  test "a lending method's parameter cannot be named yielded" (fun () ->
+      error Fixtures.Parser_rules.lending_methods_parameter_cannot_be_named_yielded
         ~code:Reserved_specification_name ~at:"yielded";
-      definition "fn f(finished: Bool) {}" "(fn f ((finished: Bool)) (block))");
+      definition "fn f(yielded: Bool) {}" "(fn f ((yielded: Bool)) (block))");
   test "a loop's cost clause" (fun () ->
       statement "for row in rows\n  cost time O(yielded.length())\n{}"
         "(for row rows (cost time (O (call (. yielded length)))) (block))");
@@ -231,22 +231,16 @@ let () =
   test "a proof block outside a function's body" (fun () ->
       error Fixtures.Parser_rules.proof_block_outside_a_functions_body ~code:Misplaced_proof
         ~at:"proof");
-  test "yield only in a method that yields" (fun () ->
-      body_error "yield 1" ~code:Misplaced_yield ~at:"yield";
-      definition Fixtures.Parser_rules.yield_only_in_a_method_that_yields
-        "(fn T.each (self) yields Int64 (block (yield 1)))");
   test "a method that lends" (fun () ->
       definition Fixtures.Parser_rules.method_that_lends
-        "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (yield (mut ([] (. \
-         self cells) 0)))))");
+        "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (mut ([] (. self \
+         cells) 0))))");
+  test "yield and yields are identifiers" (fun () ->
+      definition "fn yields(yield: Int64) -> Int64 { yield }"
+        "(fn yields ((yield: Int64)) -> Int64 (block yield))");
   test "lends own" (fun () ->
       error "fn T.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
         ~fixed:"fn T.part(own self) lends Part {}");
-  test "yield in a lambda" (fun () ->
-      error Fixtures.Parser_rules.yield_in_a_lambda ~code:Misplaced_yield ~at:"yield 1");
-  test "yield in concurrent code" (fun () ->
-      error Fixtures.Parser_rules.yield_in_concurrent_code ~code:Misplaced_yield ~at:"yield 1";
-      error Fixtures.Parser_rules.yield_in_concurrent_code_2 ~code:Misplaced_yield ~at:"yield x");
   test "break outside a loop" (fun () -> body_error "break" ~code:Misplaced_loop_exit ~at:"break");
   test "continue across a lambda" (fun () ->
       body_error "for x in s {\n  f(fn() { continue })\n}" ~code:Misplaced_loop_exit ~at:"continue");

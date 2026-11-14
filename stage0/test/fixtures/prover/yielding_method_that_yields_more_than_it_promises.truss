@@ -1,9 +1,0 @@
-type Couple(first: Int64, second: Int64)
-
-fn Couple.each(self) yields Int64
-  ensures yielded.length() <= 1
-  cost time finite
-{
-  yield self.first
-  yield self.second
-}

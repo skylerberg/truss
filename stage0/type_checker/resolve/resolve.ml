@@ -19,7 +19,6 @@ type target = Walk.target =
   | Old
   | Identical
   | Yielded
-  | Finished
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 

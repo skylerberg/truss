@@ -1,4 +1,4 @@
-fn f() -> Option[String] {
-  var each = same("a")
+fn f() -> Option[Character] {
+  var each = "a".characters()
   mut each.next()
 }

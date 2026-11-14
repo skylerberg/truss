@@ -1,0 +1,8 @@
+fn f(chunked: mut Chunked) -> USize {
+  var total: USize = 0
+  for chunk in mut chunked {
+    let current = chunk[..]
+    total = total + current.length()
+  }
+  total
+}

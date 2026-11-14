@@ -1,4 +1,4 @@
 fn Reader.window(self) lends Slice[Int64] {
   let scratch: List[Int64] = [1, 2, 3]
-  yield scratch[..]
+  scratch[..]
 }

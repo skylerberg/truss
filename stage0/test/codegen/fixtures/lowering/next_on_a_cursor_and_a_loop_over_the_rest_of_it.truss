@@ -1,9 +1,19 @@
-fn numbers(limit: Int64) yields Int64 {
-  var next = 1
-  while next <= limit {
-    yield next
-    next += 1
+type Numbers(index: Int64, count: Int64)
+
+impl Cursor for Numbers {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(self.index)
   }
+}
+
+fn numbers(limit: Int64) -> Numbers {
+  Numbers(index: 0, count: limit)
 }
 
 fn first_and_rest(limit: Int64) -> Int64 {

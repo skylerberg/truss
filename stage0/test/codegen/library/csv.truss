@@ -112,10 +112,8 @@ test "rows are read one at a time from a stream" {
     assert mut reader.next_row() is Ok(None)
     var again = csv::RowReader.new(streams::ByteReader.new(bytes.slice()))
     var count: USize = 0
-    for row in mut again.rows() {
-      if row is Ok(_) {
-        count += 1
-      }
+    while mut again.next_row() is Ok(Some(_)) {
+      count += 1
     }
     assert count == 4
   }

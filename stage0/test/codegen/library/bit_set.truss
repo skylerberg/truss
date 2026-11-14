@@ -33,14 +33,14 @@ test "a bit is read, flipped, and assigned by its position" {
   mut bits.flip(63)
   mut bits.flip(64)
   mut bits.flip(129)
-  assert bits[0] && bits[63] && bits[64] && bits[129] && !bits[1] && !bits[128]
+  assert bits.is_set(0) && bits.is_set(63) && bits.is_set(64) && bits.is_set(129) && !bits.is_set(1) && !bits.is_set(128)
   assert bits.count_ones() == 4 && bits.count_zeros() == 126
   assert positions(bits) == [0, 63, 64, 129]
   mut bits.flip(63)
-  assert !bits[63] && bits.count_ones() == 3
-  bits[5] = true
-  bits[0] = false
-  bits[64] = true
+  assert !bits.is_set(63) && bits.count_ones() == 3
+  mut bits.set(5, value: true)
+  mut bits.set(0, value: false)
+  mut bits.set(64, value: true)
   assert positions(bits) == [5, 64, 129]
   assert bits.first_one() == Some(5) && bits.first_zero() == Some(0)
 }
@@ -91,7 +91,7 @@ test "two bit sets are united, intersected, subtracted, and inverted" {
   assert positions(difference) == [1, 70]
   var inverse = left.copy()
   mut inverse.complement()
-  assert inverse.count_ones() == 95 && !inverse[1] && inverse[0] && inverse[98] && !inverse[99]
+  assert inverse.count_ones() == 95 && !inverse.is_set(1) && inverse.is_set(0) && inverse.is_set(98) && !inverse.is_set(99)
   mut inverse.complement()
   assert inverse == left
 }

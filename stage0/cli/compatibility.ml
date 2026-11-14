@@ -2,8 +2,7 @@
    by comparing the two releases' public definitions. A signature's types
    are compared after type checking, and a contract syntactically: a
    release may remove [requires] clauses and add [ensures] and cost
-   clauses. Whether a yielding method can be pulled is the only property
-   inferred from a body. *)
+   clauses. No property is inferred from a body. *)
 
 open Syntax
 module Names = Resolve.Names
@@ -96,29 +95,6 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
       (if fewer <> Types.no_capabilities then [ Grows "uses fewer capabilities" ] else []);
       (if gained_default then [ Grows "gained a default" ] else []);
     ]
-
-(* Whether a yielding method can be pulled as a cursor: for every element
-   type, only for an element type that copies implicitly, or not at all. A
-   caller that pulls the method relies on this, although it is inferred
-   from the method's body. *)
-let pulled database path (signature : Types.signature) =
-  match (Query.demand database Ownership.pullable path, signature.output) with
-  | Pullable, _ -> 2
-  | Yields_places, Yields (_, element)
-    when Interface.Impls.plain database ~bounds:(fun _ -> []) element ->
-      2
-  | Yields_places, _ -> 1
-  | (Yields_mut | Recursive), _ -> 0
-
-let pulling ~before ~after path (old_signature : Types.signature) (new_signature : Types.signature)
-    =
-  match (old_signature.output, new_signature.output) with
-  | Yields _, Yields _ ->
-      let was = pulled before path old_signature and is = pulled after path new_signature in
-      if is < was then [ Breaks "can be pulled as a cursor in fewer cases" ]
-      else if is > was then [ Grows "can be pulled as a cursor in more cases" ]
-      else []
-  | _ -> []
 
 let clauses_of (definition : definition option) =
   match definition with
@@ -291,7 +267,6 @@ let compare ~before ~after package =
                   signature ~before:old_signature ~after:new_signature
                   @ contract ~before:(clauses_of before_definition)
                       ~after:(clauses_of after_definition)
-                  @ pulling ~before ~after path old_signature new_signature
               | Some (Type_interface old_type), Some (Type_interface new_type) ->
                   type_ ~before:old_type ~after:new_type ~before_definition ~after_definition
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->

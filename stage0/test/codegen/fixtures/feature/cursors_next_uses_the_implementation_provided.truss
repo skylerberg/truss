@@ -14,14 +14,25 @@ impl Meter for Table {
   }
 }
 
-fn readings(count: Int64) yields Int64
-  uses Meter
-{
-  var index = 0
-  while index < count {
-    yield Meter.read() + index
-    index += 1
+type Readings(index: Int64, count: Int64)
+
+impl Cursor for Readings {
+  type Element = Int64
+  capability Uses = Meter
+
+  fn next(mut self) -> Option[Int64]
+    uses Meter
+  {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(Meter.read() + self.index - 1)
   }
+}
+
+fn readings(count: Int64) -> Readings {
+  Readings(index: 0, count: count)
 }
 
 fn total(count: Int64) -> Int64

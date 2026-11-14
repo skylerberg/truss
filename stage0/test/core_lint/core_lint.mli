@@ -31,8 +31,8 @@
     - the expression of a [Lent] place is a call of a lending method;
     - a conversion to [any] records the [impl] or the bound that implements the trait for the
       value's type, and a trait method call is dynamic exactly when its [Self] is an [any] type;
-    - a [Yielding_call] is a call of a yielding method, and the [next] of a yielding method's cursor
-      is a [Cursor_next], not a call.
+    - the count of an [Elements] loop is a call, its position is a [Bind], and its element is the
+      [Lent] place of a call.
 
     Patterns and bindings:
     - a [let], [match], or [is] on a value binds every name [own];
@@ -47,15 +47,15 @@
       operation that computes the new value, and nowhere else;
     - a lambda captures exactly the locals of the enclosing function that its body reads, in order
       of first use;
-    - a construct that no [yield] yields has no field that is a place, and a yielded construct that
+    - a construct that no [Yield] lends has no field that is a place, and a lent construct that
       lends a place takes only values of [Plain] types.
 
     Specifications:
     - a [requires] clause or an [assert] is executable exactly when it has no quantifier, no value
       of type [Integer], no [old] or [result], and no call of a specification-only function;
     - a quantifier in executable code, which includes the assertions of a test, runs as a loop
-      ([Over_each]) of a read-only call with one argument, and a quantifier in a specification
-      ranges over a mathematical collection ([Over_collection]). *)
+      ([Over_elements]), and a quantifier in a specification ranges over a mathematical collection
+      ([Over_collection]). *)
 
 val check : Query.context -> Resolve.Names.key -> Core.t -> unit
 (** Fails the running test if the definition's core form breaks an invariant. *)

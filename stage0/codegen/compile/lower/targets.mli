@@ -40,16 +40,6 @@ val implementation_evidence :
 
 val evidence_of : Lowering.state -> Path.t -> Lowered.operand
 
-val cursor_into :
-  Lowering.state ->
-  path:Path.t ->
-  type_arguments:Ground.argument list ->
-  signature:Types.signature ->
-  arguments:(Types.mode * Ground.ty * Lowered.place) list ->
-  mask:int ->
-  Lowered.place ->
-  unit
-
 val nested_function :
   Lowering.state ->
   function_type:Ground.function_type ->
@@ -128,15 +118,9 @@ val template_value :
   parts:(Lowered.place -> unit) list ->
   Lowered.place
 
-val cursor_result : Definitions.context -> Ground.yielding -> Ground.ty
-val call_next : Lowering.state -> Ground.yielding -> Lowered.place -> Lowered.place -> unit
-
 val pull_loop :
   Lowering.state ->
-  kept:bool ->
   option:Ground.ty ->
   call_next:(Lowered.place -> unit) ->
   body:(Lowered.place -> unit) ->
   unit
-
-val boxed_cursor : Lowering.state -> kept:bool -> Ground.yielding -> Lowered.place

@@ -8,7 +8,6 @@ module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
 open Modes
-open Instantiation
 open Hooks
 open Lookups
 open Pattern_typing
@@ -252,21 +251,14 @@ and statement state env (written : statement) ~last : unit =
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
       register_statement state written (fun () ->
-          let iteration = Form.iteration state written inner in
           let pattern = build_pattern state written_pattern in
           let clauses = List.map (Form.loop_clause state) clauses in
-          For
-            {
-              pattern;
-              iteration;
-              clauses;
-              body = build_block state body;
-              mode =
-                (match running with
-                | Sequential -> Sequential
-                | Parallel_loop -> Parallel_loop
-                | Concurrent_loop -> Concurrent_loop);
-            });
+          Form.for_loop state written inner ~pattern ~clauses ~body:(build_block state body)
+            ~mode:
+              (match running with
+              | Sequential -> Sequential
+              | Parallel_loop -> Parallel_loop
+              | Concurrent_loop -> Concurrent_loop));
       loop_body state env body
   | While { condition = test; clauses; body } ->
       reject_in_formula state env written.span "A `while` loop";
@@ -304,37 +296,6 @@ and statement state env (written : statement) ~last : unit =
           Assert
             { condition = { value; executable = Form.is_executable state value }; by_bit_vector });
       check state env value Types.bool
-  | Yield value -> (
-      reject_in_formula state env written.span "`yield`";
-      match env.output with
-      | Some (Yields (_, element) | Lends (_, element)) ->
-          let inner =
-            match value.kind with
-            | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
-            | _ -> value
-          in
-          Hashtbl.replace state.yielded inner.id
-            (match env.output with Some (Yields (Mut, _) | Lends (Mut, _)) -> Mut | _ -> Read);
-          let actual = expression state env ~expected:element inner in
-          if inner != value then record state value actual;
-          check_lent_value state env inner;
-          (* A part that is yielded or lent [mut] is mutated, so the index
-             expressions in it use the [mut self] version of [at]. *)
-          (match env.output with
-          | Some (Yields (Mut, _) | Lends (Mut, _)) -> mutate state env ~by:Mut_mark inner
-          | _ -> ());
-          register_statement state written (fun () ->
-              let mode =
-                match env.output with
-                | Some (Yields (mode, _) | Lends (mode, _)) -> mode
-                | _ -> Types.Read
-              in
-              Yield { mode; part = Form.operand mode (build_expression state inner) });
-          coerce state env inner ~actual ~expected:element
-      | _ ->
-          ignore (expression state env value);
-          report state Wrong_yield written.span
-            "Only a method whose signature `yields` or `lends` can `yield`.")
   | Statement_error -> ()
 
 (* [collection[key] = value], where the collection's type implements
@@ -415,11 +376,10 @@ and loop_clause state env (clause : loop_clause) =
       | Big_o value | At_most value | Exactly value -> ignore (expression state env value)
       | Finite -> ())
 
-(* The iteration of a [for] loop: a range of built-in integers, a call of a
-   yielding method, a cursor, or the [each] method that the loop's mode
-   selects. *)
-(* Checks the iterable of a [for] loop. Returns the type of the loop
-   variable and its mode. *)
+(* Checks the iterable of a [for] loop: a range of built-in integers, a
+   cursor, or a collection, whose elements the loop visits by position or,
+   for a loop that consumes it, pulls from its cursor. Returns the type of
+   the loop variable and its mode. *)
 and loop_iterable state env (written : statement) ~mode (iterable : expression) =
   match iterable.kind with
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
@@ -442,39 +402,49 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
       | _ -> bug "a range is not of the range type")
   | _ -> (
       let type_ = normalize state (expression state env iterable) in
-      let call =
-        Option.bind (called iterable) (fun (inner : expression) -> state.tables.calls.(inner.id))
-      in
-      match (type_, call) with
-      | Types.Cursor { method_; _ }, Some call ->
-          (* The iterable is a call of a yielding method, as in
-             [for x in mut items.each()]. The loop iterates over that call.
-             The loop variable has the mode that the method yields with. *)
-          state.tables.loops.(written.id) <- Some (Yielding { call; mode });
-          let yields =
-            match function_signature state method_ with
-            | Some (Ok { output = Yields (yields, _); _ }) -> yields
-            | _ -> mode
-          in
-          (call.callee_result, yields)
-      | Types.Error _, _ | Types.Hole, _ -> (type_, mode)
+      match type_ with
+      | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
-          match each_call state iterable.span type_ mode with
-          | Some (call, element) ->
-              state.tables.loops.(written.id) <- Some (Yielding { call; mode });
-              (element, mode)
-          | None -> (
-              let cursor = trait_reference (Well_known.path Cursor) in
-              match implements state type_ cursor with
-              | Some _ ->
-                  state.tables.loops.(written.id) <- Some (Pulled { cursor = type_ });
-                  (associated state type_ cursor "Element" ~at:iterable.span, mode)
-              | None ->
-                  ( error state Not_indexable iterable.span
-                      (Printf.sprintf
-                         "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
-                          way."
-                         (Types.show type_)
-                         (Path.show_receiver
-                            (match mode with Types.Read -> Read | Mut -> Mut | Own -> Own))),
-                    mode ))))
+          let cursor = trait_reference (Well_known.path Cursor) in
+          let by_position =
+            if mode = Types.Own then None else elements_calls state iterable.span type_ mode
+          and consumed =
+            if mode = Types.Own then consuming_cursor state iterable.span type_ else None
+          in
+          match (by_position, consumed, implements state type_ cursor) with
+          | Some (loop, element, lends), _, _ ->
+              state.tables.loops.(written.id) <- Some loop;
+              (element, lends)
+          | None, Some (loop, element), _ ->
+              state.tables.loops.(written.id) <- Some loop;
+              (element, Types.Own)
+          | None, None, Some _ ->
+              state.tables.loops.(written.id) <-
+                Some
+                  (Pulled
+                     {
+                       cursor = type_;
+                       made_by = None;
+                       remaining = remaining_call state iterable.span type_;
+                     });
+              (* A pull gives the loop each value owned. *)
+              (associated state type_ cursor "Element" ~at:iterable.span, Types.Own)
+          | None, None, None ->
+              ( error state Not_indexable iterable.span
+                  (match mode with
+                  | Types.Read ->
+                      Printf.sprintf
+                        "A `for` loop cannot go over `%s`: it is not a `Cursor`, and it has no \
+                         `count` and `element` to visit it by position."
+                        (Types.show type_)
+                  | Mut ->
+                      Printf.sprintf
+                        "A `for` loop cannot change the elements of `%s`: it has no `element` that \
+                         takes `mut self`."
+                        (Types.show type_)
+                  | Own ->
+                      Printf.sprintf
+                        "A `for` loop cannot consume `%s`: it has no `cursor` that takes `own \
+                         self`."
+                        (Types.show type_)),
+                mode )))

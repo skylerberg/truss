@@ -1,0 +1,52 @@
+fn total[Source: Cursor[Element = Int64]](items: own Source) -> Int64
+  uses Source.Uses
+{
+  var cursor = own items
+  var sum: Int64 = 0
+  while mut cursor.next() is Some(item) {
+    sum = sum.wrapping_add(item)
+  }
+  sum
+}
+
+fn counted[Source: Cursor](items: own Source) -> USize
+  uses Source.Uses
+{
+  own items.count()
+}
+
+fn skipped[Source: Cursor[Element = Int64]](items: own Source) -> Int64
+  uses Source.Uses
+{
+  total(own items.skip(1))
+}
+
+type CountTo(index: Int64, count: Int64)
+
+impl Cursor for CountTo {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(self.index)
+  }
+}
+
+fn count_to(limit: Int64) -> CountTo {
+  CountTo(index: 0, count: limit)
+}
+
+test "a cursor given to generic code" {
+  let items: List[Int64] = [3, 1, 4]
+  assert total(items.cursor()) == 8
+  assert counted(items.cursor()) == 3
+  assert skipped(items.cursor()) == 5
+  let copied: List[Int64] = List.collect(items.cursor())
+  assert copied.length() == 3 && copied[2] == 4
+  assert items.cursor().count() == 3
+  assert total(items.cursor().skip(2)) == 4
+  assert total(count_to(4)) == 10
+}

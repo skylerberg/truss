@@ -80,9 +80,15 @@ type literal =
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
       (** A counted loop over built-in integers. *)
-  | Yielding of { call : call; mode : Types.mode }
-      (** A call of a [yields] method: [each], or a call that is written out. *)
-  | Pulled of { cursor : Types.ty }  (** A cursor, pulled until it is exhausted. *)
+  | Elements of { count : call; element : call; lends : Types.mode }
+      (** The elements of a collection, by position: the calls of its [count] and of its [element],
+          which lends with [lends]. Neither call records its arguments: the collection and, for
+          [element], the position. *)
+  | Pulled of { cursor : Types.ty; made_by : call option; remaining : call option }
+      (** A cursor, pulled until it is exhausted. In a loop that consumes a collection, [made_by] is
+          the call of the collection's [cursor], which takes the collection as [own] and makes the
+          cursor. [remaining] is the call of the cursor's [remaining], if it has one: a bound on the
+          values it has left, which is the loop's measure where it states none. *)
 
 type pattern =
   | Variant_pattern of { type_ : Types.ty; variant : string }

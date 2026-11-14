@@ -1,5 +1,5 @@
 (* Lowers a body from its MIR to C, once {!Instance_mir} has inlined
-   the lending and yielding methods it calls. The MIR has made every
+   the lending methods it calls. The MIR has made every
    decision about the order of evaluation, the scope of temporaries and
    bindings, and the flow of patterns and loops, so this lowering decides
    only what is C's: pointers, layout, the calling convention, drops,
@@ -30,13 +30,6 @@ let parameter_of (body : Mir.body) local =
   match body.locals.(local) with
   | { kind = Source { mode; name; _ }; type_; _ } -> (mode, Option.value name ~default:"_", type_)
   | _ -> bug "a parameter that is no source local"
-
-(* Where a default's expression is, for a report about it. *)
-let default_origin (default : Mir.t) =
-  Array.fold_left
-    (fun found (block : Mir.basic_block) ->
-      match block.terminator with Return _ -> block.terminator_origin | _ -> found)
-    0 default.body.blocks
 
 let spans st =
   match demand st.context Names.spans st.frame.code.definition_key with
@@ -70,9 +63,6 @@ let bind_local st local place =
 let result_slot st =
   match (mir st).returns_into with Some destination -> Some destination | None -> result_place st
 
-(* Whether a pulled method's cursor keeps a local of the MIR. *)
-let is_kept st local = List.mem local (mir st).kept
-
 (* A new C local for a local of the MIR. A temporary that a [return]
    returns is the result's slot. *)
 let rec fresh_place st local : Lowered.place =
@@ -83,17 +73,9 @@ let rec fresh_place st local : Lowered.place =
   | _ -> new_place st local
 
 and new_place st local : Lowered.place =
-  let frame = mir st in
   let ty = ground st (info st local).type_ in
   let name = match core_local st local with Some _ -> Some "binding" | None -> None in
-  let place =
-    match (ty, frame.owner) with
-    | Cursor yielding, Some scope when List.exists (Path.equal yielding.method_) st.frame.inlined ->
-        let boxed = boxed_cursor st ~kept:(st.cursor <> None) yielding in
-        scope.owned <- Free_pointed boxed :: scope.owned;
-        boxed / Deref
-    | _ -> held st ~kept:(is_kept st local) ?name (Value ty)
-  in
+  let place = held st ?name (Value ty) in
   bind_local st local place;
   place
 
@@ -188,7 +170,6 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     | None -> false
   in
   let moves = Moves.analyse ~passed ~tracks:needs_drop body in
-  let kept = if st.cursor <> None then Moves.kept_by_cursor moves body else [] in
   {
     body;
     lambdas;
@@ -207,11 +188,9 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
         [] body.blocks;
     taken = [];
     moves;
-    kept;
     flags =
       List.map
-        (fun (path : Moves.path) ->
-          (path, held st ~kept:(List.mem path.local kept) ~name:"owned" (Raw Bool)))
+        (fun (path : Moves.path) -> (path, held st ~name:"owned" (Raw Bool)))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
   }
@@ -605,44 +584,15 @@ let overwritten st (target : Mir.place) (destination : Lowered.place) ty =
 
 (* Returns from the function, whose result is already written. In an
    expression lowered on its own, jumps to its end instead. *)
-(* A pulled method's state: 0 before it starts, 1 once it has returned, and
-   [k + 1] after its [k]th [yield]. *)
-let cursor_state (cursor : cursor) : Lowered.place =
-  { root = Local cursor.pointer; projections = [ Deref; Field Convention.cursor_state ] }
-
-let set_cursor_state st cursor state =
-  emit st.builder (Assign (cursor_state cursor, Use (constant_int UInt32 (Z.of_int state))))
-
-(* Ends a call of a pulled method's [next], which gives [value] in [Some],
-   or [None]. *)
-let give_option st (value : Lowered.operand option) =
-  (match (result_place st, returned_type st) with
-  | Some result, Some ty ->
-      emit st.builder
-        (Assign
-           ( result,
-             Build
-               {
-                 ty;
-                 variant = Some (if value = None then "None" else "Some");
-                 fields = Option.fold ~none:[] ~some:(fun value -> [ ("value", value) ]) value;
-               } ))
-  | _ -> ());
-  finish st.builder (return_result st)
-
 let return_from_frame st =
   (match st.frame.exit with
   | Some (exit, depth) ->
       leave_to st depth;
       finish st.builder (Goto exit)
-  | None -> (
+  | None ->
       drop_parameters st;
       leave_to st 0;
-      match st.cursor with
-      | Some cursor ->
-          set_cursor_state st cursor 1;
-          give_option st None
-      | None -> finish st.builder (return_result st)));
+      finish st.builder (return_result st));
   start st.builder (block st.builder)
 
 (* Calls *)
@@ -659,13 +609,13 @@ let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.argument list) op
       | _ -> bug "a trait method's key")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
-(* A lending or yielding method a call reaches, with its MIR as the
-   instance runs it, for inlining. *)
+(* A lending method a call reaches, with its MIR as the instance runs it,
+   for inlining. *)
 let inlinable st (callee : Mir.callee) : Instance_mir.callee option =
   match resolve_callee st callee with
   | Some (path, type_arguments) -> (
       match (signature_of st.context path).output with
-      | Yields _ | Lends _ ->
+      | Lends _ ->
           let code = code_of st.context path type_arguments in
           Some
             {
@@ -706,7 +656,7 @@ let result_type st (callee : Mir.callee) =
   let path, _, signature, substitution = resolved st callee in
   match signature.output with
   | Returns ty -> Monomorphic.ground st.context.monomorphic substitution ty
-  | Yields _ | Lends _ -> bug "%s does not return a value" (Path.show path)
+  | Lends _ -> bug "%s does not return a value" (Path.show path)
 
 (* Calls a function or a method with arguments that are already in places,
    one for each parameter in order. *)
@@ -874,9 +824,7 @@ let tasks_bool st name places : Lowered.operand =
    join, so an early exit from [f] joins the group too. The scope's other
    temporaries are dropped after the join, because a task may still read
    them until then. *)
-let with_group st ~origin (f : Lowered.place -> unit) =
-  if st.cursor <> None then
-    unsupported ~at:(site_of st origin) "`concurrent` code in a yielding method that is pulled";
+let with_group st (f : Lowered.place -> unit) =
   let scope = open_scope st Statement in
   let group = at (local st.builder ~name:"group" (Value (Monomorphic.builtin UInt64))) in
   emit st.builder (tasks_call st "open" ~result:group []);
@@ -1060,12 +1008,6 @@ let lent_field (lent : Ground.lent) variant field =
       else None)
     lent.fields
 
-(* The type that the current frame's method yields. *)
-let yielded_type_of_frame st =
-  match st.frame.code.result with
-  | Yields (_, ty) | Lends (_, ty) -> ground st ty
-  | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
-
 let rec built_lent st ~writable ty (values : Mir.rvalue list) : Ground.lent =
   let lent_field_for variant (name, field_ty) : Ground.lent_field option =
     let fields =
@@ -1212,7 +1154,7 @@ and concurrent_block st region ~fork ~(branches : Mir.branch list) ~join =
   let function_type = task_function_type st in
   let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
   emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
-  with_group st ~origin:fork (fun group ->
+  with_group st (fun group ->
       let functions =
         List.mapi
           (fun index (branch : Mir.branch) ->
@@ -1253,10 +1195,6 @@ and lower_statement st (statement : Mir.statement) =
   | Lend { part; call } -> lend st part call ~origin
   | Slice { destination; call; _ } | Template { destination; call; _ } ->
       call_into st call (place st destination) ~origin
-  | Pull { destination; cursor } -> (
-      match mir_place_type st cursor with
-      | Ground.Cursor yielding -> call_next st yielding (place st cursor) (place st destination)
-      | _ -> bug "next on a place that is not a cursor")
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
   | Dead locals -> List.iter (dead st) locals
   | Assert { condition; _ } ->
@@ -1407,7 +1345,7 @@ and build_part st part (value : Mir.rvalue) =
           built_lent st ~writable (ground st type_)
             (Option.get (Moves.built_values (mir st).moves part))
         in
-        let slot = held st ~kept:(is_kept st part) (Value (Lent lent)) in
+        let slot = held st (Value (Lent lent)) in
         bind_local st part slot;
         slot
   in
@@ -1421,8 +1359,7 @@ and build_part st part (value : Mir.rvalue) =
           (fun (name, (field : Mir.operand option)) ->
             let evaluated () =
               match field with
-              | Some (Borrow { place = written; _ }) ->
-                  snapshot st ~kept:(is_kept st part) (place st written)
+              | Some (Borrow { place = written; _ }) -> snapshot st (place st written)
               | Some (Use { place = { root = Local nested; projections = [] } as written; _ })
                 when Moves.built_values (mir st).moves nested <> None ->
                   place st written
@@ -1469,10 +1406,7 @@ and alias st local (source : Lowered.place) ~writable =
       | Some { root = Local pointer; projections = [ Deref; Field field; Deref ] } ->
           { root = Local pointer; projections = [ Deref; Field field ] }
       | _ ->
-          let pointer =
-            held st ~kept:(is_kept st local) ~name:"binding"
-              (Pointer { target = Value ty; writable })
-          in
+          let pointer = held st ~name:"binding" (Pointer { target = Value ty; writable }) in
           bind_local st local (pointer / Deref);
           pointer
     in
@@ -1484,11 +1418,11 @@ and alias st local (source : Lowered.place) ~writable =
     && lent_at st source = None
     && match (info st local).kind with Source _ -> true | Temporary | Lent _ -> false
   then begin
-    let copy = held st ~kept:(is_kept st local) ~name:"binding" (Value ty) in
+    let copy = held st ~name:"binding" (Value ty) in
     emit st.builder (Assign (copy, Use (Copy source)));
     bind_local st local copy
   end
-  else bind_local st local (snapshot st ~kept:(is_kept st local) source)
+  else bind_local st local (snapshot st source)
 
 and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~origin =
   let assign built = emit st.builder (Assign (destination, built)) in
@@ -1558,8 +1492,6 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
       | Value number -> assign (Use (constant_of st ty (Integer_value number)))
       | _ -> bug "the value parameter %s is not a number" parameter.name)
   | Lambda { body = index; captures; _ } ->
-      if st.cursor <> None then
-        unsupported ~at:(site_of st origin) "a lambda in a yielding method that is pulled";
       let function_type =
         match ty with
         | Function function_type -> function_type
@@ -1643,10 +1575,6 @@ and call_into st (call : Mir.call) destination ~origin =
           call_instance st
             (Code { path; type_arguments })
             ~signature ~substitution ~arguments ~mask ~destination ()
-      | Yields _ ->
-          (* A yielding method called outside a [for] loop makes a cursor,
-             which holds its arguments. *)
-          cursor_into st ~path ~type_arguments ~signature ~arguments ~mask destination
       | Lends _ -> bug "a lending call that lends no part")
   | None, Intrinsic { operation; type_arguments } -> (
       match
@@ -1779,32 +1707,14 @@ and lend st part (call : Mir.call) ~origin =
           with
           | Some place -> bind_local st part place
           | None -> bug "a lent place from an intrinsic that does not lend")
-  | _ -> bug "a lending call that is not inlined"
-
-and construct_copied st ty ~variant ~fields ~destination =
-  let fields =
-    List.map
-      (fun (name, (field : Mir.yielded option)) ->
-        match field with
-        | Some (Part (Borrow { place = written; type_; _ })) ->
-            let field_ty = ground st type_ in
-            let fresh_copy = temporary st field_ty in
-            Glue.copy_into st.context.glue st.builder ~destination:fresh_copy
-              ~source:(whole st (place st written))
-              field_ty;
-            (name, owned st fresh_copy field_ty)
-        | Some (Built { variant; fields; type_; _ }) ->
-            let nested_ty = ground st type_ in
-            let inner = at (local st.builder (Value nested_ty)) in
-            construct_copied st nested_ty ~variant ~fields ~destination:inner;
-            (name, owned st inner nested_ty)
-        | Some (Part nested) -> (name, value st nested)
-        | None ->
-            let default, default_ty = field_default_place st ty ~variant ~field:name in
-            (name, owned st default default_ty))
-      fields
-  in
-  emit st.builder (Assign (destination, Build { ty; variant; fields }))
+  | callee -> (
+      (* A lending method runs inside the statement that calls it, so its
+         code is inlined there. The inlining of a lending method that
+         calls itself would not end. *)
+      match inlinable st callee with
+      | Some { path; _ } when List.exists (Path.equal path) st.frame.inlined ->
+          unsupported ~at:(site_of st origin) "a lending method that calls itself"
+      | _ -> bug "a lending call that is not inlined")
 
 and terminator st region (ending : Mir.terminator) ~origin =
   match ending with
@@ -1833,9 +1743,6 @@ and terminator st region (ending : Mir.terminator) ~origin =
       start st.builder (block st.builder)
   | Return returned ->
       (match (result_slot st, returned) with
-      | _ when st.cursor <> None && st.frame.exit = None ->
-          (* A pulled method's [return] gives [None], below. *)
-          ()
       | Some _, Some (Use { place = { root = Local local; projections = [] }; _ })
         when List.mem local (mir st).returned ->
           (* The value is in the slot already. *)
@@ -1881,10 +1788,10 @@ and terminator st region (ending : Mir.terminator) ~origin =
         (Switch
            { value = Copy (local_place st winner); cases; default = Some (jump st region next) });
       start st.builder (block st.builder)
-  | Yield { mode; part; resume } -> yield st region ~mode ~part ~resume ~origin
-  | For { iteration; part; body; blocks; after; loop } ->
+  | Yield _ -> bug "a lent part outside an inlined lending call"
+  | For { iteration; part; body; after; loop; _ } ->
       claim st region after;
-      for_loop st region ~iteration ~part ~body ~blocks ~loop;
+      for_loop st region ~iteration ~part ~body ~loop;
       goto st region after
   | Fork { fork; concurrent = true; branches; join } ->
       concurrent_block st region ~fork ~branches ~join
@@ -1915,44 +1822,6 @@ and terminator st region (ending : Mir.terminator) ~origin =
           start st.builder (block st.builder)
       | _ -> goto st region next)
 
-and yield st region ~mode ~part ~resume ~origin =
-  let cursor =
-    match st.cursor with Some cursor -> cursor | None -> bug "a yield outside a pulled method"
-  in
-  let ty = yielded_type_of_frame st in
-  let yielded =
-    match part with
-    | Built _ when mode = Mut ->
-        unsupported ~at:(site_of st origin) "a cursor over a method that lends places to be changed"
-    | Built { variant; fields; _ } ->
-        let copy = temporary st ty in
-        construct_copied st ty ~variant ~fields ~destination:copy;
-        copy
-    | Part (Borrow { place = written; _ }) when trivial st ty -> whole st (place st written)
-    | Part (Borrow { place = written; _ }) ->
-        let copy = temporary st ty in
-        Glue.copy_into st.context.glue st.builder ~destination:copy
-          ~source:(whole st (place st written))
-          ty;
-        copy
-    | Part part -> operand_place st part
-  in
-  (* [next] gives the value, and goes on after the [yield] when it is
-     called again. *)
-  let resume = jump st region resume in
-  cursor.resumes <- resume :: cursor.resumes;
-  let state = List.length cursor.resumes + 1 in
-  set_cursor_state st cursor state;
-  give_option st (Some (owned st yielded ty));
-  Emit_c.Builder.write_in st.builder cursor.drop (fun () ->
-      let stop = block st.builder in
-      cursor.stops <- stop :: cursor.stops;
-      start st.builder stop;
-      Array.iteri (fun local _ -> drop_local st local) (mir st).body.locals;
-      leave_to st 0;
-      finish st.builder (Return None));
-  start st.builder (block st.builder)
-
 (* Lowers a [for] loop's body as a region of its own, once [value] is the
    place of the element. *)
 and loop_body st region ~part ~body (value : Lowered.place) =
@@ -1963,30 +1832,14 @@ and loop_body st region ~part ~body (value : Lowered.place) =
   st.frame <- caller;
   run_region st inner ~entry:(body, 0)
 
-(* A loop over the cursor of a yielding method's call: the pulled method's
-   [next] is called until it gives [None]. *)
-and pull_cursor st ~kept (yielding : Ground.yielding) cursor ~(each : Lowered.place -> unit) =
-  pull_loop st ~kept
-    ~option:(cursor_result st.context yielding)
-    ~call_next:(fun destination -> call_next st yielding cursor destination)
-    ~body:each
-
-and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~blocks ~(loop : Mir.loop) =
+and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : Mir.loop) =
   let origin = loop.origin in
   let each = loop_body st region ~part ~body in
-  (* A loop whose body yields keeps its state in the cursor. *)
-  let kept =
-    st.cursor <> None
-    && List.exists
-         (fun block ->
-           match (mir st).body.blocks.(block).terminator with Yield _ -> true | _ -> false)
-         blocks
-  in
   match loop.schedule with
   | Concurrent_loop ->
       (* The enclosing code runs the iteration and spawns one task for each
          value. *)
-      with_group st ~origin (fun group ->
+      with_group st (fun group ->
           let spawning =
             {
               origin;
@@ -1995,15 +1848,15 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~blocks ~(loop :
               element = ground st (info st part).type_;
             }
           in
-          for_each st ~kept ~schedule:(Spawned spawning) ~iteration ~each)
-  | Parallel_loop -> for_each st ~kept ~schedule:Chunked ~iteration ~each
-  | Core.Sequential -> for_each st ~kept ~schedule:Sequential ~iteration ~each
+          for_each st ~schedule:(Spawned spawning) ~iteration ~each)
+  | Parallel_loop -> for_each st ~schedule:Chunked ~iteration ~each
+  | Core.Sequential -> for_each st ~schedule:Sequential ~iteration ~each
 
 (* Lowers a loop over [iteration]. [each] lowers the loop body for the
    place of one value. The loop is the innermost loop for the body: the end
    of an iteration starts the next one. *)
-and for_each st ~kept ~(schedule : schedule) ~(iteration : Mir.iteration)
-    ~(each : Lowered.place -> unit) =
+and for_each st ~(schedule : schedule) ~(iteration : Mir.iteration) ~(each : Lowered.place -> unit)
+    =
   let schedule = match schedule with Chunked when not (may_fork st) -> Sequential | own -> own in
   (* How an iteration receives a value that the loop owns, such as one
      that a cursor's [next] returned. *)
@@ -2014,22 +1867,16 @@ and for_each st ~kept ~(schedule : schedule) ~(iteration : Mir.iteration)
   in
   match iteration with
   | Range { start = low; stop = high; inclusive } ->
-      range_loop st ~kept ~schedule ~low ~high ~inclusive ~each
-  | Yielding _ -> bug "a loop over a yielding method that is not inlined"
-  | Pull { cursor; next = None } -> (
-      match mir_place_type st cursor with
-      | Ground.Cursor yielding -> pull_cursor st ~kept yielding (place st cursor) ~each:owned_each
-      | _ -> bug "a loop over a place that is not a cursor")
-  | Pull { cursor; next = Some next } ->
-      (* A value of a type that implements [Cursor]: its own [next] is
-         called until it gives [None]. *)
+      range_loop st ~schedule ~low ~high ~inclusive ~each
+  | Pull { cursor; next } ->
+      (* A cursor: its type's [next] is called until it gives [None]. *)
       let cursor = place st cursor in
-      pull_loop st ~kept ~option:(result_type st next)
+      pull_loop st ~option:(result_type st next)
         ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
         ~body:owned_each
 
 (* A loop over a range of integers or characters. *)
-and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusive ~each =
+and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusive ~each =
   (* The unit a range of a type counts in. A range of [Character] goes from
      U+D7FF to U+E000, since the surrogates between them are no
      characters. *)
@@ -2124,9 +1971,7 @@ and range_loop st ~kept ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       finish st.builder (Goto after);
       start st.builder after
   | Sequential | Spawned _ ->
-      let loop_value ?name () =
-        if kept then held st ~kept ?name (Value element) else binding st ?name element
-      in
+      let loop_value ?name () = binding st ?name element in
       let index = loop_value ~name:"index" () in
       let stop = loop_value () in
       emit st.builder (Assign (index, Use (value st low)));
@@ -2201,14 +2046,8 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
           let unless_passed other =
             Emit_c.Builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
           in
-          let pulled reason =
-            if st.cursor <> None then
-              unsupported
-                ~at:(site_of st (default_origin default))
-                "a default for %s, %s, in a yielding method that is pulled" name reason
-          in
           let place =
-            if mode = Own && (not (trivial st ty)) && st.cursor = None then begin
+            if mode = Own && not (trivial st ty) then begin
               let owned_here = at (local builder ~name (Value ty)) in
               let passed_block = block builder in
               unless_passed passed_block;
@@ -2225,17 +2064,12 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
               in_statement st (fun () ->
                   match arrived with
                   | { projections = [ Deref ]; root = Local pointer } ->
-                      pulled "which is passed by address";
                       let value = binding st ty in
                       mir_into st default value;
                       emit builder
                         (Assign (at pointer, Use (Address { place = value; writable = true })))
-                  | place when mode = Own || trivial st ty ->
-                      (* In a pulled method, the argument's field in the
-                         cursor holds the default. *)
-                      mir_into st default place
+                  | place when mode = Own || trivial st ty -> mir_into st default place
                   | place ->
-                      pulled "which is a view";
                       let value = binding st ty in
                       mir_into st default value;
                       emit builder (Assign (place, Use (Copy value))));

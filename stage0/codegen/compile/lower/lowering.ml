@@ -60,7 +60,6 @@ and mir_frame = {
       (** The targets of compound assignments whose old value an operator has taken, which hold
           nothing until they are assigned again *)
   moves : Moves.t;  (** Which places may hold a value at each point *)
-  kept : Mir.local list;  (** In a pulled method, the locals its cursor holds *)
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
@@ -82,16 +81,6 @@ type spawn_loop = {
   element : Ground.ty;
 }
 
-(* The cursor of a pulled method: [next] keeps in it the values it needs
-   from one call to the next, and its drop function drops them. *)
-type cursor = {
-  pointer : Lowered.local;
-  drop : Emit_c.Builder.separate;  (** The cursor's drop function *)
-  fields : (string * Lowered.ty) list ref;
-  mutable resumes : Lowered.block list;
-  mutable stops : Lowered.block list;
-}
-
 (* How the iterations of a loop run: one after another, as chunks of a
    range on several threads, or each as a spawned task. *)
 type schedule = Sequential | Chunked | Spawned of spawn_loop
@@ -110,8 +99,6 @@ type state = {
   nested : int ref;  (** How many nested functions, lambdas and outlined code, the instance has *)
   mutable evidence : (Path.t * Lowered.operand) list;
       (** The evidence for each capability available *)
-  cursor : cursor option;
-      (** In a yielding method's pulled version, the cursor it keeps values in *)
   mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
   mutable moved : Lowered.place list;
 }
@@ -119,7 +106,7 @@ type state = {
 let frame_of code ~inlined =
   { code; self_place = None; inlined; reported = None; exit = None; mir = None }
 
-let enter context ?cursor ?(nested = ref 0) ~builder frame =
+let enter context ?(nested = ref 0) ~builder frame =
   {
     context;
     frame;
@@ -129,25 +116,14 @@ let enter context ?cursor ?(nested = ref 0) ~builder frame =
     result = No_result;
     nested;
     evidence = [];
-    cursor;
     tasks = [];
     moved = [];
   }
 
-let may_fork st = st.cursor = None && st.frame.exit = None
+let may_fork st = st.frame.exit = None
 
-(* A field of the cursor, with the place it is at. *)
-let cursor_field (cursor : cursor) name ty : Lowered.place =
-  if not (List.mem_assoc name !(cursor.fields)) then cursor.fields := (name, ty) :: !(cursor.fields);
-  { root = Local cursor.pointer; projections = [ Deref; Field name ] }
-
-(* A place that holds a value [kept] across a [yield]: a new field of the
-   cursor in a pulled method, or else a new local. *)
-let held st ~kept ?name ty : Lowered.place =
-  match st.cursor with
-  | Some cursor when kept ->
-      cursor_field cursor (Printf.sprintf "held%d" (List.length !(cursor.fields))) ty
-  | _ -> at (local st.builder ?name ty)
+(* A new local, as the place that holds a value. *)
+let held st ?name ty : Lowered.place = at (local st.builder ?name ty)
 
 (* Writes code with [body] as an outlined function, nested in the instance,
    given [parts] as its parameters. Gives the function's number and the
@@ -259,15 +235,6 @@ let result_place st : Lowered.place option =
   | Returned_in local -> Some (at local)
   | No_result -> None
 
-(* The type of the function's result, if it has one with a size. *)
-let returned_type st =
-  match st.result with
-  | Through slot | Returned_in slot -> (
-      match local_type st.builder slot with
-      | Value ty | Pointer { target = Value ty; _ } -> Some ty
-      | _ -> None)
-  | No_result -> None
-
 let return_result st : Lowered.terminator =
   Return (match st.result with Returned_in local -> Some (Move (at local)) | _ -> None)
 
@@ -359,17 +326,14 @@ let take st (place : Lowered.place) ty ~destination =
 
 (* A place whose indexes are fixed now, so that an alias of it refers to the
    same element however the index variables change later. *)
-let snapshot st ~kept (place : Lowered.place) =
+let snapshot st (place : Lowered.place) =
   {
     place with
     projections =
       List.map
         (function
           | Lowered.Index (Copy index_place) ->
-              let fixed =
-                if kept then held st ~kept (Value st.context.types.usize)
-                else binding st st.context.types.usize
-              in
+              let fixed = binding st st.context.types.usize in
               emit st.builder (Assign (fixed, Use (Copy index_place)));
               Lowered.Index (Copy fixed)
           | projection -> projection)
@@ -392,13 +356,7 @@ let place_type st (place : Lowered.place) =
         Option.bind (Lowered.projection_type st.context.env ~environment ty projection) (fun ty ->
             projected ty rest)
   in
-  match (st.cursor, place) with
-  | Some cursor, { root = Local pointer; projections = Deref :: Field field :: rest }
-    when pointer = cursor.pointer -> (
-      match List.assoc_opt field !(cursor.fields) with
-      | Some ty -> projected ty rest
-      | None when field = Convention.cursor_state -> projected (Raw (Integer UInt32)) rest
-      | None -> bug "the cursor has no field %s" field)
+  match place with
   | _ ->
       let root : Lowered.ty =
         match place.root with

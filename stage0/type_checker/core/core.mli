@@ -178,11 +178,11 @@ and kind =
 
           A field that is a [Value] is moved into the constructed value. A field that is a [Place]
           is lent to it: the constructed value holds the place's value and does not own it. Only a
-          construct that a {!Yield} yields has such a field, or a construct that is a field of one,
+          construct that a {!Yield} lends has such a field, or a construct that is a field of one,
           to any depth. The place is lent with the [Yield]'s mode: when a [mut] lend ends, the place
-          has the value of the field as the caller left it. A yielded construct that lends a place
-          at any depth owns nothing, because each of its other fields is a place, a nested
-          construct, or a value of a [Plain] type. *)
+          has the value of the field as the caller left it. A lent construct that lends a place at
+          any depth owns nothing, because each of its other fields is a place, a nested construct,
+          or a value of a [Plain] type. *)
   | Collection_literal of { elements : expression list; construction : construction }
       (** An array literal, or a specification-only sequence or set. The node's type says which.
           List and set literals are not this node: they are desugared to calls. *)
@@ -220,9 +220,6 @@ and kind =
   | Matches of { value : operand; pattern : pattern }
       (** [value is pattern]. Also used for ordering comparisons of non-built-in types:
           [first < second] is [compare(first, second) is Less]. *)
-  | Cursor_next of place
-      (** Advances the cursor produced by a call of a yielding method. The result is an [Option] of
-          the next yielded value. *)
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
       (** Converts a value to [any Trait]. [evidence] is the [impl] of the trait for the value's
@@ -261,8 +258,9 @@ and kind =
           the operator takes as owned. It appears exactly once, as the first argument of the {!Call}
           or {!Operator} that computes the new value. *)
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
-  | Yielded  (** [yielded]: the sequence of values a yielding method has yielded so far. *)
-  | Finished  (** [finished]: whether a yielding method has returned. *)
+  | Yielded
+      (** [yielded]: in a loop's clauses, the sequence of the values of the iterations before; in a
+          lending method's [ensures], the sequence of its one part, as the caller left it. *)
   | Identical of expression * expression  (** [identical(first, second)] *)
   | Specification_function of { function_ : specification_function; arguments : expression list }
       (** A function that only a specification can call. [log(count)] and [power(base, exponent)]
@@ -301,11 +299,9 @@ and binder =
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
   | Over_collection of { pattern : pattern; collection : expression }
       (** The elements of a collection, in a specification. *)
-  | Over_each of { pattern : pattern; call : expression }
-      (** The elements of a collection, in executable code. [call] is the read-only {!Call} of the
-          collection's [each], the same call that a [for] loop over the collection makes, so the
-          quantifier runs as that loop and stops at the first counterexample or witness. The
-          collection is the call's one argument. *)
+  | Over_elements of { pattern : pattern; elements : elements }
+      (** The elements of a collection, in executable code: the quantifier runs as the [for] loop
+          over the collection does, and stops at the first counterexample or witness. *)
 
 and implementation = {
   origin : origin;
@@ -373,7 +369,8 @@ and statement_kind =
   | Assert of { condition : condition; by_bit_vector : bool }
       (** [by_bit_vector]: proven alone, for every value of the variables it names. *)
   | Yield of { mode : Types.mode; part : operand }
-      (** [yield] in a lending or yielding method. [mode] is the mode in the method's signature. *)
+      (** Lends [part], which is the value of a lending method's body or of its [return], with the
+          mode in the method's signature. The method ends after it. *)
 
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
@@ -390,13 +387,22 @@ and task =
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
       (** A range of built-in integers or characters. *)
-  | Yielding_call of expression
-      (** A {!Call} of a yielding method. [for item in items] is desugared to a call of
-          [items.each()] with the loop's mode. *)
-  | Cursor of { cursor : place; next : callee option }
-      (** An existing cursor, advanced until it is exhausted. [next] is the cursor type's
-          [Cursor.next]. It is [None] for the built-in cursor of a yielding method, which is
-          advanced as {!Cursor_next} does. *)
+  | Elements of elements  (** The elements of a collection, by position. *)
+  | Cursor of { cursor : place; next : callee }
+      (** A cursor, advanced until it is exhausted. [next] is its type's [Cursor.next]. *)
+
+and elements = {
+  count : expression;
+      (** The {!Call} of the collection's [count], which is evaluated once, before the first
+          iteration. *)
+  position : pattern;
+      (** A {!Bind} of the position of the iteration: each [USize] from zero up to the count. *)
+  element : place;
+      (** The {!Lent} place of the {!Call} of the collection's [element] at [position]. It is lent
+          for the iteration, and the loop's pattern binds it. *)
+}
+(** How a loop visits the elements of a collection. The collection is a place that both calls name,
+    so it is evaluated once, by the code around the loop. *)
 
 and loop_clause =
   | Invariant of expression

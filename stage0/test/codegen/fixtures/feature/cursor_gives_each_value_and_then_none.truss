@@ -1,0 +1,31 @@
+type CountTo(index: Int64, count: Int64)
+
+impl Cursor for CountTo {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some(self.index)
+  }
+}
+
+fn count_to(limit: Int64) -> CountTo {
+  CountTo(index: 0, count: limit)
+}
+
+test "cursors" {
+  var first = count_to(3)
+  var second = count_to(2)
+  var total = 0
+  while mut first.next() is Some(left) && mut second.next() is Some(right) {
+    total += left * right
+  }
+  assert total == 5
+  assert mut first.next() == None
+  var third = count_to(1)
+  assert mut third.next() == Some(1)
+  assert mut third.next() == None
+}

@@ -76,7 +76,6 @@ type context = {
   mutable calls : (Path.t * int) list;
       (** The methods of capabilities it calls: each capability, and the method's place *)
   mutable failures : (failure * site) list;  (** Its [echo]s and [todo]s *)
-  mutable cursors : (Ground.yielding * (string * Lowered.ty) list ref) list;
 }
 
 let new_context env prefix =
@@ -96,7 +95,6 @@ let new_context env prefix =
     called = [];
     calls = [];
     failures = [];
-    cursors = [];
   }
 
 (* Records that the code names an instance. *)
@@ -123,29 +121,19 @@ let layout context ty = Memory_layout.of_type context.env ty
 (* Whether a Truss type is a C [struct], which must be defined before
    anything holds it by value. *)
 let is_struct context (ty : Ground.ty) =
-  match ty with
-  | Cursor _ -> true
-  | _ -> (
-      match (layout context ty).form with
-      | Struct _ | Array _ | Tagged _ -> true
-      | Niche_encoded { dataful; _ } -> (
-          match dataful.payload.form with Struct _ -> true | _ -> false)
-      | Zero_size | Scalar _ | Tag_only _ -> false)
+  match (layout context ty).form with
+  | Struct _ | Array _ | Tagged _ -> true
+  | Niche_encoded { dataful; _ } -> (
+      match dataful.payload.form with Struct _ -> true | _ -> false)
+  | Zero_size | Scalar _ | Tag_only _ -> false
 
-(* A cursor is always a struct, which holds its state, so code over one is
-   written before its pulled method has decided its other fields. *)
 let rec value_c context (ty : Ground.ty) =
-  match ty with
-  | Cursor _ ->
+  match (layout context ty).form with
+  | Zero_size -> "void"
+  | Scalar scalar -> scalar_c context scalar
+  | _ ->
       register context (Type ty);
       Instance.type_symbol ty
-  | _ -> (
-      match (layout context ty).form with
-      | Zero_size -> "void"
-      | Scalar scalar -> scalar_c context scalar
-      | _ ->
-          register context (Type ty);
-          Instance.type_symbol ty)
 
 and scalar_c context : Memory_layout.scalar -> string = function
   | Integer integer -> integer_c integer

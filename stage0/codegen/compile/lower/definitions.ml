@@ -26,13 +26,12 @@ let debug_form : Ground.ty -> Glue.debug_form = function
       | _ -> Structure)
   | _ -> Structure
 
-let context ?(checks = false) ~cursor_fields ~constant database target =
+let context ?(checks = false) ~constant database target =
   let rec monomorphic : Monomorphic.context =
     {
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
       normalize = Interface.Impls.normalize database ~bounds:(fun _ -> []);
       normalize_capabilities = Interface.Impls.normalize_capabilities database ~bounds:(fun _ -> []);
-      cursor_fields = (fun yielding -> cursor_fields (Lazy.force context) yielding);
     }
   and context =
     lazy
@@ -208,7 +207,7 @@ let result_of context substitution (result : Types.result) =
   | Returns Never -> (Convention.Nothing, false)
   | Returns ty ->
       (Convention.result context.env (Monomorphic.ground context.monomorphic substitution ty), true)
-  | Yields _ | Lends _ -> (Convention.Nothing, true)
+  | Lends _ -> (Convention.Nothing, true)
 
 (* The C signature of a function from its interface, after substitution:
    the result pointer when the result is too large, each parameter, the

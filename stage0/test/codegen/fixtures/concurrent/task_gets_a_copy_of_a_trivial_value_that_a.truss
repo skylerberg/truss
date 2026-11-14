@@ -1,0 +1,19 @@
+type Bag(items: List[Int64])
+
+fn Bag.count(self) -> USize {
+  self.items.count()
+}
+
+fn Bag.element(self, position: USize) lends Int64 {
+  self.items[position]
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  let bag = Bag(items: [5, 6, 7])
+  concurrent for item in bag {
+    Console.print_line("saw ${item}")
+  }
+  ExitCode.success
+}

@@ -32,9 +32,33 @@ open Statements
 open Values
 
 let rec expression state env ?expected (value : expression) : Types.ty =
-  let type_ = expression_kind state env ?expected value in
+  let type_ =
+    if Hashtbl.mem state.lent_tails value.id then lent_part state env value
+    else expression_kind state env ?expected value
+  in
   record state value type_;
   type_
+
+(* A tail expression of a lending method: the part the method lends. A
+   place in it is lent, not moved or copied, and a part lent [mut] is
+   mutated, so an index in it uses the [mut self] version of [at]. *)
+and lent_part state env (value : expression) : Types.ty =
+  Hashtbl.remove state.lent_tails value.id;
+  match env.output with
+  | Some (Lends (mode, part)) ->
+      let inner =
+        match value.kind with
+        | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
+        | _ -> value
+      in
+      Hashtbl.replace state.yielded inner.id (match mode with Mut -> Mut | Read | Own -> Read);
+      let actual = expression state env ~expected:part inner in
+      if inner != value then alias_expression state value inner;
+      check_lent_value state env inner;
+      if mode = Mut then mutate state env ~by:Mut_mark inner;
+      coerce state env inner ~actual ~expected:part;
+      actual
+  | _ -> expression_kind state env value
 
 and check state env (value : expression) (expected : Types.ty) =
   let actual = expression state env ~expected value in
@@ -174,29 +198,36 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
           declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:Types.Read);
       check state { env with in_quantifier = true } body Types.bool;
       register_expression state value (fun () ->
-          let binder : Core.binder =
-            match binder with
-            | Binder_type (bound, _) ->
-                Over_type
-                  {
-                    local = Named bound.id;
-                    name = bound.text;
-                    type_ = Form.local_type state bound.id;
-                  }
-            | Binder_in
-                (written, { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ })
-              ->
-                let pattern = build_pattern state written in
-                let start = build_expression state start in
-                Over_range { pattern; start; stop = build_expression state stop; inclusive }
-            | Binder_in (written, collection) -> (
-                let pattern = build_pattern state written in
-                match state.tables.loops.(value.id) with
-                | Some (Yielding { call; mode }) ->
-                    Over_each { pattern; call = Form.each_of state call mode collection }
-                | _ -> Over_collection { pattern; collection = build_expression state collection })
+          let quantified binder : Core.kind =
+            Quantified { quantifier; binder; body = build_expression state body }
           in
-          Quantified { quantifier; binder; body = build_expression state body });
+          match (binder, state.tables.loops.(value.id)) with
+          | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
+              let pattern = build_pattern state written in
+              Form.over_elements state collection ~count ~element ~lends ~origin:value.id
+                (fun elements -> quantified (Over_elements { pattern; elements }))
+          | _ ->
+              let binder : Core.binder =
+                match binder with
+                | Binder_type (bound, _) ->
+                    Over_type
+                      {
+                        local = Named bound.id;
+                        name = bound.text;
+                        type_ = Form.local_type state bound.id;
+                      }
+                | Binder_in
+                    ( written,
+                      { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ } )
+                  ->
+                    let pattern = build_pattern state written in
+                    let start = build_expression state start in
+                    Over_range { pattern; start; stop = build_expression state stop; inclusive }
+                | Binder_in (written, collection) ->
+                    let pattern = build_pattern state written in
+                    Over_collection { pattern; collection = build_expression state collection }
+              in
+              quantified binder);
       Types.bool
   | Echo inner ->
       let type_ = expression state env ?expected inner in
@@ -204,9 +235,26 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       type_
   | Return inner ->
       reject_in_formula state env value.span "`return`";
-      register_expression state value (fun () -> Return (Option.map (build_expression state) inner));
+      register_expression state value (fun () ->
+          match (inner, env.output) with
+          | Some inner, Some (Lends (mode, _)) ->
+              (* A lending method lends the value and then returns. *)
+              let returned =
+                synthetic_expression state ~origin:value.id Types.Never (Return None)
+              in
+              Block
+                {
+                  statements =
+                    Form.lend_statements state mode (build_expression state inner)
+                    @ [ { id = fresh_node_id state; origin = value.id; kind = Evaluate returned } ];
+                  value = None;
+                }
+          | _ -> Return (Option.map (build_expression state) inner));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
+      | Some inner, Some (Lends (_, part)) ->
+          mark_lent_tails state inner;
+          check state env inner part
       | None, Some (Returns output) ->
           if not (unify state output Types.unit) then
             mismatch state value.span ~expected:output ~actual:Types.unit

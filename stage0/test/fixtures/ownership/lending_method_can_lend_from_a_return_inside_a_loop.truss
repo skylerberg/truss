@@ -1,0 +1,8 @@
+type Bag(items: List[String])
+
+fn Bag.first(self) lends Option[String] {
+  for item in self.items {
+    return Some(item)
+  }
+  None
+}

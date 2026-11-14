@@ -278,13 +278,6 @@ let () =
       match core_call_at text "Console.print_line(\"hello\")" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> fail "no conversion recorded");
-  test "a cursor's next is the Cursor trait's, by the cursor's own impl" (fun () ->
-      let text = Fixtures.Infer.cursors_next_is_the_cursor_traits_by_the_cursors in
-      fine text;
-      has_type text "count_to(3)" "the cursor of app::main::count_to";
-      match core_at text "first.next()" 1 with
-      | [ { kind = Cursor_next _; type_; _ } ] when Types.show type_ = "Option[Int64]" -> ()
-      | _ -> fail "not the `next` of the cursor's own impl");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
         (functions ^ Fixtures.Infer.unknown_label_is_an_error_with_a_fix_to_the)
@@ -356,8 +349,8 @@ let () =
     ];
   test "a `var`, a `mut` parameter, `mut self`, and a `mut` loop variable can be marked `mut`"
     (fun () -> fine Fixtures.Infer.var_a_mut_parameter_mut_self_and_a_mut_loop);
-  test "the variable of a loop over a call that yields `mut` can be marked `mut`" (fun () ->
-      fine Fixtures.Infer.variable_of_a_loop_over_a_call_that_yields_mut_can);
+  test "the variable of a loop over elements lent `mut` can be marked `mut`" (fun () ->
+      fine Fixtures.Infer.variable_of_a_loop_over_elements_lent_mut_can);
   test "a var can be assigned" (fun () -> fine Fixtures.Infer.var_can_be_assigned);
   test "an empty list with nothing to decide its elements is an error" (fun () ->
       one_diagnostic Fixtures.Infer.empty_list_with_nothing_to_decide_its_elements_is
@@ -526,8 +519,8 @@ let () =
                match node.kind with For { iteration = Integer_range _; _ } -> true | _ -> false)
              (first_core_nodes text).statements)
       then fail "no counted loop");
-  test "a for loop over a list drives its each" (fun () ->
-      fine Fixtures.Infer.for_loop_over_a_list_drives_its_each)
+  test "a for loop over a list visits its positions" (fun () ->
+      fine Fixtures.Infer.for_loop_over_a_list_visits_its_positions)
 
 (* Incremental work and determinism *)
 
@@ -620,8 +613,8 @@ let () =
   test "a method written in full takes its receiver's mark" (fun () ->
       one_diagnostic Fixtures.Infer.method_written_in_full_takes_its_receivers_mark
         "types.wrong_receiver");
-  test "a for loop takes each version from the type or from a trait" (fun () ->
-      fine Fixtures.Infer.for_loop_takes_each_version_from_the_type_or_from);
+  test "a for loop takes the `element` version from the type or from a trait" (fun () ->
+      fine Fixtures.Infer.for_loop_takes_element_version_from_the_type_or_from);
   test "a call picks a version among a type's own and its family of traits'" (fun () ->
       fine Fixtures.Infer.call_picks_a_version_among_a_types_own_and_its);
   test "two traits that give one version of a name are ambiguous at the call" (fun () ->
@@ -814,8 +807,8 @@ let () =
         "types.unsatisfied_bound");
   test "the scrutinee of an `is` is inferred before its pattern is checked" (fun () ->
       fine Fixtures.Infer.scrutinee_of_an_is_is_inferred_before_its_pattern);
-  test "a `for` over a call of `each` binds the yielded elements" (fun () ->
-      fine Fixtures.Infer.for_over_a_call_of_each_binds_the_yielded_elements);
+  test "a `for` over a cursor binds the values of its `next`" (fun () ->
+      fine Fixtures.Infer.for_over_a_cursor_binds_the_values_of_its_next);
   test "`Self` in the body of a method without `self` is the method's type" (fun () ->
       fine Fixtures.Infer.self_in_the_body_of_a_method_without_self_is_the);
   test "a pattern that does not fit its type still gives its bindings a type" (fun () ->

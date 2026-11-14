@@ -187,12 +187,6 @@ let check_body context (body : Mir.body) moves ~returns =
       check_uses state (Moves.terminator_uses moves basic);
       match basic.terminator with
       | Return _ -> returned at state
-      | Yield _ when context.yields ->
-          check_given state ~locals:all_locals ~at:(Some at) (fun moved _ ->
-              Printf.sprintf
-                "`%s` is moved out and not reinitialized before this `yield`. The caller's loop \
-                 may `break` here, and then the method never resumes."
-                moved)
       | Iteration_end { loop } -> (
           match body.blocks.(loop).terminator with
           | For { part; _ } -> check_given state ~locals:[ part ] ~at:None scope_end

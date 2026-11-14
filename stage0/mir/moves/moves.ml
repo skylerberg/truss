@@ -88,7 +88,6 @@ let uses ~moving (statement : Mir.statement) =
   | Assign { value; _ } -> rvalue_uses ~moving ~origin value
   | Call { call; _ } | Lend { call; _ } | Template { call; _ } -> call_uses ~moving call
   | Slice { base; call; _ } -> read ~origin base :: call_uses ~moving call
-  | Pull { cursor; _ } -> [ read ~origin cursor ]
   | Assert { condition = operand; _ } | Echo operand -> operand_use ~moving ~by_value:false operand
   | Provide { provided; _ } ->
       List.concat_map
@@ -113,7 +112,6 @@ let terminator_uses ~moving (basic : Mir.basic_block) =
   | For { iteration = Range { start; stop; _ }; _ } ->
       List.concat_map (operand_use ~moving ~by_value:false) [ start; stop ]
   | For { iteration = Pull { cursor; _ }; _ } -> [ read ~origin cursor ]
-  | For { iteration = Yielding call; _ } -> call_uses ~moving call
   | Yield { part; _ } -> yielded_uses ~moving part
   | Return (Some operand) | Cancel { returned = Some (operand, _); _ } ->
       operand_use ~moving ~by_value:true operand
@@ -135,8 +133,7 @@ let inits (statement : Mir.statement) : Mir.place list =
   | Assign { target; _ } -> [ target ]
   | Call { destination; _ } -> Option.to_list destination
   | Lend { part; _ } -> [ { root = Local part; projections = [] } ]
-  | Slice { destination; _ } | Template { destination; _ } | Pull { destination; _ } ->
-      [ destination ]
+  | Slice { destination; _ } | Template { destination; _ } -> [ destination ]
   | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _
   | Ghost_assert _ | Matched _ | Proof _ ->
       []
@@ -722,7 +719,7 @@ let live analysis (body : Mir.body) ~drops =
             ( part,
               match iteration with
               | Pull { cursor; _ } -> reads (place_locals cursor)
-              | Range _ | Yielding _ -> [] )
+              | Range _ -> [] )
       | _ -> ())
     body.blocks;
   let before =
@@ -770,29 +767,5 @@ let live analysis (body : Mir.body) ~drops =
     done
   done;
   fun block index local -> before.(block).(index).(local)
-
-let kept_by_cursor analysis (body : Mir.body) =
-  let count = Array.length body.locals in
-  let live = live analysis body ~drops:true in
-  let kept = Array.make count false in
-  List.iter (fun local -> kept.(local) <- true) body.parameters;
-  Array.iteri
-    (fun block (basic : Mir.basic_block) ->
-      match basic.terminator with
-      | Yield { resume; _ } ->
-          for local = 0 to count - 1 do
-            if live resume 0 local then kept.(local) <- true
-          done;
-          let state = copy analysis.entries.(block) in
-          List.iter (apply analysis state) basic.statements;
-          apply_terminator_moves analysis state basic;
-          Array.iteri
-            (fun position (path : path) ->
-              if state.maybe_holds.(position) && owns analysis path.local then
-                kept.(path.local) <- true)
-            analysis.paths
-      | _ -> ())
-    body.blocks;
-  List.filter (fun local -> kept.(local)) (List.init count Fun.id)
 
 let terminator_uses analysis basic = terminator_uses ~moving:analysis.moving basic

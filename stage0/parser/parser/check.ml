@@ -1,6 +1,6 @@
 (* The rules that need the whole tree of one definition: where
-   specification-only forms, [assert], [proof], [yield], [break],
-   [continue], [return], [?], and [echo] may appear.
+   specification-only forms, [assert], [proof], [break], [continue],
+   [return], [?], and [echo] may appear.
 
    This is a separate walk with a small context, so the parsing code does
    not thread a context through every call, and each rule is tested on its
@@ -23,14 +23,9 @@ type context = {
       (** In a function's body, where a [proof] block may appear, and where [==>] and a quantifier
           over a type are left to the type checker, which knows whether the function is for
           specifications only *)
-  in_yielding_method : bool;
-      (** In a method whose signature [yields] or [lends], outside lambdas *)
   loop : loop;
   in_parallel : bool;
       (** In a [parallel] branch or a [parallel for] body, where [return] and [?] cannot leave *)
-  in_task : bool;
-      (** In a branch of a [concurrent] block or the body of a [concurrent for]. A [yield] is
-          rejected there, because it would run the caller's loop body as a task. *)
 }
 
 let plain =
@@ -38,10 +33,8 @@ let plain =
     specification = false;
     assert_allowed = false;
     function_body = false;
-    in_yielding_method = false;
     loop = Outside;
     in_parallel = false;
-    in_task = false;
   }
 
 let specification context = { context with specification = true }
@@ -87,15 +80,7 @@ let rec expression cursor context (value : expression) =
   match value.kind with
   | Lambda { body; _ } ->
       let loop = match context.loop with Outside -> Outside | _ -> Across_lambda in
-      block cursor
-        {
-          context with
-          assert_allowed = false;
-          in_yielding_method = false;
-          in_parallel = false;
-          loop;
-        }
-        body
+      block cursor { context with assert_allowed = false; in_parallel = false; loop } body
   | _ -> parts cursor context value
 
 and parts cursor context value =
@@ -170,7 +155,7 @@ and statement cursor context (statement : statement) =
         match mode with
         | Parallel_loop -> { context with loop = Parallel_body; in_parallel = true }
         | Sequential -> { context with loop = Inside }
-        | Concurrent_loop -> { context with loop = Inside; in_task = true }
+        | Concurrent_loop -> { context with loop = Inside }
       in
       block cursor body_context body
   | While { condition; clauses; body } ->
@@ -180,7 +165,7 @@ and statement cursor context (statement : statement) =
   | Parallel body ->
       let loop = match context.loop with Outside -> Outside | _ -> Branch in
       block cursor { context with in_parallel = true; loop } body
-  | Concurrent body -> block cursor { context with in_task = true } body
+  | Concurrent body -> block cursor context body
   | Proof body ->
       if not context.function_body then
         report cursor Misplaced_proof statement.span
@@ -191,22 +176,13 @@ and statement cursor context (statement : statement) =
         report cursor Misplaced_assert statement.span
           "`assert` is only allowed in tests, theorems, and proofs.";
       statement_parts cursor context statement
-  | Yield _ ->
-      if not context.in_yielding_method then
-        report cursor Misplaced_yield statement.span
-          "`yield` is only allowed in a method whose signature `yields` or `lends`."
-      else if context.in_task then
-        report cursor Misplaced_yield statement.span
-          "`yield` is not allowed in a `concurrent` block or a `concurrent for`: the caller's loop \
-           body would run as a task.";
-      statement_parts cursor context statement
   | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
 
 and statement_parts cursor context (parent : statement) =
   Syntax_walk.statement_parts ~expression:(expression cursor context)
     ~statement:(statement cursor context) parent
 
-let parameters ?(lends_or_yields = false) cursor (parameters : parameter list) =
+let parameters ?(lends = false) cursor (parameters : parameter list) =
   List.iter
     (fun (parameter : parameter) ->
       match parameter.kind with
@@ -215,14 +191,10 @@ let parameters ?(lends_or_yields = false) cursor (parameters : parameter list) =
             report cursor Reserved_specification_name name.span
               "A parameter cannot be named `result`, which names the return value in `ensures` and \
                `cost`.";
-          if lends_or_yields && (name.text = "yielded" || name.text = "finished") then
+          if lends && name.text = "yielded" then
             report cursor Reserved_specification_name name.span
-              (Printf.sprintf
-                 "A parameter of a lending or yielding method cannot be named `%s`, which names %s \
-                  in its `ensures`."
-                 name.text
-                 (if name.text = "yielded" then "the parts yielded so far"
-                  else "whether the method ran to its end"));
+              "A parameter of a lending method cannot be named `yielded`, which names the part as \
+               the caller left it in the method's `ensures`.";
           types ~parameter:true cursor plain type_;
           Option.iter (expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())
@@ -237,21 +209,16 @@ let generic_parameters cursor generics =
 let signature cursor (signature : signature) =
   Syntax_walk.definition_name (expression cursor (specification plain)) signature.name;
   generic_parameters cursor signature.generics;
-  let lends_or_yields =
-    match signature.result with Some (Yields _ | Lends _) -> true | _ -> false
-  in
-  parameters ~lends_or_yields cursor signature.parameters;
+  let lends = match signature.result with Some (Lends _) -> true | _ -> false in
+  parameters ~lends cursor signature.parameters;
   (match signature.result with
-  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) -> types cursor plain type_
+  | Some (Returns type_ | Lends (_, type_)) -> types cursor plain type_
   | None -> ());
   clauses cursor signature.clauses
 
 let function_ cursor (declared : signature) body =
   signature cursor declared;
-  let in_yielding_method =
-    match declared.result with Some (Yields _ | Lends _) -> true | _ -> false
-  in
-  Option.iter (block cursor { plain with function_body = true; in_yielding_method }) body
+  Option.iter (block cursor { plain with function_body = true }) body
 
 let function_definition cursor (definition : function_definition) =
   function_ cursor definition.signature (Some definition.body)

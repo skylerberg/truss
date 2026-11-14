@@ -56,7 +56,7 @@ type part = {
 type contract = {
   parts : part list;
   pure : bool;
-  result_kind : [ `Lends | `Returns | `Yields ];
+  result_kind : [ `Lends | `Returns ];
   definition : (part * Core.block) option;
 }
 
@@ -75,7 +75,6 @@ type frame = {
   substitution : Types.substitution;
   self_type : Types.ty option;
   yielded : Logic.term option;
-  finished : Logic.term option;
   yielded_so_far : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
 }
@@ -91,10 +90,12 @@ type loop_cost = {
   entry : Logic.term;
   rule : loop_rule;
   held : (frame -> Logic.term) option;
+  held_on_entry : Logic.term option;
+  gained_at_head : Logic.term option;
+  mutable counts_potential : bool;
 }
 
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
-type cursor = { method_frame : frame; own : part; element : Types.ty }
 
 type received = {
   has_another : Logic.term;
@@ -142,7 +143,7 @@ type context = {
   disjoint : (int * int) list;
   mutable indexes : (int * (place_value * span)) list;
   mutable evaluated_keys : (Core.id * Logic.term) list;
-  mutable yielded_part : (Types.ty * [ `Lends | `Yields ]) option;
+  mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Core.expression list * Core.expression list) option;
   home : Names.key;
   mutable laws_assumed : string list;
@@ -162,7 +163,6 @@ type context = {
   mutable known_calls : known_call list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
-  mutable cursors : (Logic.term * cursor) list;
   mutable proving : bool;
   mutable holes : (Names.key * span) list;
   mutable unfinished : Logic.term list;

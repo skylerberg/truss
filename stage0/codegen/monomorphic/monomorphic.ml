@@ -4,7 +4,6 @@ type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
   normalize_capabilities : Types.capability_set -> Types.capability_set;
-  cursor_fields : Ground.yielding -> (string * Memory_layout.member) list;
 }
 
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
@@ -43,8 +42,6 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
           arguments = List.map (ground_argument context []) trait_arguments;
           associated = List.map (fun (name, ty) -> (name, ground context [] ty)) associated;
         }
-  | Cursor { method_; arguments } ->
-      Cursor { method_; type_arguments = List.map (ground_argument context []) arguments }
   | Never -> Never
   | Parameter parameter ->
       bug "the generic parameter %s of %s is not substituted" parameter.name
@@ -69,7 +66,6 @@ and ground_function context substitution (function_type : Types.function_type) :
   let function_type = Types.substitute_function substitution function_type in
   let ground_result : Types.result -> Ground.result = function
     | Returns ty -> Returns (ground context [] ty)
-    | Yields (yield_mode, ty) -> Yields (mode yield_mode, ground context [] ty)
     | Lends (yield_mode, ty) -> Lends (mode yield_mode, ground context [] ty)
   in
   {
@@ -97,7 +93,6 @@ let rec back : Ground.ty -> Types.ty = function
           output =
             (match function_type.result with
             | Returns ty -> Returns (back ty)
-            | Yields (yield_mode, ty) -> Yields (types_mode yield_mode, back ty)
             | Lends (yield_mode, ty) -> Lends (types_mode yield_mode, back ty));
           uses =
             Types.capability_set (List.map (fun path -> Types.Capability path) function_type.uses);
@@ -110,8 +105,6 @@ let rec back : Ground.ty -> Types.ty = function
           trait_arguments = List.map back_argument arguments;
           associated = List.map (fun (name, ty) -> (name, back ty)) associated;
         }
-  | Cursor { method_; type_arguments } ->
-      Cursor { method_; arguments = List.map back_argument type_arguments }
   | Lent lent -> bug "%s has no type in the checker" (Ground.to_string (Lent lent))
 
 and back_argument : Ground.argument -> Types.argument = function
@@ -140,7 +133,6 @@ let rec shape context (ty : Ground.ty) : Memory_layout.shape =
   | Never -> Sum []
   | Function function_type -> Convention.function_value_shape function_type
   | Any _ -> Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ]
-  | Cursor yielding -> Record (context.cursor_fields yielding)
   | Lent lent -> lent_shape context lent
   | Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, arguments) with

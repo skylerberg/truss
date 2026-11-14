@@ -1,0 +1,32 @@
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var board = Board(cells: filled(100000))
+  var expected = filled(100000)
+  for cell in mut expected {
+    if cell % 7 != 0 {
+      cell = collatz(cell)
+    }
+  }
+  parallel for cell in mut board.cells {
+    if cell % 7 == 0 {
+      continue
+    }
+    cell = collatz(cell)
+  }
+  var same = true
+  for index in 0..expected.length() {
+    if expected[index] != board.cells[index] {
+      same = false
+    }
+  }
+  var total: Int64 = 0
+  for steps in board.cells {
+    if steps % 7 != 0 || steps < 7 {
+      total = total.wrapping_add(steps)
+    }
+  }
+  Console.print_line("${total} ${if same { "same" } else { "different" }}")
+  ExitCode.success
+}

@@ -1,0 +1,25 @@
+fn Pair.count(self) -> USize {
+  2
+}
+
+fn Pair.element(self, position: USize) lends List[Int64] {
+  if position == 0 {
+    self.first
+  } else {
+    self.second
+  }
+}
+
+fn Pair.element(mut self, position: USize) lends mut List[Int64] {
+  if position == 0 {
+    mut self.first
+  } else {
+    mut self.second
+  }
+}
+
+fn f(pair: mut Pair) {
+  parallel for list in mut pair {
+    look(list)
+  }
+}

@@ -70,8 +70,35 @@ val compound_assign :
   Syntax.binary ->
   Core.statement_kind
 
-val each_of : State.state -> Tables.call -> Types.mode -> Syntax.expression -> Core.expression
-val iteration : State.state -> Syntax.statement -> Syntax.expression -> Core.iteration
+val lend_statements : State.state -> Types.mode -> Core.expression -> Core.statement list
+(** The statements that lend the value of a tail expression of a lending method. *)
+
+val lend_block : State.state -> Types.mode -> Core.block -> Core.block
+(** A block whose value a lending method lends, as a block that lends it and has no value. *)
+
+val over_elements :
+  State.state ->
+  Syntax.expression ->
+  count:Tables.call ->
+  element:Tables.call ->
+  lends:Types.mode ->
+  origin:Core.origin ->
+  (Core.elements -> Core.kind) ->
+  Core.kind
+(** The core form of a quantifier that runs as a loop over the elements of a collection, made from
+    how the loop visits them. *)
+
+val for_loop :
+  State.state ->
+  Syntax.statement ->
+  Syntax.expression ->
+  pattern:Core.pattern ->
+  clauses:Core.loop_clause list ->
+  body:Core.block ->
+  mode:Core.loop_mode ->
+  Core.statement_kind
+(** The core form of a [for] loop over an iterable expression. *)
+
 val cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
 val loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause
 val try_ : State.state -> Syntax.expression -> Syntax.expression -> output:Types.ty -> Core.kind

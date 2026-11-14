@@ -10,13 +10,24 @@ impl Meter for Fixed {
   }
 }
 
-fn readings(count: Int64) yields Int64
-  uses Meter
-{
-  var index = 0
-  while index < count {
-    yield Meter.read()
-    index += 1
+type Readings(left: Int64)
+
+impl Cursor for Readings {
+  type Element = Int64
+  capability Uses = Meter
+
+  fn next(mut self) -> Option[Int64]
+    uses Meter
+  {
+    if self.left <= 0 {
+      return None
+    }
+    self.left -= 1
+    Some(Meter.read())
   }
+}
+
+fn readings(count: Int64) -> Readings {
+  Readings(left: count)
 }
 

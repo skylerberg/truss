@@ -151,7 +151,7 @@ public fn Peekable[Source: Cursor].peek(mut self) lends Option[Source.Element]
     self.peeked = Some(mut self.source.next())
   }
   match self.peeked {
-    Some(item) => yield item
-    None => yield None
+    Some(item) => item
+    None => None
   }
 }

@@ -122,17 +122,14 @@ let parameters cursor ~method_ =
 let result cursor =
   if Cursor.accept_punctuation cursor Arrow then
     Some (Returns (Parse_expression.type_expression cursor))
-  else if Cursor.accept_keyword cursor Yields then
-    let mode = Atoms.mode cursor in
-    Some (Yields (mode, Parse_expression.type_expression cursor))
   else if Cursor.accept_keyword cursor Lends then begin
     (* A lent part stays with [self], so it is never handed over. *)
     let own = Cursor.peek cursor in
     let mode = Atoms.mode cursor in
     if mode = Some Own then
       Cursor.report cursor Lends_own own.span
-        "A part a `lends` method lends stays with `self`, so it cannot be `own`; a method that \
-         hands over owned parts `yields own`."
+        "A part a `lends` method lends stays with `self`, so it cannot be `own`. A method that \
+         hands over an owned value returns it with `->`."
         ~fixes:
           [
             Diagnostic.fix "Remove `own`"

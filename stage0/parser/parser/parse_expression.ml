@@ -1523,9 +1523,6 @@ and statement cursor : statement =
         | _ -> false
       in
       finish (Assert { value; by_bit_vector })
-  | Keyword Yield ->
-      Cursor.advance cursor;
-      finish (Yield (expression cursor))
   | Reserved Loop when Cursor.peek_ahead cursor 1 = Punctuation (Open Curly) ->
       let loop_token = Cursor.next cursor in
       Habits.loop cursor ~loop_token;

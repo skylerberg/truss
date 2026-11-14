@@ -1,6 +1,14 @@
-fn Reader.chunks(mut self) yields Slice[Int64] {
-  yield self.buffer[..]
-  mut self.buffer.push(4)
-  yield self.buffer[..]
+type Chunked(chunks: List[List[Int64]])
+
+fn Chunked.count(self) -> USize {
+  self.chunks.count()
+}
+
+fn Chunked.element(self, position: USize) lends List[Int64] {
+  self.chunks[position]
+}
+
+fn Chunked.element(mut self, position: USize) lends mut List[Int64] {
+  mut self.chunks[position]
 }
 

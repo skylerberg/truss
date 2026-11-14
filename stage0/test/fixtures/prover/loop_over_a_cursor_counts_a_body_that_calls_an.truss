@@ -1,0 +1,10 @@
+fn spaced(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  var output = ""
+  for character in text.characters() {
+    mut output.push_character(character)
+    mut output.push_character(Character" ")
+  }
+  output
+}

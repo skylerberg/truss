@@ -248,7 +248,6 @@ and statement_kind =
   | Proof of block
   | Assert of { value : expression; by_bit_vector : bool }
       (** [assert value], or [assert value by bit_vector]. *)
-  | Yield of expression
   | Statement_error
 
 and loop_clause = loop_clause_kind node
@@ -326,12 +325,9 @@ and parameter_kind =
     }
   | Parameter_error
 
-(** A [yields] method yields parts of [self] any number of times, and a [lends] method lends one
-    part exactly once. *)
-type result =
-  | Returns of type_expression
-  | Yields of mode option * type_expression
-  | Lends of mode option * type_expression
+(** A function returns a value. A [lends] method lends its caller a part of its parameters: the
+    value of its body. *)
+type result = Returns of type_expression | Lends of mode option * type_expression
 
 type signature = {
   name : definition_name;

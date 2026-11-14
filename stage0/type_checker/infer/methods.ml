@@ -115,7 +115,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
   | Unknown report -> arguments_alone state env arguments (Types.Error report)
   | Local _ | Law_parameter _ | Value_parameter _
   | Definition (Constant, _)
-  | Field _ | Result_value | Yielded | Finished ->
+  | Field _ | Result_value | Yielded ->
       function_value_call state env value callee arguments
   | Binding | Module _ -> bug "the name `%s` is not resolved" name.text
 
@@ -568,12 +568,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                     | None -> [])
                   (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
       | Ok versions -> (
-          match
-            Option.map
-              (fun (chosen, version) ->
-                (chosen, impl_method_if_resolved state receiver_type version))
-              (choose_temporary versions)
-          with
+          match choose_temporary versions with
           | None -> missing_receiver_mark versions
           | Some (_, Own_version method_path) ->
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
@@ -730,17 +725,4 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   (match receiver_type with
   | Types.Any _ -> ()
   | _ -> resolve_evidence state value receiver_type reference);
-  match instance.signature.output with
-  | Yields _ ->
-      Types.Cursor
-        {
-          method_ =
-            Method
-              {
-                owner = trait.trait;
-                name = method_.method_name;
-                receiver = method_.method_receiver;
-              };
-          arguments = instance.type_arguments;
-        }
-  | _ -> normalize state result
+  normalize state result

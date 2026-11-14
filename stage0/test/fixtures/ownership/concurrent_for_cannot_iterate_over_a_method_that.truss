@@ -1,4 +1,0 @@
-fn Pair.each(mut self) yields mut List[Int64] {
-  yield mut self.first
-  yield mut self.second
-}

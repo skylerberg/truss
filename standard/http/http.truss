@@ -884,7 +884,7 @@ fn read_head[Stream: streams::Duplex](
       }
     }
   }
-  let parts: List[StringSlice] = List.collect(request_line.slice().split(" "))
+  let parts: List[StringSlice] = request_line.slice().split(" ")
   if parts.length() != 3 || !is_token(parts[0]) || parts[1].is_empty() {
     return Err(malformed("a request line that is not a method, a target, and a version"))
   }
@@ -942,7 +942,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
       if length is Some(_) {
         return Err(malformed("both Transfer-Encoding and Content-Length"))
       }
-      let codings: List[StringSlice] = List.collect(coding.split(","))
+      let codings: List[StringSlice] = coding.split(",")
       match codings.last() {
         Some(last) => {
           if !same_name(last.trim(), second: "chunked") {
@@ -1550,8 +1550,8 @@ fn accept_until(listener: mut network::Listener, connections: tasks::Channel[net
 {
   concurrent {
     {
-      for accepted in mut listener.connections() {
-        match own accepted {
+      while true {
+        match mut listener.accept() {
           Ok(connection) => {
             if connections.send(own connection) is Err(_) {
               return

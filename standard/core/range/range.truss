@@ -17,92 +17,88 @@ public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
 impl Iterable for Range[Value: core::Countable] {
   type Element = Value
 
-  fn each(self) yields Value
+  fn count(self) -> USize
+    cost time finite
+  {
+    match self.start.steps_to(self.stop) {
+      Some(steps) => if self.inclusive { steps.saturating_add(1) } else { steps }
+      None => 0
+    }
+  }
+
+  fn element(self, position: USize) lends Value
+    requires position < self.count()
     ensures self.contains(result)
     cost time finite
   {
     match self.start.steps_to(self.stop) {
-      Some(count) => {
-        var offset: USize = 0
-        while offset < count
-          decreases count - offset
-        {
-          match self.start.advanced(offset) {
-            Some(value) => {
-              yield value
-            }
-            None => {}
+      Some(steps) => {
+        if position < steps {
+          match self.start.advanced(position) {
+            Some(value) => value
+            None => unreachable
           }
-          offset += 1
-        }
-        if self.inclusive {
-          yield self.stop
-        }
-      }
-      None => {}
-    }
-  }
-}
-
-public fn Range[Value: core::Countable].reversed(self) yields Value
-  ensures self.contains(result)
-  cost time finite
-{
-  match self.start.steps_to(self.stop) {
-    Some(count) => {
-      if self.inclusive {
-        yield self.stop
-      }
-      var left = count
-      while left > 0
-        invariant left <= count
-        decreases left
-      {
-        match self.stop.retreated(count - left + 1) {
-          Some(value) => {
-            yield value
-          }
-          None => {}
-        }
-        left -= 1
-      }
-    }
-    None => {}
-  }
-}
-
-public fn Range[Value: core::Countable].step_by(self, step: USize) yields Value
-  requires step > 0
-  ensures self.contains(result)
-  cost time finite
-{
-  match self.start.steps_to(self.stop) {
-    Some(count) => {
-      var offset: USize = 0
-      var lands_on_stop = count == 0
-      while offset < count
-        invariant offset <= count
-        decreases count - offset
-      {
-        match self.start.advanced(offset) {
-          Some(value) => {
-            yield value
-          }
-          None => {}
-        }
-        let room = count - offset
-        if step < room {
-          offset += step
         } else {
-          lands_on_stop = step == room
-          offset = count
+          self.stop
         }
       }
-      if self.inclusive && lands_on_stop {
-        yield self.stop
-      }
+      None => unreachable
     }
-    None => {}
+  }
+}
+
+public opaque type Reversed[Value: core::Countable](range: Range[Value])
+
+public fn Range[Value: core::Countable].reversed(self) -> Reversed[Value]
+  cost time O(1)
+{
+  Reversed(range: Range(start: self.start, stop: self.stop, inclusive: self.inclusive))
+}
+
+impl Iterable for Reversed[Value: core::Countable] {
+  type Element = Value
+
+  fn count(self) -> USize
+    cost time finite
+  {
+    self.range.count()
+  }
+
+  fn element(self, position: USize) lends Value
+    requires position < self.count()
+    ensures self.range.contains(result)
+    cost time finite
+  {
+    self.range.element(self.range.count() - 1 - position)
+  }
+}
+
+public opaque type Stepped[Value: core::Countable](range: Range[Value], step: USize)
+  invariant step > 0
+
+public fn Range[Value: core::Countable].step_by(self, step: USize) -> Stepped[Value]
+  requires step > 0
+  cost time O(1)
+{
+  Stepped(range: Range(start: self.start, stop: self.stop, inclusive: self.inclusive), step: step)
+}
+
+impl Iterable for Stepped[Value: core::Countable] {
+  type Element = Value
+
+  fn count(self) -> USize
+    cost time finite
+  {
+    let whole = self.range.count()
+    if whole == 0 { 0 } else { (whole - 1) / self.step + 1 }
+  }
+
+  fn element(self, position: USize) lends Value
+    requires position < self.count()
+    ensures self.range.contains(result)
+    cost time finite
+  {
+    self.range.element(position * self.step)
   }
 }
 

@@ -28,9 +28,8 @@ type target = Walk.target =
   | Old  (** [old], in specifications and proofs. *)
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
   | Yielded
-      (** [yielded]: the sequence of the parts that a lending or yielding method has yielded so far.
-      *)
-  | Finished  (** [finished], whether a yielding method ran to its end. *)
+      (** [yielded]: in a loop's clauses, the values of the iterations before; in a lending method's
+          [ensures], its part as the caller left it. *)
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
 

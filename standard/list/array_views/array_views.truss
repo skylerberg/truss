@@ -15,8 +15,8 @@ public fn Array[Element, count: USize].get(self, index: USize) lends Option[Elem
   cost time O(1)
 {
   match self.slice().get(index) {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 
@@ -27,8 +27,8 @@ public fn Array[Element, count: USize].first(self) lends Option[Element]
   cost time O(1)
 {
   match self.slice().first() {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 
@@ -39,8 +39,8 @@ public fn Array[Element, count: USize].last(self) lends Option[Element]
   cost time O(1)
 {
   match self.slice().last() {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 
@@ -49,7 +49,7 @@ public fn Array[Element, count: USize].split_first(self) lends Option[list::Spli
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  yield self.slice().split_first()
+  self.slice().split_first()
 }
 
 public fn Array[Element, count: USize].split_last(self) lends Option[list::SplitLast[Element]]
@@ -57,7 +57,7 @@ public fn Array[Element, count: USize].split_last(self) lends Option[list::Split
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  yield self.slice().split_last()
+  self.slice().split_last()
 }
 
 public fn Array[Element, count: USize].split_at(self, index: USize) -> core::Pair[Slice[Element], Slice[Element]]
@@ -175,8 +175,8 @@ public fn Array[Element: Ordered, count: USize].minimum(self) lends Option[Eleme
   cost time O(self.length() * time(Element.compare))
 {
   match self.slice().minimum() {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 
@@ -185,8 +185,8 @@ public fn Array[Element: Ordered, count: USize].maximum(self) lends Option[Eleme
   cost time O(self.length() * time(Element.compare))
 {
   match self.slice().maximum() {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 
@@ -226,126 +226,54 @@ public fn Array[Element: Display, count: USize].join(self, separator: StringSlic
   self.slice().join(separator)
 }
 
-public fn Array[Element, count: USize].enumerate(self) yields core::Indexed[Element]
-
-  ensures result.index == yielded.length()
-  ensures identical(result.element, self.model()[yielded.length()])
-  ensures yielded.length() <= self.length()
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+public fn Array[Element, count: USize].enumerate(self) -> list::Enumerated[Element]
+  ensures result.count() == self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  var index: USize = 0
-  while index < self.length()
-    invariant index <= self.length()
-    invariant yielded.length() == index
-    decreases self.length() - index
-  {
-    yield core::Indexed(index: index, element: self[index])
-    index += 1
-  }
+  self.slice().enumerate()
 }
 
-public fn Array[Element, count: USize].enumerate(mut self) yields mut core::Indexed[Element]
-  cost time O(self.length())
+public fn Array[Element, count: USize].reversed(self) -> list::Reversed[Element]
+  ensures result.count() == self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  var index: USize = 0
-  while index < self.length()
-    invariant index <= self.length()
-    decreases self.length() - index
-  {
-    yield core::Indexed(index: index, element: mut self[index])
-    index += 1
-  }
+  self.slice().reversed()
 }
 
-public fn Array[Element, count: USize].reversed(self) yields Element
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
-{
-  var index = self.length()
-  while index > 0
-    invariant index <= self.length()
-    invariant yielded.length() == self.length() - index
-    decreases index
-  {
-    index -= 1
-    yield self[index]
-  }
-}
-
-public fn Array[Element, count: USize].reversed(mut self) yields mut Element
-  cost time O(self.length())
-{
-  var index = self.length()
-  while index > 0
-    invariant index <= self.length()
-    decreases index
-  {
-    index -= 1
-    yield mut self[index]
-  }
-}
-
-public fn Array[Element, count: USize].windows(self, size: USize) yields Slice[Element]
+public fn Array[Element, count: USize].windows(self, size: USize) -> list::Windows[Element]
   requires size > 0
-  ensures result.length() == size
-  cost time O(self.length())
+  ensures result.count() <= self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  for window in self.slice().windows(size) {
-    yield window
-  }
+  self.slice().windows(size)
 }
 
-public fn Array[Element, count: USize].chunks(self, size: USize) yields Slice[Element]
+public fn Array[Element, count: USize].chunks(self, size: USize) -> list::Chunks[Element]
   requires size > 0
-  ensures result.length() <= size
-  cost time O(self.length())
+  ensures result.count() <= self.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  for chunk in self.slice().chunks(size) {
-    yield chunk
-  }
+  self.slice().chunks(size)
 }
 
-public fn Array[Element: Equal, count: USize].split(self, separator: Element) yields Slice[Element]
-  cost time O(self.length() * time(Element.equal))
+public fn Array[Element: Equal, count: USize].split(self, separator: Element) -> List[Slice[Element]]
+  ensures result.length() <= self.length() + 1
+  cost time finite
 {
-  for part in self.slice().split(separator) {
-    yield part
-  }
+  self.slice().split(separator)
 }
 
-public fn Array[Element, count: USize].zip[Other](self, other: Slice[Other]) yields core::Pair[Element, Other]
-
-  ensures identical(result.first, self.model()[yielded.length()])
-  ensures identical(result.second, other.model()[yielded.length()])
-  ensures yielded.length() <= self.length()
-  ensures yielded.length() <= other.length()
-  cost time O(self.length())
+public fn Array[Element, count: USize].zip[Other](self, other: Slice[Other]) -> list::Zipped[Element, Other]
+  ensures result.count() <= self.length()
+  ensures result.count() <= other.length()
+  cost time O(1)
+  cost allocations == 0
 {
-  var index: USize = 0
-  while index < self.length() && index < other.length()
-    invariant index <= self.length()
-    invariant index <= other.length()
-    invariant yielded.length() == index
-    decreases self.length() - index
-  {
-    yield core::Pair(first: self[index], second: other[index])
-    index += 1
-  }
-}
-
-public fn Array[Element, count: USize].zip[Other](mut self, other: mut Slice[Other]) yields mut core::Pair[Element, Other]
-  cost time O(self.length())
-{
-  var index: USize = 0
-  while index < self.length() && index < other.length()
-    invariant other.length() == old(other.length())
-    invariant index <= self.length()
-    decreases self.length() - index
-  {
-    yield core::Pair(first: mut self[index], second: mut other[index])
-    index += 1
-  }
+  self.slice().zip(other)
 }
 
 public fn Array[Element, count: USize].swap(mut self, first: USize, second: USize)
@@ -446,8 +374,8 @@ public fn Array[Element, count: USize].min_by(
   cost time O(self.length() * time(compare))
 {
   match self.slice().min_by(compare) {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 
@@ -459,8 +387,8 @@ public fn Array[Element, count: USize].max_by(
   cost time O(self.length() * time(compare))
 {
   match self.slice().max_by(compare) {
-    Some(found) => yield Some(found)
-    None => yield None
+    Some(found) => Some(found)
+    None => None
   }
 }
 

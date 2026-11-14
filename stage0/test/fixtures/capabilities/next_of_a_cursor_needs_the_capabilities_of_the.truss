@@ -1,6 +1,0 @@
-fn first() -> Option[Int64] {
-  var cursor = provide Fixed(value: 7) {
-    readings(3)
-  }
-  mut cursor.next()
-}

@@ -1,0 +1,4 @@
+fn Holder.lend_items(mut self) lends mut List[Int64] {
+  var items = own self.items
+  mut items
+}

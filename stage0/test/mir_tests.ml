@@ -64,9 +64,6 @@ let effects (statement : Mir.statement) =
   | Template { destination; call; _ } ->
       let read, given = written destination in
       (call_locals call @ read, given, [])
-  | Pull { destination; cursor } ->
-      let read, given = written destination in
-      (place_locals cursor @ read, given, [])
   | Live locals -> ([], locals, [])
   | Dead locals -> ([], [], locals)
   | Assert { condition = value; _ } | Echo value -> (operand_locals value, [], [])
@@ -80,7 +77,6 @@ let effects (statement : Mir.statement) =
 let terminator_reads : Mir.terminator -> Mir.local list = function
   | Branch { condition; _ } -> operand_locals condition
   | Switch_variant { place; _ } -> place_locals place
-  | For { iteration = Yielding call; _ } -> call_locals call
   | For { iteration = Range { start; stop; _ }; _ } -> operand_locals start @ operand_locals stop
   | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
   | Yield { part; _ } -> yielded_locals part
@@ -518,18 +514,18 @@ let () =
               blocks
           in
           if List.length ends < 2 then fail "the continue does not end the iteration");
-  test "a loop over a yielding call runs its body for each part, and a break leaves it" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.loop_over_a_yielding_call_runs_its_body_for_each in
+  test "a loop over a collection runs its body for each element, and a break leaves it" (fun () ->
+      let mir = mir_of_g Fixtures.Mir.loop_over_a_collection_runs_its_body_for_each in
       let body = mir.body in
       match
         List.find_map
           (fun (_, terminator) ->
             match (terminator : Mir.terminator) with
-            | For { iteration = Yielding _; blocks; after; _ } -> Some (blocks, after)
+            | For { iteration = Range _; lent = Some _; blocks; after; _ } -> Some (blocks, after)
             | _ -> None)
           (terminators body)
       with
-      | None -> fail "no loop over a yielding call"
+      | None -> fail "no loop over a collection's positions that lends each element"
       | Some (blocks, after) ->
           if
             not
@@ -853,29 +849,3 @@ let () =
       expect_string ~expected:"holds"
         (show_status
            (status_where_ended body moves { local = named body "both"; steps = [ Field "first" ] })))
-
-let () =
-  test "a cursor keeps its arguments, what code after a yield reads, and what a stop drops"
-    (fun () ->
-      let body, moves =
-        moves_of_g
-          (moves_program
-         ^ "fn g(limit: Int64) yields Int64 {\n\
-           \  let before: Int64 = 3\n\
-           \  let gone = text()\n\
-           \  take(own gone)\n\
-           \  let held = text()\n\
-           \  var index = before\n\
-           \  while index < limit {\n\
-           \    yield index\n\
-           \    index += 1\n\
-           \  }\n\
-           \  take(own held)\n\
-            }\n")
-      in
-      let kept = Moves.kept_by_cursor moves body in
-      List.iter
-        (fun (name, expected) ->
-          if List.mem (named body name) kept <> expected then
-            fail "the cursor %s %s" (if expected then "does not keep" else "keeps") name)
-        [ ("limit", true); ("index", true); ("held", true); ("before", false); ("gone", false) ])

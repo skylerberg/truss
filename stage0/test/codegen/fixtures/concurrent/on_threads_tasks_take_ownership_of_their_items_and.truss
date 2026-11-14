@@ -15,12 +15,22 @@ impl Lengths for Sum {
   }
 }
 
-fn labels(count: Int64) yields own String {
-  var index: Int64 = 0
-  while index < count {
-    yield "label number ${index % 10}"
-    index += 1
+type Labels(index: Int64, count: Int64)
+
+impl Cursor for Labels {
+  type Element = String
+
+  fn next(mut self) -> Option[String] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some("label number ${(self.index - 1) % 10}")
   }
+}
+
+fn labels(count: Int64) -> Labels {
+  Labels(index: 0, count: count)
 }
 
 fn main(arguments: List[String]) -> ExitCode

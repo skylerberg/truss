@@ -31,11 +31,11 @@ let can_begin = function
       ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
       | Forall | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide
       | Public | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type
-      | Unreachable | Use | Var | While | Yield ) ->
+      | Unreachable | Use | Var | While ) ->
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Opaque | Requires | Uses | With | Yields ) ->
+      | Opaque | Requires | Uses | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 

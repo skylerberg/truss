@@ -65,84 +65,68 @@ let () =
   test "an operand that is a copy does not borrow its place" (fun () ->
       fine (functions ^ Fixtures.Ownership.operand_that_is_a_copy_does_not_borrow_its_place))
 
-(* A yielded constructor that lends places *)
+(* A constructor that a lending method lends *)
 
 let () =
   let shelf = Fixtures.Ownership.shelf in
   let lends name signature body = shelf ^ "fn Shelf." ^ name ^ signature ^ " {\n" ^ body ^ "}\n" in
-  test "a yielded constructor lends a place without a mark" (fun () ->
+  test "a lent constructor lends a place without a mark" (fun () ->
       fine
         (lends "get" "(self, index: USize) lends Option[String]"
            "  if index < self.books.length() {\n\
-           \    yield Some(self.books[index])\n\
+           \    Some(self.books[index])\n\
            \  } else {\n\
-           \    yield None\n\
+           \    None\n\
            \  }\n"
-        ^ Fixtures.Ownership.yielded_constructor_lends_a_place_without_a_mark));
-  test "a constructor nested in a yielded constructor lends places too" (fun () ->
+        ^ Fixtures.Ownership.lent_constructor_lends_a_place_without_a_mark));
+  test "a constructor nested in a lent constructor lends places too" (fun () ->
       fine
         (lends "first" "(self) lends Option[First]"
-           "  yield Some(First(title: self.books[0], rest: self.books[1..]))\n"));
-  test "a yielded constructor that lends no place owns its fields" (fun () ->
+           "  Some(First(title: self.books[0], rest: self.books[1..]))\n"));
+  test "a lent constructor that lends no place owns its fields" (fun () ->
       fine
         (lends "copied" "(self) lends Tagged"
-           "  yield Tagged(tag: \"new\".copy(), book: self.books[0].copy())\n"));
-  test "a `Plain` place in a yielded constructor is copied, so it lends nothing" (fun () ->
+           "  Tagged(tag: \"new\".copy(), book: self.books[0].copy())\n"));
+  test "a `Plain` place in a lent constructor is copied, so it lends nothing" (fun () ->
       fine
         (lends "numbered" "(self, index: USize) lends Numbered"
-           "  yield Numbered(index: index, title: self.books[index].copy())\n"));
-  test "a local is a place that a yielded constructor lends" (fun () ->
+           "  Numbered(index: index, title: self.books[index].copy())\n"));
+  test "a local is a place that a lent constructor lends" (fun () ->
       fine
         (lends "tagged" "(self) lends Tagged"
-           "  let tag = \"new\".copy()\n  yield Tagged(tag: tag, book: self.books[0])\n"));
-  test "a yielded constructor that lends a place cannot hold an owned value" (fun () ->
+           "  let tag = \"new\".copy()\n  Tagged(tag: tag, book: self.books[0])\n"));
+  test "a lent constructor that lends a place cannot hold an owned value" (fun () ->
       one_diagnostic
-        (lends "tagged" "(self) lends Tagged"
-           "  yield Tagged(tag: \"new\".copy(), book: self.books[0])\n")
+        (lends "tagged" "(self) lends Tagged" "  Tagged(tag: \"new\".copy(), book: self.books[0])\n")
         "ownership.owned_beside_lent");
   test "a place lent `mut` inside a variant is rejected" (fun () ->
       one_diagnostic
-        (lends "first" "(mut self) lends mut Option[String]" "  yield Some(mut self.books[0])\n")
+        (lends "first" "(mut self) lends mut Option[String]" "  Some(mut self.books[0])\n")
         "ownership.lent_mut_in_variant");
   test "a place lent `mut` inside a record inside a variant is rejected" (fun () ->
       one_diagnostic
-        (lends "first" "(mut self) yields mut Option[Numbered]"
-           "  yield Some(Numbered(index: 0, title: mut self.books[0]))\n")
+        (lends "first" "(mut self) lends mut Option[Numbered]"
+           "  Some(Numbered(index: 0, title: mut self.books[0]))\n")
         "ownership.lent_mut_in_variant");
-  test "a constructor yielded `mut` lends the places marked `mut`" (fun () ->
+  test "a constructor lent `mut` lends the places marked `mut`" (fun () ->
       fine
-        (lends "numbered" "(mut self) yields mut Numbered"
-           "  var index: USize = 0\n\
-           \  while index < self.books.length() {\n\
-           \    yield Numbered(index: index, title: mut self.books[index])\n\
-           \    index = index + 1\n\
-           \  }\n"
-        ^ Fixtures.Ownership.constructor_yielded_mut_lends_the_places_marked));
-  test "a place in a constructor yielded `mut` needs the `mut` mark" (fun () ->
+        (lends "numbered" "(mut self, index: USize) lends mut Numbered"
+           "  Numbered(index: index, title: mut self.books[index])\n"
+        ^ Fixtures.Ownership.constructor_lent_mut_lends_the_places_marked));
+  test "a place in a constructor lent `mut` needs the `mut` mark" (fun () ->
       one_diagnostic
         (lends "numbered" "(mut self) lends mut Numbered"
-           "  yield Numbered(index: 0, title: self.books[0])\n")
+           "  Numbered(index: 0, title: self.books[0])\n")
         "types.missing_mark");
-  test "a place in a constructor yielded read-only takes no `mut` mark" (fun () ->
+  test "a place in a constructor lent read-only takes no `mut` mark" (fun () ->
       one_diagnostic
-        (lends "numbered" "(self) lends Numbered"
-           "  yield Numbered(index: 0, title: mut self.books[0])\n")
+        (lends "numbered" "(self) lends Numbered" "  Numbered(index: 0, title: mut self.books[0])\n")
         "types.redundant_mark");
-  test "a yielded constructor is not lent one place `mut` twice" (fun () ->
+  test "a lent constructor is not lent one place `mut` twice" (fun () ->
       one_diagnostic
         (lends "both" "(mut self) lends mut Both"
-           "  yield Both(first: mut self.books, second: mut self.books)\n")
-        "ownership.conflicting_loan");
-  test "a method that yields a constructor of lent places cannot be pulled" (fun () ->
-      one_diagnostic
-        (lends "numbered" "(self) yields Numbered"
-           "  var index: USize = 0\n\
-           \  while index < self.books.length() {\n\
-           \    yield Numbered(index: index, title: self.books[index])\n\
-           \    index = index + 1\n\
-           \  }\n"
-        ^ Fixtures.Ownership.method_that_yields_a_constructor_of_lent_places)
-        "ownership.not_pullable")
+           "  Both(first: mut self.books, second: mut self.books)\n")
+        "ownership.conflicting_loan")
 
 (* Lambdas that capture *)
 
@@ -240,27 +224,29 @@ let () =
   accepted "a place can be mutated in an arm once the `match` bindings are dead"
     Fixtures.Ownership.place_can_be_mutated_in_an_arm_once_the_match
 
-(* Views that a method yields *)
+(* Views that a method lends *)
 
 let () =
   let reader = "type Reader(buffer: List[Int64])\n\n" in
   let rejected name body code = test name (fun () -> one_diagnostic (reader ^ body) code) in
   let accepted name body = test name (fun () -> fine (reader ^ body)) in
-  rejected "a yielding method cannot yield a view of its local"
-    Fixtures.Ownership.yielding_method_cannot_yield_a_view_of_its_local "ownership.view_escapes";
   rejected "a lending method cannot lend a view of its local"
     Fixtures.Ownership.lending_method_cannot_lend_a_view_of_its_local "ownership.view_escapes";
-  accepted "a method can yield a view of `self`, and lend a local itself"
-    Fixtures.Ownership.method_can_yield_a_view_of_self_and_lend_a_local;
+  accepted "a method can lend a view of `self`, and lend a local itself"
+    Fixtures.Ownership.method_can_lend_a_view_of_self_and_lend_a_local;
   (let chunks = Fixtures.Ownership.chunks in
-   rejected
-     "a view from an iteration of a loop that borrows `mut` cannot be used after the next pull"
-     (chunks ^ Fixtures.Ownership.view_from_one_iteration_of_a_loop_that_borrows_mut)
+   (* The next iteration calls [element] with the collection borrowed
+      [mut], which may change what the view of the last element views. No
+      call follows the last iteration. *)
+   rejected "a view of an element lent `mut` cannot be used in the next iteration"
+     (chunks ^ Fixtures.Ownership.view_of_an_element_lent_mut_cannot_be_used_in_the_next)
      "ownership.changed_while_viewed";
-   accepted "a view from an iteration of a loop that borrows `mut` can be used in that iteration"
-     (chunks ^ Fixtures.Ownership.view_from_an_iteration_of_a_loop_that_borrows_mut));
-  accepted "a view from a loop over a read-only source can be used after the loop"
-    Fixtures.Ownership.view_from_a_loop_over_a_read_only_source_can_be;
+   accepted "a view of the last element lent `mut` can be used after the loop"
+     (chunks ^ Fixtures.Ownership.view_of_the_last_element_lent_mut_can_be_used_after);
+   accepted "a view of an element lent `mut` to an iteration can be used in that iteration"
+     (chunks ^ Fixtures.Ownership.view_of_an_element_lent_mut_to_an_iteration_can);
+   accepted "a view from a loop over a read-only collection can be used after the loop"
+     (chunks ^ Fixtures.Ownership.view_from_a_loop_over_a_read_only_collection_can_be));
   accepted "a view is not in use between its last read and a new value, so its original can change"
     Fixtures.Ownership.view_is_not_in_use_between_its_last_read_and
 
@@ -317,17 +303,11 @@ let () =
   test "a `mut` view argument does not store a view of a borrowed argument that is not a view"
     (fun () -> fine (reader ^ Fixtures.Ownership.mut_view_argument_does_not_store_a_view_of_a))
 
-(* Cursors that a yielding method makes *)
+(* Cursors *)
 
 let () =
-  test "the `Cursor` trait's own methods are called on a yielding method's cursor" (fun () ->
-      fine Fixtures.Ownership.cursor_traits_own_methods_are_called_on_a_yielding);
-  test "a cursor that would copy its elements cannot be passed to generic code" (fun () ->
-      one_diagnostic Fixtures.Ownership.cursor_that_would_copy_its_elements_cannot_be
-        "ownership.not_pullable");
-  test "a cursor that would copy its elements cannot be used through the trait's methods" (fun () ->
-      one_diagnostic Fixtures.Ownership.cursor_that_would_copy_its_elements_cannot_be_used
-        "ownership.not_pullable");
+  test "the `Cursor` trait's own methods are called on a cursor" (fun () ->
+      fine Fixtures.Ownership.cursor_traits_own_methods_are_called_on_a_cursor);
   test "a cursor over `Plain` elements can be passed to generic code" (fun () ->
       fine Fixtures.Ownership.cursor_over_plain_elements_can_be_passed_to)
 
@@ -392,37 +372,32 @@ let () =
     "a place moved out before a `concurrent` block must be reinitialized where a branch returns"
     Fixtures.Ownership.place_moved_out_before_a_concurrent_block_must_be
     "ownership.not_reinitialized";
-  (* A [concurrent for] over a yielding method that does not yield by
-     position: its body is not a single loop over a range. *)
   let pair = Fixtures.Ownership.pair in
-  let rejected_loop name ~says method_ loop =
-    test name (fun () ->
-        one_diagnostic ~says
-          (pair ^ method_ ^ "\nfn f(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
-          "ownership.task_outlives_yield")
-  in
-  rejected_loop "a `concurrent for` cannot iterate over a method that yields `mut` borrows"
-    ~says:"`mut` borrows" Fixtures.Ownership.concurrent_for_cannot_iterate_over_a_method_that
-    "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
-  rejected_loop "a task cannot borrow a place inside a `mut` parameter of the yielding method"
-    ~says:"`self.first`" Fixtures.Ownership.task_cannot_borrow_a_place_inside_a_mut_parameter
-    "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
-  rejected_loop "a task cannot borrow a local of the yielding method" ~says:"`local`"
-    Fixtures.Ownership.task_cannot_borrow_a_local_of_the_yielding_method
-    "  concurrent for list in pair.each() {\n    look(list)\n  }\n";
-  rejected_loop "a task cannot keep a view of a place inside a `mut` parameter" ~says:"`self.text`"
-    Fixtures.Ownership.task_cannot_keep_a_view_of_a_place_inside_a_mut
-    "  concurrent for word in mut pair.words() {\n    look(word)\n  }\n";
-  test "a task can borrow and view places inside a read-only parameter" (fun () ->
-      fine (pair ^ Fixtures.Ownership.task_can_borrow_and_view_places_inside_a_read_only));
+  (* Each iteration is lent an element to change, and only a [List], a
+     [Slice], or an [Array] is known to lend a different place at each
+     position. *)
+  test
+    "a `concurrent for` cannot change the elements of a collection that is not a `List`, a \
+     `Slice`, or an `Array`" (fun () ->
+      one_diagnostic ~says:"Only a `List`, a `Slice`, or an `Array`"
+        (pair ^ Fixtures.Ownership.concurrent_for_cannot_change_the_elements_of_a)
+        "ownership.data_race");
+  test
+    "a `parallel for` cannot change the elements of a collection that is not a `List`, a `Slice`, \
+     or an `Array`" (fun () ->
+      one_diagnostic ~says:"`parallel for`"
+        (pair ^ Fixtures.Ownership.parallel_for_cannot_change_the_elements_of_a)
+        "ownership.data_race");
+  test "a `concurrent for` can change the elements of a `List`" (fun () ->
+      fine (pair ^ Fixtures.Ownership.concurrent_for_can_change_the_elements_of_a_list));
+  test "a `concurrent for` can read the elements of any collection" (fun () ->
+      fine (pair ^ Fixtures.Ownership.concurrent_for_can_read_the_elements_of_any));
   test "a `concurrent for` cannot iterate over a cursor of views" (fun () ->
       one_diagnostic ~says:"`Slice[Int64]` is a view"
         (pair ^ Fixtures.Ownership.concurrent_for_cannot_iterate_over_a_cursor_of)
-        "ownership.task_outlives_yield");
-  test "a `concurrent for` can iterate over owned values and Plain copies" (fun () ->
-      fine (pair ^ Fixtures.Ownership.concurrent_for_can_iterate_over_owned_values_and));
-  test "a `concurrent for` can iterate over a method that yields by position" (fun () ->
-      fine (pair ^ Fixtures.Ownership.concurrent_for_can_iterate_over_a_method_that))
+        "ownership.task_keeps_view");
+  test "a `concurrent for` can iterate over a cursor of owned values or of `Plain` copies"
+    (fun () -> fine (pair ^ Fixtures.Ownership.concurrent_for_can_iterate_over_a_cursor_of_owned))
 
 (* Guards *)
 
@@ -547,11 +522,9 @@ let () =
    rejected "a `mut` binding of a `match` that is moved out must be reinitialized in the arm"
      Fixtures.Ownership.mut_binding_of_a_match_that_is_moved_out_must_be
      "ownership.not_reinitialized";
-   rejected "a yielding method cannot yield while a place of its caller is moved out"
-     Fixtures.Ownership.yielding_method_cannot_yield_while_a_place_of_its
-     "ownership.not_reinitialized";
-   accepted "a lending method can yield while a place of its caller is moved out"
-     Fixtures.Ownership.lending_method_can_yield_while_a_place_of_its);
+   rejected "a lending method must reinitialize a place of its caller that it moved out"
+     Fixtures.Ownership.lending_method_must_reinitialize_a_place_of_its
+     "ownership.not_reinitialized");
   test "one place cannot be borrowed `mut` twice by one call" (fun () ->
       one_diagnostic Fixtures.Ownership.one_place_cannot_be_borrowed_mut_twice_by_one_call
         "ownership.conflicting_loan");
@@ -585,35 +558,8 @@ let () =
       fine Fixtures.Ownership.constants_value_and_a_default_may_hold_a_constant);
   test "a list element needs an owned value" (fun () ->
       one_diagnostic Fixtures.Ownership.list_element_needs_an_owned_value "ownership.needs_owned");
-  test "a lending method yields on every path" (fun () ->
-      one_diagnostic Fixtures.Ownership.lending_method_yields_on_every_path "ownership.yield_count");
-  (let bag = Fixtures.Ownership.bag_2 in
-   test "a lending method can yield in a loop whose body then returns" (fun () ->
-       fine (bag ^ Fixtures.Ownership.lending_method_can_yield_in_a_loop_whose_body_then));
-   test "a lending method cannot yield before a loop whose body yields and returns" (fun () ->
-       one_diagnostic
-         (bag ^ Fixtures.Ownership.lending_method_cannot_yield_before_a_loop_whose)
-         "ownership.yield_count");
-   test "a lending method cannot yield after a loop that yields and breaks" (fun () ->
-       one_diagnostic
-         (bag ^ Fixtures.Ownership.lending_method_cannot_yield_after_a_loop_that)
-         "ownership.yield_count");
-   test "a lending method cannot yield on each iteration of a loop" (fun () ->
-       one_diagnostic
-         (bag ^ Fixtures.Ownership.lending_method_cannot_yield_on_each_iteration_of_a)
-         "ownership.yield_count"));
-  (let grid = "type Grid(cells: List[Int64], count: USize)\n\n" in
-   test "a lending method can yield in one branch of a `parallel` block" (fun () ->
-       fine (grid ^ Fixtures.Ownership.lending_method_can_yield_in_one_branch_of_a));
-   test "a lending method cannot yield in two branches of a `parallel` block" (fun () ->
-       one_diagnostic
-         (grid ^ Fixtures.Ownership.lending_method_cannot_yield_in_two_branches_of_a)
-         "ownership.yield_count"));
-  test "a method that yields recursively cannot be pulled" (fun () ->
-      one_diagnostic Fixtures.Ownership.method_that_yields_recursively_cannot_be_pulled
-        "ownership.not_pullable");
-  test "a cursor of a method that can be pulled is pulled" (fun () ->
-      fine Fixtures.Ownership.cursor_of_a_method_that_can_be_pulled_is_pulled);
+  test "a lending method can lend from a `return` inside a loop" (fun () ->
+      fine Fixtures.Ownership.lending_method_can_lend_from_a_return_inside_a_loop);
   test "a `parallel` branch cannot mutate a place that another branch uses" (fun () ->
       one_diagnostic Fixtures.Ownership.parallel_branch_cannot_mutate_a_place_that_another
         "ownership.data_race")
@@ -660,35 +606,24 @@ let () =
   test "a Plain place passed own is copied, so the call may use it twice" (fun () ->
       fine Fixtures.Ownership.plain_place_passed_own_is_copied_so_the_call_may)
 
-(* Pulling and lending *)
+(* Calls and lending methods *)
 
 let () =
-  let tree = Fixtures.Ownership.tree in
-  test "a method that yields recursively inside a branch cannot be pulled" (fun () ->
-      one_diagnostic
-        (tree ^ Fixtures.Ownership.method_that_yields_recursively_inside_a_branch)
-        "ownership.not_pullable");
-  test "mutually recursive yielding methods cannot be pulled" (fun () ->
-      one_diagnostic
-        (tree ^ Fixtures.Ownership.mutually_recursive_yielding_methods_cannot_be)
-        "ownership.not_pullable");
   test "a call's result does not view a `Plain` argument" (fun () ->
       fine Fixtures.Ownership.calls_result_does_not_view_a_plain_argument);
-  test "a diverging path of a lending method need not yield" (fun () ->
-      fine Fixtures.Ownership.diverging_path_of_a_lending_method_need_not_yield)
+  test "a diverging path of a lending method need not lend" (fun () ->
+      fine Fixtures.Ownership.diverging_path_of_a_lending_method_need_not_lend)
 
 (* Views of temporaries *)
 
 let () =
-  let same = Fixtures.Ownership.same in
   test "a cursor cannot view a temporary that the statement drops" (fun () ->
-      one_diagnostic
-        (same ^ Fixtures.Ownership.cursor_cannot_view_a_temporary_that_the_statement)
+      one_diagnostic Fixtures.Ownership.cursor_cannot_view_a_temporary_that_the_statement
         "ownership.views_temporary");
   test "a cursor may view a named value" (fun () ->
-      fine (same ^ Fixtures.Ownership.cursor_may_view_a_named_value));
+      fine Fixtures.Ownership.cursor_may_view_a_named_value);
   test "a cursor may view a string literal, which has static storage" (fun () ->
-      fine (same ^ Fixtures.Ownership.cursor_may_view_a_string_literal_which_has_static));
+      fine Fixtures.Ownership.cursor_may_view_a_string_literal_which_has_static);
   test "a value computed from a temporary's view is fine" (fun () ->
       fine Fixtures.Ownership.value_computed_from_a_temporarys_view_is_fine);
   test "a view of a temporary cannot be returned" (fun () ->
@@ -738,23 +673,11 @@ let () =
       one_diagnostic Fixtures.Ownership.assigning_a_field_a_new_view_keeps_the_records_other_views
         "ownership.changed_while_viewed")
 
-(* Pulling views of places *)
+(* Loops over a collection's elements *)
 
 let () =
-  test "pulling a view of a String element is an error" (fun () ->
-      one_diagnostic Fixtures.Ownership.pulling_a_view_of_a_string_element_is_an_error
-        "ownership.not_pullable");
-  test "a `for` loop over a stored cursor of `String` elements is an error too" (fun () ->
-      one_diagnostic Fixtures.Ownership.for_loop_over_a_stored_cursor_of_string_elements
-        "ownership.not_pullable");
-  test "a method that yields owned values can be pulled whatever its element" (fun () ->
-      fine Fixtures.Ownership.method_that_yields_owned_values_can_be_pulled);
-  test "a for loop over a marked call drives the method, not a cursor" (fun () ->
-      fine Fixtures.Ownership.for_loop_over_a_marked_call_drives_the_method_not);
-  test "a recursive mut walk may loop over itself" (fun () ->
-      fine Fixtures.Ownership.recursive_mut_walk_may_loop_over_itself);
-  test "looping over a method that yields views of String elements is fine" (fun () ->
-      fine Fixtures.Ownership.looping_over_a_method_that_yields_views_of_string)
+  test "a loop over a list of `String` elements is lent each element" (fun () ->
+      fine Fixtures.Ownership.loop_over_a_list_of_string_elements_is_lent_each)
 
 let () =
   test "is on a temporary binds its parts as owned, as match does" (fun () ->

@@ -87,7 +87,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> bug "a capability method that yields"
+    | _ -> bug "a capability method that lends"
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
@@ -165,7 +165,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> bug "a capability method that yields"
+    | _ -> bug "a capability method that lends"
   in
   tasks_call "lock";
   emit builder
@@ -354,7 +354,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
   let exit_ty =
     match signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> bug "main yields"
+    | _ -> bug "main lends"
   in
   let exit = temporary st exit_ty in
   call_instance st
@@ -385,7 +385,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   let result_ty =
     match ty.result with
     | Returns result_type -> result_type
-    | _ -> bug "an adapter for a function that yields"
+    | _ -> bug "an adapter for a function that lends"
   in
   result_slot st (Convention.result context.env result_ty);
   let parameter_places =
@@ -447,7 +447,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
   let result_ty =
     match method_signature.output with
     | Returns result_type -> Monomorphic.ground context.monomorphic substitution result_type
-    | _ -> bug "an any method that yields"
+    | _ -> bug "an any method that lends"
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:

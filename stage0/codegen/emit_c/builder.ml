@@ -14,8 +14,8 @@ open C_instance
 
 let instance_key (instance : instance) = instance.key
 
-(* A function of the code a builder writes: the builder's own, number 0, an
-   outlined function, or a separate function. *)
+(* A function of the code a builder writes: the builder's own, number 0, or
+   an outlined function. *)
 type function_ = {
   code : instance;  (** The instance it is part of *)
   nested : int option;  (** Its number among the instance's nested functions *)
@@ -52,8 +52,6 @@ type t = {
   functions : function_ Dynarray.t;
   mutable function_ : int;  (** The function being written *)
 }
-
-type separate = int
 
 let new_function ~code ~nested ~parent ~parts ~holder ~environment ~entry =
   {
@@ -238,6 +236,8 @@ let loop builder ?(integer = Memory_layout.USize) ~index_type ~count body =
   finish builder (Goto test);
   start builder after
 
+(* Writes [body] in the function [number], then goes back to the block that
+   was current, with its statements so far. *)
 let write_in builder number body =
   let function_ = builder.function_ and current = builder.current and pending = builder.pending in
   builder.function_ <- number;
@@ -265,26 +265,6 @@ let outline builder ~nested ~parts body =
       start builder entry;
       body ());
   holder
-
-let separate builder ~key ~parts =
-  let code =
-    { key; context = new_context builder.env (Instance.symbol key); functions = []; weight = 0 }
-  in
-  let entry = block builder in
-  Dynarray.add_last builder.functions
-    (new_function ~code ~nested:None ~parent:builder.function_ ~parts ~holder:None ~environment:None
-       ~entry);
-  Dynarray.length builder.functions - 1
-
-let separate_entry builder number = (Dynarray.get builder.functions number).entry
-
-let describe_cursor builder yielding fields =
-  Dynarray.iter
-    (fun (function_ : function_) ->
-      let context = function_.code.context in
-      if not (List.mem_assoc yielding context.cursors) then
-        context.cursors <- (yielding, fields) :: context.cursors)
-    builder.functions
 
 (* Replaces each token in a function's C with the text [name] gives its
    local. *)
@@ -520,4 +500,3 @@ let build ?(returns = true) builder ~parameters ~result =
     functions
 
 let built builder = (Dynarray.get builder.functions 0).code
-let built_separate builder number = (Dynarray.get builder.functions number).code

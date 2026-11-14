@@ -28,7 +28,7 @@ test "an element is replaced through a slice of a list" {
   assert items.length() == 4
 }
 
-test "reversed yields elements from the last to the first" {
+test "reversed gives elements from the last to the first" {
   let items: List[Int64] = [1, 2, 3]
   var seen: List[Int64] = []
   for item in items.reversed() {
@@ -52,7 +52,7 @@ test "reversed yields elements from the last to the first" {
   assert last == 7
 }
 
-test "windows yields every run of a size, and none when the list is shorter" {
+test "windows gives every run of a size, and none when the list is shorter" {
   let items: List[Int64] = [1, 2, 3, 4]
   var sums: List[Int64] = []
   for window in items.windows(2) {
@@ -76,7 +76,7 @@ test "windows yields every run of a size, and none when the list is shorter" {
   assert none == 0
 }
 
-test "chunks yields runs of a size, with a shorter last one" {
+test "chunks gives runs of a size, with a shorter last one" {
   let items: List[Int64] = [1, 2, 3, 4, 5]
   var lengths: List[USize] = []
   var firsts: List[Int64] = []
@@ -310,7 +310,7 @@ test "split_first and split_last lend one element and view the rest" {
   assert none.split_last() is None
 }
 
-test "enumerate yields each element with its index" {
+test "enumerate gives each element with its index" {
   let words: List[String] = ["a${1}", "b${2}"]
   var seen: USize = 0
   for entry in words.enumerate() {
@@ -319,16 +319,9 @@ test "enumerate yields each element with its index" {
     seen += 1
   }
   assert seen == 2
-  var items: List[Int64] = [10, 20, 30]
-  for entry in mut items.enumerate() {
-    if entry.index > 0 {
-      entry.element = entry.element + 1
-    }
-  }
-  assert same_items(items, expected: [10, 21, 31])
 }
 
-test "zip yields pairs up to the shorter length, and lends both to change" {
+test "zip gives pairs up to the shorter length" {
   let numbers: List[Int64] = [1, 2, 3]
   let more: List[Int64] = [10, 20]
   var total = 0
@@ -339,22 +332,13 @@ test "zip yields pairs up to the shorter length, and lends both to change" {
   }
   assert count == 2
   assert total == 50
-  var left: List[Int64] = [1, 2, 3]
-  var right: List[Int64] = [10, 20, 30]
-  for pair in mut left.zip(mut right[..]) {
-    let first = pair.first
-    pair.first = pair.second
-    pair.second = first
-  }
-  assert same_items(left, expected: [10, 20, 30])
-  assert same_items(right, expected: [1, 2, 3])
 }
 
-test "reversed lends elements to change, from the last to the first" {
+test "a list's elements change by position, from the last to the first" {
   var items: List[Int64] = [1, 2, 3]
   var next = 100
-  for item in mut items.reversed() {
-    item = next
+  for index in (0..items.length()).reversed() {
+    items[index] = next
     next += 1
   }
   assert same_items(items, expected: [102, 101, 100])

@@ -1,7 +1,0 @@
-fn f(reader: mut Reader, other: List[Int64]) -> USize {
-  var held: Slice[Int64] = other[..]
-  for chunk in mut reader.chunks() {
-    held = chunk
-  }
-  held.length()
-}

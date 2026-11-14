@@ -3,13 +3,14 @@ type Shelf(titles: List[String])
 impl Iterable for Shelf {
   type Element = String
 
-  fn each(self) yields String {
+  fn count(self) -> USize {
+    self.titles.count()
+  }
+
+  fn element(self, position: USize) lends String {
     let label = "${self.titles.length()} titles on the shelf"
-    for title in self.titles {
-      if label.length() > 0 {
-        yield title
-      }
-    }
+    let _ = label.length()
+    self.titles[position]
   }
 }
 

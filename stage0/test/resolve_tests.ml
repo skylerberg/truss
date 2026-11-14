@@ -111,7 +111,6 @@ let describe names base (target : Resolve.target option) =
   | Some Old -> "old"
   | Some Identical -> "identical"
   | Some Yielded -> "yielded"
-  | Some Finished -> "finished"
   | Some (Specification_function _) -> "specification function"
   | Some (Unknown _) -> "unknown"
 

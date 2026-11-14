@@ -58,7 +58,7 @@ fn number_of(text: StringSlice) -> Option[UInt32] {
 }
 
 fn clock_of(text: StringSlice) -> Option[time::TimeOfDay] {
-  let parts: List[StringSlice] = List.collect(text.split(":"))
+  let parts: List[StringSlice] = text.split(":")
   if parts.length() != 3 {
     return None
   }
@@ -74,7 +74,7 @@ fn clock_of(text: StringSlice) -> Option[time::TimeOfDay] {
 }
 
 internal fn parse(text: StringSlice) -> Option[Instant] {
-  let words: List[StringSlice] = List.collect(text.split_whitespace())
+  let words: List[StringSlice] = text.split_whitespace()
   var day: Option[UInt32] = None
   var month: Option[UInt8] = None
   var year: Option[UInt32] = None
@@ -85,7 +85,7 @@ internal fn parse(text: StringSlice) -> Option[Instant] {
     year = number_of(words[3])
     clock = clock_of(words[4])
   } else if words.length() == 4 && words[3] == "GMT".slice() {
-    let parts: List[StringSlice] = List.collect(words[1].split("-"))
+    let parts: List[StringSlice] = words[1].split("-")
     if parts.length() == 3 {
       day = number_of(parts[0])
       month = month_number(parts[1])

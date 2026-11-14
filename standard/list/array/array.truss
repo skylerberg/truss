@@ -100,7 +100,7 @@ impl Index for Array[Element, count: USize] {
     cost time O(1)
     cost allocations == 0
   {
-    yield intrinsic::view_at(intrinsic::array_view(self), index: key)
+    intrinsic::view_at(intrinsic::array_view(self), index: key)
   }
 
   fn at(mut self, key: USize) lends mut Element
@@ -110,61 +110,39 @@ impl Index for Array[Element, count: USize] {
     cost time O(1)
     cost allocations == 0
   {
-    yield intrinsic::array_at_mut(mut self, index: key)
+    intrinsic::array_at_mut(mut self, index: key)
   }
 }
 
 impl Iterable for Array[Element, count: USize] {
   type Element = Element
 
-  fn each(self) yields Element
-    ensures identical(result, self.model()[yielded.length()])
-    ensures yielded.length() <= count
-    ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-    ensures finished ==> yielded.length() == count
-    ensures finished ==> identical(yielded, self.model())
-    cost time O(count)
+  fn count(self) -> USize
+    ensures result == count
+    cost time O(1)
+    cost allocations == 0
   {
-    var index: USize = 0
-    while index < count
-      invariant index <= count
-      invariant yielded.length() == index
-      invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-      decreases count - index
-    {
-      yield self[index]
-      index += 1
-    }
+    count
+  }
+
+  fn element(self, position: USize) lends Element
+    requires position < self.count()
+    ensures identical(result, self.model()[position])
+    cost time O(1)
+    cost allocations == 0
+  {
+    self[position]
   }
 }
 
-public fn Array[Element, count: USize].each(mut self) yields mut Element
-  cost time O(count)
+public fn Array[Element, count: USize].element(mut self, position: USize) lends mut Element
+  requires position < self.count()
+  ensures identical(result, old(self.model())[position])
+  ensures identical(self.model(), old(self.model()).update(position, value: yielded[0]))
+  cost time O(1)
+  cost allocations == 0
 {
-  for index in 0..count {
-    yield mut self[index]
-  }
-}
-
-public fn Array[Element, count: USize].each(own self) yields own Element
-  ensures identical(result, self.model()[yielded.length()])
-  ensures yielded.length() <= count
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-  ensures finished ==> yielded.length() == count
-  ensures finished ==> identical(yielded, self.model())
-  cost time O(count)
-{
-  var remaining = own self.to_list()
-  mut remaining.reverse()
-  while remaining.length() > 0
-    invariant remaining.length() + yielded.length() == count
-    invariant forall i in 0..remaining.length() =>
-      identical(remaining.model()[i], self.model()[count - 1 - i])
-    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-    decreases remaining.length()
-  {
-    yield intrinsic::storage_pop(mut remaining.storage)
-  }
+  mut self[position]
 }
 
 public fn Array[Element, count: USize].map_each[Output, capability Granted](

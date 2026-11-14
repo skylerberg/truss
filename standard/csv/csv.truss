@@ -398,23 +398,3 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
   }
 }
 
-public fn RowReader[Source: streams::Reader].rows(mut self) yields own Result[List[String], ReadError]
-  uses Handles
-{
-  var more = true
-  while more
-    invariant self.source.start <= self.source.pending.length()
-    invariant self.source.capacity > 0
-  {
-    match mut self.next_row() {
-      Ok(Some(row)) => yield Ok(own row)
-      Ok(None) => {
-        more = false
-      }
-      Err(error) => {
-        more = false
-        yield Err(error)
-      }
-    }
-  }
-}

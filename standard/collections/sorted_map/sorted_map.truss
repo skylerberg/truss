@@ -1,5 +1,6 @@
 use standard::collections
 use standard::core
+use standard::list
 use standard::list::slice
 use standard::map
 
@@ -283,10 +284,10 @@ public fn collections::SortedMap[Key: Ordered, Value].get(self, key: Key) lends 
 {
   match self.search(key) {
     Ok(index) => {
-      yield Some(self.entries[index].value)
+      Some(self.entries[index].value)
     }
     Err(_) => {
-      yield None
+      None
     }
   }
 }
@@ -369,7 +370,7 @@ public fn collections::SortedMap[Key: Ordered, Value].get_or_insert(
   cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))
 {
   let position = mut self.find_or_insert(own key, default: own default)
-  yield mut self.entries[position].value
+  mut self.entries[position].value
 }
 
 public fn collections::SortedMap[Key: Ordered, Value].update[capability Granted](
@@ -443,9 +444,9 @@ public fn collections::SortedMap[Key: Ordered, Value].first(self) lends Option[m
   cost time O(1)
 {
   if self.entries.length() > 0 {
-    yield Some(self.entries[0])
+    Some(self.entries[0])
   } else {
-    yield None
+    None
   }
 }
 
@@ -454,9 +455,9 @@ public fn collections::SortedMap[Key: Ordered, Value].last(self) lends Option[ma
   cost time O(1)
 {
   if self.entries.length() > 0 {
-    yield Some(self.entries[self.entries.length() - 1])
+    Some(self.entries[self.entries.length() - 1])
   } else {
-    yield None
+    None
   }
 }
 
@@ -522,9 +523,9 @@ public fn collections::SortedMap[Key: Ordered, Value].at_or_before(self, key: Ke
     proof {
       slice::at_most_is_not_less_reversed(self.entries.model()[position - 1].key, second: key)
     }
-    yield Some(self.entries[position - 1])
+    Some(self.entries[position - 1])
   } else {
-    yield None
+    None
   }
 }
 
@@ -537,9 +538,9 @@ public fn collections::SortedMap[Key: Ordered, Value].at_or_after(self, key: Key
     proof {
       slice::at_most_is_not_less_reversed(key, second: self.entries.model()[position].key)
     }
-    yield Some(self.entries[position])
+    Some(self.entries[position])
   } else {
-    yield None
+    None
   }
 }
 
@@ -549,9 +550,9 @@ public fn collections::SortedMap[Key: Ordered, Value].before(self, key: Key) len
 {
   let position = self.index_at_or_after(key)
   if position > 0 {
-    yield Some(self.entries[position - 1])
+    Some(self.entries[position - 1])
   } else {
-    yield None
+    None
   }
 }
 
@@ -561,28 +562,19 @@ public fn collections::SortedMap[Key: Ordered, Value].after(self, key: Key) lend
 {
   let position = self.index_after(key)
   if position < self.entries.length() {
-    yield Some(self.entries[position])
+    Some(self.entries[position])
   } else {
-    yield None
+    None
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) yields map::Entry[Key, Value]
-  ensures range.contains(result.key)
+public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) -> Slice[map::Entry[Key, Value]]
+  ensures forall i in 0..result.length() => range.contains(result.model()[i].key)
   cost time O(self.length() + log(self.length()) * time(Key.compare))
 {
   let first = self.index_at_or_after(range.start)
   let end = if range.inclusive { self.index_after(range.stop) } else { self.index_at_or_after(range.stop) }
-  var index = first
-  while index < end
-    invariant first <= index
-    invariant index <= self.entries.length()
-    invariant forall i in first..end => range.contains(self.entries.model()[i].key)
-    decreases self.entries.length() - index
-  {
-    yield self.entries[index]
-    index += 1
-  }
+  if first < end { self.entries[first..end] } else { self.entries[first..first] }
 }
 
 public fn collections::SortedMap[Key: Ordered, Value].retain(
@@ -644,7 +636,7 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
     requires self.contains(key)
     cost time O(log(self.length()) * time(Key.compare))
   {
-    yield self.entries[self.position_of(key)].value
+    self.entries[self.position_of(key)].value
   }
 
   fn at(mut self, key: Key) lends mut Value
@@ -652,7 +644,7 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
     cost time O(log(self.length()) * time(Key.compare))
   {
     let position = self.position_of(key)
-    yield mut self.entries[position].value
+    mut self.entries[position].value
   }
 }
 
@@ -683,88 +675,56 @@ impl core::IndexAssign for collections::SortedMap[Key: Ordered, Value] {
 impl Iterable for collections::SortedMap[Key: Ordered, Value] {
   type Element = map::Entry[Key, Value]
 
-  fn each(self) yields map::Entry[Key, Value]
-    ensures finished ==> yielded.length() == self.length()
-    cost time O(self.length())
+  fn count(self) -> USize
+    ensures result == self.length()
+    cost time O(1)
   {
-    var index: USize = 0
-    while index < self.entries.length()
-      invariant index <= self.entries.length()
-      invariant yielded.length() == index
-      decreases self.entries.length() - index
-    {
-      yield self.entries[index]
-      index += 1
-    }
+    self.entries.length()
+  }
+
+  fn element(self, position: USize) lends map::Entry[Key, Value]
+    requires position < self.count()
+    cost time O(1)
+  {
+    self.entries[position]
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].each(own self) yields own map::Entry[Key, Value]
+public fn collections::SortedMap[Key: Ordered, Value].cursor(own self) -> list::ListCursor[map::Entry[Key, Value]]
+  ensures result.remaining() == self.length()
   cost time O(self.length())
+  cost amortized time O(self.length())
 {
-  for entry in own self.entries {
-    yield own entry
-  }
+  own self.entries.cursor()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].reversed(self) yields map::Entry[Key, Value]
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+public fn collections::SortedMap[Key: Ordered, Value].reversed(self) -> list::Reversed[map::Entry[Key, Value]]
+  ensures result.count() == self.length()
+  cost time O(1)
 {
-  var remaining = self.entries.length()
-  while remaining > 0
-    invariant remaining <= self.entries.length()
-    invariant yielded.length() == self.entries.length() - remaining
-    decreases remaining
-  {
-    remaining -= 1
-    yield self.entries[remaining]
-  }
+  self.entries.slice().reversed()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].keys(self) yields Key
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+public fn collections::SortedMap[Key: Ordered, Value].keys(self) -> map::Keys[Key, Value]
+  ensures result.count() == self.length()
+  cost time O(1)
 {
-  var index: USize = 0
-  while index < self.entries.length()
-    invariant index <= self.entries.length()
-    invariant yielded.length() == index
-    decreases self.entries.length() - index
-  {
-    yield self.entries[index].key
-    index += 1
-  }
+  map::Keys(entries: self.entries.slice())
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].values(self) yields Value
-  ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length())
+public fn collections::SortedMap[Key: Ordered, Value].values(self) -> map::Values[Key, Value]
+  ensures result.count() == self.length()
+  cost time O(1)
 {
-  var index: USize = 0
-  while index < self.entries.length()
-    invariant index <= self.entries.length()
-    invariant yielded.length() == index
-    decreases self.entries.length() - index
-  {
-    yield self.entries[index].value
-    index += 1
-  }
+  map::Values(entries: self.entries.slice())
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].values(mut self) yields mut Value
-  cost time O(self.length())
+public fn collections::SortedMap[Key: Ordered, Value].value_at(mut self, position: USize) lends mut Value
+  requires position < self.length()
+  ensures self.length() == old(self.length())
+  cost time O(1)
 {
-  var index: USize = 0
-  while index < self.entries.length()
-    invariant self.entries.length() == old(self.entries.length())
-    invariant index <= self.entries.length()
-    invariant strictly_ascending(self.entries.model())
-    decreases self.entries.length() - index
-  {
-    yield mut self.entries[index].value
-    index += 1
-  }
+  mut self.entries[position].value
 }
 
 impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {

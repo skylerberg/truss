@@ -2,8 +2,8 @@
 
 Methods of `String` and `StringSlice`, and the types of tagged templates.
 
-- `trim()`, `split()`, and `lines()` return `StringSlice`s, views of the
-  string.
+- `trim()` returns a `StringSlice`, a view of the string, and `split()` and
+  `lines()` return a `List` of them.
 - `fields.join(", ")` and `mut text.push(more)` build text; strings have no
   concatenation operator.
 - `text.bytes()` gives the bytes, `text.characters()` the `Character`s, and

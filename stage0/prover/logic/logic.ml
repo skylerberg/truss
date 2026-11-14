@@ -26,8 +26,6 @@ module Symbol = struct
     | Slack of string
     | Potential of string
     | Potential_measure of string
-    | Cursor_yielded of string
-    | Cursor_ended of string
     | Block_bytes of { type_key : string; variant : string option }
     | Time of sort
     | Method_time of { method_ : Path.t; self_type : string }
@@ -105,8 +103,6 @@ let rec show_symbol : symbol -> string = function
   | Slack type_key -> "slack." ^ type_key
   | Potential type_key -> "potential." ^ type_key
   | Potential_measure type_key -> "potential.measure." ^ type_key
-  | Cursor_yielded type_key -> "cursor.yielded." ^ type_key
-  | Cursor_ended type_key -> "cursor.ended." ^ type_key
   | Block_bytes { type_key; variant } -> "bytes." ^ type_key ^ "." ^ variant_text variant
   | Time sort -> "time." ^ sort_text sort
   | Method_time { method_; self_type } ->

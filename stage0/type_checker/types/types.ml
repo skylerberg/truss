@@ -8,7 +8,6 @@ type ty =
   | Projection of { base : ty; trait : trait_reference; name : string }
   | Function of function_type
   | Any of trait_reference
-  | Cursor of { method_ : Path.t; arguments : argument list }
   | Never
   | Integer
   | Variable of int
@@ -32,7 +31,7 @@ and function_type = {
   costs : cost list;
 }
 
-and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
+and result = Returns of ty | Lends of mode * ty
 
 and capability =
   | Capability of Path.t
@@ -134,8 +133,6 @@ let rec substitute substitution type_ =
         | None -> Projection { base; trait; name })
     | Function function_type -> Function (substitute_function substitution function_type)
     | Any trait -> Any (substitute_trait substitution trait)
-    | Cursor { method_; arguments } ->
-        Cursor { method_; arguments = List.map (substitute_argument substitution) arguments }
     | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_
 
 and substitute_argument substitution = function
@@ -178,7 +175,6 @@ and substitute_trait substitution (trait : trait_reference) =
 and substitute_function substitution (function_type : function_type) =
   let result = function
     | Returns type_ -> Returns (substitute substitution type_)
-    | Yields (mode, type_) -> Yields (mode, substitute substitution type_)
     | Lends (mode, type_) -> Lends (mode, substitute substitution type_)
   in
   {
@@ -189,7 +185,7 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
-let result_type = function Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
+let result_type = function Returns type_ | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
 let rec map ?(capabilities = Fun.id) transform type_ =
@@ -221,12 +217,10 @@ let rec map ?(capabilities = Fun.id) transform type_ =
               output =
                 (match function_type.output with
                 | Returns type_ -> Returns (map type_)
-                | Yields (mode, type_) -> Yields (mode, map type_)
                 | Lends (mode, type_) -> Lends (mode, map type_));
               uses = capabilities function_type.uses;
             }
       | Any reference -> Any (trait reference)
-      | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
       | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
@@ -240,7 +234,7 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   transform type_
   ||
   match type_ with
-  | Named { arguments; _ } | Cursor { arguments; _ } -> List.exists argument arguments
+  | Named { arguments; _ } -> List.exists argument arguments
   | Projection { base; trait = reference; _ } -> exists base || trait reference
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> exists type_) inputs || exists (result_type output)
@@ -255,7 +249,7 @@ let is_error = function Error _ -> true | _ -> false
 
 let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
-  | Named { arguments; _ } | Cursor { arguments; _ } -> List.exists argument_unsolved arguments
+  | Named { arguments; _ } -> List.exists argument_unsolved arguments
   | Projection { base; trait; _ } -> contains_unsolved base || trait_unsolved trait
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> contains_unsolved type_) inputs
@@ -331,7 +325,6 @@ and show = function
   | Projection { base; name; _ } -> show base ^ "." ^ name
   | Function function_type -> show_function function_type
   | Any trait -> "any " ^ show_trait trait
-  | Cursor { method_; _ } -> Printf.sprintf "the cursor of %s" (Path.show method_)
   | Never -> "Never"
   | Integer -> "Integer"
   | Variable _ -> "_"
@@ -358,7 +351,6 @@ and show_trait trait =
 and show_output = function
   | Returns type_ when type_ = unit -> ""
   | Returns type_ -> " -> " ^ show type_
-  | Yields (written, type_) -> " yields " ^ show_mode written ^ show type_
   | Lends (written, type_) -> " lends " ^ show_mode written ^ show type_
 
 and show_function (function_type : function_type) =
@@ -432,7 +424,7 @@ let body_is_definition (signature : signature) =
   signature.terminates && signature.uses = []
   && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
   && List.for_all (fun (parameter : parameter_info) -> parameter.mode <> Mut) signature.parameters
-  && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false
+  && match signature.output with Returns _ -> true | Lends _ -> false
 
 let map_signature transform (signature : signature) =
   {
@@ -445,7 +437,6 @@ let map_signature transform (signature : signature) =
     output =
       (match signature.output with
       | Returns type_ -> Returns (transform type_)
-      | Yields (mode, type_) -> Yields (mode, transform type_)
       | Lends (mode, type_) -> Lends (mode, transform type_));
   }
 

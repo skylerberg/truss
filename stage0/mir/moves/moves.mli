@@ -7,7 +7,7 @@
       parameter stays the caller's, whose end drops it.
     - An assignment moves each value it reads by value: the operand it assigns, a constructor's
       fields, an array's elements, an operation's operands, and the value made [any].
-    - A [return], and a [yield], move the values they give.
+    - A [return], and the end of a lending method, move the values they give.
     - An early exit from a task moves the value it returns. The value is in the exit's local where
       the code after the task's group takes the exit.
     - A loop that pulls values gives its part one at the start of each iteration.
@@ -131,5 +131,3 @@ val live : t -> Mir.body -> drops:bool -> Mir.block -> int -> Mir.local -> bool
     a local that may hold a value with something to drop uses it, since its drop does.
 
     Partial application to [body] runs the analysis once. *)
-
-val kept_by_cursor : t -> Mir.body -> Mir.local list

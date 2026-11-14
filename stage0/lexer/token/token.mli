@@ -54,8 +54,6 @@ type keyword =
   | Var
   | While
   | With
-  | Yield
-  | Yields
 
 (** Reserved for later use. The parser reports them, since a good fix depends on the construct
     around them. *)

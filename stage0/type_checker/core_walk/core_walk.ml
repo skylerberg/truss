@@ -27,12 +27,6 @@ let place_origin : place -> origin = function
   | Local { origin; _ } | Constant { origin; _ } | Field { origin; _ } -> origin
   | Lent value | Temporary value -> value.origin
 
-let rec lent_places : operand -> place list = function
-  | Place core_place -> [ core_place ]
-  | Value { kind = Construct { fields; _ }; _ } ->
-      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:lent_places field) fields
-  | Value _ -> []
-
 let rec place visit core_place =
   visit.place core_place;
   match core_place with
@@ -62,7 +56,7 @@ let loop_clause visit = function
 let expression_children visit (node : expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Finished
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded
   (* The callee of a [Method_time] is not called, so it is not reported to
      the visitor. *)
   | Method_time _ ->
@@ -107,7 +101,6 @@ let expression_children visit (node : expression) =
   | Matches { value; pattern } ->
       operand visit value;
       visit.pattern pattern
-  | Cursor_next cursor -> place visit cursor
   | Convert { value; _ } -> visit.expression value
   | If { condition; then_; else_; _ } ->
       visit.expression condition;
@@ -135,8 +128,13 @@ let expression_children visit (node : expression) =
           visit.expression start;
           visit.expression stop;
           visit.pattern pattern
-      | Over_collection { pattern; collection } | Over_each { pattern; call = collection } ->
+      | Over_collection { pattern; collection } ->
           visit.expression collection;
+          visit.pattern pattern
+      | Over_elements { pattern; elements = { count; position; element } } ->
+          visit.expression count;
+          visit.pattern position;
+          place visit element;
           visit.pattern pattern);
       visit.expression body
 
@@ -159,10 +157,13 @@ let statement_children visit (node : statement) =
       | Integer_range { start; stop; _ } ->
           visit.expression start;
           visit.expression stop
-      | Yielding_call call -> visit.expression call
+      | Elements { count; position; element } ->
+          visit.expression count;
+          visit.pattern position;
+          place visit element
       | Cursor { cursor; next } ->
           place visit cursor;
-          Option.iter visit.callee next);
+          visit.callee next);
       visit.pattern pattern;
       List.iter (loop_clause visit) clauses;
       block visit body
@@ -220,9 +221,6 @@ let block_exists ?expression ?statement node = exists block ?expression ?stateme
 
 let expression_exists ?expression ?statement node =
   exists (fun visit -> visit.expression) ?expression ?statement node
-
-let statement_exists ?expression ?statement node =
-  exists (fun visit -> visit.statement) ?expression ?statement node
 
 let parameter visit (parameter : parameter) =
   Option.iter visit.expression parameter.default;
@@ -317,26 +315,6 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabi
   !usage
 
 let can_use_tasks ?solved (body : block) : bool = tasks_use ?solved body <> No_tasks
-
-(* A [List], a [Slice], or an [Array]. An element of one of these is a
-   place. An index of any other collection is a call of the collection's
-   [at], which lends the element. *)
-let is_storage type_ =
-  Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_
-
-(* If the expression is an index of a [List], a [Slice], or an [Array],
-   the collection that is indexed. *)
-let storage_index (value : expression) : place option =
-  match value.kind with
-  | Call
-      {
-        callee = Trait_method { trait; name = "at"; self_type; _ };
-        arguments = Passed { value = Place collection; _ } :: _;
-        _;
-      }
-    when Well_known.is Index trait.trait && is_storage self_type ->
-      Some collection
-  | _ -> None
 
 let traverse_indirect (change : 'a -> 'b option) : 'a target -> 'b target option = function
   | Function { path; type_arguments } -> Some (Function { path; type_arguments })

@@ -296,25 +296,27 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
   Path(text: String(storage: own output))
 }
 
-public fn Path.components(self) yields StringSlice
-  ensures yielded.length() <= self.text.length()
+public fn Path.components(self) -> List[StringSlice]
+  ensures result.length() <= self.text.length()
   cost time O(self.text.length())
 {
+  var parts: List[StringSlice] = []
   let text = self.text.slice()
   var from: USize = 0
   while from < text.length()
     invariant from <= text.length()
-    invariant yielded.length() <= from
+    invariant parts.length() <= from
     decreases text.length() - from
     cost time O(from)
   {
     let span = next_component(text, from: from)
     if span.is_empty() {
-      return
+      return parts
     }
-    yield text.part(span.start, to: span.end)
+    mut parts.push(text.part(span.start, to: span.end))
     from = span.end
   }
+  parts
 }
 
 internal fn parent_length(output: intrinsic::Storage[UInt8], floor: USize) -> USize
@@ -573,24 +575,6 @@ public fn FileReader.read_line(mut self) -> Result[Option[String], SystemError]
   uses Handles
 {
   mut self.reader.read_line()
-}
-
-public fn FileReader.lines(mut self) yields own Result[String, SystemError]
-  uses Handles
-{
-  var more = true
-  while more {
-    match mut self.reader.read_line() {
-      Ok(Some(line)) => yield Ok(own line)
-      Ok(None) => {
-        more = false
-      }
-      Err(error) => {
-        more = false
-        yield Err(error)
-      }
-    }
-  }
 }
 
 public fn FileReader.metadata(self) -> Result[Metadata, SystemError]

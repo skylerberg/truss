@@ -55,25 +55,12 @@ val loop :
 
 val outline : t -> nested:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
 
-type separate
-
-val separate : t -> key:Instance.key -> parts:Lowered.local list -> separate
-val separate_entry : t -> separate -> Lowered.block
-val describe_cursor : t -> Ground.yielding -> (string * Lowered.ty) list ref -> unit
-
-(* Writes [body] in a separate function, then goes back to the block that
-   was current, with its statements so far. *)
-val write_in : t -> separate -> (unit -> unit) -> unit
-
 (* Writes the C of the builder's function, which takes [parameters] and
-   gives [result], and of the functions outlined from it and written
-   beside it. *)
+   gives [result], and of the functions outlined from it. *)
 val build : ?returns:bool -> t -> parameters:Lowered.local list -> result:Lowered.ty option -> unit
 
-(* The instance the builder's function is part of, and a separate
-   function's instance, once they are built. *)
+(* The instance the builder's function is part of, once it is built. *)
 val built : t -> instance
-val built_separate : t -> separate -> instance
 val at : Lowered.local -> Lowered.place
 val ( / ) : Lowered.place -> Lowered.projection -> Lowered.place
 val usize : int -> Lowered.operand

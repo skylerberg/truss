@@ -42,7 +42,6 @@ let rec agrees (left : Types.ty) (right : Types.ty) =
 and agrees_result (left : Types.result) (right : Types.result) =
   match (left, right) with
   | Returns left, Returns right -> agrees left right
-  | Yields (left_mode, left), Yields (right_mode, right)
   | Lends (left_mode, left), Lends (right_mode, right) ->
       left_mode = right_mode && agrees left right
   | _ -> false

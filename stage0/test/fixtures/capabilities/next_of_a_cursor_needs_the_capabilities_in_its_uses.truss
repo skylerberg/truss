@@ -1,0 +1,4 @@
+fn first() -> Option[Int64] {
+  var cursor = readings(3)
+  mut cursor.next()
+}

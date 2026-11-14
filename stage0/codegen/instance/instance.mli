@@ -24,9 +24,6 @@ type key =
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
       (** Code run while compiling: a call of a function that is not generic, with each argument a
           known integer, or a [Bool] as 0 or 1, its result written out *)
-  | Cursor_next of Ground.yielding
-      (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
-      *)
   | Adapter of { function_ : key; ty : Ground.function_type }
       (** A named function used as a function value: it takes the environment and ignores it *)
   | Entry of key

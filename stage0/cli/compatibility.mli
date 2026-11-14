@@ -17,8 +17,7 @@ val compare :
 
     A signature's types are compared after type checking. A contract is compared syntactically: a
     release may remove a [requires] clause and add an [ensures] or cost clause, and any other change
-    to a contract is incompatible. A yielding method that could be pulled as a cursor and no longer
-    can is incompatible too, although that property is inferred from its body. *)
+    to a contract is incompatible. *)
 
 val breaks : public_change list -> (Path.t * string) list
 val grows : public_change list -> (Path.t * string) list

@@ -32,7 +32,6 @@ type context = {
   mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
   mutable failures : (C_runtime.failure * C_runtime.site) list;
-  mutable cursors : (Ground.yielding * (string * Lowered.ty) list ref) list;
 }
 
 val new_context : Memory_layout.env -> string -> context

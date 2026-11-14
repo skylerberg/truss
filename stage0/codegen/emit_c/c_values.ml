@@ -13,7 +13,6 @@ let local_name local = function
   | None -> Printf.sprintf "l%d" local
 
 let erased context : Lowered.ty -> bool = function
-  | Value (Cursor _) -> false
   | Value ty -> (layout context ty).size = 0
   | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 
@@ -110,19 +109,7 @@ let rec place_c context fc (place : Lowered.place) : (string * Lowered.ty) optio
     | Variant_field _, _ -> bug "a variant of a place that is not a value"
   in
   let projected (ty : Lowered.ty) (projection : Lowered.projection) =
-    match (ty, projection) with
-    | Value (Cursor yielding), Field field -> (
-        match List.assoc_opt yielding context.cursors with
-        | Some fields -> (
-            match List.assoc_opt field !fields with
-            | Some ty -> Some ty
-            | None when field = Convention.cursor_state -> Some (Raw (Integer UInt32))
-            | None -> bug "the cursor has no field %s" field)
-        | None ->
-            Lowered.projection_type context.env ~environment:(environment_of context fc) ty
-              projection)
-    | _ ->
-        Lowered.projection_type context.env ~environment:(environment_of context fc) ty projection
+    Lowered.projection_type context.env ~environment:(environment_of context fc) ty projection
   in
   let rec walk ((_, ty) as current) = function
     | [] -> Some current
@@ -437,19 +424,7 @@ let prototype context current symbol ?names ~linkage (signature : Lowered.signat
     (signature_parameters context current signature.parameters names)
 
 let build_c context fc (ty : Ground.ty) variant (values : (string * Lowered.operand) list) =
-  match ty with
-  | Cursor yielding when List.mem_assoc yielding context.cursors ->
-      Some
-        (Expression
-           (Printf.sprintf "((%s){ %s })" (value_c context ty)
-              (String.concat ", "
-                 (List.filter_map
-                    (fun (name, operand) ->
-                      Option.map
-                        (fun (text, _) -> Printf.sprintf ".f_%s = %s" name text)
-                        (operand_c context fc operand))
-                    values))))
-  | _ -> build_laid_out_c context fc ty variant values
+  build_laid_out_c context fc ty variant values
 
 let rvalue_c context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : built option =
   let operand argument =

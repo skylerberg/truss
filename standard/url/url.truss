@@ -696,7 +696,7 @@ public fn Url.user_information(self) -> Option[StringSlice]
 public fn Url.host(self) lends Option[Host]
   cost time O(1)
 {
-  yield self.host
+  self.host
 }
 
 public fn Url.port(self) -> Option[UInt16]

@@ -22,7 +22,7 @@ fn stepped(range: Range[Int64], step: USize) -> List[Int64] {
   items
 }
 
-test "a range yields its values in order" {
+test "a range gives its values in order" {
   assert collected(2..6) == [2, 3, 4, 5]
   assert collected(2..=6) == [2, 3, 4, 5, 6]
   assert collected(-2..2) == [-2, -1, 0, 1]
@@ -32,7 +32,7 @@ test "a range yields its values in order" {
   assert collected(6..=2).is_empty()
 }
 
-test "a range yields its values from the last to the first" {
+test "a range gives its values from the last to the first" {
   assert backwards(2..6) == [5, 4, 3, 2]
   assert backwards(2..=6) == [6, 5, 4, 3, 2]
   assert backwards(5..5).is_empty()
@@ -40,7 +40,7 @@ test "a range yields its values from the last to the first" {
   assert backwards(6..2).is_empty()
 }
 
-test "a range yields every value a step apart" {
+test "a range gives every value a step apart" {
   assert stepped(0..10, step: 3) == [0, 3, 6, 9]
   assert stepped(0..=9, step: 3) == [0, 3, 6, 9]
   assert stepped(0..=10, step: 3) == [0, 3, 6, 9]
@@ -81,7 +81,7 @@ test "a range of a narrow type reaches its largest value without overflowing" {
   assert low == [-126, -127, -128]
 }
 
-test "a range of characters yields each character" {
+test "a range of characters gives each character" {
   var text = ""
   let letters: Range[Character] = Character"a"..=Character"e"
   for letter in letters {

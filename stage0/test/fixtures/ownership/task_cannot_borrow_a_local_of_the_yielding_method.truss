@@ -1,5 +1,0 @@
-fn Pair.each(self) yields List[Int64] {
-  let local: List[Int64] = [1]
-  yield local
-  yield self.second
-}

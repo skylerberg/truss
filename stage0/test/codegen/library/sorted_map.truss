@@ -79,8 +79,8 @@ test "a sorted map is read and written by key" {
   sorted[2] = 44
   sorted[7] = 49
   assert sorted[2] == 44 && sorted[7] == 49 && keys_of(sorted) == [1, 2, 3, 7]
-  for value in mut sorted.values() {
-    value = value + 1
+  for position in 0..sorted.count() {
+    mut sorted.value_at(position) += 1
   }
   assert sorted[1] == 2 && sorted[2] == 45 && sorted[3] == 10 && sorted[7] == 50
 }
@@ -145,7 +145,7 @@ test "a sorted map is made from entries in any order, the last of a key winning"
   ]
   let sorted: collections::SortedMap[Int64, Int64] = collections::SortedMap.from(entries.copy())
   assert keys_of(sorted) == [1, 2, 3] && sorted.get(3) == Some(5) && sorted.get(1) == Some(2)
-  var collected: collections::SortedMap[Int64, Int64] = collections::SortedMap.collect(entries.copy().each())
+  var collected: collections::SortedMap[Int64, Int64] = collections::SortedMap.collect(entries.copy().cursor())
   assert collected == sorted
   let more: List[map::Entry[Int64, Int64]] = [
     map::Entry(key: 9, value: 90),
@@ -153,11 +153,11 @@ test "a sorted map is made from entries in any order, the last of a key winning"
     map::Entry(key: 0, value: 0),
     map::Entry(key: 2, value: 21),
   ]
-  mut collected.extend(more.copy().each())
+  mut collected.extend(more.copy().cursor())
   assert keys_of(collected) == [0, 1, 2, 3, 9]
   assert collected.get(2) == Some(21) && collected.get(3) == Some(5) && collected.get(9) == Some(90)
   var fresh: collections::SortedMap[Int64, Int64] = collections::SortedMap.default()
-  mut fresh.extend(more.copy().each())
+  mut fresh.extend(more.copy().cursor())
   assert keys_of(fresh) == [0, 2, 9] && fresh.get(2) == Some(21)
   var owned: List[Int64] = []
   for entry in own fresh {

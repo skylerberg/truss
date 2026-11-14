@@ -1,0 +1,7 @@
+fn f(chunked: Chunked, other: List[Int64]) -> USize {
+  var held: Slice[Int64] = other[..]
+  for chunk in chunked {
+    held = chunk[..]
+  }
+  held.length()
+}

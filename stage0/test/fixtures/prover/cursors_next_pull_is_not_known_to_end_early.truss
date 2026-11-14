@@ -1,7 +1,0 @@
-fn f(couple: Couple) -> Bool
-  ensures result
-{
-  var cursor = couple.each()
-  let _ = mut cursor.next()
-  mut cursor.next() is None
-}

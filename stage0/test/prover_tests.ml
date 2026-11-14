@@ -245,22 +245,29 @@ let () =
 let couple = Fixtures.Prover.couple
 
 let () =
-  test "a yielding method keeps its contract at each yield and at its end" (fun () -> proven couple);
+  test "a lending method keeps its contract on each path that lends" (fun () -> proven couple);
   let tagged ensures =
-    Fixtures.Prover.ensures ^ ensures ^ "{\n  yield Tagged(tag: 0, value: mut self.second)\n}\n"
+    Fixtures.Prover.ensures ^ ensures ^ "{\n  Tagged(tag: 0, value: mut self.second)\n}\n"
   in
-  test "a constructor yielded `mut` does not change a field of `self` that it does not lend"
-    (fun () -> proven (tagged "  ensures self.first == old(self.first)\n"));
-  test "a caller's change to a constructor yielded `mut` is written to the lent field" (fun () ->
+  test "a constructor lent `mut` does not change a field of `self` that it does not lend" (fun () ->
+      proven (tagged "  ensures self.first == old(self.first)\n"));
+  test "a caller's change to a constructor lent `mut` is written to the lent field" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
-  test "a caller of a method that yields a constructor `mut` can rely on its `ensures`" (fun () ->
+  test "a caller of a method that lends a constructor `mut` can rely on its `ensures`" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"
-        ^ Fixtures.Prover.caller_of_a_method_that_yields_a_constructor_mut));
-  test "a yielding method that yields more than it promises" (fun () ->
-      not_proven Fixtures.Prover.yielding_method_that_yields_more_than_it_promises "prover.ensures");
-  test "a loop over a user's yielding method gets its facts" (fun () ->
-      proven (couple ^ Fixtures.Prover.loop_over_a_users_yielding_method_gets_its_facts));
+        ^ Fixtures.Prover.caller_of_a_method_that_lends_a_constructor_mut));
+  test "a lending method that lends a part it does not promise" (fun () ->
+      not_proven Fixtures.Prover.lending_method_that_lends_a_part_it_does_not_promise
+        "prover.ensures");
+  test "a loop over a user's collection gets the facts of its `count` and its `element`" (fun () ->
+      proven (couple ^ Fixtures.Prover.loop_over_a_users_collection_gets_the_facts_of_its));
+  test "the elements that a loop has read meet the postcondition of the collection's `element`"
+    (fun () -> proven (couple ^ Fixtures.Prover.elements_that_a_loop_has_read_meet_the));
+  test "the elements that a loop has read are not known beyond that postcondition" (fun () ->
+      not_proven
+        (couple ^ Fixtures.Prover.elements_that_a_loop_has_read_are_not_known_beyond)
+        "prover.invariant");
   test "a loop over a range has its indexes as yielded" (fun () ->
       proven Fixtures.Prover.loop_over_a_range_has_its_indexes_as_yielded);
   test "a range loop's index in its clauses is the next index" (fun () ->
@@ -274,22 +281,15 @@ let () =
       proven Fixtures.Prover.inclusive_range_loops_index_in_its_clauses_runs);
   test "a range loop's index bounds its cost" (fun () ->
       proven Fixtures.Prover.range_loops_index_bounds_its_cost);
-  test "a while loop's invariant in a yielding method can name `yielded`" (fun () ->
-      proven Fixtures.Prover.while_loops_invariant_in_a_yielding_method_can);
-  test "a pull of a cursor meets its method's clauses for each part" (fun () ->
-      proven (couple ^ Fixtures.Prover.pull_of_a_cursor_meets_its_methods_clauses_for));
-  test "a cursor ends where its method says it has yielded all it will" (fun () ->
-      proven (couple ^ Fixtures.Prover.cursor_ends_where_its_method_says_it_has_yielded));
-  test "a cursor's next pull is not known to end early" (fun () ->
-      not_proven
-        (couple ^ Fixtures.Prover.cursors_next_pull_is_not_known_to_end_early)
-        "prover.ensures");
-  test "a loop over a cursor gets its method's facts" (fun () ->
-      proven (couple ^ Fixtures.Prover.loop_over_a_cursor_gets_its_methods_facts));
   test "a loop over a type's own cursor calls its next" (fun () ->
       proven Fixtures.Prover.loop_over_a_types_own_cursor_calls_its_next);
   test "a loop over a cursor in a field calls its next" (fun () ->
       proven Fixtures.Prover.loop_over_a_cursor_in_a_field_calls_its_next);
+  (* The loop holds the potential of [output], which the body's amortized
+     callee spends and saves, and not the cursor's, which its [next] leaves
+     alone. *)
+  test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
+      proven Fixtures.Prover.loop_over_a_cursor_counts_a_body_that_calls_an);
   test "a later arm sees an earlier arm's guard's changes" (fun () ->
       proven Fixtures.Prover.later_arm_sees_an_earlier_arms_guards_changes);
   test "assigning an element changes only that element" (fun () ->
@@ -613,8 +613,8 @@ let () =
 let () =
   test "self changed on one path is joined with the other" (fun () ->
       not_proven Fixtures.Prover.self_changed_on_one_path_is_joined_with_the_other "prover.ensures");
-  test "a method's yielded part on one path is joined with the other" (fun () ->
-      not_proven Fixtures.Prover.methods_yielded_part_on_one_path_is_joined_with "prover.ensures")
+  test "a lending method's `ensures` holds for the part lent on each path" (fun () ->
+      not_proven Fixtures.Prover.lending_methods_ensures_holds_for_the_part_lent_on "prover.ensures")
 
 (* Loop changes *)
 
@@ -821,8 +821,8 @@ let () =
         "prover.invariant");
   test "an element changed through a lend that keeps its invariant proves" (fun () ->
       proven Fixtures.Prover.element_changed_through_a_lend_that_keeps_its);
-  test "a yielded part meets its invariant" (fun () ->
-      not_proven Fixtures.Prover.yielded_part_meets_its_invariant "prover.invariant");
+  test "a lent part meets its invariant" (fun () ->
+      not_proven Fixtures.Prover.lent_part_meets_its_invariant "prover.invariant");
   test "a loop keeps the validity of each value it changes" (fun () ->
       proven Fixtures.Prover.loop_keeps_the_validity_of_each_value_it_changes);
   test "an iteration must keep the validity of each value the loop changes" (fun () ->

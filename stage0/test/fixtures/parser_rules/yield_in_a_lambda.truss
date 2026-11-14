@@ -1,3 +1,0 @@
-fn T.each(self) yields Int64 {
-  f(fn() { yield 1 })
-}

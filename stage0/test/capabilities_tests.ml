@@ -65,7 +65,7 @@ let () =
   test "a lambda's uses must fit the function type it is passed as" (fun () ->
       one_diagnostic Fixtures.Capabilities.lambdas_uses_must_fit_the_function_type_it_is
         "capabilities.lambda_uses");
-  test "a loop over a value needs the capabilities that its `each` uses" (fun () ->
+  test "a loop over a value needs the capabilities that its `element` uses" (fun () ->
       one_diagnostic Fixtures.Capabilities.loop_over_a_value_needs_the_capabilities_that_its
         "capabilities.not_available");
   test "a loop over a value can use the function's capabilities" (fun () ->
@@ -433,41 +433,41 @@ let () =
       one_diagnostic Fixtures.Capabilities.function_types_inside_a_type_must_promise_the_same
         "types.mismatch")
 
-(* The cursor of a yielding method that uses a capability *)
+(* A cursor whose [next] uses a capability *)
 
 let readings = Fixtures.Capabilities.readings
 
 let () =
-  test "the next of a cursor needs the capabilities of the cursor's method" (fun () ->
+  test "the next of a cursor needs the capabilities in its `Uses`" (fun () ->
       one_diagnostic
-        (readings ^ Fixtures.Capabilities.next_of_a_cursor_needs_the_capabilities_of_the)
+        (readings ^ Fixtures.Capabilities.next_of_a_cursor_needs_the_capabilities_in_its_uses)
         "capabilities.not_available");
-  test "the next of a cursor is fine where the method's capabilities are available" (fun () ->
-      fine (readings ^ Fixtures.Capabilities.next_of_a_cursor_is_fine_where_the_methods));
-  test "a for loop over a cursor needs the capabilities of the cursor's method" (fun () ->
+  test "the next of a cursor is fine where its `Uses` are available" (fun () ->
+      fine (readings ^ Fixtures.Capabilities.next_of_a_cursor_is_fine_where_its_uses_are));
+  test "a for loop over a cursor needs the capabilities in the cursor's `Uses`" (fun () ->
       one_diagnostic
-        (readings ^ Fixtures.Capabilities.for_loop_over_a_cursor_needs_the_capabilities_of)
+        (readings ^ Fixtures.Capabilities.for_loop_over_a_cursor_needs_the_capabilities_in)
         "capabilities.not_available");
-  test "a cursor whose method uses a capability meets a Cursor bound" (fun () ->
-      fine (readings ^ Fixtures.Capabilities.cursor_whose_method_uses_a_capability_meets_a));
+  test "a cursor whose `next` uses a capability meets a Cursor bound" (fun () ->
+      fine (readings ^ Fixtures.Capabilities.cursor_whose_next_uses_a_capability_meets_a));
   test "a generic function that advances a cursor needs the cursor's capabilities" (fun () ->
       one_diagnostic Fixtures.Capabilities.generic_function_that_advances_a_cursor_needs_the
         "capabilities.not_available");
-  test "a call that passes a cursor needs the capabilities of the cursor's method" (fun () ->
+  test "a call that passes a cursor needs the capabilities in the cursor's `Uses`" (fun () ->
       one_diagnostic
         (readings ^ Fixtures.Capabilities.call_that_passes_a_cursor_needs_the_capabilities)
         "capabilities.not_available");
-  test "a method that Cursor provides needs the capabilities of the cursor's method" (fun () ->
+  test "a method that Cursor provides needs the capabilities in the cursor's `Uses`" (fun () ->
       one_diagnostic
         (readings ^ Fixtures.Capabilities.method_that_cursor_provides_needs_the_capabilities)
         "capabilities.not_available");
-  test "a method that Cursor provides runs where the cursor's capabilities are available" (fun () ->
+  test "a method that Cursor provides runs where the cursor's `Uses` are available" (fun () ->
       fine (readings ^ Fixtures.Capabilities.method_that_cursor_provides_runs_where_the_cursors));
-  test "a cursor whose method uses no capability needs none" (fun () ->
-      fine Fixtures.Capabilities.cursor_whose_method_uses_no_capability_needs_none);
-  test "a cursor whose method uses a capability cannot be an any value" (fun () ->
+  test "a cursor whose `next` uses no capability needs none" (fun () ->
+      fine Fixtures.Capabilities.cursor_whose_next_uses_no_capability_needs_none);
+  test "a cursor whose `next` uses a capability cannot be an any value" (fun () ->
       one_diagnostic
-        (readings ^ Fixtures.Capabilities.cursor_whose_method_uses_a_capability_cannot_be_an)
+        (readings ^ Fixtures.Capabilities.cursor_whose_next_uses_a_capability_cannot_be_an)
         "types.no_impl")
 
 (* Associated capability sets *)

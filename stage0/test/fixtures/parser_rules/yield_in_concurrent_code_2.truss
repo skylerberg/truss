@@ -1,5 +1,0 @@
-fn T.each(self) yields Int64 {
-  concurrent for x in s {
-    yield x
-  }
-}

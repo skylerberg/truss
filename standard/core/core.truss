@@ -246,7 +246,11 @@ public trait IndexAssign: Index {
 public trait Iterable {
   type Element
 
-  fn each(self) yields Self.Element
+  fn count(self) -> USize
+    cost time finite
+
+  fn element(self, position: USize) lends Self.Element
+    requires position < self.count()
     cost time finite
 
   fn fold[Total](
@@ -305,7 +309,7 @@ public trait Iterable {
     results
   }
 
-  fn count(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> USize
+  fn count_where(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> USize
     cost time finite
   {
     var count: USize = 0
@@ -322,11 +326,10 @@ public trait Iterable {
   {
     for item in self {
       if predicate(item) {
-        yield Some(item)
-        return
+        return Some(item)
       }
     }
-    yield None
+    None
   }
 }
 

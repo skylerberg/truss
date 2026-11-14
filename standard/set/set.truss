@@ -1,3 +1,5 @@
+use standard::list
+
 public opaque type Set[Element: Hash + Ordered](elements: List[Element])
   invariant forall i in 0..elements.length() => forall j in 0..elements.length() =>
     i < j ==> !(elements.model()[i] == elements.model()[j])
@@ -370,28 +372,27 @@ public fn Set[Element: Hash + Ordered + Copyable].symmetric_difference(self, oth
 impl Iterable for Set[Element: Hash + Ordered] {
   type Element = Element
 
-  fn each(self) yields Element
-    ensures finished ==> yielded.length() == self.length()
-    cost time O(self.length())
+  fn count(self) -> USize
+    ensures result == self.length()
+    cost time O(1)
   {
-    var index: USize = 0
-    while index < self.elements.length()
-      invariant index <= self.elements.length()
-      invariant yielded.length() == index
-      decreases self.elements.length() - index
-    {
-      yield self.elements[index]
-      index += 1
-    }
+    self.elements.length()
+  }
+
+  fn element(self, position: USize) lends Element
+    requires position < self.count()
+    cost time O(1)
+  {
+    self.elements[position]
   }
 }
 
-public fn Set[Element: Hash + Ordered].each(own self) yields own Element
+public fn Set[Element: Hash + Ordered].cursor(own self) -> list::ListCursor[Element]
+  ensures result.remaining() == self.length()
   cost time O(self.length())
+  cost amortized time O(self.length())
 {
-  for element in own self.elements {
-    yield own element
-  }
+  own self.elements.cursor()
 }
 
 internal fn Set[Element: Hash + Ordered].elements_included_in(self, other: Set[Element]) -> Bool

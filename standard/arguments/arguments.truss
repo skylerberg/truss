@@ -698,8 +698,8 @@ public fn Parsed.command(self) lends Option[Parsed]
   cost time O(1)
 {
   if self.command.length() > 0 {
-    yield Some(self.command[0])
+    Some(self.command[0])
   } else {
-    yield None
+    None
   }
 }

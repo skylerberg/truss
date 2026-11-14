@@ -56,24 +56,24 @@ test "fill, copy_from, and update_each replace an array's elements" {
   assert same_items(fixed[..], expected: [0, 1, 2])
 }
 
-test "an array lends its elements to change with their indexes, in pairs, and back to front" {
+test "an array's elements change by position: one, in pairs with a list's, and back to front" {
   var fixed: Array[Int64, 3] = [10, 20, 30]
-  for entry in mut fixed.enumerate() {
-    if entry.index == 2 {
-      entry.element = 0
+  for index in 0..fixed.length() {
+    if index == 2 {
+      fixed[index] = 0
     }
   }
   assert same_items(fixed[..], expected: [10, 20, 0])
   var other: List[Int64] = [1, 2, 3]
-  for pair in mut fixed.zip(mut other[..]) {
-    pair.first = pair.first + pair.second
-    pair.second = 0
+  for index in 0..fixed.length() {
+    fixed[index] = fixed[index] + other[index]
+    other[index] = 0
   }
   assert same_items(fixed[..], expected: [11, 22, 3])
   assert same_items(other, expected: [0, 0, 0])
   var next = 1
-  for item in mut fixed.reversed() {
-    item = next
+  for index in (0..fixed.length()).reversed() {
+    fixed[index] = next
     next += 1
   }
   assert same_items(fixed[..], expected: [3, 2, 1])
