@@ -1,0 +1,8 @@
+; The prover's evaluator, implemented by code generation. The prover defines
+; the interface, Prover.evaluator, and does not depend on code generation.
+; This adapter is the only library of code generation that depends on the
+; prover; compile and the rest of code generation do not.
+
+(library
+ (name evaluator)
+ (libraries zarith compile instance prover))
