@@ -566,7 +566,7 @@ and binary cursor ~level ~open_range =
     | Punctuation ((Dot_dot | Dot_dot_equal) as range) when level <= range_level ->
         let token = Cursor.next cursor in
         if not open_range then open_range_error cursor token "start";
-        let stop = range_stop cursor ~open_range in
+        let stop = range_stop cursor ~open_range ~inclusive:(range = Dot_dot_equal) in
         expression_node cursor start
           (Range
              {
@@ -591,7 +591,7 @@ and binary cursor ~level ~open_range =
             let pattern = Parse_pattern.pattern cursor in
             loop (expression_node cursor start (Is { value = left; operator_span; pattern }))
         | Range_operator inclusive ->
-            let stop = range_stop cursor ~open_range in
+            let stop = range_stop cursor ~open_range ~inclusive in
             loop
               (expression_node cursor start
                  (Range { start = Some left; operator_span; stop; inclusive })))
@@ -619,9 +619,13 @@ and binary cursor ~level ~open_range =
 
 (* The end of a range after [..] or [..=], which only brackets let a range
    leave out. *)
-and range_stop cursor ~open_range =
+and range_stop cursor ~open_range ~inclusive =
   match Cursor.peek_kind cursor with
-  | Punctuation (Close Square | Comma) when open_range -> None
+  | Punctuation (Close Square | Comma) when open_range ->
+      if inclusive then
+        Cursor.report cursor Open_range (Cursor.token_at cursor (cursor.index - 1)).span
+          "A range that includes its end needs the end, as in `items[2..=4]`.";
+      None
   | kind when begins_expression kind ->
       Some (binary cursor ~level:(range_level + 1) ~open_range:false)
   | _ ->

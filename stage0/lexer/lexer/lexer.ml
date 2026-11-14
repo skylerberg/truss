@@ -196,8 +196,40 @@ let rec recover source tokens diagnostics =
   match fixes with
   | [] -> (tokens, diagnostics)
   | _ -> (
+      let withhold wrong =
+        recover source tokens
+          (List.map
+             (fun (diagnostic : Diagnostic.t) ->
+               if List.exists (fun (fixed, _) -> fixed == diagnostic) wrong then
+                 { diagnostic with fixes = [] }
+               else diagnostic)
+             diagnostics)
+      in
       match works source tokens diagnostics fixes with
-      | Ok fixed_tokens -> (fixed_tokens, diagnostics)
+      | Ok fixed_tokens -> (
+          (* A fix beside another may work only with it, as `..<` fixed to `..`
+             before `.0` does; it must work alone too. *)
+          let beside (_, (fix : Diagnostic.span Diagnostic.fix)) =
+            List.exists
+              (fun (_, (other : Diagnostic.span Diagnostic.fix)) ->
+                other != fix
+                && List.exists
+                     (fun (edit : Diagnostic.span Diagnostic.edit) ->
+                       List.exists
+                         (fun (neighbor : Diagnostic.span Diagnostic.edit) ->
+                           edit.span.start <= neighbor.span.stop
+                           && neighbor.span.start <= edit.span.stop)
+                         other.edits)
+                     fix.edits)
+              fixes
+          in
+          match
+            List.filter
+              (fun fix -> beside fix && Result.is_error (works source tokens diagnostics [ fix ]))
+              fixes
+          with
+          | [] -> (fixed_tokens, diagnostics)
+          | wrong -> withhold wrong)
       | Error joined ->
           let touches (edit : Diagnostic.span Diagnostic.edit) =
             List.exists
@@ -218,15 +250,7 @@ let rec recover source tokens diagnostics =
                      ([], []) fixes)
             | touching -> touching
           in
-          if wrong = [] then (tokens, diagnostics)
-          else
-            recover source tokens
-              (List.map
-                 (fun diagnostic ->
-                   if List.exists (fun (fixed, _) -> fixed == diagnostic) wrong then
-                     { diagnostic with fixes = [] }
-                   else diagnostic)
-                 diagnostics))
+          if wrong = [] then (tokens, diagnostics) else withhold wrong)
 
 (* A diagnostic's alternative fixes, which recovery does not apply, are
    each checked alone. One left alone would be applied without review, so

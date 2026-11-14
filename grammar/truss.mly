@@ -629,8 +629,8 @@ pattern_primary:
   | range_end { () }
   | range_end DOTDOT range_end { () }
   | range_end DOTDOTEQ range_end { () }
-  | qualified_upper { () }
-  | qualified_upper pattern_fields { () }
+  | UPPER { () }
+  | UPPER pattern_fields { () }
   | pattern_fields { () }
 
 range_end:

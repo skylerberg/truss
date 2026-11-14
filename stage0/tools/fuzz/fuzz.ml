@@ -2,27 +2,25 @@
    inputs that break the lexer, and turn each one it finds into a focused
    test.
 
-     dune exec stage0/tools/fuzz/fuzz.exe -- [--seed N] [--count N] FILE...
+     dune exec stage0/tools/fuzz/fuzz.exe -- [--seed N] [--count N] PATH...
 
-   The files are Markdown documents; their ```truss blocks are the inputs it
-   mutates. It checks that:
+   Each path is a .truss file or a directory of them. Each top-level piece of
+   each file, a definition or a `use` line, is an input it mutates. It checks
+   that:
 
    - no input raises, every span of a token, a string's piece, or a
      diagnostic is in bounds, no two tokens overlap, and brackets are
      balanced;
-   - for one mistake made in an example, every fix removes its diagnostic
-     and adds no other, and for several, the lexer's machine-applicable
-     fixes together remove theirs and add no other, so that the lexer
-     recovers by lexing the text they write;
+   - for one mistake, every fix removes its diagnostic and adds no other,
+     and for several, the lexer's machine-applicable fixes together remove
+     theirs and add no other;
    - valid tokens printed with spaces between them lex back to the same
      tokens;
    - the parser never raises, every span in a tree is in bounds and inside
      the node around it, children are in source order where the parser did
      not recover, and no two expressions share an id;
-   - for one mistake made in an example, every fix of the lexer's or
-     the parser's removes its diagnostic and adds no other;
-   - the parser and the reference grammar accept and reject the same pieces
-     of mutated examples.
+   - the parser and the reference grammar accept and reject the same
+     mutated inputs.
 
    It prints each failing input and exits with status 1 if there was one. *)
 
@@ -99,12 +97,11 @@ let check_robust text =
       check_tokens text ~start:0 ~stop:(String.length text) tokens;
       List.iter (check_diagnostic_spans text) diagnostics
 
-(* An example lexed and parsed piece by piece, as the documents' tests do. *)
-let snippet text =
+let parse text =
   let source = Source.create ~path:"fuzz.truss" text in
   let tokens, lexer_diagnostics = Lexer.lex source in
-  let items, parser_diagnostics = Reference.Snippet.parse source tokens in
-  (tokens, items, lexer_diagnostics @ parser_diagnostics)
+  let file, parser_diagnostics = Parser.parse source tokens in
+  (tokens, file, lexer_diagnostics @ parser_diagnostics)
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
@@ -140,14 +137,10 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   Syntax_walk.definition (expression item.value.span) item.value
 
 let check_parse_robust text =
-  let source = Source.create ~path:"fuzz.truss" text in
-  match
-    let tokens, _ = Lexer.lex source in
-    (Parser.parse source tokens, snippet text)
-  with
+  match parse text with
   | exception exception_ ->
       fail "the parser raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
-  | (file, diagnostics), _ ->
+  | _, file, diagnostics ->
       List.iter (check_tree text) file.definitions;
       List.iter (check_diagnostic_spans text) diagnostics
 
@@ -177,11 +170,11 @@ let verdict : Diagnostic.Code.t -> verdict = function
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts
 
-(* Each piece of an example, as the parser split it, is rejected by the
-   parser exactly when the reference grammar rejects it. Errors inside an
-   interpolation are left out: the grammar reads a string as one token. *)
+(* The parser rejects an input exactly when the reference grammar does.
+   Errors inside an interpolation are left out: the grammar reads a string
+   as one token. *)
 let check_parsers_agree text =
-  let tokens, items, diagnostics = snippet text in
+  let tokens, _, diagnostics = parse text in
   let interpolations =
     Array.to_list tokens
     |> List.concat_map (fun (token : Token.t) ->
@@ -197,59 +190,51 @@ let check_parsers_agree text =
       (fun (inner : Source.span) -> inner.start <= span.start && span.start < inner.stop)
       interpolations
   in
-  List.iter
-    (fun (item : Reference.Snippet.item) ->
-      let start = tokens.(item.first).span.start and stop = tokens.(item.stop - 1).span.stop in
-      (* Whether a position is in a [cost] clause, where the grammar's rule
-         takes any names, so that its structure depends on their spelling. *)
-      let in_cost_clause offset =
-        let rec back index =
-          if index < item.first then false
-          else
-            let token = tokens.(index) in
-            if token.span.start > offset then back (index - 1)
-            else
-              match token.kind with
-              | Keyword Cost -> true
-              | Keyword (Uses | Requires | Ensures | Decreases | Invariant | Derives)
-              | Punctuation (Open Curly)
-              | Newline ->
-                  false
-              | _ -> back (index - 1)
-        in
-        back (item.stop - 1)
-      in
-      let verdicts =
-        List.filter_map
-          (fun (diagnostic : Diagnostic.t) ->
-            if
-              start <= diagnostic.span.start && diagnostic.span.start <= stop
-              && not (inside_interpolation diagnostic.span)
-            then
-              Some
-                (if in_cost_clause diagnostic.span.start then Unknown else verdict diagnostic.code)
-            else None)
-          diagnostics
-      in
-      let parser_rejects = List.mem Grammar_rejects verdicts in
-      let slice = Array.to_list (Array.sub tokens item.first (item.stop - item.first)) in
-      (* The parser reports nothing missing before a closer the lexer
-         inserted, which already has its error. *)
-      if
-        (not (List.mem Unknown verdicts))
-        && not
-             (List.exists
-                (fun (token : Token.t) ->
-                  token.span.start = token.span.stop && token.kind <> End_of_file)
-                slice)
-      then
-        let reference_rejects = not (Reference.accepts (Reference.Snippet.entry item.kind) slice) in
-        if parser_rejects <> reference_rejects then
-          fail "the parser %s and the reference grammar %s tokens %d to %d of %s"
-            (if parser_rejects then "rejects" else "accepts")
-            (if reference_rejects then "rejects" else "accepts")
-            item.first item.stop (Diagnostic.quote text))
-    items
+  (* Whether a position is in a [cost] clause, where the grammar's rule takes
+     any names. *)
+  let in_cost_clause offset =
+    let rec back index =
+      if index < 0 then false
+      else
+        let token = tokens.(index) in
+        if token.span.start > offset then back (index - 1)
+        else
+          match token.kind with
+          | Keyword Cost -> true
+          | Keyword (Uses | Requires | Ensures | Decreases | Invariant | Derives)
+          | Punctuation (Open Curly)
+          | Newline ->
+              false
+          | _ -> back (index - 1)
+    in
+    back (Array.length tokens - 1)
+  in
+  let verdicts =
+    List.filter_map
+      (fun (diagnostic : Diagnostic.t) ->
+        if inside_interpolation diagnostic.span then None
+        else if in_cost_clause diagnostic.span.start then Some Unknown
+        else Some (verdict diagnostic.code))
+      diagnostics
+  in
+  let all = Array.to_list tokens in
+  (* The parser reports nothing missing before a closer the lexer inserted,
+     which already has its error. *)
+  if
+    (not (List.mem Unknown verdicts))
+    && not
+         (List.exists
+            (fun (token : Token.t) ->
+              token.span.start = token.span.stop && token.kind <> End_of_file)
+            all)
+  then
+    let parser_rejects = List.mem Grammar_rejects verdicts
+    and reference_rejects = not (Reference.accepts Reference.file all) in
+    if parser_rejects <> reference_rejects then
+      fail "the parser %s and the reference grammar %s %s"
+        (if parser_rejects then "rejects" else "accepts")
+        (if reference_rejects then "rejects" else "accepts")
+        (Diagnostic.quote text)
 
 let rec contained smaller larger =
   match (smaller, larger) with
@@ -264,7 +249,7 @@ let rec contained smaller larger =
    diagnostics are the others, or fewer. *)
 let check_fixes_work text =
   let all text =
-    let _, _, diagnostics = snippet text in
+    let _, _, diagnostics = parse text in
     diagnostics
   in
   (* A lexer's fix is judged by the lexer alone: it can bring back a parser
@@ -499,21 +484,37 @@ let round_trip random =
     fail "the tokens of %s do not round-trip" (Diagnostic.quote text)
 
 let () =
-  let seed = ref 0 and count = ref 10_000 and files = ref [] in
+  let seed = ref 0 and count = ref 10_000 and paths = ref [] in
   Arg.parse
     [
       ("--seed", Arg.Set_int seed, " The random seed");
       ("--count", Arg.Set_int count, " How many inputs of each kind");
     ]
-    (fun file -> files := file :: !files)
-    "fuzz [--seed N] [--count N] FILE...";
+    (fun path -> paths := path :: !paths)
+    "fuzz [--seed N] [--count N] PATH...";
   let random = Random.State.make [| !seed |] in
+  let rec truss_files path =
+    if Sys.is_directory path then
+      List.concat_map
+        (fun name -> truss_files (Filename.concat path name))
+        (List.sort compare (Array.to_list (Sys.readdir path)))
+    else if Filename.check_suffix path ".truss" then [ path ]
+    else []
+  in
+  let pieces path =
+    let source = Source.read_file path in
+    let tokens, _ = Lexer.lex source in
+    List.map
+      (fun (piece : Parser.piece) ->
+        let start = tokens.(piece.first).span.start in
+        String.sub (Source.text source) start (tokens.(piece.stop - 1).span.stop - start))
+      (Parser.split tokens)
+  in
   let examples =
-    Array.of_list
-      (List.concat_map (fun file -> Documents.truss_blocks (Documents.read file)) !files)
+    Array.of_list (List.concat_map pieces (List.concat_map truss_files (List.rev !paths)))
   in
   if Array.length examples = 0 then (
-    prerr_endline "fuzz: give Markdown files with ```truss blocks";
+    prerr_endline "fuzz: give .truss files, or directories of them";
     exit 2);
   let example () = examples.(Random.State.int random (Array.length examples)) in
   (* Uniform bytes are rarely valid UTF-8, so half are characters instead. *)
@@ -534,7 +535,7 @@ let () =
       done;
       Buffer.contents buffer
   in
-  (* A range replaced by a mistake, a piece of another example, or nothing. *)
+  (* A range replaced by a mistake, a piece of another input, or nothing. *)
   let mutate text =
     let length = String.length text in
     let at = Random.State.int random (length + 1) in
@@ -571,4 +572,4 @@ let () =
     Printf.printf "%d failures\n" !failures;
     exit 1
   end
-  else Printf.printf "%d inputs of each kind pass\n" !count
+  else Printf.printf "%d inputs of each kind pass, from %d pieces\n" !count (Array.length examples)

@@ -491,6 +491,8 @@ let () =
       body_error "let x = ..3" ~code:Open_range ~at:"..");
   test "an open range is alone in its brackets" (fun () ->
       body_error "let x = items[1.., 4]" ~code:Open_range ~at:"..");
+  test "a range that includes its end has an end" (fun () ->
+      body_error "let x = items[1..=]" ~code:Open_range ~at:"..=");
   test "an open range has no comma after it" (fun () ->
       body_error "let x = items[1..,]" ~code:Open_range ~at:"," ~fixed:"let x = items[1..]");
   test "a bare name does not end a range pattern" (fun () ->
