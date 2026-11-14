@@ -1670,6 +1670,12 @@ let comparison (comparison : comparison) =
   | Greater_equal -> Some ">="
   | Not_equal -> None
 
+(* The longest literal whose bytes are stated one fact each. Every query
+   that reaches a literal carries its facts, so a long literal, such as a
+   table embedded as text, stalls the solver. A longer literal is known by
+   its length alone. *)
+let literal_bytes_limit = 256
+
 let rec expression context frame (node : expression) : (frame * Logic.term) option =
   if frame.source.key = Some context.home then
     match List.assoc_opt node.id context.evaluated_keys with
@@ -4805,12 +4811,13 @@ and text_value context frame (ty : Types.ty) text =
       let holds model =
         add_fact context
           (Logic.equal (sequence_length context byte model) (Logic.int (String.length text)));
-        String.iteri
-          (fun index character ->
-            match sequence_at context byte model (Logic.int index) with
-            | Some at -> add_fact context (Logic.equal at (Logic.int (Char.code character)))
-            | None -> ())
-          text
+        if String.length text <= literal_bytes_limit then
+          String.iteri
+            (fun index character ->
+              match sequence_at context byte model (Logic.int index) with
+              | Some at -> add_fact context (Logic.equal at (Logic.int (Char.code character)))
+              | None -> ())
+            text
       in
       Option.iter holds (model_of context ty literal ~element:byte);
       match constructors context ty with
