@@ -163,38 +163,40 @@ let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
   in
   walk (tokens written) (tokens fixed)
 
-let fix_edits (diagnostic : Diagnostic.t) =
-  match diagnostic.fixes with [ fix ] -> fix.edits | _ -> []
-
-(* The tokens and diagnostics of the text with [applied]'s fixes, and the
-   spans where a fix joined or split a neighboring token. *)
-let attempt_fixes source tokens applied =
-  let edits = List.concat_map fix_edits applied in
+(* Whether applying [fixes], each a diagnostic's fix, works: the fixed text
+   adds no error and joins or splits no neighboring token. [Error] gives the
+   spans of the tokens a fix joined or split. *)
+let works source tokens diagnostics fixes =
+  let edits =
+    List.concat_map (fun (_, (fix : Diagnostic.span Diagnostic.fix)) -> fix.edits) fixes
+  in
   let fixed_tokens, remaining =
     scan
       (Source.create ~path:(Source.path source) (Diagnostic.apply_edits (Source.text source) edits))
   in
   let fixed_tokens = Array.map (original_token (placed_edits edits)) fixed_tokens in
-  ( fixed_tokens,
-    remaining,
-    joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens )
+  let others =
+    List.filter
+      (fun diagnostic -> not (List.exists (fun (fixed, _) -> fixed == diagnostic) fixes))
+      diagnostics
+  in
+  match joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens with
+  | [] when Diagnostic.adds_none ~before:others ~after:remaining -> Ok fixed_tokens
+  | joined -> Error joined
 
 (* A fix that joins or splits a neighboring token, or adds an error, is
    withheld, and the file is lexed again without it. *)
 let rec recover source tokens diagnostics =
-  match Diagnostic.machine_applicable diagnostics with
+  let fixes =
+    List.filter_map
+      (fun (diagnostic : Diagnostic.t) ->
+        match diagnostic.fixes with [ fix ] -> Some (diagnostic, fix) | _ -> None)
+      (Diagnostic.machine_applicable diagnostics)
+  in
+  match fixes with
   | [] -> (tokens, diagnostics)
-  | applied -> (
-      let others applied =
-        List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics
-      in
-      let works applied =
-        let fixed_tokens, remaining, joined = attempt_fixes source tokens applied in
-        if joined = [] && Diagnostic.adds_none ~before:(others applied) ~after:remaining then
-          Ok fixed_tokens
-        else Error joined
-      in
-      match works applied with
+  | _ -> (
+      match works source tokens diagnostics fixes with
       | Ok fixed_tokens -> (fixed_tokens, diagnostics)
       | Error joined ->
           let touches (edit : Diagnostic.span Diagnostic.edit) =
@@ -204,8 +206,16 @@ let rec recover source tokens diagnostics =
               joined
           in
           let wrong =
-            match List.filter (fun d -> List.exists touches (fix_edits d)) applied with
-            | [] -> List.filter (fun d -> Result.is_error (works [ d ])) applied
+            match List.filter (fun (_, fix) -> List.exists touches fix.Diagnostic.edits) fixes with
+            | [] ->
+                (* Each fix that breaks the ones before it. *)
+                snd
+                  (List.fold_left
+                     (fun (accepted, wrong) fix ->
+                       if Result.is_ok (works source tokens diagnostics (fix :: accepted)) then
+                         (fix :: accepted, wrong)
+                       else (accepted, fix :: wrong))
+                     ([], []) fixes)
             | touching -> touching
           in
           if wrong = [] then (tokens, diagnostics)
@@ -213,12 +223,36 @@ let rec recover source tokens diagnostics =
             recover source tokens
               (List.map
                  (fun diagnostic ->
-                   if List.memq diagnostic wrong then { diagnostic with fixes = [] } else diagnostic)
+                   if List.exists (fun (fixed, _) -> fixed == diagnostic) wrong then
+                     { diagnostic with fixes = [] }
+                   else diagnostic)
                  diagnostics))
+
+(* A diagnostic's alternative fixes, which recovery does not apply, are
+   each checked alone. One left alone would be applied without review, so
+   fewer than two leave none. *)
+let with_working_alternatives source tokens diagnostics =
+  List.map
+    (fun (diagnostic : Diagnostic.t) ->
+      match diagnostic.fixes with
+      | _ :: _ :: _ -> (
+          match
+            List.filter
+              (fun fix -> Result.is_ok (works source tokens diagnostics [ (diagnostic, fix) ]))
+              diagnostic.fixes
+          with
+          | _ :: _ :: _ as fixes -> { diagnostic with fixes }
+          | _ -> { diagnostic with fixes = [] })
+      | _ -> diagnostic)
+    diagnostics
 
 let lex source =
   let tokens, diagnostics = scan source in
-  recover source tokens (without_colliding_renames (Source.text source) tokens diagnostics)
+  let diagnostics =
+    with_working_alternatives source tokens
+      (without_colliding_renames (Source.text source) tokens diagnostics)
+  in
+  recover source tokens diagnostics
 
 module For_testing = struct
   let can_end = Layout.can_end

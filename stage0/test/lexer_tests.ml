@@ -530,6 +530,7 @@ let () =
       error "Co`x`" ~code:String_delimiter ~at:"`";
       error "x = 1u8.4" ~code:Number_suffix ~at:"u8";
       equal_lists Fun.id "fixed" [] (fixed_texts "x =..<.y" ~code:Foreign_operator);
+      equal_lists Fun.id "fixed" [] (fixed_texts "f(01.: 0)" ~code:Number_leading_zero);
       equal_lists Fun.id "fixed" [] (fixed_texts "a \u{2260}\u{21D2} b" ~code:Confusable_character));
   test "a float with no digit before its `.` and a suffix" (fun () ->
       error "x = .5f" ~code:Number_missing_digits ~at:".";
