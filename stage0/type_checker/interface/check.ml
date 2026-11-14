@@ -276,6 +276,18 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                           (Printf.sprintf
                              "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
                              shown);
+                    (* A derived [Default] builds a field that has a default
+                       from that default, so only the other fields' types
+                       need [Default]. *)
+                    let needed =
+                      match interface.shape with
+                      | Record fields when Well_known.is Default trait ->
+                          List.filter_map
+                            (fun (field : Types.field) ->
+                              if field.field_has_default then None else Some field.field_type)
+                            fields
+                      | _ -> field_types
+                    in
                     List.iter
                       (fun type_ ->
                         let wanted : Types.trait_reference =
@@ -291,7 +303,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                                "A field of type `%s` does not implement `%s`, so `%s` cannot be \
                                 derived."
                                (Types.show type_) shown shown))
-                      field_types
+                      needed
                   end
               | _ -> ())
             traits

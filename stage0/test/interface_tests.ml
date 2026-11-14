@@ -104,6 +104,14 @@ let () =
   test "only a record derives Default" (fun () ->
       one_diagnostic Fixtures.Interface.only_a_record_derives_default "types.cannot_derive";
       no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
+  test "a field with a default needs no Default of its type to derive Default" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "type Token(text: String)\n\n\
+             type Session(token: Token = Token(text: \"none\"), count: Int64)\n\
+            \  derives Default\n" );
+        ]);
   test "deriving Serialize needs every field to implement it" (fun () ->
       one_diagnostic Fixtures.Interface.deriving_serialize_needs_every_field_to_implement
         "types.cannot_derive";

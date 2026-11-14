@@ -1,0 +1,4 @@
+type Positive(value: Int32)
+  invariant value > 0
+
+type Holder(item: Positive = Positive(value: 0))

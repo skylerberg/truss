@@ -118,6 +118,40 @@ let integer_instances database (path : Path.t) =
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
+(* The value a derived [Default] builds, from each field's default or its
+   type's [default()], meets the type's invariant. The derived method has
+   no source of its own, so its obligations are reported at the type. *)
+let derived_default database (key : Names.key) (source : Translate.source) =
+  let derives_default =
+    match Query.demand database Interface.Environment.type_interface key.path with
+    | Some interface -> List.exists (Well_known.is Default) interface.derives
+    | None -> false
+  in
+  let path =
+    Path.Method
+      {
+        owner = Derived { type_ = key.path; trait = Well_known.path Default };
+        name = "default";
+        receiver = Static;
+      }
+  in
+  match if derives_default then Query.demand database Infer.derived path else None with
+  | Some core ->
+      let outcome = Translate.function_ database { source with core } ~path in
+      let span = Translate.definition_span source in
+      List.map
+        (fun (obligation : Translate.obligation) ->
+          let message =
+            match obligation.code with
+            | Invariant ->
+                "The value that the derived `Default` builds from the fields' defaults may not \
+                 meet this type's invariant."
+            | _ -> "In the derived `Default`: " ^ obligation.message
+          in
+          { obligation with span; message })
+        outcome.obligations
+  | _ -> []
+
 let prove database (key : Names.key) =
   match (declaration database key, Translate.source_at_key database key) with
   | _ when is_specification_module key -> Not_proven_here
@@ -176,7 +210,14 @@ let prove database (key : Names.key) =
                 holes =
                   List.concat_map (fun (outcome : Translate.outcome) -> outcome.holes) outcomes;
               }
-        | Type, Type { invariants = _ :: _; _ } | Type, Type { potential = Some _; _ } ->
+        | Type, Type { invariants = _ :: _; _ } ->
+            let outcome = Translate.type_ database source ~path:key.path in
+            Obligations
+              {
+                outcome with
+                obligations = outcome.obligations @ derived_default database key source;
+              }
+        | Type, Type { potential = Some _; _ } | Type, Type { defaults = _ :: _; _ } ->
             Obligations (Translate.type_ database source ~path:key.path)
         | _ -> Not_proven_here
       with
