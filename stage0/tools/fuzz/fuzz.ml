@@ -7,15 +7,17 @@
    The files are Markdown documents; their ```truss blocks are the inputs it
    mutates. It checks that:
 
-   - no input raises, every token and diagnostic span is in bounds and in
-     order, and brackets are balanced;
-   - for one mistake inserted into an example, every fix removes its
-     diagnostic and adds no other;
+   - no input raises, every span of a token, a string's piece, or a
+     diagnostic is in bounds, no two tokens overlap, and brackets are
+     balanced;
+   - for one mistake made in an example, every fix removes its diagnostic
+     and adds no other, and the lexer's tokens equal those of the text one
+     of its fixes writes;
    - valid tokens printed with spaces between them lex back to the same
      tokens;
    - the parser never raises, every span in a tree is in bounds and inside
      the node around it, and no two expressions share an id;
-   - for one mistake inserted into an example, every fix of the lexer's or
+   - for one mistake made in an example, every fix of the lexer's or
      the parser's removes its diagnostic and adds no other;
    - the parser and the reference grammar accept and reject the same pieces
      of mutated examples.
@@ -39,13 +41,21 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let quoted = Diagnostic.quote text in
   let length = Array.length tokens in
   if length = 0 || tokens.(length - 1).kind <> End_of_file then fail "no End_of_file in %s" quoted;
-  let stack = ref [] and previous = ref start in
+  (* Each span starts at or after the end of the one before, so no byte of
+     the source belongs to two tokens. *)
+  let check_spans ~start ~stop spans =
+    ignore
+      (List.fold_left
+         (fun previous_stop (span : span) ->
+           if span.start < start || span.stop > stop then fail "span out of bounds in %s" quoted
+           else if span.start < previous_stop then fail "spans overlap in %s" quoted;
+           span.stop)
+         start spans)
+  in
+  check_spans ~start ~stop (Array.to_list (Array.map (fun (token : Token.t) -> token.span) tokens));
+  let stack = ref [] in
   Array.iter
     (fun (token : Token.t) ->
-      if token.span.start < start || token.span.stop > stop then
-        fail "span out of bounds in %s" quoted;
-      if token.span.start < !previous then fail "tokens out of order in %s" quoted;
-      previous := token.span.start;
       match token.kind with
       | Punctuation (Open bracket) -> stack := bracket :: !stack
       | Punctuation (Close bracket) -> (
@@ -53,6 +63,12 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
           | top :: rest when top = bracket -> stack := rest
           | _ -> fail "unbalanced brackets in %s" quoted)
       | String literal ->
+          check_spans ~start:token.span.start ~stop:token.span.stop
+            (literal.first.span
+            :: List.concat_map
+                 (fun ((interpolation : interpolation), (text : text)) ->
+                   [ interpolation.span; text.span ])
+                 (Array.to_list literal.rest));
           Array.iter
             (fun (interpolation : interpolation) ->
               check_tokens text ~start:interpolation.span.start ~stop:interpolation.span.stop
@@ -62,17 +78,28 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
     tokens;
   if !stack <> [] then fail "unbalanced brackets in %s" quoted
 
+(* Every span a diagnostic gives, its own, its notes', and its fixes' edits',
+   is in bounds. *)
+let check_diagnostic_spans text (diagnostic : Diagnostic.t) =
+  let spans =
+    (diagnostic.span :: List.map fst diagnostic.notes)
+    @ List.concat_map
+        (fun (fix : Diagnostic.span Diagnostic.fix) ->
+          List.map (fun (edit : Diagnostic.span Diagnostic.edit) -> edit.span) fix.edits)
+        diagnostic.fixes
+  in
+  if List.exists (fun (span : Diagnostic.span) -> span.stop > String.length text) spans then
+    fail "a span of %s is out of bounds in %s"
+      (Diagnostic.Code.name diagnostic.code)
+      (Diagnostic.quote text)
+
 let check_robust text =
   match lex text with
   | exception exception_ ->
       fail "raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
   | tokens, diagnostics ->
       check_tokens text ~start:0 ~stop:(String.length text) tokens;
-      List.iter
-        (fun (diagnostic : Diagnostic.t) ->
-          if diagnostic.span.stop > String.length text then
-            fail "diagnostic out of bounds in %s" (Diagnostic.quote text))
-        diagnostics
+      List.iter (check_diagnostic_spans text) diagnostics
 
 (* An example lexed and parsed piece by piece, as the documents' tests do. *)
 let snippet text =
@@ -119,11 +146,7 @@ let check_parse_robust text =
       fail "the parser raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
   | (file, diagnostics), _ ->
       List.iter (check_tree text) file.definitions;
-      List.iter
-        (fun (diagnostic : Diagnostic.t) ->
-          if diagnostic.span.stop > String.length text then
-            fail "a parser diagnostic is out of bounds in %s" (Diagnostic.quote text))
-        diagnostics
+      List.iter (check_diagnostic_spans text) diagnostics
 
 (* A parser diagnostic's claim about the reference grammar: that it
    rejects the tokens, that it accepts them because the rule is checked
@@ -275,6 +298,69 @@ let check_fixes_work text =
         diagnostic.fixes)
     (all text)
 
+(* The lexer recovers from a mistake by lexing the text that a fix of the
+   mistake writes: its tokens are the tokens of the fixed text, up to
+   offsets. Recovery that reads the text any other way gives the parser
+   tokens that no fixed program has, so the parser reports errors that the
+   fix would not leave.
+
+   Two exceptions are left out. An unclosed bracket's fix closes it where
+   the indentation says it was meant to close, which can be before tokens
+   that layout has already emitted, so layout inserts its closer later:
+   before the next definition, or at the end of the file. And a string is
+   compared by its tag and form alone: the fix of a format string of
+   another language, such as `f"{name}"`, rewrites its text into
+   interpolations, and recovery keeps the text as written. *)
+let check_recovery_matches_fix text =
+  let nowhere = Source.zero_width 0 in
+  let without_spans (token : Token.t) =
+    let kind =
+      match token.kind with
+      | String literal ->
+          String
+            {
+              tag = Option.map (fun (tag, _) -> (tag, nowhere)) literal.tag;
+              form = literal.form;
+              first = { value = ""; span = nowhere };
+              rest = [||];
+            }
+      | kind -> kind
+    in
+    { token with kind; span = nowhere }
+  in
+  (* The first token has no token before it, so the line breaks before it,
+     which a fix that removes the file's first lines removes, separate
+     nothing. *)
+  let shape text =
+    let tokens, diagnostics = lex text in
+    ( Array.mapi
+        (fun index token ->
+          let token = without_spans token in
+          if index = 0 then { token with line_break_before = false; blank_line_before = false }
+          else token)
+        tokens,
+      diagnostics )
+  in
+  let tokens, diagnostics = shape text in
+  List.iter
+    (fun (diagnostic : Diagnostic.t) ->
+      if
+        diagnostic.fixes <> []
+        && diagnostic.code <> Lexer Unclosed_bracket
+        && not
+             (List.exists
+                (fun fix ->
+                  (* [check_fixes_work] reports a fix whose edits overlap. *)
+                  match Diagnostic.apply_fix text fix with
+                  | exception Invalid_argument _ -> true
+                  | fixed -> fst (shape fixed) = tokens)
+                diagnostic.fixes)
+      then
+        fail "the lexer recovers from %s other than as its fix writes in %s"
+          (Diagnostic.Code.name diagnostic.code)
+          (Diagnostic.quote text))
+    diagnostics
+
 let mistakes =
   [|
     "\"";
@@ -337,6 +423,80 @@ let mistakes =
     "loop ";
     "elif ";
     "{ it }";
+    (* Strings of other languages, and Truss's raw strings. *)
+    "r\"";
+    "r#\"";
+    "\"#";
+    "b\"";
+    "b'";
+    "f\"";
+    "@\"";
+    "$\"";
+    "`";
+    "$$\"\"\"";
+    "\"\"\"\n";
+    "$${";
+    "'a'";
+    "'a";
+    (* Escapes, which matter inside a string. *)
+    "\\n";
+    "\\u{";
+    "\\u{1F600}";
+    "\\u{D800}";
+    "\\x41";
+    (* Operators of other languages. *)
+    "...";
+    "..<";
+    "<>";
+    "!==";
+    ":=";
+    "|>";
+    "**";
+    "--";
+    (* Numbers. *)
+    "1.";
+    ".5";
+    "0b2";
+    "1__0";
+    "0X1";
+    "1E5";
+    "1u8";
+    "99999999999999999999999";
+    (* Comments and line breaks. *)
+    "/* /* */";
+    "*/";
+    "\r\n";
+    "\t";
+    "\u{2028}";
+    "\u{0085}";
+    "\u{FEFF}";
+    (* Characters that look like ASCII spaces or punctuation. *)
+    "\u{00A0}";
+    "\u{3000}";
+    "\u{2003}";
+    "\u{201C}";
+    "\u{201D}";
+    "\u{2018}";
+    "\u{2019}";
+    "\u{FF08}";
+    "\u{FF09}";
+    "\u{FF5B}";
+    "\u{FF0C}";
+    "\u{FF1D}";
+    "\u{2013}";
+    "\u{2264}";
+    "\u{2260}";
+    "\u{2192}";
+    "\u{21D2}";
+    "\u{2200}";
+    (* Names outside ASCII: accented, decomposed, Greek, a Cyrillic letter
+       that looks Latin, a ligature, and the ohm sign that NFC replaces. *)
+    "caf\u{00E9}";
+    "e\u{0301}";
+    "\u{03BB}";
+    "\u{0430}";
+    "\u{FB01}";
+    "\u{2126}";
   |]
 
 let round_trip random =
@@ -399,22 +559,58 @@ let () =
     prerr_endline "fuzz: give Markdown files with ```truss blocks";
     exit 2);
   let example () = examples.(Random.State.int random (Array.length examples)) in
-  let insert text piece =
-    let at = Random.State.int random (String.length text + 1) in
-    String.sub text 0 at ^ piece ^ String.sub text at (String.length text - at)
+  (* Bytes at random, or characters at random: uniform bytes are almost
+     never valid UTF-8 beyond one byte, so names and confusable characters
+     outside ASCII need code points of their own. *)
+  let random_text () =
+    let length = Random.State.int random 120 in
+    if Random.State.bool random then
+      String.init length (fun _ -> Char.chr (Random.State.int random 256))
+    else
+      let buffer = Buffer.create length in
+      for _ = 1 to length do
+        let code_point =
+          match Random.State.int random 4 with
+          | 0 | 1 -> 0x20 + Random.State.int random 0x5F
+          | 2 -> 0x80 + Random.State.int random (0x3000 - 0x80)
+          | _ -> Random.State.int random 0x110000
+        in
+        if Uchar.is_valid code_point then Buffer.add_utf_8_uchar buffer (Uchar.of_int code_point)
+      done;
+      Buffer.contents buffer
+  in
+  (* One mistake: a range of the text replaced by a mistake from the list,
+     by a piece of another example, or by nothing. An empty range makes it
+     an insertion. *)
+  let mutate text =
+    let length = String.length text in
+    let at = Random.State.int random (length + 1) in
+    let removed =
+      if Random.State.bool random then 0 else min (length - at) (1 + Random.State.int random 8)
+    in
+    let piece =
+      match Random.State.int random 6 with
+      | 0 when removed > 0 -> ""
+      | 1 ->
+          let other = example () in
+          let start = Random.State.int random (String.length other + 1) in
+          String.sub other start (min (String.length other - start) (Random.State.int random 40))
+      | _ -> mistakes.(Random.State.int random (Array.length mistakes))
+    in
+    String.sub text 0 at ^ piece ^ String.sub text (at + removed) (length - at - removed)
   in
   for _ = 1 to !count do
-    check_robust
-      (String.init (Random.State.int random 120) (fun _ -> Char.chr (Random.State.int random 256)));
+    check_robust (random_text ());
     let several = ref (example ()) in
     for _ = 1 to 1 + Random.State.int random 4 do
-      several := insert !several mistakes.(Random.State.int random (Array.length mistakes))
+      several := mutate !several
     done;
     check_robust !several;
     check_parse_robust !several;
     check_parsers_agree !several;
-    check_fixes_work
-      (insert (example ()) mistakes.(Random.State.int random (Array.length mistakes)));
+    let one = mutate (example ()) in
+    check_fixes_work one;
+    check_recovery_matches_fix one;
     round_trip random
   done;
   if !failures > 0 then begin

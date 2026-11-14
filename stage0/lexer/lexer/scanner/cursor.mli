@@ -9,9 +9,15 @@ type t = {
   mutable line_is_blank : bool;
   mutable unterminated_at_end : bool;
   names : (string, Names.checked) Hashtbl.t;
+  mutable previous : Token.kind option;
+  is_peek : bool;
 }
 
 val create : Source.t -> Diagnostic.Collector.t -> t
+
+val peek : t -> int -> t
+(** [peek cursor index] is a copy of [cursor] at [index] for scanning ahead: what it scans changes
+    nothing in [cursor], and what it reports is discarded. *)
 
 type ending = Closed | Unterminated
 type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
@@ -47,3 +53,8 @@ val spaces_before : t -> int -> int
 val only_spaces_before : t -> int -> bool
 val describe_code_point : int -> string
 val show_character : t -> int -> string
+
+val replace_code : t -> Source.span -> string -> Diagnostic.span Diagnostic.edit
+(** [replace_code cursor span code] replaces [span] with the tokens [code], separated by a space
+    from a neighbor that would otherwise join one of them into another token. With [code] empty, it
+    deletes [span], and leaves a space if the two neighbors would join. *)

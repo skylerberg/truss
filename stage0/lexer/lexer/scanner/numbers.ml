@@ -436,7 +436,8 @@ let check_decimal text =
       ]
   in
   let value =
-    if not is_float then Token.Integer (Z.of_string whole_digits)
+    (* `3f` is the float that its fix writes, `3.0`. *)
+    if not (is_float || has_float_suffix) then Token.Integer (Z.of_string whole_digits)
     else
       let fraction_digits =
         match parts.fraction with Some fraction -> digits fraction | None -> ""

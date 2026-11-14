@@ -53,6 +53,20 @@ let shown tokens =
 
 let tokens_of text = shown (fst (lex text))
 
+(* The tokens of [text] as recovery must match a fix's: a string by its tag
+   and form alone, since the fix of a format string of another language,
+   such as `f"{name}"`, rewrites its text into interpolations, and recovery
+   keeps the text as written. *)
+let recovered_tokens text =
+  Array.to_list (fst (lex text))
+  |> List.map (fun (token : Token.t) ->
+      match token.kind with
+      | String { tag; form; _ } ->
+          let tag = match tag with Some (tag, _) -> tag | None -> "" in
+          let form = match form with Ordinary -> "string" | Raw _ -> "raw string" in
+          tag ^ form
+      | _ -> show token)
+
 (* Asserts that [text] lexes with no diagnostics into [expected]. *)
 let tokens text expected =
   List.iter (fun code -> fail "unexpected %s" code) (codes text);
@@ -94,7 +108,15 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
           equal_lists (Printf.sprintf "%S") "fixed text" (fixed :: alternatives) results;
           List.iter
             (fun result -> List.iter (fail "the fixed text %S has %s" result) (codes result))
-            results)
+            results;
+          (* The lexer recovers as one of its fixes writes, so the parser
+             reads the tokens of a fixed program. An unclosed bracket's fix
+             closes it where the indentation says, which layout cannot see. *)
+          let recovered = recovered_tokens text in
+          if
+            code <> Unclosed_bracket
+            && not (List.exists (fun result -> recovered_tokens result = recovered) results)
+          then fail "%S recovers as [%s], which no fix writes" text (String.concat "; " recovered))
   | diagnostics ->
       fail "expected one diagnostic, got [%s]"
         (String.concat "; "
@@ -146,7 +168,8 @@ let () =
   test "a forbidden character between names becomes a space" (fun () ->
       error "a\x01b" ~code:Forbidden_character ~at:"\x01" ~fixed:"a b");
   test "a forbidden character in a string becomes an escape" (fun () ->
-      error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2" ~fixed:"\"\\u{202E}\"");
+      error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2" ~fixed:"\"\\u{202E}\"";
+      equal_lists Fun.id "tokens" (tokens_of "\"\\u{202E}\"") (tokens_of "\"\xE2\x80\xAE\""));
   test "a forbidden character in a raw string has no fix" (fun () ->
       error "\"\"\"\xE2\x80\x8Bx\"\"\"" ~code:Forbidden_character ~at:"\xE2");
   test "joiners and variation selectors are allowed in strings" (fun () ->
@@ -217,6 +240,9 @@ let () =
       error "3u8" ~code:Number_suffix ~at:"u8" ~fixed:"3";
       error "1.5f" ~code:Number_suffix ~at:"f" ~fixed:"1.5";
       error "3f" ~code:Number_suffix ~at:"f" ~fixed:"3.0");
+  test "an integer with a float suffix is the float its fix writes" (fun () ->
+      equal_lists Fun.id "tokens" [ "3e0"; "NL" ] (tokens_of "3f");
+      equal_lists Fun.id "tokens" [ "5e0"; "NL" ] (tokens_of "5d"));
   test "prefixes and exponents are lowercase" (fun () ->
       error "0X1F" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0x1F";
       error "1E9" ~code:Number_uppercase_exponent ~at:"E" ~fixed:"1e9");
@@ -318,7 +344,9 @@ let () =
       error {|r"""\d+"""|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|});
   test "a C# string becomes a Truss string" (fun () ->
       error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
-      error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|});
+      error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|};
+      (* Without the space, `Path` would become the string's tag. *)
+      error {|Path$"{name}"|} ~code:String_prefix ~at:"$" ~fixed:{|Path "${name}"|});
   test "a template literal becomes an ordinary string" (fun () ->
       error "`Hello ${name}`" ~code:String_delimiter ~at:"`" ~fixed:{|"Hello ${name}"|};
       error "`say \"hi\"`" ~code:String_delimiter ~at:"`" ~fixed:{|"say \"hi\""|};
@@ -485,7 +513,26 @@ let () =
       error "a \u{2264} b" ~code:Confusable_character ~at:"\u{2264}" ~fixed:"a <= b";
       error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
       error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
-      equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"))
+      equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"));
+  test "a fix does not join the code it writes to a neighbor" (fun () ->
+      error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"p forall x";
+      error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:"a- >b";
+      error "a\u{2013}b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:"a-b";
+      error "fn.5" ~code:Number_missing_digits ~at:"." ~fixed:"fn 0.5";
+      error "a<>=b" ~code:Foreign_operator ~at:"<>" ~fixed:"a!= =b";
+      error "a..<.b" ~code:Foreign_operator ~at:"..<" ~fixed:"a.. .b";
+      error "Co@\"x\"" ~code:String_prefix ~at:"@" ~fixed:"Co \"\"\"x\"\"\"";
+      error "Co`x`" ~code:String_delimiter ~at:"`" ~fixed:"Co \"x\"");
+  test "a float with no digit before its `.` and a suffix" (fun () ->
+      error "x = .5f" ~code:Number_missing_digits ~at:"." ~fixed:"x = 0.5");
+  test "a confusable character after `1.` is not a member" (fun () ->
+      equal_lists Fun.id "tokens" [ "0e0"; "-"; "1"; "NL" ] (tokens_of "0.\u{2013}1");
+      equal_lists Fun.id "tokens" [ "1"; "."; "forall" ] (tokens_of "1.\u{2200}");
+      equal_lists Fun.id "tokens" (tokens_of "1. .max") (tokens_of "1.\u{00A0}.max");
+      equal_lists Fun.id "tokens" (tokens_of "f( .5)") (tokens_of "f(\u{00A0}.5)");
+      equal_lists Fun.id "tokens" (tokens_of "f(\u{FF08}.5))") (tokens_of "f((.5))"));
+  test "`...` before a float with no digit before its `.` is a range" (fun () ->
+      equal_lists Fun.id "tokens" [ "3"; "..="; "14e-2"; "NL" ] (tokens_of "3....14"))
 
 (* Layout *)
 

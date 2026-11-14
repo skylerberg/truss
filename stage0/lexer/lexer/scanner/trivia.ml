@@ -120,40 +120,6 @@ let character_literal_end ?(after_prefix = false) cursor start =
         Some (close + 1)
     | _ -> None
 
-(* Whether the token before [index] can end an operand: a name, a literal, a
-   closer, `?`, or one of the keywords that are expressions. It is read
-   from the text, since the scanner does not keep the token before. *)
-let after_operand cursor index =
-  let rec back position =
-    if position < Source.line_start cursor.source 0 then None
-    else
-      let current = byte cursor position in
-      if is_space current || is_line_break current then back (position - 1) else Some position
-  in
-  match back (index - 1) with
-  | None -> false
-  | Some last ->
-      let current = byte cursor last in
-      if is_ascii_name_byte current then begin
-        let rec word_start position =
-          if position > 0 && is_ascii_name_byte (byte cursor (position - 1)) then
-            word_start (position - 1)
-          else position
-        in
-        let first = word_start last in
-        match Token.word (String.sub cursor.text first (last + 1 - first)) with
-        | Some (Keyword (True | False | Self_value | Self_type | Todo | Unreachable)) | None -> true
-        | Some _ -> false
-      end
-      else current >= 0x80 || List.mem (Char.chr current) [ '"'; ')'; ']'; '}'; '?' ]
-
-(* Whether an operand starts at [index], after spaces: a name, a literal, or
-   an opening `(` or `[`. *)
-let before_operand cursor index =
-  let current = byte cursor (skip_spaces cursor index) in
-  is_ascii_name_byte current || current >= 0x80
-  || (current >= 0 && List.mem (Char.chr current) [ '"'; '('; '[' ])
-
 (* An attribute of Rust, `#[derive(...)]` or `#![...]`: like a comment, it
    lexes as nothing, up to the end of its line. *)
 let attribute cursor =
