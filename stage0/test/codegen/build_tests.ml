@@ -221,7 +221,7 @@ let () =
       let cache = Build.cache directory in
       let objects () =
         match
-          Build.For_testing.objects (Lazy.force compiler) cache settings
+          Build.For_testing.objects (Lazy.force compiler) cache (Lazy.force settings)
             [ ("one", "int one(void) { return 1; }\n") ]
         with
         | Ok [ path ] -> path

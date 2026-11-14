@@ -20,9 +20,9 @@ let arguments_alone state env (arguments : argument list) (type_ : Types.ty) =
   type_
 
 (* The [mut] or [own] an argument is written with, if any. *)
-let mark_of (value : expression) : Core.mark option =
+let mode_keyword_of (value : expression) : Core.mode_keyword option =
   match value.kind with
-  | Mode (_, marked) -> Some { written = value.id; marked = marked.id }
+  | Mode (_, operand) -> Some { written = value.id; operand = operand.id }
   | _ -> None
 
 (* An indirect call, through a function value. Arguments are positional,
@@ -62,7 +62,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
               Tables.expression = argument.value.id;
               parameter_index = index;
               mode;
-              mark = mark_of argument.value;
+              mode_keyword = mode_keyword_of argument.value;
             })
           pairs
       in
@@ -92,7 +92,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
 and check_argument state env (value : expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
-    | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
+    | Mode (_, inner) when Option.is_none (call_with_mode_keyword state inner) -> inner
     | _ -> value
   in
   let actual = expression state env ~expected:parameter.type_ inner in
@@ -301,7 +301,7 @@ and check_arguments state env (parameters : Types.parameter_info list) matched ~
       Tables.expression = argument.value.id;
       parameter_index = index + offset;
       mode;
-      mark = mark_of argument.value;
+      mode_keyword = mode_keyword_of argument.value;
     }
   in
   let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in

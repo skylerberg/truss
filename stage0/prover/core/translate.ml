@@ -143,7 +143,7 @@ type frame = {
       (** Each counter's cost so far in the definition being proven. *)
 }
 
-(* The locals, and whether [self], a loop's body may change. *)
+(* The locals, and whether [self], a loop's body may mutate. *)
 type changed = { changed_locals : Core.local list; changes_self : bool }
 
 type loop_rule =
@@ -154,7 +154,7 @@ type loop_cost = {
   counter : Costs.counter;
   entry : Logic.term;  (** The counter on entry to the loop. *)
   rule : loop_rule;
-  held : (frame -> Logic.term) option;  (** The potential of the values the loop changes. *)
+  held : (frame -> Logic.term) option;  (** The potential of the values the loop mutates. *)
   held_on_entry : Logic.term option;  (** That potential on entry to the loop. *)
   gained_at_head : Logic.term option;
       (** For a [cost] clause of a loop whose changed values hold potential: what the clause counts
@@ -225,7 +225,7 @@ type driven = {
           lent. The loop is then over the positions of the elements, and [yielded] holds the
           elements. *)
   kept_count : Core.expression option;
-      (** In a loop that changes the elements of a collection, the call of the collection's [count],
+      (** In a loop that mutates the elements of a collection, the call of the collection's [count],
           whose value every iteration keeps. *)
   element_call : Core.expression option;
       (** In a loop that reads the elements of a collection, the call of the collection's [element]
@@ -233,7 +233,7 @@ type driven = {
           the same value in every iteration, and [yielded] holds those values. *)
   bind_element : frame -> Logic.term -> frame;
   changed_in : frame -> changed;
-      (** The values the loop changes: those its body changes, and a cursor it pulls. *)
+      (** The values the loop mutates: those its body mutates, and a cursor it pulls. *)
   changed_by_body : frame -> changed;
   run_body : frame -> Logic.term -> frame list * frame list;
   bindings : frame -> frame;
@@ -1469,7 +1469,7 @@ let law_unshown database (impl : Path.t) (trait : Types.trait_reference) for_typ
 (* Whether a body is functional, so that it can be the function's
    definition: [let], [if], [match], [is], calls, fields, building values,
    [with], operators, and quantifiers, with no [var], assignment, loop,
-   [return], or argument lent to change. *)
+   [return], or argument lent to mutate. *)
 let is_functional walk =
   let fine = ref true in
   let rec visit =
@@ -1520,7 +1520,7 @@ let make_contract database path ~own ~others ~body =
     match signature with
     | Some (signature : Types.signature) -> (
         (* A function of its arguments: it may take them [own], but
-           changes none of the caller's. *)
+           mutates none of the caller's. *)
         signature.uses = Types.no_capabilities
         && signature.terminates
         && List.for_all
@@ -1669,6 +1669,12 @@ let comparison (comparison : comparison) =
   | Greater -> Some ">"
   | Greater_equal -> Some ">="
   | Not_equal -> None
+
+(* The longest literal whose bytes are stated one fact each. Every query
+   that reaches a literal carries its facts, so a long literal, such as a
+   table embedded as text, stalls the solver. A longer literal is known by
+   its length alone. *)
+let literal_bytes_limit = 256
 
 let rec expression context frame (node : expression) : (frame * Logic.term) option =
   if frame.source.key = Some context.home then
@@ -3250,7 +3256,7 @@ and apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
         (Path.Method { owner = capability; name; receiver = Static })
         (capability_contract context.database capability name)
   | Intrinsic { operation; type_arguments } ->
-      (* Lending a part of a storage changes nothing until the lend ends,
+      (* Lending a part of a storage mutates nothing until the lend ends,
          when the borrower's final value is written back. *)
       let frame =
         match operation with
@@ -3539,7 +3545,7 @@ and libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
                          ] )))
                 counted
           | _, Some counted ->
-              needs "have the elements it changes"
+              needs "have the elements it mutates"
                 (Logic.Operation ("<=", [ counted; length element (model before) ]))
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
@@ -4805,12 +4811,13 @@ and text_value context frame (ty : Types.ty) text =
       let holds model =
         add_fact context
           (Logic.equal (sequence_length context byte model) (Logic.int (String.length text)));
-        String.iteri
-          (fun index character ->
-            match sequence_at context byte model (Logic.int index) with
-            | Some at -> add_fact context (Logic.equal at (Logic.int (Char.code character)))
-            | None -> ())
-          text
+        if String.length text <= literal_bytes_limit then
+          String.iteri
+            (fun index character ->
+              match sequence_at context byte model (Logic.int index) with
+              | Some at -> add_fact context (Logic.equal at (Logic.int (Char.code character)))
+              | None -> ())
+            text
       in
       Option.iter holds (model_of context ty literal ~element:byte);
       match constructors context ty with
@@ -5506,7 +5513,7 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
   let carries_value = not (Types.equal result_type Types.unit || result_type = Types.Never) in
   let scoped = end_scope ~outer:frame in
   (* Each arm is tried where no arm before it was taken: where its patterns
-     did not match, or they did and its guard, which may change locals, was
+     did not match, or they did and its guard, which may mutate locals, was
      false. *)
   let untaken = ref (Some frame) in
   let reached =
@@ -5548,7 +5555,7 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
               | None -> (entered, [])
             in
             untaken := join_frames context (restrict current (Logic.not_ condition) :: passed_over);
-            (* A formula changes nothing, so a binding an arm lends [mut] ends
+            (* A formula mutates nothing, so a binding an arm lends [mut] ends
                with the value it began with, and the scrutinee keeps its own. *)
             block_value context entered arm_.body)
       arms
@@ -6946,7 +6953,7 @@ and function_value_amount context frame (function_type : Types.function_type) ca
 
 (* The intrinsic storage and view operations, as the compiler declares
    them: a storage or a view is modeled as the sequence of its elements,
-   and each operation reads or changes that sequence. An operation that
+   and each operation reads or mutates that sequence. An operation that
    stops the program on a bad index assumes on return that the index was
    valid. *)
 and buffer_operation context frame ~(site : Invocation.site) (operation : Intrinsic.operation)
@@ -7144,7 +7151,7 @@ and buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
       assume context frame (in_bounds index (view buffer));
       at (view buffer) index
   | Storage_view_mut, [ buffer ] ->
-      (* A view of the storage's elements, to change them through. The
+      (* A view of the storage's elements, to mutate them through. The
          storage keeps its elements; a static one gets a buffer of its own,
          so its capacity may change. *)
       assume context frame
@@ -7243,7 +7250,7 @@ and buffer_model context (builtin : Intrinsic.builtin) element term =
   Logic.Apply (symbol, [ term ])
 
 (* Whether a call through a value of a function type is a function in the
-   logic: it ends, uses no capabilities, changes none of its arguments, and
+   logic: it ends, uses no capabilities, mutates none of its arguments, and
    returns its result. *)
 and in_the_logic (function_type : Types.function_type) =
   Types.terminates function_type
@@ -7518,7 +7525,7 @@ and trait_method_time context frame (method_ : Path.t) self_type =
 (* A bound on [time(Types.method)] for a known type: a copy of a [Plain] value
    that holds no potential takes one step, and the method of an [impl] whose
    time clause is a constant [O(k)] takes at most [k] counted as a call is,
-   where it makes no potential, since nothing it changes or returns can
+   where it makes no potential, since nothing it mutates or returns can
    hold any. *)
 and method_time_bound context (method_ : Path.t) self_type =
   let holds ty = try has_potential context ty with Foreign_unsupported _ -> true in
@@ -7605,14 +7612,14 @@ and copied context frame ty term =
    per-iteration bound, [per], which is inferred from the body's cost and
    then proven of each iteration.
 
-   Where the values a loop changes hold potential, which amortized callees
+   Where the values a loop mutates hold potential, which amortized callees
    spend and save, a second bound, [per_held], bounds the loop's cost so far
    plus the potential it holds. That sum telescopes when each iteration
    spends potential that earlier ones saved. Both bounds are assumed at the
    head. The assumption is sound even before the bound is inferred, since
    each run of the loop has a last iteration. Only the bound an iteration's
    cost needs is inferred and proven. [held] maps a frame to the potential
-   of the values the loop changes. *)
+   of the values the loop mutates. *)
 and loop_costs context frame (clauses : loop_clause list) ~held =
   List.map
     (fun (counter : Costs.counter) ->
@@ -7672,7 +7679,7 @@ and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Cor
   | Exactly -> Logic.equal since amount
   | At_most -> Costs.at_most since amount
 
-(* The potential that the values a loop changes have gained since its
+(* The potential that the values a loop mutates have gained since its
    entry, where the loop's [cost] clause counts it. An iteration that calls
    an amortized callee spends or saves potential, so its clause bounds the
    cost so far plus the potential gained: that sum telescopes where the cost
@@ -7816,14 +7823,14 @@ and loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
                 (fun (frame : frame) spent ->
                   oblige context frame Cost span
                     "The prover cannot show that this iteration of the loop costs no more than the \
-                     per-iteration bound it inferred from the values the loop does not change: \
+                     per-iteration bound it inferred from the values the loop does not mutate: \
                      give the loop a `cost` clause."
                     (counted_with ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
           | None ->
               oblige context head Cost span
                 "The prover cannot bound the cost of one iteration of this loop by the values the \
-                 loop does not change, so it cannot count the loop's cost: give the loop a `cost` \
+                 loop does not mutate, so it cannot count the loop's cost: give the loop a `cost` \
                  clause."
                 (Logic.Boolean false)))
     costs
@@ -8194,7 +8201,7 @@ and statement context frame (node : statement) : frame option =
   else statement_kind context frame node
 
 (* A proof is ghost code, which a build leaves out: its facts are known
-   after it, and, being a formula, it changes nothing. A [todo] in it stands
+   after it, and, being a formula, it mutates nothing. A [todo] in it stands
    for the proof still to write, so the code after it is not proven on the
    paths that reach one, which this returns. *)
 and ghost context frame body =
@@ -8367,7 +8374,7 @@ and array_updated context frame (array_type : Types.ty) array index part =
       updated
   | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show array_type)))
 
-(* The owner of a slice lent to change, after the change: as long as it
+(* The owner of a slice lent to mutate, after the change: as long as it
    was, and the same outside the slice's run. *)
 and sliced_owner_changed context frame ~(owner : passed_place) ~owner_type ~start ~stop =
   let element =
@@ -8436,13 +8443,13 @@ and havoc_root context frame (place : place) =
   | Some Self -> (
       match frame.self_type with
       | Some ty -> { frame with self = Some (arrive context frame "changed" ty) }
-      | None -> raise (Foreign_unsupported "changing `self` outside a method"))
+      | None -> raise (Foreign_unsupported "mutating `self` outside a method"))
   | Some local -> (
       match local_type context frame local with
       | Some ty ->
           { frame with locals = Locals.add local (arrive context frame "changed" ty) frame.locals }
-      | None -> raise (Foreign_unsupported "changing this place"))
-  | None -> raise (Foreign_unsupported "changing this place")
+      | None -> raise (Foreign_unsupported "mutating this place"))
+  | None -> raise (Foreign_unsupported "mutating this place")
 
 and store context frame (place : place) new_value =
   match place with
@@ -8551,7 +8558,7 @@ and store_lent context frame (place : place) leave =
                (Printf.sprintf "assigning to a field of `%s`" (Types.show base_type))))
   | _ -> store context frame place (leave (snd (place_value context frame place)))
 
-(* The values a [for] loop's body may change: its core form's, as the MIR
+(* The values a [for] loop's body may mutate: its core form's, as the MIR
    holds them. *)
 
 and havoc context frame (changed : changed) =
@@ -8568,7 +8575,7 @@ and havoc context frame (changed : changed) =
   | true, Some ty -> { frame with self = Some (arrive context frame "loop" ty) }
   | _ -> frame
 
-(* Validity is an invariant of every loop: each value the loop changes
+(* Validity is an invariant of every loop: each value the loop mutates
    that is valid on entry is valid at the head of each iteration, so each
    iteration must keep it valid. A value that is not valid on entry, as
    [self] may not be in a private method that updates it, is not held to
@@ -8696,7 +8703,7 @@ and loop_over ~(driven : driven) context frame =
   | Over_range { low; high; inclusive } ->
       (* In a loop over the elements of a collection, [yielded] holds the
          elements. Where the loop reads them, each is the value of the
-         collection's [element] at its position. Where the loop changes
+         collection's [element] at its position. Where the loop mutates
          them, the prover knows them by their number alone. *)
       let element =
         substituted context frame (Option.value driven.lent_element ~default:driven.element_type)
@@ -8753,7 +8760,7 @@ and loop_over ~(driven : driven) context frame =
           costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
-      (* A loop that changes the elements of a collection keeps their number,
+      (* A loop that mutates the elements of a collection keeps their number,
          which is the loop's stop: each iteration's [element] must. *)
       let keeps_count (at : frame) =
         Option.map
@@ -8921,7 +8928,7 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
     if context.terminates then match measured frame with Some [ entry ] -> Some entry | _ -> None
     else None
   in
-  (* The loop holds the potential of the values its body changes, and of
+  (* The loop holds the potential of the values its body mutates, and of
      the cursor only where its [next] is amortized. A [next] that is not
      amortized neither spends nor saves the cursor's potential, so counting
      it would leave each iteration's cost depending on a value the loop
@@ -9002,7 +9009,7 @@ and own_cursor_loop ~(driven : driven) context frame (cursor_access : passed_pla
    [start] is the values received before an iteration, at the head, and
    [receive] is the value an iteration receives, with the [ensures] of the
    cursor's [next] for it assumed. [holds] is the values whose potential
-   the loop holds, among those it changes. *)
+   the loop holds, among those it mutates. *)
 and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?(most = []) ~(driven : driven)
     context frame ~element_type ~changed ~holds ~start ~receive =
   let clauses = driven.loop_clauses in
@@ -9055,14 +9062,14 @@ type run = {
   definitions : (Mir.local, Mir.rvalue * Core.id option * Core.origin) Hashtbl.t;
   places : (Mir.local, Mir.place) Hashtbl.t;
   lends : (Mir.local, frame -> Logic.term -> frame) Hashtbl.t;
-      (** For each part lent to change, how its final value goes back where it was lent from, as the
+      (** For each part lent to mutate, how its final value goes back where it was lent from, as the
           lend ends *)
   passed_lambdas : (Mir.local, unit) Hashtbl.t;
       (** The temporaries holding a lambda that a call takes as an argument, which the call reads
           with its parameter's facts *)
   slices : (Mir.local, Invocation.site * Mir.place * Logic.term * Logic.term) Hashtbl.t;
       (** Each temporary that holds a slice: where it is made, the collection it views, and its
-          run's start and stop, for a callee that changes the slice *)
+          run's start and stop, for a callee that mutates the slice *)
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
 }
 
@@ -9529,7 +9536,7 @@ let mir_lend context frame run part (call : Mir.call) =
     | None -> None
   end
 
-(* The place a place stands for: through each binding of a part to change,
+(* The place a place stands for: through each binding of a part to mutate,
    and each temporary that holds a borrow of a place. *)
 let borrowed run (place : Mir.place) =
   let rec through visited (place : Mir.place) =
@@ -9602,7 +9609,7 @@ let rec mir_written_back context run ty (part : Mir.yielded) frame after =
       | None -> raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty))))
   | Part (Use _ | Take _ | Constant _) -> frame
 
-(* The frame with each binding of a part to change holding the part's
+(* The frame with each binding of a part to mutate holding the part's
    value, for the core form's expressions that name the binding: a loop's
    clauses and measure, and the specifications read here. A change through
    the binding goes to the part. *)
@@ -9628,7 +9635,7 @@ let mir_statement context frame run (statement : Mir.statement) =
         value = Operand (Borrow { place; mode = Mut; _ });
         _;
       } ->
-      (* A binding of a part to change is the part itself. *)
+      (* A binding of a part to mutate is the part itself. *)
       Hashtbl.replace run.places local place;
       Some frame
   | Assign { target = { root = Local local; projections = [] } as target; value = Lambda _; _ }
@@ -10526,7 +10533,7 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
   (* An amortized bound is on the cost plus the change in potential of the
-     definition's result and changed values. *)
+     definition's result and mutated values. *)
   let spent = if promise.clause.amortized then Costs.plus spent (change ()) else spent in
   let amount =
     match promise.clause.bound with

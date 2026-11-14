@@ -12,11 +12,13 @@ open State
 open Modes
 open Instantiation
 
-(* One version of a method: a method of the type, or a trait method. *)
-type version = Own_version of Path.t | Trait_version of Types.trait_reference * Types.trait_method
+(* One overload of a method: a method of the type, or a trait method. *)
+type overload =
+  | Type_overload of Path.t
+  | Trait_overload of Types.trait_reference * Types.trait_method
 
-(* The version of a method that a receiver selects: the version its mark
-   names, or the read-only version if it has no mark. *)
+(* The overload of a method that a receiver selects: the overload its mode keyword
+   names, or the read-only overload if it has no mode keyword. *)
 let marked_receiver (receiver : expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
 
@@ -429,8 +431,8 @@ and trait_candidates state receiver_type name =
 
 (* Whether the traits that declare a method of the same name are related:
    each requires, or is required by, another trait in the list. Only then
-   are their methods versions of one method (such as a [self] version and a
-   [mut self] version). Unrelated traits that share a method name stay
+   are their methods overloads of one method (such as a [self] overload and a
+   [mut self] overload). Unrelated traits that share a method name stay
    ambiguous, whatever receiver each method takes. Otherwise a trait added
    later could take over a call on a temporary without an error. *)
 and one_family state (traits : Types.trait_reference list) =
@@ -450,13 +452,13 @@ and one_family state (traits : Types.trait_reference list) =
   in
   match traits with [] -> true | first :: rest -> grow [ first ] rest
 
-(* The versions of a method name on a type, by receiver mode: the methods of
+(* The overloads of a method name on a type, by receiver mode: the methods of
    the type together with the methods of the related traits that declare the
    name. [Error] with the traits if they are not related. If the type and a
-   trait both declare a version with the same receiver, the type's version
+   trait both declare an overload with the same receiver, the type's overload
    is used; the clash is reported at the [impl]. *)
-and versions state receiver_type name :
-    ((Path.receiver * version) list, Types.trait_reference list) Result.t =
+and overloads state receiver_type name :
+    ((Path.receiver * overload) list, Types.trait_reference list) Result.t =
   let candidates = trait_candidates state receiver_type name in
   if not (one_family state (List.map fst candidates)) then Error (List.map fst candidates)
   else
@@ -465,7 +467,7 @@ and versions state receiver_type name :
       | Types.Named { path; _ } ->
           List.filter_map
             (fun (receiver, method_path) ->
-              if receiver = Path.Static then None else Some (receiver, Own_version method_path))
+              if receiver = Path.Static then None else Some (receiver, Type_overload method_path))
             (Members.own_methods state.database path name)
       | _ -> []
     in
@@ -474,7 +476,7 @@ and versions state receiver_type name :
         (fun ((trait : Types.trait_reference), methods) ->
           List.map
             (fun (method_ : Types.trait_method) ->
-              (method_.method_receiver, Trait_version (trait, method_)))
+              (method_.method_receiver, Trait_overload (trait, method_)))
             methods)
         candidates
     in
@@ -482,17 +484,17 @@ and versions state receiver_type name :
       (List.filter_map
          (fun (receiver : Path.receiver) ->
            Option.map
-             (fun version -> (receiver, version))
+             (fun overload -> (receiver, overload))
              (List.assoc_opt receiver (own @ from_traits)))
          [ Read; Mut; Own ])
 
-(* The callee of the version of a method of a type that takes [self] with
+(* The callee of the overload of a method of a type that takes [self] with
    [receiver], and the method's signature as a call instantiates it. *)
 and method_version state (span : span) type_ name (receiver : Path.receiver) :
     (Tables.callee * Types.signature) option =
-  let found = match versions state type_ name with Ok found -> found | Error _ -> [] in
+  let found = match overloads state type_ name with Ok found -> found | Error _ -> [] in
   match List.assoc_opt receiver found with
-  | Some (Own_version method_path) -> (
+  | Some (Type_overload method_path) -> (
       match function_signature state method_path with
       | Some (Ok signature) ->
           let instance = instantiate state span signature in
@@ -503,7 +505,7 @@ and method_version state (span : span) type_ name (receiver : Path.receiver) :
             ( Function { path = method_path; type_arguments = instance.type_arguments },
               instance.signature )
       | Some (Error _) | None -> None)
-  | Some (Trait_version (trait, method_)) ->
+  | Some (Trait_overload (trait, method_)) ->
       let instance =
         instantiate state span
           ~extra:[ ({ owner = trait.trait; name = "Self" }, Types.Type type_) ]
@@ -533,7 +535,7 @@ and argumentless_call callee (signature : Types.signature) result : Tables.call 
   { callee; arguments = []; omitted_defaults = []; uses = signature.uses; callee_result = result }
 
 (* The calls that a [for] loop over a collection makes to visit its
-   elements by position: of its [count], and of the version of its
+   elements by position: of its [count], and of the overload of its
    [element] that takes [self] with the loop's mode. The loop, the type of
    its elements, and the mode it binds each with. *)
 and elements_calls state (span : span) type_ (mode : Types.mode) =
@@ -561,7 +563,7 @@ and elements_calls state (span : span) type_ (mode : Types.mode) =
   | _ -> None
 
 (* The call of a collection's [cursor] that a [for] loop makes to consume
-   the collection: the version that takes [self] as [own], whose result is
+   the collection: the overload that takes [self] as [own], whose result is
    a [Cursor]. The loop and the type of its elements. *)
 and consuming_cursor state (span : span) type_ =
   match method_version state span type_ "cursor" Own with

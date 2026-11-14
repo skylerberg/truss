@@ -62,13 +62,13 @@ let conditional cursor ~(condition : expression) ~(then_ : expression) ~(else_ :
 
 (* [let mut x]. *)
 let let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
-  report cursor Let_mut mut_token.span
-    "A variable that can change is declared with `var`, not `let mut`." "Write `var`"
+  report cursor Let_mut mut_token.span "A mutable variable is declared with `var`, not `let mut`."
+    "Write `var`"
     [ Diagnostic.replace (Source.span let_token.span.start mut_token.span.stop) "var" ]
 
-(* [&x] and [&mut x]: arguments are marked with [mut] or [own], never [&]. *)
+(* [&x] and [&mut x]: an argument takes [mut] or [own], never [&]. *)
 let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next : Token.t) =
-  let marked = match next.kind with Keyword Mut -> "`mut x`" | _ -> "`x`" in
+  let written = match next.kind with Keyword Mut -> "`mut x`" | _ -> "`x`" in
   (* Between two words, as in [match& x], a space keeps them separate tokens. *)
   let separator =
     match before with
@@ -79,9 +79,9 @@ let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next :
   in
   report cursor Address_of ampersand.span
     (Printf.sprintf
-       "Truss has no `&`; write %s, marking a place with `mut` or `own` only when it is changed or \
+       "Truss has no `&`; write %s, with `mut` or `own` before a place only when it is mutated or \
         moved."
-       marked)
+       written)
     "Remove the `&`"
     [ Diagnostic.replace (through_next ampersand next) separator ]
 

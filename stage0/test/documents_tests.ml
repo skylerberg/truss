@@ -18,7 +18,7 @@ let excerpt_codes =
   [
     "resolve.unknown_name";
     "resolve.unknown_module";
-    "resolve.hides_name";
+    "resolve.shadowed_name";
     "types.method_outside_package";
     "package.impl_location";
   ]

@@ -759,3 +759,84 @@ impl Tasks for SeededTasks
     switch(self.scheduler)
   }
 }
+
+public type PoolOptions(maximum: USize = 10, idle_maximum: USize = 10, idle_seconds: Int64 = 300)
+  derives Equal
+
+type Idle[Resource](resource: Resource, returned: Instant)
+
+public opaque type Pool[Resource: Storable](idle: Cell[List[Idle[Resource]]], permits: Limiter, options: PoolOptions)
+
+public fn Pool[Resource: Storable].new(options: PoolOptions = PoolOptions()) -> Pool[Resource] {
+  let maximum = if options.maximum == 0 { 1 } else { options.maximum }
+  Pool(idle: Cell.new([]), permits: Limiter.new(maximum), options: options)
+}
+
+public fn Pool[Resource: Storable].copy(self) -> Pool[Resource] {
+  Pool(idle: self.idle.copy(), permits: self.permits.copy(), options: self.options)
+}
+
+public fn Pool[Resource: Storable].idle_count(self) -> USize
+  uses Tasks
+{
+  self.idle.read(fn(listed) { listed.length() })
+}
+
+fn is_fresh(returned: Instant, now: Instant, seconds: Int64) -> Bool {
+  if seconds <= 0 {
+    return true
+  }
+  match returned.checked_add(Duration.seconds(if seconds > 9223372036 { 9223372036 } else { seconds })) {
+    Some(expires) => now < expires
+    None => true
+  }
+}
+
+public fn Pool[Resource: Storable].using[Output, Failure, capability Granted](
+  self,
+  open: (fn() -> Result[Resource, Failure] uses Granted),
+  work: (fn(mut Resource) -> Result[Output, Failure] uses Granted),
+) -> Option[Result[Output, Failure]]
+  uses Tasks, Clock, Granted
+{
+  let idle = self.idle.copy()
+  let options = self.options
+  self.permits.hold(fn() {
+    let now = Clock.now()
+    let reused = idle.update(fn(listed) {
+      var found: Option[Resource] = None
+      while found is None && !listed.is_empty() {
+        let last = mut listed.pop()
+        match own last {
+          Some(entry) => {
+            if is_fresh(entry.returned, now: now, seconds: options.idle_seconds) {
+              found = Some(own entry.resource)
+            }
+          }
+          None => {}
+        }
+      }
+      found
+    })
+    var resource = match own reused {
+      Some(resource) => own resource
+      None => match open() {
+        Ok(resource) => own resource
+        Err(failure) => return Err(own failure)
+      }
+    }
+    match work(mut resource) {
+      Ok(output) => {
+        let returned = Clock.now()
+        let limit = options.idle_maximum
+        intrinsic::shared_update(idle.state, input: Idle(resource: own resource, returned: returned), change: fn(listed, entry) {
+          if listed.length() < limit {
+            mut listed.push(own entry)
+          }
+        })
+        Ok(own output)
+      }
+      Err(failure) => Err(own failure)
+    }
+  })
+}

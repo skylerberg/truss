@@ -337,8 +337,8 @@ let check_trait_cycle state (requires : path_type list) =
   | _ -> ()
 
 (* A method is its name and how it takes [self], so a trait may add a
-   version of a method that a trait it requires declares, and may not
-   declare the same version again. *)
+   overload of a method that a trait it requires declares, and may not
+   declare the same overload again. *)
 let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path : Path.t)
     (trait : Types.trait_interface) =
   let inherited =

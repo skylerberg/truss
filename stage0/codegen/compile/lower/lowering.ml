@@ -6,6 +6,9 @@ open Emit_c.Builder
 
 type cleanup =
   | Drop_value of Lowered.place  (** Drops the place's value, if the place still owns it. *)
+  | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
+      (** Drops the place's value where its drop flag, the [Bool] at [flag], is true, for a place
+          that only some paths initialize. *)
   | Free_pointed of Lowered.place
       (** Frees the heap block that the pointer at the place points to, after the block's contents
           are dropped. *)
@@ -14,7 +17,7 @@ type cleanup =
           dropping the block's contents. *)
   | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
       (** Moves the value at [source] into [destination], the place it was moved out of so that the
-          caller could change it. *)
+          caller could mutate it. *)
   | Join_group of Lowered.statement  (** Joins a task group with the call of [Tasks.join]. *)
 
 (* A scope owns the values dropped as it ends: the scope of a block's names,
@@ -198,6 +201,17 @@ let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
 (* A local that lasts as long as the names around it. *)
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
+(* A local that lasts as long as the names around it, and that only some
+   paths initialize: its value is dropped where its drop flag, the [Bool]
+   at [flag], is true. *)
+let flagged_binding st ty ~flag =
+  let place = at (local st.builder (Value ty)) in
+  if not (trivial st ty) then begin
+    let scope = binding_scope st.scopes in
+    scope.owned <- Drop_flagged { place; flag } :: scope.owned
+  end;
+  place
+
 let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let how = Option.value how ~default:(Convention.parameter st.context.env) in
   let own place = if in_scope && owned && not (trivial st ty) then own_in_scope st place in
@@ -248,6 +262,9 @@ let drop_scope st (scope : scope) =
   List.iter
     (function
       | Drop_value place -> if not (List.mem place st.moved) then emit st.builder (Drop place)
+      | Drop_flagged { place; flag } ->
+          if not (List.mem place st.moved) then
+            when_ st.builder (Copy flag) (fun () -> emit st.builder (Drop place))
       | Free_pointed pointer ->
           emit st.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
@@ -321,7 +338,7 @@ let unreachable_block st =
 
 (* An operand for an owned position: a [var], an [own] argument, a field, a
    returned value. The type checker has made sure a place there is a
-   temporary or was marked [own], or copies implicitly. *)
+   temporary or was passed [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lowered.Copy place else moved st place
 
 let take st (place : Lowered.place) ty ~destination =

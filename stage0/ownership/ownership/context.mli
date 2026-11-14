@@ -4,7 +4,7 @@ type context = {
   database : Query.context;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
-  marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
+  mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
       (** Each argument written with a [mut] or [own], by the origin of the value passed. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
@@ -37,4 +37,4 @@ val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
 val collect : context -> Mir.t -> unit
 val copy_at : context -> Core.origin -> Syntax.span Diagnostic.edit list
-val with_mark : context -> Core.origin -> Syntax.span
+val with_mode_keyword : context -> Core.origin -> Syntax.span

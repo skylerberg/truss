@@ -139,16 +139,6 @@ fn identity_quality(listed: Slice[Preference]) -> UInt16 {
   quality_for(listed, offered: "identity", specificity: coding_specificity).unwrap_or(1)
 }
 
-internal fn accepts_coding(header: Option[StringSlice], coding: StringSlice) -> Bool {
-  match header {
-    Some(value) => {
-      let quality = quality_for(preferences(value).slice(), offered: coding, specificity: coding_specificity)
-      quality is Some(level) && level > 0
-    }
-    None => false
-  }
-}
-
 public fn Request.preferred_type(self, offered: Slice[String]) -> Option[String] {
   chosen(self.headers.get("Accept"), offered: offered, specificity: media_specificity, unlisted: 0)
 }

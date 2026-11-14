@@ -73,7 +73,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
           register_expression state value (fun () ->
               let make = synthetic_expression state ~origin:value.id in
               let passed value : Core.argument =
-                Passed { mode = Read; value = Value value; mark = None }
+                Passed { mode = Read; value = Value value; mode_keyword = None }
               in
               let first =
                 make part
@@ -177,10 +177,10 @@ and call_named state env ?expected (value : expression) (callee : expression)
 
 (* [time(Element.equal)] in a [cost] bound: a bound on the time of any one
    call of a method of a trait that bounds a type parameter. If the bounds
-   have several versions of the method, the term names the read-only
-   version. *)
+   have several overloads of the method, the term names the read-only
+   overload. *)
 and method_time state (value : expression) (type_ : Types.ty) (member : name) =
-  let versions =
+  let overloads =
     List.fold_left
       (fun methods (bound : Types.trait_reference) ->
         List.fold_left
@@ -199,7 +199,7 @@ and method_time state (value : expression) (type_ : Types.ty) (member : name) =
       (Properties.known_bounds state.database ~bounds:(bounds state) type_)
   in
   let chosen =
-    match versions with
+    match overloads with
     | [ only ] -> Some only
     | several -> (
         match
@@ -210,7 +210,7 @@ and method_time state (value : expression) (type_ : Types.ty) (member : name) =
         | [ read_only ] -> Some read_only
         | _ -> None)
   in
-  match (chosen, versions) with
+  match (chosen, overloads) with
   | Some (trait, method_), _ ->
       register_expression state value (fun () ->
           Method_time
@@ -251,12 +251,12 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
     arguments_alone state env arguments
       (error state Wrong_receiver member.span
          (Printf.sprintf
-            "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as its \
-             versions take."
+            "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as \
+             its overloads take."
             member.text))
   in
   (* A method with [self] called in full form. The first argument is the
-     receiver, and its mark selects the version of the method, as it does in
+     receiver, and its mode keyword selects the overload of the method, as it does in
      a call with a dot. *)
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
@@ -305,11 +305,11 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               trait_method_through_type state env ?expected value type_ trait method_ arguments
           | _ :: _ :: _ as several -> ambiguous (List.map fst several)
           | [] -> (
-              match versions state type_ member.text with
+              match overloads state type_ member.text with
               | Error traits -> ambiguous traits
-              | Ok versions -> (
-                  match (arguments, List.assoc_opt wanted versions) with
-                  | receiver :: rest, Some (Own_version method_path) ->
+              | Ok overloads -> (
+                  match (arguments, List.assoc_opt wanted overloads) with
+                  | receiver :: rest, Some (Type_overload method_path) ->
                       let inner =
                         match receiver.value.kind with
                         | Mode (_, inner) -> inner
@@ -330,11 +330,11 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                         receiver_type;
                       method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest
-                  | _ :: _, Some (Trait_version (trait, method_)) ->
+                  | _ :: _, Some (Trait_overload (trait, method_)) ->
                       trait_method_through_type state env ?expected value type_ trait method_
                         arguments
-                  | _ :: _, None when versions <> [] -> wrong_receiver ()
-                  | [], _ when versions <> [] ->
+                  | _ :: _, None when overloads <> [] -> wrong_receiver ()
+                  | [], _ when overloads <> [] ->
                       error state Missing_argument value.span
                         "A method written in full takes its receiver as its first argument."
                   | _ ->
@@ -346,8 +346,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                               (Printf.sprintf "`%s` has no method `%s`." (show state type_)
                                  member.text))))))
   | Types.Parameter parameter -> (
-      (* A method of a trait bound: the static method, or the version that
-         the first argument's mark selects. Two bounds on the same trait
+      (* A method of a trait bound: the static method, or the overload that
+         the first argument's mode keyword selects. Two bounds on the same trait
          differ only in the trait's type arguments, which the call's
          arguments determine. *)
       let without_self =
@@ -365,17 +365,17 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           []
           (Properties.known_bounds state.database ~bounds:(bounds state) (Types.Parameter parameter))
       in
-      match (without_self, versions state type_ member.text) with
+      match (without_self, overloads state type_ member.text) with
       | [ (trait, method_) ], _ ->
           trait_method_through_type state env ?expected value type_ trait method_ arguments
       | (_ :: _ :: _ as several), _ -> ambiguous (List.map fst several)
       | [], Error traits -> ambiguous traits
-      | [], Ok versions -> (
-          match List.assoc_opt wanted versions with
-          | Some (Trait_version (trait, method_)) ->
+      | [], Ok overloads -> (
+          match List.assoc_opt wanted overloads with
+          | Some (Trait_overload (trait, method_)) ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
-          | Some (Own_version _) -> bug "a generic parameter has a method of its own"
-          | None when versions <> [] -> wrong_receiver ()
+          | Some (Type_overload _) -> bug "a generic parameter has a method of its own"
+          | None when overloads <> [] -> wrong_receiver ()
           | None ->
               error state Unknown_member member.span
                 (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text)))
@@ -428,7 +428,14 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
             in
             let mode = check_argument state env first.value parameter in
             ignore (default_literal state ~at:value.span self_type);
-            ( [ { Tables.expression = first.value.id; parameter_index = 0; mode; mark = None } ],
+            ( [
+                {
+                  Tables.expression = first.value.id;
+                  parameter_index = 0;
+                  mode;
+                  mode_keyword = None;
+                };
+              ],
               1,
               parameters,
               rest )
@@ -473,13 +480,13 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
    with its receiver as the first argument. *)
 and trait_call_in_full state env (value : expression) trait ~trait_arguments (member : name)
     arguments =
-  (* The static method, or the version that the receiver's mark selects, as
+  (* The static method, or the overload that the receiver's mode keyword selects, as
      in a call with a dot. *)
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
-  let version = Members.trait_method state.database trait member.text in
-  match match version Static with None -> version wanted | trait_method -> trait_method with
+  let overload = Members.trait_method state.database trait member.text in
+  match match overload Static with None -> overload wanted | trait_method -> trait_method with
   | Some method_ ->
       (* [Self] is the receiver's type. Checking the receiver as the first
          argument infers it. *)
@@ -489,8 +496,8 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
       arguments_alone state env arguments
         (error state Wrong_receiver member.span
            (Printf.sprintf
-              "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as \
-               its versions take."
+              "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as \
+               its overloads take."
               member.text))
   | None ->
       error state Unknown_member member.span
@@ -528,10 +535,10 @@ and method_call state env ?expected (value : expression) (base : expression) (me
   let receiver_type =
     default_literal state ~at:value.span (normalize state (expression state env base))
   in
-  let marked = List.mem_assoc value.id state.receiver_modes in
-  (* A part that is lent [mut] takes no mark of its own to call a [mut self]
-     method: the mark is on the place that lends it. *)
-  let lent_mode = if marked then None else lent state base in
+  let has_mode_keyword = List.mem_assoc value.id state.receiver_modes in
+  (* A part that is lent [mut] takes no mode keyword of its own to call a [mut self]
+     method: the keyword is on the place that lends it. *)
+  let lent_mode = if has_mode_keyword then None else lent state base in
   let wanted : Path.receiver =
     match (List.assoc_opt value.id state.receiver_modes, lent_mode) with
     | Some Mut, _ | None, Some Mut -> Mut
@@ -539,52 +546,56 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     | _ -> Read
   in
   let place = is_place state base || Option.is_some lent_mode in
-  let choose versions =
-    (* Without a mark, the call selects the read-only version. On a
-       temporary it selects the [own] version if there is one. A [Plain]
-       place can be copied for an [own] version. *)
-    match List.assoc_opt wanted versions with
+  let choose overloads =
+    (* Without a mode keyword, the call selects the read-only overload. On a
+       temporary it selects the [own] overload if there is one. A [Plain]
+       place can be copied for an [own] overload. *)
+    match List.assoc_opt wanted overloads with
     | Some method_path -> Some (wanted, method_path)
-    | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read versions ->
-        Some (Path.Read, List.assoc Path.Read versions)
-    | None when (not marked) && ((not place) || plain state receiver_type) -> (
-        match List.assoc_opt Path.Own versions with
+    | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read overloads ->
+        Some (Path.Read, List.assoc Path.Read overloads)
+    | None when (not has_mode_keyword) && ((not place) || plain state receiver_type) -> (
+        match List.assoc_opt Path.Own overloads with
         | Some method_path -> Some (Path.Own, method_path)
         | None -> None)
     | None -> None
   in
-  let choose_temporary versions =
+  let choose_temporary overloads =
     let chosen =
-      if (not marked) && not place then
-        match List.assoc_opt Path.Own versions with
+      if (not has_mode_keyword) && not place then
+        match List.assoc_opt Path.Own overloads with
         | Some method_path -> Some (Path.Own, method_path)
-        | None -> choose versions
-      else choose versions
+        | None -> choose overloads
+      else choose overloads
     in
     (* A [mut self] method mutates its receiver, so every index expression
-       in the receiver must use the [mut self] version of [at]. *)
-    (match chosen with Some (Path.Mut, _) -> mutate state env ~by:Mut_mark base | _ -> ());
+       in the receiver must use the [mut self] overload of [at]. *)
+    (match chosen with Some (Path.Mut, _) -> mutate state env ~by:Passed_mut base | _ -> ());
     chosen
   in
-  let wrong_receiver versions =
+  let wrong_receiver overloads =
     error state Wrong_receiver member.span
-      (Printf.sprintf "`%s` has no version that takes %s here; it has %s." member.text
+      (Printf.sprintf "`%s` has no overload that takes %s here; it has %s." member.text
          (Path.show_receiver wanted)
-         (String.concat ", " (List.map (fun (receiver, _) -> Path.show_receiver receiver) versions)))
+         (String.concat ", "
+            (List.map (fun (receiver, _) -> Path.show_receiver receiver) overloads)))
   in
-  (* A place that calls a method with only a [mut] or an [own] version lacks
-     its mark. The fix adds the mark. *)
-  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> Types.ty =
-   fun versions ->
-    let has receiver = List.exists (fun (version, _) -> version = receiver) versions in
-    if (not marked) && place && (has Path.Mut || has Path.Own) then begin
-      let mark = if has Path.Mut then "mut" else "own" in
-      error state Missing_mark base.span
-        ~fixes:[ fix (Printf.sprintf "Mark it `%s`." mark) [ insert base.span.start (mark ^ " ") ] ]
-        (Printf.sprintf "`%s` takes `%s self`, so the call marks its receiver `%s`." member.text
-           mark mark)
+  (* A place that calls a method with only a [mut] or an [own] overload lacks
+     its mode keyword. The fix adds the keyword. *)
+  let missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
+   fun overloads ->
+    let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
+    if (not has_mode_keyword) && place && (has Path.Mut || has Path.Own) then begin
+      let keyword = if has Path.Mut then "mut" else "own" in
+      error state Missing_mode base.span
+        ~fixes:
+          [
+            fix (Printf.sprintf "Pass it `%s`." keyword) [ insert base.span.start (keyword ^ " ") ];
+          ]
+        (Printf.sprintf "`%s` takes `%s self`, so the call site passes its receiver `%s`."
+           member.text keyword keyword)
     end
-    else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) versions)
+    else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in
   match receiver_type with
   | Types.Error _ | Types.Hole ->
@@ -593,7 +604,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
         arguments;
       receiver_type
   | _ -> (
-      match versions state receiver_type member.text with
+      match overloads state receiver_type member.text with
       | Ok [] ->
           let candidates =
             match receiver_type with
@@ -623,13 +634,13 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                         ]
                     | None -> [])
                   (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
-      | Ok versions -> (
-          match choose_temporary versions with
-          | None -> missing_receiver_mark versions
-          | Some (_, Own_version method_path) ->
+      | Ok overloads -> (
+          match choose_temporary overloads with
+          | None -> missing_receiver_mode overloads
+          | Some (_, Type_overload method_path) ->
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
-          | Some (_, Trait_version (trait, method_)) ->
+          | Some (_, Trait_overload (trait, method_)) ->
               trait_method_call state env value ~receiver:base ~receiver_type trait method_
                 ~type_arguments arguments)
       | Error traits ->
@@ -700,7 +711,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
             | Some (Mut, _) -> Mut
             | Some (Own, _) -> Own
             | _ -> Read);
-          mark = None;
+          mode_keyword = None;
         }
       in
       check_specification_call state env value signature;
@@ -731,8 +742,8 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
           report state Not_callable value.span
             (Printf.sprintf
                "`%s` has generic parameters of its own, so it cannot be called through `%s`: an \
-                `any` value holds one version of each method, and this one has a version for each \
-                set of arguments. Call it on a value whose type is known."
+                `any` value holds one instance of each method, and this one has an instance for \
+                each set of arguments. Call it on a value whose type is known."
                method_.method_name (show state receiver_type))
       | Names_self ->
           report state Not_callable value.span
@@ -755,7 +766,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
       Tables.expression = receiver.id;
       parameter_index = 0;
       mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
-      mark = None;
+      mode_keyword = None;
     }
   in
   let evidence = match receiver_type with Types.Any _ -> Tables.Dynamic | _ -> Tables.Built_in in

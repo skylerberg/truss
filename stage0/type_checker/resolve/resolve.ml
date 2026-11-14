@@ -117,9 +117,9 @@ let resolved =
               in
               match declared_name definition with
               | Some declared when not defines_it ->
-                  Walk.report state Hides_name declared.span
+                  Walk.report state Shadowed_name declared.span
                     (Printf.sprintf
-                       "`%s` is a name in the prelude, and a name cannot hide another. Choose \
+                       "`%s` is a name in the prelude, and a name cannot shadow another. Choose \
                         another name."
                        name)
               | _ -> ())

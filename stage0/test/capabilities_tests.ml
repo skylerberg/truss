@@ -83,9 +83,9 @@ let () =
       one_diagnostic Fixtures.Capabilities.capability_parameters_set_must_be_available_at_the
         "capabilities.not_available");
   test "a test has Panic" (fun () -> fine Fixtures.Capabilities.test_has_panic);
-  test "a place whose implementation changes state is provided mut" (fun () ->
+  test "a place whose implementation mutates state is provided mut" (fun () ->
       one_diagnostic Fixtures.Capabilities.place_whose_implementation_changes_state_is
-        "capabilities.provide_mark")
+        "capabilities.provide_mode")
 
 let () =
   test "a dependency can use only the capabilities that it is granted" (fun () ->

@@ -236,7 +236,7 @@ let rec since ~start total =
 
 (* Finding a bound for one iteration of a loop, or one call of a lambda.
 
-   [cost] is one iteration's cost, a term over values the loop changes,
+   [cost] is one iteration's cost, a term over values the loop mutates,
    which [varies] tells, and values it does not. The bound replaces each
    part of [cost] that varies with a bound on it from [facts]: an upper
    bound where [cost] grows with the part, and a lower bound where it

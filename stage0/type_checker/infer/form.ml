@@ -56,7 +56,7 @@ let arguments state (call : Tables.call) : Core.argument list =
             {
               mode = argument.mode;
               value = operand argument.mode (build_expression_by_id state argument.expression);
-              mark = argument.mark;
+              mode_keyword = argument.mode_keyword;
             }
       | None -> Default)
 
@@ -189,7 +189,7 @@ let register_call ?function_value state (value : expression) =
   register_expression state value (fun () -> kind_of_call ?function_value state value)
 
 (* An index expression is a call of [Index.at], which lends. It lends
-   mutably if the checker chose the [mut self] version of [at]. *)
+   mutably if the checker chose the [mut self] overload of [at]. *)
 let register_index state (value : expression) =
   register_expression state value (fun () ->
       match (checked_call state value.id).callee with
@@ -411,7 +411,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                  (make Types.unit
                     (call (builder_method "write" Mut)
                        [
-                         Passed { mode = Mut; value = Place builder_place; mark = None };
+                         Passed { mode = Mut; value = Place builder_place; mode_keyword = None };
                          Passed
                            {
                              mode = Read;
@@ -420,7 +420,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                                  (make
                                     (Types.named (Well_known.path String_slice) [])
                                     (String written.value));
-                             mark = None;
+                             mode_keyword = None;
                            };
                        ])));
           ]
@@ -440,9 +440,9 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                                {
                                  mode = Read;
                                  value = operand Read (build_expression state part);
-                                 mark = None;
+                                 mode_keyword = None;
                                };
-                             Passed { mode = Mut; value = Place builder_place; mark = None };
+                             Passed { mode = Mut; value = Place builder_place; mode_keyword = None };
                            ];
                          lends = None;
                          uses = recorded.uses;
@@ -466,7 +466,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                         {
                           mode = Own;
                           value = Value (make builder_type (Use builder_place));
-                          mark = None;
+                          mode_keyword = None;
                         };
                     ]));
         }
@@ -506,7 +506,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
            value =
              Value
                (intrinsic Storage_with_capacity storage_type
-                  [ Passed { mode = Read; value = Value capacity; mark = None } ]);
+                  [ Passed { mode = Read; value = Value capacity; mode_keyword = None } ]);
            else_ = None;
          })
   in
@@ -521,9 +521,9 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
                     {
                       mode = Mut;
                       value = Place (Local { local = storage; type_ = storage_type; origin });
-                      mark = None;
+                      mode_keyword = None;
                     };
-                  Passed { mode = Own; value = Value element; mark = None };
+                  Passed { mode = Own; value = Value element; mode_keyword = None };
                 ])))
       elements
   in
@@ -557,7 +557,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
                             Value
                               (make storage_type
                                  (Use (Local { local = storage; type_ = storage_type; origin })));
-                          mark = None;
+                          mode_keyword = None;
                         };
                     ];
                   lends = None;
@@ -620,7 +620,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
           (Call
              {
                callee = callee from_template.callee;
-               arguments = [ Passed { mode = Read; value = Value template; mark = None } ];
+               arguments = [ Passed { mode = Read; value = Value template; mode_keyword = None } ];
                lends = None;
                uses = from_template.uses;
              });
@@ -876,8 +876,9 @@ let compound_assign state (written : statement) (target : expression) (value : e
                   callee = callee recorded.callee;
                   arguments =
                     [
-                      Passed { mode = mode 0; value = Value current; mark = None };
-                      Passed { mode = mode 1; value = operand (mode 1) bound_value; mark = None };
+                      Passed { mode = mode 0; value = Value current; mode_keyword = None };
+                      Passed
+                        { mode = mode 1; value = operand (mode 1) bound_value; mode_keyword = None };
                     ];
                   lends = None;
                   uses = recorded.uses;
@@ -984,7 +985,9 @@ let elements_at state ~origin (collection : Core.place) ~(count : Tables.call)
     ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
   let usize = Types.builtin USize in
   let local = fresh_synthetic_local state in
-  let receiver mode : Core.argument = Passed { mode; value = Place collection; mark = None } in
+  let receiver mode : Core.argument =
+    Passed { mode; value = Place collection; mode_keyword = None }
+  in
   let position =
     synthetic_expression state ~origin usize (Use (Local { local; type_ = usize; origin }))
   in
@@ -1014,7 +1017,7 @@ let elements_at state ~origin (collection : Core.place) ~(count : Tables.call)
                 arguments =
                   [
                     receiver lends;
-                    Passed { mode = Read; value = operand Read position; mark = None };
+                    Passed { mode = Read; value = operand Read position; mode_keyword = None };
                   ];
                 lends = Some lends;
                 uses = element.uses;
@@ -1085,7 +1088,7 @@ let for_loop state (written : statement) (iterable : expression) ~pattern ~claus
                  {
                    callee = callee made_by.callee;
                    arguments =
-                     [ Passed { mode = Own; value = operand Own collection; mark = None } ];
+                     [ Passed { mode = Own; value = operand Own collection; mode_keyword = None } ];
                    lends = None;
                    uses = made_by.uses;
                  })
@@ -1104,7 +1107,8 @@ let for_loop state (written : statement) (iterable : expression) ~pattern ~claus
                     (Call
                        {
                          callee = callee remaining.callee;
-                         arguments = [ Passed { mode = Read; value = Place place; mark = None } ];
+                         arguments =
+                           [ Passed { mode = Read; value = Place place; mode_keyword = None } ];
                          lends = None;
                          uses = remaining.uses;
                        });
@@ -1312,7 +1316,7 @@ let inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
   let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length entries))) in
   let created =
     call "with_capacity" Static
-      [ Passed { mode = Read; value = Value capacity; mark = None } ]
+      [ Passed { mode = Read; value = Value capacity; mode_keyword = None } ]
       type_
   in
   match entries with
@@ -1341,10 +1345,10 @@ let inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
             statement
               (Evaluate
                  (call insert Mut
-                    (Passed { mode = Mut; value = Place collection; mark = None }
+                    (Passed { mode = Mut; value = Place collection; mode_keyword = None }
                     :: List.map
                          (fun argument : Core.argument ->
-                           Passed { mode = Own; value = Value argument; mark = None })
+                           Passed { mode = Own; value = Value argument; mode_keyword = None })
                          entry)
                     Types.unit)))
           entries

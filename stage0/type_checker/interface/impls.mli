@@ -56,11 +56,11 @@ type evidence =
           with the [Error] of its report. *)
 
 (** Whether a trait's method can be called through an [any] value, and if not, why. An [any] value
-    has one compiled version of each method, for the type that it hides. *)
+    has one compiled instance of each method, for the type that it hides. *)
 type through_any =
   | Callable
   | Has_generics
-      (** The method has generic parameters of its own, so it has a version for each set of type
+      (** The method has generic parameters of its own, so it has an instance for each set of type
           arguments. *)
   | Names_self
       (** A parameter's type or the result's type names [Self], the hidden type, at any depth. An

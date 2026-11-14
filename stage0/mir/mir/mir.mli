@@ -49,7 +49,7 @@ type callee = operand Core.target
     {!Operation}. *)
 
 type argument =
-  | Passed of { mode : Types.mode; value : operand; mark : Core.mark option }
+  | Passed of { mode : Types.mode; value : operand; mode_keyword : Core.mode_keyword option }
   | Default  (** The callee fills in the parameter's default. *)
 
 type call = {
@@ -184,7 +184,7 @@ type branch = {
 type lent_element = {
   element : local;  (** The [Lent] local of the element. *)
   count : Core.expression;
-      (** The call of the collection's [count], which the prover reads: a loop that changes its
+      (** The call of the collection's [count], which the prover reads: a loop that mutates its
           elements leaves their number as it was. *)
   call : Core.expression;
       (** The call of the collection's [element] at the loop's position, which the prover reads: a

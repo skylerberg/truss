@@ -369,21 +369,24 @@ and check_provide checking scope implementations body =
             List.exists (fun (_, receiver, _) -> receiver = Path.Mut) interface.impl_methods)
           impls
       in
-      let marked_mut = implementation.mode = Mut in
+      let provided_mut = implementation.mode = Mut in
       let is_place = match implementation.value with Place _ -> true | Value _ -> false in
       let start = checking.spans.(implementation.origin).start in
-      if is_place && mutates && not marked_mut then
-        report checking Provide_mark implementation.origin
-          ~fixes:
-            [ Diagnostic.fix "Mark it `mut`." [ Diagnostic.insert (Span.zero_width start) "mut " ] ]
-          "This implementation changes its own state, so the place is provided `mut`."
-      else if marked_mut && not mutates then
-        report checking Provide_mark implementation.origin
+      if is_place && mutates && not provided_mut then
+        report checking Provide_mode implementation.origin
           ~fixes:
             [
-              Diagnostic.fix "Remove the mark." [ Diagnostic.delete (Span.make start (start + 4)) ];
+              Diagnostic.fix "Provide it `mut`."
+                [ Diagnostic.insert (Span.zero_width start) "mut " ];
             ]
-          "This implementation never changes its own state, so the place is provided without `mut`.";
+          "This implementation mutates its own state, so the place is provided `mut`."
+      else if provided_mut && not mutates then
+        report checking Provide_mode implementation.origin
+          ~fixes:
+            [
+              Diagnostic.fix "Remove the `mut`." [ Diagnostic.delete (Span.make start (start + 4)) ];
+            ]
+          "This implementation never mutates its own state, so the place is provided without `mut`.";
       List.iter
         (fun ((provided : Core.provided), (interface : Types.impl_interface)) ->
           check_grant checking implementation.origin
