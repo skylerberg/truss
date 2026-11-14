@@ -1,0 +1,561 @@
+use standard::base64
+use standard::http::date
+use standard::map
+use standard::network
+use standard::streams
+use standard::tls
+use standard::x509
+
+public type Error =
+  | Malformed(message: String)
+  | Rejected(code: UInt16, message: String)
+  | Unsupported(message: String)
+  | System(error: SystemError)
+  | Tls(error: tls::Error)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Malformed(message) => {
+        mut output.write("a malformed message: ")
+        mut output.write(message.slice())
+      }
+      Rejected(code, message) => {
+        mut output.write("the mail server refused with ")
+        code.display(mut output)
+        mut output.write(": ")
+        mut output.write(message.slice())
+      }
+      Unsupported(message) => mut output.write(message.slice())
+      System(error) => error.display(mut output)
+      Tls(error) => error.display(mut output)
+    }
+  }
+}
+
+fn malformed(message: StringSlice) -> Error {
+  Error.Malformed(message: message.to_string())
+}
+
+fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error] {
+  match own outcome {
+    Ok(value) => Ok(own value)
+    Err(error) => Err(Error.System(error: error))
+  }
+}
+
+public type Address(email: String, name: Option[String] = None)
+  derives Equal
+
+public type Attachment(filename: String, content_type: String, bytes: List[UInt8])
+  derives Equal
+
+public type Message(
+  from: Address,
+  to: List[Address],
+  subject: String,
+  text: Option[String] = None,
+  html: Option[String] = None,
+  cc: List[Address] = [],
+  bcc: List[Address] = [],
+  reply_to: Option[Address] = None,
+  attachments: List[Attachment] = [],
+)
+  derives Equal
+
+fn has_line_break(text: StringSlice) -> Bool {
+  text.contains("\r") || text.contains("\n")
+}
+
+fn is_ascii(text: StringSlice) -> Bool {
+  for byte in text.bytes() {
+    if byte >= 128 {
+      return false
+    }
+  }
+  true
+}
+
+fn check_address(address: Address) -> Result[Unit, Error] {
+  let email = address.email.slice()
+  if has_line_break(email) || email.contains(" ") || email.contains("<") || email.contains(">") || !email.contains("@") {
+    return Err(malformed("an email address that is not of the form name@domain"))
+  }
+  match address.name {
+    Some(name) => if has_line_break(name.slice()) { return Err(malformed("a name with a line break")) }
+    None => {}
+  }
+  Ok(Unit)
+}
+
+fn encoded_word(text: StringSlice) -> String {
+  if is_ascii(text) {
+    return text.to_string()
+  }
+  "=?UTF-8?B?${base64::encode(text.bytes())}?="
+}
+
+fn quoted_name(name: StringSlice) -> String {
+  if !is_ascii(name) {
+    return encoded_word(name)
+  }
+  var quoted = "\""
+  for character in name.characters() {
+    if character == Character"\"" || character == Character"\\" {
+      mut quoted.push("\\")
+    }
+    mut quoted.push_character(character)
+  }
+  mut quoted.push("\"")
+  quoted
+}
+
+fn mailbox(address: Address) -> String {
+  match address.name {
+    Some(name) => "${quoted_name(name.slice())} <${address.email}>"
+    None => "<${address.email}>"
+  }
+}
+
+fn mailbox_list(addresses: Slice[Address]) -> String {
+  var listed = ""
+  for address in addresses {
+    if !listed.is_empty() {
+      mut listed.push(", ")
+    }
+    mut listed.push(mailbox(address).slice())
+  }
+  listed
+}
+
+fn hex_digit(value: UInt8) -> UInt8
+  requires value < 16
+{
+  if value < 10 { value + 48 } else { value + 55 }
+}
+
+fn quoted_printable(text: StringSlice) -> String {
+  var output: List[UInt8] = []
+  var column: USize = 0
+  let bytes = text.bytes()
+  var index: USize = 0
+  while index < bytes.length()
+    invariant column <= 78
+  {
+    let byte = bytes[index]
+    if byte == 13 && index + 1 < bytes.length() && bytes[index + 1] == 10 {
+      mut output.append_slice("\r\n".bytes())
+      column = 0
+      index += 2
+      continue
+    }
+    if byte == 10 {
+      mut output.append_slice("\r\n".bytes())
+      column = 0
+      index += 1
+      continue
+    }
+    let ends_line = index + 1 == bytes.length() || bytes[index + 1] == 13 || bytes[index + 1] == 10
+    let is_plain = (byte >= 33 && byte <= 126 && byte != 61) || ((byte == 32 || byte == 9) && !ends_line)
+    let width: USize = if is_plain { 1 } else { 3 }
+    if column + width > 75 {
+      mut output.append_slice("=\r\n".bytes())
+      column = 0
+    }
+    if is_plain {
+      mut output.push(byte)
+    } else {
+      mut output.push(61)
+      mut output.push(hex_digit(byte / 16))
+      mut output.push(hex_digit(byte % 16))
+    }
+    column += width
+    index += 1
+  }
+  String.from_utf8_lossy(output.slice())
+}
+
+fn wrapped_base64(bytes: Slice[UInt8]) -> String {
+  let encoded = base64::encode(bytes)
+  var output = ""
+  var start: USize = 0
+  let length = encoded.length()
+  while start < length
+    decreases length - start
+  {
+    let end = if length - start > 76 { start + 76 } else { length }
+    mut output.push(encoded.slice().part(start, to: end))
+    mut output.push("\r\n")
+    start = end
+  }
+  output
+}
+
+fn text_part(content_type: StringSlice, body: StringSlice) -> String {
+  "Content-Type: ${content_type}; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${quoted_printable(body)}\r\n"
+}
+
+fn attachment_part(attachment: Attachment) -> String {
+  let name = attachment.filename.slice()
+  let disposition = if is_ascii(name) && !name.contains("\"") && !name.contains("\\") {
+    "attachment; filename=\"${name}\""
+  } else {
+    var encoded: List[UInt8] = []
+    for byte in name.bytes() {
+      if (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 46 || byte == 45 || byte == 95 {
+        mut encoded.push(byte)
+      } else {
+        mut encoded.push(37)
+        mut encoded.push(hex_digit(byte / 16))
+        mut encoded.push(hex_digit(byte % 16))
+      }
+    }
+    "attachment; filename*=UTF-8''${String.from_utf8_lossy(encoded.slice())}"
+  }
+  "Content-Type: ${attachment.content_type}\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: ${disposition}\r\n\r\n${wrapped_base64(attachment.bytes.slice())}"
+}
+
+fn multipart(subtype: StringSlice, boundary: StringSlice, parts: Slice[String]) -> String {
+  var body = "Content-Type: multipart/${subtype}; boundary=\"${boundary}\"\r\n\r\n"
+  for part in parts {
+    mut body.push("--${boundary}\r\n".slice())
+    mut body.push(part.slice())
+  }
+  mut body.push("--${boundary}--\r\n".slice())
+  body
+}
+
+fn boundary() -> String
+  uses Random
+{
+  "truss-${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}"
+}
+
+fn domain_of(email: StringSlice) -> String {
+  match email.find_last("@") {
+    Some(at) => email.split_at(at).second.strip_prefix("@").unwrap_or("localhost").to_string()
+    None => "localhost"
+  }
+}
+
+fn message_date(now: Instant) -> String {
+  let stamp = date::format(now)
+  match stamp.slice().strip_suffix(" GMT") {
+    Some(prefix) => "${prefix} +0000"
+    None => own stamp
+  }
+}
+
+public fn Message.encode(self) -> Result[String, Error]
+  uses Random, Clock
+{
+  check_address(self.from)?
+  for address in self.to {
+    check_address(address)?
+  }
+  for address in self.cc {
+    check_address(address)?
+  }
+  for address in self.bcc {
+    check_address(address)?
+  }
+  match self.reply_to {
+    Some(address) => check_address(address)?
+    None => {}
+  }
+  if has_line_break(self.subject.slice()) {
+    return Err(malformed("a subject with a line break"))
+  }
+  for attachment in self.attachments {
+    if has_line_break(attachment.filename.slice()) || has_line_break(attachment.content_type.slice()) {
+      return Err(malformed("an attachment name or type with a line break"))
+    }
+  }
+  if self.to.is_empty() && self.cc.is_empty() && self.bcc.is_empty() {
+    return Err(malformed("a message without recipients"))
+  }
+  var head = "From: ${mailbox(self.from)}\r\n"
+  if !self.to.is_empty() {
+    mut head.push("To: ${mailbox_list(self.to.slice())}\r\n".slice())
+  }
+  if !self.cc.is_empty() {
+    mut head.push("Cc: ${mailbox_list(self.cc.slice())}\r\n".slice())
+  }
+  match self.reply_to {
+    Some(address) => mut head.push("Reply-To: ${mailbox(address)}\r\n".slice())
+    None => {}
+  }
+  mut head.push("Subject: ${encoded_word(self.subject.slice())}\r\n".slice())
+  mut head.push("Date: ${message_date(Clock.now())}\r\n".slice())
+  mut head.push("Message-ID: <${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}@${domain_of(self.from.email.slice())}>\r\n".slice())
+  mut head.push("MIME-Version: 1.0\r\n")
+  var bodies: List[String] = []
+  match self.text {
+    Some(text) => mut bodies.push(text_part("text/plain", body: text.slice()))
+    None => {}
+  }
+  match self.html {
+    Some(html) => mut bodies.push(text_part("text/html", body: html.slice()))
+    None => {}
+  }
+  if bodies.is_empty() {
+    mut bodies.push(text_part("text/plain", body: ""))
+  }
+  let content = if bodies.length() == 1 { bodies[0].copy() } else { multipart("alternative", boundary: boundary().slice(), parts: bodies.slice()) }
+  if self.attachments.is_empty() {
+    return Ok("${head}${content}")
+  }
+  var parts: List[String] = [own content]
+  for attachment in self.attachments {
+    mut parts.push(attachment_part(attachment))
+  }
+  Ok("${head}${multipart("mixed", boundary: boundary().slice(), parts: parts.slice())}")
+}
+
+public type Security = StartTls | Implicit | Plain
+  derives Equal
+
+public type SmtpOptions(
+  host: String,
+  port: UInt16 = 587,
+  security: Security = Security.StartTls,
+  username: Option[String] = None,
+  password: Option[String] = None,
+  client_name: String = "localhost",
+  timeout_seconds: Int64 = 30,
+  roots: Option[List[x509::Certificate]] = None,
+)
+
+type Reply(code: UInt16, lines: List[String])
+
+type Inbox(bytes: List[UInt8])
+
+fn read_line[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[String, Error]
+  uses Handles, Tasks
+{
+  while true {
+    match line_end(inbox.bytes.slice()) {
+      Some(end) => {
+        let rest = mut inbox.bytes.split_off(end + 2)
+        let line = map::exchange(mut inbox.bytes, value: own rest)
+        return Ok(String.from_utf8_lossy(line[..end]))
+      }
+      None => {}
+    }
+    if inbox.bytes.length() > 65536 {
+      return Err(malformed("a reply line longer than 64 KiB"))
+    }
+    match system(stream.receive(mut inbox.bytes, limit: 4096))? {
+      0 => return Err(Error.System(error: SystemError.ConnectionReset))
+      _ => {}
+    }
+  }
+}
+
+fn line_end(bytes: Slice[UInt8]) -> Option[USize]
+  ensures match result {
+    Some(end) => end + 2 <= bytes.length()
+    None => true
+  }
+{
+  for index in 1..bytes.length() {
+    if bytes[index] == 10 && bytes[index - 1] == 13 {
+      return Some(index - 1)
+    }
+  }
+  None
+}
+
+fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Reply, Error]
+  uses Handles, Tasks
+{
+  var lines: List[String] = []
+  while true {
+    let line = read_line(stream, inbox: mut inbox)?
+    if line.length() < 3 {
+      return Err(malformed("a reply without a code"))
+    }
+    let code = match UInt16.parse(line.slice().part(0, to: 3)) {
+      Ok(code) => code
+      Err(_) => return Err(malformed("a reply without a code"))
+    }
+    let is_last = line.length() == 3 || line.slice().bytes()[3] != 45
+    mut lines.push(if line.length() > 4 { line.slice().part(4, to: line.length()).to_string() } else { "" })
+    if is_last {
+      return Ok(Reply(code: code, lines: own lines))
+    }
+  }
+}
+
+fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
+  uses Handles, Tasks
+{
+  let reply = read_reply(stream, inbox: mut inbox)?
+  if reply.code < lowest || reply.code > highest {
+    let message = if reply.lines.is_empty() { "" } else { reply.lines[0].copy() }
+    return Err(Error.Rejected(code: reply.code, message: own message))
+  }
+  Ok(own reply)
+}
+
+fn command[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, line: StringSlice, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
+  uses Handles, Tasks
+{
+  system(stream.send_all("${line}\r\n".slice().bytes()))?
+  expect(stream, inbox: mut inbox, lowest: lowest, highest: highest)
+}
+
+fn has_extension(reply: Reply, name: StringSlice) -> Bool {
+  for line in reply.lines {
+    let upper = line.slice().to_ascii_uppercase()
+    if upper.slice() == name || upper.slice().starts_with("${name} ".slice()) {
+      return true
+    }
+  }
+  false
+}
+
+fn offers_mechanism(reply: Reply, mechanism: StringSlice) -> Bool {
+  for line in reply.lines {
+    let upper = line.slice().to_ascii_uppercase()
+    match upper.slice().strip_prefix("AUTH ") {
+      Some(mechanisms) => {
+        for offered in mechanisms.split(" ") {
+          if offered == mechanism {
+            return true
+          }
+        }
+      }
+      None => {}
+    }
+  }
+  false
+}
+
+fn dot_stuffed(body: StringSlice) -> String {
+  var output = ""
+  var is_line_start = true
+  for character in body.characters() {
+    if is_line_start && character == Character"." {
+      mut output.push(".")
+    }
+    mut output.push_character(character)
+    is_line_start = character == Character"\n"
+  }
+  if !output.slice().ends_with("\r\n") {
+    mut output.push("\r\n")
+  }
+  output
+}
+
+fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: Reply, options: SmtpOptions) -> Result[Unit, Error]
+  uses Handles, Tasks
+{
+  let username = match options.username {
+    Some(username) => username.copy()
+    None => return Ok(Unit)
+  }
+  let password = options.password.copy().unwrap_or("")
+  if offers_mechanism(features, mechanism: "PLAIN") {
+    var credentials: List[UInt8] = [0]
+    mut credentials.append_slice(username.slice().bytes())
+    mut credentials.push(0)
+    mut credentials.append_slice(password.slice().bytes())
+    let _ = command(stream, inbox: mut inbox, line: "AUTH PLAIN ${base64::encode(credentials.slice())}".slice(), lowest: 235, highest: 235)?
+    return Ok(Unit)
+  }
+  if offers_mechanism(features, mechanism: "LOGIN") {
+    let _ = command(stream, inbox: mut inbox, line: "AUTH LOGIN", lowest: 334, highest: 334)?
+    let _ = command(stream, inbox: mut inbox, line: base64::encode(username.slice().bytes()).slice(), lowest: 334, highest: 334)?
+    let _ = command(stream, inbox: mut inbox, line: base64::encode(password.slice().bytes()).slice(), lowest: 235, highest: 235)?
+    return Ok(Unit)
+  }
+  Err(Error.Unsupported(message: "a mail server that offers neither AUTH PLAIN nor AUTH LOGIN"))
+}
+
+fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: Reply, message: Message, encoded: StringSlice, options: SmtpOptions) -> Result[Unit, Error]
+  uses Handles, Tasks
+{
+  authenticate(stream, inbox: mut inbox, features: features, options: options)?
+  let _ = command(stream, inbox: mut inbox, line: "MAIL FROM:<${message.from.email}>".slice(), lowest: 250, highest: 250)?
+  for list in [message.to.copy(), message.cc.copy(), message.bcc.copy()] {
+    for address in list {
+      let _ = command(stream, inbox: mut inbox, line: "RCPT TO:<${address.email}>".slice(), lowest: 250, highest: 251)?
+    }
+  }
+  let _ = command(stream, inbox: mut inbox, line: "DATA", lowest: 354, highest: 354)?
+  system(stream.send_all(dot_stuffed(encoded).slice().bytes()))?
+  let _ = command(stream, inbox: mut inbox, line: ".", lowest: 250, highest: 250)?
+  let _ = command(stream, inbox: mut inbox, line: "QUIT", lowest: 200, highest: 299)
+  Ok(Unit)
+}
+
+fn quit_after[Stream: streams::Duplex, Value](stream: Stream, outcome: own Result[Value, Error]) -> Result[Value, Error]
+  uses Handles, Tasks
+{
+  if outcome is Err(_) {
+    let _ = stream.send_all("QUIT\r\n".bytes())
+    let _ = stream.close_sending()
+  }
+  outcome
+}
+
+fn client_config(options: SmtpOptions) -> Result[tls::ClientConfig, Error]
+  uses FileRead, Panic
+{
+  let roots = match options.roots {
+    Some(roots) => roots.copy()
+    None => system(x509::system_roots())?
+  }
+  Ok(tls::ClientConfig(roots: own roots))
+}
+
+public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
+  uses NetworkClient, Handles, Tasks, Random, Clock, FileRead, Panic
+{
+  let encoded = message.encode()?
+  let timeout = if options.timeout_seconds > 0 && options.timeout_seconds <= 1000000000 { Some(Duration.seconds(options.timeout_seconds)) } else { None }
+  var connection = system(network::connect(options.host.slice(), port: options.port, timeout: timeout))?
+  let _ = mut connection.set_read_timeout(timeout)
+  let _ = mut connection.set_write_timeout(timeout)
+  let greeting = "EHLO ${options.client_name}"
+  match options.security {
+    Plain => {
+      var inbox = Inbox(bytes: [])
+      let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
+      let features = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting.slice(), lowest: 250, highest: 250))?
+      quit_after(connection, outcome: deliver(connection, inbox: mut inbox, features: features, message: message, encoded: encoded.slice(), options: options))
+    }
+    Implicit => {
+      let secured = match tls::connect(own connection, host: options.host.slice(), config: client_config(options)?) {
+        Ok(secured) => own secured
+        Err(error) => return Err(Error.Tls(error: own error))
+      }
+      var inbox = Inbox(bytes: [])
+      let _ = expect(secured, inbox: mut inbox, lowest: 220, highest: 220)?
+      let features = quit_after(secured, outcome: command(secured, inbox: mut inbox, line: greeting.slice(), lowest: 250, highest: 250))?
+      quit_after(secured, outcome: deliver(secured, inbox: mut inbox, features: features, message: message, encoded: encoded.slice(), options: options))
+    }
+    StartTls => {
+      var inbox = Inbox(bytes: [])
+      let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
+      let offered = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting.slice(), lowest: 250, highest: 250))?
+      if !has_extension(offered, name: "STARTTLS") {
+        return quit_after(connection, outcome: Err(Error.Unsupported(message: "a mail server that does not offer STARTTLS")))
+      }
+      let _ = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: "STARTTLS", lowest: 220, highest: 220))?
+      if !inbox.bytes.is_empty() {
+        return Err(malformed("a mail server that sent bytes before the TLS handshake"))
+      }
+      let secured = match tls::connect(own connection, host: options.host.slice(), config: client_config(options)?) {
+        Ok(secured) => own secured
+        Err(error) => return Err(Error.Tls(error: own error))
+      }
+      var secured_inbox = Inbox(bytes: [])
+      let features = quit_after(secured, outcome: command(secured, inbox: mut secured_inbox, line: greeting.slice(), lowest: 250, highest: 250))?
+      quit_after(secured, outcome: deliver(secured, inbox: mut secured_inbox, features: features, message: message, encoded: encoded.slice(), options: options))
+    }
+  }
+}

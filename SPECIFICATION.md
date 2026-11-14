@@ -89,8 +89,7 @@ reports it once.
 
 Types, constructors, traits, and capabilities are `UpperCamelCase`. Values,
 constants, functions, fields, modules, and files are `lower_snake_case`. In a
-pattern, `Circle` is therefore a constructor and `radius` a binding, unless a
-constant named `radius` is in scope.
+pattern, `Circle` is therefore a constructor and `radius` a binding.
 
 ### Keywords
 
