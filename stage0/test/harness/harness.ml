@@ -1,11 +1,12 @@
 (* With [TRUSS_SKIP_SUITES] naming this executable, such as
    [prover_tests,database_tests], it says it is skipped and runs no test:
-   CI runs the slowest suites in jobs of their own. *)
+   CI runs the slowest suites in jobs of their own, and skips a suite that
+   builds no C where it runs the codegen tests under sanitizers. *)
 let () =
   let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
   match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
   | Some names when List.mem suite (String.split_on_char ',' names) ->
-      print_endline ("skipped: CI runs " ^ suite ^ " in a job of its own");
+      print_endline ("skipped: TRUSS_SKIP_SUITES names " ^ suite);
       exit 0
   | _ -> ()
 
