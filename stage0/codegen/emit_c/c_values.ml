@@ -167,10 +167,7 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
         (match key with
         | Table _ | Any_table _ | Locked_table _ ->
             Printf.sprintf "extern const void *const %s[];\n" symbol
-        | _ ->
-            Printf.sprintf "extern const %s %s;\n"
-              (use_declaration context "struct t_evidence")
-              symbol);
+        | _ -> Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
       ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))
 
 (* The scalar a value of a type is, for operators. *)

@@ -198,11 +198,14 @@ let compiler =
    reports the difference in spelling. [-Wtype-limits] is asked for by
    name: GCC's [-Wextra] has it and Clang's does not, so without it a
    comparison that only GCC rejects passes wherever the tests use Clang.
-   A local read before any write is an error, but not a local that the
-   compiler finds unwritten on some path: the code can take a path that no
-   run takes, such as the code after a [concurrent] block whose every
-   branch returns. Each compiler names that warning its own way, and Clang
-   rejects GCC's name. *)
+   A read of a local that no path has written is an error. A read of a
+   local that only some paths have written is not: the lowered C has
+   infeasible paths, such as the code after a [concurrent] block whose
+   every branch returns, and an infeasible path may read a local that it
+   never wrote. Clang and GCC name that warning differently, and Clang
+   rejects GCC's name. The sanitizer job of CI catches such a read on a
+   feasible path: it fills every local that has no initializer with a
+   pattern. *)
 let strict =
   lazy
     [

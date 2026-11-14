@@ -9,8 +9,5 @@ val anchor_struct : string
 val integer_c : Memory_layout.integer -> string
 val unsigned_c : Memory_layout.integer -> string
 val signed : Memory_layout.integer -> bool
-val integer_typedefs : Memory_layout.target -> string
-
-val declarations_text : build -> string list -> string
-(** The runtime's declarations and the helpers that the names in the list stand for, with those they
-    need, in an order C accepts. *)
+val runtime_declarations : Memory_layout.target -> string
+val helpers : (string * string) list

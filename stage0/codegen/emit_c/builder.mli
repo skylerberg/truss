@@ -18,8 +18,10 @@ val nested : t -> index:int -> environment:(string * Lowered.ty) list -> t
 
 (* A new local, numbered after every earlier one. [is_zeroed] declares it
    zeroed in the function that owns it, so that it is zero at the start of
-   each run: a drop flag, which starts false, or a value that C must be
-   given and that nothing reads. *)
+   each run of that function: a drop flag, which starts false, or an
+   omitted argument, which C must be passed a value for. Every other local
+   is declared with no initializer, and must be written before it is
+   read. *)
 val local : t -> ?name:string -> ?is_zeroed:bool -> Lowered.ty -> Lowered.local
 val local_type : t -> Lowered.local -> Lowered.ty
 

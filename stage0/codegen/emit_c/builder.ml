@@ -8,8 +8,8 @@ module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
 (* [is_zeroed] marks a local that is declared zeroed: a drop flag, which
-   starts false, or a value that C must be given and that nothing reads,
-   such as an omitted argument. *)
+   starts false, or an omitted argument, which C must be passed a value
+   for. *)
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
 type instance = C_instance.t
 
@@ -42,17 +42,12 @@ type facts = {
 
 let no_facts () = { instances = []; called = []; calls = []; failures = [] }
 
-(* The target of a block's [goto], and whether the block has no statements,
-   so that a jump to it can go straight to the target. *)
-type jump = { target : Lowered.block; is_empty : bool }
-
 type t = {
   env : Memory_layout.env;
   locals : local_info Dynarray.t;
   texts : string option Dynarray.t;  (** Each block's C, once it is finished *)
   mentions : Locals.t Dynarray.t;  (** The locals each block's code names *)
   successors : Lowered.block list Dynarray.t;  (** The blocks each block goes to *)
-  jumps : jump option Dynarray.t;  (** For a block that ends in a [goto], its target *)
   facts : facts Dynarray.t;
   owners : int Dynarray.t;
   mutable current : Lowered.block;
@@ -84,7 +79,6 @@ let new_builder env =
       texts = Dynarray.create ();
       mentions = Dynarray.create ();
       successors = Dynarray.create ();
-      jumps = Dynarray.create ();
       facts = Dynarray.create ();
       owners = Dynarray.create ();
       current = 0;
@@ -99,7 +93,6 @@ let block builder =
   Dynarray.add_last builder.texts None;
   Dynarray.add_last builder.mentions Locals.empty;
   Dynarray.add_last builder.successors [];
-  Dynarray.add_last builder.jumps None;
   Dynarray.add_last builder.facts (no_facts ());
   Dynarray.add_last builder.owners (-1);
   Dynarray.length builder.texts - 1
@@ -130,11 +123,6 @@ let current_function builder = Dynarray.get builder.functions builder.function_
 (* A local's name in C stands as a token until the function is built, when
    it becomes the local itself or its place in the environment. *)
 let token local = Printf.sprintf "\001%d\002" local
-
-(* A block's label stands as a token until the function is built, when it
-   becomes the label of the block that jumps to it lead to. *)
-let label_token block = Printf.sprintf "\003%d\004" block
-let goto_line block = Printf.sprintf "  goto %s;\n" (label_token block)
 
 (* A function's context for printing code, which records each local the
    code names with [name]. *)
@@ -202,13 +190,8 @@ let finish builder (terminator : Lowered.terminator) =
       function_.returns <- gives :: function_.returns
   | _ -> ());
   Dynarray.set builder.successors builder.current (Lowered.successors terminator);
-  Dynarray.set builder.jumps builder.current
-    (match terminator with
-    | Goto target -> Some { target; is_empty = Buffer.length builder.pending = 0 }
-    | _ -> None);
   function_.size <- function_.size + 2;
-  in_block_facts builder context (fun () ->
-      terminator_c context fc ~label:label_token builder.pending terminator);
+  in_block_facts builder context (fun () -> terminator_c context fc builder.pending terminator);
   Dynarray.set builder.texts builder.current (Some (Buffer.contents builder.pending));
   builder.pending <- Buffer.create 256
 
@@ -286,37 +269,26 @@ let outline builder ~nested ~parts body =
       body ());
   holder
 
-(* Replaces each token in a function's C with the text [local] gives its
-   local or [label] gives its block. *)
-let resolve text ~local ~label =
+(* Replaces each token in a function's C with the text [name] gives its
+   local. *)
+let resolve text name =
   let buffer = Buffer.create (String.length text) in
   let length = String.length text in
   let rec scan position =
     if position < length then
-      match text.[position] with
-      | ('\001' | '\003') as opening ->
-          let closing = if opening = '\001' then '\002' else '\004' in
-          let stop = String.index_from text position closing in
-          let number = int_of_string (String.sub text (position + 1) (stop - position - 1)) in
-          Buffer.add_string buffer (if opening = '\001' then local number else label number);
-          scan (stop + 1)
-      | character ->
-          Buffer.add_char buffer character;
-          scan (position + 1)
+      if text.[position] = '\001' then begin
+        let stop = String.index_from text position '\002' in
+        Buffer.add_string buffer
+          (name (int_of_string (String.sub text (position + 1) (stop - position - 1))));
+        scan (stop + 1)
+      end
+      else begin
+        Buffer.add_char buffer text.[position];
+        scan (position + 1)
+      end
   in
   scan 0;
   Buffer.contents buffer
-
-(* Each token of a block's label in a text. *)
-let labels_named text =
-  let rec scan position labels =
-    match String.index_from_opt text position '\003' with
-    | None -> labels
-    | Some start ->
-        let stop = String.index_from text start '\004' in
-        scan (stop + 1) (int_of_string (String.sub text (start + 1) (stop - start - 1)) :: labels)
-  in
-  scan 0 []
 
 (* Writes every function the builder holds as C.
 
@@ -328,36 +300,23 @@ let labels_named text =
    addresses do not change, and a loop that runs the function again while
    tasks it spawned earlier read the environment does not write it again,
    which would be a data race. A local that takes no room is never shared:
-   each function that names it has its own.
-
-   A jump to a block that has no statements and ends in a [goto] goes
-   straight to where that [goto] leads, so the block is written only where
-   it is a function's entry. A [goto] to the block written right after it
-   is left out, and a block has a label only where a [goto] names it. *)
+   each function that names it has its own. *)
 let build ?(returns = true) builder ~parameters ~result =
   let functions = Dynarray.to_array builder.functions in
   let count = Array.length functions in
   let texts = Dynarray.to_array builder.texts and owners = Dynarray.to_array builder.owners in
   let successors = Dynarray.to_array builder.successors in
-  let jumps = Dynarray.to_array builder.jumps in
-  (* Where a jump to a block leads. A cycle of empty blocks is an endless
-     loop, which keeps the block whose [goto] closes it. *)
-  let destination block =
-    let rec follow block seen =
-      match jumps.(block) with
-      | Some { target; is_empty = true } when not (Blocks.mem target seen) ->
-          follow target (Blocks.add block seen)
-      | _ -> block
-    in
-    follow block Blocks.empty
-  in
-  let reached = Array.make (Array.length texts) false in
+  let reached = Array.make (Array.length texts) false and targets = ref Blocks.empty in
   Array.iter
     (fun (function_ : function_) ->
       let rec reach block =
         if not reached.(block) then begin
           reached.(block) <- true;
-          List.iter (fun target -> reach (destination target)) successors.(block)
+          List.iter
+            (fun target ->
+              targets := Blocks.add target !targets;
+              reach target)
+            successors.(block)
         end
       in
       reach function_.entry)
@@ -485,23 +444,24 @@ let build ?(returns = true) builder ~parameters ~result =
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
       let symbol = Instance.symbol function_.code.key in
-      (* A local is declared with no initializer, unless it is zeroed: the
-         code writes every other local before it reads it, so zeroing it
-         would only cost a store, and hide a read that the lowering got
-         wrong. *)
+      (* A local is declared with no initializer, unless it is zeroed. The
+         code writes every other local before it reads it, so an
+         initializer would cost a store, and would hide a read of a local
+         that the lowering never wrote. *)
       List.iter
         (fun local ->
           let ty = local_type builder local in
           if (not (List.mem local (parameters_of number))) && not (erased context ty) then
-            let zero =
-              match ty with
-              | _ when not (Dynarray.get builder.locals local).is_zeroed -> ""
-              | Value ty when is_struct context ty -> " = {0}"
-              | Environment _ | Evidence _ -> bug "a zeroed environment or evidence slot"
-              | Value _ | Pointer _ | Raw _ -> " = 0"
+            let initializer_ =
+              if not (Dynarray.get builder.locals local).is_zeroed then ""
+              else
+                match ty with
+                | Value ty when is_struct context ty -> " = {0}"
+                | Value _ | Pointer _ | Raw _ -> " = 0"
+                | Environment _ | Evidence _ -> bug "a zeroed environment or evidence slot"
             in
             Buffer.add_string body
-              (Printf.sprintf "  %s %s%s;\n" (c_ty context symbol ty) (name local) zero))
+              (Printf.sprintf "  %s %s%s;\n" (c_ty context symbol ty) (name local) initializer_))
         (List.sort compare
            (Hashtbl.fold
               (fun local owner locals -> if owner = number then local :: locals else locals)
@@ -514,40 +474,13 @@ let build ?(returns = true) builder ~parameters ~result =
              (fun block -> block <> function_.entry && owners.(block) = number && reached.(block))
              (List.init (Array.length texts) Fun.id)
       in
-      let text block =
-        match texts.(block) with
-        | Some text -> text
-        | None -> bug "block %d is never finished" block
-      in
-      let rec written = function
-        | [] -> []
-        | block :: rest ->
-            let text = text block in
-            let text =
-              match (jumps.(block), rest) with
-              | Some { target; _ }, next :: _ when destination target = next ->
-                  let goto = goto_line target in
-                  if not (String.ends_with ~suffix:goto text) then
-                    bug "block %d ends in a goto that its C does not end with" block;
-                  String.sub text 0 (String.length text - String.length goto)
-              | _ -> text
-            in
-            (block, text) :: written rest
-      in
-      let written = written blocks in
-      let labelled =
-        List.fold_left
-          (fun labelled (_, text) ->
-            List.fold_left
-              (fun labelled block -> Blocks.add (destination block) labelled)
-              labelled (labels_named text))
-          Blocks.empty written
-      in
       List.iter
-        (fun (block, text) ->
-          if Blocks.mem block labelled then Buffer.add_string body (Printf.sprintf "b%d:;\n" block);
-          Buffer.add_string body text)
-        written;
+        (fun block ->
+          if Blocks.mem block !targets then Buffer.add_string body (Printf.sprintf "b%d:;\n" block);
+          match texts.(block) with
+          | Some text -> Buffer.add_string body text
+          | None -> bug "block %d is never finished" block)
+        blocks;
       Buffer.add_string body "}\n";
       let symbol =
         match function_.nested with
@@ -566,24 +499,9 @@ let build ?(returns = true) builder ~parameters ~result =
           }
       in
       function_.code.functions <-
-        ( function_.nested,
-          ( header,
-            resolve (Buffer.contents body) ~local:name ~label:(fun block ->
-                Printf.sprintf "b%d" (destination block)) ) )
+        (function_.nested, (header, resolve (Buffer.contents body) name))
         :: function_.code.functions;
-      (* A terminator counts 2 toward the size, so each block that a jump
-         goes past, and is not written, takes 2 off. *)
-      if number = 0 && function_.nested = None then
-        let passed =
-          List.length
-            (List.filter
-               (fun block ->
-                 owners.(block) = number
-                 && (not reached.(block))
-                 && match jumps.(block) with Some { is_empty; _ } -> is_empty | None -> false)
-               (List.init (Array.length texts) Fun.id))
-        in
-        function_.code.weight <- function_.size - (2 * passed))
+      if number = 0 && function_.nested = None then function_.code.weight <- function_.size)
     functions
 
 let built builder = (Dynarray.get builder.functions 0).code

@@ -26,7 +26,7 @@ type context = {
   mutable prototypes : (string * string) list;
   mutable anchors : (string * Path.t) list;
   mutable references : key list option;
-  mutable declarations_used : string list;
+  mutable helpers_used : string list;
   mutable statics : string list;
   mutable instances : Instance.key list;
   mutable called : Instance.key list;
@@ -36,7 +36,7 @@ type context = {
 
 val new_context : Memory_layout.env -> string -> context
 val refer : context -> Instance.key -> unit
-val use_declaration : context -> string -> string
+val use_helper : context -> string -> string
 val register : context -> Keys.key -> unit
 val layout : context -> Ground.ty -> Memory_layout.t
 val is_struct : context -> Ground.ty -> bool

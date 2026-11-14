@@ -193,7 +193,11 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
         (fun (path : Moves.path) ->
           (* A flag is written only where its path's state changes, so it
              starts zeroed: false, for a path that holds nothing. A flag of
-             a path that holds a value on entry is set true there. *)
+             a path that holds a value on entry is set true there. The
+             zero is the flag's declaration, not an assignment on entry: an
+             outlined loop body that alone names a flag then has its own
+             in each run, where an assignment in the enclosing function
+             would make the runs share one flag, a data race. *)
           (path, at (local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool))))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
@@ -677,10 +681,12 @@ let call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~des
     ~signature ~substitution ~arguments ~destination ()
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
-   order. An omitted argument gets a zeroed local, which nothing drops: the
-   callee makes the default its own and never reads the argument, but C
-   must be passed a value, since passing an uninitialized one is undefined.
-   The returned mask has one bit for each parameter with a default, set
+   order. An omitted argument gets a zeroed local. A function or a method
+   evaluates the default itself and never reads the argument, so nothing
+   here drops the local, but C must be passed a value: passing an
+   uninitialized one is undefined behavior. For a capability method,
+   [capability_defaults] then writes the default into the local and drops
+   it. The returned mask has one bit for each parameter with a default, set
    where the call passes an argument. *)
 let evaluate_arguments st (signature : Types.signature) substitution (arguments : Mir.argument list)
     =
@@ -2041,16 +2047,17 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
           incr bit;
           let bit = !bit in
           let ty = ground st type_ in
-          let passed = local builder (Raw (Integer UInt64))
-          and is_passed = local builder (Raw Bool) in
+          let passed_bit = local builder (Raw (Integer UInt64))
+          and is_omitted = local builder (Raw Bool) in
           emit builder
             (Assign
-               (at passed, Binary (Bit_and, Copy mask, constant_int UInt64 (Z.shift_left Z.one bit))));
+               ( at passed_bit,
+                 Binary (Bit_and, Copy mask, constant_int UInt64 (Z.shift_left Z.one bit)) ));
           emit builder
-            (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+            (Assign (at is_omitted, Binary (Equal, Copy (at passed_bit), constant_int UInt64 Z.zero)));
           let fill = block builder and after = block builder in
           let unless_passed other =
-            Emit_c.Builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
+            Emit_c.Builder.branch builder (Copy (at is_omitted)) ~yes:fill ~no:other
           in
           let place =
             if mode = Own && not (trivial st ty) then begin
@@ -2066,16 +2073,11 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
             end
             else begin
               (* A default lent to the function is a value of its own, which
-                 only the path that omits the argument builds, so it is
-                 dropped only there. *)
-              let default_value =
-                if trivial st ty then fun () -> binding st ty
-                else begin
-                  let is_omitted = local builder (Raw Bool) in
-                  emit builder (Assign (at is_omitted, Unary (Not, Copy (at is_passed))));
-                  fun () -> binding_where st ty ~holds:(at is_omitted)
-                end
-              in
+                 only the path that omits the argument initializes, so
+                 [is_omitted] is its drop flag. Dropping it where the
+                 argument was passed would be a free of a pointer that
+                 nothing wrote. *)
+              let default_value () = flagged_binding st ty ~flag:(at is_omitted) in
               unless_passed after;
               start builder fill;
               in_statement st (fun () ->

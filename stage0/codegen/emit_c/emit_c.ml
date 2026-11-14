@@ -6,7 +6,7 @@ type build = C_runtime.build = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
 let anchor_struct = C_runtime.anchor_struct
-let integer_typedefs = C_runtime.integer_typedefs
+let runtime_declarations = C_runtime.runtime_declarations
 let anchor_symbol = C_runtime.anchor_symbol
 let version = 27
 
@@ -28,7 +28,7 @@ type fragment = {
   prototypes : (string * string) list;
   statics : string list;
   anchors : (string * Path.t) list;
-  declarations : string list;
+  helpers : string list;
   references : Instance.key list;
   calls : (Path.t * int) list;
   called : Instance.key list;
@@ -86,7 +86,7 @@ let text fragment =
             | Struct { body; _ } -> body
             | Typedef text | Code_typedef text -> text)
           fragment.environments
-      @ List.map snd fragment.prototypes @ fragment.statics @ fragment.declarations)
+      @ List.map snd fragment.prototypes @ fragment.statics @ fragment.helpers)
   in
   let buffer = Buffer.create (String.length whole) in
   let is_start character =
@@ -189,7 +189,7 @@ let fragment env (compiled : compiled) =
            context.bytes)
       @ List.rev context.statics;
     anchors = List.rev context.anchors;
-    declarations = context.declarations_used;
+    helpers = context.helpers_used;
     references =
       (match compiled with
       | Table table -> List.map fst table.entries
@@ -273,18 +273,20 @@ let file env build (fragments : (fragment * linkage) list) =
   close ();
   let keys = List.rev context.order in
   let defined key = Keys.find key !definitions in
-  let anchors =
-    List.sort_uniq String.compare
-      (List.concat_map (fun ((fragment : fragment), _) -> List.map fst fragment.anchors) fragments)
-  in
-  let declarations_used =
-    (if anchors = [] then [] else [ "struct t_anchor" ])
-    @ context.declarations_used
-    @ List.concat_map (fun ((fragment : fragment), _) -> fragment.declarations) fragments
-  in
   let buffer = Buffer.create 4096 in
-  Buffer.add_string buffer (integer_typedefs (Memory_layout.target env));
-  Buffer.add_string buffer (declarations_text build declarations_used);
+  Buffer.add_string buffer (runtime_declarations (Memory_layout.target env));
+  Buffer.add_string buffer
+    (match build with
+    | Development -> "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"
+    | Release -> "#define T_UNREACHABLE() __builtin_unreachable()\n");
+  let helpers_used =
+    List.sort_uniq String.compare
+      (context.helpers_used
+      @ List.concat_map (fun ((fragment : fragment), _) -> fragment.helpers) fragments)
+  in
+  List.iter
+    (fun (name, text) -> if List.mem name helpers_used then Buffer.add_string buffer text)
+    helpers;
   List.iter
     (fun key ->
       match (defined key).definition with
@@ -337,6 +339,10 @@ let file env build (fragments : (fragment * linkage) list) =
                (key_name key) layout.size (key_name key) layout.alignment))
         layout)
     keys;
+  let anchors =
+    List.sort_uniq String.compare
+      (List.concat_map (fun ((fragment : fragment), _) -> List.map fst fragment.anchors) fragments)
+  in
   List.iter
     (fun symbol ->
       Buffer.add_string buffer (Printf.sprintf "extern const struct t_anchor %s;\n" symbol))

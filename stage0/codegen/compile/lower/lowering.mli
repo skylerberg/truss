@@ -1,6 +1,6 @@
 type cleanup =
   | Drop_value of Lowered.place
-  | Drop_where of { place : Lowered.place; holds : Lowered.place }
+  | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
   | Free_pointed of Lowered.place
   | Free_blocks of { place : Lowered.place; variants : string list }
   | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
@@ -91,8 +91,9 @@ val innermost_scope : state -> scope
 val temporary : state -> ?name:string -> Ground.ty -> Lowered.place
 val binding : state -> ?name:string -> Ground.ty -> Lowered.place
 
-val binding_where : state -> ?name:string -> Ground.ty -> holds:Lowered.place -> Lowered.place
-(** A [binding] whose value is dropped where the [Bool] at [holds] is true. *)
+val flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
+(** A [binding] that only some paths initialize, whose value is dropped where its drop flag, the
+    [Bool] at [flag], is true. *)
 
 val parameter :
   state ->

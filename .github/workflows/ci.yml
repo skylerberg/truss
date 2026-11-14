@@ -219,11 +219,15 @@ jobs:
           key: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-${{ github.sha }}
 
   # The codegen tests again, with their C built under AddressSanitizer and
-  # UndefinedBehaviorSanitizer: a report is a compiler bug. Leaks are left to
-  # the test runner's own count of live blocks, since the runner itself
-  # frees nothing at exit. layout_tests is skipped: it builds no C, so the
-  # sanitizers would run the same OCaml as the codegen job. It runs beside
-  # the check, on a runner of its own.
+  # UndefinedBehaviorSanitizer: a report is a compiler bug. The C declares a
+  # local with no initializer, and -ftrivial-auto-var-init=pattern fills
+  # each such local with a pattern. A read of a local that the lowering
+  # never wrote then yields a wild pointer or a true drop flag, which
+  # AddressSanitizer reports, and not the bytes that the stack held, which
+  # are often zero. Leaks are left to the test runner's own count of live
+  # blocks, since the runner itself frees nothing at exit. layout_tests is
+  # skipped: it builds no C, so the sanitizers would run the same OCaml as
+  # the codegen job. It runs beside the check, on a runner of its own.
   sanitizers:
     runs-on: ubuntu-latest
     steps:
@@ -259,7 +263,7 @@ jobs:
 
       - name: Test generated code under sanitizers
         env:
-          TRUSS_CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+          TRUSS_CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -ftrivial-auto-var-init=pattern
           ASAN_OPTIONS: detect_leaks=0
           TRUSS_SKIP_SUITES: layout_tests
         run: opam exec -- dune build @stage0/test/codegen/runtest

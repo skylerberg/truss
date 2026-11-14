@@ -1,5 +1,6 @@
-(* The C every file starts with, and the declarations of the runtime and the
-   helpers that a file holds only where its code names them. *)
+(* The C every file starts with: the build and linkage kinds, the
+   runtime's declarations, and the helpers a file includes when it uses
+   them. *)
 
 type build = Development | Release
 type linkage = External | Internal
@@ -37,10 +38,9 @@ let signed : Memory_layout.integer -> bool = function
   | Int8 | Int16 | Int32 | Int64 | ISize -> true
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> false
 
-(* The typedefs every file starts with: the fixed-width integers, from the
-   compiler's own predefined macros, and the target's [USize] and
-   [ISize]. *)
-let integer_typedefs (target : Memory_layout.target) =
+(* The declarations every file starts with: the fixed-width integers, from the
+   compiler's own predefined macros, the target's [USize], and the runtime. *)
+let runtime_declarations (target : Memory_layout.target) =
   let usize, isize =
     if target.usize_bytes = 8 then ("__UINT64_TYPE__", "__INT64_TYPE__")
     else ("__UINT32_TYPE__", "__INT32_TYPE__")
@@ -57,135 +57,82 @@ let integer_typedefs (target : Memory_layout.target) =
       "typedef __UINT64_TYPE__ uint64_t;\n";
       Printf.sprintf "typedef %s t_usize;\n" usize;
       Printf.sprintf "typedef %s t_isize;\n" isize;
-    ]
-
-type declaration = { name : string; requires : string list; text : string }
-
-let declaration ?(requires = []) name text = { name; requires; text }
-
-(* A runtime function's prototype, named by its symbol. *)
-let runtime_function ?requires symbol ~result ~parameters =
-  declaration ?requires symbol (Printf.sprintf "%s%s(%s);\n" result symbol parameters)
-
-let failing symbol ~result =
-  runtime_function symbol ~result ~requires:[ "struct t_anchor" ]
-    ~parameters:
-      "const uint8_t *message, t_usize length, const struct t_anchor *anchor, uint32_t line, \
-       uint32_t column"
-
-(* The declarations a file holds only where its code names them, each after
-   the declarations its text names. A file holds none of the others, so
-   that adding one to the runtime leaves the C of every instance that does
-   not name it unchanged. *)
-let declarations build =
-  [
-    declaration "struct t_anchor" anchor_struct;
-    declaration "struct t_evidence"
+      anchor_struct;
+      "_Noreturn void t_runtime_panic(const uint8_t *message, t_usize length, const struct \
+       t_anchor *anchor, uint32_t line, uint32_t column);\n";
+      "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, t_usize length, const \
+       struct t_anchor *anchor, uint32_t line, uint32_t column);\n";
+      "_Noreturn void t_runtime_todo(const uint8_t *message, t_usize length, const struct t_anchor \
+       *anchor, uint32_t line, uint32_t column);\n";
+      "void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, \
+       uint32_t line, uint32_t column);\n";
+      "_Noreturn void t_runtime_compiler_bug(void);\n";
       "struct t_evidence {\n\
       \  void *implementation;\n\
       \  const void *const *table;\n\
       \  const struct t_evidence *const *outer;\n\
        };\n";
-    declaration "struct t_branch"
+      "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
+      "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
+      "void t_runtime_free(void *pointer);\n";
       "struct t_branch {\n  void (*run)(void *environment);\n  void *environment;\n};\n";
-    failing "t_runtime_panic" ~result:"_Noreturn void ";
-    failing "t_runtime_assertion_failed" ~result:"_Noreturn void ";
-    failing "t_runtime_todo" ~result:"_Noreturn void ";
-    failing "t_runtime_echo" ~result:"void ";
-    runtime_function "t_runtime_compiler_bug" ~result:"_Noreturn void " ~parameters:"void";
-    (match build with
-    | Development ->
-        declaration "T_UNREACHABLE" ~requires:[ "t_runtime_compiler_bug" ]
-          "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"
-    | Release -> declaration "T_UNREACHABLE" "#define T_UNREACHABLE() __builtin_unreachable()\n");
-    runtime_function "t_runtime_allocate" ~result:"void *"
-      ~parameters:"t_usize size, t_usize alignment";
-    runtime_function "t_runtime_reallocate" ~result:"void *"
-      ~parameters:"void *pointer, t_usize old_size, t_usize size, t_usize alignment";
-    runtime_function "t_runtime_free" ~result:"void " ~parameters:"void *pointer";
-    runtime_function "t_runtime_parallel" ~result:"void " ~requires:[ "struct t_branch" ]
-      ~parameters:"const struct t_branch *branches, t_usize count";
-    runtime_function "t_runtime_parallel_range" ~result:"void "
-      ~parameters:
-        "void (*body)(void *environment, uint64_t first, uint64_t last), void *environment, \
-         uint64_t first, uint64_t last";
-    runtime_function "t_runtime_coroutine_start" ~result:"t_usize "
-      ~parameters:"void (*code)(void *environment, uint64_t item), void *environment, uint64_t item";
-    runtime_function "t_runtime_coroutine_resume" ~result:"uint8_t " ~parameters:"t_usize coroutine";
-    runtime_function "t_runtime_coroutine_suspend" ~result:"void " ~parameters:"void";
-    runtime_function "t_runtime_tasks_spawn" ~result:"uint8_t "
-      ~parameters:
-        "uint64_t group, void (*code)(void *environment, uint64_t item), void *environment, \
-         uint64_t item";
-    runtime_function "t_runtime_run_test" ~result:"void " ~parameters:"uint32_t index";
-    runtime_function "t_runtime_report_tests_to" ~result:"void " ~parameters:"int32_t descriptor";
-    runtime_function "t_runtime_live_blocks" ~result:"t_usize " ~parameters:"void";
-    runtime_function "t_runtime_shared_allocate" ~result:"void *"
-      ~parameters:"t_usize size, t_usize alignment";
-    runtime_function "t_runtime_shared_retain" ~result:"void " ~parameters:"void *value";
-    runtime_function "t_runtime_shared_release" ~result:"uint8_t " ~parameters:"void *value";
-    runtime_function "t_runtime_shared_free" ~result:"void " ~parameters:"void *value";
-    runtime_function "t_runtime_shared_lock" ~result:"void " ~parameters:"void *value";
-    runtime_function "t_runtime_shared_unlock" ~result:"void " ~parameters:"void *value";
-    runtime_function "t_runtime_blocking_begin" ~result:"void " ~parameters:"void";
-    runtime_function "t_runtime_blocking_end" ~result:"void " ~parameters:"void";
-    declaration "t_compare_bytes"
+      "void t_runtime_parallel(const struct t_branch *branches, t_usize count);\n";
+      "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
+       last), void *environment, uint64_t first, uint64_t last);\n";
+      "t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
+       *environment, uint64_t item);\n";
+      "uint8_t t_runtime_coroutine_resume(t_usize coroutine);\n";
+      "void t_runtime_coroutine_suspend(void);\n";
+      "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
+       item), void *environment, uint64_t item);\n";
+      "void t_runtime_run_test(uint32_t index);\n";
+      "void t_runtime_report_tests_to(int32_t descriptor);\n";
+      "t_usize t_runtime_live_blocks(void);\n";
+    ]
+
+(* Small functions that generated code calls, each emitted only into the
+   files that use it. *)
+let helpers =
+  [
+    ( "t_compare_bytes",
       {|static inline int32_t t_compare_bytes(const void *first, const void *second, t_usize count) {
   int order = __builtin_memcmp(first, second, count);
   return (order > 0) - (order < 0);
 }
-|};
-    declaration "t_float64_bits"
+|}
+    );
+    ( "t_float64_bits",
       {|static inline uint64_t t_float64_bits(double value) {
   uint64_t bits;
   if (value != value) return 0x7ff8000000000000ULL;
   __builtin_memcpy(&bits, &value, 8);
   return bits;
 }
-|};
-    declaration "t_float32_bits"
+|}
+    );
+    ( "t_float32_bits",
       {|static inline uint32_t t_float32_bits(float value) {
   uint32_t bits;
   if (value != value) return 0x7fc00000U;
   __builtin_memcpy(&bits, &value, 4);
   return bits;
 }
-|};
-    declaration "t_float64_from_bits"
+|}
+    );
+    ( "t_float64_from_bits",
       {|static inline double t_float64_from_bits(uint64_t bits) {
   double value;
   __builtin_memcpy(&value, &bits, 8);
   return value;
 }
-|};
-    declaration "t_float32_from_bits"
+|}
+    );
+    ( "t_float32_from_bits",
       {|static inline float t_float32_from_bits(uint32_t bits) {
   float value;
   __builtin_memcpy(&value, &bits, 4);
   return value;
 }
-|};
+|}
+    );
   ]
-
-(* The text of the declarations named in [used] and of those their texts
-   name, in the order of [declarations]. *)
-let declarations_text build used =
-  let all = declarations build in
-  List.iter
-    (fun name ->
-      if not (List.exists (fun declaration -> declaration.name = name) all) then
-        bug "no runtime declaration named %s" name)
-    used;
-  (* Each declaration comes after those it requires, so one pass from the
-     last adds every declaration the used ones require. *)
-  let required =
-    List.fold_left
-      (fun required declaration ->
-        if List.mem declaration.name required then declaration.requires @ required else required)
-      used (List.rev all)
-  in
-  String.concat ""
-    (List.filter_map
-       (fun declaration ->
-         if List.mem declaration.name required then Some declaration.text else None)
-       all)
