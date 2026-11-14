@@ -37,6 +37,7 @@
   library_tests)
  (libraries
   harness
+  core_lint
   substring
   compiler_bug
   zarith

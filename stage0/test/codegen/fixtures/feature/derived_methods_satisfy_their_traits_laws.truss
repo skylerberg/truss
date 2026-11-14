@@ -1,0 +1,68 @@
+type Light =
+  | Off
+  | Dim(level: Int64)
+  | On
+  derives Equal, Hash, Ordered
+
+type Pair[Second](first: Int64, second: Second)
+  derives Equal, Hash, Ordered, Default
+
+fn hashed[Value: Hash](value: Value) -> UInt64 {
+  var hasher = Hasher.new()
+  value.hash(mut hasher)
+  hasher.finish()
+}
+
+fn lawful[Value: Ordered + Hash](values: List[Value]) -> Bool {
+  for first in values {
+    if first != first {
+      return false
+    }
+    for second in values {
+      let order = first.compare(second)
+      if (order == Ordering.Equal) != (first == second) {
+        return false
+      }
+      if (order == Ordering.Less) != (second.compare(first) == Ordering.Greater) {
+        return false
+      }
+      if (first <= second) != (order != Ordering.Greater) {
+        return false
+      }
+      if first == second && hashed(first) != hashed(second) {
+        return false
+      }
+      for third in values {
+        if first <= second && second <= third && !(first <= third) {
+          return false
+        }
+      }
+    }
+  }
+  true
+}
+
+test "derived equal, compare, and hash satisfy the laws of their traits" {
+  assert lawful([Light.On, Light.Dim(level: 7), Light.Off, Light.Dim(level: -1), Light.Dim(level: 7)])
+  assert lawful([
+    Pair(first: 1, second: "b"),
+    Pair(first: 1, second: "a"),
+    Pair(first: 0, second: "z"),
+    Pair(first: 1, second: "a"),
+  ])
+}
+
+test "a sum type orders by variant, then by fields" {
+  assert Light.Off < Light.Dim(level: -5)
+  assert Light.Dim(level: 100) < Light.On
+  assert Light.Dim(level: 1) < Light.Dim(level: 2)
+  assert Light.Off != Light.On
+  assert Light.Dim(level: 3) == Light.Dim(level: 3)
+  assert Light.Dim(level: 3) != Light.Dim(level: 4)
+}
+
+test "a derived default is the default of each field" {
+  let pair = Pair[String].default()
+  assert pair.first == 0
+  assert pair.second == ""
+}

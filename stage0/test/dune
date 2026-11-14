@@ -44,6 +44,7 @@
   syntax_print
   core
   core_print
+  core_lint
   core_walk
   mir
   moves

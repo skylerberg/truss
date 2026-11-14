@@ -1,0 +1,11 @@
+test "assignment" {
+  var ports: Map[String, Int64] = ["http": 80]
+  ports["https"] = 443
+  ports["http"] = 8080
+  assert ports.length() == 2
+  assert ports["http"] == 8080
+  assert ports["https"] == 443
+  var scores: List[Int64] = [1, 2]
+  scores[1] = 5
+  assert scores == [1, 5]
+}

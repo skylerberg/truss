@@ -281,7 +281,7 @@ let load_files ?results files =
     (fun (file, _) ->
       let source = (Query.demand database Workspace.file file).source in
       match Checks.diagnostics database file with
-      | [] -> ()
+      | [] -> ignore (Core_lint.check_file database file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))

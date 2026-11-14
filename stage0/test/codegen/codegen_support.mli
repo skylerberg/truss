@@ -109,7 +109,11 @@ val example_file : Path.file
 (** [example/main.truss], the file {!load} gives its text. *)
 
 val checked_standard : Engine.t lazy_t
+
 val load_files : ?results:Compile.results -> (Path.file * string) list -> Query.context * Compile.t
+(** Loads the files as the package [example]. Fails the running test if a file has a diagnostic or a
+    core form that fails {!Core_lint.check}. *)
+
 val load : ?results:Compile.results -> string -> Query.context * Compile.t
 val tests_in : Query.context -> Path.module_ -> Path.t list
 val tests_of : Query.context -> Path.t list

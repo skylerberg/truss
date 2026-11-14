@@ -19,5 +19,4 @@
   infer
   core
   core_walk
-  intrinsic
-  intrinsic_signatures))
+  core_lint))

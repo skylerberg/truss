@@ -1,0 +1,16 @@
+(library
+ (name core_lint)
+ (libraries
+  harness
+  query
+  path
+  types
+  resolve
+  interface
+  infer
+  core
+  core_walk
+  intrinsic
+  intrinsic_signatures
+  well_known
+  zarith))
