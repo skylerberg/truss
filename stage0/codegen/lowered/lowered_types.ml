@@ -58,7 +58,9 @@ and constant =
   | Character of int
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
-  | Symbol_address of Instance.key  (** The address of a table, or of a type's drop function *)
+  | Symbol_address of Instance.key
+      (** The address of a table, or of [Instance.Any_drop], a drop function that takes the value's
+          pointer untyped *)
   | Site of site
       (** The address of a call site, which lasts for the call that it is passed to: a lending
           method of the standard library reports a failed check at its call site *)
@@ -177,7 +179,8 @@ type intrinsic =
       (** [(lend, size, alignment)]: storage that lasts until the lend ends, as an untyped pointer
       *)
   | Lend_defer_drop
-      (** [(lend, drop, value)]: when the lend ends, calls the drop function [drop] on [value] *)
+      (** [(lend, drop, value)]: when the lend ends, calls [drop] on [value]. [drop] is the address
+          of an [Instance.Any_drop]. *)
   | Lend_defer_write_back
       (** [(lend, destination, source, size)]: when the lend ends, copies [size] bytes from [source]
           to [destination] *)

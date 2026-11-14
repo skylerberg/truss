@@ -1899,7 +1899,9 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
     let target = List.fold_left ( / ) slot inside in
     match deferred with
     | Deferred_drop ty ->
-        defer_call Lend_defer_drop [ Constant (Symbol_address (Drop ty)); address target ]
+        (* The drop function that takes the value's pointer untyped, as the
+           record calls it. *)
+        defer_call Lend_defer_drop [ Constant (Symbol_address (Any_drop ty)); address target ]
     | Deferred_write_back { source; ty } ->
         defer_call Lend_defer_write_back [ address source; address target; Constant (Size_of ty) ]
     | Deferred_free variant ->
