@@ -24,6 +24,14 @@ fn save_report(path: Path, report: Report) -> Result[Unit, SystemError]
 Code never owns a writer, so no writer is dropped with data in it. A type
 that writes in stages takes the writer as a `mut` parameter of each call.
 
+## Temporary files
+
+`with_temporary_directory(work)` creates a directory under
+`temporary_root()`, runs `work` with its path, and removes the directory and
+everything in it afterwards. `with_temporary_file(work)` does the same with
+an empty file inside such a directory. `temporary_root()` is `$TMPDIR`, or
+`/tmp` when it is not set.
+
 ## Implementations
 
 - `MemoryFiles` is an in-memory file system, with directories, links,

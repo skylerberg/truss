@@ -61,6 +61,28 @@ fn total_size(paths: Slice[Path]) -> USize
   same value.
 - `Counter` is a cell that holds an `Int64`.
 
+## Pools
+
+A `Pool[Resource]` lends out resources that are slow to open, such as
+database connections. `pool.using(open:, work:)` takes an idle resource, or
+calls `open` for a new one, and runs `work` on it:
+
+```truss
+let connections = tasks::Pool[Session].new(tasks::PoolOptions(maximum: 20, idle_seconds: 300))
+let rows = connections.using(open: fn() { Session.connect(address) }, work: fn(session) {
+  session.query("select 1")
+})
+```
+
+- At most `maximum` resources are lent out at once. A task that asks for
+  another waits for one to come back.
+- When `work` returns `Ok`, the resource goes back to the pool, which keeps
+  at most `idle_maximum` of them. When `work` returns `Err`, the resource is
+  dropped, because it may be broken.
+- A resource that has been idle longer than `idle_seconds` is dropped
+  instead of lent.
+- `using` returns `None` when the task is cancelled while it waits.
+
 ## Time limits
 
 `with_timeout(limit, work)` runs `work` and a timer as two branches, each of
