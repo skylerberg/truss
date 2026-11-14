@@ -110,23 +110,9 @@ Each document has one job, and a fact is stated in one of them:
   language, whether or not stage0 builds all of it yet.
 - **The Markdown files beside the modules of [`standard/`](standard)
   document the standard library,** each its module's types and functions.
-- **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
-  [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
-  [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
-  [CLI.md](CLI.md) describe stage0,**
-  each for its own stage, and each ends with the one list of the features
-  that stage does not build yet. How results are kept current and kept from being
-  computed twice is DATABASE.md's, and the other documents describe only
-  their own stage's additions to it.
 - **This document holds the rules for working on stage0.**
 
-A document does not restate the code: a module's contents, a signature, or a
-test's coverage is read from the code, where it cannot go stale.
-A stage's document gives its structure, the decisions that need a reason,
-and its interfaces to other stages. A mechanism, a data format, a JSON
-field, or a diagnostic's code is read from the code. A reason belongs in
-one document: a stage's document does not argue again what DESIGN.md
-argues, and CLI.md does not restate PACKAGES.md's rules.
+Stage0 has no documents of its own. Its code and interfaces describe it.
 
 A design document describes the design as it is. How it got there belongs in
 version control, in commit messages and pull request descriptions. A

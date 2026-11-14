@@ -1,7 +1,7 @@
 name: Z3
 description: >
   Installs the Z3 release the prover is pinned to, since another could answer
-  differently (see PROVER.md, "The solver"). The release is downloaded and
+  differently. The release is downloaded and
   checked against its pinned hash, and put on the path.
 
 runs:

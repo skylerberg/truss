@@ -1,5 +1,5 @@
 ; The truss command line: its commands, apart from starting the program, so
-; that tests can drive them. See CLI.md.
+; that tests can drive them.
 
 (library
  (name cli)

@@ -1,4 +1,4 @@
-; The truss command. See CLI.md.
+; The truss command.
 
 (executable
  (name truss)

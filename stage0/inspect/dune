@@ -1,5 +1,5 @@
 ; Queries about definitions for the command line's tools, which read the
-; type checker's results. See IMPLEMENTATION.md.
+; type checker's results.
 
 (library
  (name inspect)
