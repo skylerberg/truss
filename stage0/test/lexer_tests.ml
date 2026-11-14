@@ -53,6 +53,13 @@ let shown tokens =
 
 let tokens_of text = shown (fst (lex text))
 
+let recovered_tokens text =
+  List.map
+    (fun shown ->
+      if String.length shown > 1 && shown.[0] = '+' then String.sub shown 1 (String.length shown - 1)
+      else shown)
+    (tokens_of text)
+
 (* Asserts that [text] lexes with no diagnostics into [expected]. *)
 let tokens text expected =
   List.iter (fun code -> fail "unexpected %s" code) (codes text);
@@ -94,7 +101,12 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
           equal_lists (Printf.sprintf "%S") "fixed text" (fixed :: alternatives) results;
           List.iter
             (fun result -> List.iter (fail "the fixed text %S has %s" result) (codes result))
-            results)
+            results;
+          let recovered = recovered_tokens text in
+          if
+            List.length results = 1
+            && not (List.exists (fun result -> recovered_tokens result = recovered) results)
+          then fail "%S recovers as [%s], which no fix writes" text (String.concat "; " recovered))
   | diagnostics ->
       fail "expected one diagnostic, got [%s]"
         (String.concat "; "
@@ -109,6 +121,13 @@ let fixed_texts text ~code =
       if diagnostic.code = Lexer code then List.map (Diagnostic.apply_fix text) diagnostic.fixes
       else [])
     (snd (lex text))
+
+let machine_fixed text =
+  Diagnostic.apply_edits text
+    (List.concat_map
+       (fun (diagnostic : Diagnostic.t) ->
+         match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+       (Diagnostic.machine_applicable (snd (lex text))))
 
 (* Source text *)
 
@@ -146,7 +165,8 @@ let () =
   test "a forbidden character between names becomes a space" (fun () ->
       error "a\x01b" ~code:Forbidden_character ~at:"\x01" ~fixed:"a b");
   test "a forbidden character in a string becomes an escape" (fun () ->
-      error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2" ~fixed:"\"\\u{202E}\"");
+      error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2" ~fixed:"\"\\u{202E}\"";
+      equal_lists Fun.id "tokens" (tokens_of "\"\\u{202E}\"") (tokens_of "\"\xE2\x80\xAE\""));
   test "a forbidden character in a raw string has no fix" (fun () ->
       error "\"\"\"\xE2\x80\x8Bx\"\"\"" ~code:Forbidden_character ~at:"\xE2");
   test "joiners and variation selectors are allowed in strings" (fun () ->
@@ -183,6 +203,15 @@ let () =
       error "user__name" ~code:Name_case ~at:"user" ~fixed:"user_name";
       error "_unused" ~code:Name_case ~at:"_" ~fixed:"unused");
   test "no fix that would make a keyword" (fun () -> error "_type" ~code:Name_case ~at:"_");
+  test "no fix that would make a name a string's prefix or tag" (fun () ->
+      equal_lists Fun.id "fixed" [] (fixed_texts "_f\"a\"" ~code:Name_case);
+      equal_lists Fun.id "fixed" [] (fixed_texts "HTTP_OK\"a\"" ~code:Name_case);
+      equal_lists Fun.id "fixed" [ "HttpClient\"a\"" ]
+        (fixed_texts "Http_Client\"a\"" ~code:Name_case));
+  test "no fix that would rename to a name the file already has" (fun () ->
+      error "my_var + myVar" ~code:Name_case ~at:"myVar";
+      equal_lists Fun.id "tokens" [ "my_var"; "+"; "myVar"; "NL" ] (tokens_of "my_var + myVar");
+      equal_lists Fun.id "fixed" [] (fixed_texts "myVar + my_Var" ~code:Name_case));
   test "a name with a letter outside ASCII is one name with one error" (fun () ->
       error "let caf\xC3\xA9 = 1" ~code:Name_not_ascii ~at:"caf";
       equal_lists Fun.id "tokens"
@@ -213,10 +242,14 @@ let () =
       tokens "1..2" [ "1"; ".."; "2"; "NL" ];
       tokens "1.max" [ "1"; "."; "max"; "NL" ];
       tokens "1.0.max" [ "1e0"; "."; "max"; "NL" ]);
-  test "type suffixes" (fun () ->
-      error "3u8" ~code:Number_suffix ~at:"u8" ~fixed:"3";
-      error "1.5f" ~code:Number_suffix ~at:"f" ~fixed:"1.5";
-      error "3f" ~code:Number_suffix ~at:"f" ~fixed:"3.0");
+  test "a type suffix has no fix" (fun () ->
+      error "3u8" ~code:Number_suffix ~at:"u8";
+      error "1.5f" ~code:Number_suffix ~at:"f";
+      error "3f" ~code:Number_suffix ~at:"f";
+      error "1_u8" ~code:Number_suffix ~at:"u8");
+  test "an integer with a float suffix is a float" (fun () ->
+      equal_lists Fun.id "tokens" [ "3e0"; "NL" ] (tokens_of "3f");
+      equal_lists Fun.id "tokens" [ "5e0"; "NL" ] (tokens_of "5d"));
   test "prefixes and exponents are lowercase" (fun () ->
       error "0X1F" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0x1F";
       error "1E9" ~code:Number_uppercase_exponent ~at:"E" ~fixed:"1e9");
@@ -224,7 +257,7 @@ let () =
       error "1__000" ~code:Number_underscore ~at:"_" ~fixed:"1_000";
       error "0x_FF" ~code:Number_underscore ~at:"_" ~fixed:"0xFF");
   test "one fix corrects every problem in a literal" (fun () ->
-      error "1_u8" ~code:Number_underscore ~at:"_" ~fixed:"1");
+      error "0X_FF" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0xFF");
   test "a leading zero" (fun () ->
       error "0755" ~code:Number_leading_zero ~at:"0755" ~fixed:"0o755" ~alternatives:[ "755" ];
       error "09" ~code:Number_leading_zero ~at:"09" ~fixed:"9";
@@ -293,8 +326,8 @@ let () =
   test "an f-string with a format specification has no fix" (fun () ->
       error {|f"{value:.2f}"|} ~code:String_prefix ~at:"f";
       error {|f"{}"|} ~code:String_prefix ~at:"f");
-  test "an f-string is lexed as one string" (fun () ->
-      equal_lists Fun.id "tokens" [ "x"; "="; {|"a {b}"|}; "NL" ] (tokens_of {|x = f"a {b}"|}));
+  test "an f-string recovers as the string its fix writes" (fun () ->
+      equal_lists Fun.id "tokens" [ "x"; "="; {|"a ${}"|}; "NL" ] (tokens_of {|x = f"a {b}"|}));
   test "an r-string becomes a raw string" (fun () ->
       error {|r"\d+"|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|};
       equal_lists Fun.id "tokens" [ {|"\\d+"|}; "NL" ] (tokens_of {|r"\d+"|}));
@@ -318,7 +351,8 @@ let () =
       error {|r"""\d+"""|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|});
   test "a C# string becomes a Truss string" (fun () ->
       error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
-      error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|});
+      error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|};
+      error {|Path$"{name}"|} ~code:String_prefix ~at:"$");
   test "a template literal becomes an ordinary string" (fun () ->
       error "`Hello ${name}`" ~code:String_delimiter ~at:"`" ~fixed:{|"Hello ${name}"|};
       error "`say \"hi\"`" ~code:String_delimiter ~at:"`" ~fixed:{|"say \"hi\""|};
@@ -390,14 +424,14 @@ let () =
 (* Rejected sequences *)
 
 let () =
-  test "a comment at the end of a line" (fun () ->
-      error "let a = 1 // one" ~code:Comment ~at:"//" ~fixed:"let a = 1");
-  test "a comment on its own line" (fun () ->
-      error "a\n// note\nb" ~code:Comment ~at:"//" ~fixed:"a\nb";
-      error "a\n# note\nb" ~code:Comment ~at:"#" ~fixed:"a\nb");
-  test "a block comment between tokens" (fun () ->
-      error "a /* x */ + b" ~code:Comment ~at:"/*" ~fixed:"a + b";
-      error "a /* x /* y */ */ b" ~code:Comment ~at:"/*" ~fixed:"a b");
+  test "a comment at the end of a line has no fix" (fun () ->
+      error "let a = 1 // one" ~code:Comment ~at:"//");
+  test "a comment on its own line has no fix" (fun () ->
+      error "a\n// note\nb" ~code:Comment ~at:"//";
+      error "a\n# note\nb" ~code:Comment ~at:"#");
+  test "a block comment between tokens has no fix" (fun () ->
+      error "a /* x */ + b" ~code:Comment ~at:"/*";
+      error "a /* x /* y */ */ b" ~code:Comment ~at:"/*");
   test "an unterminated block comment has no fix" (fun () ->
       error "a /* never closed\nb" ~code:Comment ~at:"/*");
   test "a block comment across lines separates statements" (fun () ->
@@ -458,16 +492,15 @@ let () =
   test "a method call on a hexadecimal literal is not a hexadecimal float" (fun () ->
       tokens "0xFF.abs()" [ "255"; "."; "abs"; "("; ")"; "NL" ];
       tokens "0x1.bad" [ "1"; "."; "bad"; "NL" ]);
-  test "an attribute is removed" (fun () ->
-      error "#[derive(Debug)]\ntype Point(x: Int64)" ~code:Attribute ~at:"#"
-        ~fixed:"type Point(x: Int64)";
-      error "#![allow(unused)]\nx" ~code:Attribute ~at:"#" ~fixed:"x");
+  test "an attribute has no fix" (fun () ->
+      error "#[derive(Debug)]\ntype Point(x: Int64)" ~code:Attribute ~at:"#";
+      error "#![allow(unused)]\nx" ~code:Attribute ~at:"#");
   test "an operator of another language becomes Truss's" (fun () ->
       error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
       error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
       equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (tokens_of "a <> b"));
-  test "three dots between operands are an inclusive range" (fun () ->
-      error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..=5";
+  test "three dots between operands are either range" (fun () ->
+      error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..5" ~alternatives:[ "1..=5" ];
       equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (tokens_of "a...b"));
   test "three dots alone are todo" (fun () ->
       error "fn f() { ... }" ~code:Foreign_operator ~at:"..." ~fixed:"fn f() { todo }";
@@ -485,7 +518,56 @@ let () =
       error "a \u{2264} b" ~code:Confusable_character ~at:"\u{2264}" ~fixed:"a <= b";
       error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
       error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
-      equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"))
+      equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"));
+  test "a fix whose code would join a neighbor is withheld" (fun () ->
+      error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}";
+      error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}";
+      error "a\u{2013}b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:"a-b";
+      error "fn.5" ~code:Number_missing_digits ~at:".";
+      error "a<>=b" ~code:Foreign_operator ~at:"<>";
+      error "a..<.b" ~code:Foreign_operator ~at:"..<";
+      error "Co@\"x\"" ~code:String_prefix ~at:"@";
+      error "Co`x`" ~code:String_delimiter ~at:"`";
+      error "x = 1u8.4" ~code:Number_suffix ~at:"u8";
+      equal_lists Fun.id "fixed" [] (fixed_texts "x =..<.y" ~code:Foreign_operator);
+      equal_lists Fun.id "fixed" [] (fixed_texts "f(01.: 0)" ~code:Number_leading_zero);
+      equal_lists Fun.id "fixed" [] (fixed_texts "x = 0..<.0" ~code:Foreign_operator);
+      equal_lists Fun.id "fixed" [ "a !=\u{21D2} b" ]
+        (fixed_texts "a \u{2260}\u{21D2} b" ~code:Confusable_character));
+  test "a float with no digit before its `.` and a suffix" (fun () ->
+      error "x = .5f" ~code:Number_missing_digits ~at:".";
+      equal_lists Fun.id "tokens" [ "x"; "="; "5e-1"; "NL" ] (tokens_of "x = .5f"));
+  test "a confusable character after `1.` is not a member" (fun () ->
+      equal_lists Fun.id "tokens" [ "0e0"; "-"; "1"; "NL" ] (tokens_of "0.\u{2013}1");
+      equal_lists Fun.id "tokens" [ "1"; "."; "forall" ] (tokens_of "1.\u{2200}");
+      equal_lists Fun.id "tokens" (tokens_of "1. .max") (tokens_of "1.\u{00A0}.max");
+      equal_lists Fun.id "tokens" (tokens_of "f( .5)") (tokens_of "f(\u{00A0}.5)");
+      equal_lists Fun.id "tokens" (tokens_of "f(\u{FF08}.5))") (tokens_of "f((.5))"));
+  test "`...` before a float with no digit before its `.` is a range" (fun () ->
+      equal_lists Fun.id "tokens" [ "3"; "..="; "14e-2"; "NL" ] (tokens_of "3....14"));
+  test "`1.` at the end of a line is a float" (fun () ->
+      error "x = 1.\nmax" ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0\nmax");
+  test "a file recovers as its machine-applicable fixes write" (fun () ->
+      List.iter
+        (fun text ->
+          equal_lists Fun.id
+            ("recovered tokens of " ^ String.escaped text)
+            (recovered_tokens (machine_fixed text))
+            (recovered_tokens text))
+        [
+          "f(a\n\u{202E}let x = 1\n";
+          "let middle = items[;let total = 1\n";
+          "a = 1\n\u{2003}\nlet b = 2\n";
+          "x = f\"a {b} c\"\n";
+          "if a === b \u{2264} c { f(x\u{FF09} }\n";
+          "push(item: name\u{2192}'e)\n";
+        ]);
+  test "an interpolation that holds a rejected character has no fix" (fun () ->
+      equal_lists Fun.id "fixed" [] (fixed_texts "\"a ${\\} b\"" ~code:Empty_interpolation));
+  test "the indentation fix keeps a forbidden character whole" (fun () ->
+      equal_lists Fun.id "fixed"
+        [ "x = \"\"\"\n  \u{0085} a\n  \"\"\"\n" ]
+        (fixed_texts "x = \"\"\"\n\u{0085} a\n  \"\"\"\n" ~code:Raw_string_indentation))
 
 (* Layout *)
 
@@ -536,8 +618,9 @@ let () =
         (fixed_texts "x = m(a {\n  b\n}\n" ~code:Unclosed_bracket));
   test "a bracket whose closer a cut-off string swallowed has no fix" (fun () ->
       equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unclosed_bracket);
-      equal_lists Fun.id "fixed" [ "f(a, \"b)\"\n" ]
-        (fixed_texts "f(a, \"b)\n" ~code:Unterminated_string));
+      equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unterminated_string);
+      equal_lists Fun.id "fixed" [ "f(a, \"b\"\n" ]
+        (fixed_texts "f(a, \"b\n" ~code:Unterminated_string));
   test "a missing } goes on a line of its own" (fun () ->
       error "fn f() {\n  body\n" ~code:Unclosed_bracket ~at:"{" ~fixed:"fn f() {\n  body\n}\n");
   test "a closer that matches nothing is dropped" (fun () ->

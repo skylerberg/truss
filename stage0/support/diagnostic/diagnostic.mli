@@ -323,6 +323,16 @@ val apply_fix : string -> span fix -> string
 (** Applies a fix's edits to the text it was made for. Raises [Invalid_argument] if the edits
     overlap. *)
 
+val apply_edits : string -> span edit list -> string
+(** Like {!apply_fix}, for any edits. *)
+
+val adds_none : before:'span diagnostic list -> after:'span diagnostic list -> bool
+(** Whether every code of [after] is in [before], counting each as often as it occurs. *)
+
+val machine_applicable : t list -> t list
+(** The diagnostics whose only fix [truss check --fix] and the lexer's recovery apply, leaving out
+    one whose edits overlap an earlier one's. *)
+
 (** Collects the diagnostics of one file. Every diagnostic is kept, so that later checks, such as of
     fixes, see all of them; only {!shown} limits how many are listed. *)
 module Collector : sig

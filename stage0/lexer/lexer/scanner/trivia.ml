@@ -1,6 +1,6 @@
 (* The sequences from other languages that lex as whitespace: comments, `;`,
-   and characters Truss does not use. Each is reported, and its fix removes
-   it with [Source_text.remove_trivia]. *)
+   and characters Truss does not use. A comment or an attribute has no fix:
+   removing it would delete what its author wrote. *)
 
 open Cursor
 
@@ -11,13 +11,7 @@ let line_comment cursor =
   let stop = end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  report cursor ~code:Comment
-    ~fixes:
-      [
-        Diagnostic.fix "Remove the comment"
-          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:false ];
-      ]
-    (span start stop) comment_message
+  report cursor ~code:Comment (span start stop) comment_message
 
 let block_comment cursor =
   let start = cursor.position in
@@ -45,18 +39,7 @@ let block_comment cursor =
   | Some line_break when cursor.first_line_break = None ->
       cursor.first_line_break <- Some line_break
   | _ -> ());
-  (* An unterminated comment runs to the end of the file. Removing it would
-     remove the rest of the file, and where its `*/` was meant to go cannot
-     be known, so it has no fix. *)
-  let fixes =
-    if closed then
-      [
-        Diagnostic.fix "Remove the comment"
-          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:(!first_line_break <> None) ];
-      ]
-    else []
-  in
-  report cursor ~code:Comment ~fixes (span start stop)
+  report cursor ~code:Comment (span start stop)
     (if closed then comment_message
      else comment_message ^ " This comment is never closed, so it runs to the end of the file.")
 
@@ -120,40 +103,6 @@ let character_literal_end ?(after_prefix = false) cursor start =
         Some (close + 1)
     | _ -> None
 
-(* Whether the token before [index] can end an operand: a name, a literal, a
-   closer, `?`, or one of the keywords that are expressions. It is read
-   from the text, since the scanner does not keep the token before. *)
-let after_operand cursor index =
-  let rec back position =
-    if position < Source.line_start cursor.source 0 then None
-    else
-      let current = byte cursor position in
-      if is_space current || is_line_break current then back (position - 1) else Some position
-  in
-  match back (index - 1) with
-  | None -> false
-  | Some last ->
-      let current = byte cursor last in
-      if is_ascii_name_byte current then begin
-        let rec word_start position =
-          if position > 0 && is_ascii_name_byte (byte cursor (position - 1)) then
-            word_start (position - 1)
-          else position
-        in
-        let first = word_start last in
-        match Token.word (String.sub cursor.text first (last + 1 - first)) with
-        | Some (Keyword (True | False | Self_value | Self_type | Todo | Unreachable)) | None -> true
-        | Some _ -> false
-      end
-      else current >= 0x80 || List.mem (Char.chr current) [ '"'; ')'; ']'; '}'; '?' ]
-
-(* Whether an operand starts at [index], after spaces: a name, a literal, or
-   an opening `(` or `[`. *)
-let before_operand cursor index =
-  let current = byte cursor (skip_spaces cursor index) in
-  is_ascii_name_byte current || current >= 0x80
-  || (current >= 0 && List.mem (Char.chr current) [ '"'; '('; '[' ])
-
 (* An attribute of Rust, `#[derive(...)]` or `#![...]`: like a comment, it
    lexes as nothing, up to the end of its line. *)
 let attribute cursor =
@@ -161,13 +110,7 @@ let attribute cursor =
   let stop = end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  report cursor ~code:Attribute
-    ~fixes:
-      [
-        Diagnostic.fix "Remove the attribute"
-          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:false ];
-      ]
-    (span start stop)
+  report cursor ~code:Attribute (span start stop)
     "Truss has no attributes. A type lists the traits it derives in a `derives` clause, and a test \
      is a `test` definition."
 

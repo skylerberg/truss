@@ -7,6 +7,5 @@ val forbidden_run : Cursor.t -> context:context -> unit
 val invalid_run : Cursor.t -> unit
 val copy_plain : Cursor.t -> Buffer.t -> special:(int -> bool) -> unit
 val read_character : Cursor.t -> Buffer.t -> context:context -> unit
-val skip_blank : Cursor.t -> int -> int
 val consume_line_break : Cursor.t -> Source.span
 val note_line_break : Cursor.t -> Source.span -> unit

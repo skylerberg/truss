@@ -17,6 +17,8 @@ type t = {
   (* Each name spelling is checked once per file, and its tokens share one
      string. *)
   names : (string, Names.checked) Hashtbl.t;
+  mutable previous : Token.kind option;
+  is_peek : bool;
 }
 
 let create source diagnostics =
@@ -31,6 +33,17 @@ let create source diagnostics =
     line_is_blank = true;
     unterminated_at_end = false;
     names = Hashtbl.create 256;
+    previous = None;
+    is_peek = false;
+  }
+
+let peek cursor index =
+  {
+    cursor with
+    position = index;
+    diagnostics = Diagnostic.Collector.create ();
+    previous = None;
+    is_peek = true;
   }
 
 (* How a construct that must end on its line ended. [Unterminated] means
