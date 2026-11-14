@@ -39,7 +39,6 @@
   harness
   substring
   compiler_bug
-  verify
   zarith
   path
   well_known

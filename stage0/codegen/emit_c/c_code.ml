@@ -130,6 +130,20 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
 let call_c context fc (target : Lir.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in
   let texts = String.concat ", " (List.map fst arguments) in
+  (* A call passes its target's leading argument, then each argument that
+     has a size, the pointer a large result is written through first. *)
+  (match target with
+  | Direct { signature; _ }
+  | Indirect { signature; _ }
+  | Evidence_call { signature; _ }
+  | Table_call { signature; _ } ->
+      let leading = match target with Direct _ -> 0 | _ -> 1 in
+      let arity = List.length signature.parameters in
+      if leading + List.length arguments <> arity then
+        bug "a call that passes %d arguments to a target that takes %d"
+          (leading + List.length arguments)
+          arity
+  | Intrinsic _ | Foreign _ -> ());
   match target with
   | Direct { function_; signature } ->
       let symbol = function_ref_symbol fc function_ in
@@ -199,6 +213,24 @@ let anchor_c context definition =
     context.anchors <- (symbol, definition) :: context.anchors;
   "&" ^ symbol
 
+(* Whether two places may share memory. Places under different roots do
+   not. Under one root they do not if their paths part at different fields
+   of a record or of one variant, or if one path is the other followed by a
+   dereference, which leads to another object. Two elements are assumed to
+   overlap unless their indexes are written the same way. *)
+let may_alias (first : Lir.place) (second : Lir.place) =
+  let rec overlap (first : Lir.projection list) (second : Lir.projection list) =
+    match (first, second) with
+    | [], rest | rest, [] -> not (List.mem Lir.Deref rest)
+    | Field left :: first, Field right :: second -> left = right && overlap first second
+    | Variant_field left :: first, Variant_field right :: second ->
+        left.variant <> right.variant || (left.field = right.field && overlap first second)
+    | Deref :: first, Deref :: second -> overlap first second
+    | Index left :: first, Index right :: second -> left <> right || overlap first second
+    | (Field _ | Variant_field _ | Deref | Index _) :: _, _ -> true
+  in
+  first.root = second.root && overlap first.projections second.projections
+
 let statement_c context fc buffer (statement : Lir.statement) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
@@ -219,6 +251,15 @@ let statement_c context fc buffer (statement : Lir.statement) =
               line "  %s = %s;" target (value "block");
               line "}"))
   | Call { target; arguments; result = Written place } ->
+      (* Every pointer a callee is given is [restrict], so the place it
+         writes its result to is none it is also given to read. *)
+      List.iter
+        (fun (argument : Lir.operand) ->
+          match argument with
+          | (Address { place = passed; _ } | Moved_address passed) when may_alias place passed ->
+              bug "a call that writes its result to a place it is also given"
+          | _ -> ())
+        arguments;
       line "%s;" (call_c context fc target (Address { place; writable = true } :: arguments))
   | Call { target; arguments; result } -> (
       let call = call_c context fc target arguments in
@@ -333,10 +374,14 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
                 cases;
               line "%s" (default otherwise))
       | Some _ -> bug "a variant switch on a place that is not a value")
-  | Return None -> line "return;"
+  | Return None -> (
+      match fc.function_.result with
+      | Some _ -> bug "a return of nothing from a function with a result"
+      | None -> line "return;")
   | Return (Some value) -> (
       match (fc.function_.result, operand_c context fc value) with
-      | None, _ | _, None -> line "return;"
+      | None, _ -> bug "a return of a value from a function with no result"
+      | _, None -> line "return;"
       | Some _, Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
   | Fail { failure; message; length; site } ->
@@ -350,24 +395,44 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
         (anchor_c context site.definition)
         site.line site.column
 
+(* A function's C: the blocks its entry reaches, each labeled where a jump
+   goes to it, after a declaration of each local their code names. *)
 let function_c context key symbol (function_ : Lir.function_) =
-  let fc = { symbol = Instance.symbol key; function_ } in
-  let buffer = Buffer.create 1024 in
+  let fc = { symbol = Instance.symbol key; function_; named = Hashtbl.create 32 } in
   let names = List.map (local_name function_) function_.parameters in
   let header =
     prototype context fc.symbol symbol ~names ~linkage:External (Lir.signature function_)
   in
-  let targets = Hashtbl.create 16 in
-  Array.iter
-    (fun (block : Lir.basic_block) ->
+  let reached = Array.make (Array.length function_.blocks) false and targets = Hashtbl.create 16 in
+  let rec reach block =
+    if not reached.(block) then begin
+      reached.(block) <- true;
       List.iter
-        (fun block_index -> Hashtbl.replace targets block_index ())
-        (Lir.successors block.terminator))
+        (fun target ->
+          Hashtbl.replace targets target ();
+          reach target)
+        (Lir.successors function_.blocks.(block).terminator)
+    end
+  in
+  if Array.length function_.blocks > 0 then reach 0;
+  let body = Buffer.create 1024 in
+  Array.iteri
+    (fun index (block : Lir.basic_block) ->
+      if reached.(index) then begin
+        if Hashtbl.mem targets index then Buffer.add_string body (Printf.sprintf "b%d:;\n" index);
+        List.iter (statement_c context fc body) block.statements;
+        terminator_c context fc body block.terminator
+      end)
     function_.blocks;
+  let buffer = Buffer.create 1024 in
   Buffer.add_string buffer " {\n";
   Array.iteri
     (fun local (info : Lir.local_info) ->
-      if (not (List.mem local function_.parameters)) && not (erased context info.ty) then
+      if
+        Hashtbl.mem fc.named local
+        && (not (List.mem local function_.parameters))
+        && not (erased context info.ty)
+      then
         let zero =
           match info.ty with
           | Value ty when is_struct context ty -> "{0}"
@@ -379,11 +444,6 @@ let function_c context key symbol (function_ : Lir.function_) =
           (Printf.sprintf "  %s %s = %s;\n" (c_ty context fc.symbol info.ty)
              (local_name function_ local) zero))
     function_.locals;
-  Array.iteri
-    (fun index (block : Lir.basic_block) ->
-      if Hashtbl.mem targets index then Buffer.add_string buffer (Printf.sprintf "b%d:;\n" index);
-      List.iter (statement_c context fc buffer) block.statements;
-      terminator_c context fc buffer block.terminator)
-    function_.blocks;
+  Buffer.add_buffer buffer body;
   Buffer.add_string buffer "}\n";
   (header, Buffer.contents buffer)

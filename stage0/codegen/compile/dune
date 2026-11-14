@@ -4,7 +4,6 @@
  (name compile)
  (libraries
   compiler_bug
-  verify
   path
   well_known
   query

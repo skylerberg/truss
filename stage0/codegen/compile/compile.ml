@@ -63,17 +63,14 @@ and pulled =
            ("lowering the pulled form of " ^ Ground.to_string (Cursor yielding))
            (fun () -> Lower.pulled (fresh_context lowering database) yielding)))
 
-(* An instance's C, once its LIR is checked. *)
+(* An instance's C, a constant's data, or a capability's table. *)
 and emitted (context : Lower.context) (compiled : Lir.compiled) =
-  (match compiled with
-  | Code instance -> Verify.instance (Lower.env context) instance
-  | Data _ | Table _ -> ());
   Compiled (Emit_c.fragment (Lower.env context) compiled)
 
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-  let code instance = emitted context (Code (Lir.canonical_instance instance)) in
+  let code instance = emitted context (Code instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)

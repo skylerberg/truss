@@ -81,6 +81,7 @@ let () =
       let sum = Lir_builder.local builder int in
       let other = Lir_builder.local builder int in
       Lir_builder.start builder (Lir_builder.block builder);
+      Lir_builder.emit builder (Assign (at parameter, Use (constant_int32 5)));
       let first =
         Lir_builder.outline builder ~nested:0 ~parts:[] (fun () ->
             let own = Lir_builder.local builder int in
@@ -97,25 +98,14 @@ let () =
       Lir_builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
       Lir_builder.emit builder (Assign (at sum, add sum other));
       Lir_builder.finish builder (Return (Some (copy sum)));
-      let main =
-        Lir_builder.build builder ~env:(shape_env ()) ~parameters:[ parameter ] ~result:(Some int)
-      in
+      let main = Lir_builder.build builder ~env:(shape_env ()) ~parameters:[] ~result:(Some int) in
       let nested = List.map snd (List.sort compare (Lir_builder.outlined_functions builder)) in
-      expect_string
-        ~expected:
-          (String.concat "\n"
-             [
-               "test::entry fn(_0: Int32) -> Int32";
-               "b0: _1.capture0 = &mut _0; _1.capture1 = &mut _2; _3.capture0 = &mut _0; \
-                _3.capture1 = &mut _4; fork nested 0(&_1), nested 1(&_3); _2 = _2 + _4; return _2";
-               "nested 0 fn(_0: raw nullable)";
-               "b0: _1 = _0; goto b1";
-               "b1: _2 = **_1.capture0 + **_1.capture0; **_1.capture1 = _2 + **_1.capture0; return";
-               "nested 1 fn(_0: raw nullable)";
-               "b0: _1 = _0; goto b1";
-               "b1: **_1.capture1 = **_1.capture0; return";
-             ])
-        (Lir.For_testing.to_string (Lir.canonical_instance (instance ~nested "entry" main))))
+      List.iter
+        (fun (function_ : Lir.function_) ->
+          if List.map fst function_.environment <> [ "capture0"; "capture1" ] then
+            fail "an outlined function reaches %d locals, not 2" (List.length function_.environment))
+        nested;
+      expect_status 20 [ instance ~nested "entry" main ])
 
 (* Coroutines *)
 
