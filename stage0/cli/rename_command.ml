@@ -9,6 +9,7 @@
    formatting afterward. *)
 
 module Names = Resolve.Names
+module References = Inspect.References
 
 type target =
   | Definition of Path.t  (** A top-level definition, or every version of a method *)
@@ -104,12 +105,32 @@ let new_name ~from_ to_ =
   if name = "" then Outcome.cannot_run "`%s` gives no new name." to_;
   name
 
+(* Every occurrence in the packages' code, each with its file and its span
+   in the file's offsets. *)
+let occurrences session packages =
+  let context = Database.context session in
+  List.concat_map
+    (fun file ->
+      List.concat_map
+        (fun declaration ->
+          let key = Names.key_of declaration in
+          match Query.demand context Names.base key with
+          | Some (file, base) ->
+              List.map
+                (fun ({ span; target } : References.occurrence) ->
+                  (file, Syntax.Span.to_source ~base span, target))
+                (Query.demand context References.occurrences key)
+          | None -> [])
+        (Query.demand context Names.declarations_in file))
+    (Command_packages.files session packages)
+
 let plan_definition session packages path name =
-  let occurrences = References.all session packages in
   let edits =
-    List.filter (References.names_definition path) occurrences
-    |> List.map (fun (occurrence : References.occurrence) ->
-        (occurrence.file, Diagnostic.replace occurrence.span name))
+    List.filter_map
+      (fun (file, span, target) ->
+        if References.names_definition path target then Some (file, Diagnostic.replace span name)
+        else None)
+      (occurrences session packages)
   in
   { edits = by_file edits; moved = None }
 
@@ -134,25 +155,22 @@ let plan_module session packages (old_module : Path.module_) to_ =
   let last = List.nth modules (List.length modules - 1) in
   let edits =
     List.filter_map
-      (fun (occurrence : References.occurrence) ->
-        match occurrence.target with
+      (fun (file, (span : Source.span), (target : References.target)) ->
+        match target with
         | Module edit_module when edit_module = old_module ->
             (* Written as its import's name, one segment, or as a full path. *)
-            let text =
-              Source.text (Query.demand (Database.context session) Packages.source occurrence.file)
-            in
-            let written =
-              String.sub text occurrence.span.start (occurrence.span.stop - occurrence.span.start)
-            in
-            Some
-              ( occurrence.file,
-                Diagnostic.replace occurrence.span
-                  (if String.contains written ':' then full else last) )
+            let text = Source.text (Query.demand (Database.context session) Packages.source file) in
+            let written = String.sub text span.start (span.stop - span.start) in
+            Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
-      (References.all session packages)
-    @ List.map
-        (fun (file, span) -> (file, Diagnostic.replace span full))
-        (References.uses session packages old_module)
+      (occurrences session packages)
+    @ List.concat_map
+        (fun file ->
+          List.filter_map
+            (fun (module_, span) ->
+              if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
+            (Query.demand (Database.context session) References.uses file))
+        (Command_packages.files session packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }
 

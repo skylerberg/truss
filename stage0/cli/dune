@@ -18,6 +18,7 @@
   parsed
   resolve
   infer
+  inspect
   interface
   checks
   manifest

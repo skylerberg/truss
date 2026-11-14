@@ -1,7 +1,9 @@
-(* Queries about one definition for the agent tools: its holes, with each
-   one's expected type and the bindings in scope, and the name or
-   expression at a position. They only read the type checker's results. *)
+(* Queries about one definition for the command line's tools: its
+   unfinished code, its holes, with each one's expected type and the
+   bindings in scope, the name or expression at a position, and the
+   occurrences of names in it. They only read the type checker's results. *)
 
+module References = References
 open Syntax
 
 type hole = {
