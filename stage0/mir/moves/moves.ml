@@ -30,20 +30,30 @@ let overlaps first second = is_inside ~outer:first second || is_inside ~outer:se
 
 (* Effects *)
 
-(* A place a statement or a terminator reads, in evaluation order, and
-   whether the read moves the value out. *)
-type use = { place : Mir.place; origin : Core.origin; moves : bool }
+(* A place a statement or a terminator reads, in evaluation order: where,
+   whether the read moves the value out, the operand that reads it, if one
+   does, and the mode of the parameter it is passed to, for an argument. *)
+type use = {
+  place : Mir.place;
+  origin : Core.origin;
+  moves : bool;
+  operand : Mir.operand option;
+  passed : Types.mode option;
+}
 
 (* A value read by value moves where its type moves, as [moving] says:
-   the rest copy implicitly. A place lent for an operation moves nothing. *)
-let operand_use ~moving ~by_value (operand : Mir.operand) =
+   the rest copy implicitly. A place lent for an operation moves nothing;
+   one lent to an [own] parameter moves. *)
+let operand_use ?passed ~moving ~by_value (operand : Mir.operand) =
   match operand with
   | Use { place; type_; origin; _ } | Take { place; type_; origin } ->
-      [ { place; origin; moves = by_value && moving type_ } ]
-  | Borrow { place; origin; _ } -> [ { place; origin; moves = false } ]
+      [ { place; origin; moves = by_value && moving type_; operand = Some operand; passed } ]
+  | Borrow { place; type_; origin; _ } ->
+      let moves = by_value && Option.is_some passed && moving type_ in
+      [ { place; origin; moves; operand = Some operand; passed } ]
   | Constant _ -> []
 
-let read ~origin place = { place; origin; moves = false }
+let read ~origin place = { place; origin; moves = false; operand = None; passed = None }
 
 let rvalue_uses ~moving ~origin (rvalue : Mir.rvalue) =
   let by_value = List.concat_map (operand_use ~moving ~by_value:true)
@@ -68,13 +78,7 @@ let call_uses ~moving (call : Mir.call) =
   @ List.concat_map
       (function
         | Mir.Passed { mode; value; _ } ->
-            let moves_argument operand =
-              match operand with
-              | Mir.Borrow { place; type_; origin; _ } ->
-                  [ { place; origin; moves = mode = Own && moving type_ } ]
-              | _ -> operand_use ~moving ~by_value:(mode = Own) operand
-            in
-            moves_argument value
+            operand_use ~passed:mode ~moving ~by_value:(mode = Own) value
         | Default -> [])
       call.arguments
 
@@ -101,8 +105,9 @@ let rec yielded_uses ~moving : Mir.yielded -> use list = function
         (fun (_, field) -> Option.fold ~none:[] ~some:(yielded_uses ~moving) field)
         fields
 
-let terminator_uses ~moving ~origin (terminator : Mir.terminator) =
-  match terminator with
+let terminator_uses ~moving (basic : Mir.basic_block) =
+  let origin = basic.terminator_origin in
+  match basic.terminator with
   | Branch { condition; _ } -> operand_use ~moving ~by_value:false condition
   | Switch_variant { place; _ } -> [ read ~origin place ]
   | For { iteration = Range { start; stop; _ }; _ } ->
@@ -117,7 +122,9 @@ let terminator_uses ~moving ~origin (terminator : Mir.terminator) =
   | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
       []
 
-let moved uses = List.filter_map (fun use -> if use.moves then Some use.place else None) uses
+let moved uses =
+  List.filter_map (fun use -> if use.moves then Some (use.place, use.origin) else None) uses
+
 let moves ~moving statement = moved (uses ~moving statement)
 
 (* The places a statement gives values. *)
@@ -133,7 +140,7 @@ let inits (statement : Mir.statement) : Mir.place list =
       []
 
 let ends (statement : Mir.statement) = match statement.kind with Dead locals -> locals | _ -> []
-let terminator_moves ~moving terminator = moved (terminator_uses ~moving ~origin:0 terminator)
+let terminator_moves ~moving basic = moved (terminator_uses ~moving basic)
 
 (* The locals a terminator's exit from tasks ends on its way out. *)
 let terminator_ends : Mir.terminator -> Mir.local list = function
@@ -152,13 +159,21 @@ type t = {
   owner : Mir.local -> bool;
   lent : Mir.local -> bool;  (** Whether a local is another owner's place, lent to be changed *)
   moving : Types.ty -> bool;
+  aliases : (Mir.local, int) Hashtbl.t;  (** How many assignments give each local a place *)
+  built : (Mir.local, Mir.rvalue list) Hashtbl.t;
+      (** The values assigned to each lent local built around places *)
   loop_parts : (Mir.block, Mir.local list) Hashtbl.t;
       (** The parts that the way into each loop's body gives values *)
   entries : state array;  (** The state where each block starts *)
   mutable flagged : int list;
 }
 
-and state = { maybe_holds : bool array; maybe_empty : bool array }
+and state = {
+  maybe_holds : bool array;
+  maybe_empty : bool array;
+  moved_at : Core.origin list array;
+      (** For each path, where the moves that may have left it empty are *)
+}
 
 type status = Holds | Empty | Maybe
 
@@ -175,20 +190,27 @@ let affected analysis place =
 let affected_local analysis local = affected analysis { root = Local local; projections = [] }
 
 let copy state =
-  { maybe_holds = Array.copy state.maybe_holds; maybe_empty = Array.copy state.maybe_empty }
+  {
+    maybe_holds = Array.copy state.maybe_holds;
+    maybe_empty = Array.copy state.maybe_empty;
+    moved_at = Array.copy state.moved_at;
+  }
 
-let set_empty state positions =
+(* Empties paths: by a move at [origin], or where their local ends. *)
+let set_empty ?origin state positions =
   List.iter
     (fun position ->
       state.maybe_holds.(position) <- false;
-      state.maybe_empty.(position) <- true)
+      state.maybe_empty.(position) <- true;
+      state.moved_at.(position) <- Option.to_list origin)
     positions
 
 let set_holds state positions =
   List.iter
     (fun position ->
       state.maybe_holds.(position) <- true;
-      state.maybe_empty.(position) <- false)
+      state.maybe_empty.(position) <- false;
+      state.moved_at.(position) <- [])
     positions
 
 (* A record holds a value once each of its tracked parts does, however it
@@ -225,7 +247,7 @@ let rec promote analysis state path =
   | _ -> ()
 
 let apply_effects analysis state ~moves ~inits ~ends =
-  List.iter (fun place -> set_empty state (affected analysis place)) moves;
+  List.iter (fun (place, origin) -> set_empty ~origin state (affected analysis place)) moves;
   List.iter
     (fun place ->
       set_holds state (affected analysis place);
@@ -238,12 +260,15 @@ let apply_moves analysis state statement =
 
 let owns analysis local = analysis.owner local
 let lent_mut analysis local = analysis.lent local
+let places_given analysis local = Option.value ~default:0 (Hashtbl.find_opt analysis.aliases local)
+let built_values analysis local = Hashtbl.find_opt analysis.built local
 let statement_uses analysis statement = uses ~moving:analysis.moving statement
+let move_out analysis state place ~origin = set_empty ~origin state (affected analysis place)
 
-let terminator_uses_of analysis terminator ~origin =
-  terminator_uses ~moving:analysis.moving ~origin terminator
+(* Where the moves are that may have left a path empty. *)
+let moved_at analysis state path =
+  match index analysis path with Some position -> state.moved_at.(position) | None -> []
 
-let move_out analysis state place = set_empty state (affected analysis place)
 let given_by statement = List.filter_map path_of_place (inits statement)
 let ended_by = ends
 
@@ -265,9 +290,9 @@ let apply analysis state statement =
     ~moves:(moves ~moving:analysis.moving statement)
     ~inits:(inits statement) ~ends:(ends statement)
 
-let apply_terminator_moves analysis state terminator =
+let apply_terminator_moves analysis state basic =
   apply_effects analysis state
-    ~moves:(terminator_moves ~moving:analysis.moving terminator)
+    ~moves:(terminator_moves ~moving:analysis.moving basic)
     ~inits:[] ~ends:[]
 
 let status analysis state path =
@@ -366,7 +391,9 @@ let into analysis state (terminator : Mir.terminator) successor =
    is passed. A part built around places, a loop's part, and a capture are
    no owner's place lent here. *)
 let owners ?(passed = fun _ -> None) (body : Mir.body) =
-  let aliases = Hashtbl.create 8 and built = Hashtbl.create 1 in
+  (* How many assignments give each local a place, and the values assigned
+     to each lent local that some assignment constructs around places. *)
+  let aliases = Hashtbl.create 8 and lent_values = Hashtbl.create 1 in
   Array.iter
     (fun (block : Mir.basic_block) ->
       List.iter
@@ -374,13 +401,25 @@ let owners ?(passed = fun _ -> None) (body : Mir.body) =
           match statement.kind with
           | Assign { target = { root = Local local; projections = [] }; value; _ } -> (
               (match (body.locals.(local).kind, value) with
-              | (Lent (Read | Mut) | Source { mode = Read | Mut; _ }), Construct _ ->
-                  Hashtbl.replace built local ()
+              | ( (Lent (Read | Mut) | Source { mode = Read | Mut; _ }),
+                  (Construct _ | Operand (Borrow _)) ) ->
+                  Hashtbl.add lent_values local value
               | _ -> ());
-              match value with Operand (Borrow _) -> Hashtbl.replace aliases local () | _ -> ())
+              match value with
+              | Operand (Borrow _) ->
+                  Hashtbl.replace aliases local
+                    (1 + Option.value ~default:0 (Hashtbl.find_opt aliases local))
+              | _ -> ())
           | _ -> ())
         block.statements)
     body.blocks;
+  let built = Hashtbl.create 1 in
+  Hashtbl.iter
+    (fun local _ ->
+      let values = Hashtbl.find_all lent_values local in
+      if List.exists (function Mir.Construct _ -> true | _ -> false) values then
+        Hashtbl.replace built local values)
+    lent_values;
   let parts =
     Array.fold_left
       (fun parts (block : Mir.basic_block) ->
@@ -409,10 +448,10 @@ let owners ?(passed = fun _ -> None) (body : Mir.body) =
     | None, (Source { mode = Mut; _ } | Lent Mut) -> true
     | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
   in
-  (owns, lent_mut)
+  (owns, lent_mut, aliases, built)
 
 let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.body) =
-  let owns, lent_mut = owners ?passed body in
+  let owns, lent_mut, aliases, built = owners ?passed body in
   let tracks local = owns local || lent_mut local in
   let moves = moves ~moving and terminator_moves = terminator_moves ~moving in
   let candidates = Hashtbl.create 64 in
@@ -433,11 +472,11 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
     (fun (basic : Mir.basic_block) ->
       List.iter
         (fun statement ->
-          List.iter consider (moves statement);
+          List.iter (fun (place, _) -> consider place) (moves statement);
           List.iter consider (inits statement);
           List.iter consider_local (ends statement))
         basic.statements;
-      List.iter consider (terminator_moves basic.terminator);
+      List.iter (fun (place, _) -> consider place) (terminator_moves basic);
       List.iter consider_local (terminator_ends basic.terminator);
       match basic.terminator with
       | For { iteration = Pull _; part; _ } -> consider_local part
@@ -463,7 +502,13 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
       paths
   in
   let count = Array.length paths in
-  let empty () = { maybe_holds = Array.make count false; maybe_empty = Array.make count false } in
+  let empty () =
+    {
+      maybe_holds = Array.make count false;
+      maybe_empty = Array.make count false;
+      moved_at = Array.make count [];
+    }
+  in
   let parameters = List.filter tracks body.parameters in
   let analysis =
     {
@@ -475,6 +520,8 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
       owner = owns;
       lent = lent_mut;
       moving;
+      aliases;
+      built;
       loop_parts =
         (let parts = Hashtbl.create 4 in
          Array.iter
@@ -526,6 +573,15 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
       if state.maybe_empty.(position) && not into.maybe_empty.(position) then begin
         into.maybe_empty.(position) <- true;
         changed := true
+      end;
+      let added =
+        List.filter
+          (fun origin -> not (List.mem origin into.moved_at.(position)))
+          state.moved_at.(position)
+      in
+      if added <> [] then begin
+        into.moved_at.(position) <- into.moved_at.(position) @ added;
+        changed := true
       end
     done;
     !changed
@@ -538,7 +594,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
         if reached.(block) then begin
           let state = copy analysis.entries.(block) in
           List.iter (apply analysis state) basic.statements;
-          apply_effects analysis state ~moves:(terminator_moves basic.terminator) ~inits:[] ~ends:[];
+          apply_effects analysis state ~moves:(terminator_moves basic) ~inits:[] ~ends:[];
           List.iter
             (fun successor ->
               let state =
@@ -572,7 +628,9 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
         in
         List.iter
           (fun statement ->
-            List.iter (fun place -> set_empty state (affected analysis place)) (moves statement);
+            List.iter
+              (fun (place, origin) -> set_empty ~origin state (affected analysis place))
+              (moves statement);
             List.iter
               (fun place ->
                 Option.iter
@@ -582,7 +640,9 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
             List.iter drop_local (ends statement);
             apply_effects analysis state ~moves:[] ~inits:(inits statement) ~ends:(ends statement))
           basic.statements;
-        set_empty state (List.concat_map (affected analysis) (terminator_moves basic.terminator));
+        List.iter
+          (fun (place, origin) -> set_empty ~origin state (affected analysis place))
+          (terminator_moves basic);
         List.iter drop_local (terminator_ends basic.terminator);
         match basic.terminator with
         | Return _ | Exit_tasks { exit = Exit_return _; _ } -> List.iter drop_local parameters
@@ -602,69 +662,15 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.bod
 let place_locals (place : Mir.place) =
   match place.root with Local local -> [ local ] | Constant _ -> []
 
-let operand_locals : Mir.operand -> Mir.local list = function
-  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> place_locals place
-  | Constant _ -> []
-
-let borrowed_locals : Mir.operand -> Mir.local list = function
-  | Borrow { place; _ } -> place_locals place
-  | Use _ | Take _ | Constant _ -> []
-
-let rvalue_operands : Mir.rvalue -> Mir.operand list = function
-  | Operand operand
-  | Not operand
-  | Convert { value = operand; _ }
-  | Copy operand
-  | To_any { value = operand; _ } ->
-      [ operand ]
-  | Operation { operands; _ } | Array operands -> operands
-  | Compare { left; right; _ } -> [ left; right ]
-  | Construct { fields; _ } -> List.filter_map snd fields
-  | Is_variant _ | Function_value _ | Value_parameter _ | Lambda _ -> []
-
-let rvalue_reads (rvalue : Mir.rvalue) =
-  List.concat_map operand_locals (rvalue_operands rvalue)
-  @
-  match rvalue with
-  | Is_variant { place; _ } -> place_locals place
-  | Lambda { captures; _ } ->
-      List.concat_map (fun (capture : Mir.capture) -> place_locals capture.place) captures
-  | _ -> []
-
-let call_reads (call : Mir.call) =
-  (match call.callee with Indirect operand -> operand_locals operand | _ -> [])
-  @ List.concat_map
-      (function Mir.Passed { value; _ } -> operand_locals value | Default -> [])
-      call.arguments
-
-(* A write to a whole local gives it a value. A write to a part of one
-   reads the rest of it. *)
-let written (place : Mir.place) =
-  match place with
-  | { root = Local local; projections = [] } -> ([], [ local ])
-  | _ -> (place_locals place, [])
-
-let rec yielded_reads : Mir.yielded -> Mir.local list = function
-  | Part operand -> operand_locals operand
-  | Built { fields; _ } ->
-      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:yielded_reads field) fields
+let use_locals uses = List.concat_map (fun use -> place_locals use.place) uses
+let every _ = true
 
 (* The locals a statement reads and those it gives a whole value, in
-   [state], where it runs. An end of a local that may hold a value with
-   something to drop reads it, since its drop does. *)
+   [state], where it runs. A write to a part of a local reads the rest of
+   it, and an end of a local that may hold a value with something to drop
+   reads it, since its drop does. *)
 let reads_and_writes analysis state (statement : Mir.statement) =
-  let destination = function Some place -> written place | None -> ([], []) in
-  let combine (reads, writes) (more_reads, more_writes) =
-    (reads @ more_reads, writes @ more_writes)
-  in
   match statement.kind with
-  | Assign { target; value; _ } -> combine (rvalue_reads value, []) (written target)
-  | Call { destination = place; call } -> combine (call_reads call, []) (destination place)
-  | Lend { part; call } -> (call_reads call, [ part ])
-  | Slice { destination = place; base; call } ->
-      combine (place_locals base @ call_reads call, []) (written place)
-  | Template { destination = place; call; _ } -> combine (call_reads call, []) (written place)
-  | Pull { destination = place; cursor } -> combine (place_locals cursor, []) (written place)
   | Live locals -> ([], locals)
   | Dead locals ->
       ( List.filter
@@ -675,25 +681,18 @@ let reads_and_writes analysis state (statement : Mir.statement) =
                  (affected_local analysis local))
           locals,
         [] )
-  | Assert { condition; _ } -> (operand_locals condition, [])
-  | Echo operand -> (operand_locals operand, [])
-  | Provide { provided; _ } ->
-      (List.concat_map (fun (provided : Mir.provided) -> operand_locals provided.value) provided, [])
-  | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [])
+  | _ ->
+      let given = inits statement in
+      ( use_locals (uses ~moving:every statement)
+        @ List.concat_map
+            (fun (place : Mir.place) -> if place.projections = [] then [] else place_locals place)
+            given,
+        List.filter_map
+          (fun (place : Mir.place) ->
+            match place with { root = Local local; projections = [] } -> Some local | _ -> None)
+          given )
 
-let terminator_reads : Mir.terminator -> Mir.local list = function
-  | Branch { condition; _ } -> operand_locals condition
-  | Switch_variant { place; _ } -> place_locals place
-  | For { iteration = Range { start; stop; _ }; _ } -> operand_locals start @ operand_locals stop
-  | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
-  | For { iteration = Yielding call; _ } -> call_reads call
-  | Yield { part; _ } -> yielded_reads part
-  | Return (Some operand) | Exit_tasks { exit = Exit_return (Some operand); _ } ->
-      operand_locals operand
-  | Goto _ | Fork _ | Join _ | Iteration_end
-  | Return None
-  | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
-      []
+let terminator_reads basic = use_locals (terminator_uses ~moving:every basic)
 
 let kept_by_cursor analysis (body : Mir.body) =
   let count = Array.length body.locals in
@@ -708,8 +707,12 @@ let kept_by_cursor analysis (body : Mir.body) =
           match statement.kind with
           | Assign { target = { root = Local local; projections = [] }; value; _ }
             when not (owns analysis local) ->
-              bind local (List.concat_map borrowed_locals (rvalue_operands value))
-          | Lend { part; call } -> bind part (call_reads call)
+              bind local
+                (use_locals
+                   (List.filter
+                      (fun use -> match use.operand with Some (Borrow _) -> true | _ -> false)
+                      (rvalue_uses ~moving:every ~origin:statement.origin value)))
+          | Lend { part; call } -> bind part (use_locals (call_uses ~moving:every call))
           | _ -> ())
         basic.statements)
     body.blocks;
@@ -772,7 +775,7 @@ let kept_by_cursor analysis (body : Mir.body) =
             List.iter (fun successor -> union after live.(successor)) (Mir.successors terminator);
             after
       in
-      List.iter (fun local -> current.(local) <- true) (reads (terminator_reads basic.terminator));
+      List.iter (fun local -> current.(local) <- true) (reads (terminator_reads basic));
       List.iter
         (fun (read, writes) ->
           List.iter (fun local -> current.(local) <- false) writes;
@@ -795,7 +798,7 @@ let kept_by_cursor analysis (body : Mir.body) =
           union kept live.(resume);
           let state = copy analysis.entries.(block) in
           List.iter (apply analysis state) basic.statements;
-          apply_terminator_moves analysis state basic.terminator;
+          apply_terminator_moves analysis state basic;
           Array.iteri
             (fun position (path : path) ->
               if state.maybe_holds.(position) && owns analysis path.local then
@@ -804,3 +807,5 @@ let kept_by_cursor analysis (body : Mir.body) =
       | _ -> ())
     body.blocks;
   List.filter (fun local -> kept.(local)) (List.init count Fun.id)
+
+let terminator_uses analysis basic = terminator_uses ~moving:analysis.moving basic

@@ -1,14 +1,13 @@
-(* Loans and views, checked on the control-flow graph of a core form. The
-   check prevents dangling views, mutation of a borrowed place, and data
-   races.
+(* Loans and views, checked on the actions of a body's MIR. The check
+   prevents dangling views, mutation of a borrowed place, and data races.
 
-   A loan is live at the points that the graph marks with it. A view is
+   A loan is live at the positions that the actions mark with it. A view is
    stored in a holder: a local, or a place that outlives the function, such
    as a [mut] parameter. A forward dataflow analysis computes the views that
-   each holder may store at each point. A backward liveness analysis
-   computes the locals that are live after each point. A place cannot be
+   each holder may store before each action. A backward liveness analysis
+   computes the locals that are live after each action. A place cannot be
    mutated or moved while a live holder stores a view of it. *)
-open Graph
+open Actions
 open Context
 open Move_rules
 
@@ -76,8 +75,8 @@ let outlives_function context (place : Place.t) =
   | Local local -> List.mem local context.parameters
   | Constant _ | Environment -> false
 
-let transfer context (point : point) (before : held_views) : held_views =
-  match point.action with
+let transfer context (step : step) (before : held_views) : held_views =
+  match step.action with
   | Bind locals ->
       List.filter
         (fun (holder, _) -> not (List.exists (fun local -> holder = Place.Local local) locals))
@@ -92,85 +91,93 @@ let transfer context (point : point) (before : held_views) : held_views =
       match resolve context before views with
       | [] -> before
       | viewed -> add_views before place.root viewed)
-  | Enter | Read _ | Move _ | Move_out_of_lent _ | Mutate _ | Assign _ | Scope_end _ | Task_end _
-  | Yield_point _ | Exit | Return_view _ | View_of_temporary _ | Bind_lent_part _
-  | Pass_owned_function _ | Write_through _ | Arguments _ ->
+  | Read _ | Move _ | Move_out_of_lent _ | Mutate _ | Assign _ | Yield_point _ | Return_view _
+  | View_of_temporary _ | Bind_lent_part _ | Pass_owned_function _ | Start_loan _ | End_loans _
+  | Write_through _ | Arguments _ ->
       before
 
-(* The views that each holder may store before each point: a forward
-   may-analysis. *)
-let held_views_before context (graph : Graph.t) : held_views array =
-  let count = Array.length graph.points in
-  let before = Array.make count [] in
-  let reached = Array.make count false in
-  let pending = Queue.create () in
-  List.iter
-    (fun entry ->
-      reached.(entry) <- true;
-      Queue.add entry pending)
-    graph.entries;
-  while not (Queue.is_empty pending) do
-    let index = Queue.pop pending in
-    let after = transfer context graph.points.(index) before.(index) in
-    List.iter
-      (fun successor ->
-        let known = before.(successor) in
-        let merged =
-          List.fold_left
-            (fun held_views (holder, places) -> add_views held_views holder places)
-            known after
-        in
-        let changed =
-          List.exists
-            (fun (holder, places) ->
-              match views_held_by known holder with
-              | Some existing -> List.exists (fun place -> not (List.mem place existing)) places
-              | None -> true)
-            after
-        in
-        if changed || not reached.(successor) then begin
-          reached.(successor) <- true;
-          before.(successor) <- merged;
-          Queue.add successor pending
-        end)
-      graph.points.(index).successors
-  done;
-  before
+(* Merges views into the known ones, where any is new. *)
+let merge_views (after : held_views) ~(into : held_views) =
+  if
+    List.exists
+      (fun (holder, places) ->
+        match views_held_by into holder with
+        | Some existing -> List.exists (fun place -> not (List.mem place existing)) places
+        | None -> true)
+      after
+  then
+    Some
+      (List.fold_left
+         (fun held_views (holder, places) -> add_views held_views holder places)
+         into after)
+  else None
 
-(* Liveness: the locals that may be used after each point. A use of a local
-   is a read, a move, a borrow, or an assignment of a place rooted at it. *)
-let live_after (graph : Graph.t) : Core.local list array =
-  let count = Array.length graph.points in
-  let after = Array.make count [] in
-  let uses (point : point) =
-    match point.action with
+(* Liveness: the locals that may be used after each action. A use of a
+   local is a read, a move, a borrow, or an assignment of a place rooted at
+   it. The ends an exit from tasks runs neither use nor bind one, so every
+   way out of a block leaves from its end. *)
+let live_after (actions : Actions.t) : Core.local list array array array =
+  let uses (step : step) =
+    match step.action with
     | Read place | Mutate place | Assign place | Move { place; _ } -> (
         match place.root with Local local -> [ local ] | Constant _ | Environment -> [])
     | _ -> []
   in
+  let before (step : step) after =
+    let bound = match step.action with Bind locals -> locals | _ -> [] in
+    List.sort_uniq compare (uses step @ List.filter (fun local -> not (List.mem local bound)) after)
+  in
+  let loops = Mir.iteration_loops actions.body in
+  let live_in = Array.make (Array.length actions.steps) [] in
+  let at_end block =
+    List.sort_uniq compare
+      (List.concat_map
+         (fun (successor, _) -> live_in.(successor))
+         (Actions.successors actions.body loops block))
+  in
+  (* The locals live after each action of a block, given those live at its
+     end. *)
+  let afters block live =
+    let live = ref live in
+    let positions =
+      Array.map
+        (fun steps ->
+          let steps = Array.of_list steps in
+          let afters = Array.make (Array.length steps) [] in
+          (steps, afters))
+        actions.steps.(block)
+    in
+    for index = Array.length positions - 1 downto 0 do
+      let steps, afters = positions.(index) in
+      for step = Array.length steps - 1 downto 0 do
+        afters.(step) <- !live;
+        live := before steps.(step) !live
+      done
+    done;
+    (Array.map snd positions, !live)
+  in
   let changed = ref true in
   while !changed do
     changed := false;
-    for index = count - 1 downto 0 do
-      let point = graph.points.(index) in
-      let live =
-        List.concat_map
-          (fun successor ->
-            let next = graph.points.(successor) in
-            let bound = match next.action with Bind locals -> locals | _ -> [] in
-            uses next @ List.filter (fun local -> not (List.mem local bound)) after.(successor))
-          point.successors
-      in
-      let added = List.filter (fun local -> not (List.mem local after.(index))) live in
-      if added <> [] then begin
-        after.(index) <- List.sort_uniq compare (after.(index) @ added);
+    for block = Array.length actions.steps - 1 downto 0 do
+      let _, start = afters block (at_end block) in
+      if start <> live_in.(block) then begin
+        live_in.(block) <- start;
         changed := true
       end
     done
   done;
-  after
+  Array.mapi (fun block _ -> fst (afters block (at_end block))) actions.steps
 
 let overlaps left right = Place.overlap left right <> Disjoint
+
+(* What holds before an action. *)
+type here = {
+  views : held_views;  (** The views each holder may store *)
+  live : Core.local list;  (** The locals live after the action *)
+  loans : loan list;  (** The loans live *)
+  origin : Core.origin;  (** Where the action is *)
+}
 
 (* The error message for a use of a place that a [mut] loan covers. [viewed]
    is true if the loan covers the place only because the borrowed place
@@ -231,43 +238,73 @@ type task_hazard =
 
 (* Reports the errors of loans and views. Returns the first [task_hazard]
    of the definition's [yield]s, if it has one. *)
-let check context (graph : Graph.t) : task_hazard option =
+let check context (actions : Actions.t) : task_hazard option =
   let task_hazard = ref None in
-  let before = held_views_before context graph in
-  let after = live_after graph in
+  let views = Actions.forward actions ~init:[] ~transfer:(transfer context) ~join:merge_views in
+  let loans = Actions.live_loans actions in
+  let live = live_after actions in
+  (* What holds before each action: the views each holder may store, the
+     locals live after it, the loans live, and where it is. *)
+  let here { block; index } step views : here =
+    {
+      views;
+      live = live.(block).(index).(step);
+      loans = (Option.get loans.(block)).(index).(step);
+      origin = (List.nth actions.steps.(block).(index) step).origin;
+    }
+  in
+  (* Runs [f] on each action at [positions] that some path reaches. *)
+  let each_step positions f =
+    List.iter
+      (fun ({ block; index } as position) ->
+        match views.(block) with
+        | Some positions_views ->
+            List.iteri
+              (fun step_index (step : step) ->
+                f (here position step_index positions_views.(index).(step_index)) step)
+              actions.steps.(block).(index)
+        | None -> ())
+      positions
+  in
+  let all_positions =
+    List.concat
+      (List.mapi
+         (fun block positions -> List.init (Array.length positions) (fun index -> { block; index }))
+         (Array.to_list actions.steps))
+  in
   (* Whether a loan covers a place: the loan borrows the place, or it
      borrows a holder that stores a view of the place. Returns [Some viewed]
      if it does, where [viewed] is true in the second case. *)
-  let loan_coverage index (loan : loan) (place : Place.t) =
+  let loan_coverage (here : here) (loan : loan) (place : Place.t) =
     if overlaps loan.borrowed place then Some false
     else if
       List.exists
         (fun (viewed : view) -> overlaps viewed.place place)
-        (resolve context before.(index) [ { place = loan.borrowed; copied_out = false } ])
+        (resolve context here.views [ { place = loan.borrowed; copied_out = false } ])
     then Some true
     else None
   in
   (* The loans that cover a place, oldest first, each with [viewed]. *)
-  let covering index (point : point) (place : Place.t) =
+  let covering (here : here) (place : Place.t) =
     List.rev
       (List.filter_map
-         (fun loan -> Option.map (fun viewed -> (loan, viewed)) (loan_coverage index loan place))
-         point.loans)
+         (fun loan -> Option.map (fun viewed -> (loan, viewed)) (loan_coverage here loan place))
+         here.loans)
   in
   let is_mut ((loan : loan), _) = loan.mode = Mut in
   (* Reports a use of a place that a [mut] loan covers. *)
-  let check_use index (point : point) (place : Place.t) =
-    match List.find_opt is_mut (covering index point place) with
+  let check_use (here : here) (place : Place.t) =
+    match List.find_opt is_mut (covering here place) with
     | Some (loan, viewed) ->
-        report context Conflicting_loan (span context point.origin)
+        report context Conflicting_loan (span context here.origin)
           (mut_loan_message context loan ~viewed place)
     | None -> ()
   in
   (* Reports a mutation or a move of a place that a loan covers, or that a
      live holder stores a view of. One mutation gets one report. *)
-  let check_mutation index (point : point) (place : Place.t) ~verb =
-    let at = span context point.origin in
-    let covering = covering index point place in
+  let check_mutation (here : here) (place : Place.t) ~verb =
+    let at = span context here.origin in
+    let covering = covering here place in
     match (List.find_opt is_mut covering, covering) with
     | Some (loan, viewed), _ ->
         report context Conflicting_loan at (mut_loan_message context loan ~viewed place)
@@ -279,7 +316,7 @@ let check context (graph : Graph.t) : task_hazard option =
             let in_use =
               match holder with
               | Local local when not (outlives_function context { root = holder; steps = [] }) ->
-                  List.mem local after.(index)
+                  List.mem local here.live
               | Local _ | Constant _ | Environment -> true
             in
             if in_use && List.exists (fun (viewed : view) -> overlaps viewed.place place) viewed
@@ -287,21 +324,20 @@ let check context (graph : Graph.t) : task_hazard option =
               report context Changed_while_viewed at
                 (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still in use."
                    (show context place) verb (show_root context holder)))
-          before.(index)
+          here.views
   in
-  Array.iteri
-    (fun index (point : point) ->
-      let at = span context point.origin in
-      match point.action with
-      | Read place -> check_use index point place
+  each_step all_positions (fun here (step : step) ->
+      let at = span context here.origin in
+      match step.action with
+      | Read place -> check_use here place
       | Mutate place ->
-          check_use index point place;
-          check_mutation index point place ~verb:"be borrowed `mut`"
-      | Assign place -> check_mutation index point place ~verb:"be assigned"
+          check_use here place;
+          check_mutation here place ~verb:"be borrowed `mut`"
+      | Assign place -> check_mutation here place ~verb:"be assigned"
       | Move { place; type_; returned; captured; _ } -> (
-          check_use index point place;
+          check_use here place;
           match verdict context place ~type_ ~returned ~captured with
-          | Moves -> check_mutation index point place ~verb:"be moved"
+          | Moves -> check_mutation here place ~verb:"be moved"
           | Reads | Refused _ -> ())
       | Arguments { places; views; yielded } ->
           (* Aliasing: two places that one call borrows cannot overlap if
@@ -339,7 +375,7 @@ let check context (graph : Graph.t) : task_hazard option =
              two places. *)
           List.iter
             (fun (position, viewed, view_at) ->
-              let viewed = resolve context before.(index) viewed in
+              let viewed = resolve context here.views viewed in
               List.iter
                 (fun (passed : borrowed_argument) ->
                   if passed.position <> position && passed.mode = Mut then begin
@@ -406,7 +442,7 @@ let check context (graph : Graph.t) : task_hazard option =
                 | Environment -> true
                 | Constant _ -> false
                 | Local _ -> kind context viewed.place.root <> Owned)
-              (resolve context before.(index) views)
+              (resolve context here.views views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
               report context View_escapes at
@@ -423,7 +459,7 @@ let check context (graph : Graph.t) : task_hazard option =
           | None -> ())
       | Return_view views -> (
           match
-            List.find_opt (lifetime_ends_at_return context) (resolve context before.(index) views)
+            List.find_opt (lifetime_ends_at_return context) (resolve context here.views views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
               report context View_escapes at
@@ -445,7 +481,7 @@ let check context (graph : Graph.t) : task_hazard option =
                 context.implements_capability
                 && List.exists
                      (fun (view : view) -> view.place.root = Local Self && not view.copied_out)
-                     (resolve context before.(index) views)
+                     (resolve context here.views views)
               then
                 report context View_crosses_capability at
                   "This returns a view of the capability implementation's own state. The caller \
@@ -453,7 +489,7 @@ let check context (graph : Graph.t) : task_hazard option =
                    that state while the view is in use. Return a copy.")
       | Store { place; views } -> (
           if outlives_function context place then
-            let resolved = resolve context before.(index) views in
+            let resolved = resolve context here.views views in
             (* The caller assumes that a [mut] argument stores only the
                views that the call was passed as view arguments. So the
                function cannot store there a view of a borrowed parameter
@@ -556,7 +592,7 @@ let check context (graph : Graph.t) : task_hazard option =
                 List.find_opt
                   (fun (viewed : view) ->
                     viewed.place <> slice && not (mutable_root viewed.place.root))
-                  (resolve context before.(index) [ { place = slice; copied_out = true } ])
+                  (resolve context here.views [ { place = slice; copied_out = true } ])
               with
               | Some viewed ->
                   report context Read_only_view at
@@ -581,7 +617,7 @@ let check context (graph : Graph.t) : task_hazard option =
              let borrowed =
                List.concat_map
                  (function
-                   | Some place -> resolve context before.(index) [ { place; copied_out = false } ]
+                   | Some place -> resolve context here.views [ { place; copied_out = false } ]
                    | None -> [])
                  lent
              in
@@ -591,7 +627,7 @@ let check context (graph : Graph.t) : task_hazard option =
                  match
                    List.find_opt
                      (fun view -> not (safe view))
-                     (borrowed @ resolve context before.(index) views)
+                     (borrowed @ resolve context here.views views)
                  with
                  | Some view -> Some (Borrows (show context view.place))
                  | None when List.mem None lent -> Some (Borrows "a part that a lending call lends")
@@ -599,7 +635,7 @@ let check context (graph : Graph.t) : task_hazard option =
           (* The caller may store a yielded view, so a method can yield a
              view only of its parameters. *)
           match
-            List.find_opt (lifetime_ends_at_return context) (resolve context before.(index) views)
+            List.find_opt (lifetime_ends_at_return context) (resolve context here.views views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
               report context View_escapes at
@@ -615,36 +651,32 @@ let check context (graph : Graph.t) : task_hazard option =
                    (show_root context local.place.root)
                    (show_root context local.place.root))
           | None -> ())
-      | Enter | Move_out_of_lent _ | Bind _ | Scope_end _ | Task_end _ | Exit | Bind_views _ -> ())
-    graph.points;
+      | Move_out_of_lent _ | Bind _ | Bind_views _ | Start_loan _ | End_loans _ -> ());
   (* The places that a range of points mutates, and the places that it uses. *)
-  let effects points =
+  let effects positions =
     let changes = ref [] and uses = ref [] in
-    List.iter
-      (fun index ->
-        let point = graph.points.(index) in
+    each_step positions (fun here (step : step) ->
         (* A use of a view uses the places that it views, and a write through
          a slice mutates the places that the slice views. *)
         let viewed place =
           List.map
             (fun (view : view) -> view.place)
-            (resolve context before.(index) [ { place; copied_out = true } ])
+            (resolve context here.views [ { place; copied_out = true } ])
         in
-        match point.action with
+        match step.action with
         | Read place -> uses := (place :: viewed place) @ !uses
         | Mutate place ->
             uses := (place :: viewed place) @ !uses;
-            changes := (place, point.origin) :: !changes
+            changes := (place, here.origin) :: !changes
         | Write_through place ->
-            changes := List.map (fun viewed -> (viewed, point.origin)) (viewed place) @ !changes
-        | Assign place -> changes := (place, point.origin) :: !changes
+            changes := List.map (fun viewed -> (viewed, here.origin)) (viewed place) @ !changes
+        | Assign place -> changes := (place, here.origin) :: !changes
         | Move { place; type_; returned; captured; _ } -> (
             uses := place :: !uses;
             match verdict context place ~type_ ~returned ~captured with
-            | Moves -> changes := (place, point.origin) :: !changes
+            | Moves -> changes := (place, here.origin) :: !changes
             | Reads | Refused _ -> ())
-        | _ -> ())
-      points;
+        | _ -> ());
     (!changes, !uses)
   in
   (* Data races between the branches of a [parallel] or [concurrent] block:
@@ -695,17 +727,15 @@ let check context (graph : Graph.t) : task_hazard option =
                     other_changes))
             branches)
         branches)
-    graph.fork_join_blocks;
+    actions.fork_join_blocks;
   (* Data races between the iterations of a [parallel for] or [concurrent
      for]: the body can mutate only the locals of one iteration, which are
      the loop's pattern variables and the locals that the body binds. *)
   List.iter
     (fun ({ keyword; body; bound } : fork_join_loop) ->
       let bound = ref bound in
-      List.iter
-        (fun index ->
-          match graph.points.(index).action with Bind locals -> bound := locals @ !bound | _ -> ())
-        body;
+      each_step body (fun _ (step : step) ->
+          match step.action with Bind locals -> bound := locals @ !bound | _ -> ());
       List.iter
         (fun ((place : Place.t), origin) ->
           let outside =
@@ -720,5 +750,5 @@ let check context (graph : Graph.t) : task_hazard option =
                   mutate only its own element and its own locals."
                  keyword))
         (fst (effects body)))
-    graph.fork_join_loops;
+    actions.fork_join_loops;
   !task_hazard

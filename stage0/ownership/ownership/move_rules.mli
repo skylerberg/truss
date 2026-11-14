@@ -10,9 +10,13 @@ type verdict = Moves | Reads | Refused of (Context.context -> Syntax.span -> Typ
 val verdict :
   Context.context -> Place.t -> type_:Types.ty -> returned:bool -> captured:bool -> verdict
 
-(* Reports each move the graph makes that its place's root forbids. *)
-val check_refused : Context.context -> Graph.t -> unit
+(* Reports each move a body's actions make that its place's root forbids. *)
+val check_refused : Context.context -> Actions.t -> unit
 
-(* Checks a definition's MIR. [returns] says whether its body returns to a
-   caller, as a function's does. *)
-val check : Context.context -> Mir.t -> returns:bool -> unit
+(* The move analysis of a body: a value whose type is not plain moves where
+   it is read by value. *)
+val analyse : Context.context -> Mir.body -> Moves.t
+
+(* Checks a definition's MIR, with the move analysis of each body. [returns]
+   says whether its body returns to a caller, as a function's does. *)
+val check : Context.context -> Mir.t -> moves:(Mir.body -> Moves.t) -> returns:bool -> unit

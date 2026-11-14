@@ -22,9 +22,6 @@ val path_of_place : Mir.place -> path option
 val is_inside : outer:path -> path -> bool
 (** Whether a path is [outer] or lies inside it. *)
 
-val overlaps : path -> path -> bool
-(** Whether two paths overlap: one is the other or lies inside it. *)
-
 type t
 
 val analyse :
@@ -47,16 +44,27 @@ val owns : t -> Mir.local -> bool
 val lent_mut : t -> Mir.local -> bool
 (** Whether a local is another owner's place, lent to be changed. *)
 
-type use = { place : Mir.place; origin : Core.origin; moves : bool }
+val places_given : t -> Mir.local -> int
+(** How many assignments give a local a place, so that it holds no value of its own. *)
+
+val built_values : t -> Mir.local -> Mir.rvalue list option
+(** For a lent local that some assignment constructs around places, the values assigned to it. *)
+
+type use = {
+  place : Mir.place;
+  origin : Core.origin;
+  moves : bool;
+  operand : Mir.operand option;  (** The operand that reads the place, if one does *)
+  passed : Types.mode option;  (** For an argument, the mode of the parameter it is passed to *)
+}
 (** A place code reads, where it reads it, and whether the read moves the value out. *)
 
 val statement_uses : t -> Mir.statement -> use list
 (** The places a statement reads, in evaluation order. A place it gives a value is not among them.
 *)
 
-val terminator_uses_of : t -> Mir.terminator -> origin:Core.origin -> use list
-(** The places a terminator reads, in evaluation order. [origin] is where a read that has no origin
-    of its own is, the terminator's. *)
+val terminator_uses : t -> Mir.basic_block -> use list
+(** The places a block's terminator reads, in evaluation order. *)
 
 val given_by : Mir.statement -> path list
 (** The places a statement gives values. *)
@@ -76,14 +84,17 @@ val apply : t -> state -> Mir.statement -> unit
 val apply_moves : t -> state -> Mir.statement -> unit
 (** Runs a statement's moves alone, which happen before it gives its destination a value. *)
 
-val apply_terminator_moves : t -> state -> Mir.terminator -> unit
-(** Runs the moves a terminator makes before it leaves its block. The ends an exit from tasks runs
-    are statements of their own, which run where the exit is taken. *)
+val apply_terminator_moves : t -> state -> Mir.basic_block -> unit
+(** Runs the moves a block's terminator makes before it leaves its block. The ends an exit from
+    tasks runs are statements of their own, which run where the exit is taken. *)
 
 val copy : state -> state
 
-val move_out : t -> state -> Mir.place -> unit
-(** Moves the value at a place out, as one of a statement's reads does. *)
+val move_out : t -> state -> Mir.place -> origin:Core.origin -> unit
+(** Moves the value at a place out, as one of a statement's reads at [origin] does. *)
+
+val moved_at : t -> state -> path -> Core.origin list
+(** Where the moves are that may have left a tracked path empty. *)
 
 type status = Holds | Empty | Maybe
 

@@ -51,12 +51,6 @@ and mir_frame = {
   body : Mir.body;
   lambdas : Mir.body array;  (** The bodies of the definition's lambdas *)
   places : (Mir.local, Lowered.place) Hashtbl.t;
-  aliases : (Mir.local, int) Hashtbl.t;
-      (** The locals bound to a place they do not own, with the number of assignments that bind each
-      *)
-  built : (Mir.local, Mir.rvalue list) Hashtbl.t;
-      (** The locals that hold no value of their own that some assignment constructs around places,
-          with each value assigned to them *)
   owner : scope option;
       (** The scope that owns the body's locals, which drops them on each way out *)
   returns_into : Lowered.place option;

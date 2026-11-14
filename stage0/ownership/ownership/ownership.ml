@@ -74,22 +74,33 @@ let analysis =
         (fun ((context : Context.context), (lowered : Interface.Environment.lowered_interface), mir)
            ->
           let task_hazard =
-            Option.bind mir (fun mir ->
+            Option.bind mir (fun (mir : Mir.t) ->
                 let returns =
                   match lowered.interface with
                   | Function_interface _ | Theorem_interface _ -> true
                   | _ -> false
                 in
-                let graph =
-                  Graph.of_mir ~plain:(Context.plain context) ~is_view:(Context.is_view context)
+                (* One move analysis of each body, which both checks read. *)
+                let analysed =
+                  List.map
+                    (fun body -> (body, Move_rules.analyse context body))
+                    (mir.body :: Array.to_list mir.lambdas)
+                in
+                let moves body = List.assq body analysed in
+                let bodies =
+                  Actions.of_mir ~plain:(Context.plain context) ~is_view:(Context.is_view context)
                     ~holds_function:(Context.holds_function context)
                     ~stores_function:(Context.stores_function context) ~returns
                     ~is_var:(fun local -> List.mem local context.mutable_locals)
-                    mir
+                    ~moves mir
                 in
-                Move_rules.check_refused context graph;
-                Move_rules.check context mir ~returns;
-                Views.check context graph)
+                List.iter (Move_rules.check_refused context) bodies;
+                Move_rules.check context mir ~moves ~returns;
+                (* Only the definition's own body yields, so only it has a
+                   task hazard. *)
+                match List.map (Views.check context) bodies with
+                | hazard :: _ -> hazard
+                | [] -> None)
           in
           {
             reported = context.diagnostics;
