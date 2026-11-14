@@ -119,4 +119,15 @@ val held_at_entry : t -> path list
 (** The flagged paths that hold a value on entry: the parameters'. *)
 
 val given_on_entry : t -> Mir.block -> path list
+
+val live : t -> Mir.body -> drops:bool -> Mir.block -> int -> Mir.local -> bool
+(** [live analysis body ~drops block index local]: whether [local] is live before position [index]
+    of [block], where a later use may read it. Position [i] is before the block's statement [i], the
+    count of its statements is before its terminator, and one more is after it. A read, a borrow, or
+    a write to a part of a local uses it, and a whole assignment ends its liveness. A use of a local
+    bound to another's place, or a lent part, uses that place's local too. Where [drops], an end of
+    a local that may hold a value with something to drop uses it, since its drop does.
+
+    Partial application to [body] runs the analysis once. *)
+
 val kept_by_cursor : t -> Mir.body -> Mir.local list

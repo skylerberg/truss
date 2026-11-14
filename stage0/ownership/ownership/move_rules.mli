@@ -10,8 +10,9 @@ type verdict = Moves | Reads | Refused of (Context.context -> Syntax.span -> Typ
 val verdict :
   Context.context -> Place.t -> type_:Types.ty -> returned:bool -> captured:bool -> verdict
 
-(* Reports each move a body's actions make that its place's root forbids. *)
-val check_refused : Context.context -> Actions.t -> unit
+(* The fix that copies a value at a span, where its type has a copy. *)
+val copy_fix :
+  Context.context -> string -> Types.ty -> Syntax.span -> Syntax.span Diagnostic.fix list
 
 (* The move analysis of a body: a value whose type is not plain moves where
    it is read by value. *)

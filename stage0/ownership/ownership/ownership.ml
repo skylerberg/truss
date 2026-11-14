@@ -60,7 +60,7 @@ let inputs database (key : Resolve.Names.key) =
 type analysis = {
   reported : Syntax.diagnostic list;
   must_be_disjoint : (Core.origin * Core.origin) list;
-  task_hazard : Views.task_hazard option;
+  task_hazard : Borrows.task_hazard option;
 }
 
 (* The dataflow analyses of a definition: moves, loans, and views. They
@@ -87,20 +87,8 @@ let analysis =
                     (mir.body :: Array.to_list mir.lambdas)
                 in
                 let moves body = List.assq body analysed in
-                let bodies =
-                  Actions.of_mir ~plain:(Context.plain context) ~is_view:(Context.is_view context)
-                    ~holds_function:(Context.holds_function context)
-                    ~stores_function:(Context.stores_function context) ~returns
-                    ~is_var:(fun local -> List.mem local context.mutable_locals)
-                    ~moves mir
-                in
-                List.iter (Move_rules.check_refused context) bodies;
                 Move_rules.check context mir ~moves ~returns;
-                (* Only the definition's own body yields, so only it has a
-                   task hazard. *)
-                match List.map (Views.check context) bodies with
-                | hazard :: _ -> hazard
-                | [] -> None)
+                Borrows.check context ~moves ~returns mir)
           in
           {
             reported = context.diagnostics;

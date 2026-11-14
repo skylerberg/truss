@@ -39,23 +39,6 @@ let overlap left right =
     in
     steps_overlap left.steps right.steps
 
-(* The tracked place that a core place denotes. [None] for a temporary and
-   for a part that a call lends, other than an element of a [List], a
-   [Slice], or an [Array]. *)
-let rec of_core (place : Core.place) : t option =
-  let with_step base step =
-    Option.map (fun base -> { base with steps = base.steps @ [ step ] }) (of_core base)
-  in
-  match place with
-  | Local { local; _ } -> Some { root = Local local; steps = [] }
-  | Constant { path; _ } -> Some { root = Constant path; steps = [] }
-  | Field { base; field; _ } -> with_step base (Field field)
-  | Lent index -> (
-      match Core_walk.storage_index index with
-      | Some collection -> with_step collection (Element { node = index.id; origin = index.origin })
-      | None -> None)
-  | Temporary _ -> None
-
 (* A [Slice] or a [StringSlice]: a view that an owned collection converts
    to, and through which the collection's elements can be mutated. *)
 let is_slice_type type_ = Types.is_well_known Slice type_ || Types.is_well_known String_slice type_

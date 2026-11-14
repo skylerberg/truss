@@ -168,7 +168,7 @@ let yield_mode context (callee : Mir.callee) : Types.mode option =
    the task outlives the [yield] that started it: the yielding method
    resumes while the task still runs. So the task can keep a borrow or a
    view only of a place that the method cannot mutate or drop, which is a
-   place inside a read-only parameter of the method. [Views.task_hazard] is
+   place inside a read-only parameter of the method. [Borrows.task_hazard] is
    that fact about a method's body, and [task_hazard] reads it for a
    callee.
 
@@ -180,7 +180,7 @@ let yield_mode context (callee : Mir.callee) : Types.mode option =
    - For a callee without a known body, such as a trait method called
      through a bound, and for a cursor, the task needs an owned element that
      is not a view, or a [Plain] copy of a read-only one. *)
-let check_concurrent_loops context ~(task_hazard : Path.t -> Views.task_hazard option option)
+let check_concurrent_loops context ~(task_hazard : Path.t -> Borrows.task_hazard option option)
     (mir : Mir.t) =
   each_block mir (fun body (block : Mir.basic_block) ->
       match block.terminator with

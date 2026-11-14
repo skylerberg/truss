@@ -8,4 +8,4 @@ val pullable : (Path.t, pulling) Query.query
 val check_cursors : Context.context -> Mir.t -> unit
 
 val check_concurrent_loops :
-  Context.context -> task_hazard:(Path.t -> Views.task_hazard option option) -> Mir.t -> unit
+  Context.context -> task_hazard:(Path.t -> Borrows.task_hazard option option) -> Mir.t -> unit
