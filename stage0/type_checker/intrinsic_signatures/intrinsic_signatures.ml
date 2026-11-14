@@ -212,6 +212,9 @@ let signature (operation : Intrinsic.operation) : Types.signature =
         with
         stores_functions = [ "work" ];
       }
+  | Holds_invariant ->
+      make ~generics:[ "Value" ] ~output:(Returns bool)
+        [ input "value" value; input "clause" usize ]
   | Shared_new | Shared_update | Shared_key -> (
       let storable : Types.trait_reference =
         { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
@@ -313,6 +316,7 @@ let cost (operation : Intrinsic.operation) =
   | Storage_push | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
   | Libc_number _ | System_is_os _ | System_is_architecture _ ->
       { time = Constant_time; allocations = No_allocations }
+  | Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
   | Compare_bytes | Storage_remove | Storage_insert | Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
   | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }

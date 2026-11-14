@@ -339,7 +339,7 @@ let specification_expressions (definition : Core.definition) =
       List.iter mark.expression contract.decreases;
       List.iter cost contract.costs
   | Type { invariants; potential; _ } ->
-      List.iter mark.expression invariants;
+      List.iter (fun (invariant : Core.condition) -> mark.expression invariant.value) invariants;
       Option.iter mark.expression potential
   | Trait laws ->
       List.iter
@@ -376,6 +376,7 @@ let check_semantics context (form : Core.t) =
   in
   (match form.definition with
   | Function { contract; _ } -> List.iter (executable "a `requires` clause") contract.requires
+  | Type { invariants; _ } -> List.iter (executable "an `invariant` clause") invariants
   | _ -> ());
   Core_walk.definition
     (located context.at

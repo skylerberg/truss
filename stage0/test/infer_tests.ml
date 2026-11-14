@@ -532,6 +532,11 @@ let () =
 (* Specifications *)
 
 let () =
+  test "deriving Deserialize needs every invariant clause to run" (fun () ->
+      one_diagnostic Fixtures.Infer.deriving_deserialize_needs_an_invariant_that_runs
+        "types.cannot_derive");
+  test "deriving Deserialize accepts an invariant that runs" (fun () ->
+      fine Fixtures.Infer.deriving_deserialize_accepts_an_invariant_that_runs);
   test "integer arithmetic in a specification is exact" (fun () ->
       has_type Fixtures.Infer.integer_arithmetic_in_a_specification_is_exact "a + b" "Integer");
   test "comparisons in a specification may mix integer types" (fun () ->

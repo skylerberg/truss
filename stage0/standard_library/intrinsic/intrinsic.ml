@@ -180,6 +180,7 @@ type operation =
   | Tasks_spawn
   | Shared_new
   | Shared_update
+  | Holds_invariant
   | Shared_key
   | System_is_os of Libc.os
   | System_is_architecture of Libc.architecture
@@ -286,6 +287,7 @@ let operations =
     Shared_new;
     Shared_update;
     Shared_key;
+    Holds_invariant;
   ]
   @ List.map (fun os -> System_is_os os) Libc.oses
   @ List.map (fun architecture -> System_is_architecture architecture) Libc.architectures
@@ -381,6 +383,7 @@ let operation_name = function
   | Shared_new -> "shared_new"
   | Shared_update -> "shared_update"
   | Shared_key -> "shared_key"
+  | Holds_invariant -> "holds_invariant"
   | System_is_os Linux -> "system_is_linux"
   | System_is_os Macos -> "system_is_macos"
   | System_is_architecture X86_64 -> "system_is_x86_64"

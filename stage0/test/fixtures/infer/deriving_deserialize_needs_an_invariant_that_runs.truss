@@ -1,0 +1,5 @@
+use standard::serialization
+
+type Scores(values: List[UInt32])
+  invariant forall i in 0..values.length() => values[i] <= 100
+  derives serialization::Deserialize
