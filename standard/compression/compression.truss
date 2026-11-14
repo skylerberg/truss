@@ -289,11 +289,11 @@ fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pai
   ))
 }
 
-fn inflate_from(input: Slice[UInt8], start: USize, limit: USize) -> Result[core::Pair[List[UInt8], USize], Error] {
+fn inflate_from(input: Slice[UInt8], start: USize, limit: USize, is_flushed: Bool = false) -> Result[core::Pair[List[UInt8], USize], Error] {
   var reader = BitReader.new(start)
   var output: List[UInt8] = []
   var last = false
-  while !last {
+  while !last && !(is_flushed && reader.count == 0 && reader.position >= input.length()) {
     last = read_bits(mut reader, input: input, wanted: 1)? == 1
     let kind = read_bits(mut reader, input: input, wanted: 2)?
     if kind == 0 {
@@ -336,6 +336,11 @@ fn number_at(input: Slice[UInt8], offset: USize, size: USize, big_endian: Bool) 
     }
   }
   Some(value)
+}
+
+internal fn inflate_flushed(input: Slice[UInt8], limit: USize) -> Result[List[UInt8], Error] {
+  let inflated = inflate_from(input, start: 0, limit: limit, is_flushed: true)?
+  Ok(own inflated.first)
 }
 
 public fn decompress(input: Slice[UInt8], format: Format = Format.Gzip, limit: USize = 268435456) -> Result[List[UInt8], Error] {
