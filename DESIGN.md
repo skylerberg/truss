@@ -181,8 +181,7 @@ write those languages' syntax by habit.
   own.
 - **Constants are evaluated when compiling, from literals only.** Constants
   appear in types, as in `Array[UInt8, digest_size]`, and keeping them free
-  of calls means type checking never waits for code to run. Constants can
-  be widened later without breaking code.
+  of calls means type checking never waits for code to run.
 - **Code run while compiling is compiled code.** Tagged-template checks and
   the tables of constant maps run Truss code while compiling. It is compiled
   and run the way tests are, rather than by a separate interpreter, so there
@@ -235,8 +234,7 @@ Truss has no type aliases either, so a type name always means one type.
 Record patterns leave out the type name, so taking a record apart stays
 short: `for (index, element) in scores.enumerate()`. That pattern matches
 fields by name, so `(i, item)` is an error that names the real fields rather
-than a silent positional match. If small groupings turn out too verbose,
-anonymous records with named fields could be added later.
+than a silent positional match.
 
 ### Building values and calling functions
 
@@ -441,8 +439,7 @@ loops and cursors work.
   behind the scenes. A cursor over such a structure is a type with an
   explicit stack, so its allocations are visible.
 - **Cursor types have no name.** A cursor is a state machine the compiler
-  makes from one method, described by `Cursor`. Returning one without
-  allocating would need opaque result types, which can be added later.
+  makes from one method, described by `Cursor`.
 - **No coroutines at run time.** A loop or a lending call compiles to a
   plain loop, and a pulled cursor to a state machine.
 
@@ -517,9 +514,6 @@ A lambda that reads local variables holds views of them:
 - **Associated types are chosen by each implementation,** and type
   parameters choose the `impl`. Truss needs both: associated types for
   `Index` and collections, and type parameters for `From` and the operators.
-- **Overloading by argument labels may come later.** It interacts with
-  defaults and the optional first label, and named constructors cover it
-  for now.
 - **Trait methods need no import,** since forgetting one is a common error
   where they do.
 - **Only traits from the packages a manifest lists are found by a dot,**
@@ -579,7 +573,7 @@ A lambda that reads local variables holds views of them:
   two traits that both require `Equal` share it.
 - **Every `impl` is written out, and none overlap.** An `impl` that covers
   every type matching a bound makes it hard to tell which implementation
-  applies. Starting strict leaves room to relax the rule later.
+  applies.
 - **A provided method can be replaced only by a version proven to give the
   same result.** So `a != b` always means `!(a == b)`, the prover reasons from
   the trait alone, and adding an `impl` never changes a provided method's
@@ -770,10 +764,6 @@ Code after a `todo` is unfinished, not dead.
   function's own terms.
 - **Conversion stays short,** because a single-field variant is a function.
 
-Error unions that `?` widens automatically could be added later without
-breaking code, if wrapper types written only to combine two errors become
-common.
-
 ## Capabilities
 
 A capability is a named set of methods for doing something outside pure
@@ -873,10 +863,6 @@ manifest grants each dependency its capabilities (see
 Grants cannot stop a wrong answer: a pure dependency can still return a
 result that its user acts on. Contracts narrow that, and review of a
 project's dependencies is still needed.
-
-Because `main`'s `uses` clause is complete, a later compiler could also apply
-operating-system restrictions such as seccomp to match, so a program without
-network capabilities could not open a socket even through a compiler bug.
 
 ## Costs
 
@@ -1067,7 +1053,7 @@ loop calls gives the prover its facts: an index in bounds, one iteration per
 element, and termination. None is a special case, so a user's collection
 gives its loops the same facts by making the same promises. A `while true`
 that is never left has type `Never`, so a server whose main loop runs
-forever can return `Never`. There are no labeled breaks for now.
+forever can return `Never`.
 
 ## Parallelism
 
@@ -1084,11 +1070,6 @@ running its branches one after another.
   to run. Code whose parts use capabilities at once is concurrent.
 - **A function that uses `parallel` is still pure,** and tests that run it can
   be cached.
-- **`span` is planned, for the work that cannot be done at once.** On `p`
-  cores a function finishes in time proportional to `time / p + span`, the
-  work-span model of Cilk, so `cost time O(n)` with `cost span O(log(n))`
-  would promise a function that gets faster with each core. `span` joins the
-  grammar with the first standard library function that states it.
 - **The result does not depend on the machine.** Where a computation is
   split is decided by its input, never by the number of cores, so a parallel
   float sum gives the same bits everywhere.
@@ -1160,8 +1141,6 @@ code that does it declares `uses Tasks`.
   and the expected type is always written nearby.
 - **`Array[Element, count]` holds a fixed number of elements in place,** so a
   digest or a lookup table needs no heap and copies like an integer.
-  Arithmetic on its length inside types is left out for now, and can be
-  added later.
 - **Literal allocation is counted.** A non-empty list literal counts as one
   allocation, whether or not the compiler keeps it in static memory, so cost
   clauses do not depend on an optimization.
@@ -1198,8 +1177,7 @@ code that does it declares `uses Tasks`.
   anything, so its capabilities, contracts, and costs could only be assumed,
   and Truss has no `assume`.
 - **The cost is reach.** Anything that needs the operating system or special
-  hardware comes only through the standard library. `extern` and `unsafe`
-  stay reserved in case foreign calls are ever added.
+  hardware comes only through the standard library.
 - **Code for one platform lives only in the standard library,** so nothing
   else needs conditional compilation. Other code asks `Environment`, so the
   answer is tracked and a test can supply another.
@@ -1535,8 +1513,7 @@ its scope, and an import could change what a name in unrelated code means.
 
 **The prelude holds only `UpperCamelCase` names,** so it never clashes with a
 variable or function. Adding a name can still clash with a user's type, so the
-prelude changes only with a language version, which comes with an automatic
-rename.
+prelude changes only with a language version.
 
 **Variants live under their type,** so the name shows its type and two types
 can share a variant name. In patterns the variant is bare and looked up in
