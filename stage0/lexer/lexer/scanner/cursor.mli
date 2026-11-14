@@ -11,9 +11,10 @@ type t = {
   names : (string, Names.checked) Hashtbl.t;
   mutable previous : Token.kind option;
   is_peek : bool;
+  foreign_escape : t -> Buffer.t -> bool;
 }
 
-val create : Source.t -> Diagnostic.Collector.t -> t
+val create : foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
 
 val peek : t -> int -> t
 (** A copy of [cursor] at [index], for scanning ahead, that discards what it reports. *)

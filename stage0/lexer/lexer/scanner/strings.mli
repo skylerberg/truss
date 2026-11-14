@@ -13,26 +13,26 @@ val scan_string :
   nesting:int ->
   Token.kind * Cursor.ending
 
-val character_literal : Cursor.t -> tag:string -> literal_start:int -> stop:int -> Token.kind
-
-type prefix_kind = Format | Raw_text | Bytes
-
-val prefixed_string :
+val scan_ordinary :
+  ?closing:int ->
   Cursor.t ->
   scan:(Cursor.t -> inline:bool -> nesting:int -> Cursor.item) ->
-  prefix:string ->
-  start:int ->
+  tag:(string * Token.span) option ->
   nesting:int ->
   Token.kind * Cursor.ending
+(** An ordinary string at its opening quote, closed by [closing], a quote unless given. *)
 
-val hash_raw_string : Cursor.t -> start:int -> Token.kind option
-val closing_delimiter : Cursor.t -> start:int -> delimiter:int -> int option
-
-val quoted_string :
+val scan_one_line_raw :
   Cursor.t ->
   scan:(Cursor.t -> inline:bool -> nesting:int -> Cursor.item) ->
+  tag:(string * Token.span) option ->
+  form:Token.form ->
   nesting:int ->
-  delimiter:int ->
+  literal_start:int ->
+  dollars:int ->
+  quotes:int ->
   Token.kind * Cursor.ending
+(** A raw string's text on its line, after its opening delimiter. *)
 
-val curly_quoted_string : Cursor.t -> opening_length:int -> closing:string -> Token.kind option
+val opens_raw_string : Cursor.t -> int -> bool
+(** Whether a run of `$` at [index] opens a raw string. *)

@@ -257,7 +257,9 @@ let () =
       error "1__000" ~code:Number_underscore ~at:"_" ~fixed:"1_000";
       error "0x_FF" ~code:Number_underscore ~at:"_" ~fixed:"0xFF");
   test "one fix corrects every problem in a literal" (fun () ->
-      error "0X_FF" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0xFF");
+      error "1__0__0" ~code:Number_underscore ~at:"_" ~fixed:"1_0_0");
+  test "a form of another language with another problem has no fix" (fun () ->
+      error "0X_FF" ~code:Number_uppercase_prefix ~at:"0X");
   test "a leading zero" (fun () ->
       error "0755" ~code:Number_leading_zero ~at:"0755" ~fixed:"0o755" ~alternatives:[ "755" ];
       error "09" ~code:Number_leading_zero ~at:"09" ~fixed:"9";

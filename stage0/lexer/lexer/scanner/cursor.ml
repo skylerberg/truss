@@ -19,9 +19,11 @@ type t = {
   names : (string, Names.checked) Hashtbl.t;
   mutable previous : Token.kind option;
   is_peek : bool;
+  (* An escape of another language in a string, which the habits scan. *)
+  foreign_escape : t -> Buffer.t -> bool;
 }
 
-let create source diagnostics =
+let create ~foreign_escape source diagnostics =
   {
     source;
     text = Source.text source;
@@ -35,6 +37,7 @@ let create source diagnostics =
     names = Hashtbl.create 256;
     previous = None;
     is_peek = false;
+    foreign_escape;
   }
 
 let peek cursor index =
