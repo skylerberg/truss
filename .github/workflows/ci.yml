@@ -221,13 +221,15 @@ jobs:
   # The codegen tests again, with their C built under AddressSanitizer and
   # UndefinedBehaviorSanitizer: a report is a compiler bug. The C declares a
   # local with no initializer, and -ftrivial-auto-var-init=pattern fills
-  # each such local with a pattern. A read of a local that the lowering
-  # never wrote then yields a wild pointer or a true drop flag, which
-  # AddressSanitizer reports, and not the bytes that the stack held, which
-  # are often zero. Leaks are left to the test runner's own count of live
-  # blocks, since the runner itself frees nothing at exit. layout_tests is
-  # skipped: it builds no C, so the sanitizers would run the same OCaml as
-  # the codegen job. It runs beside the check, on a runner of its own.
+  # each such local with a pattern. A pointer that the lowering never wrote
+  # is then a wild address, so a dereference or a free of it is a report,
+  # where the bytes that the stack held are often zero. The pattern does
+  # not show an unwritten integer or Bool: the integer is only a wrong
+  # value, and the Bool reads as false, since a branch tests for 1. Leaks
+  # are left to the test runner's own count of live blocks, since the
+  # runner itself frees nothing at exit. layout_tests is skipped: it builds
+  # no C, so the sanitizers would run the same OCaml as the codegen job. It
+  # runs beside the check, on a runner of its own.
   sanitizers:
     runs-on: ubuntu-latest
     steps:

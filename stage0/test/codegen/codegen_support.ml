@@ -203,9 +203,11 @@ let compiler =
    infeasible paths, such as the code after a [concurrent] block whose
    every branch returns, and an infeasible path may read a local that it
    never wrote. Clang and GCC name that warning differently, and Clang
-   rejects GCC's name. The sanitizer job of CI catches such a read on a
-   feasible path: it fills every local that has no initializer with a
-   pattern. *)
+   rejects GCC's name. On a feasible path, the sanitizer job of CI reports
+   a use of a pointer that only some paths wrote: it fills every local
+   that has no initializer with a pattern, which makes the pointer a wild
+   address. No check reports an integer or a [Bool] that only some paths
+   wrote. *)
 let strict =
   lazy
     [
