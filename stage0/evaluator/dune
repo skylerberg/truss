@@ -1,7 +1,0 @@
-; Running compiled code for the prover, through code generation. The prover
-; and code generation do not depend on each other, so this library, which
-; a driver uses, is in neither's directory.
-
-(library
- (name evaluator)
- (libraries zarith compile instance prover))
