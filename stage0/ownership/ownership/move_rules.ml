@@ -52,28 +52,6 @@ let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
              shown)
     | (Owned | Borrowed_mut), _ -> Moves
 
-(* The moves the actions refuse: a move of a place its root does not own,
-   and of a part that a lending call lends. Whether a place can be moved
-   needs no dataflow: it depends on the place and on how its root is
-   bound. *)
-let check_refused context (actions : Actions.t) =
-  Array.iter
-    (Array.iter
-       (List.iter (fun (step : Actions.step) ->
-            let at = span context step.origin in
-            match step.action with
-            | Move { place; type_; returned; captured } -> (
-                match verdict context place ~type_ ~returned ~captured with
-                | Refused refuse -> refuse context at type_
-                | Moves | Reads -> ())
-            | Move_out_of_lent type_ ->
-                report context Not_owned at
-                  ~fixes:(copy_fix context "Copy it." type_ at)
-                  "This part is lent, so it cannot be moved: the loan ends when the statement \
-                   ends. Copy it instead."
-            | _ -> ())))
-    actions.steps
-
 (* The checks of moves on one body's MIR, with the move analysis code
    generation drops by. A place whose type is not plain moves where it is
    read by value. The checks prevent a use after move, and a place of the

@@ -647,13 +647,17 @@ let place_locals (place : Mir.place) =
 let use_locals uses = List.concat_map (fun use -> place_locals use.place) uses
 let every _ = true
 
-let reads_and_writes analysis state (statement : Mir.statement) =
+(* The locals a statement reads and those it gives a whole value, in
+   [state], where it runs. A write to a part of a local reads the rest of
+   it. Where [drops], an end of a local that may hold a value with something
+   to drop reads it, since its drop does. *)
+let reads_and_writes analysis ~drops state (statement : Mir.statement) =
   match statement.kind with
   | Live locals -> ([], locals)
   | Dead locals ->
       ( List.filter
           (fun local ->
-            owns analysis local
+            drops && owns analysis local
             && List.exists
                  (fun position -> state.maybe_holds.(position))
                  (affected_local analysis local))
@@ -670,12 +674,10 @@ let reads_and_writes analysis state (statement : Mir.statement) =
             match place with { root = Local local; projections = [] } -> Some local | _ -> None)
           given )
 
-let terminator_reads basic = use_locals (terminator_uses ~moving:every basic)
-
-let kept_by_cursor analysis (body : Mir.body) =
+let live analysis (body : Mir.body) ~drops =
   let count = Array.length body.locals in
-  (* The locals whose places a local is bound to, or holds views of: a read
-     of the local reads them too. *)
+  (* The locals whose places a local is bound to, or holds views of: a use
+     of the local uses them too. *)
   let sources = Array.make count [] in
   let bind local others = sources.(local) <- others @ sources.(local) in
   Array.iter
@@ -706,67 +708,85 @@ let kept_by_cursor analysis (body : Mir.body) =
         let state = copy analysis.entries.(block) in
         List.map
           (fun statement ->
-            let read_and_written = reads_and_writes analysis state statement in
+            let read_and_written = reads_and_writes analysis ~drops state statement in
             apply analysis state statement;
             read_and_written)
           basic.statements)
       body.blocks
   in
+  (* Each iteration of a loop gives its part a value where its body starts,
+     and a loop that pulls values reads its cursor there. *)
+  let entered = Hashtbl.create 4 in
+  Array.iter
+    (fun (basic : Mir.basic_block) ->
+      match basic.terminator with
+      | For { iteration; part; body = first; _ } ->
+          Hashtbl.replace entered first
+            ( part,
+              match iteration with
+              | Pull { cursor; _ } -> reads (place_locals cursor)
+              | Range _ | Yielding _ -> [] )
+      | _ -> ())
+    body.blocks;
   let loops = Mir.iteration_loops body in
-  let live = Array.map (fun _ -> Array.make count false) body.blocks in
-  let union into locals =
-    Array.iteri (fun local is_live -> if is_live then into.(local) <- true) locals
+  let before =
+    Array.map
+      (fun (basic : Mir.basic_block) ->
+        Array.init (List.length basic.statements + 2) (fun _ -> Array.make count false))
+      body.blocks
   in
-  let next_iteration block =
-    let after = Array.make count false in
-    (match body.blocks.(block).terminator with
-    | For { iteration; part; body = first; after = exit; _ } -> (
-        union after live.(first);
-        after.(part) <- false;
-        union after live.(exit);
-        match iteration with
-        | Pull { cursor; _ } ->
-            List.iter (fun local -> after.(local) <- true) (reads (place_locals cursor))
-        | Range _ | Yielding _ -> ())
-    | _ -> ());
-    after
-  in
+  (* The locals live where control enters each block, before a loop's
+     iteration gives its part a value. *)
+  let entry = Array.map (fun _ -> Array.make count false) body.blocks in
   let changed = ref true in
   while !changed do
     changed := false;
     for block = Array.length body.blocks - 1 downto 0 do
       let basic = body.blocks.(block) in
-      let current =
-        match basic.terminator with
-        | For _ -> next_iteration block
-        | Iteration_end -> (
-            match Hashtbl.find_opt loops block with
-            | Some loop -> next_iteration loop
-            | None -> Array.make count false)
-        | terminator ->
-            let after = Array.make count false in
-            List.iter (fun successor -> union after live.(successor)) (Mir.successors terminator);
-            after
-      in
-      List.iter (fun local -> current.(local) <- true) (reads (terminator_reads basic));
+      let positions = before.(block) and last = List.length basic.statements in
+      let current = Array.make count false in
       List.iter
-        (fun (read, writes) ->
+        (fun successor ->
+          Array.iteri
+            (fun local is_live -> if is_live then current.(local) <- true)
+            entry.(successor))
+        (Mir.block_successors body loops block);
+      positions.(last + 1) <- Array.copy current;
+      List.iter
+        (fun local -> current.(local) <- true)
+        (reads (use_locals (terminator_uses ~moving:every basic)));
+      positions.(last) <- Array.copy current;
+      List.iteri
+        (fun index (read, writes) ->
           List.iter (fun local -> current.(local) <- false) writes;
-          List.iter (fun local -> current.(local) <- true) (reads read))
+          List.iter (fun local -> current.(local) <- true) (reads read);
+          positions.(last - 1 - index) <- Array.copy current)
         (List.rev effects.(block));
-      if current <> live.(block) then begin
-        live.(block) <- current;
+      Option.iter
+        (fun (part, cursor) ->
+          current.(part) <- false;
+          List.iter (fun local -> current.(local) <- true) cursor)
+        (Hashtbl.find_opt entered block);
+      if current <> entry.(block) then begin
+        entry.(block) <- current;
         changed := true
       end
     done
   done;
+  fun block index local -> before.(block).(index).(local)
+
+let kept_by_cursor analysis (body : Mir.body) =
+  let count = Array.length body.locals in
+  let live = live analysis body ~drops:true in
   let kept = Array.make count false in
   List.iter (fun local -> kept.(local) <- true) body.parameters;
   Array.iteri
     (fun block (basic : Mir.basic_block) ->
       match basic.terminator with
       | Yield { resume; _ } ->
-          union kept live.(resume);
+          for local = 0 to count - 1 do
+            if live resume 0 local then kept.(local) <- true
+          done;
           let state = copy analysis.entries.(block) in
           List.iter (apply analysis state) basic.statements;
           apply_terminator_moves analysis state basic;

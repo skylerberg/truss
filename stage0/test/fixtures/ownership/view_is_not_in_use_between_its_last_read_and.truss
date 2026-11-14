@@ -1,0 +1,7 @@
+fn f(items: mut List[Int64], other: List[Int64]) -> USize {
+  var view: Slice[Int64] = items[..]
+  let before = view.length()
+  mut items.push(1)
+  view = other[..]
+  before + view.length()
+}

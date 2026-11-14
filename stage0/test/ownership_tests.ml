@@ -254,13 +254,15 @@ let () =
     Fixtures.Ownership.method_can_yield_a_view_of_self_and_lend_a_local;
   (let chunks = Fixtures.Ownership.chunks in
    rejected
-     "a view from one iteration of a loop that borrows `mut` cannot be used in a later iteration"
+     "a view from an iteration of a loop that borrows `mut` cannot be used after the next pull"
      (chunks ^ Fixtures.Ownership.view_from_one_iteration_of_a_loop_that_borrows_mut)
      "ownership.changed_while_viewed";
    accepted "a view from an iteration of a loop that borrows `mut` can be used in that iteration"
      (chunks ^ Fixtures.Ownership.view_from_an_iteration_of_a_loop_that_borrows_mut));
   accepted "a view from a loop over a read-only source can be used after the loop"
-    Fixtures.Ownership.view_from_a_loop_over_a_read_only_source_can_be
+    Fixtures.Ownership.view_from_a_loop_over_a_read_only_source_can_be;
+  accepted "a view is not in use between its last read and a new value, so its original can change"
+    Fixtures.Ownership.view_is_not_in_use_between_its_last_read_and
 
 (* A place given to a [provide] block *)
 
