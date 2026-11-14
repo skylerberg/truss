@@ -392,7 +392,6 @@ let evaluate arguments =
   Format.pp_print_flush err ();
   Output.print (Buffer.contents buffer_out);
   Output.eprint (Buffer.contents buffer_err);
-  Database.save_opened ();
   outcome
 
 (* Runs a command line from [directory], or else from the current directory,
@@ -456,7 +455,7 @@ let handle ~progress request =
   in
   { output = Buffer.contents buffer; outcome }
 
-let serve key = Database.serve ~key ~handle
+let serve key = Database.serve ~key ~handle ()
 
 (* The command name: the first argument that is not an option. *)
 let command_of arguments =
@@ -524,7 +523,11 @@ let language_server ~no_server =
       { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
     in
     let response =
-      if no_server then Ok (handle ~progress:ignore request)
+      if no_server then begin
+        let response = handle ~progress:ignore request in
+        Database.save_opened ();
+        Ok response
+      end
       else Database.call ~key:(Database.server_key root) ~progress:ignore request
     in
     match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
@@ -537,7 +540,11 @@ let client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
   let arguments = List.filter (( <> ) "--no-server") arguments in
-  let local () = finish (run_command_line arguments) in
+  let local () =
+    let outcome = run_command_line arguments in
+    Database.save_opened ();
+    finish outcome
+  in
   match command_of arguments with
   | Some "clean" -> clean_store ()
   | Some "lsp" -> language_server ~no_server

@@ -79,15 +79,12 @@ val homes : unit -> (string * string) list
 (** Each directory that has a saved state, with the name its state is saved under. *)
 
 val save : t -> unit
-(** Writes the state's changes since it was last written, and points its name at it. *)
+(** Writes the state's changes since it was last written, and points its name at it. Once the
+    changes written since the last whole state reach half its size, it writes the state whole
+    instead, so that opening the state reads a short chain. *)
 
 val stabilize : t -> Engine.change
 (** Brings the state up to date, and saves it. *)
-
-val compact : ?waited_for:bool -> t -> unit
-(** Writes the state whole and opens it again, once the data written since the last whole state has
-    grown to half its size; with [waited_for], in the background process, only at four times that,
-    since a command is waiting. *)
 
 val sessions : unit -> (string * int) list
 (** Each open session's key, with how many results it holds. *)
@@ -144,18 +141,26 @@ module Graph = Graph
 (** {1 The background process} *)
 
 module Server : sig
+  val listen : key:string -> (Unix.file_descr, string) result
+  (** Binds the socket of a key's background process, for a process started some other way than by
+      {!call} to serve with {!serve}. *)
+
   val serve :
     key:string ->
+    ?socket:Unix.file_descr ->
     alive:(unit -> bool) ->
     idle:(unit -> unit) ->
+    answered:(unit -> unit) ->
     keep:(unit -> (string * string) list) ->
     handle:(progress:(string -> unit) -> 'request -> 'response) ->
+    unit ->
     unit
-  (** Runs the background process that serves a key, until it has been idle past its limit, {!stop}
-      is called, or [alive] says no. One request is answered at a time; requests for different keys
-      go to different processes, and so are answered at once. [idle] runs each second that no
-      request waits, and [keep] names states to keep when the store is collected, each as its
-      version and artifact. *)
+  (** Runs the background process that serves a key on [socket], or else on the socket that the
+      client which started it passed as its standard input, until it has been idle past its limit,
+      {!stop} is called, or [alive] says no. One request is answered at a time; requests for
+      different keys go to different processes, and so are answered at once. [answered] runs after
+      each response is sent, [idle] runs each second that no request waits, and [keep] names states
+      to keep when the store is collected, each as its version and artifact. *)
 
   val call :
     ?program:string ->
@@ -164,9 +169,10 @@ module Server : sig
     progress:(string -> unit) ->
     'request ->
     ('response, string) result
-  (** Answers a request through the background process that serves a key, starting it from [program]
-      with the arguments [__serve] and the key if it is not running, unless [start_server] is false.
-  *)
+  (** Answers a request through the background process that serves a key. Unless [start_server] is
+      false, a key that no process serves has its socket bound by the client, which then starts
+      [program] with the arguments [__serve] and the key and the socket as its standard input, and
+      sends the request at once: it waits in the socket's queue until the process accepts it. *)
 
   val running : string -> bool
   (** Whether a background process of this compiler serves a key now. *)

@@ -160,13 +160,20 @@ val plan_lock :
 val server_key : string -> string
 (** The name of the background process for a directory: the root of the project it is in. *)
 
-val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
-(** Runs the background process of a key until it has been idle past its limit, the project's
-    directory is gone, or {!stop} is called, answering each request with [handle], which may send
-    text to show while it works with [progress]. Each project has a process of its own, so requests
-    about different projects, and so different worktrees, are answered at once; those about one
-    project are answered one at a time. The client and the process are the same executable, so a
-    request and a response are the client's own types. *)
+val serve :
+  key:string ->
+  ?socket:Unix.file_descr ->
+  handle:(progress:(string -> unit) -> 'request -> 'response) ->
+  unit ->
+  unit
+(** Runs the background process of a key on [socket], or else on the socket that {!call} passed it
+    as standard input, until it has been idle past its limit, the project's directory is gone, or
+    {!stop} is called. It answers each request with [handle], which may send text to show while it
+    works with [progress], and saves the sessions the request opened after the response is sent.
+    Each project has a process of its own, so requests about different projects, and so different
+    worktrees, are answered at once; those about one project are answered one at a time. The client
+    and the process are the same executable, so a request and a response are the client's own types.
+*)
 
 val call :
   ?program:string ->
@@ -235,6 +242,10 @@ module For_testing : sig
 
   val logging : bool ref
   (** Whether new sessions keep a log of the queries they compute. *)
+
+  val listen : key:string -> (Unix.file_descr, string) result
+  (** Binds the socket of a key's background process, for a test that runs the process with {!serve}
+      in a process of its own. *)
 
   val collect_store : unit -> unit
   (** Keeps the store within its budget, as the background process does, for a run that saves a

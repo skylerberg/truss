@@ -74,6 +74,13 @@ let errors directory =
   Database.save_session session;
   List.length actual + List.length (Database.problems session)
 
+(* The socket of a key's background process, bound before the process is
+   forked, as a client binds it before it starts the process. *)
+let listening key =
+  match Database.For_testing.listen ~key with
+  | Ok socket -> socket
+  | Error message -> failwith message
+
 let executed directory =
   match Database.For_testing.session_engine directory with
   | Some engine -> Engine.For_testing.executed engine
@@ -120,27 +127,41 @@ let () =
       | 0, _ -> ()
       | status, _ -> fail "git --version exited with %d" status);
       match Unix.fork () with 0 -> Unix._exit 0 | child -> ignore (Unix.waitpid [] child));
+  test "a client whose background process fails to start is told so at once" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      match
+        (Database.call ~program:"/nonexistent" ~key:(Database.server_key directory) ~progress:ignore
+           directory
+          : (int, string) result)
+      with
+      | Error _ -> ()
+      | Ok _ -> fail "answered with no background process");
   test "the background process answers requests and sees every earlier write" (fun () ->
       fresh_store ();
       let directory = package () in
+      let socket = listening (Database.server_key directory) in
       match Unix.fork () with
       | 0 ->
           (* A request is a directory, and the answer its count of errors, or
              [-1] to stop. *)
-          Database.serve ~key:(Database.server_key directory) ~handle:(fun ~progress request ->
+          Database.serve ~key:(Database.server_key directory) ~socket
+            ~handle:(fun ~progress request ->
               let directory = request in
               progress "working";
               if directory = "stop" then begin
                 Database.stop ();
                 -1
               end
-              else errors directory);
+              else errors directory)
+            ();
           Unix._exit 0
       | child ->
+          Unix.close socket;
           let progressed = ref false in
           let call request =
             match
-              Database.call ~program:"/nonexistent" ~key:(Database.server_key directory)
+              Database.call ~start_server:false ~key:(Database.server_key directory)
                 ~progress:(fun text -> if text = "working" then progressed := true)
                 request
             with
@@ -499,18 +520,22 @@ let () =
       git root [ "worktree"; "add"; "-q"; other; "-b"; "served" ];
       add_caller other;
       let key = Database.server_key other in
+      let socket = listening key in
       match Unix.fork () with
       | 0 ->
-          Database.serve ~key ~handle:(fun ~progress:_ request ->
+          Database.serve ~key ~socket
+            ~handle:(fun ~progress:_ request ->
               if request = "stop" then begin
                 Database.stop ();
                 -1
               end
-              else errors request);
+              else errors request)
+            ();
           Unix._exit 0
       | child ->
+          Unix.close socket;
           let call request =
-            match Database.call ~program:"/nonexistent" ~key ~progress:ignore request with
+            match Database.call ~start_server:false ~key ~progress:ignore request with
             | Ok (count : int) -> count
             | Error message ->
                 fail "%s" message;
