@@ -111,13 +111,19 @@ let copy_plain cursor buffer ~special =
     cursor.position <- stop
   end
 
-(* Reads one character of text at the cursor into [buffer], checking it. A
-   forbidden or invalid character is reported and left out. *)
+(* Reads one character of text at the cursor into [buffer], checking it. An
+   invalid character is reported and left out. A forbidden character is
+   reported, and kept in an ordinary string, whose fix writes it as an
+   escape. *)
 let read_character cursor buffer ~context =
   let packed = decode cursor cursor.position in
   if packed < 0 then invalid_run cursor
-  else if Unicode.is_forbidden (Unicode.decoded_code_point packed) then
-    forbidden_run cursor ~context
+  else if Unicode.is_forbidden (Unicode.decoded_code_point packed) then begin
+    let start = cursor.position in
+    forbidden_run cursor ~context;
+    if context = Ordinary_string then
+      Buffer.add_substring buffer cursor.text start (cursor.position - start)
+  end
   else begin
     Buffer.add_substring buffer cursor.text cursor.position (Unicode.decoded_length packed);
     cursor.position <- cursor.position + Unicode.decoded_length packed

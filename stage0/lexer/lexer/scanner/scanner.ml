@@ -33,7 +33,7 @@ let punctuation cursor current =
         [
           Diagnostic.fix
             ("Write `" ^ replacement ^ "`")
-            [ Diagnostic.replace (span start stop) replacement ];
+            [ replace_code cursor (span start stop) replacement ];
         ]
       (span start stop)
       (Printf.sprintf "Truss has no `%s`; write `%s`." written replacement)
@@ -96,7 +96,7 @@ let punctuation cursor current =
           [
             Diagnostic.fix
               ("Write `" ^ replacement ^ "`")
-              [ Diagnostic.replace (span start (start + 3)) replacement ];
+              [ replace_code cursor (span start (start + 3)) replacement ];
           ]
         (span start (start + 3))
         (Printf.sprintf "Truss has no `%s`. `%s` already compares values of the same type." written
@@ -126,6 +126,31 @@ let checked_name cursor name =
       Hashtbl.add cursor.names name checked;
       checked
 
+(* Whether a name, or a keyword that a confusable character such as `∀` spells, starts
+   at [index]: after `1.`, it makes the `.` a member access. *)
+let starts_name cursor index =
+  let current = byte cursor index in
+  if current < 0x80 then is_ascii_name_byte current
+  else
+    let packed = decode cursor index in
+    packed >= 0
+    &&
+    let value = Unicode.decoded_code_point packed in
+    Unicode.is_xid_start value
+    ||
+    match Confusables.find value with
+    | Some (Spelled spelling) -> Token.word spelling <> None
+    | _ -> false
+
+(* The first offset at or after [index] that holds no space, line break, or
+   character that its fix replaces with a space, such as U+00A0. *)
+let rec skip_blank_and_confusable_spaces cursor index =
+  let position = Source_text.skip_blank cursor index in
+  let packed = if byte cursor position >= 0x80 then decode cursor position else -1 in
+  if packed >= 0 && Confusables.find (Unicode.decoded_code_point packed) = Some Confusables.Space
+  then skip_blank_and_confusable_spaces cursor (position + Unicode.decoded_length packed)
+  else position
+
 let number cursor =
   let start = cursor.position in
   let stop = Numbers.scan_end cursor.text start in
@@ -137,7 +162,7 @@ let number cursor =
         ~fixes:
           (List.map
              (fun (title, replacement) ->
-               Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
+               Diagnostic.fix title [ replace_code cursor (span start stop) replacement ])
              checked.fixes)
         (span (start + problem.start) (start + problem.stop))
         problem.message
@@ -149,8 +174,8 @@ let number cursor =
     when byte cursor stop = Char.code '.'
          && (not (Numbers.is_radix_prefix cursor.text start))
          &&
-         let after = byte cursor (Source_text.skip_blank cursor (stop + 1)) in
-         not (is_ascii_name_byte after || after >= 0x80 || after = Char.code '.') -> (
+         let after = skip_blank_and_confusable_spaces cursor (stop + 1) in
+         not (starts_name cursor after || byte cursor after = Char.code '.') -> (
       let written = String.sub cursor.text start (stop + 1 - start) in
       match Numbers.float_with_zero (written ^ "0") with
       | Some value ->
@@ -160,7 +185,7 @@ let number cursor =
               [
                 Diagnostic.fix
                   (Printf.sprintf "Write `%s0`" written)
-                  [ Diagnostic.insert (Source.zero_width (stop + 1)) "0" ];
+                  [ replace_code cursor (Source.zero_width (stop + 1)) "0" ];
               ]
             (span stop (stop + 1))
             (Printf.sprintf "A float has a digit after its `.`: `%s0`." written);
@@ -169,24 +194,28 @@ let number cursor =
   | _ -> checked.value
 
 (* `.5`, where no operand comes before the `.`: a float with no digit before
-   its `.`. [None] when the text is not one valid float. *)
+   its `.`. Its fix writes the `0`, and corrects the literal's other
+   problems with it, as `.5f` to `0.5`. [None] when the text with the `0`
+   written is not a float, or has a problem with no fix. *)
 let leading_dot_float cursor =
   let start = cursor.position in
   let stop = Numbers.scan_end cursor.text (start + 1) in
   let written = String.sub cursor.text start (stop - start) in
-  match Numbers.float_with_zero ("0" ^ written) with
-  | Some value ->
+  let checked = Numbers.check ("0" ^ written) in
+  let fixed =
+    match (checked.value, checked.problem, checked.fixes) with
+    | Float _, None, _ -> Some ("0" ^ written, replace_code cursor (Source.zero_width start) "0")
+    | Float _, Some _, (_, fixed) :: _ -> Some (fixed, replace_code cursor (span start stop) fixed)
+    | _ -> None
+  in
+  match fixed with
+  | Some (fixed, edit) ->
       cursor.position <- stop;
       report cursor ~code:Number_missing_digits
-        ~fixes:
-          [
-            Diagnostic.fix
-              (Printf.sprintf "Write `0%s`" written)
-              [ Diagnostic.insert (Source.zero_width start) "0" ];
-          ]
+        ~fixes:[ Diagnostic.fix (Printf.sprintf "Write `%s`" fixed) [ edit ] ]
         (span start (start + 1))
-        (Printf.sprintf "A float has a digit before its `.`: `0%s`." written);
-      Some value
+        (Printf.sprintf "A float has a digit before its `.`: `%s`." fixed);
+      Some checked.value
   | None -> None
 
 (* `...`, which is three things in other languages. Between two operands
@@ -206,7 +235,7 @@ let ellipsis cursor =
         [
           Diagnostic.fix
             ("Write `" ^ replacement ^ "`")
-            [ Diagnostic.replace (span start stop) replacement ];
+            [ replace_code cursor (span start stop) replacement ];
         ]
       (span start stop) message;
     Some kind
@@ -262,14 +291,15 @@ let rec scan cursor ~inline ~nesting =
           reject length (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
         in
         (* A character that looks like ASCII punctuation is reported, and
-           lexes as the token that its fix writes. *)
+           lexes as the token that its fix writes: `p∀x` as `p forall x`,
+           and `–>` as `- >`. *)
         let confusable ~replacement ~name =
           report cursor ~code:Confusable_character
             ~fixes:
               [
                 Diagnostic.fix
                   ("Write `" ^ replacement ^ "`")
-                  [ Diagnostic.replace (span start (start + length)) replacement ];
+                  [ replace_code cursor (span start (start + length)) replacement ];
               ]
             (span start (start + length))
             (Printf.sprintf "%s is not %s. Truss is written with ASCII punctuation."

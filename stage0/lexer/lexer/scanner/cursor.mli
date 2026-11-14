@@ -47,3 +47,8 @@ val spaces_before : t -> int -> int
 val only_spaces_before : t -> int -> bool
 val describe_code_point : int -> string
 val show_character : t -> int -> string
+
+val replace_code : t -> Source.span -> string -> Diagnostic.span Diagnostic.edit
+(** [replace_code cursor span code] replaces [span] with the tokens [code], separated by a space
+    from a neighbor that would otherwise join one of them into another token. With [code] empty, it
+    deletes [span], and leaves a space if the two neighbors would join. *)

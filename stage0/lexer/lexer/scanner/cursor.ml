@@ -128,3 +128,31 @@ let show_character cursor index =
       Printf.sprintf "`%s` (U+%04X)"
         (String.sub cursor.text index (Unicode.decoded_length packed))
         value
+
+(* The edit that writes [code], one or more tokens, in place of [span]. A
+   space goes between [code] and a neighbor that would otherwise join it
+   into another token: `fn.5` is fixed to `fn 0.5`, not to the name `fn0`
+   and `.5`, and `<>=` to `!= =`, not to `!==`. A name byte followed by a
+   quote joins too, as a string's tag or prefix. With no [code], the edit
+   deletes [span], and leaves a space if its two neighbors would join. *)
+let replace_code cursor (span : Source.span) code =
+  let is_name_byte byte = is_ascii_name_byte byte || byte >= 0x80 in
+  let is_operator_byte byte =
+    byte >= 0 && byte < 0x80 && String.contains "!%&*+-./:<=>^|" (Char.chr byte)
+  in
+  let joins left right =
+    (is_name_byte left && (is_name_byte right || right = quote))
+    || (is_operator_byte left && is_operator_byte right)
+  in
+  if code = "" then
+    Diagnostic.replace span
+      (if span.start > 0 && joins (byte cursor (span.start - 1)) (byte cursor span.stop) then " "
+       else "")
+  else
+    let before =
+      if span.start > 0 && joins (byte cursor (span.start - 1)) (Char.code code.[0]) then " "
+      else ""
+    and after =
+      if joins (Char.code code.[String.length code - 1]) (byte cursor span.stop) then " " else ""
+    in
+    Diagnostic.replace span (before ^ code ^ after)

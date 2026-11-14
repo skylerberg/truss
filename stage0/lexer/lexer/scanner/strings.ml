@@ -752,7 +752,7 @@ let character_literal cursor ~tag ~literal_start ~stop =
       [
         Diagnostic.fix
           ("Write `" ^ replacement ^ "`")
-          [ Diagnostic.replace (span literal_start stop) replacement ];
+          [ replace_code cursor (span literal_start stop) replacement ];
       ]
     (span literal_start stop)
     (Printf.sprintf "Truss has no %s literals. A single %s is a tagged string: `%s`."
@@ -820,7 +820,7 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
   let quotes = run_length cursor quote_start quote in
   let empty = quotes = 2 in
   let kind_of_prefix = prefix_kind prefix in
-  let remove_prefix = Diagnostic.delete (span start quote_start) in
+  let remove_prefix = replace_code cursor (span start quote_start) "" in
   let kind, ending =
     if kind_of_prefix = Raw_text && quotes = 1 then begin
       cursor.position <- quote_start + 1;
@@ -881,7 +881,7 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
             [
               Diagnostic.fix "Write a raw string"
                 [
-                  Diagnostic.replace (span start text_start) "\"\"\"";
+                  replace_code cursor (span start text_start) "\"\"\"";
                   Diagnostic.replace (span text_stop (text_stop + 1)) "\"\"\"";
                 ];
             ] )
@@ -944,7 +944,7 @@ let hash_raw_string cursor ~start =
                [
                  Diagnostic.fix "Write a raw string"
                    [
-                     Diagnostic.replace (span start text_start) delimiter;
+                     replace_code cursor (span start text_start) delimiter;
                      Diagnostic.replace (span text_stop stop) delimiter;
                    ];
                ]
@@ -1005,7 +1005,7 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
       (if ending = Closed then
          [
            Diagnostic.fix "Write the string between `\"`s"
-             ((Diagnostic.replace (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
+             ((replace_code cursor (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
              @ [ Diagnostic.replace (span (stop - 1) stop) "\"" ]);
          ]
        else [])
@@ -1047,7 +1047,7 @@ let curly_quoted_string cursor ~opening_length ~closing =
              [
                Diagnostic.fix "Write the string between `\"`s"
                  [
-                   Diagnostic.replace (span start text_start) "\"";
+                   replace_code cursor (span start text_start) "\"";
                    Diagnostic.replace (span text_stop stop) "\"";
                  ];
              ]
