@@ -168,8 +168,10 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
   | Alignment_of ty ->
       (Printf.sprintf "((t_usize)_Alignof(%s))" (value_c context ty), Raw (Integer USize))
   | Site { definition; line; column } ->
-      ( Printf.sprintf "((void *)&(struct t_site){ %s, %d, %d })" (anchor_c context definition) line
-          column,
+      (* The literal is [const], so that the C compiler may keep one copy of
+         it in read-only data and write nothing at the call. *)
+      ( Printf.sprintf "((void *)&(const struct t_site){ %s, %d, %d })"
+          (anchor_c context definition) line column,
         Raw (Pointer Opaque) )
   | Symbol_address key ->
       refer context key;
