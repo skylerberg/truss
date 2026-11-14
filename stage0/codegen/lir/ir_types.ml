@@ -221,9 +221,6 @@ type terminator =
   | Unreachable  (** A point the prover has shown is never reached *)
   | Fail of { failure : failure; message : operand; length : operand; site : site }
       (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
-  | Yield of { value : operand; resume : block; stop : block option }
-      (** Before yield lowering only. [stop] runs when the caller leaves the loop at this [yield]; a
-          lending method's [yield] has none, since it always continues. *)
 
 type basic_block = { statements : statement list; terminator : terminator }
 

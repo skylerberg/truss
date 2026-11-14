@@ -783,3 +783,29 @@ let () =
       expect_string ~expected:"holds"
         (show_status
            (status_where_ended body moves { local = named body "both"; steps = [ Field "first" ] })))
+
+let () =
+  test "a cursor keeps its arguments, what code after a yield reads, and what a stop drops"
+    (fun () ->
+      let body, moves =
+        moves_of_g
+          (moves_program
+         ^ "fn g(limit: Int64) yields Int64 {\n\
+           \  let before: Int64 = 3\n\
+           \  let gone = text()\n\
+           \  take(own gone)\n\
+           \  let held = text()\n\
+           \  var index = before\n\
+           \  while index < limit {\n\
+           \    yield index\n\
+           \    index += 1\n\
+           \  }\n\
+           \  take(own held)\n\
+            }\n")
+      in
+      let kept = Moves.kept_by_cursor moves body in
+      List.iter
+        (fun (name, expected) ->
+          if List.mem (named body name) kept <> expected then
+            fail "the cursor %s %s" (if expected then "does not keep" else "keeps") name)
+        [ ("limit", true); ("index", true); ("held", true); ("before", false); ("gone", false) ])

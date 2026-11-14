@@ -54,6 +54,20 @@ val loop :
    each of its paths with a return. *)
 val outline : t -> nested:int -> parts:Lir.local list -> (unit -> unit) -> Lir.local
 
+(* A separate function: code written as a function of its own, given
+   [parts], locals of the code around it, as its parameters, and no
+   environment, so its code names no other local of the code around it.
+   It is written in pieces with [write_in], and runs from its entry
+   block. *)
+type separate
+
+val separate : t -> parts:Lir.local list -> separate
+val separate_entry : t -> separate -> Lir.block
+
+(* Writes [body] in a separate function, then goes back to the block that
+   was current, with its statements so far. *)
+val write_in : t -> separate -> (unit -> unit) -> unit
+
 (* The function built: [written_result] is the parameter pointing to where
    a large result is written, if any. A builder with outlined functions
    needs [env], to tell which locals take no room. *)
@@ -67,6 +81,9 @@ val build :
 
 (* The outlined functions that [build] wrote, by their nested numbers. *)
 val outlined_functions : t -> (int * Lir.function_) list
+
+(* A separate function, once [build] has written it. *)
+val separate_function : t -> separate -> Lir.function_
 val at : Lir.local -> Lir.place
 val ( / ) : Lir.place -> Lir.projection -> Lir.place
 val usize : int -> Lir.operand

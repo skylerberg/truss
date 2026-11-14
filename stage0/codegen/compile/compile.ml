@@ -42,11 +42,8 @@ type lowered_outcome =
    so that each is made once and its readers are known. *)
 let rec fresh_context lowering database =
   Lower.context ~checks:lowering.checks
-    ~cursor_fields:(fun context yielding ->
-      let function_, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-      Yields.cursor_fields (Lower.env context)
-        ~evidence:(Lower.pulled_evidence context yielding function_)
-        function_)
+    ~cursor_fields:(fun _ yielding ->
+      (Query.demand database (Lazy.force pulled) (lowering, yielding)).Lower.fields)
     ~constant:(fun _ path ->
       match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
       | Folded data -> Some data.value
@@ -54,7 +51,8 @@ let rec fresh_context lowering database =
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
     database lowering.target
 
-(* A pulled method's version. *)
+(* A yielding method's pulled version: its cursor's [next], its drop
+   function, and its fields. *)
 and pulled =
   lazy
     (Query.query ~name:"pulled" ~phase:Phases.lowering ~saved:true ~portable:true
@@ -83,34 +81,8 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       match Lower.constant context path with
       | Folded data -> Folded data
       | Run ty -> Evaluate (path, ty))
-  | Drop (Cursor yielding as cursor) ->
-      let function_, owned = pulled yielding in
-      emitted context
-        (Code
-           (Lir.canonical_instance
-              {
-                key;
-                main =
-                  Yields.cursor_drop (Lower.env context) ~cursor ~owned
-                    ~evidence:(Lower.pulled_evidence context yielding function_)
-                    function_;
-                nested = [||];
-              }))
-  | Cursor_next yielding ->
-      let function_, _ = pulled yielding in
-      let cursor = Ground.Cursor yielding in
-      let result = Lower.cursor_result context yielding in
-      emitted context
-        (Code
-           (Lir.canonical_instance
-              {
-                key;
-                main =
-                  Yields.cursor_next (Lower.env context) ~cursor ~result
-                    ~evidence:(Lower.pulled_evidence context yielding function_)
-                    function_;
-                nested = [||];
-              }))
+  | Drop (Cursor yielding) -> code { key; main = (pulled yielding).Lower.drop; nested = [||] }
+  | Cursor_next yielding -> code { key; main = (pulled yielding).Lower.next; nested = [||] }
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)

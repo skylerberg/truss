@@ -17,7 +17,7 @@ val expression_into :
     writes its value to the place, which holds nothing. [arguments] are the parameters of the code
     around that it reads, with their places. *)
 
-val fill_defaults : Lowering.state -> Lir.local -> Mir.body -> Lir.place list -> Lir.place list
+val fill_defaults : Lowering.state -> Lir.place -> Mir.body -> Lir.place list -> Lir.place list
 (** Fills in each parameter whose argument the caller omitted, as the bits of the mask say, and
     gives each parameter's place: a parameter with a default that the function owns has a place of
     its own. *)
@@ -25,3 +25,12 @@ val fill_defaults : Lowering.state -> Lir.local -> Mir.body -> Lir.place list ->
 val lower_code : Lowering.state -> Path.t -> parameters:Lir.place list -> unit
 (** Lowers the MIR of the code at the path in the current frame, with the places of its parameters,
     in order. Leaves a block that nothing reaches. *)
+
+(* The field of a pulled method's cursor that holds its state: 0 before
+   the method starts, 1 once it has returned, and [k + 1] after its [k]th
+   [yield]. *)
+val cursor_state : Lowering.cursor -> Lir.place
+
+(* Ends a call of a pulled method's [next], which gives [value] in [Some],
+   or [None]. *)
+val give_option : Lowering.state -> Lir.operand option -> unit

@@ -17,9 +17,9 @@ valid program stage0 cannot build yet (see [Failures](#failures)).
 checked definitions
       │
       ▼
- Instances ──▶ Layout ──▶ Lower ──▶ Drops ──▶ Yields ──▶ Emit C ──▶ cc ──▶ link
-                            │                                              ▲
-                            └──────────── LIR, cached per instance ────────┘
+ Instances ──▶ Layout ──▶ Lower ──▶ Emit C ──▶ cc ──▶ link
+                                        │      ▲
+                                        └─ C, cached per instance
 ```
 
 Code generation reads MIR and core forms through queries of the code database. It
@@ -38,11 +38,11 @@ already needs the platform's C toolchain.
 
 ### Why one IR before C
 
-A small IR, the LIR, between the MIR and C text gives one place for
-every transformation, since the cursor state machine is a pass over a
-control-flow graph. The LIR
-is not SSA: locals are mutable slots, since the C compiler builds SSA
-itself, and slots make drops and state machines simpler.
+Lowering writes the LIR, a small typed control-flow graph that the C
+emitter prints, with every decision made: drops, outlined functions, and
+the state machines of cursors. The LIR is not SSA: locals are mutable
+slots, since the C compiler builds SSA itself, and slots make drops and
+state machines simpler.
 
 Each instance is kept as its C, a fragment that also lists the types,
 prototypes, and instances it names. The fragment is what early cutoff
@@ -166,8 +166,13 @@ marks. Where some path reaches that end without the call, a flag, one for
 each region that tasks may run at once, says whether the call ran.
 
 **A pulled yielding method is a state machine,** as C# and Kotlin compile
-iterators. Each `yield` is a state, and the locals live across a `yield`
-become the cursor's fields.
+iterators. Each `yield` is a state. A liveness analysis of the MIR decides
+what the cursor holds: the method's arguments, each local that code after a
+`yield` reads, and each that holds a value to drop where a `yield` stops.
+Lowering writes those locals as the cursor's fields from the start, along
+with the state of a loop whose body yields, and writes `next` and the
+cursor's drop function in one pass: each `yield` ends `next` and starts the
+drop function's path for its state.
 
 **A cursor holds no evidence.** The evidence it was made with is in a
 `provide`'s frame, which the cursor can outlive, so holding it could call a

@@ -76,3 +76,9 @@ val held_at_entry : t -> path list
 val given_on_entry : t -> Mir.block -> path list
 (** The flagged paths that the way into a block gives a value: a loop's part, where the block is the
     body of a loop that pulls values. *)
+
+val kept_by_cursor : t -> Mir.body -> Mir.local list
+(** The locals that the cursor of a pulled method keeps from one call of its [next] to the next: its
+    parameters, each local that code after a [yield] reads, and each that may hold a value with
+    something to drop where a [yield] stops, which a cursor dropped there drops. A read of a local
+    that views other locals' places reads those too. *)

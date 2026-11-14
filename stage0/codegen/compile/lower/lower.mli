@@ -50,18 +50,20 @@ val constant : context -> Path.t -> constant
    its binary form. *)
 val evaluator : context -> Path.t -> Lir.t
 
-(* The pulled version of a yielding method: its body with each [yield]
-   left in place for yield lowering, and the values a
-   cursor that has not started owns, as [Yields.cursor_drop] takes it. *)
-val pulled :
-  context -> Ground.yielding -> Lir.function_ * (Lir.local * (Lir.local * int) option) list
+(* The pulled version of a yielding method: a state machine over a cursor,
+   which holds the method's arguments and the values it keeps from one
+   [yield] to the next. [next] takes a pointer to the cursor, then the
+   method's evidence, and runs the method to its next [yield], giving the
+   value yielded in [Some], or [None] once the method has returned. [drop]
+   takes a pointer to the cursor and drops what it holds. [fields] are the
+   cursor's: its state, a [UInt32], first. *)
+type pulled = {
+  next : Lir.function_;
+  drop : Lir.function_;
+  fields : (string * Memory_layout.member) list;
+}
 
-(* A cursor's [next] result type: an [Option] of the method's yield type. *)
-val cursor_result : context -> Ground.yielding -> Ground.ty
-
-(* The parameters of the pulled version that are evidence, which are its
-   last. A cursor does not hold them: its [next] takes them. *)
-val pulled_evidence : context -> Ground.yielding -> Lir.function_ -> Lir.local list
+val pulled : context -> Ground.yielding -> pulled
 
 (* A capability [impl]'s table of entries. *)
 val table : context -> Instance.key -> Lir.table

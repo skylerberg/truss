@@ -349,7 +349,6 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
         (fst (operand length))
         (anchor_c context site.definition)
         site.line site.column
-  | Yield _ -> bug "a yield that yield lowering left in place"
 
 let function_c context key symbol (function_ : Lir.function_) =
   let fc = { symbol = Instance.symbol key; function_ } in

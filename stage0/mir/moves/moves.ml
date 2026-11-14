@@ -448,3 +448,211 @@ let analyse ~owns ~lent_mut ~needs_drop (body : Mir.body) =
     body.blocks;
   analysis.flagged <- List.sort_uniq compare analysis.flagged;
   analysis
+
+(* The locals a cursor keeps *)
+
+let place_locals (place : Mir.place) =
+  match place.root with Local local -> [ local ] | Constant _ -> []
+
+let operand_locals : Mir.operand -> Mir.local list = function
+  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> place_locals place
+  | Constant _ -> []
+
+let borrowed_locals : Mir.operand -> Mir.local list = function
+  | Borrow { place; _ } -> place_locals place
+  | Use _ | Take _ | Constant _ -> []
+
+let rvalue_operands : Mir.rvalue -> Mir.operand list = function
+  | Operand operand
+  | Not operand
+  | Convert { value = operand; _ }
+  | Copy operand
+  | To_any { value = operand; _ } ->
+      [ operand ]
+  | Operation { operands; _ } | Array operands -> operands
+  | Compare { left; right; _ } -> [ left; right ]
+  | Construct { fields; _ } -> List.filter_map snd fields
+  | Is_variant _ | Function_value _ | Value_parameter _ | Lambda _ -> []
+
+let rvalue_reads (rvalue : Mir.rvalue) =
+  List.concat_map operand_locals (rvalue_operands rvalue)
+  @
+  match rvalue with
+  | Is_variant { place; _ } -> place_locals place
+  | Lambda { captures; _ } ->
+      List.concat_map (fun (capture : Mir.capture) -> place_locals capture.place) captures
+  | _ -> []
+
+let call_reads (call : Mir.call) =
+  (match call.callee with Indirect operand -> operand_locals operand | _ -> [])
+  @ List.concat_map
+      (function Mir.Passed { value; _ } -> operand_locals value | Default -> [])
+      call.arguments
+
+(* A write to a whole local gives it a value. A write to a part of one
+   reads the rest of it. *)
+let written (place : Mir.place) =
+  match place with
+  | { root = Local local; projections = [] } -> ([], [ local ])
+  | _ -> (place_locals place, [])
+
+let rec yielded_reads : Mir.yielded -> Mir.local list = function
+  | Part operand -> operand_locals operand
+  | Built { fields; _ } ->
+      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:yielded_reads field) fields
+
+(* The locals a statement reads and those it gives a whole value, in
+   [state], where it runs. An end of a local that may hold a value with
+   something to drop reads it, since its drop does. *)
+let reads_and_writes analysis state (statement : Mir.statement) =
+  let destination = function Some place -> written place | None -> ([], []) in
+  let combine (reads, writes) (more_reads, more_writes) =
+    (reads @ more_reads, writes @ more_writes)
+  in
+  match statement.kind with
+  | Assign { target; value; _ } -> combine (rvalue_reads value, []) (written target)
+  | Call { destination = place; call } -> combine (call_reads call, []) (destination place)
+  | Lend { part; call } -> (call_reads call, [ part ])
+  | Slice { destination = place; base; call } ->
+      combine (place_locals base @ call_reads call, []) (written place)
+  | Template { destination = place; call; _ } -> combine (call_reads call, []) (written place)
+  | Pull { destination = place; cursor } -> combine (place_locals cursor, []) (written place)
+  | Live locals -> ([], locals)
+  | Dead locals ->
+      ( List.filter
+          (fun local ->
+            owns analysis local
+            && List.exists
+                 (fun position -> state.maybe_holds.(position))
+                 (affected_local analysis local))
+          locals,
+        [] )
+  | Assert { condition; _ } -> (operand_locals condition, [])
+  | Echo operand -> (operand_locals operand, [])
+  | Provide { provided; _ } ->
+      (List.concat_map (fun (provided : Mir.provided) -> operand_locals provided.value) provided, [])
+  | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [])
+
+let terminator_reads : Mir.terminator -> Mir.local list = function
+  | Branch { condition; _ } -> operand_locals condition
+  | Switch_variant { place; _ } -> place_locals place
+  | For { iteration = Range { start; stop; _ }; _ } -> operand_locals start @ operand_locals stop
+  | For { iteration = Pull { cursor; _ }; _ } -> place_locals cursor
+  | For { iteration = Yielding call; _ } -> call_reads call
+  | Yield { part; _ } -> yielded_reads part
+  | Return (Some operand) | Exit_tasks { exit = Exit_return (Some operand); _ } ->
+      operand_locals operand
+  | Goto _ | Fork _ | Join _ | Iteration_end
+  | Return None
+  | Exit_tasks _ | Unreachable | Written_unreachable | Todo ->
+      []
+
+let kept_by_cursor analysis (body : Mir.body) =
+  let count = Array.length body.locals in
+  (* The locals whose places a local is bound to, or holds views of: a read
+     of the local reads them too. *)
+  let sources = Array.make count [] in
+  let bind local others = sources.(local) <- others @ sources.(local) in
+  Array.iter
+    (fun (basic : Mir.basic_block) ->
+      List.iter
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Assign { target = { root = Local local; projections = [] }; value; _ }
+            when not (owns analysis local) ->
+              bind local (List.concat_map borrowed_locals (rvalue_operands value))
+          | Lend { part; call } -> bind part (call_reads call)
+          | _ -> ())
+        basic.statements)
+    body.blocks;
+  let rec with_sources seen = function
+    | [] -> seen
+    | local :: rest when List.mem local seen -> with_sources seen rest
+    | local :: rest -> with_sources (local :: seen) (sources.(local) @ rest)
+  in
+  let reads locals = with_sources [] locals in
+  (* What each statement reads and writes, which the moves before it
+     decide for an end. *)
+  let effects =
+    Array.mapi
+      (fun block (basic : Mir.basic_block) ->
+        let state = copy analysis.entries.(block) in
+        List.map
+          (fun statement ->
+            let read_and_written = reads_and_writes analysis state statement in
+            apply analysis state statement;
+            read_and_written)
+          basic.statements)
+      body.blocks
+  in
+  let loops = Mir.iteration_loops body in
+  let live = Array.map (fun _ -> Array.make count false) body.blocks in
+  let union into locals =
+    Array.iteri (fun local is_live -> if is_live then into.(local) <- true) locals
+  in
+  (* What is live where a loop goes on to its next iteration: its body less
+     its part, which the loop gives a value, what follows it, and the cursor
+     it pulls from. *)
+  let next_iteration block =
+    let after = Array.make count false in
+    (match body.blocks.(block).terminator with
+    | For { iteration; part; body = first; after = exit; _ } -> (
+        union after live.(first);
+        after.(part) <- false;
+        union after live.(exit);
+        match iteration with
+        | Pull { cursor; _ } ->
+            List.iter (fun local -> after.(local) <- true) (reads (place_locals cursor))
+        | Range _ | Yielding _ -> ())
+    | _ -> ());
+    after
+  in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    for block = Array.length body.blocks - 1 downto 0 do
+      let basic = body.blocks.(block) in
+      let current =
+        match basic.terminator with
+        | For _ -> next_iteration block
+        | Iteration_end -> (
+            match Hashtbl.find_opt loops block with
+            | Some loop -> next_iteration loop
+            | None -> Array.make count false)
+        | terminator ->
+            let after = Array.make count false in
+            List.iter (fun successor -> union after live.(successor)) (Mir.successors terminator);
+            after
+      in
+      List.iter (fun local -> current.(local) <- true) (reads (terminator_reads basic.terminator));
+      List.iter
+        (fun (read, writes) ->
+          List.iter (fun local -> current.(local) <- false) writes;
+          List.iter (fun local -> current.(local) <- true) (reads read))
+        (List.rev effects.(block));
+      if current <> live.(block) then begin
+        live.(block) <- current;
+        changed := true
+      end
+    done
+  done;
+  (* At each [yield]: what the code after it reads, and what may hold a
+     value with something to drop, which dropping the cursor there drops. *)
+  let kept = Array.make count false in
+  List.iter (fun local -> kept.(local) <- true) body.parameters;
+  Array.iteri
+    (fun block (basic : Mir.basic_block) ->
+      match basic.terminator with
+      | Yield { resume; _ } ->
+          union kept live.(resume);
+          let state = copy analysis.entries.(block) in
+          List.iter (apply analysis state) basic.statements;
+          apply_terminator_moves analysis state basic.terminator;
+          Array.iteri
+            (fun position (path : path) ->
+              if state.maybe_holds.(position) && owns analysis path.local then
+                kept.(path.local) <- true)
+            analysis.paths
+      | _ -> ())
+    body.blocks;
+  List.filter (fun local -> kept.(local)) (List.init count Fun.id)

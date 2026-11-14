@@ -2,15 +2,18 @@ let bug format = Compiler_bug.bug ~stage:"Lir_builder" format
 
 module Locals = Set.Make (Int)
 
-(* An outlined function: code written as a function of its own, nested in
-   the instance, which the code around it runs through its environment. *)
+(* Code written as a function of its own: an outlined function, nested in
+   the instance, which the code around it runs through its environment, or
+   a separate function, which has no environment. *)
 type outlined = {
   parent : int;  (** The function it is written in: 0 for the function being built *)
-  nested : int;  (** Its number among the instance's nested functions *)
+  nested : int option;  (** Its number among the instance's nested functions, if it is one *)
   parts : Lir.local list;  (** The parent's locals that it is given as parameters *)
-  holder : Lir.local;  (** The parent's local that holds its environment *)
+  holder : Lir.local option;  (** The parent's local that holds its environment, if it has one *)
   entry : Lir.block;
 }
+
+type separate = int
 
 type t = {
   mutable locals : Lir.local_info list;  (** Most recent first *)
@@ -25,6 +28,7 @@ type t = {
   mutable outlined : outlined list;  (** Most recent first; the [n]th is function [n] *)
   mutable function_ : int;  (** The function being written *)
   mutable built_outlined : (int * Lir.function_) list;
+  mutable built_separate : (int * Lir.function_) list;
 }
 
 let empty_block : Lir.basic_block = { statements = []; terminator = Unreachable }
@@ -41,6 +45,7 @@ let create () =
     outlined = [];
     function_ = 0;
     built_outlined = [];
+    built_separate = [];
   }
 
 let local builder ?name ty =
@@ -113,21 +118,36 @@ let loop builder ?(integer = Memory_layout.USize) ~index_type ~count body =
   finish builder (Goto test);
   start builder after
 
-let outline builder ~nested ~parts body =
-  let holder = local builder ~name:"environment" (Environment nested) in
-  let entry = block builder in
-  builder.outlined <-
-    { parent = builder.function_; nested; parts; holder; entry } :: builder.outlined;
+(* Writes [body] in function [number], then goes back to the block that was
+   current, with its statements so far. *)
+let write_in builder number body =
   let function_ = builder.function_
   and current = builder.current
   and statements = builder.statements in
-  builder.function_ <- List.length builder.outlined;
-  start builder entry;
+  builder.function_ <- number;
   body ();
   builder.function_ <- function_;
   builder.current <- current;
-  builder.statements <- statements;
+  builder.statements <- statements
+
+let add_function builder ~nested ~parts ~holder =
+  let entry = block builder in
+  builder.outlined <-
+    { parent = builder.function_; nested; parts; holder; entry } :: builder.outlined;
+  (List.length builder.outlined, entry)
+
+let outline builder ~nested ~parts body =
+  let holder = local builder ~name:"environment" (Environment nested) in
+  let number, entry = add_function builder ~nested:(Some nested) ~parts ~holder:(Some holder) in
+  write_in builder number (fun () ->
+      start builder entry;
+      body ());
   holder
+
+let separate builder ~parts = fst (add_function builder ~nested:None ~parts ~holder:None)
+
+let separate_entry builder number =
+  (List.nth builder.outlined (List.length builder.outlined - number)).entry
 
 (* The functions of the code built: the blocks of the function being built,
    and each outlined function.
@@ -217,14 +237,15 @@ let functions ?written_result ~env builder ~parameters =
     List.concat
       (List.mapi
          (fun index (outlined : outlined) ->
-           if outlined.parent <> number then []
-           else
-             List.map
-               (fun (local, field) ->
-                 Lir.Assign
-                   ( { root = Local outlined.holder; projections = [ Field field ] },
-                     Use (Address { place = at local; writable = true }) ))
-               (captures (index + 1)))
+           match outlined.holder with
+           | Some holder when outlined.parent = number ->
+               List.map
+                 (fun (local, field) ->
+                   Lir.Assign
+                     ( { root = Local holder; projections = [ Field field ] },
+                       Use (Address { place = at local; writable = true }) ))
+                 (captures (index + 1))
+           | _ -> [])
          (Array.to_list outlined))
   in
   let main_blocks =
@@ -239,7 +260,11 @@ let functions ?written_result ~env builder ~parameters =
       fresh := info :: !fresh;
       List.length !fresh - 1
     in
-    let arrives = local { ty = Raw (Nullable_pointer Opaque); name = Some "environment" } in
+    let arrives =
+      Option.map
+        (fun _ -> local { ty = Raw (Nullable_pointer Opaque); name = Some "environment" })
+        outlined.nested
+    in
     let mapped = Hashtbl.create 16 in
     let parameters =
       List.map
@@ -250,9 +275,16 @@ let functions ?written_result ~env builder ~parameters =
         outlined.parts
     in
     let environment =
-      local { ty = Pointer { target = Environment outlined.nested; writable = false }; name = None }
+      Option.map
+        (fun nested ->
+          local { ty = Pointer { target = Environment nested; writable = false }; name = None })
+        outlined.nested
     in
     let captures = captures number in
+    (match (environment, captures) with
+    | None, (local, _) :: _ ->
+        bug "a separate function names local %d of the function it is written in" local
+    | _ -> ());
     let place (written : Lir.place) : Lir.place =
       match written.root with
       | Static _ -> written
@@ -261,7 +293,7 @@ let functions ?written_result ~env builder ~parameters =
           | Some own, _ -> { written with root = Local own }
           | None, Some field ->
               {
-                root = Local environment;
+                root = Local (Option.get environment);
                 projections = Deref :: Field field :: Deref :: written.projections;
               }
           | None, None ->
@@ -291,14 +323,17 @@ let functions ?written_result ~env builder ~parameters =
     let entry : Lir.basic_block =
       {
         statements =
-          Assign (at environment, Use (Copy (at arrives)))
-          :: List.map (Lir.map_statement ~place ~block) (fills number);
+          (match (environment, arrives) with
+            | Some environment, Some arrives ->
+                [ Lir.Assign (at environment, Use (Copy (at arrives))) ]
+            | _ -> [])
+          @ List.map (Lir.map_statement ~place ~block) (fills number);
         terminator = Goto (block outlined.entry);
       }
     in
-    ( outlined.nested,
+    ( (number, outlined.nested),
       {
-        Lir.parameters = arrives :: parameters;
+        Lir.parameters = Option.to_list arrives @ parameters;
         written_result = None;
         result = None;
         returns = true;
@@ -318,8 +353,16 @@ let build ?written_result ?env builder ~parameters ~result : Lir.function_ =
     match (builder.outlined, env) with
     | [], _ -> Array.sub builder.blocks 0 builder.block_count
     | _ :: _, Some env ->
-        let blocks, outlined = functions ?written_result ~env builder ~parameters in
-        builder.built_outlined <- outlined;
+        let blocks, functions = functions ?written_result ~env builder ~parameters in
+        builder.built_outlined <-
+          List.filter_map
+            (fun ((_, nested), function_) -> Option.map (fun nested -> (nested, function_)) nested)
+            functions;
+        builder.built_separate <-
+          List.filter_map
+            (fun ((number, nested), function_) ->
+              if nested = None then Some (number, function_) else None)
+            functions;
         blocks
     | _ :: _, None -> bug "a function with outlined code built without a layout environment"
   in
@@ -334,3 +377,8 @@ let build ?written_result ?env builder ~parameters ~result : Lir.function_ =
   }
 
 let outlined_functions builder = builder.built_outlined
+
+let separate_function builder number =
+  match List.assoc_opt number builder.built_separate with
+  | Some function_ -> function_
+  | None -> bug "a separate function that is not built"

@@ -36,7 +36,6 @@ val implementation_evidence :
   Lir.operand
 
 val evidence_of : Lowering.state -> Path.t -> Lir.operand
-val cursor_evidence : Definitions.context -> Ground.yielding -> Path.t list
 
 val cursor_into :
   Lowering.state ->
@@ -131,9 +130,10 @@ val call_next : Lowering.state -> Ground.yielding -> Lir.place -> Lir.place -> u
 
 val pull_loop :
   Lowering.state ->
+  kept:bool ->
   option:Ground.ty ->
   call_next:(Lir.place -> unit) ->
   body:(Lir.place -> unit) ->
   unit
 
-val boxed_cursor : Lowering.state -> Ground.yielding -> Lir.place
+val boxed_cursor : Lowering.state -> kept:bool -> Ground.yielding -> Lir.place
