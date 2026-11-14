@@ -479,10 +479,12 @@ let form database (path : Path.t) : Core.t option =
                             List.map
                               (fun (field : Types.field) ->
                                 ( field.field_name,
-                                  Some
-                                    (Core.Value
-                                       (method_of trait "default" Static field.field_type []
-                                          field.field_type)) ))
+                                  if field.field_has_default then None
+                                  else
+                                    Some
+                                      (Core.Value
+                                         (method_of trait "default" Static field.field_type []
+                                            field.field_type)) ))
                               (record_fields ());
                         }))
             | "Serialize", "serialize" ->

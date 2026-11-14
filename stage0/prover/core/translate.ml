@@ -11013,7 +11013,7 @@ let type_ database (source : source) ~path =
   let home = home source in
   let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
-  | Type { invariants; potential; _ } ->
+  | Type { defaults; invariants; potential } ->
       let ty =
         match Query.demand database Interface.Environment.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
@@ -11021,6 +11021,9 @@ let type_ database (source : source) ~path =
         | _ -> Types.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in
+      (* A field's default is well defined, as a constant is, and a value
+         it builds meets its type's invariant. *)
+      List.iter (fun (_, _, default) -> ignore (value context start default)) defaults;
       let value_ = arrive context start "value" ty in
       assume context start (validity context start ~assuming:true ~own:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
