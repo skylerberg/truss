@@ -1,20 +1,15 @@
 // Colors the Graphviz drawing of areas in #canvas as graph.js colors the
 // libraries, and on hover highlights an area's dependencies and dependents.
-// A node is an area, or a library directly under stage0; an edge's label is
-// the number of dependencies of a library in one on a library in the other.
+// A node is an area; an edge's label is the number of dependencies of a
+// library in one on a library in the other.
 (() => {
   const svg = document.querySelector("#canvas svg");
   const byName = (a, b) => a.localeCompare(b);
 
-  // The same colors as graph.js: an area takes its place in the sorted list
-  // of named areas, and a library directly under stage0 takes the first.
-  const namedAreas = [...new Set(LIBRARIES.map((library) => library.area))]
-    .filter((area) => area !== "")
-    .sort(byName);
-  const areaColor = (name) => {
-    const index = namedAreas.indexOf(name);
-    return index < 0 ? "var(--area-0)" : `var(--area-${(index % 13) + 1})`;
-  };
+  // The same colors as graph.js: an area's color is its place in the sorted
+  // list of areas.
+  const areas = [...new Set(LIBRARIES.map((library) => library.area))].sort(byName);
+  const areaColor = (area) => `var(--area-${areas.indexOf(area) % 14})`;
 
   const nodes = new Map();
   for (const node of svg.querySelectorAll("g.node")) {

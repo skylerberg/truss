@@ -235,7 +235,7 @@ main {
 }
 
 .areas div:hover {
-  background: color-mix(in srgb, var(--area-0) 14%, var(--surface));
+  background: color-mix(in srgb, var(--muted) 14%, var(--surface));
 }
 
 .areas .count {
