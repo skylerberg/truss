@@ -97,10 +97,8 @@ let is_runtime_call (path : Path.t) =
   Well_known.is Write_fully path
   ||
   match path with
-  | Method { owner = Top { module_; _ }; name = "new"; receiver = Static } -> (
-      match module_.modules with
-      | [ "system"; name ] -> module_ = Well_known.system_module name
-      | _ -> false)
+  | Method { owner = Top { module_; _ }; name = "new"; receiver = Static } ->
+      Well_known.is_system_module module_
   | _ -> false
 
 let bound_methods (interface : Interface.Lookups.t) path type_arguments =

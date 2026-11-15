@@ -228,30 +228,28 @@ let table context (key : Instance.key) : Lowered.table =
       { table_key = key; capability = Some capability; entries }
   | _ -> bug "not a table: %s" (Instance.to_string key)
 
-let real_implementation (capability : Path.t) : Path.t =
-  let name = Ground.path_name capability in
-  let module_name =
-    String.concat ""
-      (List.mapi
-         (fun index letter ->
-           let lower = String.make 1 (Char.lowercase_ascii letter) in
-           if index > 0 && Char.uppercase_ascii letter = letter then "_" ^ lower else lower)
-         (List.of_seq (String.to_seq name)))
-  in
-  Impl
-    {
-      module_ = Well_known.system_module module_name;
-      trait = name;
-      for_type = { type_name = "System" ^ name; generics = [] };
-    }
+let find_real_implementation (interface : Interface.Lookups.t) (capability : Path.t) =
+  match
+    List.filter
+      (function Path.Impl { module_; _ } -> Well_known.is_system_module module_ | _ -> false)
+      (interface.names.impls_of_trait Path.standard_package capability)
+  with
+  | [] -> None
+  | [ impl ] -> (
+      match Interface.Impls.impl_interface interface impl with
+      | Some impl_interface -> Some (impl, impl_interface)
+      | None -> bug "the real implementation %s has no interface" (Path.show impl))
+  | impls ->
+      bug "%s has %d real implementations: %s" (Path.show capability) (List.length impls)
+        (String.concat ", " (List.map Path.show impls))
 
 let real_implementations st ~user capabilities =
   List.map
     (fun capability ->
-      let impl = real_implementation capability in
-      let ty =
-        match Interface.Impls.impl_interface st.context.lookups.interface impl with
-        | Some interface -> Monomorphic.ground st.context.monomorphic [] interface.for_type
+      let impl, ty =
+        match find_real_implementation st.context.lookups.interface capability with
+        | Some (impl, impl_interface) ->
+            (impl, Monomorphic.ground st.context.monomorphic [] impl_interface.for_type)
         | None ->
             unsupported "%s uses %s, which has no real implementation" user
               (Ground.path_name capability)

@@ -65,7 +65,7 @@ val path : t -> Path.t
 val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
 val specification : Path.module_
-val system_module : string -> Path.module_
+val is_system_module : Path.module_ -> bool
 
 module For_testing : sig
   val all : t list

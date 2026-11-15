@@ -1,0 +1,10 @@
+capability Greeter {
+  fn greet()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Greeter
+{
+  Greeter.greet()
+  ExitCode.success
+}
