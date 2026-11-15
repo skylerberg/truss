@@ -1,4 +1,14 @@
-type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite | Potential
+type t =
+  | Amortized
+  | Time
+  | Allocations
+  | Allocated_bytes
+  | Calls
+  | O
+  | Finite
+  | Potential
+  | By
+  | Bit_vector
 
 let spellings =
   [
@@ -10,6 +20,8 @@ let spellings =
     ("O", O);
     ("finite", Finite);
     ("potential", Potential);
+    ("by", By);
+    ("bit_vector", Bit_vector);
   ]
 
 let spelling word = fst (List.find (fun (_, candidate) -> candidate = word) spellings)

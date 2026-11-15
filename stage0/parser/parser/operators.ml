@@ -205,9 +205,9 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
       in
       report cursor (operator_span whole) message fixes
 
-let rec expression ?context cursor (value : expression) =
+let rec checked_expression ?context cursor (value : expression) =
   let operand parent ~right (operand : expression) =
-    expression ~context:(parent, right) cursor operand;
+    checked_expression ~context:(parent, right) cursor operand;
     match Option.bind (group operand) (fun child -> problem parent child ~right operand) with
     | Some problem -> report_problem cursor ?context value operand ~right problem
     | None -> ()
@@ -239,11 +239,11 @@ let rec expression ?context cursor (value : expression) =
       Option.iter (operand Range_group ~right:false) start;
       Option.iter (operand Range_group ~right:true) stop
   | Prefix (_, inner) -> (
-      expression cursor inner;
+      checked_expression cursor inner;
       match group inner with
       | Some Lowest -> report_problem cursor value inner ~right:true Lowest_operand
       | _ -> ())
-  | _ -> Syntax_walk.children (fun inner -> expression cursor inner) value
+  | _ -> Syntax_walk.children (fun inner -> checked_expression cursor inner) value
 
-let definition cursor definition =
-  Syntax_walk.definition (fun value -> expression cursor value) definition
+let expression cursor value = checked_expression cursor value
+let definition cursor definition = Syntax_walk.definition (expression cursor) definition

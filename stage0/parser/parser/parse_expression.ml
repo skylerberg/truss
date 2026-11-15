@@ -378,20 +378,20 @@ and clause cursor : clause =
 
 and cost cursor =
   let amortized =
-    match (Cost_word.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
+    match (Contextual_keyword.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
     | Some Amortized, Lower _ ->
         Cursor.advance cursor;
         true
     | _ -> false
   in
-  if Cost_word.of_token (Cursor.peek_kind cursor) = Some Potential then begin
+  if Contextual_keyword.of_token (Cursor.peek_kind cursor) = Some Potential then begin
     Cursor.report cursor Misplaced_potential (Cursor.peek cursor).span
       "`cost potential` belongs to a type, and states the potential its values hold.";
     raise Cursor.Failed
   end;
   let resource =
     match
-      Cost_word.expect cursor ~accepted:Cost_word.resources ~category:"a resource"
+      Contextual_keyword.expect cursor ~accepted:Contextual_keyword.resources ~category:"a resource"
         ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
     with
     | Time -> Time
@@ -409,9 +409,9 @@ and cost cursor =
         Cursor.advance cursor;
         Exactly (expression cursor)
     | _ -> (
-        let suggested = if resource = Time then [ Cost_word.O; Finite ] else [ O ] in
+        let suggested = if resource = Time then [ Contextual_keyword.O; Finite ] else [ O ] in
         match
-          Cost_word.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
+          Contextual_keyword.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
             ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
         with
         | O -> Big_o (parenthesized_expression cursor)
@@ -1203,8 +1203,11 @@ and statement cursor : statement =
       Cursor.advance cursor;
       let value = expression cursor in
       let by_bit_vector =
-        match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-        | Lower "by", Lower "bit_vector" ->
+        match
+          ( Contextual_keyword.of_token (Cursor.peek_kind cursor),
+            Contextual_keyword.of_token (Cursor.peek_ahead cursor 1) )
+        with
+        | Some By, Some Bit_vector ->
             Cursor.advance cursor;
             Cursor.advance cursor;
             true

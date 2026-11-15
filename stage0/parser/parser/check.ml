@@ -189,7 +189,19 @@ let clauses cursor clauses =
 let generic_parameters cursor generics =
   List.iter (Syntax_walk.generic_parameter (expression cursor (specification plain))) generics
 
+let function_name cursor (name : definition_name) =
+  let name = match name with Plain_name name | Member_name (_, name) -> name in
+  if name.text = "old" then
+    report cursor Reserved_specification_name name.span
+      "A function cannot be named `old`, which names a value as it was when a function was called, \
+       in specifications."
+  else if name.text = "identical" then
+    report cursor Reserved_specification_name name.span
+      "A function cannot be named `identical`, which tests whether two values are the same value, \
+       in specifications."
+
 let signature cursor (signature : signature) =
+  function_name cursor signature.name;
   Syntax_walk.definition_name (expression cursor (specification plain)) signature.name;
   generic_parameters cursor signature.generics;
   let lends = match signature.result with Some (Lends _) -> true | _ -> false in
