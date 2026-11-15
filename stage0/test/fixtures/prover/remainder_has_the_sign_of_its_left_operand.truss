@@ -1,0 +1,8 @@
+fn remainder(dividend: Int64, divisor: Int64) -> Int64
+  requires divisor != 0 && divisor != -1
+  ensures dividend == -7 && divisor == 2 ==> result == -1
+  ensures dividend == -7 && divisor == -2 ==> result == -1
+  ensures dividend == 7 && divisor == -2 ==> result == 1
+{
+  dividend % divisor
+}

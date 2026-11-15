@@ -267,7 +267,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~span terms =
 let literal_bytes_limit = 256
 
 let text_value context frame (ty : Types.ty) text =
-  let symbol = Symbol.Literal { type_key = type_key ty; text } in
+  let symbol = Symbol.Text_literal { type_key = type_key ty; text } in
   let literal = Logic.Symbol symbol in
   once context (Value_of symbol) (fun () ->
       declare context (Logic.Constant (symbol, sort_of context ty));

@@ -51,7 +51,7 @@ let requires_fix context frame (part : part) (requirement : Mir.requirement) ter
   let clause = requirement.clause in
   let fixed name =
     List.mem name context.entry
-    || match name with Symbol.Constant _ | Symbol.Literal _ -> true | _ -> false
+    || match name with Symbol.Constant _ | Symbol.Text_literal _ -> true | _ -> false
   in
   let simple text =
     String.for_all
@@ -76,7 +76,7 @@ let requires_fix context frame (part : part) (requirement : Mir.requirement) ter
         | _ -> None)
       (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
   in
-  if frame.source.key <> Some context.home || not (List.for_all fixed (Logic.free_symbols term))
+  if frame.source.key <> Some context.home || not (List.for_all fixed (Logic.free_constants term))
   then []
   else
     let clause_span = span_of part.callee clause.origin in
@@ -114,7 +114,7 @@ let named_term context ty term =
   in
   if not (holds_call term) then term
   else
-    let symbol = Symbol.Argument term in
+    let symbol = Symbol.Named_term term in
     let named = Logic.Symbol symbol in
     once context (Value_of symbol) (fun () ->
         declare context (Logic.Constant (symbol, sort_of context ty));
