@@ -246,11 +246,11 @@ Every stage of stage0 is tested the same way:
   test. Text that is not a whole module stays in OCaml: a template with a
   hole that the test fills, a line given to the lexer or the parser, and a
   snippet of one or two lines.
-- **Every test checks the code database too.** When a test ends, the harness
-  computes every result the test's engines hold again, in a new engine with
-  the same inputs, and fails the test if one differs. So a query that is not
-  a function of its reads, or a result the database left stale, fails
-  whichever test met it.
+- **The tests of propagation check the code database.** The engine fuzzer,
+  and each test that asserts an edit left a result uncomputed, compute every
+  result the engine holds again, in a new engine with the same inputs, and
+  fail if one differs. A stale result needs an edit that failed to
+  propagate, so a test that applies no edit does not pay for the check.
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".

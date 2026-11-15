@@ -1837,15 +1837,18 @@ Rules: [The registry](PACKAGES.md#the-registry).
 
 GOALS.md asks that building, testing, and proving cost O(change), not
 O(project). Text files stay the source of truth: programmers and tools edit
-ordinary files. The build caches its results per definition, and the rules
-of the language keep the dependencies of each result few.
+ordinary files. A code database holds each definition of a project, the
+facts derived from it, and the relationships between definitions. A change
+to the files propagates through the database as far as it changes a stored
+fact, and no further, and the rules of the language keep that distance
+short.
 
 A definition's identity is its kind, its structure, the names it resolves
 to, the names of its local variables, the values of its literals, and the
 order of its clauses within each kind. An edit that changes none of these
 changes no definition.
 
-| Edit | Invalidates | Reason |
+| Edit | Recomputes | Reason |
 |---|---|---|
 | Reformat a file, or move a definition within its file or to another file of its module | Nothing | Identity excludes the file, the position in the file, the surrounding definitions, and the layout. |
 | Edit a body, such as replacing a `todo` | The check, the proof, and the code of that body, and the template checks that run it. No caller is re-checked or re-proven. | A definition names its dependencies by module path and name, never by content, and callers depend on the signature alone. |
@@ -1853,20 +1856,180 @@ changes no definition.
 | Change the default of a parameter | The proofs and tests of the callers that omit the argument, and the code of the callee alone | The interface records only that the parameter has a default, and the callee applies it. |
 | Reorder the fields of a record | Nothing, unless the type derives `Ordered` | The compiler chooses the layout, and a record with more than one field is constructed with labeled arguments. |
 | Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule, and never stored. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
-| Add, remove, or rename a definition | The name lookups with its scope and name | A definition depends on lookups keyed by scope and name, such as "the members of `List` named `length`", including the lookups that found nothing. Each lookup searches few places: a method lives with its type, an `impl` with its trait or a type it names, and an unqualified constant comes only from the same module. |
-| Rename or move a definition | The type checks of its users, which are cheap. Their proofs, test results, and compiled code are cache hits. | Proofs, test results, and compiled code are keyed by content, not by name. |
+| Add, remove, or rename a definition | The parts that refer to its name, whether or not a definition held the name before | Each reference names one fully qualified name, so no lookup searches (see [References to names](#references-to-names)). |
+| Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition, and an object file holds the names of the functions it calls. A solver query numbers its symbols, and a test's key numbers the references of the code it reaches, so neither holds a name. |
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
 | Change the spelling of a literal, such as `0xFF` to `255` | Nothing | Identity holds the value of the literal. The file keeps the spelling, so `truss fmt` can print it back. |
 | Reorder clauses | Nothing between kinds of clause. The definition, within one kind. | Each `requires` may rely on the `requires` before it. |
 | Add a line at the top of a file | Nothing | A panic, an `echo`, a failed `assert`, and debug information record a position relative to their definition. A table built at the end of the build converts each position to a file and a line. |
 | Upgrade a dependency | The dependents of the dependency's diff | A path holds no version, so a new version of a package is an edit to code that the project does not own, and is tracked as any edit is. |
-| Install a new compiler | The results of the stages that changed | Each stage is versioned separately: the parser, the type checker, the prover with its pinned solver, code generation, and each deriving rule. A release that changes code generation leaves every proof valid. |
+| Install a new compiler | The database, from the files. Solver answers, object files, and test results whose inputs are unchanged are cache hits. | The database records the compiler that built it. Each cache is keyed by its whole input, so a release that changes code generation leaves every solver answer valid. |
 
 A development build inlines only from the standard library and from registry
 packages. Inlining makes the code of a caller depend on the body of its
 callee. The bodies of the standard library and of registry packages change
 only with a new toolchain or a new lock file, so inlining them never widens
 a rebuild during editing. A release build inlines across everything.
+
+### The code database
+
+The database holds, for each definition and under its fully qualified name,
+its source tree and the facts derived from it: its resolved names, its
+signature, its type facts and layout, its checked body, its MIR, its proof,
+its lowered code, and its test key. Each of these is a *part*. A stage
+computes each part from the definition's earlier parts and from parts of
+other definitions.
+
+**The database is a function of the files and the compiler.** A database
+that propagated a thousand edits equals one built from the same files from
+scratch. Nothing in it depends on the order of the edits, so a copy of one
+worktree's database is a correct start for another, and a hot build and a
+cold one agree.
+
+**A definition is identified by its name, not by its content.** Unison
+identifies a definition by a hash of its content and of its dependencies'
+hashes, so an edit gives every transitive dependent a new identity, and every
+result keyed by that identity is computed again. Here an edit rewrites the
+parts of one definition, and a rename rewrites the references of its users.
+Content keys are kept for the results that are expensive to compute (see
+[Caches](#caches)).
+
+The database stores three relationships:
+
+| Relationship | Recorded by | Followed by |
+|---|---|---|
+| A part read a part of another definition | The lookup that answered the read | Propagation, when the part read changes |
+| A definition's lowered code refers to an instance | The stage that lowered it, in its output | Test keys, which hash the code a test reaches |
+| A function's MIR calls a function, names it as a value, or passes an `impl` to a bound | The stage that built the MIR, in its output | Recursion groups |
+
+### Propagation
+
+The changes the files hold since the last propagation are one *change set*.
+The driver parses each changed file and gives its definitions to the
+database. The database compares each definition with its stored tree,
+ignoring positions, and marks stale every part that read a tree that
+changed. The driver then repeats three steps until no part is stale:
+
+1. It takes the next stale part from the database.
+2. It calls the stage that computes the part, with a record of lookups.
+3. It gives the result to the database. The database replaces the part's
+   recorded reads with the reads the lookups made, and compares the result
+   with the stored part. If the two differ, it stores the result and marks
+   stale every part that read it.
+
+The database hands out stale parts in the order of the stages, and within a
+stage in the order of dependencies, so a lookup never reads a stale part. If
+one change set edits both `Point` and `Segment`, which holds a `Point`, the
+type facts of `Point` are computed before those of `Segment`, and both
+before any body that copies a `Segment`.
+
+**Propagation stops where a part comes out unchanged.** Most changes stop
+one hop from the edit, because a caller reads the callee's signature and
+contract, which are written in the source. Four facts are derived from facts
+of other definitions, so a change to one can travel further:
+
+| Fact | Derived from | Read by |
+|---|---|---|
+| `Plain` and `Copyable` | The same facts of the types of its fields | The type checks of the functions that use the type |
+| Layout | The layouts of the types it stores in place | The lowered code that uses the type |
+| A value computed at compile time, by a constant or a template check | The bodies of the functions that the computation runs | The code that embeds the value, and the template check's verdict |
+| A recursion group | The call edges of the functions on a cycle, within one package | The termination proofs of its members, and test keys |
+
+Adding a field of type `Text` to `Point` makes `Point` not `Plain`.
+Propagation then computes again every type that holds a `Point` in place,
+and re-checks the functions that copy those types, where a copy has become
+a move. Adding a field of type `Float64` leaves `Point` `Plain`, and
+propagation stops at `Point`. The database computes recursion groups itself,
+as the strongly connected components of each package's call edges: an added
+edge can only merge components, and a removed edge can only split the
+component that held it.
+
+### Stages and lookups
+
+**A stage is a pure function that reads only through its lookups.** A lookup
+returns a stored part, such as a definition's signature, contract, type
+facts, or layout, or a namespace's entry for a name, and records the read. A
+stage has no handle on the database and no global state. Every read is
+therefore recorded, and no part keeps a stale result because a read went
+unrecorded.
+
+**A lookup reads, and never runs a stage.** The order of propagation makes
+every part that a lookup returns current. Since no stage can start a
+computation, no stage can start a scan: the cost of an edit follows from the
+relationships the database stores and from the lookups each stage has.
+
+**The database calls nothing.** The driver calls the parser, the database,
+the stages, and the test runner. A stage depends on the types of the data it
+reads, not on the stages that produce that data, and not on the database.
+
+| Rule | Reason |
+|---|---|
+| A program is built by following the references of its code. | A reference missing from a definition's output would leave a test's key unchanged by an edit to the code it calls. The program built from the same references fails to link, so the omission cannot go unnoticed. |
+| Lowering checks each call it emits against the caller's call edges. | A call edge missing from the termination check hides a recursive call, and the prover accepts a recursion that it never proved ends. The check makes the omission a compiler error at the first build. |
+
+### References to names
+
+**A reference is to a fully qualified name, whether or not a definition
+holds the name.** A name that is not local and not in the prelude belongs to
+the body's module, so an unqualified name resolves without a search. A
+method call names one entry of its type's methods:
+[Method lookup](SPECIFICATION.md#method-lookup) rules out a trait method with
+the name and mode of one of the type's own methods, and makes two traits that
+give one name an error at the call. An `impl` is named by its trait and its type, since `impl`s do
+not overlap and have one home.
+
+**A namespace is derived state.** The database keeps the definitions that
+hold each name of a module, and each method name of a type. A type's entry
+holds its own methods and the methods of the traits its `impl`s implement. A
+call reads the entry as its package sees it, through the traits of the
+standard library, of its own package, and of the packages its manifest
+lists. Adding or removing a definition changes the entries of its names and
+marks stale the parts that read them. A reference to a name that no
+definition holds is an error of the referring part, and adding the
+definition clears it.
+
+### Failing code
+
+**A part that fails holds its errors in place of a value.** Nothing is
+derived from it. A part that reads it is blocked: it is not computed, and it
+reports no error of its own. Fixing the error computes the failed part and
+the parts blocked behind it, and nothing else.
+
+| Rule | Reason |
+|---|---|
+| The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
+| A build or a test run requires that no definition it reaches has errors. | No test runs code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
+
+### Caches
+
+Three results are cached in the user's store, each by its whole input:
+
+| Result | Key |
+|---|---|
+| A solver answer | The query's text, whose symbols are numbered in order of appearance |
+| An object file | The C text, the C compiler, and its flags |
+| A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
+
+A cache never makes a result wrong: deleting it only makes the next build
+slower. Every worktree and CI share the caches. The database itself caches
+nothing, so a revert or a branch switch is a change to the files like any
+other. The database computes the cheap stages again, and the solver, the C
+compiler, and the tests are cache hits.
+
+### Where the database lives
+
+| State | Place | Reason |
+|---|---|---|
+| A project's database | `.truss/` in the project's root, which git ignores | It is deleted with its worktree. `cp -r` gives a new worktree its start, and the first propagation brings it up to date with the files that differ. |
+| The caches | The user's store | They are keyed by content, so every worktree and CI share them. |
+| The database of the standard library and of each registry package | The user's store, keyed by the package's content hash, the content hashes of the versions selected for its dependencies, and the compiler | A package's facts are a function of its sources and its dependencies' sources. Nothing downstream adds to them: an `impl` lives with its trait or its type, and a call sees only the traits its own package can see. |
+
+| Rule | Reason |
+|---|---|
+| The paths a database holds are relative to the project's root. | A copy then refers to its own worktree's files. |
+| A database records its compiler and the fingerprints of the files it was built from. | A copy finds the files that differ when it is first opened, and a different compiler rebuilds it. |
+| A change set commits by writing new segment files, then replacing, by rename, the file that lists them. | A crash or a copy during propagation sees the state before the change set or after it, never a state that no version of the files holds. |
+| One process owns a project's database, and handles one request or one change set at a time. | No request reads a change set that is half propagated. A request that arrives during a long propagation waits for it. |
 
 ## Omitted features
 
