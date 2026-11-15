@@ -7,7 +7,7 @@ public type Architecture = X86With64Bits | Arm64 | X86 | Arm | RiscV64 | WebAsse
 public type Platform(
   operating_system: OperatingSystem,
   architecture: Architecture,
-  processor_count: USize,
+  processor_count: UInt64,
   host_name: String,
   process_identifier: UInt32,
 )

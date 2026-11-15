@@ -2,8 +2,6 @@ open Token
 
 type entry = (Lexing.lexbuf -> Truss.token) -> Lexing.lexbuf -> unit
 
-(* The token Menhir's grammar reads for each of the lexer's. Reserved
-   words and foreign sequences have none. *)
 let token (kind : Token.kind) : Truss.token option =
   match kind with
   | Upper _ -> Some UPPER
@@ -137,13 +135,18 @@ let accepts entry (tokens : Token.t list) =
 
 let file = Truss.file
 
+let conflicts_resolved_by_precedence =
+  List.fold_left
+    (fun count line ->
+      if String.ends_with ~suffix:"silently solved." line then count + Scanf.sscanf line "%d" Fun.id
+      else count)
+    0
+    (String.split_on_char '\n' Menhir_log.text)
+
 module Snippet = struct
   type kind = Use | Definition | Signature | Statement
   type item = { kind : kind; first : int; stop : int }
 
-  (* Whether a piece starts like a definition rather than a statement. A
-     [let] starts a constant only before a name under a type, as in
-     [let UInt8.maximum]; otherwise it starts a statement. *)
   let starts_definition (tokens : Token.t array) (piece : Parser.piece) =
     let kind offset =
       if piece.first + offset < piece.stop then tokens.(piece.first + offset).kind else End_of_file

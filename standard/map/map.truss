@@ -32,7 +32,7 @@ public fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key:
   exists other: Key => map.contains_key(other) && other == key
 }
 
-public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
+public fn Map[Key: Hash + Ordered, Value].length(self) -> UInt64
   ensures result == self.model().size()
   ensures result == (self.entries.length())
   cost time O(1)
@@ -40,14 +40,14 @@ public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
   self.entries.length()
 }
 
-internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> USize
+internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
   ensures result <= self.entries.length()
   ensures result < self.entries.length() ==> self.entries.model()[result].key == key
   ensures forall i in 0..self.entries.length() => i == result || !(self.entries.model()[i].key == key)
   ensures (result < self.entries.length()) == contains_equal_key(self.model(), key: key)
   cost time O(self.entries.length() * time(Key.equal))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   var match_index = self.entries.length()
   while index < self.entries.length() && match_index == self.entries.length()
     invariant index <= self.entries.length()
@@ -83,7 +83,7 @@ internal fn exchange[Value](place: mut Value, value: own Value) -> Value
   previous
 }
 
-internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position: USize, value: own Value) -> Value
+internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position: UInt64, value: own Value) -> Value
   requires position < self.entries.length()
   ensures self.entries.length() == old(self.entries.length())
   ensures identical(result, old(self.entries.model())[position].value)
@@ -237,7 +237,7 @@ internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, v
   }
 }
 
-internal fn Map[Key: Hash + Ordered, Value].find_or_insert(mut self, key: own Key, default: own Value) -> USize
+internal fn Map[Key: Hash + Ordered, Value].find_or_insert(mut self, key: own Key, default: own Value) -> UInt64
   ensures result < self.entries.length()
   ensures self.entries.model()[result].key == key
   ensures contains_equal_key(self.model(), key: key)
@@ -259,7 +259,7 @@ internal fn Map[Key: Hash + Ordered, Value].find_or_insert(mut self, key: own Ke
   position
 }
 
-public fn Map[Key: Hash + Ordered, Value].with_capacity(capacity: USize) -> Map[Key, Value]
+public fn Map[Key: Hash + Ordered, Value].with_capacity(capacity: UInt64) -> Map[Key, Value]
   ensures result.length() == 0
   ensures forall key: Key => !result.model().contains_key(key)
   cost time O(1)
@@ -377,7 +377,7 @@ public fn Map[Key: Hash + Ordered, Value].clear(mut self)
   mut self.entries.clear()
 }
 
-public fn Map[Key: Hash + Ordered, Value].reserve(mut self, additional: USize)
+public fn Map[Key: Hash + Ordered, Value].reserve(mut self, additional: UInt64)
   ensures identical(self.model(), old(self.model()))
   ensures self.length() == old(self.length())
 {
@@ -392,7 +392,7 @@ public fn Map[Key: Hash + Ordered, Value].retain(
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.entries.length()
-  var kept_count: USize = 0
+  var kept_count: UInt64 = 0
   for index in 0..count
     invariant self.entries.length() == count
     invariant kept_count <= index
@@ -480,14 +480,14 @@ impl core::IndexAssign for Map[Key: Hash + Ordered, Value] {
 impl Iterable for Map[Key: Hash + Ordered, Value] {
   type Element = Entry[Key, Value]
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
   {
     self.entries.length()
   }
 
-  fn element(self, position: USize) lends Entry[Key, Value]
+  fn element(self, position: UInt64) lends Entry[Key, Value]
     requires position < self.count()
     cost time O(1)
   {
@@ -508,14 +508,14 @@ public type Keys[Key, Value](entries: Slice[Entry[Key, Value]])
 impl Iterable for Keys[Key, Value] {
   type Element = Key
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.entries.length()
     cost time O(1)
   {
     self.entries.length()
   }
 
-  fn element(self, position: USize) lends Key
+  fn element(self, position: UInt64) lends Key
     requires position < self.count()
     ensures identical(result, self.entries.model()[position].key)
     cost time O(1)
@@ -529,14 +529,14 @@ public type Values[Key, Value](entries: Slice[Entry[Key, Value]])
 impl Iterable for Values[Key, Value] {
   type Element = Value
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.entries.length()
     cost time O(1)
   {
     self.entries.length()
   }
 
-  fn element(self, position: USize) lends Value
+  fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures identical(result, self.entries.model()[position].value)
     cost time O(1)
@@ -559,7 +559,7 @@ public fn Map[Key: Hash + Ordered, Value].values(self) -> Values[Key, Value]
   Values(entries: self.entries.slice())
 }
 
-public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: USize) lends mut Value
+public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: UInt64) lends mut Value
   requires position < self.length()
   ensures self.length() == old(self.length())
   cost time O(1)
@@ -589,7 +589,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
       && self.entries.model()[i].value == other.entries.model()[j].value)
   cost time O(self.entries.length() * (1 + other.entries.length() * time(Key.equal) + time(Value.equal)))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.entries.length()
     invariant index <= self.entries.length()
     invariant forall i in 0..index => exists j in 0..other.entries.length() =>

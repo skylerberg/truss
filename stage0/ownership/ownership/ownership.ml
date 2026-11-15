@@ -1,9 +1,8 @@
-type result = { diagnostics : Syntax.diagnostic list; disjoint : (Core.origin * Core.origin) list }
+type result = {
+  diagnostics : Syntax.diagnostic list;
+  must_be_disjoint : (Core.origin * Core.origin) list;
+}
 
-(* The inputs of the check of one definition: a new context, the lowered
-   interface, and the MIR of the definition's code. A specification-only
-   function never runs, so it has no MIR, and no moves or borrows to check.
-   [None] if the definition has no interface. *)
 let inputs database (key : Resolve.Names.key) =
   match
     ( Query.demand database Resolve.Names.spans key,
@@ -39,44 +38,30 @@ let inputs database (key : Resolve.Names.key) =
           must_be_disjoint = [];
         }
       in
-      (* A function for specifications only never runs, so it has no moves or
-         borrows to check. *)
       let mir =
-        match lowered.interface with
-        | (Function_interface signature | Theorem_interface signature)
-          when signature.specification_only ->
-            None
-        | _ -> Query.demand database Mir.graph key
+        if Interface.Environment.is_specification lowered.interface then None
+        else Query.demand database Mir.graph key
       in
       Option.iter (Context.collect context) mir;
       Some (context, lowered, mir)
   | _ -> None
 
-(* The check of one definition: moves, loans, views, and the rules on
-   loops whose iterations run at the same time. It reads the definition's
-   MIR and the signatures the MIR names, and no other definition's body.
-   Two rules can report the same pair of parts that must be disjoint, in
-   either order, so the pairs are normalized and deduplicated. [None] if
-   the definition has no interface. *)
 let check database (key : Resolve.Names.key) : result option =
   Option.map
     (fun ((context : Context.context), (lowered : Interface.Environment.lowered_interface), mir) ->
       Option.iter
         (fun (mir : Mir.Graph.t) ->
-          let returns =
-            match lowered.interface with
-            | Function_interface _ | Theorem_interface _ -> true
-            | _ -> false
+          let returns_to_caller =
+            match lowered.interface with Function_interface _ -> true | _ -> false
           in
-          (* One move analysis of each body, which both checks read. *)
-          let analysed =
+          let move_analyses =
             List.map
               (fun body -> (body, Move_rules.analyse context body))
               (mir.body :: Array.to_list mir.lambdas)
           in
-          let moves body = List.assq body analysed in
-          Move_rules.check context mir ~moves ~returns;
-          Borrows.check context ~moves ~returns mir;
+          let moves body = List.assq body move_analyses in
+          Move_rules.check context mir ~moves ~returns_to_caller;
+          Borrows.check context ~moves ~returns_to_caller mir;
           Task_loops.check context mir)
         mir;
       {
@@ -85,11 +70,7 @@ let check database (key : Resolve.Names.key) : result option =
             (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
               compare (left.span, left.message) (right.span, right.message))
             context.diagnostics;
-        disjoint =
-          List.sort_uniq compare
-            (List.map
-               (fun (first, second) -> (min first second, max first second))
-               context.must_be_disjoint);
+        must_be_disjoint = List.sort_uniq compare context.must_be_disjoint;
       })
     (inputs database key)
 

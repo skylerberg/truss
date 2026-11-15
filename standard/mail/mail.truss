@@ -138,9 +138,9 @@ fn hex_digit(value: UInt8) -> UInt8
 
 fn quoted_printable(text: StringSlice) -> String {
   var output: List[UInt8] = []
-  var column: USize = 0
+  var column: UInt64 = 0
   let bytes = text.bytes()
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < bytes.length()
     invariant column <= 78
   {
@@ -159,7 +159,7 @@ fn quoted_printable(text: StringSlice) -> String {
     }
     let ends_line = index + 1 == bytes.length() || bytes[index + 1] == 13 || bytes[index + 1] == 10
     let is_plain = (byte >= 33 && byte <= 126 && byte != 61) || ((byte == 32 || byte == 9) && !ends_line)
-    let width: USize = if is_plain { 1 } else { 3 }
+    let width: UInt64 = if is_plain { 1 } else { 3 }
     if column + width > 75 {
       mut output.append_slice("=\r\n".bytes())
       column = 0
@@ -180,7 +180,7 @@ fn quoted_printable(text: StringSlice) -> String {
 fn wrapped_base64(bytes: Slice[UInt8]) -> String {
   let encoded = base64::encode(bytes)
   var output = ""
-  var start: USize = 0
+  var start: UInt64 = 0
   let length = encoded.length()
   while start < length
     decreases length - start
@@ -354,7 +354,7 @@ fn read_line[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Resul
   }
 }
 
-fn line_end(bytes: Slice[UInt8]) -> Option[USize]
+fn line_end(bytes: Slice[UInt8]) -> Option[UInt64]
   ensures match result {
     Some(end) => end + 2 <= bytes.length()
     None => true

@@ -7,10 +7,6 @@ let phase_error (reader : node) read_label =
     (Printf.sprintf "Incremental: %s, of phase %d, reads %s, of a later phase" (label reader)
        reader.phase read_label)
 
-(* A root, a copy of a base's node, or a node something reads. A node that
-   is none of these is unnecessary. *)
-let necessary (node : node) = node.root || node.below <> None || Hashtbl.length node.readers > 0
-
 let rec ensure engine (node : node) =
   if node.engine == engine then
     match node.cell with
@@ -27,10 +23,6 @@ and ensure_result : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) res
     | Some _, _ | None, (Hashed _ | Opaque _) -> ()
     | None, Unknown -> if not (adopt_new engine query cell) then compute engine query cell
 
-(* Checks a marked result's dependencies, in order, and computes it again only
-   if one of those changed since it was last found current. The check stops
-   at the first such read, since a later one may not be read at all once an
-   earlier one gives a different answer. *)
 and verify : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> unit =
  fun engine query cell ->
   let node = cell.node in
@@ -88,7 +80,6 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   in
   finish ();
   let outcome = match frame.cyclic with Some labels -> Raised (Cycle labels) | None -> outcome in
-  (* A read may have been copied into the engine since it was made. *)
   let reads =
     let seen = Hashtbl.create 8 in
     List.filter_map
@@ -102,8 +93,6 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
       (Dynarray.to_list frame.read)
   in
   commit_reads engine node reads;
-  (* A result whose old value is in the store and was never read is
-     compared by fingerprint, without reading the old value. *)
   let first = cell.outcome = None && node.fingerprint = Unknown in
   let changed =
     match (cell.outcome, node.fingerprint) with
@@ -126,8 +115,6 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
     node.changed_at <- tick engine;
     Dynarray.add_last engine.changed node;
     engine.tally.changes <- engine.tally.changes + 1;
-    (* A reader of a result while it was first being computed is on a cycle
-       with it, and has the cycle as its result, as this one has. *)
     if not first then seed engine node
   end;
   node.verified_at <- engine.clock;
@@ -135,13 +122,8 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   Dynarray.add_last engine.computed node;
   engine.tally.computations <- engine.tally.computations + 1;
   engine.activity <- engine.activity + 1;
-  Hashtbl.replace engine.unsaved node.id node
+  Hashtbl.replace engine.unwritten_nodes node.id node
 
-(* Looks for a result as a fact, under the key of [candidates], which are
-   its earlier dependencies, with the fingerprints they have now. A fact found
-   was computed from reads with exactly these fingerprints, and a query is a
-   function of its reads, so computing it now would read the same and
-   give the same. *)
 and adopt :
     'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> node list -> bool =
  fun engine query cell candidates ->
@@ -149,8 +131,8 @@ and adopt :
   match engine.store with
   | Some store when query.saved && candidates <> [] -> (
       let was_marked = node.marked in
-      let held () = cell.outcome <> None || node.fingerprint <> Unknown in
-      let had = held () in
+      let has_result () = cell.outcome <> None || node.fingerprint <> Unknown in
+      let had_result = has_result () in
       let rec parts parts_so_far = function
         | [] -> Some (List.rev parts_so_far)
         | read :: rest ->
@@ -166,16 +148,15 @@ and adopt :
       match parts [] candidates with
       | None -> false
       | Some parts -> (
-          if
-            (* Bringing the candidates up to date may have brought this result
-             up to date too, where they read it. *)
-            (was_marked && not node.marked) || ((not had) && held ())
-          then true
+          let is_settled_by_candidates =
+            (was_marked && not node.marked) || ((not had_result) && has_result ())
+          in
+          if is_settled_by_candidates then true
           else
             match store.find ~kind:"fact" ~key:(fact_key store node parts) with
             | None -> false
             | Some stored_fingerprint ->
-                let unchanged = had && fingerprint engine node = Some stored_fingerprint in
+                let unchanged = had_result && fingerprint engine node = Some stored_fingerprint in
                 commit_reads engine node (List.map fst parts);
                 if not unchanged then begin
                   cell.outcome <- None;
@@ -189,7 +170,7 @@ and adopt :
                 node.marked <- false;
                 engine.tally.adoptions <- engine.tally.adoptions + 1;
                 engine.activity <- engine.activity + 1;
-                Hashtbl.replace engine.unsaved node.id node;
+                Hashtbl.replace engine.unwritten_nodes node.id node;
                 true))
   | _ -> false
 
@@ -211,8 +192,6 @@ and adopt_new : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_
           in
           let candidates = List.filter_map Fun.id located in
           let adopted = List.for_all Option.is_some located && adopt engine query cell candidates in
-          (* A node made only for the lookup is collected if nothing came to
-             read it. *)
           if not adopted then List.iter (defer_collection engine) candidates;
           adopted)
   | _ -> false
@@ -225,18 +204,12 @@ let lowest engine =
   in
   find 0
 
-(* Marks the readers of a result that changed, for one phase. *)
 let mark_seeds engine phase =
   let seeds = engine.seeds.(phase) in
   engine.seeds.(phase) <- [];
   engine.waiting <- engine.waiting - List.length seeds;
   List.iter (mark engine) seeds
 
-(* Brings the marked results of one phase up to date, newest first: a result
-   marked later reads one marked earlier, and checking it may show that the
-   earlier one is no longer read. A result leaves the queue only once it is
-   no longer marked. One whose query raises a fatal exception goes back, so
-   that it is never written as if it were current. *)
 let rec settle_marks engine phase =
   match engine.marks.(phase) with
   | [] -> ()
@@ -244,8 +217,6 @@ let rec settle_marks engine phase =
       engine.marks.(phase) <- rest;
       engine.waiting <- engine.waiting - 1;
       if node.alive && node.marked then (
-        (* An unnecessary result is collected: left marked, it would be
-           written and opened as if it were current. *)
         try if necessary node then ensure engine node else defer_collection engine node
         with fatal ->
           engine.marks.(phase) <- node :: engine.marks.(phase);
@@ -254,8 +225,6 @@ let rec settle_marks engine phase =
       sweep engine;
       settle_marks engine phase
 
-(* Brings the phases up to and including [through] up to date. The later
-   ones keep their queued results. *)
 let rec settle ?(through = phases - 1) engine =
   if engine.waiting > 0 then
     match lowest engine with

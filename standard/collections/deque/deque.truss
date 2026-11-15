@@ -11,7 +11,7 @@ public fn collections::Deque[Element].new() -> collections::Deque[Element]
   collections::Deque(front: [], back: [])
 }
 
-public fn collections::Deque[Element].with_capacity(capacity: USize) -> collections::Deque[Element]
+public fn collections::Deque[Element].with_capacity(capacity: UInt64) -> collections::Deque[Element]
   ensures result.length() == 0
 {
   collections::Deque(front: [], back: List.with_capacity(capacity))
@@ -25,7 +25,7 @@ public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]]
   collections::Deque(front: [], back: List.collect(own source))
 }
 
-public fn collections::Deque[Element].length(self) -> USize
+public fn collections::Deque[Element].length(self) -> UInt64
   ensures result == (self.front.length() + self.back.length())
   cost time O(1)
 {
@@ -43,7 +43,7 @@ public fn collections::Deque[Element].push_front(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  if self.back.length() == USize.maximum - self.front.length() {
+  if self.back.length() == UInt64.maximum - self.front.length() {
     intrinsic::crash("a deque cannot hold that many items".slice())
   }
   mut self.front.push(own item)
@@ -53,7 +53,7 @@ public fn collections::Deque[Element].push_back(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  if self.back.length() == USize.maximum - self.front.length() {
+  if self.back.length() == UInt64.maximum - self.front.length() {
     intrinsic::crash("a deque cannot hold that many items".slice())
   }
   mut self.back.push(own item)
@@ -113,7 +113,7 @@ public fn collections::Deque[Element].back(self) lends Option[Element]
   }
 }
 
-public fn collections::Deque[Element].get(self, index: USize) lends Option[Element]
+public fn collections::Deque[Element].get(self, index: UInt64) lends Option[Element]
   cost time O(1)
 {
   if index < self.front.length() {
@@ -134,13 +134,13 @@ public fn collections::Deque[Element].clear(mut self)
   mut self.back.clear()
 }
 
-public fn collections::Deque[Element].reserve(mut self, additional: USize)
+public fn collections::Deque[Element].reserve(mut self, additional: UInt64)
   ensures self.length() == old(self.length())
 {
   mut self.back.reserve(additional)
 }
 
-public fn collections::Deque[Element].rotate_left(mut self, by: USize)
+public fn collections::Deque[Element].rotate_left(mut self, by: UInt64)
   requires by <= self.length()
   ensures self.length() == old(self.length())
   cost time finite
@@ -155,7 +155,7 @@ public fn collections::Deque[Element].rotate_left(mut self, by: USize)
   }
 }
 
-public fn collections::Deque[Element].rotate_right(mut self, by: USize)
+public fn collections::Deque[Element].rotate_right(mut self, by: UInt64)
   requires by <= self.length()
   ensures self.length() == old(self.length())
   cost time finite
@@ -206,16 +206,16 @@ public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](
 }
 
 impl Index for collections::Deque[Element] {
-  type Key = USize
+  type Key = UInt64
   type Output = Element
 
-  fn contains_key(self, key: USize) -> Bool
+  fn contains_key(self, key: UInt64) -> Bool
     cost time O(1)
   {
     key < self.length()
   }
 
-  fn at(self, key: USize) lends Element
+  fn at(self, key: UInt64) lends Element
     requires key < self.length()
     cost time O(1)
   {
@@ -228,7 +228,7 @@ impl Index for collections::Deque[Element] {
 }
 
 impl IndexMut for collections::Deque[Element] {
-  fn at(mut self, key: USize) lends mut Element
+  fn at(mut self, key: UInt64) lends mut Element
     requires key < self.length()
     cost time O(1)
   {
@@ -243,14 +243,14 @@ impl IndexMut for collections::Deque[Element] {
 impl Iterable for collections::Deque[Element] {
   type Element = Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
   {
     self.front.length() + self.back.length()
   }
 
-  fn element(self, position: USize) lends Element
+  fn element(self, position: UInt64) lends Element
     requires position < self.count()
     cost time O(1)
   {
@@ -258,7 +258,7 @@ impl Iterable for collections::Deque[Element] {
   }
 }
 
-public fn collections::Deque[Element].element(mut self, position: USize) lends mut Element
+public fn collections::Deque[Element].element(mut self, position: UInt64) lends mut Element
   requires position < self.count()
   ensures self.front.length() == old(self.front.length())
   ensures self.back.length() == old(self.back.length())
@@ -289,7 +289,7 @@ impl Equal for collections::Deque[Element: Equal] {
     if self.length() != other.length() {
       return false
     }
-    var index: USize = 0
+    var index: UInt64 = 0
     while index < self.length()
       invariant index <= self.length()
       invariant forall i in 0..index => self[i] == other[i]

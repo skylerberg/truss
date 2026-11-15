@@ -1,4 +1,4 @@
-fn each_index(count: USize, visit: (fn(index: USize) -> USize requires index < count)) -> USize {
+fn each_index(count: UInt64, visit: (fn(index: UInt64) -> UInt64 requires index < count)) -> UInt64 {
   if count > 0 { visit(count - 1) } else { 0 }
 }
 

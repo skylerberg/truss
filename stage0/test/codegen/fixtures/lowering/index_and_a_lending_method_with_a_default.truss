@@ -1,12 +1,12 @@
-type Grid(cells: List[Int64], width: USize)
+type Grid(cells: List[Int64], width: UInt64)
 
-fn Grid.cell(self, row: USize, column: USize = 0) lends Int64
+fn Grid.cell(self, row: UInt64, column: UInt64 = 0) lends Int64
   requires row * self.width + column < self.cells.length()
 {
   self.cells[row * self.width + column]
 }
 
-fn Grid.cell(mut self, row: USize, column: USize = 0) lends mut Int64
+fn Grid.cell(mut self, row: UInt64, column: UInt64 = 0) lends mut Int64
   requires row * self.width + column < self.cells.length()
 {
   mut self.cells[row * self.width + column]

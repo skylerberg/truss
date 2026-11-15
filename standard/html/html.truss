@@ -34,7 +34,7 @@ impl Display for Html {
 }
 
 fn push_escaped(output: mut String, text: StringSlice) {
-  var run: USize = 0
+  var run: UInt64 = 0
   for index in 0..text.length() {
     let byte = text.byte(index)
     let replacement = if byte == 38 {
@@ -146,7 +146,7 @@ type Place =
   | Unsafe
   derives Equal
 
-type Scanner(state: State, tag: List[UInt8], attribute: List[UInt8], raw_tag: List[UInt8], dashes: USize)
+type Scanner(state: State, tag: List[UInt8], attribute: List[UInt8], raw_tag: List[UInt8], dashes: UInt64)
 
 fn Scanner.new() -> Scanner
   cost time O(1)
@@ -406,7 +406,7 @@ public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
 
 fn is_safe_url(text: StringSlice) -> Bool {
   let trimmed = text.trim()
-  var scheme_end: USize = 0
+  var scheme_end: UInt64 = 0
   var found = false
   var colon = false
   for index in 0..trimmed.length() {

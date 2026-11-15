@@ -1,4 +1,4 @@
-fn f(chunked: mut Chunked, other: List[Int64]) -> USize {
+fn f(chunked: mut Chunked, other: List[Int64]) -> UInt64 {
   var held: Slice[Int64] = other[..]
   for chunk in mut chunked {
     held = chunk[..]

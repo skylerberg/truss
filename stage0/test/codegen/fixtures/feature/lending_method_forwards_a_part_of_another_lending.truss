@@ -12,18 +12,18 @@ fn Catalog.first(self) lends String {
   self.sorted()[0]
 }
 
-fn Catalog.first_length(self) lends USize {
+fn Catalog.first_length(self) lends UInt64 {
   self.first().length()
 }
 
-fn Catalog.label(self, index: USize) lends Option[String] {
+fn Catalog.label(self, index: UInt64) lends Option[String] {
   match self.bigs.get(index) {
     Some(big) => Some(big.label)
     None => None
   }
 }
 
-fn Catalog.label_or_first(self, index: USize) lends String {
+fn Catalog.label_or_first(self, index: UInt64) lends String {
   if self.label(index) is Some(label) {
     return label
   }

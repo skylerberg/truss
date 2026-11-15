@@ -1,20 +1,20 @@
 type Tally(cells: List[Int64])
 
 impl Index for Tally {
-  type Key = USize
+  type Key = UInt64
   type Output = Int64
 
-  fn contains_key(self, key: USize) -> Bool {
+  fn contains_key(self, key: UInt64) -> Bool {
     key < self.cells.length()
   }
 
-  fn at(self, key: USize) lends Int64 {
+  fn at(self, key: UInt64) lends Int64 {
     self.cells[key]
   }
 }
 
 impl IndexMut for Tally {
-  fn at(mut self, key: USize) lends mut Int64 {
+  fn at(mut self, key: UInt64) lends mut Int64 {
     mut self.cells[key]
   }
 }

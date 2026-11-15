@@ -173,10 +173,11 @@ and count_name context (name : name) : Types.argument =
   match target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
-      if not (Constants.is_usize context.database path) then
+      if not (Constants.is_uint64 context.database path) then
         Types.Type
           (error context Arity name.span
-             (Printf.sprintf "`%s` in a type argument must be a constant of type `USize`." name.text))
+             (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`."
+                name.text))
       else
         match Query.demand context.database Constants.value_of path with
         | Some value -> Types.Value (Types.Known value)
@@ -204,8 +205,6 @@ and check_arity context (path : path_type) shown expected =
              argument_count
              (if argument_count = 1 then "is" else "are"))
       else
-        (* Each argument must be of its parameter's kind: a type, or a
-           [USize] value. *)
         let written = List.filter (function Constraint _ -> false | _ -> true) path.arguments in
         List.iter2
           (fun argument (name, kind) ->
@@ -213,7 +212,8 @@ and check_arity context (path : path_type) shown expected =
             match (kind, is_value) with
             | Summary.Value_kind, false ->
                 report context Argument_kind path.span
-                  (Printf.sprintf "`%s`'s parameter `%s` is a `USize` value, not a type." shown name)
+                  (Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type." shown
+                     name)
             | (Summary.Type_kind | Summary.Capability_kind), true ->
                 report context Argument_kind path.span
                   (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
@@ -360,7 +360,7 @@ and function_type_ context (written : function_type) : Types.function_type =
   {
     inputs =
       List.map
-        (fun (written_mode, input) -> (mode written_mode, type_ context input))
+        (fun (input : function_input) -> (mode input.mode, type_ context input.type_))
         written.inputs;
     output =
       Types.Returns

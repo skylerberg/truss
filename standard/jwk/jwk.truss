@@ -80,7 +80,7 @@ fn array_32(bytes: Slice[UInt8]) -> Result[Array[UInt8, 32], Error] {
     return Err(failure("an Ed25519 key that is not 32 bytes"))
   }
   var array: Array[UInt8, 32] = Array.filled(0)
-  let width: USize = 32
+  let width: UInt64 = 32
   for index in 0..width {
     array[index] = bytes[index]
   }

@@ -1,14 +1,14 @@
 use standard::collections
 
-fn positions(bits: collections::BitSet) -> List[USize] {
-  var set_positions: List[USize] = []
+fn positions(bits: collections::BitSet) -> List[UInt64] {
+  var set_positions: List[UInt64] = []
   for position in bits.ones() {
     mut set_positions.push(position)
   }
   set_positions
 }
 
-fn with_ones(length: USize, ones: Slice[USize]) -> collections::BitSet {
+fn with_ones(length: UInt64, ones: Slice[UInt64]) -> collections::BitSet {
   var bits = collections::BitSet.new(length)
   for position in ones {
     mut bits.flip(position)

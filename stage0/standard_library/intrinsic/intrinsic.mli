@@ -13,8 +13,6 @@ type builtin =
   | UInt16
   | UInt32
   | UInt64
-  | USize
-  | ISize
   | Float32
   | Float64
   | Bool
@@ -22,7 +20,7 @@ type builtin =
   | Unit
   | Never
   | Integer  (** The mathematical integers, in specifications only. *)
-  | Array  (** [Array[Element, count: USize]] *)
+  | Array
   | Storage
       (** [Storage[Element]]: owned storage on the heap, a buffer, a length, and a capacity, with
           the elements below the length live. The compiler generates its drop and copy, so [List]
@@ -153,8 +151,6 @@ type operation =
   | View_model  (** [(view) -> Sequence]: its elements, in specifications only *)
   | Array_model  (** [(array) -> Sequence]: its elements, in specifications only *)
   | View_address
-      (** [(view) -> USize]: the address of a view's elements as a number, for the lists of
-          addresses that some functions of the C library take *)
   | Crash
   | Handle_from
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
@@ -167,17 +163,13 @@ type operation =
   | Report_tests_to
       (** [(descriptor)]: from here on a panic, a failed [assert], a [todo], and an [echo] are
           written as records to the descriptor, for a test's worker *)
-  | Live_blocks  (** [() -> USize]: how many blocks a test program has allocated and not freed *)
+  | Live_blocks
   | Environment_entry
       (** [environment_entry(index, found: mut found)]: the text of the entry at an index of the
           environment the process was started with, [NAME=value], as a view, with [found] false
           where the environment has no entry there. It counts from the first entry each time, so it
           never reads past the last. *)
   | Coroutine_start
-      (** [coroutine_start(work: own fn(UInt64), item: UInt64) -> USize]: creates a suspended
-          coroutine that will call [work(item)] on its own stack, and returns its handle. A
-          scheduler that runs one task at a time, such as a test's, runs each task as a coroutine.
-      *)
   | Coroutine_resume
       (** [coroutine_resume(coroutine) -> Bool]: runs the coroutine until it suspends or its
           function returns. Returns true if it suspended. Returns false if its function returned,
@@ -198,10 +190,6 @@ type operation =
           two updates cannot deadlock. [Result] is [Storable], so no view of the value escapes the
           lock. *)
   | Holds_invariant
-      (** [holds_invariant(value, clause: USize) -> Bool]: whether a value meets one [invariant]
-          clause of its type, by the clause's position among the type's clauses, which is a literal.
-          The clause can be evaluated at run time. A derived [Deserialize] calls it on the value it
-          read, so data cannot make a value that breaks its type's invariant. *)
   | Shared_key
       (** [shared_key(shared) -> UInt64]: the address of the heap block, as a key for [Tasks.wait]
           and [Tasks.wake]. Every copy of one [Shared] has the same key. *)

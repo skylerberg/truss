@@ -30,7 +30,7 @@ impl Cursor for Counter {
   }
 }
 
-fn label_lengths(counter: Counter, stop: Int64) -> USize
+fn label_lengths(counter: Counter, stop: Int64) -> UInt64
   uses Tasks
 {
   concurrent for label in counter.labels() {

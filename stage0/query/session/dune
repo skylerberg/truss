@@ -1,7 +1,3 @@
-; The code database's sessions: states with their place in the store, the
-; questions a state's graph answers, and the background process. It knows
-; no compiler stage.
-
 (library
  (name session)
  (libraries unix blake3 engine query store path file_system graph_types))

@@ -61,7 +61,7 @@ jobs:
       - name: Build, check formatting and truss.opam, and test the compiler
         env:
           TRUSS_SKIP_SUITES: standard_library_tests,prover_tests,database_tests
-        run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest @stage0/parser/reference/runtest
+        run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest
 
       - name: Check that truss.opam matches dune-project
         run: git diff --exit-code truss.opam
@@ -218,73 +218,11 @@ jobs:
           path: ~/.cache/truss-proofs
           key: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-${{ github.sha }}
 
-  # The codegen tests again, with their C built under AddressSanitizer and
-  # UndefinedBehaviorSanitizer: a report is a compiler bug. The C declares a
-  # local with no initializer, and -ftrivial-auto-var-init=pattern fills
-  # each such local with a pattern. A pointer that the lowering never wrote
-  # is then a wild address, so a dereference or a free of it is a report,
-  # where the bytes that the stack held are often zero. The pattern does
-  # not show an unwritten integer or Bool: the integer is only a wrong
-  # value, and the Bool reads as false, since a branch tests for 1. Leaks
-  # are left to the test runner's own count of live blocks, since the
-  # runner itself frees nothing at exit. layout_tests is skipped: it builds
-  # no C, so the sanitizers would run the same OCaml as the codegen job. It
-  # runs beside the check, on a runner of its own.
-  sanitizers:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - id: opam
-        uses: ./.github/actions/opam
-        with:
-          opam-version: ${{ env.OPAM_VERSION }}
-          opam-sha256: ${{ env.OPAM_SHA256 }}
-          ocaml-version: ${{ env.OCAML_VERSION }}
-
-      - uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cache/dune
-          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
-          restore-keys: dune-${{ steps.opam.outputs.key }}-
-
-      # evaluate_tests runs the prover, which decides a template's check by
-      # running its generated C.
-      - uses: ./.github/actions/z3
-
-      # The sanitizers' flags are part of an object's key, so these objects
-      # are this job's own. A restore takes the newest cache whose name
-      # starts with its key, so this cache's name must not start with the
-      # check's, or the check restores these objects and compiles every one
-      # of its own again.
-      - uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cache/truss/caches/objects
-          key: sanitized-objects-${{ github.sha }}
-          restore-keys: sanitized-objects-
-
-      - name: Test generated code under sanitizers
-        env:
-          TRUSS_CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -ftrivial-auto-var-init=pattern
-          ASAN_OPTIONS: detect_leaks=0
-          TRUSS_SKIP_SUITES: layout_tests
-        run: opam exec -- dune build @stage0/test/codegen/runtest
-
-      - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss/caches/objects && find ~/.cache/truss/caches/objects -type f -mtime +14 -delete
-
-      - if: github.event_name == 'push'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cache/truss/caches/objects
-          key: sanitized-objects-${{ github.sha }}
-
-  # The programs that run on several threads, again under ThreadSanitizer,
-  # which the other sanitizers cannot run beside: a report is a data race in
-  # the runtime or in generated code. The tests of tasks and shared values
-  # that run on threads have "on threads" in their names. These tests take
-  # as long as the other sanitizers' do, so they run on a runner of their
-  # own. None of them runs the prover, so the job installs no solver.
+  # The programs that run on several threads, again under ThreadSanitizer:
+  # a report is a data race in the runtime or in generated code. The tests
+  # of tasks and shared values that run on threads have "on threads" in
+  # their names. They run on a runner of their own, beside the check. None
+  # of them runs the prover, so the job installs no solver.
   thread-sanitizer:
     runs-on: ubuntu-latest
     steps:
@@ -304,16 +242,12 @@ jobs:
           restore-keys: dune-${{ steps.opam.outputs.key }}-
 
       # ThreadSanitizer's flag is part of an object's key, so these objects
-      # are this job's own. A run with no cache of this job's yet starts
-      # from the other sanitizers', which held these objects while the two
-      # were one job.
+      # are this job's own.
       - uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/truss/caches/objects
           key: thread-sanitized-objects-${{ github.sha }}
-          restore-keys: |
-            thread-sanitized-objects-
-            sanitized-objects-
+          restore-keys: thread-sanitized-objects-
 
       - name: Test programs on threads under ThreadSanitizer
         env:

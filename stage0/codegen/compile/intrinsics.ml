@@ -3,7 +3,7 @@ open Emit_c.Builder
 let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
 
 type argument = Place of Lowered.place | Value of Lowered.operand
-type types = { usize : Ground.ty; string_slice : Ground.ty }
+type types = { uint64 : Ground.ty; string_slice : Ground.ty }
 
 let operand = function Place place -> Lowered.Copy place | Value operand -> operand
 let place = function Place place -> place | Value _ -> bug "an operation on storage given a value"
@@ -42,7 +42,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     emit builder (Call { target = Intrinsic intrinsic; arguments; result })
   in
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
-  let usize_local name = local builder ~name (Value types.usize) in
+  let uint64_local name = local builder ~name (Value types.uint64) in
   let element () = type_argument 0 in
   let element_layout ?element:element_type () =
     Memory_layout.of_type env
@@ -61,7 +61,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
          {
            failure = Panic;
            message = Constant (Bytes message);
-           length = usize (String.length message);
+           length = constant_uint64 (String.length message);
            site;
            reported;
          });
@@ -73,28 +73,37 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
      to a new one and never freed. *)
   let set_capacity ?element storage capacity =
     let layout = element_layout ?element () in
-    let bytes = usize_local "bytes" and too_many = local builder (Raw Bool) in
+    let bytes = uint64_local "bytes" and too_many = local builder (Raw Bool) in
     call ~result:(at too_many) Multiply_overflow
-      [ capacity; usize layout.size; Address { place = at bytes; writable = true } ];
+      [ capacity; constant_uint64 layout.size; Address { place = at bytes; writable = true } ];
     panic_when (Copy (at too_many)) "out of memory";
     let buffer = local builder (Raw (Pointer Opaque)) in
     let owns = local builder (Raw Bool) and borrows = local builder (Raw Bool) in
-    emit builder (Assign (at owns, Binary (Not_equal, Copy (Storage.capacity storage), usize 0)));
+    emit builder
+      (Assign (at owns, Binary (Not_equal, Copy (Storage.capacity storage), constant_uint64 0)));
     emit builder (Assign (at borrows, Unary (Not, Copy (at owns))));
     when_ builder
       (Copy (at owns))
       (fun () ->
-        let held = usize_local "held" in
+        let held = uint64_local "held" in
         emit builder
-          (Assign (at held, Binary (Multiply, Copy (Storage.capacity storage), usize layout.size)));
+          (Assign
+             ( at held,
+               Binary (Multiply, Copy (Storage.capacity storage), constant_uint64 layout.size) ));
         call ~result:(at buffer) Reallocate
-          [ Copy (Storage.buffer storage); Copy (at held); Copy (at bytes); usize layout.alignment ]);
+          [
+            Copy (Storage.buffer storage);
+            Copy (at held);
+            Copy (at bytes);
+            constant_uint64 layout.alignment;
+          ]);
     when_ builder
       (Copy (at borrows))
       (fun () ->
-        call ~result:(at buffer) Allocate [ Copy (at bytes); usize layout.alignment ];
-        let used = usize_local "used" in
-        emit builder (Assign (at used, Binary (Multiply, length storage, usize layout.size)));
+        call ~result:(at buffer) Allocate [ Copy (at bytes); constant_uint64 layout.alignment ];
+        let used = uint64_local "used" in
+        emit builder
+          (Assign (at used, Binary (Multiply, length storage, constant_uint64 layout.size)));
         call Copy_bytes [ Copy (at buffer); Copy (Storage.buffer storage); Copy (at used) ]);
     emit builder (Assign (Storage.buffer storage, Use (Copy (at buffer))));
     emit builder (Assign (Storage.capacity storage, Use capacity))
@@ -124,7 +133,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
        warning an error. *)
     let decided =
       let unsigned_zero : Lowered.operand -> bool = function
-        | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64 | USize), zero)) -> Z.sign zero = 0
+        | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64), zero)) -> Z.sign zero = 0
         | _ -> false
       in
       match failed with
@@ -152,7 +161,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                {
                  failure = Panic;
                  message = Constant (Bytes message);
-                 length = usize (String.length message);
+                 length = constant_uint64 (String.length message);
                  site;
                  reported;
                });
@@ -166,9 +175,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     panic_if (Binary (Greater_equal, index, count)) "index out of bounds"
   in
   let room storage : Lowered.operand =
-    let room = local builder ~name:"room" (Value types.usize) in
+    let room = local builder ~name:"room" (Value types.uint64) in
     let any = local builder (Raw Bool) in
-    emit builder (Assign (at room, Use (usize 0)));
+    emit builder (Assign (at room, Use (constant_uint64 0)));
     emit builder
       (Assign (at any, Binary (Greater, Copy (Storage.capacity storage), length storage)));
     when_ builder
@@ -193,7 +202,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       lent (Storage.view_at view (value 1))
   | Array_at_mut ->
       (match value_arguments with
-      | [ count ] -> check_index (value 1) (Constant (Integer (USize, count)))
+      | [ count ] -> check_index (value 1) (Constant (Integer (UInt64, count)))
       | _ -> bug "array_at_mut without the array's length");
       lent (place (argument 0) / Index (value 1))
   | _ ->
@@ -225,7 +234,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               (Assign (at zero, Binary (Equal, value 1, Constant (Integer (integer, Z.zero)))));
             panic_when (Copy (at zero)) "division by zero";
             (match integer with
-            | Int8 | Int16 | Int32 | Int64 | ISize ->
+            | Int8 | Int16 | Int32 | Int64 ->
                 let bits = 8 * Memory_layout.integer_size integer in
                 let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
                 let by_minus_one = local builder (Raw Bool)
@@ -267,9 +276,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       let text_at address ~is_present =
         emit builder (Assign (is_present, Binary (Not_equal, Copy (at address), Constant Null)));
         let elements = local builder (Raw (Pointer (Data byte))) in
-        let count = usize_local "length" in
+        let count = uint64_local "length" in
         emit builder (Assign (at elements, Use (Constant (Bytes ""))));
-        emit builder (Assign (at count, Use (usize 0)));
+        emit builder (Assign (at count, Use (constant_uint64 0)));
         when_ builder (Copy is_present) (fun () ->
             emit builder (Assign (at elements, Use (Copy (at address))));
             call ~result:(at count) Terminated_length [ Copy (at address) ]);
@@ -288,7 +297,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Negate -> (
           (* The least value of a signed type has no negation in the type. *)
           match integer_argument () with
-          | Some ((Int8 | Int16 | Int32 | Int64 | ISize) as integer) when checks ->
+          | Some ((Int8 | Int16 | Int32 | Int64) as integer) when checks ->
               let bits = 8 * Memory_layout.integer_size integer in
               let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
               let of_least = local builder (Raw Bool) in
@@ -322,7 +331,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Compare_bytes ->
           let left = place (argument 0) and right = place (argument 1) in
           let shorter = local builder (Raw Bool) in
-          let count = usize_local "count" in
+          let count = uint64_local "count" in
           emit builder (Assign (at shorter, Binary (Less, view_length left, view_length right)));
           emit builder (Assign (at count, Use (view_length right)));
           when_ builder
@@ -364,7 +373,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 Constant (Integer (amount, Z.of_int number))
               in
               (match amount with
-              | Int8 | Int16 | Int32 | Int64 | ISize ->
+              | Int8 | Int16 | Int32 | Int64 ->
                   panic_if (Binary (Less, value 1, constant 0)) "shift amount out of range"
               | _ -> ());
               panic_if (Binary (Greater_equal, value 1, constant bits)) "shift amount out of range"
@@ -461,7 +470,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let result = local builder (Value ty) in
           emit builder (Assign (at result, Storage.empty ty));
           let any = local builder (Raw Bool) in
-          emit builder (Assign (at any, Binary (Greater, value 0, usize 0)));
+          emit builder (Assign (at any, Binary (Greater, value 0, constant_uint64 0)));
           when_ builder (Copy (at any)) (fun () -> set_capacity (at result) (value 0));
           set (Use (Move (at result)))
       | Storage_length -> set (Use (length (place (argument 0))))
@@ -492,13 +501,14 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             (Binary (Greater_equal, length storage, Copy (Storage.capacity storage)))
             "an element pushed to a storage that has no room";
           emit builder (Assign (element_at storage (length storage), Use (value 1)));
-          add_to_length storage (usize 1)
+          add_to_length storage (constant_uint64 1)
       | Storage_pop ->
           let storage = place (argument 0) in
           panic_if
-            (Binary (Equal, length storage, usize 0))
+            (Binary (Equal, length storage, constant_uint64 0))
             "an element popped from an empty storage";
-          emit builder (Assign (Storage.length storage, Binary (Subtract, length storage, usize 1)));
+          emit builder
+            (Assign (Storage.length storage, Binary (Subtract, length storage, constant_uint64 1)));
           set (Use (Move (element_at storage (length storage))))
       | Storage_insert ->
           let storage = place (argument 0) in
@@ -507,12 +517,14 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           panic_if
             (Binary (Greater_equal, length storage, Copy (Storage.capacity storage)))
             "an element inserted into a storage that has no room";
-          let after = usize_local "after" in
-          let bytes = usize_local "bytes" in
-          emit builder (Assign (at after, Binary (Add, index, usize 1)));
+          let after = uint64_local "after" in
+          let bytes = uint64_local "bytes" in
+          emit builder (Assign (at after, Binary (Add, index, constant_uint64 1)));
           emit builder (Assign (at bytes, Binary (Subtract, length storage, index)));
           emit builder
-            (Assign (at bytes, Binary (Multiply, Copy (at bytes), usize (element_layout ()).size)));
+            (Assign
+               ( at bytes,
+                 Binary (Multiply, Copy (at bytes), constant_uint64 (element_layout ()).size) ));
           call Move_bytes
             [
               Address { place = element_at storage (Copy (at after)); writable = true };
@@ -520,26 +532,29 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               Copy (at bytes);
             ];
           emit builder (Assign (element_at storage index, Use (value 2)));
-          add_to_length storage (usize 1)
+          add_to_length storage (constant_uint64 1)
       | Storage_remove ->
           check_index (value 1) (length (place (argument 0)));
           own (argument 0);
           let storage = place (argument 0) in
           let index = value 1 in
           set (Use (Move (element_at storage index)));
-          let after = usize_local "after" in
-          let bytes = usize_local "bytes" in
-          emit builder (Assign (at after, Binary (Add, index, usize 1)));
+          let after = uint64_local "after" in
+          let bytes = uint64_local "bytes" in
+          emit builder (Assign (at after, Binary (Add, index, constant_uint64 1)));
           emit builder (Assign (at bytes, Binary (Subtract, length storage, Copy (at after))));
           emit builder
-            (Assign (at bytes, Binary (Multiply, Copy (at bytes), usize (element_layout ()).size)));
+            (Assign
+               ( at bytes,
+                 Binary (Multiply, Copy (at bytes), constant_uint64 (element_layout ()).size) ));
           call Move_bytes
             [
               Address { place = element_at storage index; writable = true };
               Address { place = element_at storage (Copy (at after)); writable = true };
               Copy (at bytes);
             ];
-          emit builder (Assign (Storage.length storage, Binary (Subtract, length storage, usize 1)))
+          emit builder
+            (Assign (Storage.length storage, Binary (Subtract, length storage, constant_uint64 1)))
       | Storage_swap ->
           check_index (value 1) (length (place (argument 0)));
           check_index (value 2) (length (place (argument 0)));
@@ -569,14 +584,14 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let result = local builder (Value ty) in
           emit builder (Assign (at result, Storage.empty ty));
           if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
-            set_capacity (at result) (Constant (Integer (USize, count)));
+            set_capacity (at result) (Constant (Integer (UInt64, count)));
             let untyped = local builder (Raw (Pointer Opaque)) in
             emit builder (Assign (at untyped, Use (Copy (Storage.buffer (at result)))));
             let typed = local builder (Pointer { target = Value array_ty; writable = true }) in
             emit builder (Assign (at typed, Use (Copy (at untyped))));
             emit builder (Assign ({ root = Local typed; projections = [ Deref ] }, Use (value 0)))
           end;
-          add_to_length (at result) (Constant (Integer (USize, count)));
+          add_to_length (at result) (Constant (Integer (UInt64, count)));
           set (Use (Move (at result)))
       | Array_from_storage ->
           (* The storage's buffer holds the elements one after another, as
@@ -602,7 +617,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             emit builder
               (Assign
                  ( at other,
-                   Binary (Not_equal, length moved_storage, Constant (Integer (USize, count))) ));
+                   Binary (Not_equal, length moved_storage, Constant (Integer (UInt64, count))) ));
             panic_when (Copy (at other)) "a storage made into an array of another length"
           end;
           if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
@@ -615,7 +630,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           (* Static elements have no buffer to free. *)
           let owns = local builder (Raw Bool) in
           emit builder
-            (Assign (at owns, Binary (Greater, Copy (Storage.capacity moved_storage), usize 0)));
+            (Assign
+               (at owns, Binary (Greater, Copy (Storage.capacity moved_storage), constant_uint64 0)));
           when_ builder
             (Copy (at owns))
             (fun () -> call Free [ Copy (Storage.buffer moved_storage) ])
@@ -637,13 +653,13 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           in
           let elements : Lowered.operand =
             if Memory_layout.has_zero_size env array_ty then Constant (Bytes "")
-            else Address { place = read (argument 0) / Index (usize 0); writable = false }
+            else Address { place = read (argument 0) / Index (constant_uint64 0); writable = false }
           in
           set
             (Storage.view
                (Storage.view_of_elements (element ()))
                ~elements
-               ~length:(Constant (Integer (USize, count))))
+               ~length:(Constant (Integer (UInt64, count))))
       | View_swap ->
           check_index (value 1) (view_length (place (argument 0)));
           check_index (value 2) (view_length (place (argument 0)));
@@ -666,10 +682,10 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                     | [ count ] -> count
                     | _ -> bug "array_take_view without the array's length"
                   in
-                  (owner / Index from, Lowered.Constant (Integer (USize, count)))
+                  (owner / Index from, Lowered.Constant (Integer (UInt64, count)))
             in
             let message = "a view taken back is not of these elements" in
-            let stop = usize_local "stop" in
+            let stop = uint64_local "stop" in
             emit builder (Assign (at stop, Binary (Add, from, view_length part)));
             let beyond = local builder (Raw Bool) in
             emit builder (Assign (at beyond, Binary (Greater, Copy (at stop), owner_length)));
@@ -679,18 +695,18 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                  to compare. *)
               let go_on = block builder and compare = block builder in
               let empty = local builder (Raw Bool) in
-              emit builder (Assign (at empty, Binary (Equal, view_length part, usize 0)));
+              emit builder (Assign (at empty, Binary (Equal, view_length part, constant_uint64 0)));
               branch builder (Copy (at empty)) ~yes:go_on ~no:compare;
               start builder compare;
               let expected =
                 local builder (Pointer { target = Value (element ()); writable = false })
               in
               emit builder (Assign (at expected, Use (Address { place = first; writable = false })));
-              let expected_address = usize_local "expected" and address = usize_local "address" in
+              let expected_address = uint64_local "expected" and address = uint64_local "address" in
               emit builder
-                (Assign (at expected_address, Convert (Copy (at expected), Integer USize)));
+                (Assign (at expected_address, Convert (Copy (at expected), Integer UInt64)));
               emit builder
-                (Assign (at address, Convert (Copy (Storage.view_elements part), Integer USize)));
+                (Assign (at address, Convert (Copy (Storage.view_elements part), Integer UInt64)));
               let apart = local builder (Raw Bool) in
               emit builder
                 (Assign (at apart, Binary (Not_equal, Copy (at address), Copy (at expected_address))));
@@ -709,12 +725,12 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                ~length:(length storage))
       | View_length -> set (Use (view_length (place (argument 0))))
       | View_address ->
-          set (Convert (Copy (Storage.view_elements (place (argument 0))), Integer USize))
+          set (Convert (Copy (Storage.view_elements (place (argument 0))), Integer UInt64))
       | View_slice ->
           let view = place (argument 0) in
           panic_if (Binary (Greater, value 1, value 2)) "slice out of bounds";
           panic_if (Binary (Greater, value 2, view_length view)) "slice out of bounds";
-          let count = usize_local "count" in
+          let count = uint64_local "count" in
           emit builder (Assign (at count, Binary (Subtract, value 2, value 1)));
           set
             (Storage.view
@@ -796,8 +812,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
              address after the last is never passed. *)
           let environment = local builder (Raw (Pointer Opaque)) in
           call ~result:(at environment) Environment [];
-          let position = usize_local "position" in
-          emit builder (Assign (at position, Use (usize 0)));
+          let position = uint64_local "position" in
+          emit builder (Assign (at position, Use (constant_uint64 0)));
           let entry = local builder (Raw (Nullable_pointer (Data byte))) in
           let test = block builder and next = block builder and after = block builder in
           finish builder (Goto test);
@@ -810,7 +826,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           emit builder (Assign (at stop, Binary (Bit_or, Copy (at last), Copy (at reached))));
           branch builder (Copy (at stop)) ~yes:after ~no:next;
           start builder next;
-          emit builder (Assign (at position, Binary (Add, Copy (at position), usize 1)));
+          emit builder (Assign (at position, Binary (Add, Copy (at position), constant_uint64 1)));
           finish builder (Goto test);
           start builder after;
           text_at entry ~is_present:(place (argument 1))
@@ -825,7 +841,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                {
                  failure = Panic;
                  message = Constant (Bytes message);
-                 length = usize (String.length message);
+                 length = constant_uint64 (String.length message);
                  site;
                  reported;
                });
@@ -871,15 +887,16 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                       (fun index _ ->
                         let written = place (argument (next_argument ())) in
                         emit builder
-                          (Assign (at structure / Index (usize index), Use (Copy written)));
+                          (Assign (at structure / Index (constant_uint64 index), Use (Copy written)));
                         after :=
                           (fun () ->
                             emit builder
-                              (Assign (written, Use (Copy (at structure / Index (usize index))))))
+                              (Assign
+                                 (written, Use (Copy (at structure / Index (constant_uint64 index))))))
                           :: !after)
                       names;
                     Address { place = at structure; writable = true }
-                | Always number -> usize number
+                | Always number -> constant_uint64 number
                 | Fixed number -> number_constant number)
               parameters
           in
@@ -908,9 +925,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                   | Always _ | Fixed _ -> [])
                 parameters
             in
-            let as_usize operand : Lowered.operand =
-              let count = usize_local "count" in
-              emit builder (Assign (at count, Convert (operand, Integer USize)));
+            let as_uint64 operand : Lowered.operand =
+              let count = uint64_local "count" in
+              emit builder (Assign (at count, Convert (operand, Integer UInt64)));
               Copy (at count)
             in
             let counted (extent : Libc.extent) : Lowered.operand option =
@@ -918,16 +935,17 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               | Counted { by; each } -> (
                   match List.find_opt (fun (name, _, _) -> name = by) passed with
                   | Some (_, _, index) ->
-                      let count = as_usize (value index) in
+                      let count = as_uint64 (value index) in
                       if each = 1 then Some count
                       else begin
-                        let scaled = usize_local "count" in
-                        emit builder (Assign (at scaled, Binary (Multiply, count, usize each)));
+                        let scaled = uint64_local "count" in
+                        emit builder
+                          (Assign (at scaled, Binary (Multiply, count, constant_uint64 each)));
                         Some (Copy (at scaled))
                       end
                   | None -> bug "a C library row counts by %s, which it does not take" by)
-              | Exactly elements -> Some (usize elements)
-              | Number number -> Some (as_usize (number_constant number))
+              | Exactly elements -> Some (constant_uint64 elements)
+              | Number number -> Some (as_uint64 (number_constant number))
               | Through_zero -> None
             in
             List.iter
@@ -963,10 +981,10 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                           | Integer integer -> Constant (Integer (integer, Z.zero))
                           | _ -> bug "a C library row reads up to a zero that is not an integer"
                         in
-                        panic_if (Binary (Equal, view_length view, usize 0)) message;
-                        let last = usize_local "last" in
+                        panic_if (Binary (Equal, view_length view, constant_uint64 0)) message;
+                        let last = uint64_local "last" in
                         emit builder
-                          (Assign (at last, Binary (Subtract, view_length view, usize 1)));
+                          (Assign (at last, Binary (Subtract, view_length view, constant_uint64 1)));
                         panic_if
                           (Binary (Not_equal, Copy (Storage.view_at view (Copy (at last))), zero))
                           message)

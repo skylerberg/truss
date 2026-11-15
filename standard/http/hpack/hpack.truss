@@ -83,11 +83,11 @@ let huffman_counts: Array[UInt16, 31] = [0, 0, 0, 0, 0, 10, 26, 32, 6, 0, 5, 3, 
 
 let huffman_offsets: Array[UInt16, 31] = [0, 0, 0, 0, 0, 0, 10, 36, 68, 74, 74, 79, 82, 84, 90, 92, 95, 95, 95, 95, 98, 106, 119, 145, 174, 186, 190, 205, 224, 253, 253]
 
-fn entry_size(name: StringSlice, value: StringSlice) -> USize {
+fn entry_size(name: StringSlice, value: StringSlice) -> UInt64 {
   name.length().saturating_add(value.length()).saturating_add(32)
 }
 
-type Table(entries: List[Field], size: USize, limit: USize)
+type Table(entries: List[Field], size: UInt64, limit: UInt64)
 
 fn evict(table: mut Table) {
   while table.size > table.limit && !table.entries.is_empty() {
@@ -111,12 +111,12 @@ fn insert(table: mut Table, name: StringSlice, value: StringSlice) {
   evict(mut table)
 }
 
-fn resize(table: mut Table, limit: USize) {
+fn resize(table: mut Table, limit: UInt64) {
   table.limit = limit
   evict(mut table)
 }
 
-fn entry_name(table: Table, index: USize) -> Result[String, Error] {
+fn entry_name(table: Table, index: UInt64) -> Result[String, Error] {
   if index == 0 {
     return Err(failure("a header index of zero"))
   }
@@ -130,7 +130,7 @@ fn entry_name(table: Table, index: USize) -> Result[String, Error] {
   Ok(table.entries[table.entries.length() - 1 - position].name.copy())
 }
 
-fn entry_value(table: Table, index: USize) -> Result[String, Error] {
+fn entry_value(table: Table, index: UInt64) -> Result[String, Error] {
   if index == 0 {
     return Err(failure("a header index of zero"))
   }
@@ -144,19 +144,19 @@ fn entry_value(table: Table, index: USize) -> Result[String, Error] {
   Ok(table.entries[table.entries.length() - 1 - position].value.copy())
 }
 
-fn read_integer(block: Slice[UInt8], at: mut USize, prefix_bits: USize) -> Result[USize, Error] {
+fn read_integer(block: Slice[UInt8], at: mut UInt64, prefix_bits: UInt64) -> Result[UInt64, Error] {
   if at >= block.length() || prefix_bits == 0 || prefix_bits > 8 {
     return Err(failure("a header block that ends early"))
   }
-  let mask: USize = (1 << prefix_bits) - 1
-  var value = intrinsic::convert[UInt8, USize](block[at]) & mask
+  let mask: UInt64 = (1 << prefix_bits) - 1
+  var value = intrinsic::convert[UInt8, UInt64](block[at]) & mask
   at += 1
   if value < mask {
     return Ok(value)
   }
-  var shift: USize = 0
+  var shift: UInt64 = 0
   while at < block.length() {
-    let byte = intrinsic::convert[UInt8, USize](block[at])
+    let byte = intrinsic::convert[UInt8, UInt64](block[at])
     at += 1
     if shift > 21 {
       return Err(failure("an integer that is too large"))
@@ -173,8 +173,8 @@ fn read_integer(block: Slice[UInt8], at: mut USize, prefix_bits: USize) -> Resul
 fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
   var output: List[UInt8] = List.with_capacity(bytes.length())
   var code: UInt32 = 0
-  var length: USize = 0
-  let width: USize = 8
+  var length: UInt64 = 0
+  let width: UInt64 = 8
   for byte in bytes {
     for bit_index in 0..width {
       let bit: UInt32 = intrinsic::convert((byte >> (7 - bit_index)) & 1)
@@ -186,7 +186,7 @@ fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
       let first = huffman_first_codes[length]
       let count: UInt32 = intrinsic::convert(huffman_counts[length])
       if code >= first && code - first < count {
-        let position = intrinsic::convert[UInt16, USize](huffman_offsets[length]) + intrinsic::convert[UInt32, USize](code - first)
+        let position = intrinsic::convert[UInt16, UInt64](huffman_offsets[length]) + intrinsic::convert[UInt32, UInt64](code - first)
         if position >= 257 {
           return Err(failure("a Huffman code that is not in the table"))
         }
@@ -206,20 +206,20 @@ fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
   Ok(own output)
 }
 
-fn huffman_length(bytes: Slice[UInt8]) -> USize {
-  var bits: USize = 0
+fn huffman_length(bytes: Slice[UInt8]) -> UInt64 {
+  var bits: UInt64 = 0
   for byte in bytes {
-    bits = bits.saturating_add(intrinsic::convert(huffman_lengths[intrinsic::convert[UInt8, USize](byte)]))
+    bits = bits.saturating_add(intrinsic::convert(huffman_lengths[intrinsic::convert[UInt8, UInt64](byte)]))
   }
   bits.saturating_add(7) / 8
 }
 
 fn huffman_encode(output: mut List[UInt8], bytes: Slice[UInt8]) {
   var pending: UInt64 = 0
-  var bits: USize = 0
+  var bits: UInt64 = 0
   for byte in bytes {
-    let symbol: USize = intrinsic::convert(byte)
-    let length: USize = intrinsic::convert(huffman_lengths[symbol])
+    let symbol: UInt64 = intrinsic::convert(byte)
+    let length: UInt64 = intrinsic::convert(huffman_lengths[symbol])
     let code: UInt64 = intrinsic::convert(huffman_codes[symbol])
     if bits > 7 || length > 30 {
       return
@@ -235,12 +235,12 @@ fn huffman_encode(output: mut List[UInt8], bytes: Slice[UInt8]) {
     pending = pending & ((1 << bits) - 1)
   }
   if bits > 0 && bits < 8 {
-    let fill: USize = 8 - bits
+    let fill: UInt64 = 8 - bits
     mut output.push(intrinsic::convert(((pending << fill) | (255 >> bits)) & 255))
   }
 }
 
-fn read_string(block: Slice[UInt8], at: mut USize) -> Result[String, Error] {
+fn read_string(block: Slice[UInt8], at: mut UInt64) -> Result[String, Error] {
   if at >= block.length() {
     return Err(failure("a header block that ends early"))
   }
@@ -258,20 +258,20 @@ fn read_string(block: Slice[UInt8], at: mut USize) -> Result[String, Error] {
   }
 }
 
-public opaque type Decoder(table: Table, maximum: USize)
+public opaque type Decoder(table: Table, maximum: UInt64)
 
-public fn Decoder.new(limit: USize = 4096) -> Decoder {
+public fn Decoder.new(limit: UInt64 = 4096) -> Decoder {
   Decoder(table: Table(entries: [], size: 0, limit: limit), maximum: limit)
 }
 
-public fn Decoder.decode(mut self, block: Slice[UInt8], list_limit: USize = 65536) -> Result[List[Field], Error] {
+public fn Decoder.decode(mut self, block: Slice[UInt8], list_limit: UInt64 = 65536) -> Result[List[Field], Error] {
   decode_block(mut self.table, maximum: self.maximum, block: block, list_limit: list_limit)
 }
 
-fn decode_block(table: mut Table, maximum: USize, block: Slice[UInt8], list_limit: USize) -> Result[List[Field], Error] {
+fn decode_block(table: mut Table, maximum: UInt64, block: Slice[UInt8], list_limit: UInt64) -> Result[List[Field], Error] {
   var fields: List[Field] = []
-  var list_size: USize = 0
-  var at: USize = 0
+  var list_size: UInt64 = 0
+  var at: UInt64 = 0
   while at < block.length() {
     let first = block[at]
     if (first & 128) != 0 {
@@ -308,11 +308,11 @@ fn decode_block(table: mut Table, maximum: USize, block: Slice[UInt8], list_limi
   Ok(own fields)
 }
 
-fn write_integer(output: mut List[UInt8], flags: UInt8, prefix_bits: USize, value: USize) {
+fn write_integer(output: mut List[UInt8], flags: UInt8, prefix_bits: UInt64, value: UInt64) {
   if prefix_bits == 0 || prefix_bits > 8 {
     return
   }
-  let mask: USize = (1 << prefix_bits) - 1
+  let mask: UInt64 = (1 << prefix_bits) - 1
   if value < mask {
     mut output.push(flags | intrinsic::convert(value & 255))
     return
@@ -338,13 +338,13 @@ fn write_string(output: mut List[UInt8], text: StringSlice) {
   }
 }
 
-public opaque type Encoder(table: Table, pending_limit: Option[USize])
+public opaque type Encoder(table: Table, pending_limit: Option[UInt64])
 
-public fn Encoder.new(limit: USize = 4096) -> Encoder {
+public fn Encoder.new(limit: UInt64 = 4096) -> Encoder {
   Encoder(table: Table(entries: [], size: 0, limit: limit), pending_limit: None)
 }
 
-public fn Encoder.set_limit(mut self, limit: USize) {
+public fn Encoder.set_limit(mut self, limit: UInt64) {
   let bounded = if limit > 4096 { 4096 } else { limit }
   if bounded != self.table.limit {
     self.pending_limit = Some(bounded)
@@ -373,8 +373,8 @@ fn is_never_indexed(field: Field) -> Bool {
 
 fn encode_field(output: mut List[UInt8], table: mut Table, field: Field) {
   let sensitive = is_never_indexed(field)
-  var name_index: USize = 0
-  let static_count: USize = 61
+  var name_index: UInt64 = 0
+  let static_count: UInt64 = 61
   for index in 0..static_count {
     if static_names[index] == field.name {
       if !sensitive && static_values[index] == field.value {

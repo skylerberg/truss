@@ -1,5 +1,5 @@
-fn f(holders: mut List[Holder]) -> USize {
-  var total: USize = 0
+fn f(holders: mut List[Holder]) -> UInt64 {
+  var total: UInt64 = 0
   for holder in mut holders {
     let items = own holder.items
     total = total + items.length()

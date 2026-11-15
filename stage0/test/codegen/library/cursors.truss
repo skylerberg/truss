@@ -69,7 +69,7 @@ test "chain gives one cursor's values and then another's" {
 
 test "zip pairs two cursors up to the shorter, and enumerate counts from zero" {
   var total = 0
-  var pairs: USize = 0
+  var pairs: UInt64 = 0
   var zipped = Counter(next: 10, stop: 13).zip(count_to(2))
   while mut zipped.next() is Some(pair) {
     total += pair.first * pair.second
@@ -79,7 +79,7 @@ test "zip pairs two cursors up to the shorter, and enumerate counts from zero" {
   assert total == 32
   var counted = Counter(next: 10, stop: 13).enumerate()
   var weighted = 0
-  var last_index: USize = 0
+  var last_index: UInt64 = 0
   while mut counted.next() is Some(indexed) {
     last_index = indexed.index
     weighted += indexed.element
@@ -98,7 +98,7 @@ test "a peekable cursor shows the next value without taking it" {
   assert mut cursor.next() is None
 }
 
-type Letters(left: USize)
+type Letters(left: UInt64)
 
 impl Cursor for Letters {
   type Element = Character
@@ -147,15 +147,15 @@ test "the adapters and the trait's methods work on a list's cursor" {
   assert text.characters().skip(4).last() == Some(Character"o")
 }
 
-type Typed(most: USize)
+type Typed(most: UInt64)
 
-type LineLengths(most: USize, read_count: USize)
+type LineLengths(most: UInt64, read_count: UInt64)
 
 impl Cursor for LineLengths {
-  type Element = USize
+  type Element = UInt64
   capability Uses = Console
 
-  fn next(mut self) -> Option[USize]
+  fn next(mut self) -> Option[UInt64]
     uses Console
   {
     if self.read_count >= self.most {
@@ -182,9 +182,9 @@ fn typing(lines: own List[String]) -> simulation::World {
 test "the adapters work on a cursor that uses a capability" {
   let typed = Typed(most: 100)
   provide typing(["a", "bb", "ccc", "dddd", "eeeee", "ffffff"]) {
-    let middle: List[USize] = [2, 3]
+    let middle: List[UInt64] = [2, 3]
     assert typed.line_lengths().skip(1).take(2).to_list() == middle
-    let stepped: List[USize] = [4, 6]
+    let stepped: List[UInt64] = [4, 6]
     assert typed.line_lengths().step_by(2).to_list() == stepped
   }
   provide typing(["a", "bb", "ccc"]) {
@@ -204,10 +204,10 @@ test "the adapters work on a cursor that uses a capability" {
     assert mut cursor.next() is None
   }
   provide typing(["a", "bb", "ccc"]) {
-    let collected: List[USize] = List.collect(typed.line_lengths().skip(1))
-    let rest: List[USize] = [2, 3]
+    let collected: List[UInt64] = List.collect(typed.line_lengths().skip(1))
+    let rest: List[UInt64] = [2, 3]
     assert collected == rest
-    var longer: List[USize] = [9]
+    var longer: List[UInt64] = [9]
     mut longer.extend(typed.line_lengths())
     assert longer.length() == 1
   }

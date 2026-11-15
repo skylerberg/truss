@@ -151,11 +151,11 @@ public fn Parser.command(own self, command: own Parser) -> Parser {
   changed
 }
 
-fn Parser.find_long(self, name: StringSlice) -> USize
+fn Parser.find_long(self, name: StringSlice) -> UInt64
   ensures result <= self.parameters.length()
   cost time finite
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     decreases self.parameters.length() - index
@@ -169,11 +169,11 @@ fn Parser.find_long(self, name: StringSlice) -> USize
   self.parameters.length()
 }
 
-fn Parser.find_short(self, letter: Character) -> USize
+fn Parser.find_short(self, letter: Character) -> UInt64
   ensures result <= self.parameters.length()
   cost time finite
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     decreases self.parameters.length() - index
@@ -186,13 +186,13 @@ fn Parser.find_short(self, letter: Character) -> USize
   self.parameters.length()
 }
 
-fn Parser.positional_at(self, count: USize) -> USize
+fn Parser.positional_at(self, count: UInt64) -> UInt64
   ensures result <= self.parameters.length()
   cost time finite
 {
-  var seen: USize = 0
+  var seen: UInt64 = 0
   var rest = self.parameters.length()
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     invariant seen <= index
@@ -214,11 +214,11 @@ fn Parser.positional_at(self, count: USize) -> USize
   rest
 }
 
-fn Parser.find_command(self, name: StringSlice) -> USize
+fn Parser.find_command(self, name: StringSlice) -> UInt64
   ensures result <= self.commands.length()
   cost time finite
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.commands.length()
     invariant index <= self.commands.length()
     decreases self.commands.length() - index
@@ -231,11 +231,11 @@ fn Parser.find_command(self, name: StringSlice) -> USize
   self.commands.length()
 }
 
-fn Parsed.index_of(self, name: StringSlice) -> USize
+fn Parsed.index_of(self, name: StringSlice) -> UInt64
   ensures result <= self.options.length()
   cost time finite
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.options.length()
     invariant index <= self.options.length()
     decreases self.options.length() - index
@@ -273,11 +273,11 @@ fn set_flag(parsed: mut Parsed, name: StringSlice)
 fn Parser.take_option_value(
   self,
   parsed: mut Parsed,
-  position: USize,
+  position: UInt64,
   attached: Option[StringSlice],
   arguments: Slice[String],
-  next: USize,
-) -> Result[USize, Error]
+  next: UInt64,
+) -> Result[UInt64, Error]
   requires position < self.parameters.length()
   requires next <= arguments.length()
   ensures !(result is Ok(after) && (after < next || after > arguments.length()))
@@ -301,8 +301,8 @@ fn Parser.parse_long_option(
   parsed: mut Parsed,
   body: StringSlice,
   arguments: Slice[String],
-  next: USize,
-) -> Result[USize, Error]
+  next: UInt64,
+) -> Result[UInt64, Error]
   requires next <= arguments.length()
   ensures !(result is Ok(after) && (after < next || after > arguments.length()))
   cost time finite
@@ -334,8 +334,8 @@ fn Parser.parse_short_options(
   parsed: mut Parsed,
   body: StringSlice,
   arguments: Slice[String],
-  next: USize,
-) -> Result[USize, Error]
+  next: UInt64,
+) -> Result[UInt64, Error]
   requires next <= arguments.length()
   ensures !(result is Ok(after) && (after < next || after > arguments.length()))
   cost time finite
@@ -375,12 +375,12 @@ fn Parser.is_short_options(self, body: StringSlice) -> Bool
   }
 }
 
-fn Parser.finalize(self, parsed: own Parsed, positional_count: USize) -> Result[Parsed, Error]
+fn Parser.finalize(self, parsed: own Parsed, positional_count: UInt64) -> Result[Parsed, Error]
   cost time finite
 {
   var finished = own parsed
-  var seen: USize = 0
-  var index: USize = 0
+  var seen: UInt64 = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     invariant seen <= index
@@ -411,9 +411,9 @@ public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
   cost time finite
 {
   var parsed = Parsed(switches: [], options: [], command_name: None, command: [])
-  var positional_count: USize = 0
+  var positional_count: UInt64 = 0
   var literal = false
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < arguments.length()
     invariant index <= arguments.length()
     invariant positional_count <= index
@@ -517,11 +517,11 @@ fn Parameter.label(self) -> String
   text
 }
 
-fn Parser.label_width(self) -> USize
+fn Parser.label_width(self) -> UInt64
   cost time finite
 {
-  var width: USize = 0
-  var index: USize = 0
+  var width: UInt64 = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     decreases self.parameters.length() - index
@@ -546,7 +546,7 @@ fn Parser.label_width(self) -> USize
   width
 }
 
-fn write_row(text: mut String, label: StringSlice, width: USize, help: StringSlice)
+fn write_row(text: mut String, label: StringSlice, width: UInt64, help: StringSlice)
   cost time finite
 {
   mut text.push("  ")
@@ -558,11 +558,11 @@ fn write_row(text: mut String, label: StringSlice, width: USize, help: StringSli
   mut text.push("\n")
 }
 
-fn Parser.write_section(self, text: mut String, title: StringSlice, options: Bool, width: USize)
+fn Parser.write_section(self, text: mut String, title: StringSlice, options: Bool, width: UInt64)
   cost time finite
 {
   var written = false
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     decreases self.parameters.length() - index
@@ -595,7 +595,7 @@ public fn Parser.usage(self) -> String
 {
   var text = "usage: "
   mut text.push(self.name.slice())
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
     decreases self.parameters.length() - index
@@ -625,7 +625,7 @@ public fn Parser.help(self) -> String
   self.write_section(mut text, title: "options", options: true, width: width)
   if self.commands.length() > 0 {
     mut text.push("\ncommands:\n")
-    var index: USize = 0
+    var index: UInt64 = 0
     while index < self.commands.length()
       invariant index <= self.commands.length()
       decreases self.commands.length() - index
@@ -645,7 +645,7 @@ public fn Parser.help(self) -> String
 public fn Parsed.flag(self, name: StringSlice) -> Bool
   cost time finite
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.switches.length()
     invariant index <= self.switches.length()
     decreases self.switches.length() - index

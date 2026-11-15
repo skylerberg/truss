@@ -1,0 +1,4 @@
+fn f() -> StringSlice {
+  let text = "static".slice()
+  text
+}

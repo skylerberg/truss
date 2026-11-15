@@ -1,4 +1,3 @@
-use standard::intrinsic
 use standard::map
 use standard::streams
 use standard::url
@@ -100,10 +99,10 @@ public opaque type Multipart(
   delimiter: List[UInt8],
   buffer: List[UInt8],
   section: Section,
-  header_limit: USize,
+  header_limit: UInt64,
 )
 
-public fn Request.multipart(own self, header_limit: USize = 16384) -> Result[Multipart, Error] {
+public fn Request.multipart(own self, header_limit: UInt64 = 16384) -> Result[Multipart, Error] {
   if media_type(self.headers) != "multipart/form-data" {
     return Err(Error.Unsupported(message: "a body that is not multipart/form-data"))
   }
@@ -119,14 +118,14 @@ public fn Request.multipart(own self, header_limit: USize = 16384) -> Result[Mul
   Ok(Multipart(body: own self.body, delimiter: own delimiter, buffer: [13, 10], section: Section.Preamble, header_limit: header_limit))
 }
 
-fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[USize]
+fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[UInt64]
   ensures !(result is Some(at) && (at > haystack.length() || haystack.length() - at < needle.length()))
 {
   if needle.is_empty() || haystack.length() < needle.length() {
     return None
   }
   let last = haystack.length() - needle.length()
-  var at: USize = 0
+  var at: UInt64 = 0
   while at <= last {
     var is_match = true
     for offset in 0..needle.length() {
@@ -143,19 +142,19 @@ fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[USize]
   None
 }
 
-fn fill_buffer(multipart: mut Multipart) -> Result[USize, Error]
+fn fill_buffer(multipart: mut Multipart) -> Result[UInt64, Error]
   uses Handles, Tasks
 {
   mut multipart.body.read(mut multipart.buffer, limit: 65536)
 }
 
-fn drop_front(bytes: mut List[UInt8], count: USize) -> List[UInt8] {
+fn drop_front(bytes: mut List[UInt8], count: UInt64) -> List[UInt8] {
   let kept = if count < bytes.length() { count } else { bytes.length() }
   let rest = mut bytes.split_off(kept)
   map::exchange(mut bytes, value: own rest)
 }
 
-fn content_piece(multipart: mut Multipart, limit: USize) -> Result[Option[List[UInt8]], Error]
+fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[UInt8]], Error]
   uses Handles, Tasks
 {
   while true {
@@ -257,7 +256,7 @@ public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
   Ok(Some(Part(name: own name, filename: own filename, content_type: own content_type, headers: own headers)))
 }
 
-public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, Error]
+public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
   uses Handles, Tasks
 {
   if self.section != Section.Body || limit == 0 {
@@ -273,7 +272,7 @@ public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: USize) -> Res
   }
 }
 
-public fn Multipart.read_all(mut self, limit: USize = 8388608) -> Result[List[UInt8], Error]
+public fn Multipart.read_all(mut self, limit: UInt64 = 8388608) -> Result[List[UInt8], Error]
   uses Handles, Tasks
 {
   var bytes: List[UInt8] = []
@@ -299,7 +298,7 @@ public fn Multipart.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> 
     match content_piece(mut self, limit: 65536)? {
       Some(piece) => {
         system(mut sink.write_all(piece.slice()))?
-        copied = copied.saturating_add(intrinsic::convert(piece.length()))
+        copied = copied.saturating_add(piece.length())
       }
       None => {}
     }

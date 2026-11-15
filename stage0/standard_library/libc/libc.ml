@@ -20,7 +20,7 @@ let host =
   | Some os, Some architecture -> Some { os; architecture }
   | _ -> None
 
-type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float32 | Float64
+type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | Float32 | Float64
 
 type number =
   | O_rdonly
@@ -496,19 +496,19 @@ let describe function_ =
   let counted by = Counted { by; each = 1 } in
   match function_ with
   | Write ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("bytes", Elements (UInt8, counted "count"), everywhere (Pointer (Const Void)));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Read ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Open ->
@@ -580,10 +580,10 @@ let describe function_ =
             everywhere (Pointer (Const Void)) );
           ("attributes", Always 0, everywhere (Pointer (Const Void)));
           ( "arguments",
-            Elements (USize, Through_zero),
+            Elements (UInt64, Through_zero),
             everywhere (Pointer (Const (Pointer (Named "char")))) );
           ( "environment",
-            Elements (USize, Through_zero),
+            Elements (UInt64, Through_zero),
             everywhere (Pointer (Const (Pointer (Named "char")))) );
         ]
         ~named:
@@ -605,7 +605,7 @@ let describe function_ =
       row (everywhere (Named "int")) (Returns Int32) ~variadic_from:3
         [
           ("buffer", Room (UInt8, counted "size"), everywhere (Pointer (Named "char")));
-          ("size", Value USize, size);
+          ("size", Value UInt64, size);
           ("format", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
           ("precision", Value Int32, everywhere (Named "int"));
           ("value", Value Float64, everywhere (Named "double"));
@@ -642,7 +642,7 @@ let describe function_ =
             Elements_to_change (Int32, Counted { by = "count"; each = 2 }),
             everywhere (Pointer (Struct "pollfd")) );
           ( "count",
-            Value USize,
+            Value UInt64,
             by_os (function Linux -> Named "unsigned long" | Macos -> Named "unsigned int") );
           ("timeout", Value Int32, everywhere (Named "int"));
         ]
@@ -666,7 +666,7 @@ let describe function_ =
         ]
         ~headers:[ "signal.h" ]
   | Sysconf ->
-      row (everywhere (Named "long")) (Returns ISize)
+      row (everywhere (Named "long")) (Returns Int64)
         [ ("name", Value Int32, everywhere (Named "int")) ]
         ~headers:[ "unistd.h" ]
   | Exit ->
@@ -674,20 +674,20 @@ let describe function_ =
         [ ("status", Value Int32, everywhere (Named "int")) ]
         ~symbol:(everywhere "_exit") ~headers:[ "unistd.h" ]
   | Pread ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
           ("offset", Value Int64, offset);
         ]
         ~headers:[ "unistd.h" ]
   | Pwrite ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("bytes", Elements (UInt8, counted "count"), everywhere (Pointer (Const Void)));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
           ("offset", Value Int64, offset);
         ]
         ~headers:[ "unistd.h" ]
@@ -795,11 +795,11 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h"; "sys/stat.h" ]
   | Readlink ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("path", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
           ("buffer", Room (UInt8, counted "count"), everywhere (Pointer (Named "char")));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Realpath ->
@@ -821,7 +821,7 @@ let describe function_ =
         Text
         [
           ("buffer", Room (UInt8, counted "size"), everywhere (Pointer (Named "char")));
-          ("size", Value USize, size);
+          ("size", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Gethostname ->
@@ -829,7 +829,7 @@ let describe function_ =
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("name", Elements_to_change (UInt8, counted "size"), everywhere (Pointer (Named "char")));
-          ("size", Value USize, size);
+          ("size", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Getpid -> row (everywhere (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
@@ -842,7 +842,7 @@ let describe function_ =
         [
           ("process", Value Int32, everywhere (Named "int"));
           ("buffer", Room (UInt8, counted "size"), everywhere (Pointer Void));
-          ("size", Value USize, everywhere (Named "unsigned int"));
+          ("size", Value UInt64, everywhere (Named "unsigned int"));
         ]
         ~headers:[ "libproc.h" ]
   | Fcntl_dupfd_cloexec ->
@@ -928,11 +928,11 @@ let describe function_ =
          is a [struct dirent64], as long as it says it is. *)
       row ~at_most:"count"
         ~on:(fun os -> os = Linux)
-        (everywhere (Named "long")) (Returns ISize)
+        (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
         ]
         ~headers:[ "dirent.h" ]
   | Getattrlistbulk ->
@@ -946,7 +946,7 @@ let describe function_ =
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("wanted", Elements (UInt8, Exactly 24), everywhere (Pointer Void));
           ("buffer", Elements_to_change (UInt8, counted "size"), everywhere (Pointer Void));
-          ("size", Value USize, size);
+          ("size", Value UInt64, size);
           ("options", Value UInt64, everywhere (Named "unsigned long long"));
         ]
         ~headers:[ "sys/attr.h"; "unistd.h" ]
@@ -1003,7 +1003,7 @@ let describe function_ =
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("address", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
-          ("length", Value USize, everywhere (Named "unsigned int"));
+          ("length", Value UInt64, everywhere (Named "unsigned int"));
         ]
         ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h"; "netinet/in.h" ]
@@ -1021,7 +1021,7 @@ let describe function_ =
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("address", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
-          ("length", Value USize, everywhere (Named "unsigned int"));
+          ("length", Value UInt64, everywhere (Named "unsigned int"));
         ]
         ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h" ]
@@ -1073,7 +1073,7 @@ let describe function_ =
           ("level", Value Int32, everywhere (Named "int"));
           ("option", Value Int32, everywhere (Named "int"));
           ("value", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
-          ("length", Value USize, everywhere (Named "unsigned int"));
+          ("length", Value UInt64, everywhere (Named "unsigned int"));
         ]
         ~headers:[ "sys/socket.h"; "sys/time.h" ]
         ~layout:
@@ -1089,23 +1089,23 @@ let describe function_ =
         ]
         ~headers:[ "sys/socket.h" ]
   | Sendto ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("bytes", Elements (UInt8, counted "count"), everywhere (Pointer (Const Void)));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
           ("flags", Value Int32, everywhere (Named "int"));
           ("address", Elements (UInt8, counted "length"), everywhere (Pointer (Const Void)));
-          ("length", Value USize, everywhere (Named "unsigned int"));
+          ("length", Value UInt64, everywhere (Named "unsigned int"));
         ]
         ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h" ]
   | Recvfrom ->
-      row ~at_most:"count" (everywhere (Named "long")) (Returns ISize)
+      row ~at_most:"count" (everywhere (Named "long")) (Returns Int64)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
           ("buffer", Room (UInt8, counted "count"), everywhere (Pointer Void));
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
           ("flags", Value Int32, everywhere (Named "int"));
           ("address", Elements_to_change (UInt8, counted "length"), everywhere (Pointer Void));
           ("length", Written (UInt32, [ "length" ]), everywhere (Pointer (Named "unsigned int")));
@@ -1138,11 +1138,11 @@ let describe function_ =
          knows no such host, and -2 where it could not find out. *)
       row ~at_most:"room"
         ~symbol:(everywhere "t_runtime_addresses_of_host")
-        (everywhere (Named "long")) (Returns ISize)
+        (everywhere (Named "long")) (Returns Int64)
         [
           ("host", Elements (UInt8, Through_zero), everywhere (Pointer (Const (Named "char"))));
           ("addresses", Room (UInt8, counted "room"), everywhere (Pointer Void));
-          ("room", Value USize, size);
+          ("room", Value UInt64, size);
         ]
         ~headers:[]
   | Signals_wait ->
@@ -1157,7 +1157,7 @@ let describe function_ =
           ( "signals",
             Elements (Int32, counted "count"),
             everywhere (Pointer (Const (Named "int32_t"))) );
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
         ]
         ~headers:[]
   | (Descriptor_watch | Descriptor_wait) as waiting ->
@@ -1200,7 +1200,7 @@ let describe function_ =
           ( "descriptors",
             Elements (Int32, counted "count"),
             everywhere (Pointer (Const (Named "int32_t"))) );
-          ("count", Value USize, size);
+          ("count", Value UInt64, size);
           ("ticket", Value UInt64, everywhere (Named "uint64_t"));
         ]
         ~headers:[]
@@ -1569,19 +1569,17 @@ let number_name = function
   | So_reuseport -> "SO_REUSEPORT"
   | Sockaddr_un_path_size -> "SOCKADDR_UN_PATH_SIZE"
 
-(* A size or an offset in a structure is a [USize], and the bits of a
-   file's mode are compared with a number read out of the structure. *)
 let number_type = function
   | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
   | Stat_modified_offset | Stat_created_offset ->
-      USize
+      UInt64
   | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
   | Utime_omit -> Int64
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
   | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
   | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
   | Vtime | Sockaddr_family_offset | Sockaddr_family_size | Sockaddr_un_path_size ->
-      USize
+      UInt64
   | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
   | Cs8 ->
       UInt64
@@ -1875,11 +1873,7 @@ let value (system : system) number =
       Linux ) ->
       0
 
-let bytes = function
-  | UInt8 -> 1
-  | Int32 | UInt32 | Float32 -> 4
-  | Int64 | UInt64 | Float64 -> 8
-  | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
+let bytes = function UInt8 -> 1 | Int32 | UInt32 | Float32 -> 4 | Int64 | UInt64 | Float64 -> 8
 
 let check system =
   let functions = List.filter (available system) functions in

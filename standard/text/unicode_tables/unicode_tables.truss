@@ -1,13 +1,13 @@
 use standard::intrinsic
 use standard::text::unicode_data
 
-fn search(count: USize, compare: (fn(row: USize) -> Ordering requires row < count cost time O(1))) -> Option[USize]
+fn search(count: UInt64, compare: (fn(row: UInt64) -> Ordering requires row < count cost time O(1))) -> Option[UInt64]
   ensures !(result is Some(row) && row >= count)
   cost time O(1)
 {
-  var low: USize = 0
+  var low: UInt64 = 0
   var high = count
-  let steps: USize = 64
+  let steps: UInt64 = 64
   for _ in 0..steps
     invariant low <= high
     invariant high <= count
@@ -206,7 +206,7 @@ fn pool_range_of(index: Slice[UInt32], code: UInt32) -> Option[PoolRange]
 fn append_pool_range(output: mut List[UInt32], pool: Slice[UInt32], range: PoolRange)
   cost time finite
 {
-  var at: USize = intrinsic::convert(range.start)
+  var at: UInt64 = intrinsic::convert(range.start)
   var remaining = range.length
   while remaining > 0 && at < pool.length()
     decreases remaining

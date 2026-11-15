@@ -152,9 +152,6 @@ type unknown =
   | Unknown_literal of Types.literal_kind * int
   | Unknown_value of int
 
-(* Every unsolved variable in a type, at any depth: type variables, literal
-   variables, and [USize] value variables. The end of a statement's
-   inference uses only this function to find them. *)
 let unknowns unifier (type_ : Types.ty) =
   let unknowns = ref [] in
   let rec collect (type_ : Types.ty) =

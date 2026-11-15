@@ -9,7 +9,7 @@ fn total[Source: Cursor[Element = Int64]](items: own Source) -> Int64
   sum
 }
 
-fn counted[Source: Cursor](items: own Source) -> USize
+fn counted[Source: Cursor](items: own Source) -> UInt64
   uses Source.Uses
 {
   own items.count()

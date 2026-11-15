@@ -34,8 +34,8 @@ fn total(from: Int64) -> Int64 {
   sum
 }
 
-fn longest(words: own List[String]) -> USize {
-  var most: USize = 0
+fn longest(words: own List[String]) -> UInt64 {
+  var most: UInt64 = 0
   var cursor = Words(remaining: own words)
   for word in mut cursor {
     if word == "stop" {

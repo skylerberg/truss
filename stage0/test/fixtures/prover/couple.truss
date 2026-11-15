@@ -1,13 +1,13 @@
 type Couple(first: Int64, second: Int64)
 
-fn Couple.count(self) -> USize
+fn Couple.count(self) -> UInt64
   ensures result == 2
   cost time O(1)
 {
   2
 }
 
-fn Couple.element(self, position: USize) lends Int64
+fn Couple.element(self, position: UInt64) lends Int64
   requires position < 2
   ensures result == self.first || result == self.second
   cost time O(1)

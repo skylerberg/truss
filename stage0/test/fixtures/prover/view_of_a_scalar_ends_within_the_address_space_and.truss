@@ -1,6 +1,6 @@
 use standard::intrinsic
 
-fn placed(starts: intrinsic::View[USize]) -> USize {
+fn placed(starts: intrinsic::View[UInt64]) -> UInt64 {
   let first = intrinsic::view_address(starts)
   proof {
     assert intrinsic::view_length(starts) == 0 || first >= 1

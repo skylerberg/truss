@@ -125,10 +125,10 @@ let makers =
     };
     {
       maker = "a lambda that captures";
-      type_ = Some "fn() -> USize";
+      type_ = Some "fn() -> UInt64";
       make =
         (fun ~suffix place ->
-          ( [ Printf.sprintf "let built%s: fn() -> USize = fn() { %s.length() }" suffix place ],
+          ( [ Printf.sprintf "let built%s: fn() -> UInt64 = fn() { %s.length() }" suffix place ],
             "built" ^ suffix ));
     };
     { maker = "a cursor"; type_ = None; make = (fun ~suffix:_ place -> ([], place ^ ".cursor()")) };

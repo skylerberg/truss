@@ -1,7 +1,6 @@
 (* With [TRUSS_SKIP_SUITES] naming this executable, such as
    [prover_tests,database_tests], it says it is skipped and runs no test:
-   CI runs the slowest suites in jobs of their own, and skips a suite that
-   builds no C where it runs the codegen tests under sanitizers. *)
+   CI runs the slowest suites in jobs of their own. *)
 let () =
   let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
   match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
@@ -155,10 +154,10 @@ let write_files root files =
 
 let git directory arguments =
   match
-    Process.output "git"
+    Process.run "git"
       ([ "-C"; directory; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ] @ arguments)
   with
-  | 0, _ -> ()
+  | 0, _, _ -> ()
   | _ -> fail "git %s failed" (String.concat " " arguments)
 
 let rec files_under ~suffix directory =

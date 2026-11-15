@@ -39,8 +39,7 @@ fn value_of(text: StringSlice, names: Slice[String], first_name: UInt64) -> Resu
   let lower = text.to_ascii_lowercase()
   for index in 0..names.length() {
     if names[index] == lower {
-      let offset: UInt64 = intrinsic::convert(index)
-      return Ok(first_name.saturating_add(offset))
+      return Ok(first_name.saturating_add(index))
     }
   }
   Err(failure("a field value that is not a number or a name"))
@@ -183,7 +182,7 @@ public fn Schedule.next_after(self, after: Instant) -> Option[Instant] {
   var date = start.date
   let first_hour = start.time.hour()
   let first_minute = start.time.minute() + 1
-  let horizon: USize = 2928
+  let horizon: UInt64 = 2928
   for day_index in 0..horizon {
     if matches_day(self, date: date) {
       let hours: UInt8 = 24

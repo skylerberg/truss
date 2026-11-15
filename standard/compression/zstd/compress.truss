@@ -29,7 +29,7 @@ fn BitWriter.finish(own self) -> List[UInt8] {
   own bytes
 }
 
-type FseEncoder(table: FseTable, sources: List[UInt16], size: USize)
+type FseEncoder(table: FseTable, sources: List[UInt16], size: UInt64)
 
 let no_source: UInt16 = 65535
 
@@ -42,9 +42,9 @@ fn encoder_of(counts: Slice[Int16], log: UInt32) -> Option[FseEncoder] {
   var sources: List[UInt16] = List.filled(no_source, count: counts.length().saturating_multiply(size))
   for state in 0..size {
     let entry = table.entries[state]
-    let symbol: USize = intrinsic::convert(entry.symbol)
-    let width: USize = 1 << intrinsic::convert[UInt32, USize](entry.bits)
-    let baseline: USize = intrinsic::convert(entry.baseline)
+    let symbol: UInt64 = intrinsic::convert(entry.symbol)
+    let width: UInt64 = 1 << intrinsic::convert[UInt32, UInt64](entry.bits)
+    let baseline: UInt64 = intrinsic::convert(entry.baseline)
     for step in 0..width {
       let target = baseline.saturating_add(step)
       let slot = symbol.saturating_multiply(size).saturating_add(target)
@@ -56,7 +56,7 @@ fn encoder_of(counts: Slice[Int16], log: UInt32) -> Option[FseEncoder] {
   Some(FseEncoder(table: own table, sources: own sources, size: size))
 }
 
-fn FseEncoder.source(self, symbol: USize, target: USize) -> Option[USize] {
+fn FseEncoder.source(self, symbol: UInt64, target: UInt64) -> Option[UInt64] {
   let slot = symbol.saturating_multiply(self.size).saturating_add(target)
   if target >= self.size || slot >= self.sources.length() || self.sources[slot] == no_source {
     return None
@@ -64,17 +64,17 @@ fn FseEncoder.source(self, symbol: USize, target: USize) -> Option[USize] {
   Some(intrinsic::convert(self.sources[slot]))
 }
 
-fn FseEncoder.start(self, symbol: USize) -> Option[USize] {
+fn FseEncoder.start(self, symbol: UInt64) -> Option[UInt64] {
   self.source(symbol, target: 0)
 }
 
-fn FseEncoder.step(self, symbol: USize, next: USize, writer: mut BitWriter) -> Option[USize] {
+fn FseEncoder.step(self, symbol: UInt64, next: UInt64, writer: mut BitWriter) -> Option[UInt64] {
   let state = self.source(symbol, target: next)?
   if state >= self.table.entries.length() {
     return None
   }
   let entry = self.table.entries[state]
-  let baseline: USize = intrinsic::convert(entry.baseline)
+  let baseline: UInt64 = intrinsic::convert(entry.baseline)
   if next < baseline || next - baseline > 65535 {
     return None
   }
@@ -82,14 +82,14 @@ fn FseEncoder.step(self, symbol: USize, next: USize, writer: mut BitWriter) -> O
   Some(state)
 }
 
-type LzSequence(literal_length: USize, match_length: USize, offset_value: USize)
+type LzSequence(literal_length: UInt64, match_length: UInt64, offset_value: UInt64)
 
-type Code(symbol: USize, extra: UInt32, bits: UInt32)
+type Code(symbol: UInt64, extra: UInt32, bits: UInt32)
 
-fn code_of(value: USize, baselines: Slice[UInt32], extra_bits: Slice[UInt32]) -> Option[Code] {
+fn code_of(value: UInt64, baselines: Slice[UInt32], extra_bits: Slice[UInt32]) -> Option[Code] {
   var symbol = baselines.length()
   for index in 0..baselines.length() {
-    if intrinsic::convert[UInt32, USize](baselines[index]) <= value {
+    if intrinsic::convert[UInt32, UInt64](baselines[index]) <= value {
       symbol = index
     }
   }
@@ -97,7 +97,7 @@ fn code_of(value: USize, baselines: Slice[UInt32], extra_bits: Slice[UInt32]) ->
     return None
   }
   let bits = extra_bits[symbol]
-  let baseline: USize = intrinsic::convert(baselines[symbol])
+  let baseline: UInt64 = intrinsic::convert(baselines[symbol])
   if baseline > value || value - baseline >= 65536 || bits > 16 {
     return None
   }
@@ -108,12 +108,12 @@ fn code_of(value: USize, baselines: Slice[UInt32], extra_bits: Slice[UInt32]) ->
   Some(Code(symbol: symbol, extra: intrinsic::convert(extra), bits: bits))
 }
 
-fn offset_code_of(offset_value: USize) -> Option[Code] {
+fn offset_code_of(offset_value: UInt64) -> Option[Code] {
   if offset_value == 0 || offset_value >= 536870912 {
     return None
   }
   let symbol = highest_bit(intrinsic::convert(offset_value))
-  let base: USize = 1 << intrinsic::convert[UInt32, USize](symbol)
+  let base: UInt64 = 1 << intrinsic::convert[UInt32, UInt64](symbol)
   if base > offset_value {
     return None
   }
@@ -184,25 +184,25 @@ fn encode_sequences(sequences: Slice[LzSequence], encoders: Encoders) -> Option[
   Some(own writer.finish())
 }
 
-type Parse(sequences: List[LzSequence], literals: List[UInt8], last_offset: USize)
+type Parse(sequences: List[LzSequence], literals: List[UInt8], last_offset: UInt64)
 
 let hash_bits: UInt32 = 15
 
-let match_minimum: USize = 4
+let match_minimum: UInt64 = 4
 
-let window_size: USize = 1048576
+let window_size: UInt64 = 1048576
 
-let chain_depth: USize = 16
+let chain_depth: UInt64 = 16
 
-fn hash_at(input: Slice[UInt8], at: USize) -> USize
+fn hash_at(input: Slice[UInt8], at: UInt64) -> UInt64
   ensures result < 32768
 {
   let word: UInt32 = intrinsic::convert(u32_at(input, at: at))
   intrinsic::convert((word.wrapping_multiply(2654435761) >> (32 - hash_bits)) & 32767)
 }
 
-fn matching_length(input: Slice[UInt8], earlier: USize, later: USize, end: USize) -> USize {
-  var length: USize = 0
+fn matching_length(input: Slice[UInt8], earlier: UInt64, later: UInt64, end: UInt64) -> UInt64 {
+  var length: UInt64 = 0
   while later.saturating_add(length) < end && later.saturating_add(length) < input.length() && earlier.saturating_add(length) < later
     decreases end - later.saturating_add(length)
   {
@@ -214,14 +214,14 @@ fn matching_length(input: Slice[UInt8], earlier: USize, later: USize, end: USize
   length
 }
 
-type MatchFinder(heads: List[USize], chain: List[USize])
+type MatchFinder(heads: List[UInt64], chain: List[UInt64])
 
 fn finder_for(input: Slice[UInt8]) -> MatchFinder {
   let chain_size = if input.length() < window_size { input.length() } else { window_size }
   MatchFinder(heads: List.filled(0, count: 32768), chain: List.filled(0, count: chain_size))
 }
 
-fn MatchFinder.insert(mut self, input: Slice[UInt8], position: USize) {
+fn MatchFinder.insert(mut self, input: Slice[UInt8], position: UInt64) {
   let hash = hash_at(input, at: position)
   if hash < self.heads.length() && !self.chain.is_empty() {
     let slot = position % self.chain.length()
@@ -232,16 +232,16 @@ fn MatchFinder.insert(mut self, input: Slice[UInt8], position: USize) {
   }
 }
 
-type Candidate(length: USize, offset: USize)
+type Candidate(length: UInt64, offset: UInt64)
 
-fn MatchFinder.longest(self, input: Slice[UInt8], position: USize, end: USize) -> Candidate {
+fn MatchFinder.longest(self, input: Slice[UInt8], position: UInt64, end: UInt64) -> Candidate {
   let hash = hash_at(input, at: position)
   var best = Candidate(length: 0, offset: 0)
   if hash >= self.heads.length() || self.chain.is_empty() {
     return best
   }
   var next = self.heads[hash]
-  var depth: USize = 0
+  var depth: UInt64 = 0
   while next > 0 && depth < chain_depth
     decreases chain_depth - depth
   {
@@ -260,7 +260,7 @@ fn MatchFinder.longest(self, input: Slice[UInt8], position: USize, end: USize) -
   best
 }
 
-fn parse_block(input: Slice[UInt8], start: USize, end: USize, finder: mut MatchFinder, last_offset: USize) -> Parse {
+fn parse_block(input: Slice[UInt8], start: UInt64, end: UInt64, finder: mut MatchFinder, last_offset: UInt64) -> Parse {
   var sequences: List[LzSequence] = []
   var literals: List[UInt8] = []
   var repeated = last_offset
@@ -305,7 +305,7 @@ fn parse_block(input: Slice[UInt8], start: USize, end: USize, finder: mut MatchF
   Parse(sequences: own sequences, literals: own literals, last_offset: repeated)
 }
 
-fn write_literals_header(output: mut List[UInt8], size: USize) {
+fn write_literals_header(output: mut List[UInt8], size: UInt64) {
   if size < 32 {
     mut output.push(intrinsic::convert((size << 3) & 255))
   } else if size < 4096 {
@@ -318,7 +318,7 @@ fn write_literals_header(output: mut List[UInt8], size: USize) {
   }
 }
 
-fn write_sequence_count(output: mut List[UInt8], count: USize) {
+fn write_sequence_count(output: mut List[UInt8], count: UInt64) {
   if count < 128 {
     mut output.push(intrinsic::convert(count))
   } else if count < 0x7F00 {
@@ -349,16 +349,16 @@ fn compressed_block(parse: Parse, encoders: Encoders) -> Option[List[UInt8]] {
   Some(own block)
 }
 
-fn write_little_endian(output: mut List[UInt8], value: UInt64, count: USize) {
+fn write_little_endian(output: mut List[UInt8], value: UInt64, count: UInt64) {
   for index in 0..count {
     if index < 8 {
-      mut output.push(intrinsic::convert((value >> (8 * intrinsic::convert[USize, UInt64](index))) & 255))
+      mut output.push(intrinsic::convert((value >> (8 * index)) & 255))
     }
   }
 }
 
-fn write_block_header(output: mut List[UInt8], size: USize, kind: USize, is_last: Bool) {
-  let header: UInt64 = (intrinsic::convert[USize, UInt64](size & 0x1FFFFF) << 3) | (intrinsic::convert[USize, UInt64](kind & 3) << 1) | (if is_last { 1 } else { 0 })
+fn write_block_header(output: mut List[UInt8], size: UInt64, kind: UInt64, is_last: Bool) {
+  let header: UInt64 = ((size & 0x1FFFFF) << 3) | ((kind & 3) << 1) | (if is_last { 1 } else { 0 })
   write_little_endian(mut output, value: header, count: 3)
 }
 
@@ -374,7 +374,7 @@ fn is_one_byte(bytes: Slice[UInt8]) -> Bool {
 public fn compress(input: Slice[UInt8]) -> List[UInt8] {
   var output: List[UInt8] = []
   write_little_endian(mut output, value: intrinsic::convert(frame_magic), count: 4)
-  let size: UInt64 = intrinsic::convert(input.length())
+  let size: UInt64 = input.length()
   let size_flag: UInt64 = if size < 256 { 0 } else if size < 65792 { 1 } else if size <= 4294967295 { 2 } else { 3 }
   mut output.push(intrinsic::convert(((size_flag << 6) | 32 | 4) & 255))
   if size_flag == 0 {
@@ -391,8 +391,8 @@ public fn compress(input: Slice[UInt8]) -> List[UInt8] {
   }
   let tables = encoders()
   var finder = finder_for(input)
-  var last_offset: USize = 1
-  var start: USize = 0
+  var last_offset: UInt64 = 1
+  var start: UInt64 = 0
   while start < input.length()
     decreases input.length() - start
   {
@@ -428,30 +428,30 @@ public fn compress(input: Slice[UInt8]) -> List[UInt8] {
 
 let huffman_maximum_bits: UInt32 = 11
 
-let direct_weight_symbols: USize = 128
+let direct_weight_symbols: UInt64 = 128
 
 fn tree_lengths(counts: Slice[UInt64]) -> List[UInt32] {
   var weights: List[UInt64] = []
-  var parents: List[USize] = []
+  var parents: List[UInt64] = []
   var is_alive: List[Bool] = []
   for count in counts {
     mut weights.push(count)
-    mut parents.push(USize.maximum)
+    mut parents.push(UInt64.maximum)
     mut is_alive.push(count > 0)
   }
-  var alive: USize = 0
+  var alive: UInt64 = 0
   for count in counts {
     if count > 0 {
       alive = alive.saturating_add(1)
     }
   }
-  var rounds: USize = 0
+  var rounds: UInt64 = 0
   while alive > 1 && rounds < counts.length()
     decreases counts.length() - rounds
   {
     rounds += 1
-    var first = USize.maximum
-    var second = USize.maximum
+    var first = UInt64.maximum
+    var second = UInt64.maximum
     for node in 0..weights.length() {
       if node < is_alive.length() && is_alive[node] {
         if first >= weights.length() || weights[node] < weights[first] {
@@ -467,7 +467,7 @@ fn tree_lengths(counts: Slice[UInt64]) -> List[UInt32] {
     }
     let joined = weights.length()
     mut weights.push(weights[first].saturating_add(weights[second]))
-    mut parents.push(USize.maximum)
+    mut parents.push(UInt64.maximum)
     mut is_alive.push(true)
     parents[first] = joined
     parents[second] = joined
@@ -492,7 +492,7 @@ fn tree_lengths(counts: Slice[UInt64]) -> List[UInt32] {
 
 fn limited_lengths(counts: Slice[UInt64]) -> List[UInt32] {
   var scaled = counts.to_list()
-  var rounds: USize = 0
+  var rounds: UInt64 = 0
   while rounds < 64
     decreases 64 - rounds
   {
@@ -523,13 +523,13 @@ type HuffmanEncoding(description: List[UInt8], codes: List[HuffmanCode])
 fn huffman_encoding(literals: Slice[UInt8]) -> Option[HuffmanEncoding] {
   var counts: List[UInt64] = List.filled(0, count: 256)
   for literal in literals {
-    let index: USize = intrinsic::convert(literal)
+    let index: UInt64 = intrinsic::convert(literal)
     if index < counts.length() {
       counts[index] = counts[index].saturating_add(1)
     }
   }
-  var last: USize = 0
-  var distinct: USize = 0
+  var last: UInt64 = 0
+  var distinct: UInt64 = 0
   for symbol in 0..counts.length() {
     if counts[symbol] > 0 {
       last = symbol
@@ -558,7 +558,7 @@ fn huffman_encoding(literals: Slice[UInt8]) -> Option[HuffmanEncoding] {
   }
   var description: List[UInt8] = []
   mut description.push(intrinsic::convert((127 + last) & 255))
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < last
     decreases last - index
   {
@@ -567,15 +567,15 @@ fn huffman_encoding(literals: Slice[UInt8]) -> Option[HuffmanEncoding] {
     mut description.push(intrinsic::convert(((high << 4) | low) & 255))
     index += 2
   }
-  var ranks: List[USize] = List.filled(0, count: 13)
+  var ranks: List[UInt64] = List.filled(0, count: 13)
   for weight in weights {
-    let slot: USize = intrinsic::convert(weight)
+    let slot: UInt64 = intrinsic::convert(weight)
     if slot < ranks.length() {
       ranks[slot] = ranks[slot].saturating_add(1)
     }
   }
-  var starts: List[USize] = List.filled(0, count: 13)
-  var position: USize = 0
+  var starts: List[UInt64] = List.filled(0, count: 13)
+  var position: UInt64 = 0
   for weight in 1..13 {
     if weight < starts.length() && weight < ranks.length() {
       starts[weight] = position
@@ -584,7 +584,7 @@ fn huffman_encoding(literals: Slice[UInt8]) -> Option[HuffmanEncoding] {
   }
   var codes: List[HuffmanCode] = []
   for symbol in 0..weights.length() {
-    let weight: USize = intrinsic::convert(weights[symbol])
+    let weight: UInt64 = intrinsic::convert(weights[symbol])
     if weight == 0 || weight >= starts.length() || weight > 12 {
       mut codes.push(HuffmanCode(value: 0, length: 0))
     } else {
@@ -594,7 +594,7 @@ fn huffman_encoding(literals: Slice[UInt8]) -> Option[HuffmanEncoding] {
       if value > 4095 {
         return None
       }
-      mut codes.push(HuffmanCode(value: intrinsic::convert(value), length: (deepest + 1).saturating_subtract(intrinsic::convert[USize, UInt32](weight))))
+      mut codes.push(HuffmanCode(value: intrinsic::convert(value), length: (deepest + 1).saturating_subtract(intrinsic::convert[UInt64, UInt32](weight))))
     }
   }
   Some(HuffmanEncoding(description: own description, codes: own codes))
@@ -608,7 +608,7 @@ fn huffman_stream(literals: Slice[UInt8], codes: Slice[HuffmanCode]) -> Option[L
     decreases index
   {
     index -= 1
-    let symbol: USize = intrinsic::convert(literals[index])
+    let symbol: UInt64 = intrinsic::convert(literals[index])
     if symbol >= codes.length() {
       return None
     }
@@ -636,9 +636,9 @@ fn huffman_literals(literals: Slice[UInt8]) -> Option[List[UInt8]] {
     if first.length() > 65535 || second.length() > 65535 || third.length() > 65535 {
       return None
     }
-    write_little_endian(mut section, value: intrinsic::convert(first.length()), count: 2)
-    write_little_endian(mut section, value: intrinsic::convert(second.length()), count: 2)
-    write_little_endian(mut section, value: intrinsic::convert(third.length()), count: 2)
+    write_little_endian(mut section, value: first.length(), count: 2)
+    write_little_endian(mut section, value: second.length(), count: 2)
+    write_little_endian(mut section, value: third.length(), count: 2)
     mut section.append_slice(first.slice())
     mut section.append_slice(second.slice())
     mut section.append_slice(third.slice())
@@ -650,7 +650,7 @@ fn huffman_literals(literals: Slice[UInt8]) -> Option[List[UInt8]] {
     return None
   }
   let size_bits: UInt64 = if format == 0 { 10 } else if format == 2 { 14 } else { 18 }
-  let header: UInt64 = 2 | (format << 2) | (intrinsic::convert[USize, UInt64](regenerated) << 4) | (intrinsic::convert[USize, UInt64](compressed) << (4 + size_bits))
+  let header: UInt64 = 2 | (format << 2) | (regenerated << 4) | (compressed << (4 + size_bits))
   var output: List[UInt8] = []
   write_little_endian(mut output, value: header, count: if format == 0 { 3 } else if format == 2 { 4 } else { 5 })
   mut output.append_slice(section.slice())

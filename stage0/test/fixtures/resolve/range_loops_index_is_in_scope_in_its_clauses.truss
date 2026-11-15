@@ -1,4 +1,4 @@
-fn f(count: USize) {
+fn f(count: UInt64) {
   for index in 0..count
     invariant index <= count
   {

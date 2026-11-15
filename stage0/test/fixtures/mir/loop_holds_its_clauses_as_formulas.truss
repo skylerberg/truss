@@ -8,7 +8,7 @@ trait Shape {
 
 fn g(items: Slice[Int64]) -> Int64 {
   var total: Int64 = 0
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < items.length()
     invariant index <= items.length()
   {

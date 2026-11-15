@@ -1,4 +1,4 @@
-fn reset[count: USize](items: mut Array[Int64, count])
+fn reset[count: UInt64](items: mut Array[Int64, count])
   cost time O(items.length())
 {
   for item in mut items {

@@ -310,10 +310,6 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
       | _ -> ())
     clauses
 
-(* A type argument is a type or a [USize] value, so no argument can be
-   written for a capability parameter of a type or of a trait. A signature
-   or a field could then not name the type with the capabilities that its
-   value uses. *)
 let check_no_capability_parameter state definition_kind (name : name)
     (generics : generic_parameter list) =
   List.iter

@@ -1225,7 +1225,7 @@ and lower_statement st (statement : Mir.statement) =
            {
              failure = Assertion;
              message = Constant (Bytes message);
-             length = usize (String.length message);
+             length = constant_uint64 (String.length message);
              site = site_of st origin;
              reported = None;
            });
@@ -1427,7 +1427,8 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
   | Array elements ->
       List.iteri
         (fun index element ->
-          emit st.builder (Assign (destination / Index (usize index), Use (value st element))))
+          emit st.builder
+            (Assign (destination / Index (constant_uint64 index), Use (value st element))))
         elements
   | Is_variant { place = tested; variant } -> assign (Is_variant (place st tested, variant))
   | Convert { conversion = Widen; value = inner; _ } ->
@@ -1919,7 +1920,7 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
            {
              failure = Todo;
              message = Constant (Bytes message);
-             length = usize (String.length message);
+             length = constant_uint64 (String.length message);
              site = site_of st origin;
              reported = None;
            });

@@ -14,7 +14,7 @@ fn reads(text: StringSlice, expected: StringSlice) -> Bool {
   }
 }
 
-fn fails_at(text: StringSlice, offset: USize) -> Bool {
+fn fails_at(text: StringSlice, offset: UInt64) -> Bool {
   network::IpAddress.parse(text) == Err(network::AddressError(offset: offset))
 }
 
@@ -96,7 +96,7 @@ fn reads_socket(text: StringSlice, expected: StringSlice) -> Bool {
   }
 }
 
-fn socket_fails_at(text: StringSlice, offset: USize) -> Bool {
+fn socket_fails_at(text: StringSlice, offset: UInt64) -> Bool {
   network::SocketAddress.parse(text) == Err(network::AddressError(offset: offset))
 }
 

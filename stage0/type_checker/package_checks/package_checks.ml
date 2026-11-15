@@ -64,9 +64,9 @@ let check_sealed database (declaration : Names.declaration) (definition : defini
     (impl : Types.impl_interface) =
   let implementors =
     if Well_known.is Signed_integer impl.implements.trait then
-      Some Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
+      Some Intrinsic.[ Int8; Int16; Int32; Int64 ]
     else if Well_known.is Unsigned_integer impl.implements.trait then
-      Some Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ]
+      Some Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ]
     else if Well_known.is Fixed_width_integer impl.implements.trait then
       Some
         (List.filter

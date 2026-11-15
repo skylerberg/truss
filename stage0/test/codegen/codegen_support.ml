@@ -63,7 +63,6 @@ let shapes extra (ty : Ground.ty) : shape =
   | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
   | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
   | Named { path = Top { name = "UInt64"; _ }; _ } -> Scalar (Integer UInt64)
-  | Named { path = Top { name = "USize"; _ }; _ } -> Scalar (Integer USize)
   | Named { path = Top { name = "Float64"; _ }; _ } -> Scalar Float64
   | Named { path = Top { name = "Bool"; _ }; _ } -> Scalar Bool
   | Named { path = Top { name = "Character"; _ }; _ } -> Scalar Character
@@ -75,8 +74,8 @@ let shapes extra (ty : Ground.ty) : shape =
       Record
         [
           ("buffer", Raw (Pointer (Data element)));
-          field "length" (named "USize");
-          field "capacity" (named "USize");
+          field "length" (named "UInt64");
+          field "capacity" (named "UInt64");
         ]
   | Named { path = Top { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
       Array (element, Z.to_int count)
@@ -85,8 +84,8 @@ let shapes extra (ty : Ground.ty) : shape =
       Record
         [
           ("buffer", Raw (Pointer (Data element)));
-          ("length", Typed (named "USize"));
-          ("capacity", Typed (named "USize"));
+          ("length", Typed (named "UInt64"));
+          ("capacity", Typed (named "UInt64"));
         ]
   | Function function_type -> Convention.function_value_shape function_type
   | _ -> (
@@ -100,7 +99,7 @@ let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 (* Writing code by hand *)
 
 let int32 = named "Int32"
-let usize = named "USize"
+let uint64 = named "UInt64"
 
 (* A function written by hand: its locals and blocks, in the order a
    builder numbers them, block 0 first. *)
@@ -199,11 +198,8 @@ let compiler =
    infeasible paths, such as the code after a [concurrent] block whose
    every branch returns, and an infeasible path may read a local that it
    never wrote. Clang and GCC name that warning differently, and Clang
-   rejects GCC's name. On a feasible path, the sanitizer job of CI reports
-   a use of a pointer that only some paths wrote: it fills every local
-   that has no initializer with a pattern, which makes the pointer a wild
-   address. No check reports an integer or a [Bool] that only some paths
-   wrote. *)
+   rejects GCC's name. No check reports a local that only some feasible
+   paths wrote. *)
 let strict =
   lazy
     [
@@ -226,8 +222,8 @@ let counter = ref 0
    compiled. *)
 let cache = lazy (Build.cache (Database.objects_directory ()))
 
-(* The flags in [TRUSS_CFLAGS], as [truss] adds them. CI sets them to a
-   sanitizer's, so a report is a compiler bug. *)
+(* The flags in [TRUSS_CFLAGS], as [truss] adds them. CI sets them to
+   ThreadSanitizer's, so a report is a compiler bug. *)
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
@@ -313,7 +309,7 @@ let tests_of database = tests_in database example
    tests, and returns the runner's output. *)
 let run_source text =
   let database, compile = load text in
-  match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
+  match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
   | Ok records -> render_records records
   | Error message -> failwith message
 

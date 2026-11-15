@@ -1,4 +1,4 @@
-fn f(items: List[String], other: String) -> USize {
+fn f(items: List[String], other: String) -> UInt64 {
   var outer = other.slice()
   for item in items {
     outer = item.slice()

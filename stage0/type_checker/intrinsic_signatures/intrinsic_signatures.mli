@@ -10,8 +10,6 @@ type time =
       (** Steps in proportion to the length of the storage or view that is this argument. *)
   | Unbounded_time
 
-(** A number an operation is given: the argument at a position, or a [USize] generic argument by its
-    name. *)
 type amount = Argument of int | Generic of string
 
 (** How many blocks an operation allocates. *)

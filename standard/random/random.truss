@@ -40,8 +40,8 @@ internal fn Generator.jump(mut self)
 {
   let masks: Array[UInt64, 4] = [0x180ec6d33cfd0aba, 0xd5a61266f0c9392c, 0xa9582618e03fc9aa, 0x39abdc4529b1661c]
   var jumped: Array[UInt64, 4] = [0, 0, 0, 0]
-  let words: USize = 4
-  let bits: USize = 64
+  let words: UInt64 = 4
+  let bits: UInt64 = 64
   for word in 0..words {
     for bit in 0..bits {
       if (masks[word] >> bit) % 2 == 1 {
@@ -105,7 +105,7 @@ public fn Generator.below(mut self, bound: UInt64) -> UInt64
   cost time O(1)
 {
   let rejected = rejection_threshold(bound)
-  let attempts: USize = 64
+  let attempts: UInt64 = 64
   for _ in 0..attempts {
     let value = mut self.next()
     if value >= rejected {
@@ -128,12 +128,12 @@ public fn Generator.integer(mut self, range: Range[Int64]) -> Int64
   add_offset(range.start, offset: mut self.below(span + 1))
 }
 
-public fn Generator.index(mut self, length: USize) -> USize
+public fn Generator.index(mut self, length: UInt64) -> UInt64
   requires length > 0
   ensures result < length
   cost time O(1)
 {
-  intrinsic::convert(mut self.below(intrinsic::convert(length)))
+  mut self.below(length)
 }
 
 public fn Generator.unit(mut self) -> Float64
@@ -200,7 +200,7 @@ public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
   }
 }
 
-public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Option[USize]
+public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Option[UInt64]
   ensures match result {
     Some(index) => index < items.length()
     None => items.length() == 0
@@ -210,13 +210,13 @@ public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Op
   if items.length() == 0 { None } else { Some(mut self.index(items.length())) }
 }
 
-public fn Generator.sample(mut self, population: USize, count: USize) -> List[USize]
+public fn Generator.sample(mut self, population: UInt64, count: UInt64) -> List[UInt64]
   requires count <= population
   ensures result.length() == count
   ensures forall i in 0..result.length() => result.model()[i] < population
   cost time finite
 {
-  var chosen: List[USize] = List.with_capacity(count)
+  var chosen: List[UInt64] = List.with_capacity(count)
   let start = population - count
   var position = start
   while position < population
@@ -237,7 +237,7 @@ public fn Generator.sample(mut self, population: USize, count: USize) -> List[US
   chosen
 }
 
-public fn bytes(count: USize) -> List[UInt8]
+public fn bytes(count: UInt64) -> List[UInt8]
   uses Random
   ensures result.length() == count
 {
@@ -262,7 +262,7 @@ public fn below(bound: UInt64) -> UInt64
   ensures result < bound
 {
   let rejected = rejection_threshold(bound)
-  let attempts: USize = 64
+  let attempts: UInt64 = 64
   for _ in 0..attempts {
     let value = Random.next()
     if value >= rejected {

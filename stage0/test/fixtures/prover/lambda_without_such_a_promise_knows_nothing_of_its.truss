@@ -1,4 +1,4 @@
-fn each(count: USize, visit: fn(USize) -> Int64) -> Int64 {
+fn each(count: UInt64, visit: fn(UInt64) -> Int64) -> Int64 {
   todo
 }
 

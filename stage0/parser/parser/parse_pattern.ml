@@ -1,10 +1,3 @@
-(* Patterns.
-
-   A pattern position is always known from the token before it, and a
-   pattern contains no expressions, so this module needs nothing from the
-   others. A bare lowercase name binds. A constant is written with its
-   module or its type, so the parser decides every pattern's meaning. *)
-
 open Token
 open Syntax
 
@@ -13,7 +6,6 @@ let pattern_node cursor start kind : pattern =
 
 let range_bound = "a literal or a constant with its module or type, such as `http::last`"
 
-(* A string in a pattern is a literal, so it cannot interpolate. *)
 let string_literal cursor ~start ~modules literal =
   let string = Cursor.peek cursor in
   let interpolation (_ : Token.interpolation) =
@@ -23,7 +15,6 @@ let string_literal cursor ~start ~modules literal =
   in
   Atoms.string_literal cursor ~start ~modules literal ~interpolation
 
-(* A literal pattern, or [None] when the current token does not start one. *)
 let literal cursor : literal option =
   let start = cursor.Cursor.index in
   let take literal =
@@ -47,9 +38,6 @@ let literal cursor : literal option =
   | String literal -> Some (Literal_string (string_literal cursor ~start ~modules:[] literal))
   | _ -> None
 
-(* The rest of a pattern after a module path and an uppercase name. With
-   [.name], the pattern is a constant of the type, and otherwise it is a
-   variant. *)
 let rec after_upper cursor start (path : path) =
   if Cursor.is_punctuation cursor Dot then begin
     Cursor.advance cursor;
@@ -62,8 +50,6 @@ let rec after_upper cursor start (path : path) =
     in
     pattern_node cursor start (Variant { name = path.last; fields })
 
-(* A pattern of [kind], or, if [..] or [..=] follows, a range pattern that
-   starts with [end_kind]. *)
 and range_or cursor start end_kind kind =
   let first : range_end =
     { kind = end_kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
@@ -90,7 +76,6 @@ and range_or cursor start end_kind kind =
         (Pattern_range { start = first; stop; inclusive = operator = Dot_dot_equal })
   | _ -> pattern_node cursor start kind
 
-(* A constant at the end of a range: [http::last] or [UInt16.maximum]. *)
 and constant_end cursor start : range_end =
   let modules = Atoms.module_prefix cursor in
   let kind =
@@ -120,8 +105,6 @@ and primary cursor : pattern =
       | Lower _ | Upper _ -> named cursor start
       | _ -> Cursor.fail cursor "a pattern")
 
-(* A pattern that starts with a name: a binding, a qualified constant, a
-   variant, or a tagged string. *)
 and named cursor start =
   let modules = Atoms.module_prefix cursor in
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -142,12 +125,6 @@ and named cursor start =
       range_or cursor start (End_literal literal) (Literal literal)
   | _ -> Cursor.fail cursor "a name after `::`"
 
-(* [Shape.Circle(radius)], [Shape::Circle(radius)], and
-   [geometry::Circle(radius)]: a variant written with its type or its
-   module, as an expression names it and as Rust and Swift write a pattern.
-   The qualifier is reported, and the result is the variant alone, as after
-   the fix. A [.] that remains begins a constant of the type, as in
-   [geometry::Status.teapot], whose module qualifier is valid. *)
 and unqualified_variant cursor start (path : path) =
   let rec last_name (qualified : Token.t option) =
     match (Cursor.peek_kind cursor, Cursor.token_at cursor (cursor.index + 1)) with
@@ -168,7 +145,6 @@ and unqualified_variant cursor start (path : path) =
       { path with modules = [] }
   | _ -> path
 
-(* [(index, element: score, ..)]. [..] may only be the last field. *)
 and pattern_fields cursor =
   let field cursor : pattern_field =
     let start = cursor.Cursor.index in
@@ -202,7 +178,6 @@ and pattern_fields cursor =
     fields;
   fields
 
-(* A pattern, with alternatives: [Low | Normal]. *)
 and pattern cursor : pattern = Cursor.nested cursor alternatives
 
 and alternatives cursor : pattern =

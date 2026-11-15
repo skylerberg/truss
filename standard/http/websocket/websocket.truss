@@ -38,14 +38,14 @@ internal type Frame(is_final: Bool, is_compressed: Bool, opcode: UInt8, payload:
 
 internal type Parsed =
   | Incomplete
-  | Complete(frame: Frame, length: USize)
+  | Complete(frame: Frame, length: UInt64)
   | Invalid(code: UInt16, reason: String)
 
 fn invalid(code: UInt16, reason: StringSlice) -> Parsed {
   Parsed.Invalid(code: code, reason: reason.to_string())
 }
 
-internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize, is_deflate: Bool = false) -> Parsed {
+internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: UInt64, is_deflate: Bool = false) -> Parsed {
   if bytes.length() < 2 {
     return Parsed.Incomplete
   }
@@ -66,7 +66,7 @@ internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize, is_deflate
     return invalid(protocol_error, reason: "a frame with an unknown opcode")
   }
   var length: UInt64 = intrinsic::convert(second & 127)
-  var at: USize = 2
+  var at: UInt64 = 2
   if length == 126 {
     if bytes.length() < 4 {
       return Parsed.Incomplete
@@ -78,7 +78,7 @@ internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize, is_deflate
       return Parsed.Incomplete
     }
     length = 0
-    let width: USize = 8
+    let width: UInt64 = 8
     for index in 0..width {
       length = (length << 8) | intrinsic::convert[UInt8, UInt64](bytes[2 + index])
     }
@@ -90,31 +90,29 @@ internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: USize, is_deflate
   if opcode >= 8 && (!is_final || length > 125) {
     return invalid(protocol_error, reason: "a control frame that is fragmented or longer than 125 bytes")
   }
-  let limit_wide: UInt64 = intrinsic::convert(limit)
-  if length > limit_wide {
+  if length > limit {
     return invalid(message_too_big, reason: "a frame larger than the limit")
   }
-  let size: USize = intrinsic::convert(length)
   var mask: Array[UInt8, 4] = [0, 0, 0, 0]
   if is_masked {
     if bytes.length() < at || bytes.length() - at < 4 {
       return Parsed.Incomplete
     }
-    let width: USize = 4
+    let width: UInt64 = 4
     for index in 0..width {
       mask[index] = bytes[at + index]
     }
     at += 4
   }
-  if bytes.length() < at || bytes.length() - at < size {
+  if bytes.length() < at || bytes.length() - at < length {
     return Parsed.Incomplete
   }
-  let raw = bytes[at..at + size]
-  var payload: List[UInt8] = List.with_capacity(size)
+  let raw = bytes[at..at + length]
+  var payload: List[UInt8] = List.with_capacity(length)
   for index in 0..raw.length() {
     mut payload.push(if is_masked { raw[index] ^ mask[index % 4] } else { raw[index] })
   }
-  Parsed.Complete(frame: Frame(is_final: is_final, is_compressed: is_compressed, opcode: opcode, payload: own payload), length: at + size)
+  Parsed.Complete(frame: Frame(is_final: is_final, is_compressed: is_compressed, opcode: opcode, payload: own payload), length: at + length)
 }
 
 internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: Option[Array[UInt8, 4]], is_compressed: Bool = false) -> List[UInt8] {
@@ -130,10 +128,9 @@ internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: O
     mut bytes.push(intrinsic::convert(length & 255))
   } else {
     mut bytes.push(mask_bit | 127)
-    let wide: UInt64 = intrinsic::convert(length)
-    let width: USize = 8
+    let width: UInt64 = 8
     for index in 0..width {
-      mut bytes.push(intrinsic::convert((wide >> (8 * (7 - index))) & 255))
+      mut bytes.push(intrinsic::convert((length >> (8 * (7 - index))) & 255))
     }
   }
   match mask {

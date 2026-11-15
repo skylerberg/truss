@@ -35,10 +35,7 @@ and argument =
   | Capabilities of capability_set
       (** The capabilities a [capability] parameter is instantiated with. *)
 
-and value =
-  | Known of Z.t
-  | Value_parameter of parameter
-  | Value_variable of int  (** An unknown [USize] argument, while one statement is checked. *)
+and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
 
 and trait_reference = {
   trait : Path.t;
@@ -99,8 +96,6 @@ val is_well_known : Well_known.t -> ty -> bool
     [List[Int64]]. *)
 
 val integer_bits : ty -> (int * bool) option
-(** The bits of a built-in integer type and whether it is signed. [USize] and [ISize] have 64 bits
-    on every target. *)
 
 val integer_range : ty -> (Z.t * Z.t) option
 (** The least and the greatest value of a built-in integer type. *)
@@ -189,7 +184,7 @@ val show_output : result -> string
 
 type generic_kind =
   | Type_generic of trait_reference list  (** Bounds. *)
-  | Value_generic  (** A [USize] value, as in [count: USize]. *)
+  | Value_generic
   | Capability_generic
 
 type generic = { generic : parameter; kind : generic_kind }

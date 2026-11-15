@@ -193,7 +193,7 @@ and type_argument_of_expression state (value : expression) : Types.argument =
       | Some (Static_type type_) -> Types.Type type_
       | Some (Static_trait _ | Static_capability _) | None ->
           Types.Type
-            (error_at state Not_a_type value "A type argument is a type, or a `USize` value."))
+            (error_at state Not_a_type value "A type argument is a type, or a `UInt64` value."))
 
 type instance = {
   signature : Types.signature;

@@ -1,4 +1,4 @@
-fn f(items: List[Int64]) -> USize {
+fn f(items: List[Int64]) -> UInt64 {
   var boxed: any Cursor[Element = Int64] = any items.cursor()
   let _ = mut boxed.next()
   own boxed.count()

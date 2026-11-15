@@ -181,10 +181,11 @@ it explains.
 
 ### Comments
 
-A comment holds information the code cannot express: a reason, an invariant, or a trap. One
-that restates the code, labels a section, or retells a document is left
-out. A comment never points at a document, a section of one, or another
-file, since such a pointer goes stale when its target moves.
+Code has no comments. Nothing checks a comment against the code it
+describes, so the comment drifts. A reason, an invariant, or a trap is
+stated instead by a name, by code that cannot be gotten wrong, or by a test
+named after the failure it prevents. A rule of the language belongs in
+[SPECIFICATION.md](SPECIFICATION.md).
 
 ### Testing
 

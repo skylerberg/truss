@@ -1,0 +1,10 @@
+type Pair(first: String, second: String)
+
+fn keep_pair(pair: own Pair) {}
+
+fn f(second: own String) -> Pair {
+  var pair = Pair(first: "a", second: own second)
+  keep_pair(own pair)
+  pair.first = "c"
+  pair
+}

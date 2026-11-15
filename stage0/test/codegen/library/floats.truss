@@ -231,7 +231,7 @@ test "a float is cut toward zero and held within an integer's range" {
   assert UInt8.saturating_from(-5.0) == 0
   assert Int8.saturating_from(-128.9) == -128
   assert Int8.saturating_from(-129.0) == -128
-  assert USize.saturating_from(1.0e30) == USize.maximum
+  assert UInt64.saturating_from(1.0e30) == UInt64.maximum
 }
 
 fn exponential(value: Float64) -> Float64 {
@@ -538,11 +538,11 @@ test "a single goes through the trigonometric functions too" {
   assert (one.arctangent_2(1.0) - 0.7853982).absolute() < 0.0000001
 }
 
-fn fixed(value: Float64, decimals: USize) -> String {
+fn fixed(value: Float64, decimals: UInt64) -> String {
   value.to_fixed(decimals)
 }
 
-fn scientific(value: Float64, decimals: USize) -> String {
+fn scientific(value: Float64, decimals: UInt64) -> String {
   value.to_scientific(decimals)
 }
 

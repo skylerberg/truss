@@ -1,21 +1,6 @@
-(* The background process: one per user and compiler, which holds sessions
-   between commands. *)
-
-(* Only the user may reach the background process: the data on its
-   socket is marshaled, and reading marshaled bytes from another user would
-   let that user run code as this one. *)
-let servers_directory () =
-  let directory = Filename.concat (Store.default_directory ()) "servers" in
-  File_system.make_directory directory;
-  (try Unix.chmod directory 0o700 with Unix.Unix_error _ -> ());
-  directory
-
-(* A directory in /tmp that is the user's alone. Another user could have
-   made one of this name first, so it is used only if it is a directory,
-   this user's, and closed to everyone else. *)
-let private_temporary_directory () =
-  let directory = Printf.sprintf "/tmp/truss-%d" (Unix.getuid ()) in
-  (try Unix.mkdir directory 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+let private_directory directory =
+  File_system.make_directory (Filename.dirname directory);
+  (try Unix.mkdir directory 0o700 with Unix.Unix_error _ -> ());
   match Unix.lstat directory with
   | { st_kind = S_DIR; st_uid; st_perm; _ } when st_uid = Unix.getuid () && st_perm land 0o077 = 0
     ->
@@ -23,25 +8,20 @@ let private_temporary_directory () =
   | _ | (exception Unix.Unix_error _) ->
       Error (directory ^ " is not a directory that only this user can use; try --no-server.")
 
-(* A background process serves one key, which a client gives: a project's
-   root. Its socket and its lock are named by the compiler's identity and a
-   hash of the key, and a file beside them says the key. A socket's path
-   has a short limit, about 100 bytes, so one under a long store path goes
-   in a directory of the user's own in /tmp, named by a hash of where it
-   would have been. *)
-let server_path identity key =
-  Filename.concat (servers_directory ())
-    (Identity.short identity ^ "-" ^ Blake3.hex_digest ~digits:16 key)
+let servers_directory () =
+  private_directory (Filename.concat (Store.default_directory ()) "servers")
 
-let socket_path identity key =
-  let path = server_path identity key ^ ".socket" in
+let server_path directory identity key =
+  Filename.concat directory (Identity.short identity ^ "-" ^ Blake3.hex_digest ~digits:16 key)
+
+let socket_path server_path =
+  let path = server_path ^ ".socket" in
   if String.length path < 100 then Ok path
   else
     Result.map
       (fun directory -> Filename.concat directory (Blake3.hex_digest ~digits:16 path ^ ".socket"))
-      (private_temporary_directory ())
+      (private_directory (Printf.sprintf "/tmp/truss-%d" (Unix.getuid ())))
 
-(* Whether a process holds a lock file's lock. *)
 let locked path =
   match Unix.openfile path [ O_RDWR; O_CLOEXEC ] 0 with
   | exception Unix.Unix_error _ -> false
@@ -53,30 +33,30 @@ let locked path =
           | () -> false
           | exception Unix.Unix_error _ -> true)
 
-(* The key this process serves, if it is a background process. *)
 let served : string option ref = ref None
 
-(* Whether a background process of this compiler serves a key now. A
-   process does not test its own lock: closing any descriptor of a file
-   releases the process's lock on it. *)
 let running key =
   !served = Some key
-  || locked (server_path (Identity.compute (Store.default_directory ())) key ^ ".lock")
+  ||
+  match servers_directory () with
+  | Ok directory ->
+      locked (server_path directory (Identity.compute (Store.default_directory ())) key ^ ".lock")
+  | Error _ -> false
 
-(* The keys that background processes of this compiler serve now. *)
 let serving () =
-  let identity = Identity.compute (Store.default_directory ()) in
-  let prefix = Identity.short identity ^ "-" in
-  let directory = servers_directory () in
-  Array.to_list (Sys.readdir directory)
-  |> List.filter_map (fun entry ->
-      if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
-        let path = Filename.concat directory entry in
-        match File_system.read path with
-        | key when running key -> Some key
-        | _ | (exception Sys_error _) -> None
-      else None)
-  |> List.sort compare
+  match servers_directory () with
+  | Error _ -> []
+  | Ok directory ->
+      let prefix = Identity.short (Identity.compute (Store.default_directory ())) ^ "-" in
+      Array.to_list (Sys.readdir directory)
+      |> List.filter_map (fun entry ->
+          if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
+            let path = Filename.concat directory entry in
+            match File_system.read path with
+            | key when running key -> Some key
+            | _ | (exception Sys_error _) -> None
+          else None)
+      |> List.sort compare
 
 let idle_limit = 3. *. 3600.
 
@@ -89,18 +69,14 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve_at ~key ~alive ~idle ~keep ~handle identity path =
-  let lock =
-    Unix.openfile (server_path identity key ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
-  in
+let serve_at ~key ~alive ~idle ~keep ~handle server_path path =
+  let lock = Unix.openfile (server_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
   match Unix.lockf lock F_TLOCK 0 with
   | exception Unix.Unix_error _ -> ()
   | () ->
       Core.serving := true;
       served := Some key;
-      Out_channel.with_open_bin
-        (server_path identity key ^ ".key")
-        (fun out -> output_string out key);
+      Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
       (try Unix.unlink path with Unix.Unix_error _ -> ());
       let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
       Unix.bind socket (ADDR_UNIX path);
@@ -117,9 +93,6 @@ let serve_at ~key ~alive ~idle ~keep ~handle identity path =
             List.iter Core.compact (Core.all ());
             if now -. !last_collection > 60. then begin
               last_collection := now;
-              (* A compiler that was built again has another identity, and
-                 its clients start a process of their own, so this one would
-                 only scan worktrees for no one. *)
               if Identity.compute (Store.default_directory ()) <> Core.identity () then
                 stopping := true;
               Core.collect ~keep
@@ -140,19 +113,21 @@ let serve_at ~key ~alive ~idle ~keep ~handle identity path =
       done;
       Core.reset ();
       (try Unix.unlink path with Unix.Unix_error _ -> ());
-      (try Sys.remove (server_path identity key ^ ".key") with Sys_error _ -> ());
+      (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
       Unix.close lock
 
 let serve ~key ~alive ~idle ~keep ~handle =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let identity = Core.identity () in
-  match socket_path identity key with
+  match servers_directory () with
   | Error message -> prerr_endline message
-  | Ok path -> serve_at ~key ~alive ~idle ~keep ~handle identity path
+  | Ok directory -> (
+      let server_path = server_path directory (Core.identity ()) key in
+      match socket_path server_path with
+      | Error message -> prerr_endline message
+      | Ok path -> serve_at ~key ~alive ~idle ~keep ~handle server_path path)
 
-(* Starts the background process, detached from the client's terminal. *)
-let start program key =
-  let log = Filename.concat (servers_directory ()) "server.log" in
+let start directory program key =
+  let log = Filename.concat directory "server.log" in
   match Unix.fork () with
   | 0 -> (
       ignore (Unix.setsid ());
@@ -178,21 +153,20 @@ let connect path =
 
 let store_directory () = Store.default_directory ()
 
-(* Answers a request through the background process that serves a key,
-   starting it if it is not running. *)
 let call ?program ?(start_server = true) ~key ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = Identity.compute (Store.default_directory ()) in
   let program = Option.value program ~default:(Identity.executable ()) in
   let ( let* ) = Result.bind in
-  let* path = socket_path identity key in
+  let* directory = servers_directory () in
+  let* path = socket_path (server_path directory identity key) in
   let rec attempt tries =
     match connect path with
     | Some socket -> Some socket
     | None ->
         if tries = 0 || not start_server then None
         else begin
-          if tries = 50 then start program key;
+          if tries = 50 then start directory program key;
           Unix.sleepf 0.1;
           attempt (tries - 1)
         end

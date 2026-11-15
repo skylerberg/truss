@@ -186,18 +186,6 @@ impl TryFrom[Int64] for Int8 {
   }
 }
 
-impl TryFrom[ISize] for Int8 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own ISize) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (-128 <= value && value <= 127)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[ISize, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
 impl TryFrom[UInt8] for Int8 {
   type Error = core::ConversionError
 
@@ -243,18 +231,6 @@ impl TryFrom[UInt64] for Int8 {
     cost time O(1)
   {
     if intrinsic::fits[UInt64, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
-impl TryFrom[USize] for Int8 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own USize) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 127)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[USize, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
   }
 }
 
@@ -440,18 +416,6 @@ impl TryFrom[Int64] for Int16 {
   }
 }
 
-impl TryFrom[ISize] for Int16 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own ISize) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (-32768 <= value && value <= 32767)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[ISize, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
 impl From[UInt8] for Int16 {
   fn from(value: own UInt8) -> Int16
     ensures result == value
@@ -494,18 +458,6 @@ impl TryFrom[UInt64] for Int16 {
     cost time O(1)
   {
     if intrinsic::fits[UInt64, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
-impl TryFrom[USize] for Int16 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own USize) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 32767)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[USize, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
   }
 }
 
@@ -688,18 +640,6 @@ impl TryFrom[Int64] for Int32 {
   }
 }
 
-impl TryFrom[ISize] for Int32 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own ISize) -> Result[Int32, core::ConversionError]
-    ensures (result is Ok(_)) == (-2147483648 <= value && value <= 2147483647)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[ISize, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
 impl From[UInt8] for Int32 {
   fn from(value: own UInt8) -> Int32
     ensures result == value
@@ -742,18 +682,6 @@ impl TryFrom[UInt64] for Int32 {
   }
 }
 
-impl TryFrom[USize] for Int32 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own USize) -> Result[Int32, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 2147483647)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[USize, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
 impl Equal for Int64 {
   fn equal(self, other: Int64) -> Bool
     cost time O(1)
@@ -787,7 +715,7 @@ impl Default for Int64 {
 
 impl Display for Int64 {
   fn display(self, output: mut TextBuilder) {
-    mut output.write_signed(intrinsic::convert(self))
+    mut output.write_signed(self)
   }
 }
 
@@ -930,15 +858,6 @@ impl From[Int32] for Int64 {
   }
 }
 
-impl From[ISize] for Int64 {
-  fn from(value: own ISize) -> Int64
-    ensures result == value
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
 impl From[UInt8] for Int64 {
   fn from(value: own UInt8) -> Int64
     ensures result == value
@@ -978,258 +897,6 @@ impl TryFrom[UInt64] for Int64 {
   }
 }
 
-impl TryFrom[USize] for Int64 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own USize) -> Result[Int64, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 9223372036854775807)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[USize, Int64](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
-impl Equal for ISize {
-  fn equal(self, other: ISize) -> Bool
-    cost time O(1)
-  {
-    intrinsic::equal(self, right: other)
-  }
-}
-
-impl Ordered for ISize {
-  fn compare(self, other: ISize) -> Ordering
-    ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
-    cost time O(1)
-  {
-    if intrinsic::less(self, right: other) {
-      Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
-      Ordering.Equal
-    } else {
-      Ordering.Greater
-    }
-  }
-}
-
-impl Default for ISize {
-  fn default() -> ISize
-    cost time O(1)
-  {
-    0
-  }
-}
-
-impl Display for ISize {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_signed(intrinsic::convert(self))
-  }
-}
-
-impl Add[ISize] for ISize {
-  type Output = ISize
-
-  fn add_is_defined(self, right: ISize) -> Bool
-    cost time O(1)
-  {
-    !intrinsic::add_overflows(self, right: right)
-  }
-
-  fn add(self, right: ISize) -> ISize
-    requires !intrinsic::add_overflows(self, right: right)
-    cost time O(1)
-  {
-    intrinsic::add(self, right)
-  }
-}
-
-impl Subtract[ISize] for ISize {
-  type Output = ISize
-
-  fn subtract_is_defined(self, right: ISize) -> Bool
-    cost time O(1)
-  {
-    !intrinsic::subtract_overflows(self, right: right)
-  }
-
-  fn subtract(self, right: ISize) -> ISize
-    requires !intrinsic::subtract_overflows(self, right: right)
-    cost time O(1)
-  {
-    intrinsic::subtract(self, right)
-  }
-}
-
-impl Multiply[ISize] for ISize {
-  type Output = ISize
-
-  fn multiply_is_defined(self, right: ISize) -> Bool
-    cost time O(1)
-  {
-    !intrinsic::multiply_overflows(self, right: right)
-  }
-
-  fn multiply(self, right: ISize) -> ISize
-    requires !intrinsic::multiply_overflows(self, right: right)
-    cost time O(1)
-  {
-    intrinsic::multiply(self, right)
-  }
-}
-
-impl Divide[ISize] for ISize {
-  type Output = ISize
-
-  fn divide_is_defined(self, right: ISize) -> Bool
-    cost time O(1)
-  {
-    right != 0 && !(self == ISize.minimum && right == -1)
-  }
-
-  fn divide(self, right: ISize) -> ISize
-    requires right != 0 && !(self == ISize.minimum && right == -1)
-    cost time O(1)
-  {
-    intrinsic::divide(self, right)
-  }
-}
-
-impl Remainder[ISize] for ISize {
-  type Output = ISize
-
-  fn remainder_is_defined(self, right: ISize) -> Bool
-    cost time O(1)
-  {
-    right != 0 && !(self == ISize.minimum && right == -1)
-  }
-
-  fn remainder(self, right: ISize) -> ISize
-    requires right != 0 && !(self == ISize.minimum && right == -1)
-    cost time O(1)
-  {
-    intrinsic::remainder(self, right)
-  }
-}
-
-impl Negate for ISize {
-  type Output = ISize
-
-  fn negate_is_defined(self) -> Bool
-    cost time O(1)
-  {
-    self != ISize.minimum
-  }
-
-  fn negate(self) -> ISize
-    requires self != ISize.minimum
-    cost time O(1)
-  {
-    intrinsic::negate(self)
-  }
-}
-
-impl Hash for ISize {
-  fn hash(self, hasher: mut Hasher) {
-    mut hasher.write(intrinsic::convert(self))
-  }
-}
-
-public let ISize.minimum: ISize = -9223372036854775808
-
-public let ISize.maximum: ISize = 9223372036854775807
-
-impl From[Int8] for ISize {
-  fn from(value: own Int8) -> ISize
-    ensures result == value
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[Int16] for ISize {
-  fn from(value: own Int16) -> ISize
-    ensures result == value
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[Int32] for ISize {
-  fn from(value: own Int32) -> ISize
-    ensures result == value
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl TryFrom[Int64] for ISize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Int64) -> Result[ISize, core::ConversionError]
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[Int64, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
-impl From[UInt8] for ISize {
-  fn from(value: own UInt8) -> ISize
-    ensures result == value
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[UInt16] for ISize {
-  fn from(value: own UInt16) -> ISize
-    ensures result == value
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl TryFrom[UInt32] for ISize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own UInt32) -> Result[ISize, core::ConversionError]
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[UInt32, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
-impl TryFrom[UInt64] for ISize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own UInt64) -> Result[ISize, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 9223372036854775807)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[UInt64, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
-impl TryFrom[USize] for ISize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own USize) -> Result[ISize, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 9223372036854775807)
-    ensures !(result is Ok(converted) && converted != value)
-    cost time O(1)
-  {
-    if intrinsic::fits[USize, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
-  }
-}
-
 impl FixedWidthInteger for Int8 {
   fn minimum_value() -> Int8
     ensures result == Int8.minimum
@@ -1245,7 +912,7 @@ impl FixedWidthInteger for Int8 {
     Int8.maximum
   }
 
-  fn bit_width() -> USize
+  fn bit_width() -> UInt64
     ensures result == Int8.bits
     cost time O(1)
   {
@@ -1272,7 +939,7 @@ impl FixedWidthInteger for Int16 {
     Int16.maximum
   }
 
-  fn bit_width() -> USize
+  fn bit_width() -> UInt64
     ensures result == Int16.bits
     cost time O(1)
   {
@@ -1299,7 +966,7 @@ impl FixedWidthInteger for Int32 {
     Int32.maximum
   }
 
-  fn bit_width() -> USize
+  fn bit_width() -> UInt64
     ensures result == Int32.bits
     cost time O(1)
   {
@@ -1326,7 +993,7 @@ impl FixedWidthInteger for Int64 {
     Int64.maximum
   }
 
-  fn bit_width() -> USize
+  fn bit_width() -> UInt64
     ensures result == Int64.bits
     cost time O(1)
   {
@@ -1336,31 +1003,4 @@ impl FixedWidthInteger for Int64 {
 
 impl SignedInteger for Int64 {
   type Unsigned = UInt64
-}
-
-impl FixedWidthInteger for ISize {
-  fn minimum_value() -> ISize
-    ensures result == ISize.minimum
-    cost time O(1)
-  {
-    ISize.minimum
-  }
-
-  fn maximum_value() -> ISize
-    ensures result == ISize.maximum
-    cost time O(1)
-  {
-    ISize.maximum
-  }
-
-  fn bit_width() -> USize
-    ensures result == ISize.bits
-    cost time O(1)
-  {
-    ISize.bits
-  }
-}
-
-impl SignedInteger for ISize {
-  type Unsigned = USize
 }

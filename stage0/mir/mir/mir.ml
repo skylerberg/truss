@@ -15,13 +15,9 @@ let mir =
           Query.demand database Interface.Environment.lowered_interface key )
       with
       | Some form, Some lowered ->
-          let is_specification =
-            match lowered.interface with
-            | Function_interface signature -> signature.specification_only
-            | Theorem_interface _ | Law_proof_interface _ -> true
-            | _ -> false
-          in
-          of_definition ~is_specification form.definition
+          of_definition
+            ~is_specification:(Interface.Environment.is_specification lowered.interface)
+            form.definition
       | _ -> None)
 
 let is_lowered database key = Option.is_some (Query.demand database Infer.core key)

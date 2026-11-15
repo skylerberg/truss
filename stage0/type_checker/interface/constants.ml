@@ -42,12 +42,12 @@ let value_of =
   Query.query ~name:"constant_value" ~phase:Phases.interfaces ~saved:true ~show:Path.show
     (fun database path -> evaluate database ~visiting:[] path)
 
-let is_usize database path =
+let is_uint64 database path =
   match Summary.definition database path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (
       match Query.demand database Resolve.resolved key with
       | Some resolved ->
           resolved.names.(written.path.last.id)
-          = Some (Definition (Type, Intrinsic.builtin_path USize))
+          = Some (Definition (Type, Intrinsic.builtin_path UInt64))
       | None -> false)
   | _ -> false

@@ -73,7 +73,7 @@ let new_context database ~home ~current ~terminates ~measures =
         && Call_graph.recursive database ~package:(Path.package current) current;
       disjoint =
         (match Query.demand database Ownership.ownership home with
-        | Some ownership -> ownership.disjoint
+        | Some ownership -> ownership.must_be_disjoint
         | None -> []);
       indexes = [];
       evaluated_keys = [];

@@ -22,6 +22,8 @@ type lowered_interface = {
       (** The generic parameters' bounds. *)
 }
 
+val is_specification : interface -> bool
+
 val lower :
   Query.context ->
   Resolve.Names.key ->

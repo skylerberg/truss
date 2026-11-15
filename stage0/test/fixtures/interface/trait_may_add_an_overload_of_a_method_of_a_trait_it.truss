@@ -1,3 +1,3 @@
 trait Changeable: Iterable {
-  fn element(mut self, position: USize) lends mut Self.Element
+  fn element(mut self, position: UInt64) lends mut Self.Element
 }

@@ -32,16 +32,14 @@ let record_fact engine store (node : node) reads =
                   (Marshal.to_string
                      (List.map (fun (read, _) -> (name read, key_bytes read)) parts)
                      []))
-      (* A result that raised, or whose bytes are not in the store, is no
-         fact: there would be no value to give. *)
       | _ -> ())
   | _ -> ()
 
-let unsaved_nodes engine =
+let alive_unwritten_nodes engine =
   by_id
     (Hashtbl.fold
        (fun _ (node : node) nodes -> if node.alive then node :: nodes else nodes)
-       engine.unsaved [])
+       engine.unwritten_nodes [])
 
 let record_facts engine =
   match engine.store with
@@ -49,14 +47,12 @@ let record_facts engine =
   | Some store ->
       List.iter
         (fun node -> record_fact engine store node (lazy (current_reads engine node)))
-        (unsaved_nodes engine)
+        (alive_unwritten_nodes engine)
 
-(* An artifact: a state, or its changes since an earlier artifact. Each
-   node is named by its input or query and its key, and its reads by places in the artifact's table of such names. *)
 type saved_node = {
   saved_name : string;
   saved_key : string;
-  saved_fingerprint : fingerprint;  (** [Unknown] for an input that is not set *)
+  saved_fingerprint : fingerprint;
   saved_reads : int list;
   saved_root : bool;
 }
@@ -68,12 +64,9 @@ type artifact = {
   saved : saved_node list;
   table : (string * string) array;
   collected : (string * string) list;
-  whole_size : int;
-  difference_size : int;
-  difference_count : int;
+  chain_size : chain_size;
 }
 
-(* The same reads in the same order name the same nodes. *)
 let same_reads engine reads (base : node) =
   List.map identity reads = List.map identity (current_reads engine base)
 
@@ -85,8 +78,6 @@ let write ?(full = false) ?stores_every_value engine =
   let full = full || engine.chain = None in
   let candidates =
     if full then begin
-      (* The nodes the roots and the set inputs reach, apart from the
-         fixed bases. *)
       let reached = Hashtbl.create 1024 in
       let rec reach (node : node) =
         if (not node.engine.fixed) && not (Hashtbl.mem reached node.id) then begin
@@ -99,10 +90,6 @@ let write ?(full = false) ?stores_every_value engine =
           let set =
             match node.cell with Input (_, { slot = Set _ | Stored; _ }) -> true | _ -> false
           in
-          (* A copy of a fixed base's node is the state's result where the
-             base's is not: it read an input the state replaced. It is
-             written whether or not anything reaches it, or a state opened
-             from this one would read the base's result in its place. *)
           let replaces_fixed =
             match node.below with Some base -> base.engine.fixed | None -> false
           in
@@ -110,11 +97,8 @@ let write ?(full = false) ?stores_every_value engine =
         (nodes engine);
       by_id (Hashtbl.fold (fun _ node nodes -> node :: nodes) reached [])
     end
-    else unsaved_nodes engine
+    else alive_unwritten_nodes engine
   in
-  (* A node that is written must find its dependencies when the state is
-     opened, so a node of the engine's own that the chain does not hold yet
-     is written with the first node that read it. *)
   let scheduled = Hashtbl.create 256 in
   List.iter (fun (node : node) -> Hashtbl.replace scheduled node.id ()) candidates;
   let more = Queue.create () in
@@ -147,7 +131,7 @@ let write ?(full = false) ?stores_every_value engine =
   in
   let save (node : node) =
     let reads = lazy (current_reads engine node) in
-    if Hashtbl.mem engine.unsaved node.id then record_fact engine store node reads;
+    if Hashtbl.mem engine.unwritten_nodes node.id then record_fact engine store node reads;
     let as_base = (not full) && engine.on_whole && node.written <> In_difference in
     let as_below () =
       as_base
@@ -171,7 +155,6 @@ let write ?(full = false) ?stores_every_value engine =
     | Result _ -> (
         match fingerprint engine node with
         | Some _ -> if as_below () then None else written node (List.map place (Lazy.force reads))
-        (* A result that was never computed. *)
         | None -> None)
     | Unfilled -> None
   in
@@ -190,43 +173,36 @@ let write ?(full = false) ?stores_every_value engine =
       saved;
       table = Array.of_list (List.rev !table);
       collected = (if full then [] else List.rev engine.collected);
-      whole_size = (if full then count else engine.whole);
-      difference_size = (if full then 0 else engine.differences + count);
-      difference_count = (if full then 0 else engine.depth + 1);
+      chain_size =
+        (if full then { whole = count; differences = 0; depth = 0 }
+         else
+           {
+             engine.chain_size with
+             differences = engine.chain_size.differences + count;
+             depth = engine.chain_size.depth + 1;
+           });
     }
   in
   let name = store.put (artifact_header store ^ Marshal.to_string artifact []) in
   if full then engine.on_whole <- false;
   engine.chain <- Some name;
-  engine.whole <- artifact.whole_size;
-  engine.differences <- artifact.difference_size;
-  engine.depth <- artifact.difference_count;
-  Hashtbl.reset engine.unsaved;
+  engine.chain_size <- artifact.chain_size;
+  Hashtbl.reset engine.unwritten_nodes;
   engine.collected <- [];
   name
 
-type chain_size = { whole : int; differences : int; depth : int }
-
-let chain_size (engine : t) =
-  { whole = engine.whole; differences = engine.differences; depth = engine.depth }
-
+let chain_size (engine : t) = engine.chain_size
 let artifact (engine : t) = engine.chain
 
 let unwritten (engine : t) =
-  engine.chain = None || Hashtbl.length engine.unsaved > 0 || engine.collected <> []
+  engine.chain = None || Hashtbl.length engine.unwritten_nodes > 0 || engine.collected <> []
 
-(* An artifact's bytes start with the version that wrote it. They are marshaled, so
-   they mean something only to the same version: read by another, as when
-   a compiler collects a store that an earlier build of it wrote to, they
-   would be taken for another type's. *)
 let read_artifact store bytes : artifact option =
   let header = artifact_header store in
   if String.starts_with ~prefix:header bytes then
     Some (Marshal.from_string bytes (String.length header))
   else None
 
-(* The artifacts from the whole state a chain starts with to its last;
-   [None] if the store lacks one, or another version wrote one. *)
 let chain_of store name =
   let rec back name chain =
     match Option.bind (store.get name) (read_artifact store) with
@@ -249,12 +225,11 @@ let values_in store name =
                artifact.saved)
         chain
 
-(* Fills an engine with artifacts' nodes, each the last of its name and key,
-   apart from those collected after. A node of a query this program does not
-   declare is left out, and so is one that read a node that cannot be
-   found, with everything that read it, since its result could not be
-   checked. *)
 let fill engine (artifacts : artifact list) =
+  let exception Missing in
+  let restorer name =
+    match Hashtbl.find_opt restorers name with Some restorer -> restorer | None -> raise Missing
+  in
   let last : (string * string, saved_node * artifact) Hashtbl.t = Hashtbl.create 1024 in
   let order = ref [] in
   let collected = Hashtbl.create 16 in
@@ -273,85 +248,49 @@ let fill engine (artifacts : artifact list) =
           Hashtbl.replace last key (node, artifact))
         artifact.saved)
     artifacts;
-  Hashtbl.iter
-    (fun (name, key) () ->
-      match Hashtbl.find_opt restorers name with
-      | Some restorer -> (
-          match restorer.find engine ~key with
-          | Some (existing : node) when existing.engine != engine -> (
-              match restorer.restore engine ~key with
-              | node ->
-                  node.written <- In_difference;
-                  node.root <- false
-              | exception _ -> ())
-          | _ | (exception _) -> ())
-      | None -> ())
-    collected;
-  let restored =
-    List.filter_map
-      (fun key ->
-        match Hashtbl.find_opt last key with
-        | None -> None
-        | Some (saved, artifact) -> (
-            match Hashtbl.find_opt restorers saved.saved_name with
-            | None -> None
-            | Some restorer -> (
-                match restorer.restore engine ~key:saved.saved_key with
-                | exception _ -> None
-                | node ->
-                    node.fingerprint <- saved.saved_fingerprint;
-                    node.root <- saved.saved_root;
-                    node.written <- In_difference;
-                    (match node.cell with
-                    | Input (_, cell) ->
-                        cell.slot <- (if saved.saved_fingerprint = Unknown then Unset else Stored)
-                    | Result (_, cell) -> cell.outcome <- None
-                    | Unfilled -> ());
-                    Some (node, saved, artifact))))
-      (List.rev !order)
-  in
-  let find (artifact : artifact) place =
-    let name, key = artifact.table.(place) in
-    match Hashtbl.find_opt restorers name with
-    | Some restorer -> ( try restorer.find engine ~key with _ -> None)
-    | None -> None
-  in
-  let broken = Hashtbl.create 8 in
-  List.iter
-    (fun ((node : node), saved, artifact) ->
-      let looked_up = List.map (find artifact) saved.saved_reads in
-      if List.exists Option.is_none looked_up then Hashtbl.replace broken node.id node
-      else begin
-        let reads = List.filter_map Fun.id looked_up in
+  match
+    Hashtbl.iter
+      (fun (name, key) () ->
+        let restorer = restorer name in
+        match restorer.find engine ~key with
+        | Some (existing : node) when existing.engine != engine ->
+            let node = restorer.restore engine ~key in
+            node.written <- In_difference;
+            node.root <- false
+        | Some _ | None -> ())
+      collected;
+    let restored =
+      List.filter_map
+        (fun key ->
+          Option.map
+            (fun ((saved : saved_node), artifact) ->
+              let node = (restorer saved.saved_name).restore engine ~key:saved.saved_key in
+              node.fingerprint <- saved.saved_fingerprint;
+              node.root <- saved.saved_root;
+              node.written <- In_difference;
+              (match node.cell with
+              | Input (_, cell) ->
+                  cell.slot <- (if saved.saved_fingerprint = Unknown then Unset else Stored)
+              | Result (_, cell) -> cell.outcome <- None
+              | Unfilled -> ());
+              (node, saved, artifact))
+            (Hashtbl.find_opt last key))
+        (List.rev !order)
+    in
+    List.iter
+      (fun ((node : node), (saved : saved_node), (artifact : artifact)) ->
+        let read place =
+          let name, key = artifact.table.(place) in
+          match (restorer name).find engine ~key with Some read -> read | None -> raise Missing
+        in
+        let reads = List.map read saved.saved_reads in
         node.reads <- reads;
-        List.iter (fun read -> add_reader engine read node) reads
-      end)
-    restored;
-  let emptied = Hashtbl.create 8 in
-  let rec remove (node : node) =
-    if node.alive && not (Hashtbl.mem emptied node.id) then begin
-      Hashtbl.replace emptied node.id ();
-      let readers = Hashtbl.fold (fun _ reader readers -> reader :: readers) node.readers [] in
-      List.iter (fun read -> remove_reader engine read node) node.reads;
-      node.reads <- [];
-      forget_fingerprint node;
-      (match node.cell with
-      | Input (_, cell) -> cell.slot <- Unset
-      | Result (_, cell) -> cell.outcome <- None
-      | Unfilled -> ());
-      if node.below = None then begin
-        node.alive <- false;
-        forget engine node;
-        Hashtbl.remove engine.own node.id
-      end;
-      List.iter remove readers
-    end
-  in
-  Hashtbl.iter (fun _ node -> remove node) broken
+        List.iter (fun read -> add_reader engine read node) reads)
+      restored
+  with
+  | () -> true
+  | exception Missing -> false
 
-(* Frozen bases, shared by every engine opened from the same whole state
-   over the same bases, and held weakly, so that one no engine uses is
-   freed. *)
 let shared_bases : (string * string * bool * int list, t Weak.t) Hashtbl.t = Hashtbl.create 8
 let forget_bases () = Hashtbl.reset shared_bases
 
@@ -361,41 +300,42 @@ let frozen_from (store : store) ~bases ~fixed ~name (artifacts : artifact list) 
     match Hashtbl.find_opt shared_bases key with Some weak -> Weak.get weak 0 | None -> None
   in
   match cached with
-  | Some engine -> engine
+  | Some engine -> Some engine
   | None ->
       let engine = create ~bases () in
       attach engine store;
-      fill engine artifacts;
-      engine.frozen <- true;
-      engine.fixed <- fixed;
-      let dead =
-        Hashtbl.fold
-          (fun key weak dead -> if Weak.check weak 0 then dead else key :: dead)
-          shared_bases []
-      in
-      List.iter (Hashtbl.remove shared_bases) dead;
-      let weak = Weak.create 1 in
-      Weak.set weak 0 (Some engine);
-      Hashtbl.replace shared_bases key weak;
-      engine
+      if not (fill engine artifacts) then None
+      else begin
+        engine.frozen <- true;
+        engine.fixed <- fixed;
+        let dead =
+          Hashtbl.fold
+            (fun key weak dead -> if Weak.check weak 0 then dead else key :: dead)
+            shared_bases []
+        in
+        List.iter (Hashtbl.remove shared_bases) dead;
+        let weak = Weak.create 1 in
+        Weak.set weak 0 (Some engine);
+        Hashtbl.replace shared_bases key weak;
+        Some engine
+      end
 
 let frozen_of store ~bases ~fixed name =
-  match chain_of store name with
-  | None -> None
-  | Some chain -> Some (frozen_from store ~bases ~fixed ~name (List.map snd chain))
+  Option.bind (chain_of store name) (fun chain ->
+      frozen_from store ~bases ~fixed ~name (List.map snd chain))
 
 let open_ ?log store ~bases name =
   match chain_of store name with
   | None | Some [] -> None
   | Some ((whole_name, whole) :: differences) ->
-      let base = frozen_from store ~bases ~fixed:false ~name:whole_name [ whole ] in
-      let engine = create ?log ~bases:(base :: bases) () in
-      attach engine store;
-      fill engine (List.map snd differences);
-      let last = match List.rev differences with (_, last) :: _ -> last | [] -> whole in
-      engine.chain <- Some name;
-      engine.on_whole <- true;
-      engine.whole <- last.whole_size;
-      engine.differences <- last.difference_size;
-      engine.depth <- last.difference_count;
-      Some engine
+      Option.bind (frozen_from store ~bases ~fixed:false ~name:whole_name [ whole ]) (fun base ->
+          let engine = create ?log ~bases:(base :: bases) () in
+          attach engine store;
+          if not (fill engine (List.map snd differences)) then None
+          else begin
+            let last = match List.rev differences with (_, last) :: _ -> last | [] -> whole in
+            engine.chain <- Some name;
+            engine.on_whole <- true;
+            engine.chain_size <- last.chain_size;
+            Some engine
+          end)

@@ -1,5 +1,5 @@
-fn f(names: List[String]) -> USize {
-  var count: USize = 0
+fn f(names: List[String]) -> UInt64 {
+  var count: UInt64 = 0
   for name in names {
     count = count + name.length()
   }

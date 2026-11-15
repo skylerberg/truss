@@ -18,7 +18,7 @@ val closure_bars :
   opening:Token.t ->
   closing:Token.t ->
   body:Syntax.expression ->
-  before_else:bool ->
+  is_before_else:bool ->
   unit
 
 val brace_record :
@@ -35,7 +35,7 @@ val angle_brackets : Cursor.t -> angles:Token.t list -> unit
 val path_separator : Cursor.t -> separator:Token.t -> unit
 val qualified_variant : Cursor.t -> qualifier_start:int -> variant:Token.t -> unit
 val macro_call : Cursor.t -> name:Syntax.name -> bang:Token.t -> opening:Token.t -> unit
-val keyword_macro : Cursor.t -> bang:Token.t -> closing:Token.t -> empty:bool -> unit
+val keyword_macro : Cursor.t -> bang:Token.t -> closing:Token.t -> has_arguments:bool -> unit
 val tuple : Cursor.t -> opening:Token.t -> 'a
 val tuple_field : Cursor.t -> field:Token.t -> 'a
 val power_operator : Cursor.t -> operator:Token.t -> unit
@@ -45,7 +45,7 @@ val pipe_operator :
   Cursor.t -> value:Syntax.expression -> operator:Token.t -> callee:Syntax.expression -> unit
 
 val lambda_annotation : Cursor.t -> from:int -> stop:int -> unit
-val impl_parameters : Cursor.t -> opening:Token.t -> closing:Token.t -> plain:bool -> unit
+val impl_parameters : Cursor.t -> opening:Token.t -> closing:Token.t -> has_bounds:bool -> unit
 
 val null_coalescing :
   Cursor.t ->

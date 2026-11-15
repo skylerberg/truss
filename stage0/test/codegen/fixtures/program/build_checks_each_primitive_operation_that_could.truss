@@ -1,4 +1,4 @@
-fn pick(items: List[Int64], top: USize) -> USize
+fn pick(items: List[Int64], top: UInt64) -> UInt64
   requires items[top] >= 0
 {
   top

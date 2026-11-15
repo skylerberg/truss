@@ -17,7 +17,7 @@ val host : system option
     [None] where that is a system it knows no C library of. *)
 
 (** A number that Truss and C both have. *)
-type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float32 | Float64
+type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | Float32 | Float64
 
 type number =
   | O_rdonly

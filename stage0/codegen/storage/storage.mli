@@ -21,10 +21,8 @@ val of_elements : Ground.ty -> Ground.ty
 val view_of_elements : Ground.ty -> Ground.ty
 val elements_of : Ground.ty -> Ground.ty option
 val viewed : Ground.ty -> Ground.ty option
-
-(* Each one's shape, where [usize] is the type of a length. *)
-val shape : usize:Ground.ty -> Ground.ty -> Memory_layout.shape
-val view_shape : usize:Ground.ty -> Ground.ty -> Memory_layout.shape
+val shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
+val view_shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
 
 (* The names of a storage's fields, for the emitter's static data. *)
 val buffer_field : string

@@ -37,7 +37,7 @@ let input ~name ~show ?(equal = ( = )) ?(about = fun _ -> None) () =
           | Some cell -> cell.input_node
           | None ->
               let cell = make_input engine input key ~below:None in
-              Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
+              Hashtbl.replace engine.unwritten_nodes cell.input_node.id cell.input_node;
               cell.input_node);
       find =
         (fun engine ~key ->
@@ -55,11 +55,9 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
   | None ->
       if engine.frozen then None
       else begin
-        (* A read that found nothing is read too, and is part of the state. *)
         let cell = make_input engine input key ~below:None in
-        Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
+        Hashtbl.replace engine.unwritten_nodes cell.input_node.id cell.input_node;
         record_read context cell.input_node;
-        (* A result a driver only observed is collected again. *)
         if context.frame = None && context.observing then begin
           defer_collection engine cell.input_node;
           sweep engine
@@ -73,10 +71,9 @@ let change engine (cell : ('key, 'value) input_cell) slot =
   forget_fingerprint node;
   node.changed_at <- tick engine;
   engine.activity <- engine.activity + 1;
-  Hashtbl.replace engine.unsaved node.id node;
+  Hashtbl.replace engine.unwritten_nodes node.id node;
   seed engine node
 
-(* The engine's own cell for an input, copying a base's if it has one. *)
 let own_input engine (input : ('key, 'value) input) key =
   match find_input engine input key with
   | Some cell when cell.input_node.engine == engine -> cell
@@ -148,8 +145,6 @@ let query ~name ~show ~phase ?(saved = false) ?(portable = false) ?(equal = ( = 
     };
   query
 
-(* The value of a result that is up to date. A stored value the store no
-   longer has is computed again, in the engine itself. *)
 let rec value : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> 'value =
  fun engine query cell ->
   match load engine cell with
@@ -202,22 +197,12 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
   in
   (match (context.frame, result) with
   | None, _ ->
-      (* A result a driver only observed is collected again, unless something
-         reads it or it is a root. *)
       if context.observing then defer_collection engine node;
       sweep engine
-  | Some frame, Error (Cycle labels) ->
-      (* A cycle is an error wherever it is met: a reader of a result that
-         is a cycle has the cycle as its own, whether or not it catches it,
-         so that its result does not depend on which query met the cycle
-         first. *)
-      if frame.cyclic = None then frame.cyclic <- Some labels
+  | Some frame, Error (Cycle labels) -> if frame.cyclic = None then frame.cyclic <- Some labels
   | Some _, _ -> ());
   match result with Ok value -> value | Error exception_ -> raise exception_
 
-(* A query's node as a driver observes it: brought up to date, or computed,
-   and not made a root. A node that the observation leaves unnecessary is
-   collected as this returns, and still holds its outcome. *)
 let observed_node engine (query : ('key, 'value) query) (key : 'key) : node =
   settle ~through:query.phase engine;
   let cell =

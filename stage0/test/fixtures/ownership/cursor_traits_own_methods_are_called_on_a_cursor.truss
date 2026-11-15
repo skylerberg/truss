@@ -1,4 +1,4 @@
-fn f(items: List[Int64], text: String) -> USize {
+fn f(items: List[Int64], text: String) -> UInt64 {
   var cursor = items.cursor()
   let _ = mut cursor.find(fn(item) { item > 3 })
   let _ = items.cursor().fold(0, combine: fn(total, item) { total + item })
