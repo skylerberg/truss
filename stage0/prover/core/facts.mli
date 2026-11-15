@@ -55,9 +55,7 @@ val span_of : source -> int -> span
 val quote : source -> int -> string
 val builtin : Types.ty -> Intrinsic.builtin option
 val bounds : Types.ty -> (Z.t * Z.t) option
-val is_numeric : Types.ty -> bool
 val float_format : Types.ty -> (int * int) option
-val is_bool : Types.ty -> bool
 val constructor_name : Types.ty -> string option -> 'a Symbol.t
 val selector_name : Types.ty -> string option -> string -> 'a Symbol.t
 val is_standard_equal : Path.t -> bool
