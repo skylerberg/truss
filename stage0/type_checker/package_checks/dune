@@ -3,7 +3,6 @@
  (modules_without_implementation lookups)
  (libraries
   compiler_bug
-  manifest
   path
   diagnostic
   resolve
