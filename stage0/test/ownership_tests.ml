@@ -19,7 +19,10 @@ let () =
       ("the place a slice in a field views", Fixtures.Ownership.place_a_slice_in_a_field_views);
     ];
   test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
-      fine (bump ^ Fixtures.Ownership.var_and_a_mut_parameter_can_be_written_through_a))
+      fine (bump ^ Fixtures.Ownership.var_and_a_mut_parameter_can_be_written_through_a));
+  test "a read-only `Slice` parameter cannot be written through" (fun () ->
+      one_diagnostic Fixtures.Ownership.read_only_slice_parameter_cannot_be_written_through
+        "types.not_assignable")
 
 let () =
   let functions = Fixtures.Ownership.functions in
@@ -217,6 +220,7 @@ let () =
     Fixtures.Ownership.capturing_lambda_cannot_be_stored_in_a_mut "ownership.view_escapes";
   rejected "a capturing lambda cannot be passed with a `mut` parameter that holds a function"
     Fixtures.Ownership.capturing_lambda_cannot_be_passed_with_a_mut "ownership.view_escapes";
+
   accepted "a capturing lambda can be passed with a `mut` slice parameter"
     Fixtures.Ownership.capturing_lambda_can_be_passed_with_a_mut_slice;
   rejected "a capturing lambda cannot be passed with a `mut` slice of functions"
@@ -229,6 +233,7 @@ let () =
   rejected
     "a function value that is not owned cannot be passed to an `own` function-typed parameter"
     Fixtures.Ownership.function_value_that_is_not_owned_cannot_be_passed "ownership.view_escapes";
+
   accepted
     "a capturing lambda can be stored in a local list and passed to a generic `own` parameter"
     Fixtures.Ownership.capturing_lambda_can_be_stored_in_a_local_list_and;
@@ -238,6 +243,8 @@ let () =
     Fixtures.Ownership.capturing_lambda_returned_through_a_generic_own "ownership.view_escapes";
   accepted "a function that captures nothing can be returned, stored, and moved"
     Fixtures.Ownership.function_that_captures_nothing_can_be_returned;
+  accepted "an owned local that a lambda captures can be moved once the lambda is dead"
+    (keep ^ Fixtures.Ownership.owned_local_that_a_lambda_captures_can_be_moved);
   accepted "a capturing lambda can be passed to a call and stored in a local record"
     Fixtures.Ownership.capturing_lambda_can_be_passed_to_a_call_and
 
@@ -298,6 +305,7 @@ let () =
   accepted "a method can lend a view of `self`, and lend a local itself"
     Fixtures.Ownership.method_can_lend_a_view_of_self_and_lend_a_local;
   (let chunks = Fixtures.Ownership.chunks in
+
    rejected "a view of an element lent `mut` cannot be used in the next iteration"
      (chunks ^ Fixtures.Ownership.view_of_an_element_lent_mut_cannot_be_used_in_the_next)
      "ownership.mutated_while_viewed";
@@ -415,6 +423,7 @@ let () =
     Fixtures.Ownership.place_moved_out_before_a_concurrent_block_must_be
     "ownership.not_reinitialized";
   let pair = Fixtures.Ownership.pair in
+
   test
     "a `concurrent for` cannot change the elements of a collection that is not a `List`, a \
      `Slice`, or an `Array`" (fun () ->
@@ -523,6 +532,11 @@ let () =
         "ownership.use_after_move");
   test "a place is usable again once it is assigned" (fun () ->
       fine (keep ^ Fixtures.Ownership.place_is_usable_again_once_it_is_assigned));
+  test
+    "a field of a place moved out whole cannot be assigned, which prevents a double free of its \
+     other fields" (fun () ->
+      one_diagnostic Fixtures.Ownership.field_of_a_place_moved_out_whole_cannot_be_assigned
+        "ownership.use_after_move");
   test "a field can be moved out by itself" (fun () ->
       fine Fixtures.Ownership.field_can_be_moved_out_by_itself);
   test "a read-only parameter cannot be moved" (fun () ->
@@ -579,6 +593,8 @@ let () =
         "ownership.view_escapes");
   test "a function can return a view of its parameter" (fun () ->
       fine Fixtures.Ownership.function_can_return_a_view_of_its_parameter);
+  test "a view-typed local that views nothing can be returned" (fun () ->
+      fine Fixtures.Ownership.view_typed_local_that_views_nothing_can_be_returned);
   test "a `var` needs an owned value, with fixes that move or copy the place" (fun () ->
       one_diagnostic Fixtures.Ownership.var_needs_an_owned_value_with_fixes_that_move_or
         "ownership.needs_owned"
@@ -716,6 +732,7 @@ let () =
       fine (make ^ Fixtures.Ownership.is_binding_in_an_if_inside_a_loop_may_be_moved));
   test "a let-else binding inside a loop may be moved" (fun () ->
       fine (make ^ Fixtures.Ownership.let_else_binding_inside_a_loop_may_be_moved));
+
   test "an `is` binding after `&&` in a `while` condition may be moved in every iteration"
     (fun () ->
       fine (make ^ Fixtures.Ownership.is_binding_after_and_in_a_while_condition_may_be_moved))
@@ -746,29 +763,29 @@ let disjoint_obligations text =
   List.fold_left
     (fun total declaration ->
       match Query.demand database Ownership.ownership (Resolve.Names.key_of declaration) with
-      | Some result -> total + List.length result.Ownership.disjoint
+      | Some result -> total + List.length result.Ownership.must_be_disjoint
       | None -> total)
     0
     (Query.demand database Resolve.Names.declarations_in file)
 
 let () =
-  test "two slices of one list borrowed by one call produce a `Disjoint` obligation" (fun () ->
+  test "two slices of one list borrowed by one call produce one `Disjoint` obligation" (fun () ->
       let actual =
         disjoint_obligations Fixtures.Ownership.two_slices_of_one_list_borrowed_by_one_call
       in
       if actual <> 1 then fail "%d obligations" actual);
-  test "`parallel` branches that mutate two elements produce a `Disjoint` obligation" (fun () ->
+  test "`parallel` branches that mutate two elements produce one `Disjoint` obligation" (fun () ->
       let actual =
         disjoint_obligations Fixtures.Ownership.parallel_branches_that_mutate_two_elements_produce
       in
       if actual <> 1 then fail "%d obligations" actual);
-  test "a `mut` slice argument that may alias a view argument produces a `Disjoint` obligation"
+  test "a `mut` slice argument that may alias a view argument produces one `Disjoint` obligation"
     (fun () ->
       let actual =
         disjoint_obligations Fixtures.Ownership.mut_slice_argument_that_may_alias_a_view_argument
       in
       if actual <> 1 then fail "%d obligations" actual);
-  test "a `mut` element argument that may alias a view argument produces a `Disjoint` obligation"
+  test "a `mut` element argument that may alias a view argument produces one `Disjoint` obligation"
     (fun () ->
       let actual =
         disjoint_obligations Fixtures.Ownership.mut_element_argument_that_may_alias_a_view

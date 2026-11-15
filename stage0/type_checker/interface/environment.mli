@@ -21,6 +21,8 @@ type lowered_interface = {
   bounds : (Types.parameter * Types.trait_reference list) list;
 }
 
+val is_specification : interface -> bool
+
 val lower :
   Query.context ->
   Resolve.Names.key ->

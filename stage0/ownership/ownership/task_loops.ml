@@ -1,13 +1,5 @@
-(* An iteration outlives the step of the loop that started it, so what it
-   is given stays valid, and distinct from what the other iterations are
-   given, until the loop ends. Both rules read the loop and the types it
-   names, never the body of a callee. *)
 open Context
 
-let is_storage type_ =
-  Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_
-
-(* The type of the collection whose [element] lends a loop's element. *)
 let collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (element : Mir.local) =
   List.find_map
     (fun (statement : Mir.statement) ->
@@ -34,15 +26,10 @@ let check context (mir : Mir.Graph.t) =
                 _;
               } -> (
               let keyword = if schedule = Parallel_loop then "parallel" else "concurrent" in
-              (* A data race. Each iteration is lent an element to mutate, so
-                 the elements must be different places. An index of a [List],
-                 a [Slice], or an [Array] is one for each position. Any other
-                 collection's [element] could lend one place to two
-                 iterations. *)
               (match lent with
               | Some { element; _ } when body.locals.(element).kind = Lent Mut -> (
                   match collection_type body ~inside element with
-                  | Some collection when is_storage collection -> ()
+                  | Some collection when Place.is_storage_type collection -> ()
                   | collection ->
                       report context Data_race (span context origin)
                         (Printf.sprintf
@@ -56,9 +43,6 @@ let check context (mir : Mir.Graph.t) =
                            | Some collection -> Printf.sprintf "`%s`" (Types.show collection)
                            | None -> "the collection")))
               | _ -> ());
-              (* A dangling view. A task keeps the value it is given after the
-                 loop pulls the cursor again, and a pull may mutate or drop
-                 what a view from the cursor views. *)
               match (schedule, iteration) with
               | Concurrent_loop, Pull _ when is_view context body.locals.(part).type_ ->
                   report context Task_outlives_view
