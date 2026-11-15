@@ -359,18 +359,24 @@ let processor () =
       | Some name -> name
       | None | (exception Sys_error _) -> "an unknown processor")
 
-let load () =
-  match command "uptime" [] with
-  | Some text -> (
-      let fields =
-        List.filter (( <> ) "")
-          (String.split_on_char ' '
-             (String.map (fun character -> if character = ',' then ' ' else character) text))
-      in
-      match List.rev fields with
-      | fifteen :: five :: one :: _ -> String.concat " " [ one; five; fifteen ]
-      | _ -> "unknown")
-  | None -> "unknown"
+let busy_seconds () =
+  match In_channel.with_open_text "/proc/stat" In_channel.input_line with
+  | Some line -> (
+      match List.filter (( <> ) "") (String.split_on_char ' ' line) with
+      | "cpu" :: user :: nice :: system :: _idle :: _iowait :: irq :: softirq :: steal :: _ ->
+          Some
+            (float_of_int
+               (List.fold_left
+                  (fun total field -> total + int_of_string field)
+                  0
+                  [ user; nice; system; irq; softirq; steal ])
+            /. 100.)
+      | _ -> None)
+  | None | (exception Sys_error _) -> None
+
+let own_seconds () =
+  let times = Unix.times () in
+  times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
 let run_in_new_process ~scratch ~standard ~modules =
   match Process.run Sys.executable_name [ "--run"; string_of_int modules; standard; scratch ] with
@@ -392,7 +398,8 @@ let benchmark arguments =
   end;
   let scratch = Filename.temp_dir "truss-benchmark" "" in
   at_exit (fun () -> File_system.remove scratch);
-  let load_before = load () in
+  let started = Unix.gettimeofday () and busy_before = busy_seconds () in
+  let own_before = own_seconds () in
   let standard = Filename.concat scratch "standard" in
   Unix.putenv "TRUSS_CACHE" standard;
   let (), standard_time =
@@ -409,19 +416,31 @@ let benchmark arguments =
           List.init runs (fun _ -> run_in_new_process ~scratch:runs_directory ~standard ~modules) ))
       sizes
   in
+  let elapsed = Unix.gettimeofday () -. started in
+  let interference =
+    match (busy_before, busy_seconds ()) with
+    | Some before, Some after ->
+        Printf.sprintf "Other processes used %.1f CPU-seconds during the run's %.0f seconds."
+          (Float.max 0. (after -. before -. (own_seconds () -. own_before)))
+          elapsed
+    | _ ->
+        Printf.sprintf
+          "The run took %.0f seconds, and this system does not report other processes' CPU time."
+          elapsed
+  in
   let date =
     let time = Unix.localtime (Unix.time ()) in
     Printf.sprintf "%d-%02d-%02d" (time.tm_year + 1900) (time.tm_mon + 1) time.tm_mday
   in
   Printf.printf
-    "Run on %s, on %s (%s, %d logical cores). Load averages were %s before the run and %s after \
-     it. Each run is a process of its own, and each time is the median of %d runs.\n\n\
+    "Run on %s, on %s (%s, %d logical cores). %s Each run is a process of its own, and each time \
+     is the median of %d runs.\n\n\
      Checking the standard library into an empty store took %.0f ms.\n"
     date
     (Option.value (command "uname" [ "-sm" ]) ~default:"an unknown system")
     (processor ())
     (Domain.recommended_domain_count ())
-    load_before (load ()) runs standard_time;
+    interference runs standard_time;
   List.iter (fun (modules, outcomes) -> summarize ~modules outcomes) summaries
 
 let () =
