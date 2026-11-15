@@ -1,0 +1,76 @@
+type Big(label: String, numbers: Array[Int64, 64])
+
+type Catalog(books: List[String], bigs: List[Big])
+
+fn Catalog.sorted(self) lends List[String] {
+  var sorted = self.books.copy()
+  mut sorted.sort()
+  sorted
+}
+
+fn Catalog.first(self) lends String {
+  self.sorted()[0]
+}
+
+fn Catalog.first_length(self) lends USize {
+  self.first().length()
+}
+
+fn Catalog.label(self, index: USize) lends Option[String] {
+  match self.bigs.get(index) {
+    Some(big) => Some(big.label)
+    None => None
+  }
+}
+
+fn Catalog.label_or_first(self, index: USize) lends String {
+  if self.label(index) is Some(label) {
+    return label
+  }
+  self.first()
+}
+
+fn Catalog.first_matching(self, prefix: String) lends Option[String] {
+  for index in 0..self.bigs.length() {
+    if self.label(index) is Some(label) {
+      if label.slice().starts_with(prefix.slice()) {
+        return Some(label)
+      }
+    }
+  }
+  None
+}
+
+fn catalog() -> Catalog {
+  Catalog(
+    books: ["pear", "fig", "plum"],
+    bigs: [
+      Big(label: "${1}st", numbers: Array[Int64, 64].filled(3)),
+      Big(label: "${2}nd", numbers: Array[Int64, 64].filled(4)),
+    ],
+  )
+}
+
+test "a part of a value that the called method made lives until the caller's lend ends" {
+  let catalog = catalog()
+  assert catalog.first() == "fig"
+  assert catalog.first().length() == 3
+  assert catalog.first_length() == 3
+}
+
+test "a part of a constructor that the called method built" {
+  let catalog = catalog()
+  assert catalog.label(1) == Some("2nd")
+  assert catalog.label(2) is None
+  if catalog.label(0) is Some(label) {
+    assert label.length() == 3
+  }
+}
+
+test "a lend that ends before the method lends, and one that it forwards" {
+  let catalog = catalog()
+  assert catalog.label_or_first(1) == "2nd"
+  assert catalog.label_or_first(7) == "fig"
+  assert catalog.first_matching("2") == Some("2nd")
+  assert catalog.first_matching("x") is None
+}

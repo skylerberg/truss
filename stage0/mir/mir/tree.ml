@@ -72,7 +72,6 @@ type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
   | Pull of { cursor : place; next : callee }
 
-type inlined = { method_ : Path.t; type_arguments : Types.argument list; call : Core.origin }
 type connective = And | Or | Implies
 
 type rvalue =

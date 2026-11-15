@@ -38,7 +38,6 @@ type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
-  inlined : inlined list;
 }
 
 type body = {
@@ -52,6 +51,5 @@ type t = { body : body; lambdas : body array }
 
 val canonical : basic_block array -> basic_block array
 val successors : terminator -> block list
-val conditional_lends : body -> local list
 val iteration_loop : terminator -> block option
 val block_successors : body -> block -> block list

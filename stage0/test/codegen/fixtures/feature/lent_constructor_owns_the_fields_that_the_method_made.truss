@@ -1,0 +1,53 @@
+type Shelf(books: List[String])
+
+type Tagged(tag: String, book: String)
+
+type Report(count: USize, first: Tagged)
+
+fn Shelf.tagged(self, index: USize) lends Tagged {
+  Tagged(tag: "book ${index}", book: self.books[index])
+}
+
+fn Shelf.find(self, index: USize) lends Option[Tagged] {
+  if index < self.books.length() {
+    Some(Tagged(tag: "book ${index}", book: self.books[index]))
+  } else {
+    None
+  }
+}
+
+fn Shelf.report(self) lends Report {
+  Report(count: self.books.length(), first: Tagged(tag: "first of ${self.books.length()}", book: self.books[0]))
+}
+
+fn length_of(tagged: Tagged) -> USize {
+  tagged.tag.length() + tagged.book.length()
+}
+
+test "the part owns the field that the method made, and lends the place" {
+  let shelf = Shelf(books: ["first", "second"])
+  assert shelf.tagged(1).tag == "book 1"
+  assert shelf.tagged(1).book == "second"
+  assert length_of(shelf.tagged(0)) == 11
+}
+
+test "inside a variant, and inside another constructor" {
+  let shelf = Shelf(books: ["first", "second"])
+  if shelf.find(0) is Some(tagged) {
+    assert tagged.tag == "book 0"
+    assert tagged.book == "first"
+  }
+  assert shelf.find(5) is None
+  assert shelf.report().count == 2
+  assert shelf.report().first.tag == "first of 2"
+  assert shelf.report().first.book == "first"
+}
+
+test "each lend in a loop drops the field it made" {
+  let shelf = Shelf(books: ["first", "second", "third"])
+  var total: USize = 0
+  for index in 0..shelf.books.length() {
+    total += length_of(shelf.tagged(index))
+  }
+  assert total == 34
+}

@@ -21,4 +21,10 @@ val fill_defaults :
   Lowered.place list ->
   Lowered.place list
 
-val lower_code : Lowering.state -> Path.t -> parameters:Lowered.place list -> unit
+val lower_code :
+  Lowering.state ->
+  Path.t ->
+  parameters:Lowered.place list ->
+  ?lending:Lowering.lending ->
+  unit ->
+  unit

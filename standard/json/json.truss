@@ -845,12 +845,12 @@ fn pointer_array_index(token: StringSlice) -> Option[USize]
   }
 }
 
-public fn Value.pointer(self, path: StringSlice) -> Option[Value]
+public fn Value.pointer(self, path: StringSlice) lends Option[Value]
   decreases path.length()
   cost time finite
 {
   if path.length() == 0 {
-    return Some(self.copy())
+    return Some(self)
   }
   if path.byte(0) != 47 {
     return None

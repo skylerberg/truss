@@ -69,7 +69,7 @@ let begin_body st ~(body : Mir.Graph.body) ~defaults =
 
 let code_state context ~key path =
   let code = code_of context path [] in
-  (enter context ~builder:(create context.env ~key) (frame_of code ~inlined:[ path ]), code)
+  (enter context ~builder:(create context.env ~key) (frame_of code), code)
 
 (* The [requires] clauses of a tag's [from_template] that can run, each by
    its position among the clauses, as a body that takes the template. *)
@@ -153,14 +153,31 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.
 let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
   let code = code_of context path type_arguments in
   let body = (Mir_form.mir_of context path).body in
-  let st = enter context ~builder:(create context.env ~key) (frame_of code ~inlined:[ path ]) in
+  let st = enter context ~builder:(create context.env ~key) (frame_of code) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
   let parameter_locals, places =
     begin_body st ~body ~defaults:(Mir_form.parameter_defaults context path)
   in
-  Mir_form.lower_code st path ~parameters:places;
-  finish_instance st ~returns ~rest:parameter_locals ()
+  let lending_locals =
+    List.map
+      (fun ty -> local st.builder ~name:"lend" ty)
+      (lending_parameters context code.substitution code.result)
+  in
+  let lending : Lowering.lending option =
+    match (code.result, List.rev lending_locals) with
+    | Lends (_, ty), site :: record :: slot ->
+        Some
+          {
+            slot = (match slot with [ slot ] -> Some (at slot) | _ -> None);
+            part = ground st ty;
+            record = Copy (at record);
+            site = Copy (at site);
+          }
+    | _ -> None
+  in
+  Mir_form.lower_code st path ~parameters:places ?lending ();
+  finish_instance st ~returns ~rest:(parameter_locals @ lending_locals) ()
 
 let instance context (key : Instance.key) : Emit_c.Builder.instance =
   match key with

@@ -154,22 +154,7 @@ let rec mangle_ty (ty : Ground.ty) =
              (fun (name, ty) -> marker "Assoc" ^ name ^ marker "Is" ^ mangle_ty ty)
              associated)
       ^ marker "End"
-  | Lent lent -> mangle_lent lent
   | Never -> marker "Never"
-
-and mangle_lent ({ base; writable; fields } : Ground.lent) =
-  marker "Lent"
-  ^ (if writable then marker "Mut" else "")
-  ^ mangle_ty base
-  ^ String.concat ""
-      (List.map
-         (fun ({ variant; field; holds } : Ground.lent_field) ->
-           marker "Field"
-           ^ Option.fold ~none:"" ~some:(fun variant -> text variant ^ marker "Variant") variant
-           ^ text field
-           ^ match holds with Address -> marker "Address" | Nested lent -> mangle_lent lent)
-         fields)
-  ^ marker "End"
 
 and mangle_argument = function
   | Ground.Type ty -> mangle_ty ty

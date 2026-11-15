@@ -202,8 +202,8 @@ module Code : sig
     | Needs_owned
     | Data_race
     | Lent_part_escapes
+    | Lends_other_parameter
     | Read_only_view
-    | Owned_beside_lent
     | Lent_mut_in_variant
     | Task_outlives_view
 

@@ -11,19 +11,13 @@ type jump_targets = {
 let expanded_body (body : body) : Graph.body =
   let blocks : Graph.basic_block Dynarray.t = Dynarray.create () in
   let fresh () =
-    Dynarray.add_last blocks
-      { statements = []; terminator = Unreachable; terminator_origin = 0; inlined = [] };
+    Dynarray.add_last blocks { statements = []; terminator = Unreachable; terminator_origin = 0 };
     Dynarray.length blocks - 1
   in
   let made_since first = List.init (Dynarray.length blocks - first) (fun index -> first + index) in
   let close (index, emitted) terminator origin =
     Dynarray.set blocks index
-      {
-        (Dynarray.get blocks index) with
-        statements = List.rev emitted;
-        terminator;
-        terminator_origin = origin;
-      }
+      { statements = List.rev emitted; terminator; terminator_origin = origin }
   in
   let assigned target value origin : statement =
     { kind = Assign { target; value = Operand value; node = None }; origin }

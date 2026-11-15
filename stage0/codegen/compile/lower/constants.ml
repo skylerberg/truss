@@ -244,8 +244,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
             type_arguments
         in
         let callee =
-          enter st.context ~builder:st.builder
-            (frame_of (code_of st.context path type_arguments) ~inlined:[])
+          enter st.context ~builder:st.builder (frame_of (code_of st.context path type_arguments))
         in
         let defaults = Mir_form.parameter_defaults st.context path in
         let* values =
@@ -317,9 +316,7 @@ let constant_state context path =
       text = text_of context key;
     }
   in
-  let st =
-    enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code ~inlined:[])
-  in
+  let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in
   (st, mir, ty)
 
 (* A constant's static data, where its value folds, and otherwise the type
