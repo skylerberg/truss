@@ -104,7 +104,7 @@ let () =
   test "a coroutine runs when resumed, switches back when it suspends, and ends when it returns"
     (fun () ->
       let work : Ground.function_type =
-        { parameters = [ (Read, named "UInt64") ]; result = Returns (named "Unit"); uses = [] }
+        { parameters = [ (Read, uint64) ]; result = Returns unit; uses = [] }
       in
       let environment = [ ("count", Lowered.Pointer { target = value int32; writable = true }) ] in
       let count = at ~projections:[ Deref; Field "count"; Deref ] 2 in
@@ -113,7 +113,7 @@ let () =
         function_ ~parameters:[ 0; 1 ] ~environment
           [
             local ~name:"environment" (Raw (Nullable_pointer Opaque));
-            local ~name:"item" (value (named "UInt64"));
+            local ~name:"item" (value uint64);
             local (Pointer { target = Environment 0; writable = false });
             local (value int32);
           ]

@@ -88,7 +88,7 @@ let () =
               [ field "left" (named "Tree"); field "value" int64; field "right" (named "Tree") ];
           ]
       in
-      let env = computed_env host (shapes [ ("Tree", tree) ]) in
+      let env = computed_env host (find_shape [ ("Tree", tree) ]) in
       expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (For_testing.to_string (Memory_layout.block env (named "Tree") "Node")));
   test "an Array holds its elements in place" (fun () ->

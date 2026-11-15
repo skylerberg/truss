@@ -77,7 +77,6 @@ and ground_function context substitution (function_type : Types.function_type) :
     uses = evidence_for context [] function_type.uses;
   }
 
-let uint64 = Ground.builtin UInt64
 let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
 let rec back : Ground.ty -> Types.ty = function
@@ -148,8 +147,8 @@ let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
       | Some Unit, [] -> Some (Record [])
       | Some Never, [] -> Some (Sum [])
       | Some Array, [ Type element; Value count ] -> Some (Array (element, Z.to_int count))
-      | Some Storage, [ Type element ] -> Some (Storage.shape ~uint64 element)
-      | Some View, [ Type element ] -> Some (Storage.view_shape ~uint64 element)
+      | Some Storage, [ Type element ] -> Some (Storage.make_shape element)
+      | Some View, [ Type element ] -> Some (Storage.make_view_shape element)
       | Some Handle, [] -> Some (Record [ ("descriptor", Raw (Integer Int32)) ])
       | Some Shared, [ Type _ ] -> Some (Record [ ("value", Raw (Pointer Opaque)) ])
       | Some Integer, _ -> bug "Integer exists only in specifications"
@@ -162,7 +161,9 @@ let rec compute_fixed_layout ty =
   | None -> None
   | Some shape -> (
       let layout_of stored =
-        match compute_fixed_layout stored with Some layout -> layout | None -> raise Defined_layout
+        match compute_fixed_layout stored with
+        | Some layout -> layout
+        | None -> raise Defined_layout
       in
       match Memory_layout.layout ~layout_of ty shape with
       | layout -> Some layout

@@ -38,8 +38,9 @@ let buffer_field = "buffer"
 let length_field = "length"
 let capacity_field = "capacity"
 let elements_field = "elements"
+let uint64 = Ground.builtin UInt64
 
-let shape ~uint64 element : Memory_layout.shape =
+let make_shape element : Memory_layout.shape =
   Record
     [
       (buffer_field, Raw (Pointer (Data element)));
@@ -47,7 +48,7 @@ let shape ~uint64 element : Memory_layout.shape =
       (capacity_field, Typed uint64);
     ]
 
-let view_shape ~uint64 element : Memory_layout.shape =
+let make_view_shape element : Memory_layout.shape =
   Record [ (elements_field, Raw (Pointer (Data element))); (length_field, Typed uint64) ]
 
 let ( / ) (place : Lowered.place) projection : Lowered.place =

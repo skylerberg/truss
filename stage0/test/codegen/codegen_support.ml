@@ -27,17 +27,22 @@ let definition name : Path.t =
   Top { module_ = { package = { owner = None; name = "test" }; modules = [] }; name }
 
 let named ?(arguments = []) name = Ground.Named { path = definition name; arguments }
-let int64 = named "Int64"
-let bool = named "Bool"
-let character = named "Character"
-let unit = named "Unit"
+let int32 = Ground.builtin Int32
+let int64 = Ground.builtin Int64
+let uint8 = Ground.builtin UInt8
+let uint64 = Ground.builtin UInt64
+let float64 = Ground.builtin Float64
+let bool = Ground.builtin Bool
+let character = Ground.builtin Character
+let unit = Ground.builtin Unit
 let text = named "Text"
 let pair = named "Pair"
-let float64 = named "Float64"
-let uint8 = named "UInt8"
 let option value = named "Option" ~arguments:[ Type value ]
 let list element = named "List" ~arguments:[ Type element ]
-let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_int count) ]
+
+let array element count : Ground.ty =
+  Named
+    { path = Intrinsic.builtin_path Array; arguments = [ Type element; Value (Z.of_int count) ] }
 
 open Memory_layout
 
@@ -47,37 +52,15 @@ let host =
 let field name ty = (name, Typed ty)
 let variant ?(indirect = false) name fields : variant_shape = { name; indirect; fields }
 
-let shapes extra (ty : Ground.ty) : shape =
-  match ty with
-  | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
-  | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
-  | Named { path = Top { name = "UInt64"; _ }; _ } -> Scalar (Integer UInt64)
-  | Named { path = Top { name = "Float64"; _ }; _ } -> Scalar Float64
-  | Named { path = Top { name = "Bool"; _ }; _ } -> Scalar Bool
-  | Named { path = Top { name = "Character"; _ }; _ } -> Scalar Character
-  | Named { path = Top { name = "Unit"; _ }; _ } -> Record []
-  | Never -> Sum []
-  | Named { path = Top { name = "Option"; _ }; arguments = [ Type value ] } ->
+let find_shape extra (ty : Ground.ty) : shape =
+  match (Monomorphic.find_builtin_shape ty, ty) with
+  | Some shape, _ -> shape
+  | None, Named { path = Top { name = "Option"; _ }; arguments = [ Type value ] } ->
       Sum [ variant "Some" [ field "value" value ]; variant "None" [] ]
-  | Named { path = Top { name = "List"; _ }; arguments = [ Type element ] } ->
+  | None, Named { path = Top { name = "List"; _ }; arguments = [ Type element ] } ->
       Record
-        [
-          ("buffer", Raw (Pointer (Data element)));
-          field "length" (named "UInt64");
-          field "capacity" (named "UInt64");
-        ]
-  | Named { path = Top { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
-      Array (element, Z.to_int count)
-  | Named { path = Top { name = "Int32"; _ }; _ } -> Scalar (Integer Int32)
-  | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } ->
-      Record
-        [
-          ("buffer", Raw (Pointer (Data element)));
-          ("length", Typed (named "UInt64"));
-          ("capacity", Typed (named "UInt64"));
-        ]
-  | Function function_type -> Convention.function_value_shape function_type
-  | _ -> (
+        [ ("buffer", Raw (Pointer (Data element))); field "length" uint64; field "capacity" uint64 ]
+  | None, _ -> (
       match List.assoc_opt (Ground.to_string ty) extra with
       | Some shape -> shape
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
@@ -86,10 +69,8 @@ let computed_env system shape_of =
   let rec layout_of ty = Memory_layout.layout ~layout_of ty (shape_of ty) in
   create system ~shape_of ~layout_of
 
-let layout ?(extra = []) ty = of_type (computed_env host (shapes extra)) ty
+let layout ?(extra = []) ty = of_type (computed_env host (find_shape extra)) ty
 let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
-let int32 = named "Int32"
-let uint64 = named "UInt64"
 
 type local_info = { ty : Lowered.ty; name : string option }
 type block = { statements : Lowered.statement list; terminator : Lowered.terminator }
@@ -159,7 +140,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
-let shape_env ?(extra = []) () = computed_env host (shapes extra)
+let shape_env ?(extra = []) () = computed_env host (find_shape extra)
 let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =

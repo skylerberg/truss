@@ -1,15 +1,14 @@
 module Intrinsics = Compile.For_testing.Intrinsics
 open Codegen_support
 
-let view_ty = named "View" ~arguments:[ Type uint8 ]
+let view_ty = Storage.view_of_elements uint8
 let bytes_ty = Storage.of_elements uint8
-let extra = [ (Ground.to_string view_ty, Storage.view_shape ~uint64 uint8) ]
 let intrinsic_types : Intrinsics.types = { uint64; string_slice = named "StringSlice" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation ~type_arguments
-       arguments ~destination
+    (Intrinsics.lower (shape_env ()) builder intrinsic_types operation ~type_arguments arguments
+       ~destination
        ~site:{ definition = definition "entry"; line = 0; column = 1 })
 
 let built_entry body : instance =
@@ -82,7 +81,7 @@ let () =
       if checked linux then fail "the check for Linux looks for proc_pidpath");
   test "a call of a function the system lacks stops the program, and calls nothing" (fun () ->
       let open Emit_c.Builder in
-      let env = computed_env linux (shapes extra) in
+      let env = computed_env linux (find_shape []) in
       let builder = create env ~key:(key "entry") in
       start builder (block builder);
       let length = local builder (value int32) in
@@ -155,7 +154,7 @@ let () =
   test "a program writes a view's bytes with write" (fun () ->
       let open Emit_c.Builder in
       let status, output, _ =
-        run_program ~extra
+        run_program
           [
             built_entry (fun builder ->
                 let view = view_of builder "written\n" in
@@ -179,7 +178,7 @@ let () =
       if names <> [ "descriptor"; "least" ] then
         fail "fcntl_dupfd_cloexec takes %s" (String.concat ", " names);
       let status, output, _ =
-        run_program ~extra
+        run_program
           [
             built_entry (fun builder ->
                 let copy = local builder (value int32) in
@@ -198,7 +197,7 @@ let () =
   test "open is given its mode as C passes an argument through ..." (fun () ->
       let open Emit_c.Builder in
       let path = Filename.concat (Lazy.force scratch) "opened" in
-      expect_status ~extra 0
+      expect_status 0
         [
           built_entry (fun builder ->
               let name = view_of builder (path ^ "\000") in
@@ -213,7 +212,7 @@ let () =
       expect_int ~expected:0o600 (Unix.stat path).st_perm);
   test "errno is the number at the address the C library returns" (fun () ->
       let open Emit_c.Builder in
-      expect_status ~extra (Libc.value host Enoent)
+      expect_status (Libc.value host Enoent)
         [
           built_entry (fun builder ->
               let name = view_of builder "/nonexistent/truss\000" in
@@ -227,7 +226,7 @@ let () =
   test "read fills the room storage has after its last element" (fun () ->
       let open Emit_c.Builder in
       let status, _, _ =
-        run_program ~extra ~input:"hello"
+        run_program ~input:"hello"
           [
             built_entry (fun builder ->
                 let storage = local builder (value bytes_ty) in
@@ -254,7 +253,7 @@ let () =
       expect_int ~expected:(Char.code 'h' + 5) status);
   test "a structure the C library writes arrives in the arguments named for its numbers" (fun () ->
       let open Emit_c.Builder in
-      expect_status ~extra 1
+      expect_status 1
         [
           built_entry (fun builder ->
               let seconds = local builder (value int64)
@@ -281,15 +280,14 @@ let () =
         ]);
   test "a number passed by address is read by the function and then written" (fun () ->
       let open Emit_c.Builder in
-      let uint32 = named "UInt32" in
-      let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
+      let uint32 = Ground.builtin UInt32 in
       let operate builder ?destination operation arguments =
         ignore
-          (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation
-             ~type_arguments:[] arguments ~destination
+          (Intrinsics.lower (shape_env ()) builder intrinsic_types operation ~type_arguments:[]
+             arguments ~destination
              ~site:{ definition = definition "entry"; line = 0; column = 1 })
       in
-      expect_status ~extra 16
+      expect_status 16
         [
           built_entry (fun builder ->
               let domain = flags builder [ Af_inet ] and kind = flags builder [ Sock_stream ] in
@@ -325,7 +323,7 @@ let () =
         ]);
   test "an argument a row fixes is no argument of the Truss call" (fun () ->
       let open Emit_c.Builder in
-      expect_status ~extra 1
+      expect_status 1
         [
           built_entry (fun builder ->
               let draw () =
@@ -346,7 +344,7 @@ let () =
 let () =
   test "nothing after a call of a function that does not return is run" (fun () ->
       let open Emit_c.Builder in
-      expect_status ~extra 7
+      expect_status 7
         [
           built_entry (fun builder ->
               operate builder (Libc Exit) [ Value (constant_int32 7) ];
@@ -358,7 +356,7 @@ let () =
     (fun () ->
       let open Emit_c.Builder in
       let waited_ty = Storage.of_elements int32 in
-      expect_status ~extra 1
+      expect_status 1
         [
           built_entry (fun builder ->
               let read_end = local builder (value int32)
@@ -456,14 +454,14 @@ let () =
 
 let checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
-       ~type_arguments arguments ~destination
+    (Intrinsics.lower ~checks:true (shape_env ()) builder intrinsic_types operation ~type_arguments
+       arguments ~destination
        ~site:{ definition = definition "entry"; line = 0; column = 1 })
 
 let anchors = [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
 
 let expect_panic ~saying instances =
-  let status, _, errors = run_program ~extra ~anchors instances in
+  let status, _, errors = run_program ~anchors instances in
   if status <> 101 then fail "expected a panic, got status %d (%s)" status errors;
   if not (contains errors saying) then fail "expected %S in %S" saying errors
 
@@ -512,7 +510,7 @@ let () =
         ]);
   test "a checked build passes a C library call whose arguments are large enough" (fun () ->
       let open Emit_c.Builder in
-      expect_status ~extra ~anchors (Libc.value host Enoent)
+      expect_status ~anchors (Libc.value host Enoent)
         [
           built_entry (fun builder ->
               let name = view_of builder "/nonexistent/truss\000" in
@@ -525,21 +523,19 @@ let () =
         ]);
   test "a checked build stops a float converted to an integer type that cannot hold it" (fun () ->
       let open Emit_c.Builder in
-      let float64 = named "Float64" in
-      let extra = extra @ [ (Ground.to_string float64, Memory_layout.Scalar Float64) ] in
       let convert builder number =
         let result = local builder (value int32) in
         ignore
-          (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types Convert
+          (Intrinsics.lower ~checks:true (shape_env ()) builder intrinsic_types Convert
              ~type_arguments:[ float64; int32 ]
              [ Value (Constant (Float64 (Int64.bits_of_float number))) ]
              ~destination:(Some (at result))
              ~site:{ definition = definition "entry"; line = 0; column = 1 });
         result
       in
-      expect_status ~extra ~anchors 7 [ built_entry (fun builder -> convert builder 7.9) ];
+      expect_status ~anchors 7 [ built_entry (fun builder -> convert builder 7.9) ];
       let status, _, errors =
-        run_program ~extra ~anchors [ built_entry (fun builder -> convert builder 1.0e30) ]
+        run_program ~anchors [ built_entry (fun builder -> convert builder 1.0e30) ]
       in
       if status <> 101 || not (contains errors "conversion out of range") then
         fail "expected a panic about the conversion, got status %d (%s)" status errors)

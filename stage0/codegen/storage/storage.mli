@@ -11,8 +11,8 @@ type representation =
   | Any
 
 val representation : Memory_layout.env -> Ground.ty -> representation
-val shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
-val view_shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
+val make_shape : Ground.ty -> Memory_layout.shape
+val make_view_shape : Ground.ty -> Memory_layout.shape
 val buffer_field : string
 val length_field : string
 val capacity_field : string

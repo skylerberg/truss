@@ -884,7 +884,9 @@ let read_layout pipeline note ty =
       | None -> unchecked (Part.show (Layout ty)))
 
 let read_ground_layout pipeline note ~readers ground_types ty =
-  if Option.is_none (Compile.compute_fixed_layout ty) && not (Type_table.mem (Lazy.force ground_types) ty)
+  if
+    Option.is_none (Compile.compute_fixed_layout ty)
+    && not (Type_table.mem (Lazy.force ground_types) ty)
   then
     Compiler_bug.bug ~stage:"Pipeline" "%s reads the layout of %s, which its ground types lack"
       (String.concat ", " (List.map Instance.to_string readers))

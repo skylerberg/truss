@@ -465,7 +465,7 @@ let () =
             type_arguments = [ Type int64 ];
           }
       in
-      expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
+      expect_string ~expected:"t_standard__list__List_each_Of_standard__intrinsic__Int64_End_"
         (Instance.symbol key));
   let function_in package modules =
     Instance.symbol
@@ -505,9 +505,7 @@ let operate builder ?destination ?(type_arguments = [ int32 ]) ?value_arguments 
 let () =
   test "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
       let open Emit_c.Builder in
-      let storage_ty =
-        Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
-      in
+      let storage_ty = Storage.of_elements int32 in
       expect_status 171
         [
           built_entry (fun builder ->
@@ -551,7 +549,7 @@ let () =
                   emit builder (Assign (at term, element index weight));
                   emit builder (Assign (at sum, Binary (Add, Copy (at sum), Copy (at term)))))
                 [ (0, 1); (1, 3); (2, 5); (3, 7) ];
-              let length = local builder (value (named "UInt64")) in
+              let length = local builder (value uint64) in
               ignore
                 (operate builder ~destination:(at length) Storage_length [ Place (at storage) ]);
               let length32 = local builder (value int32) in
@@ -564,13 +562,8 @@ let () =
         ]);
   test "an array's elements are moved into new storage, in order" (fun () ->
       let open Emit_c.Builder in
-      let storage_ty =
-        Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
-      in
-      let array_ty =
-        Ground.Named
-          { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
-      in
+      let storage_ty = Storage.of_elements int32 in
+      let array_ty = array int32 3 in
       expect_status 165
         [
           built_entry (fun builder ->
@@ -589,7 +582,7 @@ let () =
               let last = local builder (value int32) and middle = local builder (value int32) in
               ignore (operate builder ~destination:(at last) Storage_pop [ Place (at storage) ]);
               ignore (operate builder ~destination:(at middle) Storage_pop [ Place (at storage) ]);
-              let length = local builder (value (named "UInt64")) in
+              let length = local builder (value uint64) in
               ignore
                 (operate builder ~destination:(at length) Storage_length [ Place (at storage) ]);
               let status = local builder (value int32) in
@@ -603,24 +596,16 @@ let () =
         ]);
   test "a view of an array has the array's elements" (fun () ->
       let open Emit_c.Builder in
-      let array_ty =
-        Ground.Named
-          { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
-      in
-      let view_ty =
-        Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type int32 ] }
-      in
-      let extra =
-        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") int32) ]
-      in
+      let array_ty = array int32 3 in
+      let view_ty = Storage.view_of_elements int32 in
       let operate builder ?destination operation arguments =
         Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
-          (shape_env ~extra ()) builder intrinsic_types operation ~type_arguments:[ int32 ]
-          arguments ~destination
+          (shape_env ()) builder intrinsic_types operation ~type_arguments:[ int32 ] arguments
+          ~destination
           ~site:{ definition = definition "entry"; line = 0; column = 1 }
       in
-      expect_status ~extra 53
+      expect_status 53
         [
           built_entry (fun builder ->
               let array = local builder ~name:"array" (value array_ty) in
@@ -636,7 +621,7 @@ let () =
                 | Some place -> place
                 | None -> failwith "view_at lends nothing"
               in
-              let length = local builder (value (named "UInt64")) in
+              let length = local builder (value uint64) in
               ignore (operate builder ~destination:(at length) View_length [ Place (at view) ]);
               let status = local builder (value int32) in
               emit builder (Assign (at status, Convert (Copy (at length), Integer Int32)));
@@ -649,10 +634,7 @@ let () =
   test "an array made of a storage has its elements, and the storage's buffer is freed" (fun () ->
       let open Emit_c.Builder in
       let storage_ty = Storage.of_elements int32 in
-      let array_ty =
-        Ground.Named
-          { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
-      in
+      let array_ty = array int32 3 in
       let operate builder ?destination operation arguments =
         Intrinsics.lower ~checks:true
           ~value_arguments:[ Z.of_int 3 ]
@@ -739,7 +721,7 @@ let () =
         ]);
   test "a storage is shortened in place, keeping its room, and a static one stays static" (fun () ->
       let open Emit_c.Builder in
-      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let storage_ty = Storage.of_elements uint8 in
       let anchors =
         [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
       in
@@ -795,26 +777,21 @@ let () =
   test "a checked build stops a storage or view operation whose precondition does not hold"
     (fun () ->
       let open Emit_c.Builder in
-      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
-      let view_ty =
-        Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
-      in
-      let extra =
-        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") uint8) ]
-      in
+      let storage_ty = Storage.of_elements uint8 in
+      let view_ty = Storage.view_of_elements uint8 in
       let anchors =
         [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
       in
       let checked builder ?destination operation arguments =
         ignore
-          (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
+          (Intrinsics.lower ~checks:true (shape_env ()) builder intrinsic_types operation
              ~type_arguments:[ uint8 ] arguments ~destination
              ~site:{ definition = definition "entry"; line = 0; column = 1 })
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
       let stops saying operation =
         let status, _, errors =
-          run_program ~extra ~anchors
+          run_program ~anchors
             [
               built_entry (fun builder ->
                   let storage = local builder (value storage_ty) in
@@ -886,7 +863,7 @@ let () =
           checked builder ~destination:(at popped) Storage_pop [ Place (at storage) ]));
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Emit_c.Builder in
-      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let storage_ty = Storage.of_elements uint8 in
       expect_status 197
         [
           built_entry (fun builder ->
@@ -921,13 +898,7 @@ let () =
 
 let () =
   test "a small read-only value is passed by value unless it holds an array's elements" (fun () ->
-      let array_of count : Ground.ty =
-        Named
-          {
-            path = Intrinsic.builtin_path Array;
-            arguments = [ Type int32; Value (Z.of_int count) ];
-          }
-      in
+      let array_of count = array int32 count in
       let pair = named "Pair" in
       let extra = [ ("Pair", Memory_layout.Record [ field "cells" (array_of 2) ]) ] in
       let env = shape_env ~extra () in

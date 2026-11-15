@@ -7,7 +7,9 @@ val expect_int : expected:int -> int -> unit
 val render_records : Compile.record list -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
+val int32 : Ground.ty
 val int64 : Ground.ty
+val uint64 : Ground.ty
 val bool : Ground.ty
 val character : Ground.ty
 val unit : Ground.ty
@@ -24,12 +26,10 @@ val field : 'a -> Ground.ty -> 'a * Memory_layout.member
 val variant :
   ?indirect:bool -> string -> (string * Memory_layout.member) list -> Memory_layout.variant_shape
 
-val shapes : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
+val find_shape : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
 val computed_env : Libc.system -> (Ground.ty -> Memory_layout.shape) -> Memory_layout.env
 val layout : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
 val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
-val int32 : Ground.ty
-val uint64 : Ground.ty
 
 type local_info
 type block
