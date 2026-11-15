@@ -85,18 +85,15 @@ and type_argument = function
   | Count_name name -> name.text
   | Constraint (name, type_) -> name.text ^ " = " ^ type_expression type_
 
-and function_type { inputs; input_names; output; clauses } =
-  let named index =
-    match List.nth_opt input_names index with Some name -> name.text ^ ": " | None -> ""
-  in
+and function_type { inputs; output; clauses } =
   form "fn"
     ([
        form ""
-         (List.mapi
-            (fun index (input_mode, input) ->
-              named index
-              ^ (match input_mode with Some input -> mode input ^ " " | None -> "")
-              ^ type_expression input)
+         (List.map
+            (fun (input : function_input) ->
+              (match input.name with Some name -> name.text ^ ": " | None -> "")
+              ^ (match input.mode with Some input_mode -> mode input_mode ^ " " | None -> "")
+              ^ type_expression input.type_)
             inputs);
      ]
     @ [ optional (fun output -> "-> " ^ type_expression output) output ]
@@ -383,8 +380,6 @@ let fields list_ = form "" (list field list_)
 let members print (members : _ line list) =
   list (fun (member : _ line) -> print member.kind) members
 
-(* [methods] are the methods written inside a trait, an [impl], or a
-   capability, already printed, which come after its own members. *)
 let definition ?(methods = []) (definition : definition) =
   let body =
     match definition.kind with
@@ -478,19 +473,17 @@ let definition ?(methods = []) (definition : definition) =
   in
   match visibility definition.visibility with "" -> body | written -> form written [ body ]
 
-(* A file's definitions, with each method inside the trait, the [impl], or
-   the capability it is written inside. *)
 let definitions (items : definition item list) =
   let inside index =
     List.filter_map
       (fun (item : definition item) ->
-        if item.container = Some index then Some (definition item.value) else None)
+        if item.container_index = Some index then Some (definition item.value) else None)
       items
   in
   List.concat
     (List.mapi
        (fun index (item : definition item) ->
-         match item.container with
+         match item.container_index with
          | Some _ -> []
          | None -> [ definition ~methods:(inside index) item.value ])
        items)
