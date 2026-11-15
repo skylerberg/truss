@@ -82,7 +82,7 @@ type action =
           is empty. *)
 
 (* A position in a block: one of its statements, then its terminator. *)
-type position = { block : Mir.block; index : int }
+type position = { block : Mir.Graph.block; index : int }
 type step = { action : action; origin : Core.origin }
 
 (* The builder *)
@@ -118,7 +118,7 @@ let nothing =
 type builder = {
   context : Context.context;
   mutable moves : Moves.t;  (** The move analysis of the body being written *)
-  mutable body : Mir.body;
+  mutable body : Mir.Graph.body;
   mutable captured : Core.local list;
   held : (Mir.local, held) Hashtbl.t;
   mutable returned : Mir.local list;  (** The temporaries whose value the body returns. *)
@@ -130,7 +130,7 @@ type builder = {
   mutable keeps_lent : (Mir.local * Mir.local * Types.ty * Core.origin) list;
       (** Each binding of a lent part not yet dead: the binding, the part, its type, and where it is
           bound. A binding still live where its part ends would outlive the loan. *)
-  loop_entries : (Mir.block, int) Hashtbl.t;
+  loop_entries : (Mir.Graph.block, int) Hashtbl.t;
       (** For the first block of a loop's body, the first position after the loop's loan starts. *)
   mutable loop_elements : Mir.local list;
       (** The [Lent] locals of the elements that the body's loops over collections lend to their
@@ -494,7 +494,9 @@ let rvalue builder (value : Mir.rvalue) : held =
                      { place = { root = Local capture.local; steps = [] }; copied_out = false })
                    captures;
           })
-  | Function_value _ | Value_parameter _ -> nothing
+  | Function_value _ | Value_parameter _ | Conditional _ | Cases _ | Connective _ | Specification _
+    ->
+      nothing
 
 (* A local the body is about to bind: its first assignment is its value. *)
 let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin ~is_var
@@ -540,10 +542,10 @@ let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rva
   in
   if holds_views || views <> [] then emit_ builder (Bind_views { locals = [ core ]; views }) origin
 
-let returned_temporaries (body : Mir.body) =
+let returned_temporaries (body : Mir.Graph.body) =
   let returned = ref [] in
   Array.iter
-    (fun (block : Mir.basic_block) ->
+    (fun (block : Mir.Graph.basic_block) ->
       match block.terminator with
       | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
       | Cancel
@@ -556,7 +558,7 @@ let returned_temporaries (body : Mir.body) =
   while !changed do
     changed := false;
     Array.iter
-      (fun (block : Mir.basic_block) ->
+      (fun (block : Mir.Graph.basic_block) ->
         List.iter
           (fun (statement : Mir.statement) ->
             match statement.kind with
@@ -777,6 +779,8 @@ let statement builder (statement : Mir.statement) =
         Hashtbl.replace builder.loop_entries builder.position.block (builder.position.index + 1)
   | Loan_end loans -> emit_ builder (End_loans loans) origin
   | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
+  (* A graph holds none of these: they are blocks and terminators. *)
+  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ -> ()
 
 (* A pull of a cursor calls its [next], which may mutate the cursor. A pull
    happens before the first iteration and at the end of each, whether or
@@ -788,7 +792,7 @@ let pull builder (iteration : Mir.iteration) origin =
       Option.iter (fun tracked -> emit_ builder (Mutate tracked) origin) (tracked builder cursor)
   | Range _ -> ()
 
-let terminator builder ~returns (basic : Mir.basic_block) =
+let terminator builder ~returns (basic : Mir.Graph.basic_block) =
   let origin = basic.terminator_origin in
   let uses = Moves.terminator_uses builder.moves basic in
   let returning value =
@@ -807,7 +811,7 @@ let terminator builder ~returns (basic : Mir.basic_block) =
     | None -> ()
   in
   match basic.terminator with
-  | Branch _ | Switch_variant _ -> read_uses builder uses
+  | Branch _ -> read_uses builder uses
   | For { iteration; part; _ } -> (
       let part_place = { Mir.root = Local part; projections = [] } in
       match iteration with
@@ -891,14 +895,14 @@ type fork_join_loop = {
 }
 
 type actions = {
-  body : Mir.body;
+  body : Mir.Graph.body;
   steps : step list array array;  (** Each position's actions, in order *)
   fork_join_blocks : fork_join_block list;
   fork_join_loops : fork_join_loop list;
 }
 
 (* The actions of a body. *)
-let of_body (builder : builder) (body : Mir.body) ~returns : actions =
+let of_body (builder : builder) (body : Mir.Graph.body) ~returns : actions =
   builder.body <- body;
   builder.returned <- returned_temporaries body;
   builder.aliases <- [];
@@ -906,12 +910,12 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
   Hashtbl.reset builder.loop_entries;
   builder.loop_elements <-
     Array.to_list body.blocks
-    |> List.filter_map (fun (basic : Mir.basic_block) ->
+    |> List.filter_map (fun (basic : Mir.Graph.basic_block) ->
         match basic.terminator with
         | For { lent = Some { element; _ }; _ } -> Some element
         | _ -> None);
   let shape =
-    Array.map (fun (basic : Mir.basic_block) -> List.length basic.statements + 1) body.blocks
+    Array.map (fun (basic : Mir.Graph.basic_block) -> List.length basic.statements + 1) body.blocks
   in
   let steps = Array.map (fun count -> Array.make count []) shape in
   let write position body =
@@ -921,7 +925,7 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
     builder.written <- []
   in
   Array.iteri
-    (fun block (basic : Mir.basic_block) ->
+    (fun block (basic : Mir.Graph.basic_block) ->
       List.iteri
         (fun index statement' -> write { block; index } (fun () -> statement builder statement'))
         basic.statements;
@@ -938,14 +942,14 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
   in
   let fork_join_blocks =
     Array.to_list body.blocks
-    |> List.filter_map (fun (basic : Mir.basic_block) ->
+    |> List.filter_map (fun (basic : Mir.Graph.basic_block) ->
         match basic.terminator with
         | Fork { concurrent; branches; _ } ->
             Some
               {
                 keyword = (if concurrent then "concurrent" else "parallel");
                 branches =
-                  List.map (fun (branch : Mir.branch) -> positions_of branch.blocks) branches;
+                  List.map (fun (branch : Mir.Graph.branch) -> positions_of branch.blocks) branches;
               }
         | _ -> None)
   in
@@ -954,7 +958,7 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
      iteration, which the loop runs between iterations. *)
   let fork_join_loops =
     Array.to_list (Array.mapi (fun block basic -> (block, basic)) body.blocks)
-    |> List.filter_map (fun (loop_block, (basic : Mir.basic_block)) ->
+    |> List.filter_map (fun (loop_block, (basic : Mir.Graph.basic_block)) ->
         match basic.terminator with
         | For
             {
@@ -970,7 +974,7 @@ let of_body (builder : builder) (body : Mir.body) ~returns : actions =
                   List.filter
                     (fun { block; index } ->
                       index < shape.(block) - 1
-                      || Mir.iteration_loop body.blocks.(block).terminator <> Some loop_block)
+                      || Mir.Graph.iteration_loop body.blocks.(block).terminator <> Some loop_block)
                     (positions_of
                        ~from:(fun block ->
                          if block = inside then Hashtbl.find_opt builder.loop_entries inside
@@ -1163,7 +1167,7 @@ let forward context (actions : actions) =
                 entries.(successor) <- Some merged;
                 Queue.add successor pending
             | None -> ()))
-      (Mir.block_successors actions.body block)
+      (Mir.Graph.block_successors actions.body block)
   done;
   Array.mapi
     (fun block entry ->
@@ -1715,10 +1719,7 @@ let check_body context (actions : actions) moves =
         (fst (effects body)))
     actions.fork_join_loops
 
-(* Checks the loans and views of a definition's body, then of each of its
-   lambdas', with [moves], the move analysis of each body. [returns] says
-   whether the definition's body returns to a caller. *)
-let check context ~(moves : Mir.body -> Moves.t) ~returns (mir : Mir.t) =
+let check context ~(moves : Mir.Graph.body -> Moves.t) ~returns (mir : Mir.Graph.t) =
   let builder =
     {
       context;
@@ -1739,11 +1740,11 @@ let check context ~(moves : Mir.body -> Moves.t) ~returns (mir : Mir.t) =
   in
   check_body context (of_body builder mir.body ~returns) (moves mir.body);
   Array.iter
-    (fun (lambda : Mir.body) ->
+    (fun (lambda : Mir.Graph.body) ->
       builder.moves <- moves lambda;
       let made_live =
         Array.to_list lambda.blocks
-        |> List.concat_map (fun (block : Mir.basic_block) ->
+        |> List.concat_map (fun (block : Mir.Graph.basic_block) ->
             List.concat_map
               (fun (statement : Mir.statement) ->
                 match statement.kind with Live locals -> locals | _ -> [])

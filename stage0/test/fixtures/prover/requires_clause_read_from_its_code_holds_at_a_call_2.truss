@@ -1,0 +1,17 @@
+type Limits(low: Int64, high: Int64)
+
+fn clamp(value: Int64, limits: Limits, fallback: Option[Int64]) -> Int64
+  requires limits.low <= limits.high && (value >= limits.low || (fallback is Some(given) && given >= limits.low))
+{
+  if value < limits.low {
+    limits.low
+  } else if value > limits.high {
+    limits.high
+  } else {
+    value
+  }
+}
+
+fn f(value: Int64) -> Int64 {
+  clamp(value, limits: Limits(low: 0, high: 10), fallback: Some(-3))
+}

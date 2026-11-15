@@ -16,8 +16,9 @@ val copy_fix :
 
 (* The move analysis of a body: a value whose type is not plain moves where
    it is read by value. *)
-val analyse : Context.context -> Mir.body -> Moves.t
+val analyse : Context.context -> Mir.Graph.body -> Moves.t
 
 (* Checks a definition's MIR, with the move analysis of each body. [returns]
    says whether its body returns to a caller, as a function's does. *)
-val check : Context.context -> Mir.t -> moves:(Mir.body -> Moves.t) -> returns:bool -> unit
+val check :
+  Context.context -> Mir.Graph.t -> moves:(Mir.Graph.body -> Moves.t) -> returns:bool -> unit

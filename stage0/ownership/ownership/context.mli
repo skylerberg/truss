@@ -35,6 +35,6 @@ val report :
 val kind : context -> Place.root -> kind
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
-val collect : context -> Mir.t -> unit
+val collect : context -> Mir.Graph.t -> unit
 val copy_at : context -> Core.origin -> Syntax.span Diagnostic.edit list
 val with_mode_keyword : context -> Core.origin -> Syntax.span

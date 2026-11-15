@@ -44,27 +44,17 @@ type frame = {
   mir : mir_frame option;  (** The MIR being lowered in this frame *)
 }
 
-(* A body of the MIR being lowered, with the place of each of its locals. *)
 and mir_frame = {
-  body : Mir.body;
-  lambdas : Mir.body array;  (** The bodies of the definition's lambdas *)
+  body : Mir.Graph.body;
+  lambdas : Mir.Graph.body array;
   places : (Mir.local, Lowered.place) Hashtbl.t;
   owner : scope option;
-      (** The scope that owns the body's locals, which drops them on each way out *)
   returns_into : Lowered.place option;
-      (** In an expression lowered on its own, such as a default, where its value is written *)
   mutable provides : (Path.t * Lowered.operand) list list;
-      (** The evidence that each [provide] around the code being lowered replaced, innermost first
-      *)
   returned : Mir.local list;
-      (** The temporaries that a [return] returns, which are the result's slot where the function
-          has one, so that the value is written before the [return] leaves its scopes *)
   mutable taken : Mir.place list;
-      (** The targets of compound assignments whose old value an operator has taken, which hold
-          nothing until they are assigned again *)
-  moves : Moves.t;  (** Which places may hold a value at each point *)
+  moves : Moves.t;
   flags : (Moves.path * Lowered.place) list;
-      (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
 }
 
@@ -124,13 +114,8 @@ let enter context ?(nested = ref 0) ~builder frame =
   }
 
 let may_fork st = st.frame.exit = None
-
-(* A new local, as the place that holds a value. *)
 let held st ?name ty : Lowered.place = at (local st.builder ?name ty)
 
-(* Writes code with [body] as an outlined function, nested in the instance,
-   given [parts] as its parameters. Gives the function's number and the
-   operand for its environment. *)
 let outlined st ~parts body =
   let nested = !(st.nested) in
   incr st.nested;
@@ -195,9 +180,6 @@ let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
 (* A local that lasts as long as the names around it. *)
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
-(* A local that lasts as long as the names around it, and that only some
-   paths initialize: its value is dropped where its drop flag, the [Bool]
-   at [flag], is true. *)
 let flagged_binding st ty ~flag =
   let place = at (local st.builder (Value ty)) in
   if not (trivial st ty) then begin

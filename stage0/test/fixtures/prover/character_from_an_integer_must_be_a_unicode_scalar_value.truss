@@ -1,0 +1,5 @@
+use standard::intrinsic
+
+fn character(code: UInt32) -> Character {
+  intrinsic::convert(code)
+}

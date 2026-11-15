@@ -14,13 +14,9 @@ type context = {
   types : (Core.local, Types.ty) Hashtbl.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
-      (** The definition is a method of an [impl] of a capability. Its callers cannot see the
-          implementation, so no view may be stored in [self] or returned from it. *)
-  mutable mutable_locals : Core.local list;  (** The locals declared with [var]. *)
+  mutable mutable_locals : Core.local list;
   mutable diagnostics : Syntax.diagnostic list;
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
-      (** Pairs of index calls or slices of one collection, by origin, that must select disjoint
-          elements. Each pair becomes a [Disjoint] obligation for the prover. *)
 }
 
 let plain context type_ = Interface.Impls.plain context.database ~bounds:context.bounds type_
@@ -99,7 +95,7 @@ let show context (place : Place.t) =
 (* The names, kinds, and types of the definition's locals, which its MIR's
    source locals carry, and the mode keywords of its arguments. A lambda's capture
    is its enclosing body's local, which that body describes. *)
-let collect context (mir : Mir.t) =
+let collect context (mir : Mir.Graph.t) =
   let record_mode_keyword (argument : Mir.argument) =
     match argument with
     | Passed
@@ -107,12 +103,13 @@ let collect context (mir : Mir.t) =
           mode;
           value = Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ };
           mode_keyword = Some mode_keyword;
+          _;
         } ->
         Hashtbl.replace context.mode_keywords origin (mode, mode_keyword)
     | Passed _ | Default -> ()
   in
   let record_mode_keywords (call : Mir.call) = List.iter record_mode_keyword call.arguments in
-  let body (body : Mir.body) =
+  let body (body : Mir.Graph.body) =
     Array.iteri
       (fun local (info : Mir.local_info) ->
         match info.kind with
@@ -125,7 +122,7 @@ let collect context (mir : Mir.t) =
         | Source _ | Temporary | Lent _ -> ())
       body.locals;
     Array.iter
-      (fun (block : Mir.basic_block) ->
+      (fun (block : Mir.Graph.basic_block) ->
         List.iter
           (fun (statement : Mir.statement) ->
             match statement.kind with

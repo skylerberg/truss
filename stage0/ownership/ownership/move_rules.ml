@@ -1,10 +1,5 @@
-(* The rules of moves. Whether a place can be moved at all needs no
-   dataflow: it depends on the place and on how its root is bound. The move
-   analysis code generation drops by says which places may hold nothing at
-   each point of a body's MIR, and a use of one is a use after move. *)
 open Context
 
-(* The fix that copies a value at [at], where its type has a copy. *)
 let copy_fix context title type_ (at : Syntax.span) =
   if copyable context type_ then
     [ Diagnostic.fix title [ Diagnostic.insert (Syntax.Span.zero_width at.stop) ".copy()" ] ]
@@ -59,7 +54,7 @@ let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
    whether the body's end returns to a caller that owns its [mut]
    parameters' places: a function's does, and a lambda's ends a scope of
    its own. *)
-let check_body context (body : Mir.body) moves ~returns =
+let check_body context (body : Mir.Graph.body) moves ~returns =
   let place_of (path : Moves.path) : Place.t option =
     match body.locals.(path.local).kind with
     | Source { local; name = Some _; _ } ->
@@ -148,10 +143,10 @@ let check_body context (body : Mir.body) moves ~returns =
      it starts. *)
   let branches =
     Array.to_list body.blocks
-    |> List.concat_map (fun (basic : Mir.basic_block) ->
+    |> List.concat_map (fun (basic : Mir.Graph.basic_block) ->
         match basic.terminator with
         | Fork { concurrent = true; branches; _ } ->
-            List.map (fun (branch : Mir.branch) -> (branch.blocks, branch.entry)) branches
+            List.map (fun (branch : Mir.Graph.branch) -> (branch.blocks, branch.entry)) branches
         | _ -> [])
   in
   (* Checks reads in evaluation order: a read after a move in the same
@@ -165,7 +160,7 @@ let check_body context (body : Mir.body) moves ~returns =
       uses
   in
   Array.iteri
-    (fun block (basic : Mir.basic_block) ->
+    (fun block (basic : Mir.Graph.basic_block) ->
       let state = Moves.entry moves block in
       List.iter
         (fun (statement : Mir.statement) ->
@@ -211,11 +206,9 @@ let check_body context (body : Mir.body) moves ~returns =
       | _ -> ())
     body.blocks
 
-(* The move analysis of a body, by the ownership checker's rule: a value
-   whose type is not plain moves where it is read by value. *)
 let analyse context body =
   Moves.analyse ~moving:(fun type_ -> not (plain context type_)) ~tracks:(fun _ -> true) body
 
-let check context (mir : Mir.t) ~moves ~returns =
+let check context (mir : Mir.Graph.t) ~moves ~returns =
   check_body context mir.body (moves mir.body) ~returns;
   Array.iter (fun lambda -> check_body context lambda (moves lambda) ~returns:false) mir.lambdas
