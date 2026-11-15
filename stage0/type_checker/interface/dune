@@ -9,6 +9,7 @@
   intrinsic
   types
   syntax
+  syntax_walk
   resolve
   diagnostic
   zarith))

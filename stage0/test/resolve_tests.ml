@@ -48,10 +48,10 @@ let name_at database name text occurrence =
         let key = Resolve.Names.key_of declaration in
         match
           ( (Support.names database key.module_.package).definition key,
-            (Support.names database key.module_.package).base key,
+            (Support.names database key.module_.package).place key,
             Pipeline.resolved (Support.pipeline database) key )
         with
-        | Some definition, Some (_, base), Some resolved ->
+        | Some definition, Some { base; _ }, Some resolved ->
             let names = Syntax_walk.names definition in
             Option.map
               (fun (name : Syntax.name) -> (name, names, base, resolved))
@@ -240,10 +240,10 @@ let bracket_of text written occurrence =
       let key = Resolve.Names.key_of declaration in
       match
         ( (Support.names database key.module_.package).definition key,
-          (Support.names database key.module_.package).base key,
+          (Support.names database key.module_.package).place key,
           Pipeline.resolved (Support.pipeline database) key )
       with
-      | Some definition, Some (_, base), Some resolved ->
+      | Some definition, Some { base; _ }, Some resolved ->
           let bracket = ref None in
           Syntax_walk.definition
             (let rec visit (value : Syntax.expression) =
@@ -467,7 +467,12 @@ let () =
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
       match
-        (Support.names database (file_of "app::main").module_.package).imports (file_of "app::main")
+        (Support.names database (file_of "app::main").module_.package).imports
+          {
+            module_ = (file_of "app::main").module_;
+            path = Top { module_ = (file_of "app::main").module_; name = "f" };
+            ordinal = 0;
+          }
       with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");

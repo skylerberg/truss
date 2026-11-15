@@ -32,8 +32,8 @@ let run ~position =
         List.find_map
           (fun (declaration : Names.declaration) ->
             let key = Names.key_of declaration in
-            match (names.base key, names.text key) with
-            | Some (_, base), Some text when base <= offset && offset <= base + String.length text
+            match (names.place key, names.text key) with
+            | Some { base; _ }, Some text when base <= offset && offset <= base + String.length text
               -> (
                 match (names.definition key, Pipeline.resolved pipeline key) with
                 | Some definition, Some resolved ->

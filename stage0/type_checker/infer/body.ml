@@ -658,7 +658,7 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   | Some definition, Some resolved, Some lowered ->
       let module_ = key.module_ in
       let context = Interface.Lower.create lookups.interface resolved lowered.scope in
-      let text = Option.value ~default:"" (lookups.interface.names.text key) in
+      let text = lazy (Option.value ~default:"" (lookups.interface.names.text key)) in
       let binding_spans = Hashtbl.create 64 in
       List.iter
         (fun (name : name) -> Hashtbl.replace binding_spans name.id name.span)
@@ -711,7 +711,9 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
       state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
       state.diagnostics <-
         Interface.Check.bound_diagnostics lookups.interface ~package:state.package
-          ~bounds:(bounds state) !(context.named)
+          ~bounds:(bounds state)
+          ~spans:(lazy (Syntax_walk.spans definition))
+          !(context.named)
         @ state.diagnostics;
       finalize state;
       Exported_parts.check state;

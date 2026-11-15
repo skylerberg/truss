@@ -1,8 +1,11 @@
 type t
 type state
 
-val create : ?loaded:state list -> Project.package list -> t
+val create : ?loaded:state list -> ?checks:bool -> Project.package list -> t
 val state : t -> Path.package -> state
+val update : t -> (Path.file * string option) list -> unit
+val relayout : t -> loaded:state list -> Project.package list -> unit
+val propagate : t -> unit
 val check : t -> Path.package list -> unit
 val file_diagnostics : t -> Path.file -> Diagnostic.t list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
@@ -12,7 +15,8 @@ val parsed : t -> Path.file -> Parsed.file
 val names : t -> Path.package list -> Resolve.Names.lookups
 val resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val interface_lookups : t -> Path.package list -> Interface.Lookups.t
-val lowering_lookups : t -> Path.package list -> Compile.Lookups.t
+val lowering_requests : t -> Path.package list -> Compile.requests
+val main : t -> Path.package -> Path.t option
 
 type 'a part = Value of 'a | Failed of Syntax.diagnostic list | Blocked
 type proofs
@@ -37,4 +41,11 @@ module For_testing : sig
   val proof_lookups : t -> Prover.Lookups.t
   val mir : t -> Path.package -> Mir.lookups
   val ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
+  val reads : t -> string -> string list
+  val differences : t -> t -> string list
+
+  type observed = { recomputed : string list; collected : string list }
+
+  val observe : t -> (unit -> unit) -> observed
+  val root : t -> Instance.key -> unit
 end

@@ -1,31 +1,36 @@
 module Lookups = Lookups
 
-module Table = Hashtbl.Make (struct
-  type t = Instance.key
-
-  let equal = Instance.equal
-  let hash key = Hashtbl.hash_param 64 256 key
-end)
+type unsupported = Lower.unsupported = { construct : string; at : Lowered.site option }
 
 type lowered =
   | Compiled of Emit_c.fragment
-  | Folded of Lowered.data
+  | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Path.t * Ground.ty
 
-type link = { own_hash : string; references : Instance.key list }
+type ground_types = Lower.ground_types = { types : Ground.ty list; folded_constants : Path.t list }
 
-let emitted (context : Lower.context) (compiled : Emit_c.compiled) =
-  Compiled (Emit_c.fragment (Lower.env context) compiled)
+type requests = {
+  settings : Lookups.settings;
+  source : Path.file -> Source.t;
+  interface : Interface.Lookups.t;
+  mir : Mir.lookups;
+  lowered : Instance.key -> (lowered, unsupported) result;
+  test_key : Instance.key -> (string, unsupported) result;
+  layouts : Instance.key list -> Ground.ty -> Memory_layout.t;
+}
+
+let bug format = Compiler_bug.bug ~stage:"Compile" format
 
 let make (context : Lower.context) (key : Instance.key) : lowered =
+  let emitted compiled = Compiled (Emit_c.fragment (Lower.env context) compiled) in
   let glue = Lower.glue context in
-  let code instance = emitted context (Code instance) in
+  let code instance = emitted (Code instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)
   | Constant path -> (
       match Lower.constant context path with
-      | Folded data -> Folded data
+      | Folded data -> Folded (data, Emit_c.fragment (Lower.env context) (Data data))
       | Run ty -> Evaluate (path, ty))
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
@@ -37,36 +42,135 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
       code (Lower.template_check context key ~from_template ~texts)
   | Call_evaluation { function_; arguments } ->
       code (Lower.call_evaluation context key ~function_ ~arguments)
-  | Any_table _ -> emitted context (Table (Lower.any_table context key))
-  | Table _ -> emitted context (Table (Lower.table context key))
-  | Locked_table capability -> emitted context (Table (Lower.locked_table context key ~capability))
+  | Any_table _ -> emitted (Table (Lower.any_table context key))
+  | Table _ -> emitted (Table (Lower.table context key))
+  | Locked_table capability -> emitted (Table (Lower.locked_table context key ~capability))
 
-module Path_key = struct
-  type t = Path.t
-
-  let equal = Path.equal
-  let hash path = Hashtbl.hash_param 64 256 path
-  let compare = Path.compare
-end
-
-module Path_table = Hashtbl.Make (Path_key)
-module Path_components = Components.Make (Path_key)
-
-let bug format = Compiler_bug.bug ~stage:"Compile" format
+let lower (settings : Lookups.settings) (lookups : Lookups.t) ~layout_of ~lowered key =
+  let env =
+    Memory_layout.create settings.system
+      ~shape_of:(Monomorphic.shape (Lower.monomorphic lookups.interface))
+      ~layout_of
+  in
+  let constant path =
+    match lowered (Instance.Constant path) with
+    | Ok (Folded (data, _)) -> Some data.Lowered.value
+    | Ok (Evaluate _) -> None
+    | Ok (Compiled _) -> bug "%s is not a constant" (Path.show path)
+    | Error unsupported -> raise (Lower.Unsupported unsupported)
+  in
+  match
+    Compiler_bug.while_doing ~stage:"Compile"
+      ("lowering " ^ Instance.to_string key)
+      (fun () -> make (Lower.context settings ~constant ~env lookups) key)
+  with
+  | lowered -> Ok lowered
+  | exception Lower.Unsupported unsupported -> Error unsupported
 
 let evaluated_own_hash =
   Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
+
+let references = function
+  | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
+  | Evaluate (path, _) -> [ Instance.Evaluator path ]
+
+let own_hash = function
+  | Compiled fragment | Folded (_, fragment) -> Reachable.own_hash fragment
+  | Evaluate _ -> evaluated_own_hash
+
+let call_node (interface : Interface.Lookups.t) (path : Path.t) =
+  match path with
+  | Method { owner; name; receiver }
+    when not (List.exists (Path.equal path) (Mir.Call_edges.written_methods interface.names owner))
+    -> (
+      match Interface.Impls.impl_interface interface owner with
+      | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
+      | None -> path)
+  | _ -> path
+
+let is_runtime_call (path : Path.t) =
+  Well_known.is Write_fully path
+  ||
+  match path with
+  | Method { owner = Top { module_; _ }; name = "new"; receiver = Static } -> (
+      match module_.modules with
+      | [ "system"; name ] -> module_ = Well_known.system_module name
+      | _ -> false)
+  | _ -> false
+
+let bound_methods (interface : Interface.Lookups.t) path type_arguments =
+  match Interface.Impls.signature interface path with
+  | Some (signature : Types.signature) ->
+      let rec pairs (generics : Types.generic list) (arguments : Ground.argument list) =
+        match (generics, arguments) with
+        | ( { kind = Type_generic bounds; _ } :: generics,
+            Type (Named { path = head; _ }) :: arguments ) ->
+            (bounds, head) :: pairs generics arguments
+        | _ :: generics, _ :: arguments -> pairs generics arguments
+        | _ -> []
+      in
+      List.concat_map
+        (fun ((bounds : Types.trait_reference list), head) ->
+          let traits =
+            List.concat_map
+              (fun (bound : Types.trait_reference) ->
+                Mir.Call_edges.traits_with_required interface bound.trait)
+              bounds
+          in
+          List.concat_map
+            (fun package ->
+              List.concat_map
+                (Mir.Call_edges.impl_methods interface)
+                (Mir.Call_edges.impls_for interface package traits
+                   (Named { path = head; arguments = [] })))
+            (List.sort_uniq Path.compare_package
+               (Path.package head :: List.map Path.package traits)))
+        (pairs signature.generics type_arguments)
+  | None -> []
+
+let check_calls (interface : Interface.Lookups.t) ~successors (key : Instance.key) lowered =
+  match (key, lowered) with
+  | Code { path = caller; type_arguments }, Compiled fragment -> (
+      match caller with
+      | Method { owner = Derived _; _ } -> ()
+      | _ -> (
+          match successors (call_node interface caller) with
+          | None -> ()
+          | Some callees ->
+              let allowed =
+                callees
+                @ List.concat_map
+                    (fun callee -> Option.value (successors callee) ~default:[])
+                    callees
+                @ bound_methods interface caller type_arguments
+              in
+              List.iter
+                (fun (called : Instance.key) ->
+                  match called with
+                  | Code { path = callee; _ }
+                    when not
+                           (is_runtime_call callee
+                           || List.exists (Path.equal callee) allowed
+                           || List.exists (Path.equal (call_node interface callee)) allowed) ->
+                      bug "%s calls %s, which is not among its call edges" (Instance.to_string key)
+                        (Instance.to_string called)
+                  | _ -> ())
+                (Emit_c.called fragment)))
+  | _ -> ()
+
+let test_keys ~lowered ~known members =
+  Reachable.component_keys
+    ~link:(fun key ->
+      let code = lowered key in
+      (own_hash code, references code))
+    ~deep:known members
 
 type 'a ran = Ran of 'a | Ran_too_long
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
-  lookups : Lookups.t;
-  system : Libc.system;
-  context : Lower.context;
-  lowered : (lowered, Lower.unsupported) result Table.t;
-  links : link Table.t;
-  reach_keys : string Table.t;
+  requests : requests;
+  monomorphic : Monomorphic.context;
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
@@ -78,97 +182,20 @@ type t = {
   runs : (string, string ran) Hashtbl.t;
 }
 
-let lower compiler key =
-  let outcome =
-    match
-      Compiler_bug.while_doing ~stage:"Compile"
-        ("lowering " ^ Instance.to_string key)
-        (fun () -> make compiler.context key)
-    with
-    | lowered -> Ok lowered
-    | exception Lower.Unsupported unsupported -> Error unsupported
-  in
-  Table.replace compiler.lowered key outcome
-
-let fold_reads (lookups : Lookups.t) path =
-  let constants =
-    match Mir.initializer_graph_of_path lookups.mir path with
-    | Some graph -> Mir.constants_named graph
-    | None ->
-        let defaults =
-          match Mir.default_graphs_of_path lookups.mir path with
-          | Some (Parameter_defaults defaults) -> List.map snd defaults
-          | Some (Field_defaults _) | None -> []
-        in
-        List.concat_map Mir.constants_named
-          (Option.to_list (Mir.graph_of_path lookups.mir path) @ defaults)
-  in
-  constants @ lookups.call_edges path
-
-let fold_constants compiler root =
-  let is_lowered path = Table.mem compiler.lowered (Instance.Constant path) in
-  let is_constant path = Option.is_some (Mir.initializer_graph_of_path compiler.lookups.mir path) in
-  let known_reads = Path_table.create 64 in
-  let successors path =
-    if is_lowered path then []
-    else
-      match Path_table.find_opt known_reads path with
-      | Some paths -> paths
-      | None ->
-          let paths = fold_reads compiler.lookups path in
-          Path_table.replace known_reads path paths;
-          paths
-  in
-  List.iter
-    (function
-      | [ path ] when not (List.exists (Path.equal path) (successors path)) ->
-          if is_constant path && not (is_lowered path) then lower compiler (Instance.Constant path)
-      | cycle ->
-          if List.exists is_constant cycle then
-            bug "constants that read one another: %s"
-              (String.concat ", " (List.map Path.show cycle)))
-    (Path_components.of_graph ~successors [ root ])
+let env compiler keys =
+  Memory_layout.create compiler.requests.settings.system
+    ~shape_of:(Monomorphic.shape compiler.monomorphic)
+    ~layout_of:(compiler.requests.layouts keys)
 
 let lowered compiler key =
-  let outcome =
-    match Table.find_opt compiler.lowered key with
-    | Some outcome -> outcome
-    | None ->
-        (match key with Constant path -> fold_constants compiler path | _ -> lower compiler key);
-        Table.find compiler.lowered key
-  in
-  match outcome with
+  match compiler.requests.lowered key with
   | Ok lowered -> lowered
   | Error unsupported -> raise (Lower.Unsupported unsupported)
 
-let link compiler key =
-  match Table.find_opt compiler.links key with
-  | Some link -> link
-  | None ->
-      let of_fragment fragment =
-        { own_hash = Reachable.own_hash fragment; references = Emit_c.references fragment }
-      in
-      let link =
-        match lowered compiler key with
-        | Evaluate (path, _) ->
-            { own_hash = evaluated_own_hash; references = [ Instance.Evaluator path ] }
-        | Compiled fragment -> of_fragment fragment
-        | Folded data -> of_fragment (Emit_c.fragment (Lower.env compiler.context) (Data data))
-      in
-      Table.replace compiler.links key link;
-      link
-
 let reach compiler root =
-  if not (Table.mem compiler.reach_keys root) then
-    List.iter
-      (fun (key, reach_key) -> Table.replace compiler.reach_keys key reach_key)
-      (Reachable.reach_keys
-         ~link:(fun key ->
-           let link = link compiler key in
-           (link.own_hash, link.references))
-         ~known:(Table.find_opt compiler.reach_keys)
-         root);
-  Table.find compiler.reach_keys root
+  match compiler.requests.test_key root with
+  | Ok reach_key -> reach_key
+  | Error unsupported -> raise (Lower.Unsupported unsupported)
 
 let programs_built = Atomic.make 0
 
@@ -187,7 +214,7 @@ let result_key compiler root =
        (Cbor.Array
           [
             Cbor.int Emit_c.version;
-            Cbor.Text (Libc.system_name compiler.system);
+            Cbor.Text (Libc.system_name compiler.requests.settings.system);
             Bytes (reach compiler root);
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
@@ -195,18 +222,18 @@ let result_key compiler root =
 let test_key compiler test = result_key compiler (Lower.test_key test)
 
 let anchor compiler (path : Path.t) : Positions.anchor option =
-  match compiler.lookups.interface.names.key path with
+  match compiler.requests.interface.names.key path with
   | None -> None
   | Some key -> (
-      match compiler.lookups.interface.names.base key with
+      match compiler.requests.interface.names.place key with
       | None -> None
-      | Some (file, base) ->
-          let line, _ = Source.position (compiler.lookups.source file) base in
+      | Some { file; base } ->
+          let line, _ = Source.position (compiler.requests.source file) base in
           Some { definition = path; path = compiler.file_name file; first_line = line })
 
-let decode compiler ty text : Lowered.static_value =
-  let env = Lower.env compiler.context in
-  let monomorphic = Lower.monomorphic compiler.context in
+let decode compiler key ty text : Lowered.static_value =
+  let env = env compiler [ key ] in
+  let monomorphic = compiler.monomorphic in
   let at = ref 0 in
   let take count =
     if !at + count > String.length text then bug "a value written out while compiling ends early";
@@ -294,10 +321,11 @@ let small_callees ~find ~worked_on fragment =
 
 let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
 
+let roots ~tests ~mains =
+  (if tests = [] then [] else test_runner :: List.map Lower.test_key tests)
+  @ List.map (fun main -> Instance.Program_main main) mains
+
 let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
-  let supplied =
-    List.map (fun instance -> Emit_c.fragment (Lower.env compiler.context) (Code instance)) supplied
-  in
   let lookup key =
     match List.find_opt (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied with
     | Some fragment -> fragment
@@ -320,7 +348,12 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
   in
   match
     Build.program ?progress ?tests ~copied compiler.toolchain compiler.cache
-      (Lower.env compiler.context) compiler.settings
+      (env compiler
+         (List.filter
+            (fun key ->
+              not (List.exists (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied))
+            (List.map Emit_c.key units)))
+      compiler.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
   with
@@ -372,13 +405,14 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
   match ran with Ran output -> Ran (read output) | Ran_too_long -> Ran_too_long
 
 and compiled compiler key =
-  let data (data : Lowered.data) = Emit_c.fragment (Lower.env compiler.context) (Data data) in
+  let data (data : Lowered.data) = Emit_c.fragment (env compiler [ key ]) (Data data) in
   let compiled =
     match lowered compiler key with
-    | Compiled fragment -> fragment
-    | Folded folded -> data folded
+    | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
-        match run_while_compiling compiler (Instance.Evaluator path) ~read:(decode compiler ty) with
+        match
+          run_while_compiling compiler (Instance.Evaluator path) ~read:(decode compiler key ty)
+        with
         | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
             cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
@@ -529,7 +563,7 @@ type progress =
   | Ended of { test : int; record : record }
 
 let external_test compiler test =
-  match Interface.Definition.test_uses compiler.lookups.interface test with
+  match Interface.Definition.test_uses compiler.requests.interface test with
   | Some uses -> uses <> Types.no_capabilities
   | None -> false
 
@@ -606,8 +640,11 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
 
 let build_supplied_tests compiler ~time_limit_ms supplied ~output =
   reporting compiler @@ fun () ->
-  let supplied = List.map (fun instance -> instance (Lower.env compiler.context)) supplied in
-  build_test_program compiler ~supplied ~time_limit_ms
+  let supplied_env = env compiler [ test_runner ] in
+  let supplied = List.map (fun instance -> instance supplied_env) supplied in
+  build_test_program compiler
+    ~supplied:(List.map (fun instance -> Emit_c.fragment supplied_env (Code instance)) supplied)
+    ~time_limit_ms
     ~roots:(List.map Emit_c.Builder.instance_key supplied)
     ~output
 
@@ -696,7 +733,7 @@ let build_program compiler ~main ~output =
 
 let check_template compiler ~from_template ~texts =
   reporting compiler @@ fun () ->
-  match Lower.template_checked compiler.context from_template with
+  match Lower.template_checked compiler.requests.mir from_template with
   | [] -> Ran []
   | positions ->
       run_while_compiling compiler
@@ -709,33 +746,20 @@ let check_template compiler ~from_template ~texts =
 
 let evaluate_call compiler ~function_ ~arguments =
   reporting compiler @@ fun () ->
-  match Interface.Impls.signature compiler.lookups.interface function_ with
+  match Interface.Impls.signature compiler.requests.interface function_ with
   | Some { output = Returns result; _ } ->
-      let ty = Monomorphic.ground (Lower.monomorphic compiler.context) [] result in
-      run_while_compiling compiler
-        (Instance.Call_evaluation { function_; arguments })
-        ~read:(decode compiler ty)
+      let ty = Monomorphic.ground compiler.monomorphic [] result in
+      let key = Instance.Call_evaluation { function_; arguments } in
+      run_while_compiling compiler key ~read:(decode compiler key ty)
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
-let create ?(checks = true) ?(file_name = Path.show_file) ?results
-    ?(evaluation_time_limit_ms = 10_000) ?(programs = Filename.get_temp_dir_name ())
-    ?(worked_on = fun package -> package <> Path.standard_package) lookups system toolchain cache
-    settings =
-  let lowered = Table.create 1024 in
-  let constant path =
-    match Table.find_opt lowered (Instance.Constant path) with
-    | Some (Ok (Folded data)) -> Some data.value
-    | Some (Ok (Evaluate _)) -> None
-    | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
-    | Some (Ok (Compiled _)) | None -> bug "%s is read before it is folded" (Path.show path)
-  in
+let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
+    ?(programs = Filename.get_temp_dir_name ())
+    ?(worked_on = fun package -> package <> Path.standard_package) requests toolchain cache settings
+    =
   {
-    lookups;
-    system;
-    context = Lower.context ~checks ~constant lookups system;
-    lowered;
-    links = Table.create 1024;
-    reach_keys = Table.create 1024;
+    requests;
+    monomorphic = Lower.monomorphic requests.interface;
     toolchain;
     cache;
     settings;
@@ -746,6 +770,15 @@ let create ?(checks = true) ?(file_name = Path.show_file) ?results
     programs;
     runs = Hashtbl.create 8;
   }
+
+let ground_types settings lookups key =
+  Compiler_bug.while_doing ~stage:"Compile"
+    ("finding the ground types of " ^ Instance.to_string key)
+    (fun () -> Lower.ground_types settings lookups key)
+
+let shape interface ty = Monomorphic.shape (Lower.monomorphic interface) ty
+let layout interface ~layout_of ty = Memory_layout.layout ~layout_of ty (shape interface ty)
+let stored_in_place interface ty = Memory_layout.stored_in_place (shape interface ty)
 
 module For_testing = struct
   let is_folded compiler path =
@@ -760,4 +793,5 @@ module For_testing = struct
   let build_supplied_tests = build_supplied_tests
   let compiled = compiled
   let run_program = run_program
+  let evaluate_call = evaluate_call
 end

@@ -10,8 +10,8 @@ val own_hash : Emit_c.fragment -> string
 
 module Keys : Map.S with type key = Instance.key
 
-val reach_keys :
+val component_keys :
   link:(Instance.key -> string * Instance.key list) ->
-  known:(Instance.key -> string option) ->
-  Instance.key ->
+  deep:(Instance.key -> string) ->
+  Instance.key list ->
   (Instance.key * string) list

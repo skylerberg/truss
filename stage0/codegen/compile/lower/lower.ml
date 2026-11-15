@@ -12,8 +12,23 @@ type context = Definitions.context
 
 let env (context : context) = context.env
 let glue (context : context) = context.glue
-let monomorphic (context : context) = context.monomorphic
+let monomorphic = Definitions.monomorphic
 let context = Definitions.context
+
+type ground_types = Ground_types.t = { types : Ground.ty list; folded_constants : Path.t list }
+
+let ground_types (settings : Lookups.settings) (lookups : Lookups.t) key =
+  let monomorphic = monomorphic lookups.interface in
+  let env =
+    Memory_layout.create settings.system ~shape_of:(Monomorphic.shape monomorphic)
+      ~layout_of:(fun ty -> bug "ground types read the layout of %s" (Ground.to_string ty))
+  in
+  Ground_types.of_instance
+    (context settings
+       ~constant:(fun path -> bug "ground types read the value of %s" (Path.show path))
+       ~env lookups)
+    key
+
 let test_key = Definitions.test_key
 
 type constant = Constants.constant = Folded of Lowered.data | Run of Ground.ty
@@ -68,8 +83,8 @@ let code_state context ~key path =
   let code = code_of context path [] in
   (enter context ~builder:(create context.env ~key) (frame_of code), code)
 
-let template_clauses context from_template : (int * Mir.Graph.t) list =
-  match Mir.contract_of_path context.lookups.mir from_template with
+let template_clauses (mir : Mir.lookups) from_template : (int * Mir.Graph.t) list =
+  match Mir.contract_of_path mir from_template with
   | Some contract ->
       List.concat
         (List.mapi
@@ -80,7 +95,7 @@ let template_clauses context from_template : (int * Mir.Graph.t) list =
            contract.requires)
   | None -> bug "%s is not a function" (Path.show from_template)
 
-let template_checked context from_template = List.map fst (template_clauses context from_template)
+let template_checked mir from_template = List.map fst (template_clauses mir from_template)
 
 let template_check context (key : Instance.key) ~from_template ~texts : Emit_c.Builder.instance =
   let st, _ = code_state context ~key from_template in
@@ -104,7 +119,7 @@ let template_check context (key : Instance.key) ~from_template ~texts : Emit_c.B
           Glue.encode_call context.glue st.builder
             ~output:(Address { place = output; writable = true })
             context.bool holds)
-        (template_clauses context from_template);
+        (template_clauses context.lookups.mir from_template);
       Constants.write_output st output);
   finish_instance st ~rest:[] ()
 

@@ -36,48 +36,36 @@ let requires_fix context frame (part : part) (requirement : Mir.requirement) ter
         || (character >= '0' && character <= '9'))
       text
   in
-  let written =
+  let written () =
     List.filter_map
       (fun (index, (parameter : Mir.parameter)) ->
         match List.find_opt (fun (passed : passed) -> passed.position = index) values with
-        | Some { origin; _ } -> (
-            match origin with
-            | Some origin ->
-                let text = quote frame.source origin in
-                Some (parameter.local, if simple text then text else "(" ^ text ^ ")")
-            | None -> None)
-        | _ -> None)
+        | Some { origin = Some origin; _ } ->
+            let text = text_of frame.source origin in
+            Some (parameter.local, if simple text then text else "(" ^ text ^ ")")
+        | Some { origin = None; _ } | None -> None)
       (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
   in
-  if frame.source.key <> Some context.home || not (List.for_all fixed (Logic.free_constants term))
-  then []
-  else
-    let clause_span = span_of part.callee clause.origin in
-    let clause_text = quote part.callee clause.origin in
-    let references =
-      List.filter_map
-        (fun (local, origin) ->
-          Option.map (fun text -> (span_of part.callee origin, text)) (List.assoc_opt local written))
-        requirement.names
-    in
-    let buffer = Buffer.create (String.length clause_text) in
-    let next =
-      List.fold_left
-        (fun next ((span : span), text) ->
-          let start = span.start - clause_span.start and stop = span.stop - clause_span.start in
-          if start < next || stop > String.length clause_text then next
-          else begin
-            Buffer.add_string buffer (String.sub clause_text next (start - next));
-            Buffer.add_string buffer text;
-            stop
-          end)
-        0
-        (List.sort_uniq compare references)
-    in
-    Buffer.add_string buffer (String.sub clause_text next (String.length clause_text - next));
-    if written <> [] || part.parameters = [] then
-      add_requires context frame (Buffer.contents buffer)
-    else []
+  match part.callee.key with
+  | Some key
+    when frame.source.key = Some context.home && List.for_all fixed (Logic.free_constants term) ->
+      let written = written () in
+      if written <> [] || part.parameters = [] then
+        add_requires context frame
+          [
+            Substituted
+              {
+                key;
+                clause = clause.origin;
+                replacements =
+                  List.filter_map
+                    (fun (local, origin) ->
+                      Option.map (fun text -> (origin, text)) (List.assoc_opt local written))
+                    requirement.names;
+              };
+          ]
+      else []
+  | Some _ | None -> []
 
 let named_term context ty term =
   let rec holds_call = function
@@ -213,18 +201,24 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
           List.map (fun (ty, _, index) -> rank context ty (argument_at_index values index)) pairs
         in
         oblige context frame Termination span
-          "This recursive call may not be on a part of its parameters: give the function a \
-           `decreases` clause."
+          [
+            Text
+              "This recursive call may not be on a part of its parameters: give the function a \
+               `decreases` clause.";
+          ]
           Logic.(
             conjunction
               (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& lexicographically_less before after)
     | [], _ | _, [] ->
         oblige context frame Termination span
-          (Printf.sprintf
-             "This call to `%s` may not end: it calls back here, and both need a `decreases` \
-              clause for the prover to show that the recursion ends."
-             (Path.show path))
+          [
+            Text
+              (Printf.sprintf
+                 "This call to `%s` may not end: it calls back here, and both need a `decreases` \
+                  clause for the prover to show that the recursion ends."
+                 (Path.show path));
+          ]
           (Logic.Boolean false)
     | measures, callee_measures ->
         let current_frame =
@@ -248,9 +242,13 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
         in
         let before, after = prefix before after in
         oblige context frame Termination span
-          (Printf.sprintf "This call may not decrease `%s`."
-             (String.concat ", "
-                (List.map (fun (measure : Mir.formula) -> quote caller measure.origin) measures)))
+          (Text "This call may not decrease `"
+           :: List.concat
+                (List.mapi
+                   (fun index (measure : Mir.formula) ->
+                     (if index = 0 then [] else [ Text ", " ]) @ [ quote caller measure.origin ])
+                   measures)
+          @ [ Text "`." ])
           (lexicographically_less before after)
     end;
   let requiring =
@@ -267,11 +265,13 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
             let clause = requirement.clause in
             let _, term = specification_value context entry clause in
             oblige context frame Requires span
-              ?cited:
-                (Option.map (fun key -> (key, span_of part.callee clause.origin)) part.callee.key)
+              ?cited:(Option.map (fun key -> (key, clause.origin)) part.callee.key)
               ~fixes:(requires_fix context frame part requirement term values)
-              (Printf.sprintf "`%s` may not hold for this call to `%s`."
-                 (quote part.callee clause.origin) (Path.show path))
+              [
+                Text "`";
+                quote part.callee clause.origin;
+                Text (Printf.sprintf "` may not hold for this call to `%s`." (Path.show path));
+              ]
               term;
             term)
           part.requires)
@@ -821,8 +821,11 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
     in
     if not ends then
       oblige context frame Termination span
-        "This call may not end, since its callee has no `time` clause, so neither may this \
-         function."
+        [
+          Text
+            "This call may not end, since its callee has no `time` clause, so neither may this \
+             function.";
+        ]
         (Logic.Boolean false);
     List.iter
       (fun impl ->
@@ -832,11 +835,14 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
         in
         if reaches_here then
           oblige context frame Termination span
-            (Printf.sprintf
-               "This call uses `%s` where a bound needs it, and that `impl`'s methods reach back \
-                here. Such a use passes no arguments the prover can compare, so the recursion \
-                cannot be shown to end: write it as a direct call on a part."
-               (Path.show impl))
+            [
+              Text
+                (Printf.sprintf
+                   "This call uses `%s` where a bound needs it, and that `impl`'s methods reach \
+                    back here. Such a use passes no arguments the prover can compare, so the \
+                    recursion cannot be shown to end: write it as a direct call on a part."
+                   (Path.show impl));
+            ]
             (Logic.Boolean false))
       (Mir.Call_edges.impls_used context.lookups.interface (Path.package context.current)
          invocation.callee)
@@ -893,9 +899,12 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           | (Bound | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait
             ->
               oblige context frame Requires span
-                "A call of `from_template` through a bound or `any` cannot see the tag's \
-                 `requires` on its template: build the value with a template, where the tag is \
-                 known."
+                [
+                  Text
+                    "A call of `from_template` through a bound or `any` cannot see the tag's \
+                     `requires` on its template: build the value with a template, where the tag is \
+                     known.";
+                ]
                 (Logic.Boolean false)
           | _ -> ());
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
@@ -997,8 +1006,9 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             | Types.Named { arguments = Types.Type element :: _; _ } -> (
                 let model = array_model context frame array.type_ array.term in
                 oblige context frame Requires span
-                  (Printf.sprintf "`%s` may not be within the array."
-                     (quote frame.source site.origin))
+                  [
+                    Text "`"; quote frame.source site.origin; Text "` may not be within the array.";
+                  ]
                   Logic.(
                     Operation ("<=", [ int 0; index.term ])
                     &&& Operation ("<", [ index.term; sequence_length context element model ]));
@@ -1036,8 +1046,11 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
                 let elements = buffer_model context Storage element storage.term in
                 let count = value_term context frame count in
                 oblige context frame Requires span
-                  (Printf.sprintf "`%s` may not have as many elements as the array's count."
-                     (quote frame.source site.origin))
+                  [
+                    Text "`";
+                    quote frame.source site.origin;
+                    Text "` may not have as many elements as the array's count.";
+                  ]
                   (Logic.equal (sequence_length context element elements) count);
                 let array = arrive context frame "array" result_type in
                 assume context frame

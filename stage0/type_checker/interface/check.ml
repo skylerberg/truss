@@ -3,10 +3,10 @@ module Names = Resolve.Names
 open Checking
 open Impl_checks
 
-let bound_diagnostics lookups ~package ~bounds named =
-  let diagnostic code (span : span) message = Diagnostic.make ~code span message in
+let bound_diagnostics lookups ~package ~bounds ~spans named =
   List.concat_map
-    (fun ((span : span), (type_ : Types.ty)) ->
+    (fun (id, (type_ : Types.ty)) ->
+      let diagnostic code message = Diagnostic.make ~code (Lazy.force spans).(id) message in
       match type_ with
       | Named { path; arguments } -> (
           match
@@ -22,13 +22,13 @@ let bound_diagnostics lookups ~package ~bounds named =
                   match Impls.implements lookups ~bounds argument bound with
                   | None ->
                       [
-                        diagnostic (Types Unsatisfied_bound) span
+                        diagnostic (Types Unsatisfied_bound)
                           (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
                              (Types.show type_) (Types.show argument) (Types.show_trait bound));
                       ]
                   | Some evidence ->
                       List.map
-                        (diagnostic (Capabilities Not_granted) span)
+                        (diagnostic (Capabilities Not_granted))
                         (Grants.evidence_messages lookups ~package ~bounds evidence))
                 required
           | None -> [])
@@ -38,6 +38,7 @@ let bound_diagnostics lookups ~package ~bounds named =
 let check_bounds state =
   state.diagnostics <-
     bound_diagnostics state.lookups ~package:state.key.module_.package ~bounds:(bounds state)
+      ~spans:(lazy (Syntax_walk.spans state.definition))
       state.lowered.named
     @ state.diagnostics
 

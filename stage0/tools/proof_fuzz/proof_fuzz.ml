@@ -39,11 +39,6 @@ let compiler =
 let cache = lazy (Build.cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
 let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
 
-let system =
-  match Libc.host with
-  | Some system -> system
-  | None -> failwith "the fuzzer runs programs, so it runs only on Linux and macOS"
-
 let load text =
   let pipeline = example_pipeline text in
   Pipeline.check pipeline [ example_file.module_.package ];
@@ -53,8 +48,8 @@ let load text =
       ( pipeline,
         lazy
           (Compile.create ~evaluation_time_limit_ms:2000
-             (Pipeline.lowering_lookups pipeline [ example.package ])
-             system (Lazy.force compiler) (Lazy.force cache) settings) )
+             (Pipeline.lowering_requests pipeline [ example.package ])
+             (Lazy.force compiler) (Lazy.force cache) settings) )
 
 (* The bits and signedness of a built-in integer type, or of [Bool] as one
    bit. *)
@@ -88,7 +83,7 @@ let runnable pipeline =
       let key = Resolve.Names.key_of declaration in
       match
         ( Interface.Definition.signature interface declaration.path,
-          Prover.Contracts.source_at_key lookups key,
+          Prover.Contracts.home_source lookups key,
           Mir.contract_of_path mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
@@ -107,7 +102,7 @@ let runnable pipeline =
           let admits =
             List.map
               (fun (requirement : Mir.requirement) ->
-                "(" ^ Prover.Facts.quote source requirement.clause.origin ^ ")")
+                "(" ^ Prover.Facts.text_of source requirement.clause.origin ^ ")")
               requires
           in
           (* [admitting] writes each clause as code, where [==>] is not
@@ -123,8 +118,8 @@ let runnable pipeline =
 
 (* Whether every obligation of a definition proves. *)
 let proven (names : Resolve.Names.lookups) key states =
-  match (names.base key, names.text key) with
-  | Some (_, base), Some text ->
+  match (names.place key, names.text key) with
+  | Some { base; _ }, Some text ->
       List.for_all
         (fun (state : Diagnostic.span Prover.state) ->
           state.span.stop <= base
@@ -174,12 +169,13 @@ let run_mutant ~samples text =
       in
       match load with_admitting with
       | None -> ()
-      | Some (_, compile) ->
+      | Some (running, compile) ->
           List.iteri
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
-                Compile.evaluate_call (Lazy.force compile) ~function_ ~arguments
+                Pipeline.For_testing.root running (Call_evaluation { function_; arguments });
+                Compile.For_testing.evaluate_call (Lazy.force compile) ~function_ ~arguments
               in
               let admitted arguments =
                 candidate.admits = []

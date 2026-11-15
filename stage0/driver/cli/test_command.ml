@@ -12,8 +12,8 @@ let select snapshot pipeline packages ~paths ~match_ =
             when declaration.ordinal = 0
                  && match match_ with Some text -> Substring.contains name text | None -> true ->
               let line =
-                match names.base (Resolve.Names.key_of declaration) with
-                | Some (_, base) -> fst (Source.position source base)
+                match names.place (Resolve.Names.key_of declaration) with
+                | Some { base; _ } -> fst (Source.position source base)
                 | None -> 0
               in
               Some

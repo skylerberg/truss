@@ -69,10 +69,11 @@ type section_names = {
 
 type state = {
   lookups : Names.lookups;
-  file : Path.file;
+  key : Names.key;
   interface : section_names;
   contract : section_names;
   body : section_names;
+  walked : section;
   mutable section : section;
 }
 
@@ -84,13 +85,14 @@ let section_names size =
     used_imports = [];
   }
 
-let create lookups file ~size =
+let create lookups key ~size ~walked =
   {
     lookups;
-    file;
+    key;
     interface = section_names size;
     contract = section_names size;
     body = section_names size;
+    walked;
     section = Interface;
   }
 
@@ -102,10 +104,12 @@ let names_of state = function
 let current state = names_of state state.section
 
 let in_section state section walk =
-  let enclosing = state.section in
-  state.section <- section;
-  walk ();
-  state.section <- enclosing
+  if section = state.walked then begin
+    let enclosing = state.section in
+    state.section <- section;
+    walk ();
+    state.section <- enclosing
+  end
 
 let reported state ?fixes code (span : span) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
@@ -132,7 +136,7 @@ let unknown state (name : name) ~expected candidates =
        (reported state ~fixes Unknown_name name.span
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
-let module_item state text = state.lookups.find state.file.module_ text
+let module_item state text = state.lookups.find state.key.module_ text
 
 let module_of_names state (first : name) (rest : name list) =
   let failed report =
@@ -140,15 +144,16 @@ let module_of_names state (first : name) (rest : name list) =
     Error report
   in
   if
-    List.mem_assoc first.text (state.lookups.imports state.file)
+    List.mem_assoc first.text (state.lookups.imports state.key)
     && not (List.mem first.text (current state).used_imports)
   then (current state).used_imports <- first.text :: (current state).used_imports;
   begin match
-    Names.lookup_module state.lookups ~from:state.file
+    Names.lookup_module state.lookups ~from:state.key.module_
+      ~imports:(state.lookups.imports state.key)
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
   with
   | Found_module (module_, `Package)
-    when module_ = Intrinsic.module_ && state.file.module_.package <> Path.standard_package ->
+    when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->
       failed
         (reported state Intrinsic_import first.span
            "Only the `standard` package can use `standard::intrinsic`.")
@@ -171,7 +176,7 @@ let module_of_names state (first : name) (rest : name list) =
 let in_module state module_ (name : name) ~types =
   match state.lookups.find module_ name.text with
   | Some item when if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind ->
-      if Names.visible ~from:state.file.module_ module_ item.visibility then begin
+      if Names.visible ~from:state.key.module_ module_ item.visibility then begin
         let path : Path.t = Top { module_; name = name.text } in
         set state name (Definition (item.kind, path));
         Some (path, item)
@@ -192,7 +197,7 @@ let in_module state module_ (name : name) ~types =
           (fun (item : Names.entry) ->
             if
               (if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind)
-              && Names.visible ~from:state.file.module_ module_ item.visibility
+              && Names.visible ~from:state.key.module_ module_ item.visibility
             then Some item.name
             else None)
           (state.lookups.entries module_)
@@ -212,7 +217,7 @@ let type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
       (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
-      (state.lookups.entries state.file.module_)
+      (state.lookups.entries state.key.module_)
   @ List.map fst Prelude.types
 
 let type_name state scope ?(variants = false) (path : path) =
@@ -229,7 +234,7 @@ let type_name state scope ?(variants = false) (path : path) =
           match module_item state text with
           | Some item when Names.is_type_kind item.kind ->
               set state path.last
-                (Definition (item.kind, Top { module_ = state.file.module_; name = text }))
+                (Definition (item.kind, Top { module_ = state.key.module_; name = text }))
           | _ -> (
               match prelude_type state text with
               | Some (path_, item) -> set state path.last (Definition (item.kind, path_))
@@ -296,7 +301,7 @@ and count_name state scope (name : name) =
       match module_item state name.text with
       | Some item when item.kind = Constant && shadowing = None ->
           set state name
-            (Definition (Constant, Top { module_ = state.file.module_; name = name.text }))
+            (Definition (Constant, Top { module_ = state.key.module_; name = name.text }))
       | _ ->
           set state name
             (Unknown
@@ -363,7 +368,7 @@ and local_value state scope (name : name) =
         begin match module_item state text with
         | Some item when Names.is_value_kind item.kind ->
             set state name
-              (Definition (item.kind, Top { module_ = state.file.module_; name = text }))
+              (Definition (item.kind, Top { module_ = state.key.module_; name = text }))
         | _ ->
             if text = "null" || text = "nil" then begin
               set state name
@@ -382,7 +387,7 @@ and local_value state scope (name : name) =
                 @ List.filter_map
                     (fun (item : Names.entry) ->
                       if Names.is_value_kind item.kind then Some item.name else None)
-                    (state.lookups.entries state.file.module_))
+                    (state.lookups.entries state.key.module_))
         end
 
 and name_expression state scope (path : path) =

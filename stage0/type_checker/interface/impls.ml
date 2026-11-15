@@ -4,7 +4,7 @@ open Environment
 let head = function Types.Named { path; _ } -> Some path | _ -> None
 
 let impls_for (lookups : Lookups.t) (type_ : Path.t) package =
-  Option.value ~default:[] (Path.Map.find_opt type_ (lookups.names.impl_index package).by_type)
+  lookups.names.impls_of_type package type_
 
 let impls_in lookups ~trait ~type_ package =
   List.filter_map
@@ -12,10 +12,7 @@ let impls_in lookups ~trait ~type_ package =
     (impls_for lookups type_ package)
 
 let impls_of (lookups : Lookups.t) ~trait package =
-  List.sort_uniq Path.compare
-    (List.filter_map
-       (fun ((implemented, _), impl) -> if Path.equal implemented trait then Some impl else None)
-       (lookups.names.impl_index package).impls)
+  List.sort_uniq Path.compare (lookups.names.impls_of_trait package trait)
 
 let cursor_trait = Well_known.path Cursor
 

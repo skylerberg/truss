@@ -31,7 +31,7 @@ type section_names = {
 
 type state
 
-val create : Names.lookups -> Path.file -> size:int -> state
+val create : Names.lookups -> Names.key -> size:int -> walked:section -> state
 val names_of : state -> section -> section_names
 
 val report :

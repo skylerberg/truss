@@ -3,14 +3,13 @@ open Codegen_support
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let verdicts ~evaluator database =
-  Pipeline.decide ~evaluator (Lazy.force solver)
-    (Pipeline.prove (pipeline database) [ example_file ])
+let verdicts ~evaluator pipeline =
+  Pipeline.decide ~evaluator (Lazy.force solver) (Pipeline.prove pipeline [ example_file ])
 
 let proven_with_running text =
-  let database, compile = load text in
+  let pipeline, compile = load text in
   Pipeline.diagnostics
-    (verdicts ~evaluator:(Evaluator.of_compiler (lazy compile)) database)
+    (verdicts ~evaluator:(Evaluator.of_compiler (lazy compile)) pipeline)
     example_file
 
 let shout = Fixtures.Evaluate.shout
@@ -77,7 +76,7 @@ let () =
 
 let () =
   test "a template check that timed out is run again on the next check" (fun () ->
-      let database, _ =
+      let pipeline, _ =
         load (shout ^ Fixtures.Evaluate.template_check_that_timed_out_is_run_again_on_the)
       in
       let runs = ref 0 in
@@ -86,7 +85,7 @@ let () =
         incr runs;
         if !runs = 1 then Timed_out else Ran true
       in
-      let proven () = Pipeline.diagnostics (verdicts ~evaluator database) example_file in
+      let proven () = Pipeline.diagnostics (verdicts ~evaluator pipeline) example_file in
       (match proven () with
       | [ _ ] -> ()
       | actual ->
@@ -101,12 +100,12 @@ let () =
 
 let () =
   test "a state says whether its proof trusts compiled code" (fun () ->
-      let database, compile =
+      let pipeline, compile =
         load (shout ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
       in
       let states =
         Pipeline.states
-          (verdicts ~evaluator:(Evaluator.of_compiler (lazy compile)) database)
+          (verdicts ~evaluator:(Evaluator.of_compiler (lazy compile)) pipeline)
           example_file
       in
       let with_code code =

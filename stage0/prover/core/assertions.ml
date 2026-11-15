@@ -136,8 +136,11 @@ let bit_vector_assertion context frame ~named ~origin ~(read : frame -> Logic.te
     make_obligation context
       { isolated with makes_obligations = true }
       Assertion (span_of frame.source origin)
-      (Printf.sprintf "`%s` may not hold for every value of the variables it names."
-         (quote frame.source origin))
+      [
+        Text "`";
+        quote frame.source origin;
+        Text "` may not hold for every value of the variables it names.";
+      ]
       term
   in
   context.obligations <- { obligation with query = exactly obligation.query } :: context.obligations;
@@ -154,5 +157,5 @@ let assertion context frame ~origin ~bit_vector term =
   if is_test context || bit_vector <> None then assume context frame term
   else
     oblige context frame Assertion (span_of frame.source origin)
-      (Printf.sprintf "`%s` may not hold." (quote frame.source origin))
+      [ Text "`"; quote frame.source origin; Text "` may not hold." ]
       term

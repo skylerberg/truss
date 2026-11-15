@@ -17,7 +17,7 @@ let declarations pipeline (module_ : Path.module_) =
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
 let visible packages (declaration : Names.declaration) =
-  List.mem declaration.file.module_.package packages || Names.is_public declaration.visibility
+  List.mem declaration.module_.package packages || Names.is_public declaration.visibility
 
 let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
@@ -84,15 +84,15 @@ let find snapshot pipeline packages ~body text =
       let key = Names.key_of declaration in
       let opaque =
         declaration.visibility = Public_opaque
-        && not (List.mem declaration.file.module_.package packages)
+        && not (List.mem declaration.module_.package packages)
       in
       let names = Pipeline.names pipeline [ key.module_.package ] in
       match Signatures.text names ~body ~opaque key with
       | None -> None
       | Some signature ->
           let file, line =
-            match names.base key with
-            | Some (written, base) ->
+            match names.place key with
+            | Some { file = written; base } ->
                 let source = Command_packages.source snapshot packages written in
                 (Source.path source, fst (Source.position source base))
             | None -> ("", 0)

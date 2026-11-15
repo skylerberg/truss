@@ -18,7 +18,7 @@
   mir
   solver
   prover
-  libc
+  instance
   memory_layout
   toolchain
   build

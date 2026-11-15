@@ -17,17 +17,16 @@ val kind_of_named : named -> kind
 val kind_name : kind -> string
 
 type declaration = {
-  file : Path.file;
+  module_ : Path.module_;
   path : Path.t;
   ordinal : int;
-  index : int;
-  container : int option;
   kind : kind;
   visibility : Syntax.visibility;
   generic : bool;
 }
 
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
+type place = { file : Path.file; base : int }
 
 val key_of : declaration -> key
 val show_key : key -> string
@@ -45,11 +44,6 @@ val is_value_kind : named -> bool
 val is_public : Syntax.visibility -> bool
 val visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
 
-type impl_index = {
-  impls : ((Path.t * Path.t) * Path.t) list;
-  by_type : (Path.t * Path.t) list Path.Map.t;
-}
-
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
 val derivable : Path.t -> bool
@@ -57,7 +51,7 @@ val derivable : Path.t -> bool
 type lookups = {
   find : Path.module_ -> string -> entry option;
   entries : Path.module_ -> entry list;
-  imports : Path.file -> (string * Path.module_) list;
+  imports : key -> (string * Path.module_) list;
   module_exists : Path.module_ -> bool;
   split_module : string list -> Path.module_ option;
   dependency_names : Path.package -> Path.package list;
@@ -69,12 +63,14 @@ type lookups = {
   definition : key -> Syntax.definition option;
   text : key -> string option;
   spans : key -> Syntax.span array option;
-  base : key -> (Path.file * int) option;
+  place : key -> place option;
   container : key -> key option;
   contained : key -> key list;
   members : Path.t -> string -> key list;
   traits_declaring : Path.package -> string -> Path.t list;
-  impl_index : Path.package -> impl_index;
+  impls : Path.package -> ((Path.t * Path.t) * Path.t) list;
+  impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
+  impls_of_trait : Path.package -> Path.t -> Path.t list;
   law_proofs : Path.package -> law_proof_name -> key list;
 }
 
@@ -85,7 +81,14 @@ type module_lookup =
 
 val used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
-val lookup_module : lookups -> from:Path.file -> string list -> module_lookup
+
+val lookup_module :
+  lookups ->
+  from:Path.module_ ->
+  imports:(string * Path.module_) list ->
+  string list ->
+  module_lookup
+
 val definition_of_path : lookups -> Path.t -> (key * Syntax.definition) option
 val law_parameters : lookups -> Path.t -> string -> string list option
 
@@ -98,6 +101,31 @@ type namespace
 
 val namespace :
   lookups -> Path.package -> (Path.module_ * (Path.file * Syntax.file) list) list -> namespace
+
+val empty_namespace : namespace
+
+type change =
+  | Entry of Path.module_ * string
+  | Entries of Path.module_
+  | Imports of key
+  | Declaration of key
+  | Tree of key
+  | Positions of key
+  | Text of key
+  | Place of key
+  | Container of key
+  | Contained of key
+  | Module_declarations of Path.module_
+  | File_declarations of Path.file
+  | Package_declarations
+  | Members of Path.t * string
+  | Traits_declaring of string
+  | Impl_index
+  | Impls_of_type of Path.t
+  | Impls_of_trait of Path.t
+  | Law_proofs of law_proof_name
+
+val changes : namespace -> namespace -> change list
 
 val of_namespaces :
   namespace:(Path.package -> namespace) ->

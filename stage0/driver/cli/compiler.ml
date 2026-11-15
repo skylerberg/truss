@@ -8,9 +8,9 @@ let toolchain () =
   | Ok toolchain -> toolchain
   | Error message -> Outcome.cannot_run "%s" message
 
-let system () =
+let requests pipeline packages =
   match Libc.host with
-  | Some system -> system
+  | Some _ -> Pipeline.lowering_requests pipeline packages
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let results () : Compile.results =
@@ -21,14 +21,12 @@ let development_settings () : Build.settings =
   { build = Development; optimization = O1; extra = c_flags () }
 
 let lowering_only pipeline packages =
-  Compile.create
-    (Pipeline.lowering_lookups pipeline packages)
-    (system ())
+  Compile.create (requests pipeline packages)
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
     (development_settings ())
 
-let create ?(checks = true) pipeline snapshot packages build =
+let create pipeline snapshot packages build =
   let toolchain = toolchain () in
   let settings : Build.settings =
     match build with
@@ -47,9 +45,8 @@ let create ?(checks = true) pipeline snapshot packages build =
     | _ -> Path.show_file file
   in
   let own = List.map snd (Database.packages snapshot) in
-  Compile.create ~checks ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
+  Compile.create ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
     ~worked_on:(fun package -> List.mem package own)
-    (Pipeline.lowering_lookups pipeline packages)
-    (system ()) toolchain
+    (requests pipeline packages) toolchain
     (Build.cache (Database.objects_directory ()))
     settings

@@ -2,28 +2,29 @@ open Definitions
 open Lowering
 open Emit_c.Builder
 
-let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Core.evidence) =
-  let substitute = Types.substitute st.frame.code.substitution in
+let resolve_impl context substitution ~(trait : Types.trait_reference) ~self_type
+    ~(evidence : Core.evidence) =
+  let substitute = Types.substitute substitution in
   let impl, arguments =
     match evidence with
     | Impl { impl; arguments } ->
         ( impl,
           List.map
             (fun (parameter, argument) ->
-              (parameter, Types.substitute_argument st.frame.code.substitution argument))
+              (parameter, Types.substitute_argument substitution argument))
             arguments )
     | Bound -> (
-        let self = st.context.monomorphic.normalize (substitute self_type) in
+        let self = context.monomorphic.normalize (substitute self_type) in
         match
-          Interface.Impls.implements st.context.lookups.interface ~bounds:Interface.Impls.no_bounds
+          Interface.Impls.implements context.lookups.interface ~bounds:Interface.Impls.no_bounds
             self
-            (let trait = Types.substitute_trait st.frame.code.substitution trait in
+            (let trait = Types.substitute_trait substitution trait in
              {
                trait with
                trait_arguments =
                  List.map
                    (function
-                     | Types.Type ty -> Types.Type (st.context.monomorphic.normalize ty)
+                     | Types.Type ty -> Types.Type (context.monomorphic.normalize ty)
                      | argument -> argument)
                    trait.trait_arguments;
              })
@@ -33,7 +34,7 @@ let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Cor
     | Dynamic -> bug "a call through any, which reaches no one instance"
   in
   let impl_interface =
-    match Interface.Impls.impl_interface st.context.lookups.interface impl with
+    match Interface.Impls.impl_interface context.lookups.interface impl with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show impl)
   in
@@ -41,23 +42,21 @@ let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Cor
     List.map
       (fun (generic : Types.generic) ->
         match List.assoc_opt generic.generic arguments with
-        | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
+        | Some argument -> Monomorphic.ground_argument context.monomorphic [] argument
         | None -> bug "the impl's parameter %s is not bound" generic.generic.name)
       impl_interface.impl_generics
   in
   (impl, impl_arguments)
 
-let trait_method_key st ~(trait : Types.trait_reference) ~name ~receiver ~self_type ~type_arguments
-    ~(evidence : Core.evidence) =
-  let impl, impl_arguments = resolve_impl st ~trait ~self_type ~evidence in
+let trait_method_key context substitution ~(trait : Types.trait_reference) ~name ~receiver
+    ~self_type ~type_arguments ~(evidence : Core.evidence) =
+  let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
   Instance.Code
     {
       path = Method { owner = impl; name; receiver };
       type_arguments =
         impl_arguments
-        @ List.map
-            (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
-            type_arguments;
+        @ List.map (Monomorphic.ground_argument context.monomorphic substitution) type_arguments;
     }
 
 let operand_as st (mode : Types.mode) ty (place : Lowered.place) (passed : Lowered.ty option) =

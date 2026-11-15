@@ -599,7 +599,7 @@ let bind_parts context (frame : frame) run =
 
 let note_decision context frame origin test =
   if frame.makes_obligations && frame.source.key = Some context.home then begin
-    let text = quote frame.source origin in
+    let text = text_of frame.source origin in
     context.decisions <-
       ( Printf.sprintf "`%s` is true" text,
         Some (Printf.sprintf "`%s` is false" text),
@@ -621,7 +621,9 @@ let todo_reached context frame span =
   end
 
 let unreachable_reached context frame span =
-  oblige context frame Unreachable span "This `unreachable` may be reached." (Logic.Boolean false)
+  oblige context frame Unreachable span
+    [ Text "This `unreachable` may be reached." ]
+    (Logic.Boolean false)
 
 let lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_back =
   let span = span_of frame.source origin in
@@ -636,8 +638,11 @@ let lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_bac
           in
           oblige context frame Ensures
             (span_of frame.source clause.origin)
-            (Printf.sprintf "`%s` may not hold for the part lent here."
-               (quote frame.source clause.origin))
+            [
+              Text "`";
+              quote frame.source clause.origin;
+              Text "` may not hold for the part lent here.";
+            ]
             term)
         each;
       check_valid context frame span part_type handed ~deep:true ~when_:"for the part lent here";
@@ -1063,7 +1068,7 @@ and read_statement context frame run (statement : Mir.statement) =
       if frame.makes_obligations then
         context.decisions <-
           ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (quote frame.source) patterns)),
+              (String.concat ", " (List.map (text_of frame.source) patterns)),
             None,
             frame.condition,
             Logic.Boolean true )

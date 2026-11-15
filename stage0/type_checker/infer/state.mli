@@ -66,7 +66,7 @@ type state = {
   definition : Syntax.definition;
   resolved : Resolve.resolved;
   context : Lower.context;
-  text : string;
+  text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
   mutable diagnostics : Syntax.diagnostic list;

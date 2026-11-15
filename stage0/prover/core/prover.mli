@@ -18,7 +18,7 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-type verdict = (Syntax.span state * (Resolve.Names.key * Syntax.span) option) list
+type verdict = (Syntax.span state * (Resolve.Names.key * Core.origin) option) list
 
 val verdicts :
   ?evaluator:evaluator ->

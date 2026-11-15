@@ -1,0 +1,11 @@
+(executable
+ (name database_fuzz)
+ (libraries
+  unix
+  zarith
+  path
+  token
+  file_system
+  compiler_bug
+  database
+  pipeline))

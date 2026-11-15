@@ -1850,7 +1850,7 @@ changes no definition.
 
 | Edit | Recomputes | Reason |
 |---|---|---|
-| Reformat a file, or move a definition within its file or to another file of its module | Nothing | Identity excludes the file, the position in the file, the surrounding definitions, and the layout. |
+| Reformat a file, or move a definition within its file or to another file of its module | The parts that hold positions, of the definitions whose text changed. Nothing that another definition reads. | Identity excludes the file, the position in the file, the surrounding definitions, and the layout. A position is relative to its definition and is held only by the definition's own diagnostics and code, and a definition's file and place are a part that only reporting reads. |
 | Edit a body, such as replacing a `todo` | The check, the proof, and the code of that body, and the template checks that run it. No caller is re-checked or re-proven. | A definition names its dependencies by module path and name, never by content, and callers depend on the signature alone. |
 | Strengthen an `ensures` | The proofs of callers. No caller is type-checked. | A signature has two parts: the interface, which the types of callers depend on, and the contract, which only the proofs of callers depend on. |
 | Change the default of a parameter | The proofs and tests of the callers that omit the argument, and the code of the callee alone | The interface records only that the parameter has a default, and the callee applies it. |
@@ -1896,7 +1896,12 @@ reaches.
 that propagated a thousand edits equals one built from the same files from
 scratch. Nothing in it depends on the order of the edits, so a copy of one
 worktree's database is a correct start for another, and a hot build and a
-cold one agree.
+cold one agree. The roots of lowering are the project's tests and entry
+points, which the namespace lists, and the template checks that its proofs
+run. A request never adds a root, so the lowered code the database holds is
+a function of the files too, and not of the requests it served. An instance
+stays in the database while a root reaches it: when one loses its last
+referrer, the database collects it and the instances only it reached.
 
 **A definition is identified by its name, not by its content.** Unison
 identifies a definition by a hash of its content and of its dependencies'
@@ -1912,7 +1917,7 @@ The database stores three relationships:
 |---|---|---|
 | A part read a part of another definition | The lookup that answered the read | Propagation, when the part read changes |
 | A definition's lowered code refers to an instance | The stage that lowered it, in its output | Test keys, which hash the code a test reaches |
-| A function's MIR calls a function, names it as a value, or passes an `impl` to a bound | The stage that built the MIR, in its output | Recursion groups |
+| A function's MIR calls a function, names it as a value, passes an `impl` to a bound, or runs a field default or an invariant that does | The stage that built the MIR, in its output | Recursion groups, and lowering's check of each call it emits |
 
 ### Propagation
 
@@ -1943,9 +1948,10 @@ before the stage runs, on a cold build as on a hot one:
 | Part | Follows |
 |---|---|
 | A member's interface | Its container's header, which the declarations name |
-| A type's type facts and layout | Those of the types that its resolved fields name |
-| A derived method's checked body | Its type's checked body, for the type's invariants. The derived method's path names its type. |
-| A constant's value | The values of the constants that its MIR names, directly or in the functions it calls, and the lowered code of those functions |
+| A type's type facts | Those of the types that its resolved fields name |
+| A ground type's layout | The layouts of the ground types it stores in place |
+| An instance's lowered code | The layouts of the ground types it uses, which its MIR and type arguments name |
+| A constant's value | The values of the constants that its MIR names, directly or in the functions it calls. A constant computed by running code is a run, cached by its test key. |
 | A test key | The test keys of the instances that its lowered code refers to |
 
 A cycle in one of these relationships is a strongly connected component, and

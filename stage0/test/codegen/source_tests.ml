@@ -68,7 +68,6 @@ let () =
 
 let () =
   test "a derived equal stops at the first field that differs" (fun () ->
-      let _, compile = load "type Both(first: Int64, second: Int64)\n  derives Equal\n" in
       let equal : Instance.key =
         Code
           {
@@ -87,6 +86,9 @@ let () =
             type_arguments = [];
           }
       in
+      let _, compile =
+        load ~roots:[ equal ] "type Both(first: Int64, second: Int64)\n  derives Equal\n"
+      in
       let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile equal) in
       let branches =
         List.length
@@ -99,8 +101,23 @@ let () =
 let () =
   test "an index of a list, a slice, or an array, and a loop over one, call no lending method"
     (fun () ->
+      let names =
+        [
+          "list_at";
+          "slice_at";
+          "array_at";
+          "list_add";
+          "array_add";
+          "list_sum";
+          "array_sum";
+          "list_bump";
+        ]
+      in
+      let function_ name : Instance.key =
+        Code { path = Top { module_ = example; name }; type_arguments = [] }
+      in
       let _, compile =
-        load
+        load ~roots:(List.map function_ names)
           "fn list_at(items: List[Int64]) -> Int64 {\n\
           \  items[2]\n\
            }\n\n\
@@ -138,21 +155,9 @@ let () =
       in
       List.iter
         (fun name ->
-          let function_ : Instance.key =
-            Code { path = Top { module_ = example; name }; type_arguments = [] }
-          in
-          let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile function_) in
+          let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile (function_ name)) in
           if contains c "t_lend" then fail "expected no lend record in `%s`:\n%s" name c)
-        [
-          "list_at";
-          "slice_at";
-          "array_at";
-          "list_add";
-          "array_add";
-          "list_sum";
-          "array_sum";
-          "list_bump";
-        ])
+        names)
 
 let () =
   test "negating the least value of a signed type panics, where the checks are on" (fun () ->

@@ -82,12 +82,11 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | Impl _ | Test _ | Definition_error _ -> None
 
-let resolve (lookups : Names.lookups) (key : Names.key) =
-  match (lookups.definition key, lookups.declaration key) with
-  | Some definition, Some declaration ->
+let resolve (lookups : Names.lookups) (key : Names.key) section =
+  match lookups.definition key with
+  | Some definition ->
       let module_ = key.module_ in
-      let file = declaration.file in
-      let state = Walk.create lookups file ~size:(definition.id + 1) in
+      let state = Walk.create lookups key ~size:(definition.id + 1) ~walked:section in
       let container =
         Option.bind (lookups.container key) (fun (container : Names.key) ->
             Option.map
@@ -125,15 +124,15 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
           | None -> Syntax.Span.make definition.span.start definition.span.start
         in
         let first =
-          match lookups.declaration { key with ordinal = 0 } with
-          | Some first when first.file <> file -> Path.show_file first.file
+          match (lookups.place { key with ordinal = 0 }, lookups.place key) with
+          | Some first, Some place when first.file <> place.file -> Path.show_file first.file
           | _ -> "this file"
         in
         Walk.report state Duplicate_definition span
           (Printf.sprintf "%s is already defined in %s, so this definition is never used."
              (Path.show key.path) first)
       end;
-      let outcome section =
+      let outcome () =
         let walked = Walk.names_of state section in
         let resolved =
           {
@@ -151,17 +150,14 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
                    compare left.span right.span)
                  diagnostics)
       in
-      let parsed = function
+      let is_parsed =
+        match section with
         | Interface | Contract -> is_walked
         | Body -> is_walked && not (Parts.broken definition Body)
       in
-      List.filter_map
-        (fun section ->
-          if parsed section || (Walk.names_of state section).diagnostics <> [] then
-            Some (section, outcome section)
-          else None)
-        sections
-  | _ -> []
+      if is_parsed || (Walk.names_of state section).diagnostics <> [] then Some (outcome ())
+      else None
+  | None -> None
 
 let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =

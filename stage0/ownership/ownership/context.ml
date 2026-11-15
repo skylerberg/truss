@@ -1,7 +1,7 @@
 type context = {
   lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
-  spans : Syntax.span array;
+  spans : Syntax.span array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : (Core.local, string) Hashtbl.t;
   binding_modes : (Core.local, Types.mode) Hashtbl.t;
@@ -47,8 +47,8 @@ let stores_function context (callee : Mir.callee) position =
   | _ -> List.exists declared (callee_signatures context callee)
 
 let span context (origin : Core.origin) : Syntax.span =
-  if origin >= 0 && origin < Array.length context.spans then context.spans.(origin)
-  else Syntax.Span.make 0 0
+  let spans = Lazy.force context.spans in
+  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
 
 let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
   let is_reported =

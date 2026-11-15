@@ -25,7 +25,8 @@
   registry_tests
   compatibility_tests
   prover_tests
-  library_use_tests)
+  library_use_tests
+  database_tests)
  (libraries
   process
   harness
@@ -63,6 +64,11 @@
   solver
   prover
   pipeline
+  compile
+  instance
+  libc
+  ground
+  memory_layout
   types
   intrinsic
   interface

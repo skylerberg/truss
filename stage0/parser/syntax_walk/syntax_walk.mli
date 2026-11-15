@@ -25,3 +25,4 @@ val definition :
 
 val spans : Syntax.definition -> Syntax.span array
 val names : Syntax.definition -> Syntax.name list
+val without_positions : Syntax.definition -> Syntax.definition

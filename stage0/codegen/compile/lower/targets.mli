@@ -1,12 +1,14 @@
 val resolve_impl :
-  Lowering.state ->
+  Definitions.context ->
+  Types.substitution ->
   trait:Types.trait_reference ->
   self_type:Types.ty ->
   evidence:Core.evidence ->
   Path.t * Ground.argument list
 
 val trait_method_key :
-  Lowering.state ->
+  Definitions.context ->
+  Types.substitution ->
   trait:Types.trait_reference ->
   name:string ->
   receiver:Path.receiver ->

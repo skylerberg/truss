@@ -22,6 +22,10 @@
   ownership
   package_checks
   compile
+  instance
+  ground
+  memory_layout
+  libc
   solver
   prover
   zarith))

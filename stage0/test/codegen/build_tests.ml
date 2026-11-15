@@ -24,13 +24,6 @@ let lookup instances key =
 
 let references program key = Emit_c.references (lookup program key)
 
-let reach_key program root =
-  List.assoc root
-    (Reachable.reach_keys
-       ~link:(fun key -> (Reachable.own_hash (lookup program key), references program key))
-       ~known:(fun _ -> None)
-       root)
-
 module Instance_components = Components.Make (struct
   type t = Instance.key
 
@@ -38,6 +31,17 @@ module Instance_components = Components.Make (struct
   let hash = Hashtbl.hash
   let compare = Instance.compare
 end)
+
+let reach_key program root =
+  let link key = (Reachable.own_hash (lookup program key), references program key) in
+  let known = Hashtbl.create 16 in
+  List.iter
+    (fun members ->
+      List.iter
+        (fun (key, reach_key) -> Hashtbl.replace known key reach_key)
+        (Reachable.component_keys ~link ~deep:(Hashtbl.find known) members))
+    (Instance_components.of_graph ~successors:(references program) [ root ]);
+  Hashtbl.find known root
 
 let components program root =
   List.map (List.map Instance.to_string)
@@ -126,7 +130,11 @@ let () =
   test
     "the test runner reports each test's outcome, message, and echo output, a leak, and a worker \
      that ends without a word" (fun () ->
-      let _, compile = load "fn suite() {\n}\n" in
+      let _, compile =
+        load
+          ~roots:[ Code { path = Well_known.path Run_tests; type_arguments = [] } ]
+          "fn suite() {\n}\n"
+      in
       let site : Lowered.site =
         { definition = Top { module_ = example; name = "suite" }; line = 2; column = 3 }
       in

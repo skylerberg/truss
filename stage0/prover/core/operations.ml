@@ -46,7 +46,11 @@ let from_integer context frame (site : Invocation.site) term =
   let ty = substituted context frame site.type_ in
   oblige context frame Out_of_range
     (span_of frame.source site.origin)
-    (Printf.sprintf "`%s` may not fit in `%s`." (quote frame.source site.origin) (Types.show ty))
+    [
+      Text "`";
+      quote frame.source site.origin;
+      Text (Printf.sprintf "` may not fit in `%s`." (Types.show ty));
+    ]
     (in_range ty term);
   term
 
@@ -246,7 +250,7 @@ let parameter_operand context frame (operand : Core.origin) term =
     | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
     | [] -> false
   then
-    let text = quote frame.source operand in
+    let text = text_of frame.source operand in
     let plain =
       String.for_all
         (fun character ->
@@ -265,7 +269,8 @@ let overflow_fix context frame ty (operation : Intrinsic.operation) (operand : C
   | Some (low, high), Logic.Integer limit, Some text -> (
       let clause relation limit =
         if Z.leq low limit && Z.leq limit high then
-          add_requires context frame (Printf.sprintf "%s %s %s" text relation (Z.to_string limit))
+          add_requires context frame
+            [ Text (Printf.sprintf "%s %s %s" text relation (Z.to_string limit)) ]
         else []
       in
       match operation with
@@ -296,17 +301,20 @@ let arithmetic ?operand ?divisor context frame (site : Invocation.site) ty
           (match
              Option.bind divisor (fun divisor -> parameter_operand context frame divisor right)
            with
-          | Some text -> add_requires context frame (text ^ " != 0")
+          | Some text -> add_requires context frame [ Text (text ^ " != 0") ]
           | None -> [])
-        (Printf.sprintf "The divisor in `%s` may be zero." (quote source site.origin))
+        [ Text "The divisor in `"; quote source site.origin; Text "` may be zero." ]
         (Logic.not_ (Logic.equal right (Logic.int 0)))
   | _ -> ());
   (match bounds ty with
   | Some (low, _) when operation = Divide || operation = Remainder ->
       if Z.sign low < 0 then
         oblige context frame Overflow span
-          (Printf.sprintf "`%s` may overflow `%s`: the least value over -1."
-             (quote source site.origin) (Types.show ty))
+          [
+            Text "`";
+            quote source site.origin;
+            Text (Printf.sprintf "` may overflow `%s`: the least value over -1." (Types.show ty));
+          ]
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
@@ -315,7 +323,11 @@ let arithmetic ?operand ?divisor context frame (site : Invocation.site) ty
           (match operand with
           | Some operand -> overflow_fix context frame ty operation operand left right
           | None -> [])
-        (Printf.sprintf "`%s` may overflow `%s`." (quote source site.origin) (Types.show ty))
+        [
+          Text "`";
+          quote source site.origin;
+          Text (Printf.sprintf "` may overflow `%s`." (Types.show ty));
+        ]
         (match operation with
         | (Add | Multiply) when unsigned -> Logic.Operation ("<=", [ exact; Integer high ])
         | Subtract when unsigned -> Logic.Operation ("<=", [ Integer low; exact ])
@@ -438,7 +450,11 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
       let negated = Logic.Operation ("-", [ inner ]) in
       if bounds ty <> None then
         oblige context frame Overflow span
-          (Printf.sprintf "`%s` may overflow `%s`." (quote source site.origin) (Types.show ty))
+          [
+            Text "`";
+            quote source site.origin;
+            Text (Printf.sprintf "` may overflow `%s`." (Types.show ty));
+          ]
           (in_range ty negated)
       else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
       negated
@@ -450,15 +466,16 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
             match argument 1 with
             | Some amount ->
                 ( span_of frame.source amount,
-                  Printf.sprintf "The shift amount `%s`" (quote source amount),
+                  [ Text "The shift amount `"; quote source amount; Text "`" ],
                   match parameter_operand context frame amount right with
-                  | Some text -> add_requires context frame (Printf.sprintf "%s < %d" text bits)
+                  | Some text ->
+                      add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
                   | None -> [] )
             | None ->
-                (span, Printf.sprintf "The shift amount in `%s`" (quote source site.origin), [])
+                (span, [ Text "The shift amount in `"; quote source site.origin; Text "`" ], [])
           in
           oblige context frame Shift at_amount ~fixes
-            (Printf.sprintf "%s may not be less than %d." text bits)
+            (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
             Logic.(Operation ("<", [ right; int bits ]))
       | None -> unsupported span "a shift of `%s`" (Types.show ty));
       let shifted = opaque_operation context frame ty operation [ left; right ] in
@@ -658,10 +675,15 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
           | [ value ] ->
               oblige context frame Requires
                 (span_of frame.source site.origin)
-                (Printf.sprintf
-                   "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its \
-                    range."
-                   (quote frame.source site.origin) (Types.show target))
+                [
+                  Text "`";
+                  quote frame.source site.origin;
+                  Text
+                    (Printf.sprintf
+                       "` may not fit `%s`: it must be a number that, cut toward zero, is in its \
+                        range."
+                       (Types.show target));
+                ]
                 (float_fits target value);
               Logic.Operation ("to_int", [ truncated value ])
           | _ -> fallback ())
@@ -677,9 +699,11 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
           | [ value ] ->
               oblige context frame Requires
                 (span_of frame.source site.origin)
-                (Printf.sprintf
-                   "`%s` may not be a Unicode scalar value, which a `Character` must be."
-                   (quote frame.source site.origin))
+                [
+                  Text "`";
+                  quote frame.source site.origin;
+                  Text "` may not be a Unicode scalar value, which a `Character` must be.";
+                ]
                 (in_range target value);
               value
           | _ -> fallback ())

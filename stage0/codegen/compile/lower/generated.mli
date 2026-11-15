@@ -5,6 +5,7 @@ val locked_entry :
 
 val locked_table : Definitions.context -> Instance.key -> capability:Path.t -> Lowered.table
 val table : Definitions.context -> Instance.key -> Lowered.table
+val real_implementation : Path.t -> Path.t
 
 val real_implementations :
   Lowering.state -> user:string -> Path.t list -> (Path.t * Lowered.operand) list

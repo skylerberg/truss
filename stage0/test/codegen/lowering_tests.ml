@@ -154,7 +154,14 @@ let () =
 
 let folds name ~folded ~run source =
   test name (fun () ->
-      let _, compile = load source in
+      let _, compile =
+        load
+          ~roots:
+            (List.map
+               (fun name -> Instance.Constant (Top { module_ = example; name }))
+               (folded @ run))
+          source
+      in
       let is_folded name =
         Compile.For_testing.is_folded compile (Top { module_ = example; name })
       in

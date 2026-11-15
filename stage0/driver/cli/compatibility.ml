@@ -5,8 +5,10 @@ module Environment = Interface.Environment
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
 
-let public (declaration : Names.declaration) =
-  declaration.ordinal = 0 && declaration.container = None && Names.is_public declaration.visibility
+let public (side : Interface.Lookups.t) (declaration : Names.declaration) =
+  declaration.ordinal = 0
+  && side.names.container (Names.key_of declaration) = None
+  && Names.is_public declaration.visibility
 
 let declarations (side : Interface.Lookups.t) package = side.names.package_declarations package
 
@@ -233,8 +235,8 @@ let impls (side : Interface.Lookups.t) package =
     (declarations side package)
 
 let compare ~before ~after package =
-  let old = List.filter public (declarations before package) in
-  let now = List.filter public (declarations after package) in
+  let old = List.filter (public before) (declarations before package) in
+  let now = List.filter (public after) (declarations after package) in
   let public_change path change = { path; change } in
   let definitions =
     List.concat_map

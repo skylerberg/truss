@@ -82,7 +82,7 @@ let () =
       if checked linux then fail "the check for Linux looks for proc_pidpath");
   test "a call of a function the system lacks stops the program, and calls nothing" (fun () ->
       let open Emit_c.Builder in
-      let env = Memory_layout.create linux ~shape_of:(shapes extra) in
+      let env = computed_env linux (shapes extra) in
       let builder = create env ~key:(key "entry") in
       start builder (block builder);
       let length = local builder (value int32) in
@@ -401,7 +401,7 @@ let () =
       let open Emit_c.Builder in
       let path = Filename.concat (Lazy.force scratch) "held" in
       Out_channel.with_open_text path (fun channel -> output_string channel "held");
-      let env = Memory_layout.create host ~shape_of:(Monomorphic.shape standard_context) in
+      let env = computed_env host (Monomorphic.shape standard_context) in
       let glue =
         Glue.create env
           ~representation:(Monomorphic.representation standard_context)

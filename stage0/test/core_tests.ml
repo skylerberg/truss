@@ -446,7 +446,7 @@ let () =
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-          (interface.names.impl_index Path.standard_package).impls
+          (interface.names.impls Path.standard_package)
       in
       if derived = [] then fail "the standard library derives nothing";
       List.iter

@@ -10,7 +10,7 @@ type context = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   diagnostics : Syntax.diagnostic list ref;
-  named : (span * Types.ty) list ref;
+  named : (id * Types.ty) list ref;
 }
 
 let create lookups resolved (scope : Environment.scope) =
@@ -260,7 +260,7 @@ and path_type context (path : path_type) : Types.ty =
       | Some _ | None ->
           check_arity context path shown (Names.generics_of context.lookups.names definition_path);
           let type_ = Types.Named { path = definition_path; arguments = arguments context path } in
-          context.named := (path.span, type_) :: !(context.named);
+          context.named := (path.id, type_) :: !(context.named);
           type_)
   | Some (Definition (Trait, _)) ->
       error context Not_a_type path.span
