@@ -30,7 +30,9 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-val through_any : Lookups.t -> trait:Path.t -> Types.trait_method -> through_any
+val through_any :
+  Lookups.t -> any:Types.trait_reference -> trait:Path.t -> Types.trait_method -> through_any
+
 val copyable_path : Path.t
 
 type bounds = Types.parameter -> Types.trait_reference list

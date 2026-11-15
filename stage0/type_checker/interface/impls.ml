@@ -107,8 +107,9 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-let through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
-  let self : Types.parameter = { owner = trait; name = "Self" } in
+let through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
+    (method_ : Types.trait_method) : through_any =
+  let self = Definition.make_self_parameter any.trait in
   let names_self type_ =
     let mentions_self = ref false in
     ignore
@@ -123,7 +124,25 @@ let through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : throu
          type_);
     !mentions_self
   in
-  let signature = Definition.method_signature lookups ~owner:trait method_ in
+  let reference =
+    match
+      List.find_opt
+        (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
+        (Properties.bound_closure lookups ~self:(Types.Parameter self) any)
+    with
+    | Some reference -> reference
+    | None -> { trait; trait_arguments = []; associated = [] }
+  in
+  let substitution =
+    match Definition.trait_interface lookups trait with
+    | Some interface ->
+        Properties.trait_substitution interface ~self:(Types.Parameter self) reference
+    | None -> []
+  in
+  let signature =
+    Types.substitute_signature substitution
+      (Definition.method_signature lookups ~owner:trait method_)
+  in
   let result = Types.result_type signature.output in
   if signature.generics <> [] then Has_generics
   else if

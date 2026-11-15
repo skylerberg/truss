@@ -100,9 +100,9 @@ let entry_signature context (signature : Types.signature) =
   in
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
-let callable_through_any context trait (trait_method : Types.trait_method) =
+let callable_through_any context ~any trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
-  && Interface.Impls.through_any context.lookups.interface ~trait trait_method = Callable
+  && Interface.Impls.through_any context.lookups.interface ~any ~trait trait_method = Callable
 
 let is_copyable_any context (any : Types.trait_reference) =
   Interface.Properties.has context.lookups.interface
@@ -139,7 +139,7 @@ let lay_out_any_vtable context (any : Types.trait_reference) =
         in
         List.filter_map
           (fun trait_method ->
-            if callable_through_any context trait.trait trait_method then
+            if callable_through_any context ~any trait.trait trait_method then
               Some
                 (Method_slot
                    {

@@ -1,0 +1,16 @@
+trait Paired[Other] {
+  fn name(self) -> String
+  fn matches(self, other: Other) -> Bool
+}
+
+trait SelfPaired: Paired[Self] {
+  fn id(self) -> Int64
+}
+
+fn named(pet: any SelfPaired) -> String {
+  pet.name()
+}
+
+fn matched(first: any SelfPaired, second: any SelfPaired) -> Bool {
+  first.matches(second)
+}

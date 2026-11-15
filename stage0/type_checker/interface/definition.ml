@@ -31,7 +31,7 @@ let head_type context owner (head : type_head) =
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
 
-let trait_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
+let make_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 
 let fields context (written : field list) =
   List.stable_sort
@@ -72,7 +72,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
       let trait_generics = Lower.generics context path generics in
-      let self_parameter = trait_self_parameter path in
+      let self_parameter = make_self_parameter path in
       let self_trait : Types.trait_reference =
         { trait = path; trait_arguments = Types.generic_arguments trait_generics; associated = [] }
       in

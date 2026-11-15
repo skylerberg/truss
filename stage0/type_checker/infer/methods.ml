@@ -673,8 +673,8 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
     :: Option.value ~default:[] (Types.substitution_of trait_generics trait_arguments)
   in
   (match receiver_type with
-  | Types.Any _ -> (
-      match Impls.through_any state.lookups.interface ~trait:trait.trait method_ with
+  | Types.Any any -> (
+      match Impls.through_any state.lookups.interface ~any ~trait:trait.trait method_ with
       | Callable -> ()
       | Has_generics ->
           report state Not_callable value.span

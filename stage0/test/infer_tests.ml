@@ -878,6 +878,11 @@ let () =
   test "a method that takes or returns Self cannot be called through any" (fun () ->
       one_diagnostic Fixtures.Infer.method_that_takes_or_returns_self_cannot_be_called
         "types.not_callable");
+  test
+    "a supertrait's method that takes Self through its trait's argument cannot be called through \
+     any" (fun () ->
+      one_diagnostic Fixtures.Infer.supertraits_method_that_takes_self_through_its
+        "types.not_callable");
   test "a method whose result holds Self cannot be called through any" (fun () ->
       one_diagnostic Fixtures.Infer.method_whose_result_holds_self_cannot_be_called
         "types.not_callable");
