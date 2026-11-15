@@ -39,9 +39,8 @@ and mir_frame = {
   mutable provides : (Path.t * Lowered.operand) list list;
   returned : Mir.local list;
   mutable taken : Mir.place list;
-  moves : Moves.t;  (** Which places may hold a value at each point *)
+  moves : Moves.t;
   flags : (Moves.path * Lowered.place) list;
-      (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
   lending : lending option;
   called_parts : Mir.local list;
@@ -82,13 +81,7 @@ type state = {
 val frame_of : Definitions.code -> frame
 val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
 val may_fork : state -> bool
-
-(* A new local, as the place that holds a value. *)
 val held : state -> ?name:string -> Lowered.ty -> Lowered.place
-
-(* Writes code with [body] as an outlined function, nested in the instance,
-   given [parts] as its parameters. Gives the function's number and the
-   operand for its environment. *)
 val outlined : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
@@ -104,10 +97,7 @@ val source : state -> Syntax.span -> string
 val innermost_scope : state -> scope
 val temporary : state -> ?name:string -> Ground.ty -> Lowered.place
 val binding : state -> ?name:string -> Ground.ty -> Lowered.place
-
 val flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
-(** A [binding] that only some paths initialize, whose value is dropped where its drop flag, the
-    [Bool] at [flag], is true. *)
 
 val parameter :
   state ->

@@ -51,7 +51,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
   let length storage = Lowered.Copy (Storage.length storage) in
   let view_length view = Lowered.Copy (Storage.view_length view) in
   let element_at = Storage.at in
-  (* Ends the run with a panic where [failed] holds. *)
   let panic_when failed message =
     let fail = block builder and go_on = block builder in
     branch builder failed ~yes:fail ~no:go_on;
@@ -67,10 +66,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
          });
     start builder go_on
   in
-  (* Gives the storage a buffer of its own with room for exactly [capacity]
-     elements, which is at least as many as it has. A buffer it owns is
-     made larger; elements it does not own, as static ones are, are copied
-     to a new one and never freed. *)
   let set_capacity ?element storage capacity =
     let layout = element_layout ?element () in
     let bytes = uint64_local "bytes" and too_many = local builder (Raw Bool) in
@@ -108,7 +103,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     emit builder (Assign (Storage.buffer storage, Use (Copy (at buffer))));
     emit builder (Assign (Storage.capacity storage, Use capacity))
   in
-  (* Static storage gets a buffer of its own before it is written. *)
   let own ?element storage =
     let storage = place storage in
     let borrowed = local builder (Raw Bool) in
@@ -120,17 +114,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     emit builder (Assign (Storage.length storage, Binary (Add, length storage, amount)))
   in
   let lent place = Some place in
-  (* In a checked build, ends the run with a panic where [failed] holds. A
-     checked build does not wait for proofs, so it checks each operation
-     that is undefined in C, or gives a wrong value, where its precondition
-     does not hold. These are the only checks: no [requires] clause is
-     evaluated when a program runs. *)
   let panic_if (failed : Lowered.rvalue) message =
-    (* A comparison's value where its operands decide it: two
-       constants, or an unsigned value and zero. Such a comparison is not
-       written. GCC reports a comparison of an unsigned value with zero
-       that always or never holds, and the tests compile the C with every
-       warning an error. *)
     let decided =
       let unsigned_zero : Lowered.operand -> bool = function
         | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64), zero)) -> Z.sign zero = 0
@@ -211,8 +195,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         | Scalar (Integer integer) -> Some integer
         | _ -> None
       in
-      (* Integer arithmetic that panics on overflow in a checked build; it wraps
-     otherwise, which the prover shows never happens. *)
       let checked_arithmetic op overflow =
         match integer_argument () with
         | Some _ when checks ->
@@ -224,8 +206,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             set (Use (Copy (at result)))
         | _ -> binary op
       in
-      (* Integer division that panics on a zero divisor, and on the one quotient
-     that does not fit, the least value over -1, in a checked build. *)
       let checked_division op =
         match integer_argument () with
         | Some integer when checks ->
@@ -269,10 +249,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         in
         Constant (Integer (integer, Z.of_int (Libc.value (Memory_layout.system env) number)))
       in
-      (* The text at an address that may be null: the bytes up to a zero
-         byte, as a view, with [is_present] saying whether the address was
-         there. A view's address is never null, so text that is not there
-         is an empty view of static bytes. *)
       let text_at address ~is_present =
         emit builder (Assign (is_present, Binary (Not_equal, Copy (at address), Constant Null)));
         let elements = local builder (Raw (Pointer (Data byte))) in
@@ -295,7 +271,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Divide -> checked_division Divide
       | Remainder -> checked_division Remainder
       | Negate -> (
-          (* The least value of a signed type has no negation in the type. *)
           match integer_argument () with
           | Some ((Int8 | Int16 | Int32 | Int64) as integer) when checks ->
               let bits = 8 * Memory_layout.integer_size integer in
@@ -363,9 +338,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Bit_xor -> binary Bit_xor
       | Complement -> unary Complement
       | Shift_left | Shift_right ->
-          (* The emitted C masks the amount to the type's width, so a shift
-             by the width or more, or by a negative amount, would give a
-             wrong value. The amount has a type of its own. *)
           (match (integer_argument (), scalar env (type_argument 1)) with
           | Some integer, Integer amount ->
               let bits = 8 * Memory_layout.integer_size integer in
@@ -404,13 +376,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 | [ first; second ] -> Binary (Bit_and, first, second)
                 | _ -> bug "more than two bounds")
             | ((Float32 | Float64) as source), Integer target_integer ->
-                (* A float fits an integer type where it is a number and the
-                 whole number it is cut down to is in the type's range: it
-                 is above the least value less one, and below the greatest
-                 plus one. The second is a power of two, which every float
-                 type holds exactly. Where the first is not held exactly,
-                 no float lies between it and the least value. A float
-                 that is not a number passes neither test. *)
                 let low, high = Memory_layout.integer_range target_integer in
                 let held bound =
                   match source with
@@ -440,11 +405,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           match (operation, scalar env (type_argument 0), scalar env (type_argument 1)) with
           | Fits, _, _ -> set (fits ())
           | _, (Float32 | Float64), Integer _ ->
-              (* A float that is out of an integer type's range has no
-                 conversion to it in C. A conversion between integer types
-                 is defined for every value: it keeps the low bits, which
-                 the standard library relies on, as where it hashes a
-                 negative number. *)
               if checks then begin
                 let in_range = local builder (Raw Bool) in
                 emit builder (Assign (at in_range, fits ()));
@@ -482,7 +442,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             "a storage's capacity set to less than its length";
           set_capacity storage (value 1)
       | Storage_lengthen ->
-          (* The new elements are the ones the C library wrote into the spare capacity. *)
           let storage = place (argument 0) in
           if checks then
             panic_if
@@ -566,8 +525,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             (Assign (element_at storage (value 1), Use (Move (element_at storage (value 2)))));
           emit builder (Assign (element_at storage (value 2), Use (Move (at held))))
       | Storage_from_array ->
-          (* The array's bytes are the elements, so the whole array is moved
-             into the new buffer at once. *)
           let count =
             match value_arguments with
             | [ count ] -> count
@@ -594,10 +551,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           add_to_length (at result) (Constant (Integer (UInt64, count)));
           set (Use (Move (at result)))
       | Array_from_storage ->
-          (* The storage's buffer holds the elements one after another, as
-             the array does, so the whole array is read out of it at once.
-             The storage is moved into a local that nothing drops: its
-             elements are the array's now, and only its buffer is freed. *)
           let count =
             match value_arguments with
             | [ count ] -> count
@@ -627,7 +580,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             emit builder (Assign (at typed, Use (Copy (at untyped))));
             set (Use (Move { root = Local typed; projections = [ Deref ] }))
           end;
-          (* Static elements have no buffer to free. *)
           let owns = local builder (Raw Bool) in
           emit builder
             (Assign
@@ -636,9 +588,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             (Copy (at owns))
             (fun () -> call Free [ Copy (Storage.buffer moved_storage) ])
       | Array_view ->
-          (* An array's elements are one after another from its start. An
-             array with no bytes has no address, and its view is of
-             nothing. *)
           let count =
             match value_arguments with
             | [ count ] -> count
@@ -691,8 +640,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             emit builder (Assign (at beyond, Binary (Greater, Copy (at stop), owner_length)));
             panic_when (Copy (at beyond)) message;
             if (element_layout ()).size > 0 then begin
-              (* An empty view may be of nothing, and then has no address
-                 to compare. *)
               let go_on = block builder and compare = block builder in
               let empty = local builder (Raw Bool) in
               emit builder (Assign (at empty, Binary (Equal, view_length part, constant_uint64 0)));
@@ -740,8 +687,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Storage_model | View_model | Array_model ->
           bug "a model, which exists only in specifications"
       | Crash ->
-          (* The message is a [StringSlice], a record of one field: its view of
-         bytes. *)
           let message = read (argument 0) in
           let bytes =
             match (Memory_layout.of_type env types.string_slice).form with
@@ -788,8 +733,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Shared_update -> bug "shared_update is lowered with the call of its function value"
       | Holds_invariant -> bug "holds_invariant is lowered with its type's invariant"
       | Handle_release ->
-          (* The handle is moved into a local that nothing drops, so its
-             descriptor stays open. *)
           let released =
             local builder (Value (Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
           in
@@ -808,8 +751,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | System_is_architecture architecture ->
           set (Use (Constant (Bool ((Memory_layout.system env).architecture = architecture))))
       | Environment_entry ->
-          (* The entries are counted from the first each time, so the null
-             address after the last is never passed. *)
           let environment = local builder (Raw (Pointer Opaque)) in
           call ~result:(at environment) Environment [];
           let position = uint64_local "position" in
@@ -831,8 +772,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           start builder after;
           text_at entry ~is_present:(place (argument 1))
       | Libc function_ when not (Libc.available (Memory_layout.system env) function_) ->
-          (* The standard library asks which system it is built for before
-             it calls a function that only some have. *)
           let message =
             Printf.sprintf "this system's C library has no %s" (Libc.function_name function_)
           in
@@ -900,11 +839,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 | Fixed number -> number_constant number)
               parameters
           in
-          (* A checked build checks the prover's preconditions for each
-             call: a view has the elements that the function reads, and a
-             storage has the room that it writes into, or the elements that
-             it mutates. A function that reads up to a zero is given
-             elements that end with one. *)
           if checks then begin
             let position = ref 0 in
             let passed =
@@ -992,8 +926,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               passed
           end;
           let target = Lowered.Foreign (Libc.declaration (Memory_layout.system env) function_) in
-          (* A call that can block is bracketed, so that the runtime knows
-             the thread is blocked while it lasts. *)
           let bracket intrinsic =
             if Libc.blocks function_ then
               emit builder

@@ -2,8 +2,6 @@ open Definitions
 open Lowering
 open Emit_c.Builder
 
-(* The [impl] that evidence stands for in this instance, with the type
-   arguments for the [impl]'s generic parameters. *)
 let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Core.evidence) =
   let substitute = Types.substitute st.frame.code.substitution in
   let impl, arguments =
@@ -50,7 +48,6 @@ let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Cor
   in
   (impl, impl_arguments)
 
-(* The instance a trait method's call reaches, once the types are known. *)
 let trait_method_key st ~(trait : Types.trait_reference) ~name ~receiver ~self_type ~type_arguments
     ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl st ~trait ~self_type ~evidence in
@@ -64,8 +61,6 @@ let trait_method_key st ~(trait : Types.trait_reference) ~name ~receiver ~self_t
             type_arguments;
     }
 
-(* The operand that gives a place to a parameter that takes it as
-   [passed]: by value, by address, or as an owned value. *)
 let operand_as st (mode : Types.mode) ty (place : Lowered.place) (passed : Lowered.ty option) =
   match passed with
   | None -> None
@@ -78,8 +73,6 @@ let operand_as st (mode : Types.mode) ty (place : Lowered.place) (passed : Lower
 let pass st (mode : Types.mode) ty place =
   operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
 
-(* A method's slot in a table whose first method is at [first], and its
-   signature. *)
 let method_slot ~first ~missing (methods : Types.trait_method list) name =
   match
     List.find_index
@@ -89,8 +82,6 @@ let method_slot ~first ~missing (methods : Types.trait_method list) name =
   | Some index -> (first + index, (List.nth methods index).method_signature)
   | None -> missing ()
 
-(* A capability's method: its slot in every table of the capability, and
-   its signature. *)
 let capability_method context capability name =
   let interface =
     match demand context Environment.trait_interface capability with
@@ -100,8 +91,6 @@ let capability_method context capability name =
   method_slot ~first:0 interface.methods name ~missing:(fun () ->
       bug "%s has no method %s" (Path.show capability) name)
 
-(* The C signature of an entry in a capability's table, which every caller
-   and every entry agree on: the evidence, then the method's own. *)
 let entry_signature context (signature : Types.signature) =
   let entry, result =
     c_signature context []
@@ -114,20 +103,15 @@ let callable_through_any trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
   && Interface.Impls.through_any ~trait trait_method = Callable
 
-(* The methods of a trait an [any] table has an entry for, in order. *)
 let any_methods context trait =
   match demand context Environment.trait_interface trait with
   | Some position -> List.filter (callable_through_any trait) position.methods
   | None -> bug "no interface for %s" (Path.show trait)
 
-(* A method's slot in an [any] table, after the drop in slot 0. *)
 let dynamic_slot context trait name =
   method_slot ~first:1 (any_methods context trait) name ~missing:(fun () ->
       bug "%s cannot be called through any" name)
 
-(* The instantiation of a trait's [Self] and parameters in a method called
-   through an [any] type: [Self] is the [any] type, which fixes each
-   associated type. *)
 let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
   match demand context Environment.trait_interface trait with
   | Some interface ->
@@ -280,8 +264,6 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
     ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
     ()
 
-(* Calls a function value with arguments that are already in places, one for
-   each parameter of its type, and the evidence for its type's capabilities. *)
 let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.place)
     (places : Lowered.place list) destination =
   let passed =
@@ -309,8 +291,6 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
       if ty = Never then unreachable_block st
   | Lends _ -> bug "a function value that lends"
 
-(* Calls a method through an [any] value: the entry in its table, given the
-   value's pointer, then the arguments, then the evidence the method uses. *)
 let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lowered.place)
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?(lending = []) destination =
   let slot, signature = dynamic_slot st.context trait name in
@@ -337,10 +317,6 @@ let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any :
        });
   if not c_signature.returns then unreachable_block st
 
-(* Runs [f] with the current frame set to the definition of a named type,
-   with the type's generic parameters bound to the type's arguments. A
-   field's default is lowered there, because it is written in the type's
-   definition. *)
 let in_type_definition st (ty : Ground.ty) nested_function =
   let path, arguments =
     match ty with
@@ -372,8 +348,6 @@ let in_type_definition st (ty : Ground.ty) nested_function =
   st.frame <- caller;
   result
 
-(* Writes the debug text of the value at a place to the test's echo
-   output, with the position it was echoed at. *)
 let echo st place ty ~site =
   let output = temporary st Glue.output_ty in
   emit st.builder (Assign (output, Storage.empty Glue.output_ty));
@@ -395,8 +369,6 @@ let echo st place ty ~site =
   emit st.builder
     (Echo { text = Copy (Storage.buffer output); length = Copy (Storage.length output); site })
 
-(* Writes an [any] value to [destination]: the value at [value], moved into
-   a heap block of its own, with the method table of its type's [impl]. *)
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place) destination =
   let block = local st.builder (Raw (Pointer Opaque)) in
   if is_zero_size st inner_ty then emit st.builder (Assign (at block, Use (Constant (Bytes ""))))
@@ -427,9 +399,6 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place)
                ];
            } ))
 
-(* The evidence that a [provide] adds for one implementation: for each
-   capability its type provides, the [impl]'s table with a pointer to the
-   implementation. *)
 let provided_evidence st ~(implementation : Lowered.operand) provides =
   List.map
     (fun (capability, impl, (arguments : Types.substitution)) ->
@@ -446,8 +415,6 @@ let provided_evidence st ~(implementation : Lowered.operand) provides =
       (capability, implementation_evidence st ~impl ~type_arguments ~implementation))
     provides
 
-(* The mask of a call that passes every argument: a bit for each parameter
-   that has a default. *)
 let all_passed (signature : Types.signature) =
   let defaulted =
     List.length
@@ -480,7 +447,6 @@ let call_instance st key ~(signature : Types.signature) ~substitution
        });
   if not c_signature.returns then unreachable_block st
 
-(* A number literal's value. *)
 type literal = Integer_value of Z.t | Float_value of float
 
 let constant_of st ty (literal : literal) : Lowered.operand =
@@ -491,9 +457,6 @@ let constant_of st ty (literal : literal) : Lowered.operand =
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
   | _ -> bug "a literal of type %s" (Ground.to_string ty)
 
-(* Writes a string literal to [destination]. Its bytes are static data: a
-   [String] holds them as storage with capacity 0, and a [StringSlice] views
-   them. *)
 let string_literal st (ty : Ground.ty) text ~(destination : Lowered.place) =
   let length = constant_uint64 (String.length text) in
   let build field operand =
@@ -512,7 +475,6 @@ let string_literal st (ty : Ground.ty) text ~(destination : Lowered.place) =
       build field (Copy bytes)
   | _ -> bug "a string literal of type %s" (Ground.to_string ty)
 
-(* A constant's static data, as a place. *)
 let static_constant st path : Lowered.place =
   match demand st.context Environment.constant_type path with
   | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
@@ -526,8 +488,6 @@ let list_parts monomorphic ty =
       | _ -> bug "%s is not a list" (Ground.to_string ty))
   | _ -> bug "%s is not a list" (Ground.to_string ty)
 
-(* Writes a [List] to [destination], with storage of exactly its length. Each
-   fill writes one element to the place it is given. *)
 let list_of st ty destination ~site fills =
   let field, _, element = list_parts st.context.monomorphic ty in
   let storage_place = destination / Field field in
@@ -544,8 +504,6 @@ let list_of st ty destination ~site fills =
       lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
     fills
 
-(* A [Template] of these literal texts, each a [Literal] of static bytes,
-   with one part for each fill in [parts]. *)
 let template_value st template_ty texts ~site ~parts =
   let field_type ty name =
     match Monomorphic.shape st.context.monomorphic ty with
@@ -576,8 +534,6 @@ let template_value st template_ty texts ~site ~parts =
   list_of st parts_ty (built / Field "parts") ~site parts;
   built
 
-(* A loop over a cursor: [call_next] writes the result of the cursor's
-   [next], an [Option], and [body] runs for each value in [Some]. *)
 let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =
   in_scope st (fun () ->

@@ -1,11 +1,6 @@
-(* Places, operands, constants, operators, and the values a statement
-   builds, as C expressions. *)
-
 open C_runtime
 open C_types
 
-(* The function being printed: the symbol of its instance, and the C text
-   and type of each local its code names. *)
 type function_context = { symbol : string; local : Lowered.local -> string * Lowered.ty }
 
 let local_name local = function
@@ -36,11 +31,6 @@ let integer_literal integer value =
     Printf.sprintf "((%s)(-9223372036854775807LL - 1))" c_type
   else Printf.sprintf "((%s)%sLL)" c_type (Z.to_string value)
 
-(* A float as an expression that C takes for a constant, since a static
-   value is initialized with one. A float that is not finite has no literal;
-   the C compiler's own names for an infinity and for a float that is not a
-   number are constants. Every float that is not a number is the same one in
-   Truss, so which one this is does not show. *)
 let float_literal ~suffix value =
   if Float.is_finite value then Printf.sprintf "%h%s" value suffix
   else if Float.is_nan value then Printf.sprintf "__builtin_nan%s(\"\")" suffix
@@ -68,7 +58,6 @@ let environment_of context fc nested_index =
   | Some fields -> fields
   | None -> []
 
-(* Whether a variant of a sum type keeps its fields in a block. *)
 let indirect context sum variant =
   let is_block (payload : Memory_layout.t) =
     match payload.form with Scalar (Pointer (Block _)) -> true | _ -> false
@@ -82,7 +71,6 @@ let indirect context sum variant =
   | Niche_encoded { dataful; _ } -> dataful.name = variant && is_block dataful.payload
   | _ -> false
 
-(* The C expression for the pointer to an [indirect] variant's block. *)
 let block_pointer context text sum variant =
   match (layout context sum).form with
   | Tagged _ -> text ^ ".payload.v_" ^ variant
@@ -131,9 +119,6 @@ and address_c context fc (place : Lowered.place) ~writable =
   match place_c context fc place with
   | Some (text, ty) ->
       let pointer = Lowered.Pointer { target = ty; writable } in
-      (* A pointer parameter is declared [restrict]. The cast removes the
-         qualifier from the type of the parameter's address, which C does
-         not convert implicitly. *)
       let text =
         match (place, ty) with
         | { root = Local _; projections = [] }, Pointer _ ->
@@ -183,7 +168,6 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
         | _ -> Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
       ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))
 
-(* The scalar a value of a type is, for operators. *)
 let scalar_of context : Lowered.ty -> Memory_layout.scalar = function
   | Value ty -> (
       match (layout context ty).form with
@@ -200,8 +184,6 @@ let bit_width (scalar : Memory_layout.scalar) = 8 * Memory_layout.scalar_size sc
 let unsigned_of context (scalar : Memory_layout.scalar) =
   match scalar with Integer integer -> unsigned_c integer | _ -> scalar_c context scalar
 
-(* Float comparisons are lawful: every NaN equals every NaN, and NaN comes
-   after every number. *)
 let lawful_equal left right =
   Printf.sprintf "(%s == %s || (%s != %s && %s != %s))" left right left left right right
 
@@ -257,7 +239,6 @@ let unary_c context (op : Lowered.unary) (operand_text, a_ty) =
   | Not -> "((uint8_t)!" ^ operand_text ^ ")"
   | Complement -> Printf.sprintf "((%s)~%s)" c_type operand_text
 
-(* The C expression for the scalar a niche path reaches. *)
 let niche_c text (niche : Memory_layout.niche) =
   List.fold_left
     (fun text (step : Memory_layout.step) ->
@@ -300,10 +281,6 @@ let is_variant_c context text sum variant =
                 (Z.to_string niche.start) at c_type (Z.to_string stop))
       | _ -> bug "a niche in a type without one")
 
-(* A record's or a variant's fields as C designated initializers, leaving out
-   the fields of zero size. A field's pointer type is never [const], so a
-   read-only pointer stored in one, as a cursor keeps a read-only argument,
-   is cast to the plain pointer type. *)
 let initializers context fc prefix (fields : Memory_layout.field list)
     (values : (string * Lowered.operand) list) =
   String.concat ", "
@@ -325,8 +302,6 @@ let initializers context fc prefix (fields : Memory_layout.field list)
 let payload_fields (payload : Memory_layout.t) =
   match payload.form with Struct fields -> fields | _ -> []
 
-(* An rvalue, or for building an [indirect] variant the statements that
-   allocate its block and then the value. *)
 type built =
   | Expression of string
   | Allocating of { block : key; fill : string; value : string -> string }

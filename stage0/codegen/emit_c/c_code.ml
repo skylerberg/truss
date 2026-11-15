@@ -1,5 +1,3 @@
-(* Code as C: intrinsics, calls, statements, terminators, and functions. *)
-
 open C_runtime
 open C_types
 open C_values
@@ -82,8 +80,6 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
         (argument 0) (argument 1) (argument 1) (argument 2)
   | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
     as shared ->
-      (* Declared in the C files that call them, so that the C of every
-         other instance stays the same. *)
       let symbol, result, parameters =
         match shared with
         | Shared_allocate ->
@@ -255,8 +251,6 @@ let statement_c context fc buffer (statement : Lowered.statement) =
               line "  %s = %s;" target (value "block");
               line "}"))
   | Call { target; arguments; result = Written place } ->
-      (* Every pointer a callee is given is [restrict], so the place it
-         writes its result to is none it is also given to read. *)
       List.iter
         (fun (argument : Lowered.operand) ->
           match argument with

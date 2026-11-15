@@ -12,20 +12,19 @@ type lowered_outcome =
   | Folded of Lowered.data
   | Evaluate of Path.t * Ground.ty
 
-let rec fresh_context lowering database =
+let fresh_context lowered lowering database =
   Lower.context ~checks:lowering.checks
     ~constant:(fun _ path ->
-      match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
+      match Query.demand database lowered (lowering, Instance.Constant path) with
       | Folded data -> Some data.value
       | Evaluate _ -> None
       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
     database lowering.system
 
-(* An instance's C, a constant's data, or a capability's table. *)
-and emitted (context : Lower.context) (compiled : Emit_c.compiled) =
+let emitted (context : Lower.context) (compiled : Emit_c.compiled) =
   Compiled (Emit_c.fragment (Lower.env context) compiled)
 
-and make (context : Lower.context) (key : Instance.key) : lowered_outcome =
+let make (context : Lower.context) (key : Instance.key) : lowered_outcome =
   let glue = Lower.glue context in
   let code instance = emitted context (Code instance) in
   match key with
@@ -49,28 +48,16 @@ and make (context : Lower.context) (key : Instance.key) : lowered_outcome =
   | Table _ -> emitted context (Table (Lower.table context key))
   | Locked_table capability -> emitted context (Table (Lower.locked_table context key ~capability))
 
-and lowered =
-  lazy
-    (Query.query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
-       ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
-       (fun database (lowering, key) ->
-         Compiler_bug.while_doing ~stage:"Compile"
-           ("lowering " ^ Instance.to_string key)
-           (fun () -> make (fresh_context lowering database) key)))
+let lowered =
+  Query.recursive_query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
+    ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
+    (fun lowered database (lowering, key) ->
+      Compiler_bug.while_doing ~stage:"Compile"
+        ("lowering " ^ Instance.to_string key)
+        (fun () -> make (fresh_context lowered lowering database) key))
 
-(* Keys. A test's result is kept under the key of everything its code can
-   reach, which is composed from the instances' own keys, so that an edit
-   changes the keys of the instances that can reach the edited code and of nothing else. *)
-
-(* Declared when the module is initialized, not when first read: a state
-   opened before a query is declared leaves out every result that read
-   it. *)
-let () = ignore (Lazy.force lowered)
 let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
 
-(* An instance's references, and the hash of its own code. A constant
-   computed by running code refers to its evaluator, whose code determines
-   its value. *)
 let evaluated_own_hash =
   Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
 
@@ -78,11 +65,11 @@ let linked =
   Query.query ~name:"linked" ~phase:Phases.linking ~show:show_instance
     (fun database (lowering, key) ->
       let of_fragment fragment = (Reachable.own_hash fragment, Emit_c.references fragment) in
-      match Query.demand database (Lazy.force lowered) (lowering, key) with
+      match Query.demand database lowered (lowering, key) with
       | Evaluate (path, _) -> (evaluated_own_hash, [ Instance.Evaluator path ])
       | Compiled fragment -> of_fragment fragment
       | Folded data ->
-          let context = fresh_context lowering database in
+          let context = fresh_context lowered lowering database in
           of_fragment (Emit_c.fragment (Lower.env context) (Data data)))
 
 let own_hash =
@@ -117,24 +104,21 @@ let group =
     (fun database (lowering, key) ->
       Reachable.Keys.find_opt key (Query.demand database recursion lowering))
 
-let rec reach =
-  lazy
-    (Query.query ~name:"reach" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
-       (fun database (lowering, key) ->
-         let reach_of other = Query.demand database (Lazy.force reach) (lowering, other) in
-         match Query.demand database group (lowering, key) with
-         | None ->
-             Reachable.unit_key
-               ~own:(Query.demand database own_hash (lowering, key))
-               (List.map reach_of (Query.demand database references (lowering, key)))
-         | Some members ->
-             Reachable.group_key
-               ~link:(fun member ->
-                 ( Query.demand database own_hash (lowering, member),
-                   Query.demand database references (lowering, member) ))
-               ~deep:reach_of ~members key))
-
-let () = ignore (Lazy.force reach)
+let reach =
+  Query.recursive_query ~name:"reach" ~phase:Phases.keys ~saved:true ~portable:true
+    ~show:show_instance (fun reach database (lowering, key) ->
+      let reach_of other = Query.demand database reach (lowering, other) in
+      match Query.demand database group (lowering, key) with
+      | None ->
+          Reachable.unit_key
+            ~own:(Query.demand database own_hash (lowering, key))
+            (List.map reach_of (Query.demand database references (lowering, key)))
+      | Some members ->
+          Reachable.group_key
+            ~link:(fun member ->
+              ( Query.demand database own_hash (lowering, member),
+                Query.demand database references (lowering, member) ))
+            ~deep:reach_of ~members key)
 
 type 'a ran = Ran of 'a | Ran_too_long
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -143,29 +127,21 @@ type t = {
   database : Query.context;
   lowering : lowering;
   want : lowering -> Instance.key list -> unit;
-      (** Says which instances' keys are about to be asked for *)
-  context : Lower.context;  (** For laying out and emitting the lowered instances *)
+  context : Lower.context;
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
-  file_name : Path.file -> string;  (** The file a position names, which the program reports *)
+  file_name : Path.file -> string;
   worked_on : Path.package -> bool;
-      (** Whether a package is one of the project's own, whose code a development build never copies
-          into another's file *)
   results : results option;
-      (** Where the results of runs are kept, by the key of the code that ran *)
   evaluation_time_limit_ms : int;
-  programs : string;  (** The directory each built program is written to *)
+  programs : string;
   runs : (string, string ran) Hashtbl.t;
-      (** The output of each run of code while compiling, in this build, by the key of the code that
-          ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
 let programs_built = Atomic.make 0
 
-(* A path in the compiler's directory of programs that no other program of
-   any process has. *)
 let fresh_program compiler =
   Filename.concat compiler.programs
     (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
@@ -173,13 +149,6 @@ let fresh_program compiler =
 exception Cannot_build of string
 
 let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
-
-(* The key that the result of a run from [root] is kept under, once [root]
-   is wanted. It hashes the key of everything [root] can reach, code
-   generation's version, the system, and the build's added C flags. The
-   system is part of it because a run calls that system's C library. The flags
-   are part of it because a sanitizer can stop a run that passes without
-   one. *)
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-13 result key"
 
 let result_key compiler root =
@@ -189,13 +158,12 @@ let result_key compiler root =
           [
             Cbor.int Emit_c.version;
             Cbor.Text (Libc.system_name compiler.lowering.system);
-            Bytes (Query.demand compiler.database (Lazy.force reach) (compiler.lowering, root));
+            Bytes (Query.demand compiler.database reach (compiler.lowering, root));
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
 
 let test_key compiler test = result_key compiler (Lower.test_key test)
 
-(* The key a run of code while compiling is kept under. *)
 let run_key compiler root =
   compiler.want compiler.lowering [ root ];
   result_key compiler root
@@ -270,7 +238,6 @@ let decode compiler ty text : Lowered.static_value =
     | Bool -> Bool (unsigned (take 1) <> Z.zero)
     | Character -> Character (Z.to_int (unsigned (take 4)))
     | _ -> bug "a pointer computed while compiling"
-  (* A value of zero size, which is written as nothing. *)
   and empty ty : Lowered.static_value =
     match Monomorphic.shape monomorphic ty with
     | Record members ->
@@ -288,12 +255,6 @@ let decode compiler ty text : Lowered.static_value =
   if !at <> String.length text then bug "a value written out while compiling has bytes left over";
   result
 
-(* The small callees emitted beside an instance in a development build, so
-   that the C compiler can inline them: functions from source that the
-   instance calls, of the standard library or a registry package, with
-   little code and no lambdas. Those change only with the toolchain or a
-   version in the lock file. The small functions of the project's own
-   packages stay calls, so that an edit to one compiles only it again. *)
 let small_callees ~find ~worked_on fragment =
   match Emit_c.key fragment with
   | Code _ ->
@@ -307,8 +268,6 @@ let small_callees ~find ~worked_on fragment =
         (Emit_c.called fragment)
   | _ -> []
 
-(* The standard library's test runner, which a test program's [main]
-   calls. *)
 let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
 
 let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~startup ~output =
@@ -344,8 +303,6 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
 
-(* Builds the program that runs the tests at [roots], in that order, with
-   the standard library's runner. *)
 and build_test_program ?progress ?supplied compiler ~time_limit_ms ~roots ~output =
   build ?progress ?supplied compiler ~tests:true ~roots:(test_runner :: roots)
     ~startup:
@@ -353,12 +310,8 @@ and build_test_program ?progress ?supplied compiler ~time_limit_ms ~roots ~outpu
          (List.map Instance.symbol roots))
     ~output
 
-(* Builds the instances the roots reach into a program and runs it with
-   [arguments], then removes it. *)
 and build_and_run ?input ?time_limit_ms ?(in_order = true) compiler ~roots ~startup ~arguments =
   let output = fresh_program compiler in
-  (* Code run while compiling starts no threads, so it is linked with the
-     in-order runtime unless the caller asks for the threaded one. *)
   build compiler ~in_order ~roots ~startup ~output;
   let result = Process.run ?input ?time_limit_ms output arguments in
   (try Sys.remove output with Sys_error _ -> ());
@@ -384,9 +337,7 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
               | 0, output, _ ->
                   Option.iter (fun results -> results.add key output) compiler.results;
                   Ran output
-              | 137, _, _ ->
-                  (* Killed at its time limit. *)
-                  Ran_too_long
+              | 137, _, _ -> Ran_too_long
               | status, _, errors ->
                   cannot_build "Running %s while compiling ended with status %d: %s"
                     (Instance.to_string root) status errors)
@@ -396,12 +347,10 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
   in
   match ran with Ran output -> Ran (read output) | Ran_too_long -> Ran_too_long
 
-(* An instance's C from the query, or, for a constant the query could not
-   fold, the data of the value its evaluator computes. *)
 and compiled compiler key =
   let data (data : Lowered.data) = Emit_c.fragment (Lower.env compiler.context) (Data data) in
   let compiled =
-    match Query.demand compiler.database (Lazy.force lowered) (compiler.lowering, key) with
+    match Query.demand compiler.database lowered (compiler.lowering, key) with
     | Compiled fragment -> fragment
     | Folded folded -> data folded
     | Evaluate (path, ty) -> (
@@ -415,8 +364,6 @@ and compiled compiler key =
     bug "%s compiled to %s" (Instance.to_string key) (Instance.to_string (Emit_c.key compiled));
   compiled
 
-(* A valid program stage0 cannot build yet, as a message with the file and
-   line it is at. *)
 let unsupported_message compiler (unsupported : Lower.unsupported) =
   let where =
     match unsupported.at with
@@ -429,8 +376,6 @@ let unsupported_message compiler (unsupported : Lower.unsupported) =
   in
   where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
 
-(* Runs a step of a build, giving a failure that is not the compiler's as
-   its message. A compiler bug is not caught: it is the caller's to report. *)
 let reporting compiler work =
   match work () with
   | result -> Ok result
@@ -459,11 +404,8 @@ type record = {
   cached : bool;
 }
 
-(* Reads the runner's report as it arrives. Each record's blocks come
-   before the line that names its test, so a record is whole when its line
-   arrives, and is handed to [on_record] with the test's number then. *)
 type reader = {
-  pending : Buffer.t;  (** Text not yet read as whole lines and blocks *)
+  pending : Buffer.t;
   mutable message : string option;
   mutable echo : string option;
   on_start : int -> unit;
@@ -475,7 +417,6 @@ let reader ?(on_start = ignore) on_record =
 
 let malformed text = cannot_build "A test report cannot be read: %s" text
 
-(* Takes every whole record out of the pending text. *)
 let rec drain reader =
   let text = Buffer.contents reader.pending in
   match String.index_opt text '\n' with
@@ -563,9 +504,6 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-(* Whether a test is external: it declares [uses], so it gets the real
-   implementations of those capabilities, and its result depends on the
-   world, so it is never kept and runs every time. *)
 let external_test compiler test =
   match Query.demand compiler.database Interface.Environment.interface test with
   | Some (Test_interface uses) when uses <> Types.no_capabilities -> true
@@ -593,8 +531,6 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
         (index, root, key, stored_record))
       (List.combine tests roots)
   in
-  (* Kept results are reported first, as ended, so progress counts them, and
-     then each test that runs as it ends. *)
   List.iter
     (fun (index, _, _, stored_record) ->
       Option.iter (fun record -> progress (Ended { test = index; record })) stored_record)
@@ -655,13 +591,12 @@ let build_supplied_tests compiler ~time_limit_ms supplied ~output =
     ~roots:(List.map Emit_c.Builder.instance_key supplied)
     ~output
 
-(* Code that cannot ship: a [todo] or an [echo] a program can reach. *)
 type unshippable = {
   failure : [ `Todo | `Echo ];
   file : string;
   line : int;
   column : int;
-  way : Path.t list;  (** The definitions from [main] to the one that holds it *)
+  way : Path.t list;
 }
 
 let unshippable compiler ~main =
@@ -698,7 +633,6 @@ let unshippable compiler ~main =
             (Emit_c.failures compiled))
         reached
     in
-    (* One report for each place, however many instances hold it. *)
     List.sort_uniq
       (fun left right ->
         compare
@@ -750,8 +684,6 @@ let check_template compiler ~from_template ~texts =
               (Path.show from_template) (String.length output) (List.length positions);
           List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
 
-(* Evaluates a call whose arguments are known, by running it: its result as
-   static data, or that it ran past the time limit. *)
 let evaluate_call compiler ~function_ ~arguments =
   reporting compiler @@ fun () ->
   match Query.demand compiler.database Interface.Environment.signature function_ with
@@ -773,7 +705,7 @@ let create ?(checks = true) ?(file_name = Path.show_file) ?results
     database;
     lowering;
     want;
-    context = fresh_context lowering database;
+    context = fresh_context lowered lowering database;
     toolchain;
     cache;
     settings;

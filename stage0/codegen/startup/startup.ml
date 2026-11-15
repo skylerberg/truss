@@ -1,6 +1,4 @@
 let headers =
-  (* Strict C11 hides POSIX functions such as [posix_memalign] and
-     [sigaltstack] in glibc unless they are asked for. *)
   {|#define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>
@@ -44,36 +42,19 @@ static void t_write_all(int descriptor, const void *bytes, size_t length) {
   }
 }
 
-/* The address of [errno] on the calling thread. Generated code reads
-   [errno] through this function. glibc declares its own function for the
-   address as one that returns the same address on every call, so a
-   compiler may reuse the address after a task has parked and resumed on
-   another thread, and the task would read that thread's [errno]. The
-   empty assembly keeps the compiler from concluding the same of this
-   function. A release build optimizes across the runtime and the
-   generated code, so a function of the runtime that generated code calls
-   reads [errno] through this function too. */
-__attribute__((noinline)) int *t_runtime_errno(void) {
+__attribute__((noinline)) int *t_runtime_errno_address_uncached(void) {
   __asm__ __volatile__("");
   return &errno;
 }
 
 void *t_runtime_allocate(uint64_t size, uint64_t alignment);
 
-/* A test worker reports to the runner through this pipe; anywhere else it
-   is -1, and reports go to standard error. */
 static int t_report = -1;
 
 void t_runtime_report_tests_to(int32_t descriptor) { t_report = descriptor; }
 
-/* The kinds of record a worker writes. The runner, in the standard library,
-   numbers them the same way, and writes the first itself. */
 enum { t_passed, t_failed, t_panicked, t_incomplete, t_echoed };
 
-/* Text is built in a fixed buffer, so that failing never allocates, even
-   when it fails because memory ran out. Longer text is cut short. One
-   thread at a time builds text, and a thread that is ending the run never
-   gives the buffer up, so one failure is reported. */
 static char t_text[65536];
 static size_t t_text_length;
 static pthread_mutex_t t_text_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -111,8 +92,6 @@ static void t_text_position(const struct t_anchor *anchor, uint32_t line, uint32
   t_text_number(column);
 }
 
-/* A record is its kind, the length of its text in four bytes, the low one
-   first, and the text. */
 static void t_record(uint8_t kind) {
   uint8_t header[5];
   uint32_t length = (uint32_t)t_text_length;
@@ -122,9 +101,6 @@ static void t_record(uint8_t kind) {
   t_write_all(t_report, t_text, t_text_length);
 }
 
-/* Ends the run with a report of [kind] and the text built so far: in a test
-   worker, as a record for the runner, and anywhere else on standard error
-   after [heading]. */
 static _Noreturn void t_end(uint8_t kind, const char *heading, int status) {
   if (t_report >= 0) {
     t_record(kind);
@@ -200,7 +176,6 @@ static char t_signal_stack[65536];
 
 static void t_stack_overflow(int signal) {
   (void)signal;
-  /* The thread may hold the lock already, so it is taken only if free. */
   (void)pthread_mutex_trylock(&t_text_lock);
   t_text_length = 0;
   t_text_string("stack overflow");
@@ -220,19 +195,12 @@ void t_runtime_install(void) {
   sigemptyset(&action.sa_mask);
   sigaction(SIGSEGV, &action, NULL);
   sigaction(SIGBUS, &action, NULL);
-  /* A write to a socket or a pipe whose reader has gone is an error the
-     program sees, SystemError.BrokenPipe, not a signal that ends it: a
-     server must outlive a client that hangs up. */
   signal(SIGPIPE, SIG_IGN);
 }
 |}
 
 let allocation =
   {|
-/* In a test program, how many blocks are allocated and not yet freed. A
-   test must end with as many as it started with: Truss frees every block
-   it allocates, so a test that leaves one is a compiler bug. A program
-   that is not a test program counts nothing. */
 #ifdef T_TESTS
 static uint64_t t_live_blocks = 0;
 #define t_block_allocated() (t_live_blocks += 1)
@@ -278,8 +246,6 @@ void *t_runtime_reallocate(void *pointer, uint64_t old_size, uint64_t size, uint
 
 let threads =
   {|
-/* The size of the main thread's stack. Every other stack has the same
-   size, so that the recursion depth limit is the same on each. */
 static size_t t_stack_size(void) {
   struct rlimit limit;
   size_t stack = (size_t)8 << 20;
@@ -291,9 +257,6 @@ static size_t t_stack_size(void) {
 
 #ifndef T_IN_ORDER
 
-/* Installs an alternate signal stack on the calling thread, so that the
-   handler of a stack overflow can run. A thread of the runtime never
-   exits, so the stack is never removed. */
 static void t_thread_signal_stack_install(void) {
   stack_t stack;
   memset(&stack, 0, sizeof stack);
@@ -303,7 +266,6 @@ static void t_thread_signal_stack_install(void) {
   if (sigaltstack(&stack, NULL) != 0) free(stack.ss_sp);
 }
 
-/* The attributes of a thread that the runtime creates. */
 static void t_thread_attributes(pthread_attr_t *attributes) {
   pthread_attr_init(attributes);
   pthread_attr_setstacksize(attributes, t_stack_size());
@@ -311,7 +273,6 @@ static void t_thread_attributes(pthread_attr_t *attributes) {
 
 #endif
 
-/* Sanitizer hooks for switching stacks. */
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 #define T_ADDRESS_SANITIZER 1
@@ -340,13 +301,6 @@ void __tsan_destroy_fiber(void *fiber);
 void __tsan_switch_to_fiber(void *fiber, unsigned flags);
 #endif
 
-/* Stacks.
-
-   A coroutine runs on a stack of its own: memory from [mmap] with a guard
-   page below it, so that an overflow faults and is reported as any stack
-   overflow is. A stack is as large as the main thread's. Its pages take
-   memory only once they are touched. A few stacks that are no longer used
-   are kept for the next coroutine. */
 #define T_STACK_CACHE 64
 
 static pthread_mutex_t t_stack_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -355,7 +309,6 @@ static size_t t_stack_cached;
 static size_t t_stack_bytes;
 static size_t t_stack_guard;
 
-/* The lowest address of a stack's usable memory. */
 static void *t_stack_acquire(void) {
   pthread_mutex_lock(&t_stack_lock);
   if (t_stack_bytes == 0) {
@@ -381,8 +334,6 @@ static void *t_stack_acquire(void) {
 
 static void t_stack_release(void *low) {
 #ifdef T_ADDRESS_SANITIZER
-  /* The last coroutine's poisoned frames must not be reported against
-     the next one. */
   __asan_unpoison_memory_region(low, t_stack_bytes);
 #endif
   pthread_mutex_lock(&t_stack_lock);
@@ -394,13 +345,6 @@ static void t_stack_release(void *low) {
   if (low != NULL) munmap((char *)low - t_stack_guard, t_stack_guard + t_stack_bytes);
 }
 
-/* Switching stacks.
-
-   A context is the stack pointer of code that is not running. Its
-   callee-saved registers are on its stack, below that pointer, and the
-   address it resumes at is the return address of its call of
-   [t_context_switch]. The function saves the caller's registers and stack
-   pointer in [from] and loads those of [to]. */
 struct t_context {
   void *stack_pointer;
 };
@@ -434,9 +378,6 @@ __asm__(".text\n"
         "  popq %rbp\n"
         "  retq\n");
 
-/* A context that starts [entry] on an empty stack: the registers that the
-   switch pops, the address it returns to, and a word that leaves the
-   stack pointer where a call would. */
 static void t_context_start(struct t_context *context, void *low, size_t size, void (*entry)(void)) {
   uint64_t *top = (uint64_t *)(((uintptr_t)low + size) & ~(uintptr_t)15);
   *--top = 0;
@@ -477,8 +418,6 @@ __asm__(".text\n"
         "  add sp, sp, #160\n"
         "  ret\n");
 
-/* A context that starts [entry] on an empty stack: the registers that the
-   switch loads, with [entry] as the address it returns to. */
 static void t_context_start(struct t_context *context, void *low, size_t size, void (*entry)(void)) {
   uint64_t *top = (uint64_t *)(((uintptr_t)low + size) & ~(uintptr_t)15);
   uint64_t *saved = top - 20;
@@ -490,19 +429,9 @@ static void t_context_start(struct t_context *context, void *low, size_t size, v
 #error "the runtime has no context switch for this processor"
 #endif
 
-/* Coroutines.
-
-   A coroutine is a function call with its own stack. It runs only between
-   a resume and its next suspend. A scheduler that runs one task at a
-   time, such as a test's, runs each task as a coroutine: it resumes the
-   task it chose, and a task that must block suspends.
-
-   A resume switches to the coroutine's stack on the calling thread, and a
-   suspend switches back, so the two never run at the same time and no
-   thread is created. */
 struct t_coroutine {
-  struct t_context context; /* The coroutine, while it is suspended */
-  struct t_context resumer; /* The code that resumed it, while it runs */
+  struct t_context context;
+  struct t_context resumer;
   void *stack;
   int finished;
   void (*code)(void *environment, uint64_t item);
@@ -520,11 +449,6 @@ struct t_coroutine {
 
 static _Thread_local struct t_coroutine *t_coroutine_self;
 
-/* The coroutine that the calling thread runs, or NULL. A coroutine in a
-   task resumes on another thread after the task has parked, so code that
-   runs after a switch reads and writes the variable through these
-   two. They are not inlined, and the empty assembly keeps the compiler
-   from concluding that two calls do the same. */
 __attribute__((noinline)) static struct t_coroutine *t_coroutine_current(void) {
   __asm__ __volatile__("");
   return t_coroutine_self;
@@ -535,8 +459,6 @@ __attribute__((noinline)) static void t_coroutine_current_set(struct t_coroutine
   t_coroutine_self = coroutine;
 }
 
-/* Switches from the coroutine to the code that resumed it. A coroutine
-   that has finished never runs again. */
 static void t_coroutine_leave(struct t_coroutine *coroutine) {
 #ifdef T_ADDRESS_SANITIZER
   void *fake = NULL;
@@ -553,8 +475,6 @@ static void t_coroutine_leave(struct t_coroutine *coroutine) {
 #endif
 }
 
-/* Where a coroutine starts, on its own stack. It never returns: its
-   function's return switches to the resumer for the last time. */
 static void t_coroutine_entry(void) {
   struct t_coroutine *coroutine = t_coroutine_current();
 #ifdef T_ADDRESS_SANITIZER
@@ -583,9 +503,6 @@ uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item
   return (uint64_t)coroutine;
 }
 
-/* Runs a coroutine until it suspends or its function returns. Returns 1 if
-   it suspended. Returns 0 if its function returned, and frees the
-   coroutine. */
 uint8_t t_runtime_coroutine_resume(uint64_t handle) {
   struct t_coroutine *coroutine = (struct t_coroutine *)handle;
   struct t_coroutine *resumer = t_coroutine_current();
@@ -612,20 +529,12 @@ uint8_t t_runtime_coroutine_resume(uint64_t handle) {
   return 0;
 }
 
-/* Called in a coroutine. Switches to the code that resumed the coroutine,
-   and returns when the coroutine is resumed again. */
 void t_runtime_coroutine_suspend(void) {
   struct t_coroutine *coroutine = t_coroutine_current();
   if (coroutine == NULL) t_runtime_compiler_bug();
   t_coroutine_leave(coroutine);
 }
 
-/* Shared values.
-
-   The heap block of a shared value is this header followed by the value.
-   A [Shared] holds the address of the value, and the header ends where
-   the value starts. Every reference to the block counts in [count], and
-   [mutex] is held while the value is read or changed. */
 struct t_shared {
   void *block;
   atomic_size_t count;
@@ -649,9 +558,6 @@ void t_runtime_shared_retain(void *value) {
   atomic_fetch_add_explicit(&t_shared_header(value)->count, 1, memory_order_relaxed);
 }
 
-/* Returns 1 to the caller that released the last reference. The acquire
-   fence orders every earlier use of the value, on any thread, before the
-   drop that follows. */
 uint8_t t_runtime_shared_release(void *value) {
   if (atomic_fetch_sub_explicit(&t_shared_header(value)->count, 1, memory_order_release) != 1)
     return 0;
@@ -669,11 +575,6 @@ void t_runtime_shared_lock(void *value) { pthread_mutex_lock(&t_shared_header(va
 
 void t_runtime_shared_unlock(void *value) { pthread_mutex_unlock(&t_shared_header(value)->mutex); }
 
-/* The time limit that the program set on the socket for receiving or for
-   sending, in nanoseconds, or 0 if it set none or the descriptor is not a
-   socket. The system applies the limit only to a call that blocks, and a
-   socket that tasks wait for does not block, so the runtime's wait
-   applies it. */
 static uint64_t t_descriptor_limit(int32_t descriptor, int32_t writing) {
   struct timeval limit;
   socklen_t size = sizeof limit;
@@ -682,8 +583,6 @@ static uint64_t t_descriptor_limit(int32_t descriptor, int32_t writing) {
   return (uint64_t)limit.tv_sec * 1000000000u + (uint64_t)limit.tv_usec * 1000u;
 }
 
-/* Waits in [poll] until the descriptor can be read, or written, or the
-   time limit passes. Returns 0 if the limit passed. */
 static int32_t t_descriptor_poll(int32_t descriptor, int32_t writing) {
   uint64_t limit = t_descriptor_limit(descriptor, writing);
   uint64_t milliseconds = (limit + 999999u) / 1000000u;
@@ -692,8 +591,6 @@ static int32_t t_descriptor_poll(int32_t descriptor, int32_t writing) {
   return poll(&one, 1, timeout) != 0;
 }
 
-/* Waits in [poll] until one of the descriptors can be read. [poll] skips
-   a negative descriptor. */
 static void t_descriptors_poll(const int32_t *descriptors, size_t count) {
   if (count == 0) return;
   struct pollfd *waited = malloc(count * sizeof *waited);
@@ -707,16 +604,8 @@ static void t_descriptors_poll(const int32_t *descriptors, size_t count) {
   free(waited);
 }
 
-/* Tasks, in a runtime that starts no thread. */
-
 #ifdef T_IN_ORDER
 
-/* A test program, and code run while compiling, have one thread.
-   [t_runtime_tasks_spawn] calls the task's function and returns when it
-   returns, so the tasks of a group run sequentially, in the order they
-   are spawned. That is correct for tasks that never block on one another.
-   A task that waits on a key would deadlock, because the task that would
-   wake it cannot run, so [t_runtime_tasks_wait] panics. */
 struct t_group {
   int cancelled;
 };
@@ -785,7 +674,6 @@ void t_runtime_blocking_begin(void) {}
 
 void t_runtime_blocking_end(void) {}
 
-/* A wait for a descriptor, and a sleep, block the one thread. */
 uint64_t t_runtime_descriptor_watch(int32_t descriptor, int32_t writing) {
   (void)descriptor;
   (void)writing;
@@ -817,9 +705,6 @@ int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
 
 int32_t t_runtime_close(int32_t descriptor) { return close(descriptor); }
 
-/* Blocks until one of the signals arrives, and returns its number. The
-   signals stay blocked afterwards, so one that arrives between two calls
-   is pending for the second. */
 int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
   sigset_t set;
   sigemptyset(&set);
@@ -845,10 +730,6 @@ struct t_branch {
 
 #ifdef T_IN_ORDER
 
-/* A test program, and code run while compiling, run a fork's branches in
-   order, which gives the same result as running them at once. A test already has
-   one core of the machine, and in order a check that fails is the same
-   check on every run. */
 void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
   for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
 }
@@ -859,21 +740,6 @@ void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, ui
 }
 
 #else
-
-/* Running branches at once.
-
-   A fork gives a thread several branches. It runs the first itself and
-   offers the rest as jobs on its own queue, where a thread with nothing to
-   do takes one from the far end. When its first branch returns, the thread
-   takes back each job that is still there and runs it, and for a job that
-   was taken it waits, running other threads' jobs meanwhile. A job lives in
-   the frame of the fork that offered it, which does not return until every
-   one of its jobs is done.
-
-   The queue is Chase and Lev's, with the memory orderings of Le, Pop,
-   Cohen, and Zappa Nardelli ("Correct and Efficient Work-Stealing for Weak
-   Memory Models"), and a fixed size: a thread whose queue is full runs the
-   branch itself, which is always right. */
 
 struct t_job {
   void (*run)(void *environment);
@@ -894,18 +760,10 @@ struct t_worker {
   _Alignas(64) _Atomic(struct t_job *) jobs[T_QUEUE];
 };
 
-/* The pool's threads, and after them the spare threads, which are started
-   while the program runs. */
 static struct t_worker t_workers[T_WORKERS + T_SPARES];
 static atomic_size_t t_worker_count;
 static _Thread_local struct t_worker *t_self;
 
-/* The calling thread's queue of branches, or NULL. A task that has parked
-   resumes on another thread, and a release build optimizes across the
-   runtime and the generated code. So code that generated code calls reads
-   the variable through this function, which is not inlined, and whose
-   empty assembly keeps the compiler from concluding that two calls
-   return the same. */
 __attribute__((noinline)) static struct t_worker *t_worker_self(void) {
   __asm__ __volatile__("");
   return t_self;
@@ -914,10 +772,8 @@ static pthread_once_t t_pool_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t t_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_pool_wake = PTHREAD_COND_INITIALIZER;
 static atomic_size_t t_sleepers;
-/* The sleepers that run tasks when they wake. */
 static atomic_size_t t_idle_runners;
 
-/* How many tasks are ready to run. The tasks are defined after the pool. */
 static atomic_size_t t_run_count;
 struct t_task;
 static struct t_task *t_run_pop(void);
@@ -930,8 +786,6 @@ static int t_offer(struct t_worker *worker, struct t_job *job) {
   int64_t top = atomic_load_explicit(&worker->top, memory_order_acquire);
   if (bottom - top >= T_QUEUE) return 0;
   atomic_store_explicit(&worker->jobs[bottom % T_QUEUE], job, memory_order_relaxed);
-  /* Sequentially consistent, so that of this store and a thread that is
-     about to sleep, one sees the other. */
   atomic_store(&worker->bottom, bottom + 1);
   return 1;
 }
@@ -945,7 +799,6 @@ static struct t_job *t_take_back(struct t_worker *worker) {
   if (top <= bottom) {
     job = atomic_load_explicit(&worker->jobs[bottom % T_QUEUE], memory_order_relaxed);
     if (top == bottom) {
-      /* The last job, which a thief may be taking. */
       if (!atomic_compare_exchange_strong_explicit(&worker->top, &top, top + 1, memory_order_seq_cst,
                                                    memory_order_relaxed))
         job = NULL;
@@ -969,7 +822,6 @@ static struct t_job *t_steal(struct t_worker *victim) {
   return job;
 }
 
-/* A job of another thread's, or none. */
 static struct t_job *t_find(struct t_worker *self) {
   size_t count = atomic_load(&t_worker_count);
   self->random = self->random * 6364136223846793005ULL + 1442695040888963407ULL;
@@ -998,8 +850,6 @@ static void t_wake(int everyone) {
   pthread_mutex_unlock(&t_pool_lock);
 }
 
-/* Runs a job that was taken from another thread. Its frame may be gone as
-   soon as it is marked done. */
 static void t_run_taken(struct t_job *job) {
   job->run(job->environment);
   atomic_store(&job->done, 1);
@@ -1018,9 +868,6 @@ static void t_rest(unsigned idle) {
   }
 }
 
-/* Sleeps until a job is offered or a taken one is done, unless [job] is
-   done or some thread has a job already. A thread that runs tasks
-   ([runner]) does not sleep while a task is ready. */
 static void t_sleep(struct t_job *job, int runner) {
   pthread_mutex_lock(&t_pool_lock);
   atomic_fetch_add(&t_sleepers, 1);
@@ -1043,7 +890,6 @@ static void t_wait_for(struct t_worker *self, struct t_job *job) {
     } else if (++idle < 40) {
       t_rest(idle);
     } else {
-      /* The thread runs no task while it sleeps, so it counts as blocked. */
       atomic_fetch_add(&t_blocked, 1);
       t_spare_ensure();
       t_sleep(job, 0);
@@ -1053,10 +899,6 @@ static void t_wait_for(struct t_worker *self, struct t_job *job) {
   }
 }
 
-/* A thread of the runtime that runs tasks blocks every signal but the
-   faults and SIGURG. Signals sent to the process then go to the thread
-   that started it, as they do in a program with one thread. SIGURG is
-   the runtime's interrupt of a cancelled task. */
 static void t_runner_signals(void) {
   sigset_t all;
   sigfillset(&all);
@@ -1093,9 +935,6 @@ static void *t_worker_main(void *argument) {
   return NULL;
 }
 
-/* Starts the pool: a thread for each core but one, since the thread that
-   forks first is the pool's too. [TRUSS_WORKERS] gives another number of
-   threads, which changes how long a program takes and nothing it does. */
 static void t_pool_start(void) {
   long count = sysconf(_SC_NPROCESSORS_ONLN);
   const char *asked = getenv("TRUSS_WORKERS");
@@ -1112,7 +951,6 @@ static void t_pool_start(void) {
   for (long index = 1; index < count; index++) {
     pthread_t thread;
     if (pthread_create(&thread, &attributes, t_worker_main, &t_workers[index]) != 0) {
-      /* Fewer threads than cores is slower and still right. */
       atomic_store(&t_worker_count, (size_t)index);
       break;
     }
@@ -1121,12 +959,9 @@ static void t_pool_start(void) {
   if (atomic_load(&t_worker_count) == 1) t_self = NULL;
 }
 
-/* Runs up to [T_FORK] + 1 branches at once. */
 static void t_fork(struct t_worker *self, const struct t_branch *branches, size_t count) {
   struct t_job jobs[T_FORK];
   int offered = 0;
-  /* The last branch is offered first, so that thieves take the last ones
-     and this thread takes the others back in order. */
   for (size_t index = count - 1; index >= 1; index--) {
     struct t_job *job = &jobs[index - 1];
     job->run = branches[index].run;
@@ -1143,9 +978,6 @@ static void t_fork(struct t_worker *self, const struct t_branch *branches, size_
       job->run(job->environment);
       continue;
     }
-    /* Each earlier branch's job was taken back or waited for, so the
-       newest job on the queue is this one, unless a thief has
-       it, and then a thief has every job offered before it too. */
     struct t_job *back = t_take_back(self);
     if (back == job) job->run(job->environment);
     else if (back == NULL) t_wait_for(self, job);
@@ -1155,12 +987,8 @@ static void t_fork(struct t_worker *self, const struct t_branch *branches, size_
 
 void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
   pthread_once(&t_pool_once, t_pool_start);
-  /* A branch may use no capability but [Panic], so a task neither parks
-     nor yields in one, and it leaves the block on the thread it entered
-     it on. */
   struct t_worker *self = t_worker_self();
   if (self == NULL) {
-    /* The first thread of a machine with one core: in order. */
     for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
     return;
   }
@@ -1180,7 +1008,6 @@ struct t_range {
   uint64_t size;
 };
 
-/* Runs a range by halves, down to parts of at most [size] indexes. */
 static void t_range_run(void *argument) {
   const struct t_range *range = argument;
   if (range->last - range->first < range->size) {
@@ -1196,49 +1023,32 @@ static void t_range_run(void *argument) {
   t_runtime_parallel(halves, 2);
 }
 
-/* The size of a part depends on the range alone, never on the machine. */
 void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
                               void *environment, uint64_t first, uint64_t last) {
   struct t_range whole = {body, environment, first, last, ((last - first) >> 8) + 1};
   t_range_run(&whole);
 }
 
-/* Tasks.
-
-   A task is a call of a function on a stack of its own. The pool's
-   threads run the tasks that are ready, from one queue. A task that has
-   to wait, for a key, a mutex, or the tasks of a group, parks: it leaves
-   its stack, and the thread that ran it takes the next ready task. So a
-   waiting task holds no thread, and it resumes on whichever thread takes
-   it next.
-
-   A thread that waits and is not a task blocks, and so does a thread in
-   a call of the operating system that does not return at once. The C
-   library's rows that can block are bracketed by
-   [t_runtime_blocking_begin] and [t_runtime_blocking_end]. For each
-   blocked thread, one spare thread may run tasks, so ready tasks do not
-   wait behind blocked threads. */
-
 struct t_wait_slot;
 
 struct t_task {
-  struct t_context context;   /* The task, while it does not run */
+  struct t_context context;
   void *stack;
   struct t_group *group;
   void (*code)(void *environment, uint64_t item);
   void *environment;
   uint64_t item;
-  struct t_task *next;        /* In the ready queue, or in the object it is parked on */
-  uint64_t wait_key;          /* The key that it is parked on */
-  _Atomic(struct t_wait_slot *) cancellable; /* Where it parks in a wait that a cancel ends */
-  struct t_task *sibling;     /* In the group's [tasks] */
-  _Atomic(pthread_t) thread;  /* The thread that runs it, which the interrupter reads */
-  atomic_int blocking;        /* It is in a call of the operating system that can block */
-  atomic_int state;           /* T_RUNNING, T_PARKING, or T_PARKED */
+  struct t_task *next;
+  uint64_t wait_key;
+  _Atomic(struct t_wait_slot *) cancellable;
+  struct t_task *sibling;
+  _Atomic(pthread_t) thread;
+  atomic_int blocking;
+  atomic_int state;
   int finished;
-  struct t_coroutine *coroutine; /* The coroutine that it was in when it left its thread */
+  struct t_coroutine *coroutine;
 #ifdef T_ADDRESS_SANITIZER
-  const void *suspended_stack;   /* The stack that it left, which is a coroutine's if it was in one */
+  const void *suspended_stack;
   size_t suspended_stack_size;
   const void *thread_stack;
   size_t thread_stack_size;
@@ -1250,43 +1060,24 @@ struct t_task {
 #endif
 };
 
-/* A group counts its tasks that have not ended, and [join] waits until
-   the count is zero. A group is cancelled once, and a task is cancelled
-   when its group or a group that encloses it is. [parent] is the group of
-   the task that opened this group. It outlives this group: the task that
-   opened this group joins it before the task ends. A lock is always taken
-   after the lock of the enclosing group. */
 struct t_group {
   pthread_mutex_t lock;
   size_t running;
   atomic_int cancelled;
   struct t_group *parent;
-  struct t_task *tasks;       /* The tasks that have not ended, under [lock] */
-  struct t_group *children;   /* The groups that those tasks opened, under [lock] */
-  struct t_group *next;       /* In the parent's [children], under the parent's [lock] */
-  struct t_task *joiner;      /* A task that is parked in [join], under [lock] */
-  atomic_int *joined;         /* The flag a thread that blocks in [join] waits for, under [lock] */
-  struct t_group *interrupted; /* In the list of cancelled groups */
+  struct t_task *tasks;
+  struct t_group *children;
+  struct t_group *next;
+  struct t_task *joiner;
+  atomic_int *joined;
+  struct t_group *interrupted;
 };
 
-/* The states of a task. A task that parks releases the lock that guards
-   its wait condition before it leaves its stack, so its waker can find it
-   while it still runs on that stack. Making it ready then would let
-   another thread run it on a stack that is in use. So the task marks
-   itself [T_PARKING] before it releases the lock, and the thread that ran
-   it marks it [T_PARKED] once the task is off its stack. A waker that
-   finds the task [T_PARKING] marks it [T_RUNNING] and leaves it to that
-   thread, which makes it ready. A ready task is [T_RUNNING] too. */
 enum { T_RUNNING, T_PARKING, T_PARKED };
 
 static _Thread_local struct t_task *t_task_running;
 static _Thread_local struct t_context t_thread_context;
 
-/* The task that the calling thread runs, or NULL, and the thread's own
-   context. Code that runs after a switch may be on another thread, and
-   must read that thread's variables. So these two are not inlined, and
-   the empty assembly keeps the compiler from concluding that two calls
-   return the same. */
 __attribute__((noinline)) static struct t_task *t_task_self(void) {
   __asm__ __volatile__("");
   return t_task_running;
@@ -1297,7 +1088,6 @@ __attribute__((noinline)) static struct t_context *t_thread_context_self(void) {
   return &t_thread_context;
 }
 
-/* The ready queue. */
 static pthread_mutex_t t_run_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct t_task *t_run_first;
 static struct t_task *t_run_last;
@@ -1308,12 +1098,8 @@ static void t_run_push(struct t_task *task) {
   if (t_run_last != NULL) t_run_last->next = task;
   else t_run_first = task;
   t_run_last = task;
-  /* Sequentially consistent, so that of this and a thread that is about
-     to sleep, one sees the other. */
   atomic_fetch_add(&t_run_count, 1);
   pthread_mutex_unlock(&t_run_lock);
-  /* Every sleeper is woken: one that waits for a branch cannot run the
-     task. */
   t_wake(1);
   t_spare_ensure();
 }
@@ -1329,14 +1115,10 @@ static struct t_task *t_run_pop(void) {
     left = atomic_fetch_sub(&t_run_count, 1) - 1;
   }
   pthread_mutex_unlock(&t_run_lock);
-  /* A thread that was woken for one task passes the wake on while more
-     are ready. */
   if (left > 0) t_spare_ensure();
   return task;
 }
 
-/* Runs a task on the calling thread, which runs none, until the task
-   parks, yields, or ends. */
 static void t_task_run(struct t_task *task) {
   t_task_running = task;
   t_coroutine_self = task->coroutine;
@@ -1364,15 +1146,10 @@ static void t_task_run(struct t_task *task) {
     free(task);
     return;
   }
-  /* A task that yielded, or that was woken before it left its stack, is
-     ready. A task that is parked from here on belongs to its waker, which
-     may already run it on another thread. */
   int state = T_PARKING;
   if (!atomic_compare_exchange_strong(&task->state, &state, T_PARKED)) t_run_push(task);
 }
 
-/* Switches from the calling task to the thread that runs it. Returns when
-   the task runs again, on whatever thread that is. */
 static void t_task_switch(struct t_task *task) {
 #ifdef T_ADDRESS_SANITIZER
   void *fake = NULL;
@@ -1389,18 +1166,12 @@ static void t_task_switch(struct t_task *task) {
 #endif
 }
 
-/* Parks the calling task. The caller holds [lock], and under it has put
-   the task where its waker finds it. This releases the lock, and returns
-   once the task has been made ready and runs again. */
 static void t_task_park(struct t_task *task, pthread_mutex_t *lock) {
   atomic_store(&task->state, T_PARKING);
   pthread_mutex_unlock(lock);
   t_task_switch(task);
 }
 
-/* Makes a task that parked ready. The caller took the task from where it
-   parked, so no other caller makes it ready. A task that has not left its
-   stack yet is made ready by the thread that runs it. */
 static void t_task_ready(struct t_task *task) {
   int state = T_PARKING;
   if (atomic_compare_exchange_strong(&task->state, &state, T_RUNNING)) return;
@@ -1408,19 +1179,8 @@ static void t_task_ready(struct t_task *task) {
   t_run_push(task);
 }
 
-/* Spare threads. A blocked thread runs no task: it is in a call of the
-   operating system, or it is not a task and waits for one. For each
-   blocked thread, one spare thread may run tasks, so that as many threads
-   run tasks as the pool has. A spare thread runs nothing else and never
-   exits. It sleeps while no task is ready, and while as many spare
-   threads run tasks as threads are blocked. It has a queue of branches,
-   as a thread of the pool has, for the [parallel] blocks of its tasks. */
 static pthread_mutex_t t_spare_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_spare_wake = PTHREAD_COND_INITIALIZER;
-/* Under [t_spare_lock]: the spare threads, the ones that sleep, the ones
-   that run tasks, and the calls that no sleeping one has answered yet. A
-   thread that is called or started counts as running tasks from then on,
-   so that one ready task calls one thread. */
 static int t_spares;
 static int t_spares_idle;
 static int t_spares_busy;
@@ -1448,14 +1208,8 @@ static void *t_spare_main(void *argument) {
 static atomic_int t_monitor_asleep = 1;
 static void t_monitor_rouse(void);
 
-/* Called when a task has become ready, a thread has blocked, or a thread
-   has begun a call that can block. Calls or starts a spare thread if a
-   task is ready, no thread of the pool is about to take it, and fewer
-   spare threads run tasks than threads are blocked. */
 static void t_spare_ensure(void) {
   if (atomic_load(&t_run_count) == 0) return;
-  /* While tasks are ready, the monitor counts the threads whose calls
-     last. */
   if (atomic_load(&t_monitor_asleep)) t_monitor_rouse();
   if (atomic_load(&t_blocked) == 0 || atomic_load(&t_idle_runners) > 0) return;
   pthread_mutex_lock(&t_spare_lock);
@@ -1478,7 +1232,6 @@ static void t_spare_ensure(void) {
         t_spares += 1;
         t_spares_busy += 1;
       } else if (index == 1) {
-        /* No thread can run the program's tasks, which would wait forever. */
         t_out_of_memory();
       }
       pthread_attr_destroy(&attributes);
@@ -1487,19 +1240,10 @@ static void t_spare_ensure(void) {
   pthread_mutex_unlock(&t_spare_lock);
 }
 
-/* Calls that can block. Most such calls return at once: a read finds
-   bytes, a write finds room. A thread that counted as blocked from the
-   start of each would call a spare thread for nothing. So a thread only
-   records the tick at which its call began, and the monitor, a thread of
-   the runtime, counts it as blocked once the call has lasted a whole
-   tick. Go's runtime does the same.
-
-   The monitor ticks only while tasks are ready, since only then can a
-   blocked thread keep a task waiting. */
 #define T_COUNTED UINT_FAST64_MAX
 
 struct t_caller {
-  atomic_uint_fast64_t since; /* 0, the tick at which the call began, or T_COUNTED */
+  atomic_uint_fast64_t since;
   struct t_caller *next;
 };
 
@@ -1508,10 +1252,9 @@ static _Thread_local int t_caller_listed;
 static pthread_mutex_t t_monitor_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_monitor_wake = PTHREAD_COND_INITIALIZER;
 static pthread_once_t t_monitor_once = PTHREAD_ONCE_INIT;
-static struct t_caller *t_callers; /* Every thread that has made such a call, under the lock */
+static struct t_caller *t_callers;
 static atomic_uint_fast64_t t_tick = 1;
 
-/* The calling thread's record. Not inlined, as [t_task_self] is not. */
 __attribute__((noinline)) static struct t_caller *t_caller_self(void) {
   __asm__ __volatile__("");
   if (!t_caller_listed) {
@@ -1532,8 +1275,6 @@ static void *t_monitor_main(void *argument) {
   pthread_mutex_lock(&t_monitor_lock);
   for (;;) {
     if (atomic_load(&t_run_count) == 0) {
-      /* Sequentially consistent, so that of this and a thread that makes
-         a task ready, one sees the other. */
       atomic_store(&t_monitor_asleep, 1);
       if (atomic_load(&t_run_count) == 0) pthread_cond_wait(&t_monitor_wake, &t_monitor_lock);
       continue;
@@ -1543,8 +1284,6 @@ static void *t_monitor_main(void *argument) {
     int counted = 0;
     for (struct t_caller *caller = t_callers; caller != NULL; caller = caller->next) {
       uint_fast64_t since = atomic_load(&caller->since);
-      /* A call that began during the tick before this one may have just
-         begun. */
       if (since == 0 || since == T_COUNTED || tick - since < 2) continue;
       if (atomic_compare_exchange_strong(&caller->since, &since, T_COUNTED)) {
         atomic_fetch_add(&t_blocked, 1);
@@ -1577,8 +1316,6 @@ static void t_monitor_rouse(void) {
   pthread_mutex_unlock(&t_monitor_lock);
 }
 
-/* Around a call of the operating system that can block. Neither changes
-   [errno], which the code after the call reads. */
 void t_runtime_blocking_begin(void) {
   struct t_task *task = t_task_self();
   if (task != NULL) {
@@ -1595,10 +1332,6 @@ void t_runtime_blocking_end(void) {
   if (task != NULL) atomic_store(&task->blocking, 0);
 }
 
-/* A thread that waits and is not a task cannot park, so it blocks until
-   [done] is set. It runs no task meanwhile. A task that ran on top of the
-   thread's own computation could block for long, or wait for that
-   computation, and would hold it up. */
 static pthread_mutex_t t_block_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_block_wake = PTHREAD_COND_INITIALIZER;
 
@@ -1611,8 +1344,6 @@ static void t_block_until(atomic_int *done) {
   atomic_fetch_sub(&t_blocked, 1);
 }
 
-/* Sets [done] and wakes the thread that blocks until it is set. The frame
-   that holds [done] may be gone as soon as it is set. */
 static void t_unblock(atomic_int *done) {
   atomic_store(done, 1);
   pthread_mutex_lock(&t_block_lock);
@@ -1620,16 +1351,6 @@ static void t_unblock(atomic_int *done) {
   pthread_mutex_unlock(&t_block_lock);
 }
 
-/* Interrupting a blocked task. A cancelled task that is blocked in a call
-   of the operating system, such as a read or a sleep, has to return from
-   it. The runtime sends SIGURG to the thread that runs the task. The
-   handler does nothing and is installed without SA_RESTART, so the call
-   fails with EINTR, and the standard library returns its cancelled
-   error. Nothing else in a program uses SIGURG.
-
-   A task can start a blocking call just after an interrupt and miss it.
-   So a thread of the runtime interrupts the tasks of every cancelled
-   group again every few milliseconds, until the group is joined. */
 static void t_interrupt_handler(int signal) { (void)signal; }
 
 static pthread_mutex_t t_interrupter_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1637,8 +1358,6 @@ static pthread_cond_t t_interrupter_wake = PTHREAD_COND_INITIALIZER;
 static struct t_group *t_interrupter_groups;
 static pthread_once_t t_interrupt_once = PTHREAD_ONCE_INIT;
 
-/* Interrupts the group's tasks that are blocked, and those of the groups
-   that its tasks opened. The caller holds the group's lock. */
 static void t_group_interrupt(struct t_group *group) {
   for (struct t_task *task = group->tasks; task != NULL; task = task->sibling)
     if (atomic_load(&task->blocking)) pthread_kill(atomic_load(&task->thread), SIGURG);
@@ -1685,15 +1404,8 @@ static void t_interrupt_start(void) {
   if (failed) t_out_of_memory();
 }
 
-/* Waiting on a key. A key hashes to a slot, which counts the wakes of its
-   keys and holds their waiters. [watch] reads the count as a ticket,
-   [wait] parks the caller if the count still equals the ticket, and
-   [wake] increments the count and makes the waiters of the key ready.
-   Two keys can share a slot, so a wake of one key can make a [wait] on
-   the other return at once, and its caller tests its condition again. */
 #define T_WAIT_SLOTS 1024
 
-/* A thread that is not a task, waiting on a key. */
 struct t_thread_waiter {
   uint64_t key;
   atomic_int woken;
@@ -1702,7 +1414,7 @@ struct t_thread_waiter {
 
 struct t_wait_slot {
   pthread_mutex_t lock;
-  atomic_uint_fast64_t wakes; /* Changed under [lock], and read without it */
+  atomic_uint_fast64_t wakes;
   struct t_task *parked;
   struct t_thread_waiter *threads;
 };
@@ -1726,22 +1438,12 @@ int32_t t_runtime_tasks_cancelled(void) {
   return 0;
 }
 
-/* A caller makes its condition true before it wakes a key, and tests the
-   condition after it takes a ticket. So a ticket that already counts a
-   wake belongs to a caller that sees the condition. */
 uint64_t t_runtime_tasks_watch(uint64_t key) { return atomic_load(&t_wait_slot(key)->wakes); }
 
-/* Waits until [key] is woken, unless its slot has been woken since
-   [ticket] was issued. A cancellable wait does not start in a cancelled
-   task, and a cancel makes the tasks of its group that are parked in one
-   ready. */
 static void t_wait(uint64_t key, uint64_t ticket, int cancellable) {
   struct t_wait_slot *slot = t_wait_slot(key);
   struct t_task *task = t_task_self();
   pthread_mutex_lock(&slot->lock);
-  /* The task says where it parks before it reads whether it is cancelled,
-     and a cancel sets its flag before it looks for parked tasks. So the
-     task sees the flag, or the cancel finds the task. */
   if (task != NULL && cancellable) atomic_store(&task->cancellable, slot);
   if (atomic_load(&slot->wakes) != ticket || (cancellable && t_runtime_tasks_cancelled())) {
     pthread_mutex_unlock(&slot->lock);
@@ -1807,9 +1509,6 @@ int32_t t_runtime_tasks_wake(uint64_t key) {
   return 0;
 }
 
-/* Makes the group's tasks that are parked in a cancellable wait ready,
-   and those of the groups that its tasks opened. The caller holds the
-   group's lock. */
 static void t_group_wake(struct t_group *group) {
   for (struct t_task *task = group->tasks; task != NULL; task = task->sibling) {
     struct t_wait_slot *slot = atomic_load(&task->cancellable);
@@ -1829,14 +1528,10 @@ static void t_group_wake(struct t_group *group) {
   }
 }
 
-/* Timers. A wait with a time limit has a timer, which is in a heap that
-   is ordered by deadline until the timer fires or its wait ends. A thread
-   of the runtime sleeps until the earliest deadline, then marks that
-   timer fired and wakes its key. A timer is in the frame of its wait. */
 struct t_timer {
-  uint64_t deadline; /* On the monotonic clock, in nanoseconds */
+  uint64_t deadline;
   uint64_t key;
-  size_t index;      /* In the heap, until it fires */
+  size_t index;
   int fired;
 };
 
@@ -1858,7 +1553,6 @@ static void t_timer_place(struct t_timer *timer, size_t index) {
   timer->index = index;
 }
 
-/* Moves the timer at [index] up or down to where the heap is ordered. */
 static void t_timer_settle(size_t index) {
   struct t_timer *timer = t_timers[index];
   while (index > 0) {
@@ -1879,7 +1573,6 @@ static void t_timer_settle(size_t index) {
   t_timer_place(timer, index);
 }
 
-/* Takes a timer out of the heap. The caller holds [t_timer_lock]. */
 static void t_timer_remove(struct t_timer *timer) {
   size_t index = timer->index;
   t_timer_count -= 1;
@@ -1916,7 +1609,6 @@ static void *t_timer_main(void *argument) {
     t_timer_remove(first);
     first->fired = 1;
     uint64_t key = first->key;
-    /* The timer's frame may be gone as soon as the lock is released. */
     pthread_mutex_unlock(&t_timer_lock);
     t_runtime_tasks_wake(key);
     pthread_mutex_lock(&t_timer_lock);
@@ -1928,7 +1620,6 @@ static void t_timer_start(void) {
 #ifdef __APPLE__
   pthread_cond_init(&t_timer_wake, NULL);
 #else
-  /* The deadline of a timed wait is on the monotonic clock. */
   pthread_condattr_t clock;
   pthread_condattr_init(&clock);
   pthread_condattr_setclock(&clock, CLOCK_MONOTONIC);
@@ -1944,7 +1635,6 @@ static void t_timer_start(void) {
   if (failed) t_out_of_memory();
 }
 
-/* Starts a timer that fires after [nanoseconds] and then wakes [key]. */
 static void t_timer_begin(struct t_timer *timer, uint64_t nanoseconds, uint64_t key) {
   pthread_once(&t_timer_once, t_timer_start);
   uint64_t now = t_monotonic();
@@ -1972,7 +1662,6 @@ static int t_timer_fired(struct t_timer *timer) {
   return fired;
 }
 
-/* Ends a timer before its frame goes. Returns whether it fired. */
 static int t_timer_end(struct t_timer *timer) {
   pthread_mutex_lock(&t_timer_lock);
   int fired = timer->fired;
@@ -1981,8 +1670,6 @@ static int t_timer_end(struct t_timer *timer) {
   return fired;
 }
 
-/* Waits for the time. Returns 0 afterwards, or 1 as soon as the calling
-   task is cancelled. */
 int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
   uint64_t duration = seconds <= 0 ? 0 : (uint64_t)seconds;
   duration = duration > UINT64_MAX / 1000000000u ? UINT64_MAX : duration * 1000000000u;
@@ -2000,24 +1687,8 @@ int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
   }
 }
 
-/* Waiting for a descriptor. A socket or a pipe that tasks wait for does
-   not block:
-   a call that would block fails with EAGAIN, and the task then waits
-   here. The descriptor is registered with the system's poller (epoll on
-   Linux, kqueue elsewhere) at its first wait, for both directions, and
-   the system then reports each time the descriptor becomes readable or
-   writable. A thread of the runtime takes those reports and wakes the
-   key of the descriptor and direction.
-
-   The caller takes a ticket before its system call and waits on it after
-   EAGAIN, so a report between the two is not lost.
-
-   A caller that waits for any of several descriptors registers each one
-   with a key of its own instead, which a report that the descriptor is
-   readable wakes. So one wait covers them all. */
 #define T_DESCRIPTORS 65536
 
-/* Whose key the reports of a registered descriptor wake. */
 #define T_OWN_KEY 1
 #define T_CALLERS_KEY 2
 
@@ -2025,7 +1696,6 @@ static atomic_uchar t_descriptor_registered[T_DESCRIPTORS];
 static int t_poller = -1;
 static pthread_once_t t_poller_once = PTHREAD_ONCE_INIT;
 
-/* No address has the highest bit, so no mutex or timer has this key. */
 static uint64_t t_descriptor_key(int32_t descriptor, int32_t writing) {
   return (uint64_t)1 << 63 | (uint64_t)(uint32_t)descriptor << 1 | (uint64_t)(writing != 0);
 }
@@ -2040,11 +1710,8 @@ static void *t_poller_main(void *argument) {
     struct epoll_event events[64];
     int count = epoll_wait(t_poller, events, 64, -1);
     for (int index = 0; index < count; index++) {
-      /* The key that the descriptor was registered with: its own for
-         reading, which has the highest bit, or a caller's. */
       uint64_t key = events[index].data.u64;
       uint32_t found = events[index].events;
-      /* An error or a hang-up ends the wait in both directions. */
       if (found & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) t_runtime_tasks_wake(key);
       if ((key >> 63) && (found & (EPOLLOUT | EPOLLHUP | EPOLLERR))) t_runtime_tasks_wake(key | 1);
     }
@@ -2052,7 +1719,6 @@ static void *t_poller_main(void *argument) {
     struct kevent events[64];
     int count = kevent(t_poller, NULL, 0, events, 64, NULL);
     for (int index = 0; index < count; index++) {
-      /* The key that the descriptor was registered with, or 0 for its own. */
       uint64_t key = (uint64_t)(uintptr_t)events[index].udata;
       int writing = events[index].filter == EVFILT_WRITE;
       if (key == 0)
@@ -2082,13 +1748,6 @@ static void t_poller_start(void) {
   if (failed) t_out_of_memory();
 }
 
-/* Registers the descriptor with the poller, which reports at once if the
-   descriptor is ready now. Its reports wake [key], or the key of the
-   descriptor and direction where [key] is 0. A descriptor that is
-   registered with one is registered again to change to the other, and a
-   caller's key is registered each time, since the descriptor's last
-   caller may have been another. Returns 0 if the system cannot report on
-   the descriptor, as for a file. */
 static int t_descriptor_register(int32_t descriptor, uint64_t key) {
   int known = descriptor >= 0 && descriptor < T_DESCRIPTORS;
   if (key == 0 && known && atomic_load(&t_descriptor_registered[descriptor]) == T_OWN_KEY) return 1;
@@ -2099,7 +1758,7 @@ static int t_descriptor_register(int32_t descriptor, uint64_t key) {
   event.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET;
   event.data.u64 = key == 0 ? t_descriptor_key(descriptor, 0) : key;
   if (epoll_ctl(t_poller, EPOLL_CTL_ADD, descriptor, &event) != 0
-      && (*t_runtime_errno() != EEXIST || epoll_ctl(t_poller, EPOLL_CTL_MOD, descriptor, &event) != 0))
+      && (*t_runtime_errno_address_uncached() != EEXIST || epoll_ctl(t_poller, EPOLL_CTL_MOD, descriptor, &event) != 0))
     return 0;
 #else
   struct kevent changes[2];
@@ -2116,11 +1775,6 @@ uint64_t t_runtime_descriptor_watch(int32_t descriptor, int32_t writing) {
   return t_runtime_tasks_watch(t_descriptor_key(descriptor, writing));
 }
 
-/* Waits until the descriptor has become readable, or writable, since
-   [ticket] was issued. Returns 1 when the caller is to make its system
-   call again. Returns 0 when it is not, with [errno] set to say why:
-   EINTR if the calling task is cancelled, and EAGAIN if the socket's time
-   limit passed. */
 int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t ticket) {
   int32_t ready = 1;
   if (!t_descriptor_register(descriptor, 0)) {
@@ -2140,16 +1794,13 @@ int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t 
     }
   }
   if (t_runtime_tasks_cancelled()) {
-    *t_runtime_errno() = EINTR;
+    *t_runtime_errno_address_uncached() = EINTR;
     return 0;
   }
-  if (!ready) *t_runtime_errno() = EAGAIN;
+  if (!ready) *t_runtime_errno_address_uncached() = EAGAIN;
   return ready;
 }
 
-/* The key that the calling task or thread waits on for any of several
-   descriptors. It is an address, so it has no highest bit, and it is the
-   key of nothing else. */
 static uint64_t t_descriptors_key(void) {
   struct t_task *task = t_task_self();
   return (uint64_t)(uintptr_t)(task != NULL ? (void *)&task->wait_key : (void *)t_thread_context_self());
@@ -2157,10 +1808,6 @@ static uint64_t t_descriptors_key(void) {
 
 uint64_t t_runtime_descriptors_watch(void) { return t_runtime_tasks_watch(t_descriptors_key()); }
 
-/* Waits until one of the descriptors has become readable since [ticket]
-   was issued. A negative descriptor is skipped. Returns 1 when the caller
-   is to read again, and 0 with [errno] set to EINTR if the calling task
-   is cancelled. */
 int32_t t_runtime_descriptors_wait(const int32_t *descriptors, size_t count, uint64_t ticket) {
   uint64_t key = t_descriptors_key();
   int registered = 1;
@@ -2174,14 +1821,12 @@ int32_t t_runtime_descriptors_wait(const int32_t *descriptors, size_t count, uin
     t_runtime_blocking_end();
   }
   if (t_runtime_tasks_cancelled()) {
-    *t_runtime_errno() = EINTR;
+    *t_runtime_errno_address_uncached() = EINTR;
     return 0;
   }
   return 1;
 }
 
-/* The system forgets a descriptor that is closed, and gives its number to
-   the next one that is opened, so the runtime forgets it too. */
 int32_t t_runtime_close(int32_t descriptor) {
   if (descriptor >= 0 && descriptor < T_DESCRIPTORS)
     atomic_store(&t_descriptor_registered[descriptor], 0);
@@ -2211,9 +1856,6 @@ uint64_t t_runtime_tasks_open(void) {
   return (uint64_t)(uintptr_t)group;
 }
 
-/* Where a task starts, on its own stack. It never returns: when its
-   function returns, it leaves its group and switches to the thread for
-   the last time. */
 static void t_task_entry(void) {
   struct t_task *task = t_task_self();
 #ifdef T_ADDRESS_SANITIZER
@@ -2236,7 +1878,6 @@ static void t_task_entry(void) {
     group->joiner = NULL;
     group->joined = NULL;
   }
-  /* The group may be freed as soon as its lock is released. */
   pthread_mutex_unlock(&group->lock);
   if (joiner != NULL) t_task_ready(joiner);
   if (joined != NULL) t_unblock(joined);
@@ -2282,8 +1923,6 @@ uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, u
   return 1;
 }
 
-/* Waits until every task of the group has ended, then frees the group. A
-   task parks. A thread that is not a task blocks. */
 int32_t t_runtime_tasks_join(uint64_t handle) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   pthread_mutex_lock(&group->lock);
@@ -2325,11 +1964,6 @@ int32_t t_runtime_tasks_join(uint64_t handle) {
   return 0;
 }
 
-/* Cancels the group. Returns 1 to the first caller. The group's tasks
-   that are parked in a cancellable wait are made ready, so that each
-   returns from its wait. The group's tasks that are blocked in the
-   operating system are interrupted, now and again until the group is
-   joined. */
 int32_t t_runtime_tasks_cancel(uint64_t handle) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   int cancelled = 0;
@@ -2346,20 +1980,12 @@ int32_t t_runtime_tasks_cancel(uint64_t handle) {
   return 1;
 }
 
-/* Makes one waiter of [key] ready: a thread if one waits, and otherwise
-   the task that has waited longest. A caller that has taken a ticket and
-   has not parked yet returns from its wait at once, since the count has
-   changed. */
 static void t_wake_one(uint64_t key) {
   struct t_wait_slot *slot = t_wait_slot(key);
   struct t_task **task = NULL;
   struct t_thread_waiter **thread = NULL;
   pthread_mutex_lock(&slot->lock);
   atomic_fetch_add(&slot->wakes, 1);
-  /* A waiter is put at the front of its list, so the last one with the
-     key has waited longest. A program has few threads that are not tasks,
-     so taking a thread first keeps no task waiting for long, and taking a
-     task first could keep a thread waiting for ever. */
   for (struct t_thread_waiter **link = &slot->threads; *link != NULL; link = &(*link)->next)
     if ((*link)->key == key) thread = link;
   if (thread == NULL)
@@ -2379,17 +2005,6 @@ static void t_wake_one(uint64_t key) {
   if (woken_task != NULL) t_task_ready(woken_task);
 }
 
-/* A mutex is a [uint64_t] that its owner initialized to zero: 0 is
-   unlocked, 1 is locked, and 2 is locked while a caller may wait for it.
-   These are the states of Drepper's "Futexes Are Tricky". A caller that
-   finds the mutex locked sets it to 2 and waits on its address as a key,
-   and an unlock that finds 2 wakes one waiter. A caller that takes the
-   mutex after it has waited takes it as 2, since it cannot tell whether
-   another caller still waits. So a lock and an unlock that no other
-   caller contends are one atomic operation each.
-
-   The wait is not cancellable: a cancelled task still waits for the
-   mutex, since the call it made has no other result to return. */
 int32_t t_runtime_tasks_lock(uint64_t mutex) {
   uint64_t *word = (uint64_t *)(uintptr_t)mutex;
   uint64_t unlocked = 0;
@@ -2408,7 +2023,6 @@ int32_t t_runtime_tasks_unlock(uint64_t mutex) {
   return 0;
 }
 
-/* A task goes to the end of the ready queue. */
 int32_t t_runtime_tasks_yield(void) {
   struct t_task *task = t_task_self();
   if (task != NULL) t_task_switch(task);
@@ -2416,15 +2030,6 @@ int32_t t_runtime_tasks_yield(void) {
   return 0;
 }
 
-/* Waiting for signals. Any thread can wait, so the signals cannot be
-   blocked and taken with [sigwait], which needs them blocked in every
-   thread. A handler records each signal in [t_signals_pending] and writes
-   a byte to a pipe. A thread of the runtime reads the pipe and wakes the
-   waiters, since a handler may not use a condition variable. That thread
-   also unblocks every handled signal, so that a signal which the program
-   was started with blocked is delivered to it. A waiter takes a pending
-   signal that it waits for, or blocks until the next wake. A signal that
-   no waiter takes stays pending for a later one. */
 static atomic_uint_fast64_t t_signals_pending;
 static uint64_t t_signals_handled;
 static pthread_mutex_t t_signals_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -2470,8 +2075,6 @@ static void t_signals_start(void) {
   if (failed) t_out_of_memory();
 }
 
-/* Blocks until one of the signals arrives, and returns its number. Returns
-   0 if the calling task is cancelled first. */
 int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
   pthread_once(&t_signals_once, t_signals_start);
   uint_fast64_t wanted = 0;
@@ -2502,12 +2105,6 @@ int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
   uint64_t key = (uint64_t)(uintptr_t)&t_signals_pending;
   for (;;) {
     uint64_t ticket = t_runtime_tasks_watch(key);
-    /* A signal that was sent while every thread blocked it has run no
-       handler: one that the program was started with blocked, and that
-       arrived before the first wait for it. It is pending, and the
-       calling thread takes it if it can see it. On macOS only the thread
-       it is pending for can take it. On Linux any thread can, so the
-       take must not block: the runtime's thread may have taken it. */
     sigset_t blocked;
     if (sigpending(&blocked) == 0)
       for (size_t index = 0; index < count; index++) {
@@ -2541,11 +2138,6 @@ int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
 
 let resolving =
   {|
-/* A host's addresses, for the standard library, which cannot follow the
-   chain of structures [getaddrinfo] gives. Each address is written as a
-   byte that is 4 or 6 and then its 4 or 16 bytes, as many as there is room
-   for. The result is how many bytes were written, -1 where the system knows
-   no such host, and -2 where it could not find out. */
 long t_runtime_addresses_of_host(const char *host, void *room, size_t size) {
   struct addrinfo wanted;
   memset(&wanted, 0, sizeof wanted);
@@ -2578,8 +2170,6 @@ long t_runtime_addresses_of_host(const char *host, void *room, size_t size) {
 
 let tests_table =
   {|
-/* The tests of a test program, which its [main] gives before it calls the
-   runner. */
 typedef void (*t_test)(void);
 const t_test *t_runtime_tests;
 
@@ -2637,8 +2227,6 @@ let tests_calling ~time_limit_ms ~runner tests =
     (if tests = [] then "0" else table)
     runner (List.length tests) time_limit_ms
 
-(* The startup of code run while compiling: it runs the evaluator, which
-   writes its result. *)
 let evaluator_calling entry =
   Printf.sprintf
     "void t_runtime_install(void);\n\
