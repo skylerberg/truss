@@ -1,17 +1,3 @@
-(* Measures the speed of the lexer and the parser. This is a tool, not a
-   test.
-
-     dune exec stage0/tools/benchmark/benchmark.exe -- FILE...
-     dune exec stage0/tools/benchmark/benchmark.exe -- --worst-cases
-
-   For each file, it lexes and parses the file several times and prints,
-   for each stage, the best time and the speed in megabytes per second.
-
-   With [--worst-cases], it generates the inputs that once took the lexer
-   or the parser time quadratic in their size, each at one size and at
-   twice that size, and prints the ratio of the two times. A stage that is
-   linear has a ratio near 2, and one that is quadratic a ratio near 4. *)
-
 let best_time run =
   let best = ref infinity in
   for _ = 1 to 5 do
@@ -39,7 +25,6 @@ let file path =
 
 let repeated count text = String.concat "" (List.init count (fun _ -> text))
 
-(* Each input, by the construct that repeats [count] times in it. *)
 let worst_cases =
   [
     ("unclosed openers", fun count -> "let x: Int64 = " ^ String.make count '(' ^ "\n");
@@ -65,7 +50,6 @@ let worst_case (name, input) =
   let report stage time =
     let small = time (source size) and large = time (source (2 * size)) in
     Printf.printf "%-34s %-8s %.3f s, %.3f s at twice the size" name stage small large;
-    (* A ratio of two times this short is noise. *)
     if small >= 0.005 then Printf.printf ", ratio %.1f" (large /. small);
     print_newline ()
   in

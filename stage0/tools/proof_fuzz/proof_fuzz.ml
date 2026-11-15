@@ -1,25 +1,3 @@
-(* Fuzzing the prover. This is a tool, not a test: run it by hand to look
-   for a program the prover proves that fails a run-time check when it
-   runs, and turn each one it finds into a focused test.
-
-     dune exec stage0/tools/proof_fuzz/proof_fuzz.exe -- [--seed N] [--count N] [--samples N] [--verbose] FILE...
-
-   Each file is a seed, or, for a Markdown document, each of its ```truss
-   blocks is: those that check and prove on their own, with the standard
-   library, are used. [seeds.truss] beside this file is a seed of integer
-   functions, as few of the documents' examples are. Each
-   mutant changes one token of a seed: an integer moved by one, [<] for
-   [<=] and the like, or [+] for [-]. For each mutant that checks, every
-   function whose obligations all prove, with integer or [Bool] parameters
-   and result, no capabilities, no generics, and [requires] that can run,
-   is run, built with its checks, on its parameters' extremes and on random
-   values that its [requires] admit, which a function the fuzzer adds
-   decides. A run that stops at a check is a proof the prover should not
-   have made.
-
-   It prints each such mutant, function, and arguments, and exits with
-   status 1 if there was one. *)
-
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_state = lazy (Database.For_testing.standard_state ())
@@ -51,8 +29,6 @@ let load text =
              (Pipeline.lowering_requests pipeline [ example.package ])
              (Lazy.force compiler) (Lazy.force cache) settings) )
 
-(* The bits and signedness of a built-in integer type, or of [Bool] as one
-   bit. *)
 let integer (ty : Types.ty) =
   if Types.is_builtin Bool ty then Some (1, false) else Types.integer_bits ty
 
@@ -70,7 +46,7 @@ type candidate = {
   path : Path.t;
   key : Resolve.Names.key;
   signature : Types.signature;
-  admits : string list;  (** Each [requires], as written. *)
+  admits : string list;
   ranges : (int * bool) list;
 }
 
@@ -105,8 +81,6 @@ let runnable pipeline =
                 "(" ^ Prover.Facts.text_of source requirement.clause.origin ^ ")")
               requires
           in
-          (* [admitting] writes each clause as code, where [==>] is not
-             allowed. *)
           match List.filter_map Fun.id ranges with
           | ranges_written
             when List.length ranges_written = List.length ranges
@@ -116,7 +90,6 @@ let runnable pipeline =
       | _ -> None)
     (lookups.interface.names.declarations example)
 
-(* Whether every obligation of a definition proves. *)
 let proven (names : Resolve.Names.lookups) key states =
   match (names.place key, names.text key) with
   | Some { base; _ }, Some text ->
@@ -128,7 +101,6 @@ let proven (names : Resolve.Names.lookups) key states =
         states
   | _ -> false
 
-(* A function that says whether arguments meet another's [requires]. *)
 let admitting index candidate =
   Printf.sprintf "\nfn fuzz_requires_%d(%s) -> Bool {\n  %s\n}\n" index
     (String.concat ", "
@@ -211,7 +183,6 @@ let run_mutant ~samples text =
                        candidate.ranges)))
             candidates)
 
-(* Each one-token change of a seed that the fuzzer makes. *)
 let mutants text =
   let tokens, _ = Lexer.lex (Source.create ~path:"seed.truss" text) in
   let replace (span : Token.span) by =

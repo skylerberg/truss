@@ -1,10 +1,3 @@
-(* debug tokens|tree [--json] FILE: for working on the compiler, a file's
-   tokens, one a line, or each definition's syntax tree as an S-expression,
-   with its diagnostics on standard error, or with --json, only the
-   diagnostics, on standard output. It exits with 1 when there are
-   diagnostics. Run it with [dune exec stage0/tools/debug/debug.exe]. It is
-   a tool of this repository, and not part of the [truss] command. *)
-
 open Token
 
 let float_to_string significand exponent =
@@ -78,16 +71,12 @@ let read file =
   end;
   Source.read_file file
 
-(* Lexes one file and prints its tokens, one per line, unless [json], when
-   it prints only the diagnostics as JSON. *)
 let tokens ~file ~json =
   let source = read file in
   let tokens, diagnostics = Lexer.lex source in
   if not json then print_tokens source tokens;
   show_diagnostics ~json source diagnostics
 
-(* Lexes and parses one file and prints each definition's tree, unless
-   [json], when it prints only the diagnostics as JSON. *)
 let tree ~file ~json =
   let source = read file in
   let tokens, lexer_diagnostics = Lexer.lex source in

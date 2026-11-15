@@ -1,5 +1,3 @@
-// Draws the page around the Graphviz drawing in #canvas. LIBRARIES, from
-// graph_data.js, lists every declared dependency, as the drawing does.
 (() => {
   const canvas = document.getElementById("canvas");
   const panel = document.getElementById("panel");
@@ -28,7 +26,6 @@
     return seen;
   };
 
-  // An area's color is its place in the sorted list of areas.
   const areas = [...new Set(LIBRARIES.map((library) => library.area))].sort(byName);
   const areaColor = (area) => `var(--area-${areas.indexOf(area) % 14})`;
 
@@ -45,8 +42,6 @@
       .map((end) => end.replace(/^lib:/, ""));
     return { edge, source, target };
   });
-
-  // The panel and the highlighting
 
   const escape = (text) =>
     String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -113,8 +108,6 @@
     svg.classList.remove("focused");
   };
 
-  // Highlights the libraries of one directory of the overview, and the edges
-  // between two of them.
   const highlightArea = (area) => {
     clearHighlight();
     svg.classList.add("focused");
@@ -156,8 +149,6 @@
       if (name !== shown && !canvas.classList.contains("panning")) show(name);
     });
   }
-
-  // The view: a center in drawing coordinates and a scale in pixels per unit
 
   const drawing = svg.viewBox.baseVal;
   const bounds = { x: drawing.x, y: drawing.y, width: drawing.width, height: drawing.height };
@@ -213,8 +204,6 @@
     { passive: false },
   );
 
-  // A drag pans. The pointer is captured only once it moves, so a click on a
-  // node still reaches the node's link.
   let drag = null;
   canvas.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
@@ -261,8 +250,6 @@
   document.getElementById("zoom-out").addEventListener("click", () => zoomAtCenter(1 / 1.3));
   document.getElementById("fit").addEventListener("click", fit);
   new ResizeObserver(apply).observe(canvas);
-
-  // Search
 
   document.getElementById("library-names").innerHTML = [...nodes.keys()]
     .sort(byName)

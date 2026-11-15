@@ -1,9 +1,4 @@
 #!/bin/sh
-# Runs test executables, `test-shares.sh count executable...`, each as
-# `count` processes at once, each with TRUSS_TEST_SHARE set to its share of
-# the executable's tests, since one process runs its tests on one core.
-# Each process's log is printed once it ends, folded where it passed, and
-# the step fails if any process failed.
 set -eu
 
 count=$1

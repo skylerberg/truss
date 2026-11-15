@@ -1,11 +1,3 @@
-(* Writes unicode_tables.ml, the data behind the Unicode module, from the
-   Unicode data files in the directory given as the only argument. See
-   regenerate.sh, which downloads those files and checks their hashes first.
-
-   Every table of code points is a flat array of inclusive ranges,
-   [| first; last; first; last; ... |], sorted and merged. A table that maps
-   ranges to values has a third entry per range. *)
-
 let data_directory = ref ""
 let read_lines name = Ucd.read_lines !data_directory name
 let records name = Ucd.records !data_directory name
@@ -30,7 +22,6 @@ let general_category_ranges categories =
 let contains ranges value =
   List.exists (fun (first, last) -> first <= value && value <= last) ranges
 
-(* The ranges of the first set with the code points of the second removed. *)
 let subtract ranges removed =
   let rec cut (first, last) = function
     | [] -> [ (first, last) ]
@@ -65,8 +56,6 @@ let emit_strings name values =
   List.iter (fun value -> Buffer.add_string output (Printf.sprintf "\n  %S;" value)) values;
   line "\n|]\n"
 
-(* UnicodeData.txt: each character's code point and name. *)
-
 let characters =
   lazy
     (records "UnicodeData.txt"
@@ -75,8 +64,6 @@ let characters =
       | _ -> failwith "UnicodeData.txt: unexpected line"))
 
 let unicode_version () =
-  (* The first line of DerivedCoreProperties.txt is
-     "# DerivedCoreProperties-18.0.0.txt". *)
   match read_lines "DerivedCoreProperties.txt" with
   | first :: _ ->
       let prefix = "# DerivedCoreProperties-" in
@@ -89,14 +76,9 @@ let () =
   let characters = Lazy.force characters in
   line (Printf.sprintf "let unicode_version = %S\n" (unicode_version ()));
 
-  (* Words, which the scanner reads as names *)
   emit_ranges "xid_start" (property_ranges "DerivedCoreProperties.txt" "XID_Start");
   emit_ranges "xid_continue" (property_ranges "DerivedCoreProperties.txt" "XID_Continue");
 
-  (* Forbidden characters: Bidi_Control; Cc except
-     tab, line feed, and carriage return, which the scanner handles itself;
-     and Default_Ignorable_Code_Point except the joiners and the variation
-     selectors. *)
   let bidi_control = property_ranges "PropList.txt" "Bidi_Control" in
   let control = general_category_ranges [ "Cc" ] in
   let ignorable =
@@ -111,10 +93,6 @@ let () =
   emit_ranges "bidi_control" bidi_control;
   emit_ranges "control" control;
 
-  (* The names of the assigned forbidden characters, for error messages. A
-     control character's name comes from NameAliases.txt, since
-     UnicodeData.txt calls them all "<control>". Three C1 controls have only a
-     "figment" alias there, such as PADDING CHARACTER. *)
   let aliases = records "NameAliases.txt" in
   let alias value kind =
     List.find_map

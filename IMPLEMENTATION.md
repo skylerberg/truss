@@ -41,13 +41,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   needs odoc and dune-deps from opam and Graphviz from Homebrew, which
   `dune-project` does not list because CI never builds the documentation.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
-  `truss.opam` matches `dune-project`, runs every test suite, and proves the
-  standard library, on every pull request and every push to `main`. It must
-  stay fast: it installs nothing in an ordinary run, restores dune's cache,
-  the solver's answers, and compiled objects from `main`, and gives the
-  longest suites runners of their own. The workflow's comments say why each
-  job is laid out as it is; when the proofs' jobs become the longest again,
-  add a runner to their list.
+  `truss.opam` matches `dune-project`, rejects comments, runs every test
+  suite, and proves the standard library, on every pull request and every
+  push to `main`. It must stay fast: it installs nothing in an ordinary run,
+  restores dune's cache, the solver's answers, and compiled objects from
+  `main`, and gives the longest suites runners of their own. When the
+  proofs' jobs become the longest again, add an entry to the `share` matrix
+  of the `proofs` job.
 
 ### Libraries
 
@@ -182,7 +182,10 @@ Code has no comments. Nothing checks a comment against the code it
 describes, so the comment drifts. A reason, an invariant, or a trap is
 stated instead by a name, by code that cannot be gotten wrong, or by a test
 named after the failure it prevents. A rule of the language belongs in
-[SPECIFICATION.md](SPECIFICATION.md).
+[SPECIFICATION.md](SPECIFICATION.md). CI rejects a comment in any tracked
+file with `stage0/tools/comments`. The tool also rejects a file type that it
+has no comment syntax for, so a new type of file cannot add comments
+unchecked.
 
 ### Testing
 

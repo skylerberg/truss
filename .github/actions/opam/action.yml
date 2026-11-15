@@ -41,7 +41,6 @@ runs:
         key: ${{ steps.key.outputs.key }}
         restore-keys: ${{ steps.key.outputs.base }}
 
-    # Nothing restored: opam, the switch, and every dependency from nothing.
     - if: steps.restore.outputs.cache-matched-key == ''
       shell: bash
       env:
@@ -55,9 +54,6 @@ runs:
         ~/.local/bin/opam init --bare --disable-sandboxing --no-setup
         ~/.local/bin/opam switch create default "ocaml-base-compiler.${{ inputs.ocaml-version }}"
 
-    # Anything but an exact match: the dependencies truss.opam asks for now.
-    # A restored switch's package list is brought up to date first, so that a
-    # version released since it was made can be installed.
     - if: steps.restore.outputs.cache-hit != 'true'
       shell: bash
       env:

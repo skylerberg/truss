@@ -1,10 +1,4 @@
 #!/bin/sh
-# Proves one runner's share of the standard library, `prove-share.sh index
-# count`, from the directory that holds standard_library_tests.exe. The
-# prover translates on one core, so the runner's share is proven by one
-# process for each core, each a share of its own.
-# Each process's log is printed once it ends, folded where it passed, and
-# the step fails if any process failed.
 set -eu
 
 runner=$1
