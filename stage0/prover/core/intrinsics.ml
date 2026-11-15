@@ -27,7 +27,7 @@ let apply_slice context frame (site : Invocation.site) ~(base_type : Types.ty) ~
         length
   in
   oblige context frame Requires span
-    (Printf.sprintf "`%s` may not be within the collection." (quote frame.source site.origin))
+    [ Text "`"; quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(
       Operation ("<=", [ int 0; low ])
       &&& Operation ("<=", [ low; high ])
@@ -174,7 +174,9 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
   let needs requirement condition =
     oblige context frame Requires
       (span_of frame.source site.origin)
-      (Printf.sprintf "`%s` may not %s." (quote frame.source site.origin) requirement)
+      [
+        Text "`"; quote frame.source site.origin; Text (Printf.sprintf "` may not %s." requirement);
+      ]
       condition
   in
   let element_of scalar = Types.builtin (Intrinsic.libc_builtin scalar) in
@@ -348,7 +350,9 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   let needs ?(requirement = "have the room it writes into") condition =
     oblige context frame Requires
       (span_of frame.source site.origin)
-      (Printf.sprintf "`%s` may not %s." (quote frame.source site.origin) requirement)
+      [
+        Text "`"; quote frame.source site.origin; Text (Printf.sprintf "` may not %s." requirement);
+      ]
       condition
   in
   let keeps_capacity () =

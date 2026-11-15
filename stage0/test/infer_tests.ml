@@ -18,10 +18,10 @@ let expression_at text written occurrence =
         let key = Resolve.Names.key_of declaration in
         match
           ( (Support.names database key.module_.package).definition key,
-            (Support.names database key.module_.package).base key,
+            (Support.names database key.module_.package).place key,
             Pipeline.For_testing.checked_body (pipeline database) key )
         with
-        | Some definition, Some (_, base), Some result ->
+        | Some definition, Some { base; _ }, Some result ->
             let best = ref None in
             let exact (value : Syntax.expression) =
               value.span.stop - value.span.start = String.length written

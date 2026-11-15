@@ -1984,7 +1984,7 @@ type Priority =
 | `Ordered` | Variants in declaration order, then fields in declaration order |
 | `Default` | For a record, each field's written default, or its type's `default()` for a field without one. The value must meet the type's invariant, which the prover checks |
 | `serialization::Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
-| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error at the value's path that quotes the clause |
+| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error at the value's path that quotes the clause, with each run of whitespace as one space |
 | `Copyable`, `Plain` | Nothing: an opaque type declares that it copies (see [Copying](#copying)) |
 
 - Every field has the trait, and a derived trait's required traits are

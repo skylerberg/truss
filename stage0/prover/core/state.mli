@@ -7,12 +7,25 @@ module Locals = Locals
 type span = Syntax.span
 type evaluation = { from_template : Path.t; texts : string list; clause : int }
 
+type piece =
+  | Text of string
+  | Quote of Names.key * Core.origin
+  | Substituted of {
+      key : Names.key;
+      clause : Core.origin;
+      replacements : (Core.origin * string) list;
+    }
+
+type message = piece list
+type edit = { at : span; replacement : message }
+type fix = { title : message; edits : edit list }
+
 type obligation = {
   code : Code.prover;
   span : span;
-  message : string;
-  cited : (Names.key * span) option;
-  fixes : span Diagnostic.fix list;
+  message : message;
+  cited : (Names.key * Core.origin) option;
+  fixes : fix list;
   query : Logic.query;
   values : (Logic.symbol * string) list;
   locals : (Logic.symbol * string) list;

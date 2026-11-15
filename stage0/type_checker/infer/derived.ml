@@ -14,6 +14,16 @@ let gives (trait : Path.t) name =
       true
   | _ -> false
 
+let with_single_spaces text =
+  let is_space = function ' ' | '\t' | '\n' | '\r' -> true | _ -> false in
+  let buffer = Buffer.create (String.length text) in
+  String.iteri
+    (fun index character ->
+      if not (is_space character) then Buffer.add_char buffer character
+      else if index = 0 || not (is_space text.[index - 1]) then Buffer.add_char buffer ' ')
+    text;
+  Buffer.contents buffer
+
 let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match path with
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
@@ -638,7 +648,8 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                             if origin >= 0 && origin < Array.length spans then
                               let span = spans.(origin) in
                               if span.stop > span.start && span.stop <= String.length text then
-                                String.sub text span.start (span.stop - span.start)
+                                with_single_spaces
+                                  (String.sub text span.start (span.stop - span.start))
                               else "its type's invariant"
                             else "its type's invariant"
                           in

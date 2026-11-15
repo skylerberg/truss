@@ -1,13 +1,9 @@
-module Node = struct
+module Table = Hashtbl.Make (struct
   type t = Instance.key
 
   let equal = Instance.equal
   let hash key = Hashtbl.hash_param 64 256 key
-  let compare = Instance.compare
-end
-
-module Table = Hashtbl.Make (Node)
-module Instance_components = Components.Make (Node)
+end)
 
 let bug format = Compiler_bug.bug ~stage:"Reachable" format
 
@@ -102,27 +98,9 @@ let group_key ~link ~deep ~members start =
            walked);
     ]
 
-let reach_keys ~link ~known root =
-  let computed = Table.create 64 in
-  let reach_of key =
-    match known key with Some reach_key -> reach_key | None -> Table.find computed key
-  in
-  if Option.is_none (known root) then
-    List.iter
-      (fun members ->
-        let keys =
-          match members with
-          | [ key ] ->
-              let own, references = link key in
-              [ (key, unit_key ~own (List.map reach_of references)) ]
-          | members ->
-              List.map
-                (fun member -> (member, group_key ~link ~deep:reach_of ~members member))
-                members
-        in
-        List.iter (fun (key, reach_key) -> Table.replace computed key reach_key) keys)
-      (Instance_components.of_graph
-         ~successors:(fun key ->
-           List.filter (fun next -> Option.is_none (known next)) (snd (link key)))
-         [ root ]);
-  List.of_seq (Table.to_seq computed)
+let component_keys ~link ~deep members =
+  match members with
+  | [ key ] ->
+      let own, references = link key in
+      [ (key, unit_key ~own (List.map deep references)) ]
+  | members -> List.map (fun member -> (member, group_key ~link ~deep ~members member)) members

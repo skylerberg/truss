@@ -7,7 +7,7 @@ type context = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   diagnostics : Syntax.diagnostic list ref;
-  named : (Syntax.span * Types.ty) list ref;
+  named : (Syntax.id * Types.ty) list ref;
 }
 
 val create : Lookups.t -> Resolve.resolved -> Environment.scope -> context

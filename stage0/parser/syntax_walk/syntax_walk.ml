@@ -275,59 +275,7 @@ let definition ?statement:visit on_expression (definition : definition) =
       block body
   | Definition_error _ -> ()
 
-let spans (definition_ : definition) : span array =
-  let spans = Array.make (definition_.id + 1) definition_.span in
-  let rec pattern (written : pattern) =
-    spans.(written.id) <- written.span;
-    match written.kind with
-    | Wildcard | Binding _ | Qualified_constant _ | Literal _ | Pattern_error -> ()
-    | Pattern_range { start; stop; _ } ->
-        spans.(start.id) <- start.span;
-        spans.(stop.id) <- stop.span
-    | Variant { fields; _ } -> Option.iter (List.iter pattern_field) fields
-    | Record fields -> List.iter pattern_field fields
-    | Alternatives alternatives -> List.iter pattern alternatives
-  and pattern_field (written : pattern_field) =
-    match written.kind with Named_field (_, inner) | Field inner -> pattern inner | Rest -> ()
-  in
-  let rec expression (value : expression) =
-    spans.(value.id) <- value.span;
-    (match value.kind with
-    | Is { pattern = matched; _ } -> pattern matched
-    | With (_, updates) ->
-        List.iter (fun (update : update) -> spans.(update.id) <- update.span) updates
-    | Quantified { binder = Binder_in (bound, _); _ } -> pattern bound
-    | Lambda { parameters; _ } -> List.iter pattern parameters
-    | Match { arms; _ } ->
-        List.iter
-          (fun (arm : arm) ->
-            spans.(arm.id) <- arm.span;
-            List.iter pattern arm.patterns)
-          arms
-    | _ -> ());
-    expression_parts ~expression ~statement value
-  and statement (written : statement) =
-    spans.(written.id) <- written.span;
-    (match written.kind with
-    | Let { pattern = bound; _ } -> pattern bound
-    | For { pattern = bound; clauses; _ } ->
-        pattern bound;
-        List.iter (fun (clause : loop_clause) -> spans.(clause.id) <- clause.span) clauses
-    | While { clauses; _ } ->
-        List.iter (fun (clause : loop_clause) -> spans.(clause.id) <- clause.span) clauses
-    | _ -> ());
-    statement_parts ~expression ~statement written
-  in
-  (match definition_.kind with
-  | Function { signature = { clauses; _ }; _ }
-  | Method_declaration { clauses; _ }
-  | Theorem { clauses; _ } ->
-      List.iter (fun (clause : clause) -> spans.(clause.id) <- clause.span) clauses
-  | _ -> ());
-  definition ~statement expression definition_;
-  spans
-
-let walk_names ~on_name:add (definition_ : definition) =
+let walk_names ?(on_path_type = ignore) ~on_name:add (definition_ : definition) =
   let path (written : path) =
     List.iter add written.modules;
     add written.last
@@ -350,6 +298,7 @@ let walk_names ~on_name:add (definition_ : definition) =
         List.iter clause_ clauses
     | Type_error -> ()
   and path_type_ (written : path_type) =
+    on_path_type written;
     path written.path;
     List.iter
       (function
@@ -621,9 +570,544 @@ let walk_names ~on_name:add (definition_ : definition) =
       block_ body
   | Definition_error { name; _ } -> Option.iter definition_name name
 
+let spans (definition_ : definition) : span array =
+  let spans = Array.make (definition_.id + 1) definition_.span in
+  let rec pattern (written : pattern) =
+    spans.(written.id) <- written.span;
+    match written.kind with
+    | Wildcard | Binding _ | Qualified_constant _ | Literal _ | Pattern_error -> ()
+    | Pattern_range { start; stop; _ } ->
+        spans.(start.id) <- start.span;
+        spans.(stop.id) <- stop.span
+    | Variant { fields; _ } -> Option.iter (List.iter pattern_field) fields
+    | Record fields -> List.iter pattern_field fields
+    | Alternatives alternatives -> List.iter pattern alternatives
+  and pattern_field (written : pattern_field) =
+    match written.kind with Named_field (_, inner) | Field inner -> pattern inner | Rest -> ()
+  in
+  let rec expression (value : expression) =
+    spans.(value.id) <- value.span;
+    (match value.kind with
+    | Is { pattern = matched; _ } -> pattern matched
+    | With (_, updates) ->
+        List.iter (fun (update : update) -> spans.(update.id) <- update.span) updates
+    | Quantified { binder = Binder_in (bound, _); _ } -> pattern bound
+    | Lambda { parameters; _ } -> List.iter pattern parameters
+    | Match { arms; _ } ->
+        List.iter
+          (fun (arm : arm) ->
+            spans.(arm.id) <- arm.span;
+            List.iter pattern arm.patterns)
+          arms
+    | _ -> ());
+    expression_parts ~expression ~statement value
+  and statement (written : statement) =
+    spans.(written.id) <- written.span;
+    (match written.kind with
+    | Let { pattern = bound; _ } -> pattern bound
+    | For { pattern = bound; clauses; _ } ->
+        pattern bound;
+        List.iter (fun (clause : loop_clause) -> spans.(clause.id) <- clause.span) clauses
+    | While { clauses; _ } ->
+        List.iter (fun (clause : loop_clause) -> spans.(clause.id) <- clause.span) clauses
+    | _ -> ());
+    statement_parts ~expression ~statement written
+  in
+  (match definition_.kind with
+  | Function { signature = { clauses; _ }; _ }
+  | Method_declaration { clauses; _ }
+  | Theorem { clauses; _ } ->
+      List.iter (fun (clause : clause) -> spans.(clause.id) <- clause.span) clauses
+  | _ -> ());
+  definition ~statement expression definition_;
+  walk_names
+    ~on_path_type:(fun (written : path_type) -> spans.(written.id) <- written.span)
+    ~on_name:ignore definition_;
+  spans
+
 let names definition_ =
   let names = ref [] in
   walk_names ~on_name:(fun name -> names := name :: !names) definition_;
   List.stable_sort
     (fun (left : name) (right : name) -> compare left.span.start right.span.start)
     !names
+
+let without_positions (definition_ : definition) : definition =
+  let no_span = Span.zero_width 0 in
+  let name_ (written : name) = { written with span = no_span } in
+  let path (written : path) =
+    { modules = List.map name_ written.modules; last = name_ written.last }
+  in
+  let rec type_ (written : type_expression) : type_expression =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Path_type written -> Path_type (path_type written)
+        | Self_type name -> Self_type (Option.map name_ name)
+        | Associated (base, name) -> Associated (name_ base, name_ name)
+        | Any_type written -> Any_type (path_type written)
+        | Function_type { inputs; output; clauses } ->
+            Function_type
+              {
+                inputs =
+                  List.map
+                    (fun (input : function_input) ->
+                      { input with name = Option.map name_ input.name; type_ = type_ input.type_ })
+                    inputs;
+                output = Option.map type_ output;
+                clauses = List.map clause clauses;
+              }
+        | Type_error -> Type_error);
+    }
+  and path_type (written : path_type) =
+    {
+      written with
+      path = path written.path;
+      arguments = List.map type_argument written.arguments;
+      span = no_span;
+    }
+  and type_argument = function
+    | Type_argument written -> Type_argument (type_ written)
+    | Count (value, _) -> Count (value, no_span)
+    | Count_name written -> Count_name (name_ written)
+    | Constraint (name, written) -> Constraint (name_ name, type_ written)
+  and capability (written : capability_reference) : capability_reference =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Capability_path written -> Capability_path (path_type written)
+        | Self_capabilities written -> Self_capabilities (name_ written)
+        | Associated_capabilities (base, name) -> Associated_capabilities (name_ base, name_ name));
+    }
+  and clause (written : clause) : clause =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Uses capabilities -> Uses (List.map capability capabilities)
+        | Requires value -> Requires (expression value)
+        | Ensures value -> Ensures (expression value)
+        | Decreases measures -> Decreases (List.map expression measures)
+        | Cost written -> Cost (cost written)
+        | Clause_error -> Clause_error);
+    }
+  and cost (written : cost) =
+    {
+      written with
+      resource =
+        (match written.resource with
+        | Calls (Call_parameter written) -> Calls (Call_parameter (name_ written))
+        | Calls (Call_capability written) -> Calls (Call_capability (path_type written))
+        | Calls (Call_method (written, name)) -> Calls (Call_method (path_type written, name_ name))
+        | (Time | Allocations | Allocated_bytes) as resource -> resource);
+      bound =
+        (match written.bound with
+        | Big_o value -> Big_o (expression value)
+        | At_most value -> At_most (expression value)
+        | Exactly value -> Exactly (expression value)
+        | Finite -> Finite);
+    }
+  and string_literal (written : string_literal) =
+    {
+      written with
+      tag = Option.map path written.tag;
+      first = text written.first;
+      rest = List.map (fun (value, rest) -> (expression value, text rest)) written.rest;
+      span = no_span;
+    }
+  and text (written : text) = { written with span = no_span }
+  and expression (written : expression) : expression =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | ( Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
+          | Self_type_value | Expression_error ) as kind ->
+            kind
+        | String literal -> String (string_literal literal)
+        | Name written -> Name (path written)
+        | Member (base, name) -> Member (expression base, name_ name)
+        | Bracket (base, items) ->
+            Bracket
+              ( expression base,
+                List.map
+                  (function
+                    | Item item -> Item (expression item)
+                    | Item_constraint (name, written) -> Item_constraint (name_ name, type_ written))
+                  items )
+        | Call (callee, arguments) ->
+            Call
+              ( expression callee,
+                List.map
+                  (fun (argument : argument) ->
+                    { label = Option.map name_ argument.label; value = expression argument.value })
+                  arguments )
+        | Try value -> Try (expression value)
+        | With (base, updates) -> With (expression base, List.map update updates)
+        | Prefix (operator, value) -> Prefix (operator, expression value)
+        | Mode (mode, value) -> Mode (mode, expression value)
+        | Any value -> Any (expression value)
+        | Binary { operator; left; right; _ } ->
+            Binary
+              {
+                operator;
+                operator_span = no_span;
+                left = expression left;
+                right = expression right;
+              }
+        | Is { value; pattern = matched; _ } ->
+            Is { value = expression value; operator_span = no_span; pattern = pattern matched }
+        | Range { start; stop; inclusive; _ } ->
+            Range
+              {
+                start = Option.map expression start;
+                operator_span = no_span;
+                stop = Option.map expression stop;
+                inclusive;
+              }
+        | Quantified { quantifier; binder; body } ->
+            Quantified
+              {
+                quantifier;
+                binder =
+                  (match binder with
+                  | Binder_in (bound, collection) -> Binder_in (pattern bound, expression collection)
+                  | Binder_type (name, written) -> Binder_type (name_ name, type_ written));
+                body = expression body;
+              }
+        | Echo value -> Echo (expression value)
+        | Return value -> Return (Option.map expression value)
+        | Parenthesized value -> Parenthesized (expression value)
+        | List values -> List (List.map expression values)
+        | Map pairs -> Map (List.map (fun (key, value) -> (expression key, expression value)) pairs)
+        | Lambda { parameters; body } ->
+            Lambda { parameters = List.map pattern parameters; body = block body }
+        | If { condition; then_; else_ } ->
+            If
+              {
+                condition = expression condition;
+                then_ = block then_;
+                else_ =
+                  Option.map
+                    (function
+                      | Else written -> Else (block written)
+                      | Else_if value -> Else_if (expression value))
+                    else_;
+              }
+        | Match { scrutinees; arms } ->
+            Match { scrutinees = List.map expression scrutinees; arms = List.map arm arms }
+        | Provide { implementations; body } ->
+            Provide { implementations = List.map expression implementations; body = block body }
+        | Block written -> Block (block written));
+    }
+  and update (written : update) : update =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Update { field; path = rest; value } ->
+            Update
+              {
+                field = name_ field;
+                path = List.map name_ rest;
+                value = Option.map expression value;
+              }
+        | Update_error -> Update_error);
+    }
+  and arm (written : arm) =
+    {
+      written with
+      patterns = List.map pattern written.patterns;
+      guard = Option.map expression written.guard;
+      body = statement written.body;
+      span = no_span;
+      blank_line_before = false;
+    }
+  and block (written : block) =
+    { written with statements = List.map statement written.statements; span = no_span }
+  and statement (written : statement) : statement =
+    {
+      written with
+      span = no_span;
+      blank_line_before = false;
+      kind =
+        (match written.kind with
+        | Let { is_var; pattern = bound; annotation; value; else_ } ->
+            Let
+              {
+                is_var;
+                pattern = pattern bound;
+                annotation = Option.map type_ annotation;
+                value = expression value;
+                else_ = Option.map block else_;
+              }
+        | Expression value -> Expression (expression value)
+        | Assignment { target; operator; value } ->
+            Assignment { target = expression target; operator; value = expression value }
+        | For { mode; pattern = bound; annotation; iterable; clauses; body } ->
+            For
+              {
+                mode;
+                pattern = pattern bound;
+                annotation = Option.map type_ annotation;
+                iterable = expression iterable;
+                clauses = List.map loop_clause clauses;
+                body = block body;
+              }
+        | While { condition; clauses; body } ->
+            While
+              {
+                condition = expression condition;
+                clauses = List.map loop_clause clauses;
+                body = block body;
+              }
+        | Parallel written -> Parallel (block written)
+        | Concurrent written -> Concurrent (block written)
+        | Proof written -> Proof (block written)
+        | Assert { value; by_bit_vector } -> Assert { value = expression value; by_bit_vector }
+        | Statement_error -> Statement_error);
+    }
+  and loop_clause (written : loop_clause) : loop_clause =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Invariant value -> Invariant (expression value)
+        | Loop_decreases measures -> Loop_decreases (List.map expression measures)
+        | Loop_cost written -> Loop_cost (cost written));
+    }
+  and pattern (written : pattern) : pattern =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | (Wildcard | Pattern_error) as kind -> kind
+        | Binding name -> Binding (name_ name)
+        | Qualified_constant written -> Qualified_constant (constant written)
+        | Literal written -> Literal (literal written)
+        | Pattern_range { start; stop; inclusive } ->
+            Pattern_range { start = range_end start; stop = range_end stop; inclusive }
+        | Variant { name; fields } ->
+            Variant { name = name_ name; fields = Option.map (List.map pattern_field) fields }
+        | Record fields -> Record (List.map pattern_field fields)
+        | Alternatives alternatives -> Alternatives (List.map pattern alternatives));
+    }
+  and constant = function
+    | Module_constant written -> Module_constant (path written)
+    | Type_constant (written, name) -> Type_constant (path written, name_ name)
+  and literal = function
+    | Literal_string written -> Literal_string (string_literal written)
+    | (Literal_integer _ | Literal_true | Literal_false) as written -> written
+  and range_end (written : range_end) : range_end =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | End_literal written -> End_literal (literal written)
+        | End_constant written -> End_constant (constant written));
+    }
+  and pattern_field (written : pattern_field) : pattern_field =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Named_field (name, inner) -> Named_field (name_ name, pattern inner)
+        | Field inner -> Field (pattern inner)
+        | Rest -> Rest);
+    }
+  in
+  let generic (written : generic_parameter) : generic_parameter =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Type_parameter (name, bounds) -> Type_parameter (name_ name, List.map path_type bounds)
+        | Value_parameter (name, written) -> Value_parameter (name_ name, type_ written)
+        | Capability_parameter name -> Capability_parameter (name_ name)
+        | Generic_error -> Generic_error);
+    }
+  in
+  let head (written : type_head) =
+    {
+      written with
+      path = path written.path;
+      generics = List.map generic written.generics;
+      span = no_span;
+    }
+  in
+  let definition_name = function
+    | Plain_name name -> Plain_name (name_ name)
+    | Member_name (written, name) -> Member_name (head written, name_ name)
+  in
+  let parameter (written : parameter) : parameter =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Named_parameter { name; mode; type_ = written; default } ->
+            Named_parameter
+              {
+                name = name_ name;
+                mode;
+                type_ = type_ written;
+                default = Option.map expression default;
+              }
+        | (Self_parameter _ | Parameter_error) as kind -> kind);
+    }
+  in
+  let signature (written : signature) =
+    {
+      name = definition_name written.name;
+      generics = List.map generic written.generics;
+      parameters = List.map parameter written.parameters;
+      result =
+        Option.map
+          (function
+            | Returns result -> Returns (type_ result)
+            | Lends (mode, result) -> Lends (mode, type_ result))
+          written.result;
+      clauses = List.map clause written.clauses;
+    }
+  in
+  let field (written : field) : field =
+    {
+      written with
+      span = no_span;
+      kind =
+        (match written.kind with
+        | Field_declaration { name; type_ = written; default } ->
+            Field_declaration
+              { name = name_ name; type_ = type_ written; default = Option.map expression default }
+        | Field_error -> Field_error);
+    }
+  in
+  let line (written : _ line) kind =
+    { written with kind; span = no_span; blank_line_before = false }
+  in
+  let kind : definition_kind =
+    match definition_.kind with
+    | Function { signature = written; body } ->
+        Function { signature = signature written; body = block body }
+    | Method_declaration written -> Method_declaration (signature written)
+    | Type_definition { name; generics; body; clauses } ->
+        Type_definition
+          {
+            name = name_ name;
+            generics = List.map generic generics;
+            body =
+              (match body with
+              | Fields written -> Fields (List.map field written)
+              | Variants variants ->
+                  Variants
+                    (List.map
+                       (fun (variant : variant) ->
+                         {
+                           variant with
+                           name = name_ variant.name;
+                           fields = Option.map (List.map field) variant.fields;
+                           span = no_span;
+                         })
+                       variants)
+              | Type_todo -> Type_todo);
+            clauses =
+              List.map
+                (fun (written : type_clause) : type_clause ->
+                  {
+                    written with
+                    span = no_span;
+                    kind =
+                      (match written.kind with
+                      | Type_invariant value -> Type_invariant (expression value)
+                      | Derives traits -> Derives (List.map path_type traits)
+                      | Potential value -> Potential (expression value));
+                  })
+                clauses;
+          }
+    | Trait { name; generics; requires; members } ->
+        Trait
+          {
+            name = name_ name;
+            generics = List.map generic generics;
+            requires = List.map path_type requires;
+            members =
+              List.map
+                (fun (member : trait_member line) ->
+                  line member
+                    (match member.kind with
+                    | Associated_type (name, bounds) ->
+                        Associated_type (name_ name, List.map path_type bounds)
+                    | Associated_capability name -> Associated_capability (name_ name)
+                    | Law law ->
+                        Law
+                          {
+                            name = name_ law.name;
+                            parameters = List.map parameter law.parameters;
+                            requires = List.map expression law.requires;
+                            body = block law.body;
+                          }
+                    | Trait_member_error -> Trait_member_error))
+                members;
+          }
+    | Impl { trait_; type_ = written; uses; members } ->
+        Impl
+          {
+            trait_ = path_type trait_;
+            type_ = head written;
+            uses = List.map capability uses;
+            members =
+              List.map
+                (fun (member : impl_member line) ->
+                  line member
+                    (match member.kind with
+                    | Associated_definition (name, written) ->
+                        Associated_definition (name_ name, type_ written)
+                    | Capability_definition (name, capabilities) ->
+                        Capability_definition (name_ name, List.map capability capabilities)
+                    | Impl_member_error -> Impl_member_error))
+                members;
+          }
+    | Capability { name; members } ->
+        Capability
+          {
+            name = name_ name;
+            members =
+              List.map (fun (member : capability_member line) -> line member member.kind) members;
+          }
+    | Constant { name; type_ = written; value } ->
+        Constant { name = definition_name name; type_ = type_ written; value = expression value }
+    | Test { name; uses; body } ->
+        Test { name = string_literal name; uses = List.map capability uses; body = block body }
+    | Theorem { name; generics; parameters; clauses; body } ->
+        Theorem
+          {
+            name = name_ name;
+            generics = List.map generic generics;
+            parameters = List.map parameter parameters;
+            clauses = List.map clause clauses;
+            body = block body;
+          }
+    | Law_proof { trait_; law; type_ = written; body } ->
+        Law_proof
+          { trait_ = path_type trait_; law = name_ law; type_ = head written; body = block body }
+    | Definition_error { intended; name } ->
+        Definition_error { intended; name = Option.map definition_name name }
+  in
+  {
+    definition_ with
+    kind;
+    span = no_span;
+    recovered = List.map (fun _ -> no_span) definition_.recovered;
+  }

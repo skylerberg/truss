@@ -5,6 +5,8 @@ val serve :
   key:string ->
   alive:(unit -> bool) ->
   collect:(unit -> unit) ->
+  watched:(unit -> Unix.file_descr list) ->
+  changed:(Unix.file_descr -> unit) ->
   handle:(progress:(string -> unit) -> 'a -> 'b) ->
   unit
 

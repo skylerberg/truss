@@ -2,7 +2,8 @@ val bound_diagnostics :
   Lookups.t ->
   package:Path.package ->
   bounds:Impls.bounds ->
-  (Syntax.span * Types.ty) list ->
+  spans:Syntax.span array Lazy.t ->
+  (Syntax.id * Types.ty) list ->
   Syntax.diagnostic list
 
 val diagnostics : Lookups.t -> Resolve.Names.key -> Syntax.diagnostic list

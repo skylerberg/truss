@@ -18,17 +18,17 @@ val mentions_fresh_after : context -> int -> Logic.term -> bool
 val closed_over_binders : frame -> Logic.term -> Logic.term option
 val fact : context -> frame -> Logic.term -> unit
 val assume : context -> frame -> Logic.term -> unit
-val add_requires : context -> frame -> string -> Syntax.Span.t Diagnostic.fix list
+val add_requires : context -> frame -> message -> fix list
 
 val oblige :
   ?evaluation:evaluation ->
-  ?cited:Names.key * span ->
-  ?fixes:span Diagnostic.fix list ->
+  ?cited:Names.key * Core.origin ->
+  ?fixes:fix list ->
   context ->
   frame ->
   Code.prover ->
   span ->
-  string ->
+  message ->
   Logic.term ->
   unit
 
@@ -38,7 +38,7 @@ val obligation_at :
   frame ->
   Code.prover ->
   span ->
-  string ->
+  message ->
   Logic.term ->
   obligation option
 
@@ -48,12 +48,14 @@ val make_obligation :
   frame ->
   Code.prover ->
   span ->
-  string ->
+  message ->
   Logic.term ->
   obligation
 
 val span_of : source -> int -> span
-val quote : source -> int -> string
+val quote : source -> int -> piece
+val quoted : string -> span -> string
+val text_of : source -> int -> string
 val builtin : Types.ty -> Intrinsic.builtin option
 val bounds : Types.ty -> (Z.t * Z.t) option
 val float_format : Types.ty -> (int * int) option

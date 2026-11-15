@@ -13,7 +13,8 @@
   manifest
   registry
   project
-  compile))
+  compile
+  watcher))
 
 (rule
  (target fixtures.ml)

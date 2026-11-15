@@ -17,15 +17,15 @@ let implements_capability (lookups : Lookups.t) key =
   | None -> false
 
 let check (lookups : Lookups.t) (key : Resolve.Names.key) : result option =
-  match (lookups.interface.names.spans key, lookups.interface.lowered_interface key) with
-  | Some spans, Some lowered ->
+  match lookups.interface.lowered_interface key with
+  | Some lowered ->
       let context : Context.context =
         {
           lookups;
           bounds =
             (fun parameter ->
               Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds));
-          spans;
+          spans = lazy (Option.value ~default:[||] (lookups.interface.names.spans key));
           mode_keywords = Hashtbl.create 8;
           names = Hashtbl.create 32;
           binding_modes = Hashtbl.create 32;

@@ -1,18 +1,30 @@
 module Lookups = Lookups
 
+type unsupported = { construct : string; at : Lowered.site option }
+type lowered
+type ground_types = { types : Ground.ty list; folded_constants : Path.t list }
+
+type requests = {
+  settings : Lookups.settings;
+  source : Path.file -> Source.t;
+  interface : Interface.Lookups.t;
+  mir : Mir.lookups;
+  lowered : Instance.key -> (lowered, unsupported) result;
+  test_key : Instance.key -> (string, unsupported) result;
+  layouts : Instance.key list -> Ground.ty -> Memory_layout.t;
+}
+
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
 type 'a ran = Ran of 'a | Ran_too_long
 
 val create :
-  ?checks:bool ->
   ?file_name:(Path.file -> string) ->
   ?results:results ->
   ?evaluation_time_limit_ms:int ->
   ?programs:string ->
   ?worked_on:(Path.package -> bool) ->
-  Lookups.t ->
-  Libc.system ->
+  requests ->
   Toolchain.t ->
   Build.cache ->
   Build.settings ->
@@ -61,8 +73,36 @@ val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 val check_template :
   t -> from_template:Path.t -> texts:string list -> ((int * bool) list ran, string) result
 
-val evaluate_call :
-  t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
+val roots : tests:Path.t list -> mains:Path.t list -> Instance.key list
+val ground_types : Lookups.settings -> Lookups.t -> Instance.key -> ground_types
+
+val lower :
+  Lookups.settings ->
+  Lookups.t ->
+  layout_of:(Ground.ty -> Memory_layout.t) ->
+  lowered:(Instance.key -> (lowered, unsupported) result) ->
+  Instance.key ->
+  (lowered, unsupported) result
+
+val references : lowered -> Instance.key list
+
+val check_calls :
+  Interface.Lookups.t ->
+  successors:(Path.t -> Path.t list option) ->
+  Instance.key ->
+  lowered ->
+  unit
+
+val test_keys :
+  lowered:(Instance.key -> lowered) ->
+  known:(Instance.key -> string) ->
+  Instance.key list ->
+  (Instance.key * string) list
+
+val layout :
+  Interface.Lookups.t -> layout_of:(Ground.ty -> Memory_layout.t) -> Ground.ty -> Memory_layout.t
+
+val stored_in_place : Interface.Lookups.t -> Ground.ty -> Ground.ty list
 
 module For_testing : sig
   val is_folded : t -> Path.t -> bool
@@ -79,6 +119,9 @@ module For_testing : sig
     (unit, string) result
 
   val compiled : t -> Instance.key -> Emit_c.fragment
+
+  val evaluate_call :
+    t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
 
   val run_program :
     ?input:string ->

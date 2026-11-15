@@ -15,4 +15,5 @@
   standard_library
   compiler_version
   pipeline
-  registry))
+  registry
+  watcher))

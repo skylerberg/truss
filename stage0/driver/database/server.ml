@@ -103,7 +103,7 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve_at ~key ~identity ~alive ~collect ~handle server_path path =
+let serve_at ~key ~identity ~alive ~collect ~watched ~changed ~handle server_path path =
   let lock = Unix.openfile (server_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
   match Unix.lockf lock F_TLOCK 0 with
   | exception Unix.Unix_error _ -> ()
@@ -117,7 +117,7 @@ let serve_at ~key ~identity ~alive ~collect ~handle server_path path =
       let last = ref (Unix.time ()) in
       let last_collection = ref 0. in
       while (not !stopping) && Unix.time () -. !last < idle_limit && alive () do
-        match Unix.select [ socket ] [] [] 1.0 with
+        match Unix.select (socket :: watched ()) [] [] 1.0 with
         | exception Unix.Unix_error (EINTR, _, _) -> ()
         | [], _, _ ->
             let now = Unix.time () in
@@ -126,6 +126,7 @@ let serve_at ~key ~identity ~alive ~collect ~handle server_path path =
               if executable_identity () <> identity then stopping := true;
               collect ()
             end
+        | ready, _, _ when not (List.mem socket ready) -> List.iter changed ready
         | _ -> (
             match Unix.accept ~cloexec:true socket with
             | exception Unix.Unix_error _ -> ()
@@ -144,7 +145,7 @@ let serve_at ~key ~identity ~alive ~collect ~handle server_path path =
       (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
       Unix.close lock
 
-let serve ~key ~alive ~collect ~handle =
+let serve ~key ~alive ~collect ~watched ~changed ~handle =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   match servers_directory () with
   | Error message -> prerr_endline message
@@ -153,7 +154,8 @@ let serve ~key ~alive ~collect ~handle =
       let server_path = server_path directory identity key in
       match socket_path server_path with
       | Error message -> prerr_endline message
-      | Ok path -> serve_at ~key ~identity ~alive ~collect ~handle server_path path)
+      | Ok path ->
+          serve_at ~key ~identity ~alive ~collect ~watched ~changed ~handle server_path path)
 
 let start directory program key =
   let log = Filename.concat directory "server.log" in

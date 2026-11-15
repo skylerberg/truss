@@ -25,6 +25,7 @@ val variant :
   ?indirect:bool -> string -> (string * Memory_layout.member) list -> Memory_layout.variant_shape
 
 val shapes : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
+val computed_env : Libc.system -> (Ground.ty -> Memory_layout.shape) -> Memory_layout.env
 val layout : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
 val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
 val int32 : Ground.ty
@@ -95,11 +96,14 @@ val pipeline : Project.package list -> Pipeline.t
 val example_package : (Path.file * string) list -> Project.package list
 
 val load_files :
-  ?results:Compile.results -> (Path.file * string) list -> Project.package list * Compile.t
+  ?results:Compile.results ->
+  ?roots:Instance.key list ->
+  (Path.file * string) list ->
+  Pipeline.t * Compile.t
 
-val load : ?results:Compile.results -> string -> Project.package list * Compile.t
+val load : ?results:Compile.results -> ?roots:Instance.key list -> string -> Pipeline.t * Compile.t
 val tests_in : Pipeline.t -> Path.module_ -> Path.t list
-val tests_of : Project.package list -> Path.t list
+val tests_of : Pipeline.t -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val passes : string -> string -> unit

@@ -82,7 +82,11 @@ let shapes extra (ty : Ground.ty) : shape =
       | Some shape -> shape
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
 
-let layout ?(extra = []) ty = of_type (create host ~shape_of:(shapes extra)) ty
+let computed_env system shape_of =
+  let rec layout_of ty = Memory_layout.layout ~layout_of ty (shape_of ty) in
+  create system ~shape_of ~layout_of
+
+let layout ?(extra = []) ty = of_type (computed_env host (shapes extra)) ty
 let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 let int32 = named "Int32"
 let uint64 = named "UInt64"
@@ -155,7 +159,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
-let shape_env ?(extra = []) () = create host ~shape_of:(shapes extra)
+let shape_env ?(extra = []) () = computed_env host (shapes extra)
 let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =
@@ -220,9 +224,10 @@ let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] da
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let load_files ?results files =
+let load_files ?results ?(roots = []) files =
   let database = example_package files in
   let pipeline = pipeline database in
+  List.iter (Pipeline.For_testing.root pipeline) roots;
   List.iter
     (fun ((file : Path.file), text) ->
       let source = Source.create ~path:(Path.show_file file) text in
@@ -240,12 +245,12 @@ let load_files ?results files =
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
-  ( database,
+  ( pipeline,
     Compile.create ?results
-      (Pipeline.lowering_lookups pipeline [ example.package ])
-      host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
+      (Pipeline.lowering_requests pipeline [ example.package ])
+      (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
 
-let load ?results text = load_files ?results [ (example_file, text) ]
+let load ?results ?roots text = load_files ?results ?roots [ (example_file, text) ]
 
 let tests_in pipeline (module_ : Path.module_) =
   List.filter_map
@@ -253,11 +258,11 @@ let tests_in pipeline (module_ : Path.module_) =
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
     ((Pipeline.names pipeline [ module_.package ]).declarations module_)
 
-let tests_of database = tests_in (pipeline database) example
+let tests_of pipeline = tests_in pipeline example
 
 let run_source text =
-  let database, compile = load text in
-  match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
+  let pipeline, compile = load text in
+  match Compile.run_tests compile ~time_limit_ms:2000 (tests_of pipeline) with
   | Ok records -> render_records records
   | Error message -> failwith message
 
@@ -302,4 +307,4 @@ let standard module_ name ?(arguments = []) () =
 
 let standard_layout ty =
   Memory_layout.For_testing.to_string
-    (Memory_layout.of_type (create host ~shape_of:(Monomorphic.shape standard_context)) ty)
+    (Memory_layout.of_type (computed_env host (Monomorphic.shape standard_context)) ty)

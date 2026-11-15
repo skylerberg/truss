@@ -145,16 +145,18 @@ let add_requires context frame required =
         Some body.span.start
     | _ -> None
   in
+  let edit at before =
+    Some { at; replacement = (Text (before ^ "  requires ") :: required) @ [ Text "\n" ] }
+  in
   let edit =
     match brace with
-    | Some at when at > 0 && text.[at - 1] = '\n' ->
-        Some (Diagnostic.insert (Syntax.Span.zero_width at) ("  requires " ^ required ^ "\n"))
-    | Some at when at > 0 && text.[at - 1] = ' ' ->
-        Some (Diagnostic.replace (Syntax.Span.make (at - 1) at) ("\n  requires " ^ required ^ "\n"))
+    | Some at when at > 0 && text.[at - 1] = '\n' -> edit (Syntax.Span.zero_width at) ""
+    | Some at when at > 0 && text.[at - 1] = ' ' -> edit (Syntax.Span.make (at - 1) at) "\n"
     | _ -> None
   in
   match edit with
-  | Some edit -> [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
+  | Some edit ->
+      [ { title = (Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] } ]
   | None -> []
 
 let truss_of_goal context term =
@@ -235,7 +237,7 @@ let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message 
               | condition -> Logic.( ==> ) condition goal
             in
             match truss_of_goal context goal with
-            | Some required -> add_requires context frame required
+            | Some required -> add_requires context frame [ Text required ]
             | None -> [])
         | fixes -> fixes
       in
@@ -301,12 +303,14 @@ let span_of (source : source) origin =
   if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
 
 let quote source origin =
-  let span = span_of source origin in
-  let text = Lazy.force source.text in
+  match source.key with Some key -> Quote (key, origin) | None -> Text "this expression"
+
+let quoted text (span : span) =
   if span.stop > span.start && span.stop <= String.length text then
     String.sub text span.start (span.stop - span.start)
   else "this expression"
 
+let text_of source origin = quoted (Lazy.force source.text) (span_of source origin)
 let builtin ty = Types.builtin_of ty
 
 let bounds (ty : Types.ty) =

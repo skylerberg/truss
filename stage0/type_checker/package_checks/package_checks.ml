@@ -3,19 +3,10 @@ open Syntax
 module Names = Resolve.Names
 module Properties = Interface.Properties
 
-type placed = { file : Path.file; diagnostic : Diagnostic.t }
+type placed = { key : Names.key; diagnostic : Syntax.diagnostic }
 
-let diagnostic_at (lookups : Lookups.t) (key : Names.key) ?(fixes = []) code (span : span) message =
-  match lookups.interface.names.base key with
-  | Some (file, base) ->
-      Some
-        {
-          file;
-          diagnostic =
-            Diagnostic.map_spans (Span.to_source ~base)
-              (Diagnostic.make ~fixes ~code:(Package code) span message);
-        }
-  | None -> None
+let diagnostic_at (key : Names.key) ?(fixes = []) code (span : span) message =
+  { key; diagnostic = Diagnostic.make ~fixes ~code:(Package code) span message }
 
 let dependency_names (lookups : Lookups.t) package =
   List.map
@@ -35,25 +26,26 @@ let outer_packages (impl : Types.impl_interface) =
       (function Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
       impl.implements.trait_arguments
 
-let check_location lookups (declaration : Names.declaration) (definition : definition)
+let check_location (declaration : Names.declaration) (definition : definition)
     (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
-  let package = declaration.file.module_.package in
+  let package = declaration.module_.package in
   if List.mem package (outer_packages impl) then None
   else
-    diagnostic_at lookups key Impl_location (header_span definition)
-      (Printf.sprintf
-         "This `impl` must be in the package of `%s`, of `%s`, or of a type its trait's arguments \
-          name, so that only one place can hold it."
-         (Types.show_trait impl.implements)
-         (Types.show impl.for_type))
+    Some
+      (diagnostic_at key Impl_location (header_span definition)
+         (Printf.sprintf
+            "This `impl` must be in the package of `%s`, of `%s`, or of a type its trait's \
+             arguments name, so that only one place can hold it."
+            (Types.show_trait impl.implements)
+            (Types.show impl.for_type)))
 
 let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
-  let package = declaration.file.module_.package in
+  let package = declaration.module_.package in
   match
     ( List.find_opt
         (fun (_, impl) -> Path.equal impl declaration.path)
-        (lookups.interface.names.impl_index package).impls,
+        (lookups.interface.names.impls package),
       lookups.interface.names.definition (Names.key_of declaration) )
   with
   | Some ((trait, type_), _), Some definition -> (
@@ -71,13 +63,13 @@ let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
       match (implementors, Intrinsic.builtin_of_path type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
-          Option.to_list
-            (diagnostic_at lookups (Names.key_of declaration) Sealed_trait_impl
-               (header_span definition)
-               (Printf.sprintf
-                  "Only the built-in integer types implement `%s`, so `%s` cannot: generic code \
-                   over the trait is proven for each of them."
-                  (Path.show trait) (Path.show type_)))
+          [
+            diagnostic_at (Names.key_of declaration) Sealed_trait_impl (header_span definition)
+              (Printf.sprintf
+                 "Only the built-in integer types implement `%s`, so `%s` cannot: generic code \
+                  over the trait is proven for each of them."
+                 (Path.show trait) (Path.show type_));
+          ]
       | None, _ -> [])
   | _ -> []
 
@@ -147,8 +139,9 @@ let check_method_names (lookups : Lookups.t) (declaration : Names.declaration)
               impl.impl_methods
           in
           let clash message =
-            diagnostic_at lookups (Names.key_of declaration) Method_name_clash
-              (header_span definition) message
+            Some
+              (diagnostic_at (Names.key_of declaration) Method_name_clash (header_span definition)
+                 message)
           in
           if own = [] then None
           else if List.exists same_version own then
@@ -158,7 +151,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Names.declaration)
                  (Types.show impl.for_type) method_.method_name
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
-          else if declaration.file.module_.package <> Path.package path then
+          else if declaration.module_.package <> Path.package path then
             clash
               (Printf.sprintf
                  "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
@@ -316,10 +309,11 @@ let field_span (body : type_body) ((variant : Types.variant option), (field : Ty
 let check_recursion lookups ~contained (declaration : Names.declaration) (definition : definition) =
   match definition.kind with
   | Type_definition _ when grows lookups declaration.path ->
-      Option.to_list
-        (diagnostic_at lookups (Names.key_of declaration) Growing_type (header_span definition)
-           "This type contains itself with different type arguments, so it has no fixed set of \
-            instances, and generic code is compiled once for each set of arguments.")
+      [
+        diagnostic_at (Names.key_of declaration) Growing_type (header_span definition)
+          "This type contains itself with different type arguments, so it has no fixed set of \
+           instances, and generic code is compiled once for each set of arguments.";
+      ]
   | Type_definition { name; body; _ } ->
       let key = Names.key_of declaration in
       let occurrences = self_occurrences ~contained declaration.path in
@@ -342,28 +336,32 @@ let check_recursion lookups ~contained (declaration : Names.declaration) (defini
             in
             match variant_span with
             | Some span ->
-                diagnostic_at lookups key Needs_indirect span
-                  ~fixes:
-                    [
-                      Diagnostic.fix "Declare the variant `indirect`."
-                        [ Diagnostic.insert (Span.zero_width span.start) "indirect " ];
-                    ]
-                  "This type contains itself in place, so it would be infinitely large. Declare \
-                   the variant `indirect` to keep its fields on the heap."
+                Some
+                  (diagnostic_at key Needs_indirect span
+                     ~fixes:
+                       [
+                         Diagnostic.fix "Declare the variant `indirect`."
+                           [ Diagnostic.insert (Span.zero_width span.start) "indirect " ];
+                       ]
+                     "This type contains itself in place, so it would be infinitely large. Declare \
+                      the variant `indirect` to keep its fields on the heap.")
             | None ->
-                diagnostic_at lookups key Needs_indirect (header_span definition)
-                  "This record contains itself in place, so it would be infinitely large. A record \
-                   has no variant to declare `indirect`; use a sum type with an `indirect` \
-                   variant, or a collection.")
+                Some
+                  (diagnostic_at key Needs_indirect (header_span definition)
+                     "This record contains itself in place, so it would be infinitely large. A \
+                      record has no variant to declare `indirect`; use a sum type with an \
+                      `indirect` variant, or a collection."))
       in
       let function_input =
-        Option.bind (first Function_input) (fun field ->
-            diagnostic_at lookups key Not_strictly_positive
+        Option.map
+          (fun field ->
+            diagnostic_at key Not_strictly_positive
               (Option.value ~default:(header_span definition) (field_span body field))
               (Printf.sprintf
                  "Through this field, `%s` contains a function type that has a `time` clause and \
                   whose input contains `%s`. %s"
                  name.text name.text not_strictly_positive_message))
+          (first Function_input)
       in
       Option.to_list in_place @ Option.to_list function_input
   | _ -> []
@@ -398,18 +396,21 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
         (fun (recursive, (occurrence : Properties.occurrence)) ->
           match occurrence with
           | In_place ->
-              diagnostic_at lookups key Needs_indirect span
-                (Printf.sprintf
-                   "With this definition of `%s`, `%s` contains itself in place, so it would be \
-                    infinitely large. Define `%s` as a type that holds it in a collection or in an \
-                    `indirect` variant."
-                   name (Types.show recursive) name)
+              Some
+                (diagnostic_at key Needs_indirect span
+                   (Printf.sprintf
+                      "With this definition of `%s`, `%s` contains itself in place, so it would be \
+                       infinitely large. Define `%s` as a type that holds it in a collection or in \
+                       an `indirect` variant."
+                      name (Types.show recursive) name))
           | Function_input ->
-              diagnostic_at lookups key Not_strictly_positive span
-                (Printf.sprintf
-                   "With this definition of `%s`, `%s` contains a function type that has a `time` \
-                    clause and whose input contains `%s`. %s"
-                   name (Types.show recursive) (Types.show recursive) not_strictly_positive_message)
+              Some
+                (diagnostic_at key Not_strictly_positive span
+                   (Printf.sprintf
+                      "With this definition of `%s`, `%s` contains a function type that has a \
+                       `time` clause and whose input contains `%s`. %s"
+                      name (Types.show recursive) (Types.show recursive)
+                      not_strictly_positive_message))
           | Indirect -> None)
         (List.sort_uniq compare
            (List.filter_map
@@ -481,10 +482,10 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
       if List.exists (fun (callee, grows) -> grows && reaches callee declaration.path) outgoing then
         match lookups.interface.names.definition (Names.key_of declaration) with
         | Some definition ->
-            diagnostic_at lookups (Names.key_of declaration) Instantiation_cycle
-              (header_span definition)
-              "This generic code instantiates itself with type arguments that grow each time \
-               around, so it would be compiled without end."
+            Some
+              (diagnostic_at (Names.key_of declaration) Instantiation_cycle (header_span definition)
+                 "This generic code instantiates itself with type arguments that grow each time \
+                  around, so it would be compiled without end.")
         | None -> None
       else None)
     edges
@@ -504,10 +505,10 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
            | Some definition ->
                ( seen,
                  diagnostics
-                 @ Option.to_list
-                     (diagnostic_at lookups (Names.key_of declaration) Duplicate_test
-                        definition.span
-                        (Printf.sprintf "Another test of this package is named %S." name)) )
+                 @ [
+                     diagnostic_at (Names.key_of declaration) Duplicate_test definition.span
+                       (Printf.sprintf "Another test of this package is named %S." name);
+                   ] )
            | None -> (seen, diagnostics)
          else (name :: seen, diagnostics))
        ([], []) tests)
@@ -525,7 +526,7 @@ let visible_packages (lookups : Lookups.t) package =
 
 let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) definition
     (impl : Types.impl_interface) =
-  let package = declaration.file.module_.package in
+  let package = declaration.module_.package in
   match Interface.Impls.head impl.for_type with
   | Some type_ when List.mem package (outer_packages impl) ->
       let trait = impl.implements.trait in
@@ -542,7 +543,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) defin
           (fun (other : Types.impl_interface) -> List.mem package (outer_packages other))
           (List.filter_map
              (Interface.Impls.impl_interface lookups.interface)
-             (before (lookups.interface.names.impl_index package).impls))
+             (before (lookups.interface.names.impls package)))
       in
       let dependencies =
         List.concat_map
@@ -555,13 +556,13 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) defin
       List.filter_map
         (fun (other : Types.impl_interface) ->
           if overlap impl other then
-            diagnostic_at lookups (Names.key_of declaration) Overlapping_impls
-              (header_span definition)
-              (Printf.sprintf
-                 "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most one \
-                  `impl` of a trait for each set of its arguments."
-                 (Types.show_trait other.implements)
-                 (Types.show other.for_type))
+            Some
+              (diagnostic_at (Names.key_of declaration) Overlapping_impls (header_span definition)
+                 (Printf.sprintf
+                    "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most one \
+                     `impl` of a trait for each set of its arguments."
+                    (Types.show_trait other.implements)
+                    (Types.show other.for_type)))
           else None)
         (earlier @ dependencies)
   | _ -> []
@@ -572,7 +573,7 @@ let check_impl lookups ~contained (declaration : Names.declaration) =
       lookups.interface.names.definition (Names.key_of declaration) )
   with
   | Some impl, Some definition ->
-      Option.to_list (check_location lookups declaration definition impl)
+      Option.to_list (check_location declaration definition impl)
       @ check_method_names lookups declaration definition impl
       @ check_overlaps lookups declaration definition impl
       @ check_associated_types lookups ~contained declaration definition impl
@@ -583,22 +584,27 @@ let check_type lookups ~contained (declaration : Names.declaration) =
   | Some definition -> check_recursion lookups ~contained declaration definition
   | None -> []
 
-let checks (lookups : Lookups.t) package =
-  let contained = memoized (contained_types lookups) in
+type check =
+  | Sealed of Names.key
+  | Impl of Names.key
+  | Type of Names.key
+  | Instantiations
+  | Tests
+  | Grants
+  | Dependencies
+  | Code_packages
+
+let checks (declarations : Names.declaration list) =
   List.concat_map
     (fun (declaration : Names.declaration) ->
       if declaration.ordinal <> 0 then []
       else
         match declaration.kind with
-        | Impl ->
-            [
-              (fun () -> check_sealed lookups declaration);
-              (fun () -> check_impl lookups ~contained declaration);
-            ]
-        | Type -> [ (fun () -> check_type lookups ~contained declaration) ]
+        | Impl -> [ Sealed (Names.key_of declaration); Impl (Names.key_of declaration) ]
+        | Type -> [ Type (Names.key_of declaration) ]
         | _ -> [])
-    (lookups.interface.names.package_declarations package)
-  @ [ (fun () -> check_instantiation lookups package); (fun () -> check_tests lookups package) ]
+    declarations
+  @ [ Instantiations; Tests; Grants; Dependencies; Code_packages ]
 
 let used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
   let named =
@@ -665,3 +671,25 @@ let code_packages (lookups : Lookups.t) package =
        (fun ((declaration : Names.declaration), packages) ->
          match declaration.path with Test _ -> [] | _ -> packages)
        (used_by_declarations lookups package))
+
+type outcome =
+  | Placed of placed list
+  | Problems of manifest_problem list
+  | Packages of Path.package list
+
+let run (lookups : Lookups.t) package check =
+  let declared key =
+    match lookups.interface.names.declaration key with
+    | Some declaration -> declaration
+    | None -> Compiler_bug.bug ~stage:"Package_checks" "%s is not declared" (Names.show_key key)
+  in
+  let contained = memoized (contained_types lookups) in
+  match check with
+  | Sealed key -> Placed (check_sealed lookups (declared key))
+  | Impl key -> Placed (check_impl lookups ~contained (declared key))
+  | Type key -> Placed (check_type lookups ~contained (declared key))
+  | Instantiations -> Placed (check_instantiation lookups package)
+  | Tests -> Placed (check_tests lookups package)
+  | Grants -> Problems (grant_problems lookups package)
+  | Dependencies -> Problems (unused_dependencies lookups package)
+  | Code_packages -> Packages (code_packages lookups package)

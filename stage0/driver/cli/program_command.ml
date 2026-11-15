@@ -1,14 +1,7 @@
 let main_of snapshot pipeline packages (package : Path.package) =
-  let module_ : Path.module_ = { package; modules = [] } in
-  if not (List.mem module_ (Command_packages.modules snapshot packages)) then None
-  else
-    List.find_map
-      (fun (declaration : Resolve.Names.declaration) ->
-        match declaration.path with
-        | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
-            Some declaration.path
-        | _ -> None)
-      ((Pipeline.names pipeline [ package ]).declarations module_)
+  if List.mem { Path.package; modules = [] } (Command_packages.modules snapshot packages) then
+    Pipeline.main pipeline package
+  else None
 
 let mains snapshot packages =
   List.filter_map (main_of snapshot (Database.pipeline snapshot) packages) packages
@@ -88,11 +81,11 @@ let refuse_unshippable snapshot packages compile main proofs =
 
 let build_program ?output snapshot packages (build : Compiler.build) =
   let is_release = build = Release in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Database.pipeline ~checks:(not is_release) snapshot in
   let report = Report.gather ~proofs:is_release pipeline snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = main snapshot pipeline packages in
-  let compile = Compiler.create ~checks:(not is_release) pipeline snapshot packages build in
+  let compile = Compiler.create pipeline snapshot packages build in
   Option.iter (refuse_unshippable snapshot packages compile main) (Report.proofs report);
   let output = Option.value output ~default:(Compile.fresh_program compile) in
   match Compile.build_program compile ~main ~output with

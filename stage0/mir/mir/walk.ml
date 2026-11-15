@@ -117,49 +117,20 @@ and statement_places : type form. (place -> unit) -> form statement_kind -> unit
       ());
   List.iter (iter_places_read visit) (nested_blocks_of kind)
 
-let iter_graph ~statement ~terminator (graph : Graph.t) =
-  let body (body : Graph.body) =
-    Array.iter
-      (fun (basic : Graph.basic_block) ->
-        List.iter
-          (fun (graph_statement : Graph.statement) -> statement graph_statement.kind)
-          basic.statements;
-        terminator basic.terminator)
-      body.blocks
-  in
-  body graph.body;
-  Array.iter body graph.lambdas
-
-let constants_named (graph : Graph.t) =
-  let named = ref Path.Set.empty in
-  let visit (place : place) =
-    match place.root with Constant path -> named := Path.Set.add path !named | Local _ -> ()
-  in
-  iter_graph graph ~statement:(statement_places visit) ~terminator:(function
-    | Branch { condition; _ } -> operand_place visit condition
-    | For { iteration; _ } -> iteration_places visit iteration
-    | Yield { part; _ } -> yielded_places visit part
-    | Return returned -> Option.iter (operand_place visit) returned
-    | Cancel { returned; _ } -> Option.iter (fun (value, _) -> operand_place visit value) returned
-    | Goto _ | Fork _ | Join _ | Iteration_end _ | Resume _ | Unreachable | Written_unreachable
-    | Todo ->
-        ());
-  Path.Set.elements !named
-
-let rec visit_block visit (block : block) =
+let rec visit_block visit locals (block : block) =
   List.iter
     (fun (statement : statement) ->
-      visit statement;
+      visit locals statement;
       (match statement.kind with
       | Ghost_assert { condition; _ } -> visit_formula visit condition
       | Proof code -> visit_code visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
       | _ -> ());
-      List.iter (visit_block visit) (nested_blocks statement))
+      List.iter (visit_block visit locals) (nested_blocks statement))
     block.statements
 
 and visit_formula visit (formula : formula) =
-  visit_block visit formula.value;
+  visit_block visit formula.locals formula.value;
   Array.iter (visit_body visit) formula.lambdas
 
 and visit_loop visit (loop : loop) =
@@ -172,14 +143,16 @@ and visit_loop visit (loop : loop) =
           visit_formula visit amount)
     loop.clauses
 
-and visit_body visit (body : body) = visit_block visit body.code
+and visit_body visit (body : body) = visit_block visit body.locals body.code
 
 and visit_code visit (code : t) =
   visit_body visit code.body;
   Array.iter (visit_body visit) code.lambdas
 
-let iter_code visit code = visit_code visit code
-let iter_formula visit formula = visit_formula visit formula
+let iter_code visit code = visit_code (fun _ statement -> visit statement) code
+let iter_formula visit formula = visit_formula (fun _ statement -> visit statement) formula
+let iter_code_with_locals = visit_code
+let iter_formula_with_locals = visit_formula
 
 let operand_type : operand -> Types.ty = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_

@@ -4,7 +4,7 @@ module Lookups = Lookups
 type context = {
   resolved : Resolve.resolved;
   tables : Infer.tables;
-  text : string;
+  text : string Lazy.t;
   mutable diagnostics : Syntax.diagnostic list;
 }
 
@@ -136,7 +136,7 @@ let check_block context (written : block) =
     | first :: (next :: _ as rest) ->
         if statement_diverges context first then begin
           let last = List.nth rest (List.length rest - 1) in
-          let start = Source.fragment_line_start context.text next.span.start in
+          let start = Source.fragment_line_start (Lazy.force context.text) next.span.start in
           let start = if start > 0 then start - 1 else start in
           report context Unreachable_code next.span
             ~fixes:
@@ -184,14 +184,16 @@ let check_unreachable context (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let check (lookups : Lookups.t) key =
-  match
-    ( lookups.names.definition key,
-      Resolve.whole lookups.resolved key,
-      lookups.tables key,
-      lookups.names.text key )
-  with
-  | Some definition, Some resolved, Some tables, Some text ->
-      let context = { resolved; tables; text; diagnostics = [] } in
+  match (lookups.names.definition key, Resolve.whole lookups.resolved key, lookups.tables key) with
+  | Some definition, Some resolved, Some tables ->
+      let context =
+        {
+          resolved;
+          tables;
+          text = lazy (Option.value ~default:"" (lookups.names.text key));
+          diagnostics = [];
+        }
+      in
       check_unused context definition;
       check_unreachable context definition;
       List.sort

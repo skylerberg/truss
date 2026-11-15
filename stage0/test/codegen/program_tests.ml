@@ -8,8 +8,8 @@ let () =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
       let run text =
-        let database, compile = load ~results text in
-        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
+        let pipeline, compile = load ~results text in
+        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of pipeline) with
         | Ok records ->
             ( (if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records
                then 0
@@ -34,11 +34,11 @@ let () =
       let results : Compile.results =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
-      let database, compile =
+      let pipeline, compile =
         load ~results Fixtures.Program.external_test_gets_the_real_capabilities_it_uses
       in
       let run () =
-        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
+        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of pipeline) with
         | Ok records -> records
         | Error message -> failwith message
       in
@@ -62,19 +62,19 @@ let () =
       in
       List.iter contains
         [
-          "test 0 panicked\n";
-          "arithmetic overflow\n";
+          "test 0 passed\n";
           "test 1 panicked\n";
           "division by zero\n";
-          "test 2 panicked\n";
-          "index out of bounds\n  at example/main.truss:19:11\n";
+          "test 2 passed\n";
           "test 3 panicked\n";
-          "shift amount out of range\n";
+          "index out of bounds\n  at example/main.truss:19:11\n";
           "test 4 panicked\n";
-          "slice out of bounds\n";
+          "arithmetic overflow\n";
           "test 5 panicked\n";
-          "test 6 passed\n";
-          "test 7 passed\n";
+          "shift amount out of range\n";
+          "test 6 panicked\n";
+          "slice out of bounds\n";
+          "test 7 panicked\n";
         ])
 
 let () =
@@ -579,28 +579,35 @@ let () =
             test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
-                let database, compile = load text in
+                let checked = pipeline database in
                 let interface =
-                  Pipeline.interface_lookups (pipeline database) [ example_file.module_.package ]
+                  Pipeline.interface_lookups checked [ example_file.module_.package ]
                 in
-                List.iter
-                  (fun (declaration : Resolve.Names.declaration) ->
-                    match
-                      (declaration.path, Interface.Definition.signature interface declaration.path)
-                    with
-                    | Top _, Some { generics = []; specification_only = false; _ } ->
-                        ignore
-                          (Compile.For_testing.compiled compile
-                             (Code { path = declaration.path; type_arguments = [] }))
-                    | _ -> ())
-                  ((Pipeline.names (pipeline database) [ example.package ]).declarations example);
-                if tests_of database <> [] then
-                  String.split_on_char '\n' (run_source text)
-                  |> List.iter (fun line ->
-                      match String.split_on_char ' ' line with
-                      | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
-                      | [ "test"; _; outcome ] -> fail "a test %s" outcome
-                      | _ -> ())))
+                let functions =
+                  List.filter_map
+                    (fun (declaration : Resolve.Names.declaration) ->
+                      match
+                        (declaration.path, Interface.Definition.signature interface declaration.path)
+                      with
+                      | Top _, Some { generics = []; specification_only = false; _ } ->
+                          Some (Instance.Code { path = declaration.path; type_arguments = [] })
+                      | _ -> None)
+                    ((Pipeline.names checked [ example.package ]).declarations example)
+                in
+                let pipeline, compile = load ~roots:functions text in
+                List.iter (fun key -> ignore (Compile.For_testing.compiled compile key)) functions;
+                match tests_of pipeline with
+                | [] -> ()
+                | tests ->
+                    String.split_on_char '\n'
+                      (match Compile.run_tests compile ~time_limit_ms:2000 tests with
+                      | Ok records -> render_records records
+                      | Error message -> failwith message)
+                    |> List.iter (fun line ->
+                        match String.split_on_char ' ' line with
+                        | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
+                        | [ "test"; _; outcome ] -> fail "a test %s" outcome
+                        | _ -> ())))
         (Documents.truss_blocks (File_system.read (Harness.workspace_path name))))
 
 let () =

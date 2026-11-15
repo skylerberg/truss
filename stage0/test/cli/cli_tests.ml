@@ -67,6 +67,22 @@ let () =
         ~expected:[ "truss"; "run"; "--no-server"; "--release"; "--"; "input.txt" ]
         (Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
 
+let () =
+  test "a file written in a watched directory is reported after a synchronization" (fun () ->
+      let root = Harness.scratch "watched" in
+      Unix.mkdir (Filename.concat root "src") 0o755;
+      let watcher = Watcher.start ~skipped:(fun name -> name = "skipped") root in
+      Fun.protect
+        ~finally:(fun () -> Watcher.stop watcher)
+        (fun () ->
+          Unix.mkdir (Filename.concat root "skipped") 0o755;
+          Out_channel.with_open_bin (Filename.concat root "src/main.truss") (fun out ->
+              output_string out "fn main() {}\n");
+          match Watcher.changes watcher with
+          | Changed paths when List.mem "src/main.truss" paths -> ()
+          | Changed paths -> fail "reported %s" (String.concat ", " paths)
+          | Overflow -> fail "reported an overflow"))
+
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
 let modules (snapshot, packages) = Command_packages.modules snapshot packages
 let files (snapshot, packages) = Command_packages.files snapshot packages

@@ -3,7 +3,7 @@ type snapshot
 val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
 val retake : snapshot -> snapshot
 val root : snapshot -> string
-val pipeline : snapshot -> Pipeline.t
+val pipeline : ?checks:bool -> snapshot -> Pipeline.t
 val problems : snapshot -> Project.problem list
 val packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int

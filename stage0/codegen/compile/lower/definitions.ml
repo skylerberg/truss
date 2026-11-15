@@ -21,17 +21,19 @@ let debug_form : Ground.ty -> Glue.debug_form = function
       | _ -> Structure)
   | _ -> Structure
 
-let context ?(checks = false) ~constant (lookups : Lookups.t) system =
-  let monomorphic : Monomorphic.context =
-    {
-      type_interface = Interface.Definition.type_interface lookups.interface;
-      normalize = Interface.Impls.normalize lookups.interface ~bounds:Interface.Impls.no_bounds;
-      normalize_capabilities =
-        Interface.Impls.normalize_capabilities lookups.interface ~bounds:Interface.Impls.no_bounds;
-    }
-  in
-  let env = Memory_layout.create system ~shape_of:(Monomorphic.shape monomorphic) in
-  let uint64 = Monomorphic.builtin UInt64 in
+let monomorphic (interface : Interface.Lookups.t) : Monomorphic.context =
+  {
+    type_interface = Interface.Definition.type_interface interface;
+    normalize = Interface.Impls.normalize interface ~bounds:Interface.Impls.no_bounds;
+    normalize_capabilities =
+      Interface.Impls.normalize_capabilities interface ~bounds:Interface.Impls.no_bounds;
+  }
+
+let uint64 = Monomorphic.builtin UInt64
+let string_slice : Ground.ty = Named { path = Well_known.path String_slice; arguments = [] }
+
+let context (settings : Lookups.settings) ~constant ~env (lookups : Lookups.t) =
+  let monomorphic = monomorphic lookups.interface in
   {
     lookups;
     constant;
@@ -41,9 +43,9 @@ let context ?(checks = false) ~constant (lookups : Lookups.t) system =
         ~representation:(Monomorphic.representation monomorphic)
         ~uint64 ~debug_form ();
     monomorphic;
-    types = { uint64; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
+    types = { uint64; string_slice };
     bool = Monomorphic.builtin Bool;
-    checks;
+    checks = settings.checks;
   }
 
 let test_key path = Instance.Code { path; type_arguments = [] }

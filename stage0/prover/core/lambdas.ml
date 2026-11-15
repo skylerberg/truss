@@ -275,7 +275,7 @@ let check_valid context frame span ty term ~deep ~when_ =
   | Logic.Boolean true -> ()
   | valid ->
       oblige context frame Invariant span
-        (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_)
+        [ Text (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_) ]
         valid
 
 let counting_of (cost : Mir.cost) : Costs.counting =
@@ -461,8 +461,11 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                   | _ -> Logic.Boolean true
                 in
                 oblige context exit_ Cost span
-                  (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
-                     (Types.show ty))
+                  [
+                    Text
+                      (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
+                         (Types.show ty));
+                  ]
                   goal)
               promised)
           exits;
@@ -487,8 +490,11 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                   List.filter_map
                     (fun ((exit_ : frame), spent) ->
                       obligation_at context exit_ Cost span
-                        "The prover cannot show that a call of this lambda takes no more time than \
-                         the bound it found for every call, which a cost here relies on."
+                        [
+                          Text
+                            "The prover cannot show that a call of this lambda takes no more time \
+                             than the bound it found for every call, which a cost here relies on.";
+                        ]
                         (Costs.at_most spent bound))
                     (List.combine exits spent) )
           | None -> None

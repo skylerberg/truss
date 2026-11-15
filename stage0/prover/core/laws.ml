@@ -18,9 +18,11 @@ let check_callback_requires context frame (site : Invocation.site) through (valu
             (fun (clause : Mir.formula) ->
               oblige context frame Requires
                 (span_of frame.source site.origin)
-                (Printf.sprintf "`%s` may not hold for this call through `%s`."
-                   (quote frame.source clause.origin)
-                   name)
+                [
+                  Text "`";
+                  quote frame.source clause.origin;
+                  Text (Printf.sprintf "` may not hold for this call through `%s`." name);
+                ]
                 (snd (specification_value context inside clause)))
             requires
       | _ -> ())
@@ -178,22 +180,28 @@ let check_named_callback context frame (invocation : Invocation.t) (passed : pas
          List.iter
            (fun (requirement : Mir.formula) ->
              oblige context at_call Requires span
-               (Printf.sprintf
-                  "`%s` may not accept every argument this parameter's type promises it: its `%s` \
-                   may not hold."
-                  (Path.show path)
-                  (quote own.callee requirement.origin))
+               [
+                 Text
+                   (Printf.sprintf
+                      "`%s` may not accept every argument this parameter's type promises it: its `"
+                      (Path.show path));
+                 quote own.callee requirement.origin;
+                 Text "` may not hold.";
+               ]
                (snd (specification_value context inside requirement)))
            (clauses own.requires));
       List.iter
         (fun (cost : Types.cost) ->
           if not (keeps_cost context path contract cost) then
             oblige context frame Cost span
-              (Printf.sprintf
-                 "`%s` does not promise the contract this parameter's type, `%s`, asks of a \
-                  function passed for it."
-                 (Path.show path)
-                 (Types.show (Types.Function expected)))
+              [
+                Text
+                  (Printf.sprintf
+                     "`%s` does not promise the contract this parameter's type, `%s`, asks of a \
+                      function passed for it."
+                     (Path.show path)
+                     (Types.show (Types.Function expected)));
+              ]
               (Logic.Boolean false))
         expected.costs
   | _ ->

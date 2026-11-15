@@ -57,12 +57,12 @@ let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key)
   match (names.text key, names.definition key) with
   | Some text, Some definition ->
       let contained =
-        match names.base key with
-        | Some (_, base) ->
+        match names.place key with
+        | Some { base; _ } ->
             List.concat_map
               (fun member ->
-                match (names.base member, names.definition member) with
-                | Some (_, member_base), Some written ->
+                match (names.place member, names.definition member) with
+                | Some { base = member_base; _ }, Some written ->
                     List.map
                       (fun (span : span) ->
                         Span.make (span.start + member_base - base) (span.stop + member_base - base))

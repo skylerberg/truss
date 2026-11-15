@@ -1,0 +1,47 @@
+let origin_x: Int64 = 3
+let doubled: Int64 = origin_x * 2
+
+fn steps(n: Int64) -> Int64
+  requires n >= 0
+  cost time O(n)
+{
+  if n == 0 { 0 } else { 1 + steps(n - 1) }
+}
+
+fn even(n: Int64) -> Bool
+  requires n >= 0
+  cost time O(n)
+{
+  if n == 0 { true } else { odd(n - 1) }
+}
+
+fn odd(n: Int64) -> Bool
+  requires n >= 0
+  cost time O(n)
+{
+  if n == 0 { false } else { even(n - 1) }
+}
+
+fn corner() -> Point
+  cost time finite
+{
+  Point(x: origin_x, y: doubled)
+}
+
+test "a segment measures its ends" {
+  let segment = Segment(start: corner(), end: Point(x: 0, y: 0))
+  assert measure(Shape.Line(segment: segment)) == 2
+}
+
+test "steps count down" {
+  assert steps(3) == 3
+  assert even(4)
+}
+
+test "the larger of two points" {
+  assert largest(corner(), right: Point(x: 1, y: 1)) == 1
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  if measure(Shape.Dot(at: corner())) == 1 { ExitCode.success } else { ExitCode.failure }
+}

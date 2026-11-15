@@ -1,0 +1,24 @@
+module type Node = sig
+  type t
+
+  val equal : t -> t -> bool
+  val hash : t -> int
+  val compare : t -> t -> int
+end
+
+module Make (Node : Node) : sig
+  type t
+  type group = Blocked | Members of Node.t list
+  type update = { touched : Node.t list; removed : Node.t list }
+
+  val create : tracks_blocked:bool -> t
+  val add_root : t -> Node.t -> bool
+  val remove_root : t -> Node.t -> unit
+  val successors : t -> Node.t -> Node.t list option option
+  val predecessors : t -> Node.t -> Node.t list
+  val set_successors : t -> Node.t -> Node.t list option -> Node.t list
+  val remove_successors : t -> Node.t -> unit
+  val has_changes : t -> bool
+  val update : t -> update
+  val group : t -> Node.t -> group
+end

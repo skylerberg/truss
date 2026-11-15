@@ -13,11 +13,15 @@ type context = {
   checks : bool;
 }
 
+val monomorphic : Interface.Lookups.t -> Monomorphic.context
+val uint64 : Ground.ty
+val string_slice : Ground.ty
+
 val context :
-  ?checks:bool ->
+  Lookups.settings ->
   constant:(Path.t -> Lowered.static_value option) ->
+  env:Memory_layout.env ->
   Lookups.t ->
-  Libc.system ->
   context
 
 val test_key : Path.t -> Instance.key

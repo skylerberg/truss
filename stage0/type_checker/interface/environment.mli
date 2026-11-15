@@ -27,7 +27,7 @@ val empty_scope : scope
 type lowered_interface = {
   interface : interface;
   diagnostics : Syntax.diagnostic list;
-  named : (Syntax.span * Types.ty) list;
+  named : (Syntax.id * Types.ty) list;
   scope : scope;
 }
 

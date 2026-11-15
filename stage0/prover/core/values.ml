@@ -188,8 +188,11 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
                 else None
               in
               oblige ?evaluation context frame Requires span
-                (Printf.sprintf "This template may not meet `%s`, which its tag requires."
-                   (quote own.callee requirement.origin))
+                [
+                  Text "This template may not meet `";
+                  quote own.callee requirement.origin;
+                  Text "`, which its tag requires.";
+                ]
                 (snd (specification_value context entry requirement)))
             (clauses own.requires);
           let result = arrive context frame "tagged" tag_type in
@@ -226,10 +229,13 @@ let apply_map_literal context frame ~(ty : Types.ty) ~span terms =
           if other > index then
             oblige context frame Disjoint
               (match other_key with Some origin -> span_of frame.source origin | None -> span)
-              (Printf.sprintf "The key `%s` may equal an earlier key of this map."
-                 (match other_key with
-                 | Some origin -> quote frame.source origin
-                 | None -> "this key"))
+              [
+                Text "The key `";
+                (match other_key with
+                | Some origin -> quote frame.source origin
+                | None -> Text "this key");
+                Text "` may equal an earlier key of this map.";
+              ]
               (Logic.not_ (equal_of context frame key_type key_term other_term)))
         terms)
     terms;
@@ -361,11 +367,14 @@ let named_function context frame (site : Invocation.site) path type_arguments co
   if context.terminates && frame.makes_obligations && is_in_recursion_group context path then
     oblige context frame Termination
       (span_of frame.source site.origin)
-      (Printf.sprintf
-         "Naming `%s` as a value reaches back here, and such a use passes no arguments the prover \
-          can compare, so the recursion cannot be shown to end: write it as a direct call on a \
-          part."
-         (Path.show path))
+      [
+        Text
+          (Printf.sprintf
+             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
+              prover can compare, so the recursion cannot be shown to end: write it as a direct \
+              call on a part."
+             (Path.show path));
+      ]
       (Logic.Boolean false);
   let ty = substituted context frame site.type_ in
   (match (ty, contract.parts) with
@@ -382,11 +391,15 @@ let named_function context frame (site : Invocation.site) path type_arguments co
           (fun (requirement : Mir.formula) ->
             oblige context frame Requires
               (span_of frame.source site.origin)
-              (Printf.sprintf
-                 "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its \
-                  `%s` may not hold."
-                 (Path.show path) (Types.show ty)
-                 (quote own.callee requirement.origin))
+              [
+                Text
+                  (Printf.sprintf
+                     "`%s` is used as a value of `%s`, which promises nothing of its arguments, so \
+                      its `"
+                     (Path.show path) (Types.show ty));
+                quote own.callee requirement.origin;
+                Text "` may not hold.";
+              ]
               (snd (specification_value context inside requirement)))
           (clauses own.requires)
       end

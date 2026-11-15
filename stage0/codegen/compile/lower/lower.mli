@@ -6,15 +6,18 @@ type context
 
 val env : context -> Memory_layout.env
 val glue : context -> Glue.t
-val monomorphic : context -> Monomorphic.context
+val monomorphic : Interface.Lookups.t -> Monomorphic.context
 
 val context :
-  ?checks:bool ->
+  Lookups.settings ->
   constant:(Path.t -> Lowered.static_value option) ->
+  env:Memory_layout.env ->
   Lookups.t ->
-  Libc.system ->
   context
 
+type ground_types = Ground_types.t = { types : Ground.ty list; folded_constants : Path.t list }
+
+val ground_types : Lookups.settings -> Lookups.t -> Instance.key -> ground_types
 val instance : context -> Instance.key -> Emit_c.Builder.instance
 
 type constant = Folded of Lowered.data | Run of Ground.ty
@@ -29,7 +32,7 @@ val test_key : Path.t -> Instance.key
 val template_check :
   context -> Instance.key -> from_template:Path.t -> texts:string list -> Emit_c.Builder.instance
 
-val template_checked : context -> Path.t -> int list
+val template_checked : Mir.lookups -> Path.t -> int list
 
 val call_evaluation :
   context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Emit_c.Builder.instance

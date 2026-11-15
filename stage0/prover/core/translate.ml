@@ -150,13 +150,15 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
     | At_most -> Costs.at_most spent amount
   in
   oblige context frame Cost span
-    (if promise.inherited then
-       Printf.sprintf "This method may spend more than its %s's `%s` allows."
-         (promised_by context.lookups promise.written_in)
-         (quote promise.written_in promise.clause.origin)
-     else
-       Printf.sprintf "This may spend more than `%s` allows."
-         (quote promise.written_in promise.clause.origin))
+    [
+      Text
+        (if promise.inherited then
+           Printf.sprintf "This method may spend more than its %s's `"
+             (promised_by context.lookups promise.written_in)
+         else "This may spend more than `");
+      quote promise.written_in promise.clause.origin;
+      Text "` allows.";
+    ]
     goal
 
 let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substitution = [])
@@ -330,10 +332,13 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                  let frame, term = specification_value context frame requirement in
                  oblige context frame Requires
                    (span_of frame.source requirement.origin)
-                   (Printf.sprintf
-                      "`%s` may not follow from the trait's precondition, which callers through \
-                       the trait show, and an `impl`'s precondition must."
-                      (quote source requirement.origin))
+                   [
+                     Text "`";
+                     quote source requirement.origin;
+                     Text
+                       "` may not follow from the trait's precondition, which callers through the \
+                        trait show, and an `impl`'s precondition must.";
+                   ]
                    term;
                  frame)
                (restrict start trait_requires) own_requires);
@@ -405,8 +410,9 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
               in
               oblige context frame Ensures
                 (span_of frame.source ensured.origin)
-                (Printf.sprintf "`%s` may not hold when the method ends."
-                   (quote source ensured.origin))
+                [
+                  Text "`"; quote source ensured.origin; Text "` may not hold when the method ends.";
+                ]
                 term)
             at_end
       | _ ->
@@ -415,8 +421,11 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
               let _, term = specification_value context frame ensured in
               oblige context frame Ensures
                 (span_of frame.source ensured.origin)
-                (Printf.sprintf "`%s` may not hold when the function returns."
-                   (quote source ensured.origin))
+                [
+                  Text "`";
+                  quote source ensured.origin;
+                  Text "` may not hold when the function returns.";
+                ]
                 term)
             own_ensures);
       let change () =
@@ -476,8 +485,11 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
             (fun (clause : Mir.formula) ->
               let _, term = specification_value context inside clause in
               oblige context under_trait Ensures returns_span
-                (Printf.sprintf "The %s's `%s` may not hold when this method returns."
-                   (promised_by lookups part.callee) (quote part.callee clause.origin))
+                [
+                  Text (Printf.sprintf "The %s's `" (promised_by lookups part.callee));
+                  quote part.callee clause.origin;
+                  Text "` may not hold when this method returns.";
+                ]
                 term)
             part.ensures
       | _ -> ())
@@ -552,8 +564,11 @@ let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs 
         in
         let _, holds = specification_value context inside law.states in
         oblige context start Law at
-          (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait) law.name
-             (Types.show for_type))
+          [
+            Text
+              (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait)
+                 law.name (Types.show for_type));
+          ]
           holds
       end)
     (laws_of context trait.trait);
@@ -593,9 +608,12 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
           let _, own = specification_value context at_value written in
           oblige context at_value Cost
             (span_of at_value.source written.origin)
-            (Printf.sprintf
-               "The potential of `%s` may be below zero for a value that meets its invariants."
-               (Types.show ty))
+            [
+              Text
+                (Printf.sprintf
+                   "The potential of `%s` may be below zero for a value that meets its invariants."
+                   (Types.show ty));
+            ]
             (Logic.Operation ("<=", [ Logic.int 0; own ])))
         potential
   | None -> ());

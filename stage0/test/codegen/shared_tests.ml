@@ -17,6 +17,8 @@ let loaded =
            };
          ]
      in
+     Pipeline.For_testing.root pipeline
+       (Program_main (Top { module_ = probe.module_; name = "main" }));
      let text = Source.create ~path:(Path.show_file probe) source in
      (match diagnostics pipeline probe with
      | [] -> ()
@@ -25,8 +27,8 @@ let loaded =
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
      ( pipeline,
        Compile.create
-         (Pipeline.lowering_lookups pipeline [ Path.standard_package ])
-         host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
+         (Pipeline.lowering_requests pipeline [ Path.standard_package ])
+         (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
 
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->

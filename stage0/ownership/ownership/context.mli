@@ -1,7 +1,7 @@
 type context = {
   lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
-  spans : Syntax.span array;
+  spans : Syntax.span array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : (Core.local, string) Hashtbl.t;
   binding_modes : (Core.local, Types.mode) Hashtbl.t;

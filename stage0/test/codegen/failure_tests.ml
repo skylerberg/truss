@@ -75,9 +75,9 @@ let () =
 
 let () =
   test "a compiler bug says which instance was being lowered" (fun () ->
-      let _, compile = load "type Point(x: Int64)\n" in
       let not_code =
         Instance.Code { path = Top { module_ = example; name = "Point" }; type_arguments = [] }
       in
-      expect_bug ~saying:"while lowering example::Point" (fun () ->
+      let _, compile = load ~roots:[ not_code ] "type Point(x: Int64)\n" in
+      expect_bug ~saying:"while finding the ground types of example::Point" (fun () ->
           ignore (Compile.For_testing.compiled compile not_code)))

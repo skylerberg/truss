@@ -12,14 +12,14 @@ type space = Wild | Constructed of constructor * space list | Alternatives of sp
 
 type context = {
   lookups : Lookups.t;
-  spans : Syntax.span array;
-  text : string;
+  spans : Syntax.span array Lazy.t;
+  text : string Lazy.t;
   mutable diagnostics : Syntax.diagnostic list;
 }
 
 let span context (origin : Core.origin) : Syntax.span =
-  if origin >= 0 && origin < Array.length context.spans then context.spans.(origin)
-  else Syntax.Span.make 0 0
+  let spans = Lazy.force context.spans in
+  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
 
 let report context ?(fixes = []) code (span : Syntax.span) message =
   context.diagnostics <-
@@ -439,7 +439,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                       Diagnostic.delete
                         (Syntax.Span.make
                            (arm_span.start
-                           - String.length (indentation context.text arm_span.start)
+                           - String.length (indentation (Lazy.force context.text) arm_span.start)
                            - 1)
                            arm_span.stop);
                     ];
@@ -492,7 +492,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
           match List.rev arms with
           | last :: _ ->
               let last = span context last.origin in
-              let indent = indentation context.text last.start in
+              let indent = indentation (Lazy.force context.text) last.start in
               [
                 Diagnostic.fix "Add an arm for each missing case."
                   [
@@ -547,9 +547,16 @@ let check_definition context (definition : Core.definition) =
     definition
 
 let check (lookups : Lookups.t) key =
-  match (lookups.core key, lookups.interface.names.spans key, lookups.interface.names.text key) with
-  | Some form, Some spans, Some text ->
-      let context = { lookups; spans; text; diagnostics = [] } in
+  match lookups.core key with
+  | Some form ->
+      let context =
+        {
+          lookups;
+          spans = lazy (Option.value ~default:[||] (lookups.interface.names.spans key));
+          text = lazy (Option.value ~default:"" (lookups.interface.names.text key));
+          diagnostics = [];
+        }
+      in
       check_definition context form.definition;
       List.sort
         (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->

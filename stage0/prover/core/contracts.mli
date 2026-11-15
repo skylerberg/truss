@@ -1,4 +1,5 @@
 val source_at_key : Lookups.t -> State.Names.key -> State.source
+val home_source : Lookups.t -> State.Names.key -> State.source
 
 val source_at :
   Lookups.t -> Path.t -> (State.source * Types.substitution * Infer.form_origin) option

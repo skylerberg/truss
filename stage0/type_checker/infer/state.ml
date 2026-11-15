@@ -62,7 +62,7 @@ type state = {
   definition : definition;
   resolved : Resolve.resolved;
   context : Lower.context;
-  text : string;
+  text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
   mutable diagnostics : Syntax.diagnostic list;
@@ -105,8 +105,8 @@ let bug format = Compiler_bug.bug ~stage:"Infer" format
 let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
 
 let source state (span : span) =
-  if span.stop <= String.length state.text then
-    String.sub state.text span.start (span.stop - span.start)
+  let text = Lazy.force state.text in
+  if span.stop <= String.length text then String.sub text span.start (span.stop - span.start)
   else ""
 
 let fresh_node_id state =

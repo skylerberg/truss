@@ -88,7 +88,7 @@ let () =
               [ field "left" (named "Tree"); field "value" int64; field "right" (named "Tree") ];
           ]
       in
-      let env = create host ~shape_of:(shapes [ ("Tree", tree) ]) in
+      let env = computed_env host (shapes [ ("Tree", tree) ]) in
       expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (For_testing.to_string (Memory_layout.block env (named "Tree") "Node")));
   test "an Array holds its elements in place" (fun () ->
@@ -122,7 +122,7 @@ let () =
   test "the standard library's Option of a Bool is one byte" (fun () ->
       expect_int ~expected:1
         (Memory_layout.of_type
-           (create host ~shape_of:(Monomorphic.shape standard_context))
+           (computed_env host (Monomorphic.shape standard_context))
            (option bool))
           .size);
   test "a String is its storage's buffer, length, and capacity" (fun () ->
@@ -131,7 +131,7 @@ let () =
   test "storage is not trivial, and an Option of an integer is" (fun () ->
       let glue =
         Glue.create
-          (create host ~shape_of:(Monomorphic.shape standard_context))
+          (computed_env host (Monomorphic.shape standard_context))
           ~representation:(Monomorphic.representation standard_context)
           ~uint64:(Monomorphic.builtin UInt64) ()
       in

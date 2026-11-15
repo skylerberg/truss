@@ -16,7 +16,7 @@ let note_place context frame origin place =
       (fun (first, second) ->
         if first = origin || second = origin then
           match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
-          | Some (left, (first_span : span)), Some (right, (second_span : span)) ->
+          | Some (left, _), Some (right, _) ->
               let apart =
                 match (left, right) with
                 | One left, One right -> Logic.not_ (Logic.equal left right)
@@ -31,16 +31,14 @@ let note_place context frame origin place =
                         Logic.Operation ("<=", [ other_stop; other_start ]);
                       ]
               in
-              let text (span : span) =
-                let source_text = Lazy.force frame.source.text in
-                if span.stop <= String.length source_text then
-                  String.sub source_text span.start (span.stop - span.start)
-                else "this expression"
-              in
               oblige context frame Disjoint (span_of frame.source origin)
-                (Printf.sprintf
-                   "`%s` and `%s` may reach the same elements, which are used together."
-                   (text first_span) (text second_span))
+                [
+                  Text "`";
+                  quote frame.source first;
+                  Text "` and `";
+                  quote frame.source second;
+                  Text "` may reach the same elements, which are used together.";
+                ]
                 apart
           | _ -> ())
       context.disjoint
@@ -182,8 +180,11 @@ let check_callback_contract context frame span ~name inputs requires arguments ~
   List.iter
     (fun (clause : Mir.formula) ->
       oblige context (restrict frame promised) Requires span
-        (Printf.sprintf "`%s` %s, so its `%s` may not hold." name why
-           (quote frame.source clause.origin))
+        [
+          Text (Printf.sprintf "`%s` %s, so its `" name why);
+          quote frame.source clause.origin;
+          Text "` may not hold.";
+        ]
         (snd (specification_value context inside clause)))
     requires
 

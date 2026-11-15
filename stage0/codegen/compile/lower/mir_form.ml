@@ -593,7 +593,10 @@ let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.argument list) op
   | Function { path; type_arguments } -> Some (path, List.map (ground_argument st) type_arguments)
   | Trait_method { evidence = Dynamic; _ } -> None
   | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } -> (
-      match trait_method_key st ~trait ~name ~receiver ~self_type ~type_arguments ~evidence with
+      match
+        trait_method_key st.context st.frame.code.substitution ~trait ~name ~receiver ~self_type
+          ~type_arguments ~evidence
+      with
       | Code { path; type_arguments } -> Some (path, type_arguments)
       | _ -> bug "a trait method's key")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
@@ -1298,7 +1301,8 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
       bug "a conversion that exists only in specifications"
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
-        resolve_impl st ~trait ~self_type:(Mir.operand_type inner) ~evidence
+        resolve_impl st.context st.frame.code.substitution ~trait
+          ~self_type:(Mir.operand_type inner) ~evidence
       in
       any_into st ~any_ty:ty ~inner_ty:(operand_type st inner) ~impl ~type_arguments
         ~value:(operand_place st inner) destination

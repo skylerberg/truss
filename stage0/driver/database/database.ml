@@ -254,23 +254,6 @@ let target_packages snapshot requested =
       | None -> [])
   | under_requested -> under_requested
 
-let take_snapshot directory =
-  if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
-  else
-    match root_of directory with
-    | None ->
-        Error
-          (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
-             directory)
-    | Some root ->
-        let snapshot = snapshot_of_files (Worktree root) (Registry.Content.input_files root) in
-        Ok (snapshot, target_packages snapshot (relative_to root directory))
-
-let retake snapshot =
-  match snapshot.kind with
-  | Worktree root -> with_files snapshot (Registry.Content.input_files root)
-  | Published -> snapshot
-
 let trial snapshot changes =
   with_files snapshot
     (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
@@ -340,14 +323,157 @@ let package_states snapshot =
   in
   standard :: List.map (fun (name, _) -> state_of name) hashes
 
-let pipeline snapshot =
+let layout snapshot =
   let loaded = package_states snapshot in
-  Pipeline.create
-    ~loaded:(List.map (fun package -> package.state) loaded)
-    (List.filter
-       (fun (package : Project.package) ->
-         not (List.exists (fun (state : loaded) -> state.package = package.name) loaded))
-       snapshot.project.packages)
+  ( List.map (fun package -> package.state) loaded,
+    List.filter
+      (fun (package : Project.package) ->
+        not (List.exists (fun (state : loaded) -> state.package = package.name) loaded))
+      snapshot.project.packages )
+
+let cold_pipeline ~checks snapshot =
+  let loaded, packages = layout snapshot in
+  Pipeline.create ~checks ~loaded packages
+
+type database = { watcher : Watcher.t; mutable snapshot : snapshot; pipeline : Pipeline.t }
+
+let databases : (string, database) Hashtbl.t = Hashtbl.create 4
+let is_serving = ref false
+
+let served snapshot =
+  match snapshot.kind with
+  | Worktree root -> (
+      match Hashtbl.find_opt databases root with
+      | Some database when database.snapshot == snapshot -> Some database
+      | Some _ | None -> None)
+  | Published -> None
+
+let pipeline ?(checks = true) snapshot =
+  match served snapshot with
+  | Some database when checks -> database.pipeline
+  | Some _ | None -> cold_pipeline ~checks snapshot
+
+let is_layout path =
+  path = Project.lock_file || Filename.basename path = Filename.basename (Project.manifest_file "")
+
+let file_changes (before : snapshot) (after : snapshot) =
+  let layout snapshot = List.filter (fun (path, _) -> is_layout path) snapshot.files in
+  if layout before <> layout after then None
+  else
+    let texts (snapshot : snapshot) =
+      let table = Hashtbl.create 256 in
+      List.iter
+        (fun (package : Project.package) ->
+          List.iter (fun (file, text) -> Hashtbl.replace table file text) package.files)
+        snapshot.project.packages;
+      table
+    in
+    let previous = texts before and current = texts after in
+    Some
+      (Hashtbl.fold
+         (fun file text changes ->
+           match Hashtbl.find_opt previous file with
+           | Some old when String.equal old text -> changes
+           | Some _ | None -> (file, Some text) :: changes)
+         current
+         (Hashtbl.fold
+            (fun file _ changes ->
+              if Hashtbl.mem current file then changes else (file, None) :: changes)
+            previous []))
+
+let is_watched relative =
+  List.for_all (fun part -> not (Registry.Content.skipped part)) (String.split_on_char '/' relative)
+  || relative = ""
+
+let is_under prefix path =
+  prefix = "" || path = prefix || String.starts_with ~prefix:(prefix ^ "/") path
+
+let changed_files root files paths =
+  let prefixes =
+    List.filter
+      (fun path -> not (List.exists (fun other -> other <> path && is_under other path) paths))
+      (List.sort_uniq compare (List.filter is_watched paths))
+  in
+  let found prefix =
+    let absolute = if prefix = "" then root else Filename.concat root prefix in
+    match (Unix.lstat absolute).st_kind with
+    | S_DIR ->
+        List.map
+          (fun (path, text) -> ((if prefix = "" then path else prefix ^ "/" ^ path), text))
+          (Registry.Content.input_files absolute)
+    | S_REG when Registry.Content.is_input (Filename.basename prefix) ->
+        [ (prefix, File_system.read absolute) ]
+    | _ -> []
+    | exception Unix.Unix_error _ -> []
+  in
+  List.filter
+    (fun (path, _) -> not (List.exists (fun prefix -> is_under prefix path) prefixes))
+    files
+  @ List.concat_map found prefixes
+
+let refresh root database =
+  let files =
+    match Watcher.changes database.watcher with
+    | Overflow -> Some (Registry.Content.input_files root)
+    | Changed [] -> None
+    | Changed paths -> Some (changed_files root database.snapshot.files paths)
+  in
+  match files with
+  | None -> false
+  | Some files -> (
+      let before = database.snapshot in
+      let after = with_files before files in
+      database.snapshot <- after;
+      match file_changes before after with
+      | Some [] -> false
+      | Some changes ->
+          Pipeline.update database.pipeline changes;
+          true
+      | None ->
+          let loaded, packages = layout after in
+          Pipeline.relayout database.pipeline ~loaded packages;
+          true)
+
+let worktree_snapshot root =
+  if not !is_serving then snapshot_of_files (Worktree root) (Registry.Content.input_files root)
+  else
+    match Hashtbl.find_opt databases root with
+    | Some database ->
+        ignore (refresh root database);
+        database.snapshot
+    | None ->
+        let watcher = Watcher.start ~skipped:Registry.Content.skipped root in
+        let snapshot = snapshot_of_files (Worktree root) (Registry.Content.input_files root) in
+        Hashtbl.replace databases root
+          { watcher; snapshot; pipeline = cold_pipeline ~checks:true snapshot };
+        snapshot
+
+let take_snapshot directory =
+  if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
+  else
+    match root_of directory with
+    | None ->
+        Error
+          (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
+             directory)
+    | Some root ->
+        let snapshot = worktree_snapshot root in
+        Ok (snapshot, target_packages snapshot (relative_to root directory))
+
+let retake snapshot =
+  match snapshot.kind with Worktree root -> worktree_snapshot root | Published -> snapshot
+
+let propagate_changes descriptor =
+  Hashtbl.iter
+    (fun root database ->
+      if Watcher.descriptor database.watcher = descriptor then
+        match if refresh root database then Pipeline.propagate database.pipeline with
+        | () -> ()
+        | exception Compiler_bug.Bug bug ->
+            prerr_endline (Compiler_bug.to_string bug);
+            Watcher.stop database.watcher;
+            Hashtbl.remove databases root)
+    (Hashtbl.copy databases)
 
 let problems snapshot = snapshot.project.problems
 
@@ -475,7 +601,18 @@ let published name version =
 let server_key directory = Option.value (root_of directory) ~default:""
 
 let serve ~key ~handle =
-  Server.serve ~key ~alive:(fun () -> key = "" || Sys.file_exists key) ~collect ~handle;
+  is_serving := true;
+  Server.serve ~key
+    ~alive:(fun () -> key = "" || Sys.file_exists key)
+    ~collect
+    ~watched:(fun () ->
+      Hashtbl.fold
+        (fun _ database descriptors -> Watcher.descriptor database.watcher :: descriptors)
+        databases [])
+    ~changed:propagate_changes ~handle;
+  Hashtbl.iter (fun _ database -> Watcher.stop database.watcher) databases;
+  Hashtbl.reset databases;
+  is_serving := false;
   reset ()
 
 let call ?program ?start_server ?key ~progress request =

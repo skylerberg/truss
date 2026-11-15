@@ -182,8 +182,11 @@ let loop_entry context frame costs =
           | Finite -> ());
           oblige context frame Cost
             (span_of frame.source written.origin)
-            (Printf.sprintf "The loop's `%s` may not hold on entry to the loop."
-               (quote frame.source written.origin))
+            [
+              Text "The loop's `";
+              quote frame.source written.origin;
+              Text "` may not hold on entry to the loop.";
+            ]
             (loop_clause_holds context frame cost.counter written ~since:Costs.zero)
       | Per_iteration _ -> ())
     costs
@@ -208,9 +211,11 @@ let loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
             (fun (frame, when_) ->
               oblige context frame Cost
                 (span_of frame.source written_cost.origin)
-                (Printf.sprintf "The loop's `%s` may not hold %s."
-                   (quote frame.source written_cost.origin)
-                   when_)
+                [
+                  Text "The loop's `";
+                  quote frame.source written_cost.origin;
+                  Text (Printf.sprintf "` may not hold %s." when_);
+                ]
                 (loop_clause_holds context frame cost.counter written_cost
                    ~since:
                      (Costs.plus
@@ -253,16 +258,22 @@ let loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
               List.iter2
                 (fun (frame : frame) spent ->
                   oblige context frame Cost span
-                    "The prover cannot show that this iteration of the loop costs no more than the \
-                     per-iteration bound it inferred from the values the loop does not mutate: \
-                     give the loop a `cost` clause."
+                    [
+                      Text
+                        "The prover cannot show that this iteration of the loop costs no more than \
+                         the per-iteration bound it inferred from the values the loop does not \
+                         mutate: give the loop a `cost` clause.";
+                    ]
                     (counted_with ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
           | None ->
               oblige context head Cost span
-                "The prover cannot bound the cost of one iteration of this loop by the values the \
-                 loop does not mutate, so it cannot count the loop's cost: give the loop a `cost` \
-                 clause."
+                [
+                  Text
+                    "The prover cannot bound the cost of one iteration of this loop by the values \
+                     the loop does not mutate, so it cannot count the loop's cost: give the loop a \
+                     `cost` clause.";
+                ]
                 (Logic.Boolean false)))
     costs
 
@@ -402,8 +413,11 @@ let check_preserved_validity context end_ span preserved =
       match read end_ with
       | Some term ->
           oblige context end_ Invariant span
-            (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
-               (Types.show ty) name)
+            [
+              Text
+                (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
+                   (Types.show ty) name);
+            ]
             (Logic.( ==> ) valid_on_entry
                (validity context end_ ~assuming:false ~deep:true ty term))
       | None -> ())
@@ -415,9 +429,11 @@ let check_invariants context frame clauses ~when_ =
       let _, term = specification_value context frame invariant in
       oblige context frame Invariant
         (span_of frame.source invariant.origin)
-        (Printf.sprintf "The loop invariant `%s` may not hold %s."
-           (quote frame.source invariant.origin)
-           when_)
+        [
+          Text "The loop invariant `";
+          quote frame.source invariant.origin;
+          Text (Printf.sprintf "` may not hold %s." when_);
+        ]
         term)
     (invariants clauses)
 
@@ -609,13 +625,19 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
   let measures = measures_of clauses in
   if context.terminates && not (signature_terminates context path) then
     oblige context frame Termination span
-      (Printf.sprintf "This loop may not end: `%s`'s `next` has no `time` clause."
-         (Types.show cursor_type))
+      [
+        Text
+          (Printf.sprintf "This loop may not end: `%s`'s `next` has no `time` clause."
+             (Types.show cursor_type));
+      ]
       (Logic.Boolean false);
   if context.terminates && measures = None then
     oblige context frame Termination span
-      "This loop may not end: a cursor of a type's own promises no end, so give the loop a \
-       `decreases` clause."
+      [
+        Text
+          "This loop may not end: a cursor of a type's own promises no end, so give the loop a \
+           `decreases` clause.";
+      ]
       (Logic.Boolean false);
   let measured (at : frame) =
     Option.map
@@ -643,7 +665,8 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
               (fun (end_ : frame) ->
                 match measured end_ with
                 | Some after ->
-                    oblige context end_ Termination span "This loop's measure may not decrease."
+                    oblige context end_ Termination span
+                      [ Text "This loop's measure may not decrease." ]
                       (lexicographically_less before after)
                 | None -> ())
               ends
@@ -780,8 +803,11 @@ let for_ context frame (for_loop : for_loop) =
           Option.iter
             (oblige context end_ Invariant
                (span_of frame.source for_loop.for_at)
-               "An iteration of this loop may change how many elements the collection has. The \
-                collection's `element(mut self)` must leave its `count` as it was.")
+               [
+                 Text
+                   "An iteration of this loop may change how many elements the collection has. The \
+                    collection's `element(mut self)` must leave its `count` as it was.";
+               ])
             (keeps_count end_))
         ends;
       let most = [ Costs.at_least_zero count ] in
@@ -847,7 +873,8 @@ let while_ context frame (loop : while_loop) =
   in
   let start_measures = if context.terminates then measure_terms inside else None in
   if context.terminates && start_measures = None then
-    oblige context inside Termination span "This loop may not end: give it a `decreases` clause."
+    oblige context inside Termination span
+      [ Text "This loop may not end: give it a `decreases` clause." ]
       (Logic.Boolean false);
   let most =
     match (start_measures, measure_terms frame, iterations) with
@@ -878,7 +905,8 @@ let while_ context frame (loop : while_loop) =
       check_preserved_validity context end_ span preserved;
       match (start_measures, measure_terms end_) with
       | Some before, Some after ->
-          oblige context end_ Termination span "This loop's measure may not decrease."
+          oblige context end_ Termination span
+            [ Text "This loop's measure may not decrease." ]
             (lexicographically_less before after)
       | _ -> ())
     ends;

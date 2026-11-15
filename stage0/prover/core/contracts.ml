@@ -1,24 +1,26 @@
 open Core
 open State
 
-let source_of (lookups : Lookups.t) (key : Names.key) =
-  {
-    key = Some key;
-    name = Names.show_key key;
-    spans = lazy (Option.value (lookups.interface.names.spans key) ~default:[||]);
-    text = lazy (Option.value (lookups.interface.names.text key) ~default:"");
-  }
+let source_of (key : Names.key) =
+  { key = Some key; name = Names.show_key key; spans = lazy [||]; text = lazy "" }
 
 let source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.body_part key);
-  source_of lookups key
+  source_of key
+
+let home_source (lookups : Lookups.t) key =
+  {
+    (source_at_key lookups key) with
+    spans = lazy (Option.value (lookups.interface.names.spans key) ~default:[||]);
+    text = lazy (Option.value (lookups.interface.names.text key) ~default:"");
+  }
 
 let source_at (lookups : Lookups.t) (path : Path.t) =
   Option.map
     (fun ((origin : Infer.form_origin), substitution) ->
       let source =
         match origin with
-        | Written key | Inherited key -> source_of lookups key
+        | Written key | Inherited key -> source_of key
         | Generated -> { key = None; name = Path.show path; spans = lazy [||]; text = lazy "" }
       in
       (source, substitution, origin))
