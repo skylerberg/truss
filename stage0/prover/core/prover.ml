@@ -368,42 +368,29 @@ let clamp_to_definition database (key : Names.key) (span : span) =
   | _ -> Syntax.Span.make 0 0
 
 type answer = Solved of Solver.answer | Ran_true | Ran_false | Run_timed_out | Pending_answer
-type run = Template_check of State.evaluation | Call of State.known_call
-type run_result = Returned of Z.t | Timed_out | Not_run
-type evaluator = { code_key : run -> string option; run : run -> run_result }
+type run_result = Ran of bool | Timed_out | Not_run
+
+type evaluator = {
+  code_key : State.evaluation -> string option;
+  run : State.evaluation -> run_result;
+}
 
 let no_evaluator = { code_key = (fun _ -> None); run = (fun _ -> Not_run) }
 
 type oracles = {
   solve : index:int -> with_locals:bool -> solver_response;
   check_template : State.evaluation -> run_result;
-  call : State.known_call -> Z.t option;
 }
 
 and solver_response = Answered of Solver.answer | Unanswered
-
-let call_facts ~call (obligation : State.obligation) =
-  List.filter_map
-    (fun (known : State.known_call) ->
-      Option.map
-        (fun value ->
-          Logic.equal known.term
-            (if known.result_is_bool then Logic.Boolean (not (Z.equal value Z.zero))
-             else Logic.Integer value))
-        (call known))
-    obligation.known_calls
-
-let query_of ~call (obligation : State.obligation) =
-  match call_facts ~call obligation with
-  | [] -> obligation.query
-  | added -> { obligation.query with facts = obligation.query.facts @ added }
 
 let answers (oracles : oracles) (obligations : State.obligation list) =
   List.mapi
     (fun index (obligation : State.obligation) ->
       let answer =
         match Option.map oracles.check_template obligation.evaluation with
-        | Some (Returned value) -> if Z.equal value Z.zero then Ran_false else Ran_true
+        | Some (Ran true) -> Ran_true
+        | Some (Ran false) -> Ran_false
         | Some Timed_out -> Run_timed_out
         | Some Not_run | None -> (
             match oracles.solve ~index ~with_locals:false with
@@ -487,11 +474,7 @@ let definition_states oracles database (key : Names.key) =
                         " A quantified fact it may need has no term for the solver to use it by, \
                          so an `assert` that names the term it is needed for may be enough."
                       else ""));
-              trusts_compiled_code =
-                (match answer with
-                | Ran_true -> true
-                | Solved Proven -> call_facts ~call:oracles.call obligation <> []
-                | _ -> false);
+              trusts_compiled_code = (match answer with Ran_true -> true | _ -> false);
             },
             obligation.cited ))
         (answers oracles outcome.obligations)
@@ -501,7 +484,7 @@ type question = { definition : Names.key; index : int; with_locals : bool }
 let show_question question =
   Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
 
-type oracle_request = Solve of question * Solver.request | Run of run
+type oracle_request = Solve of question * Solver.request | Run of State.evaluation
 
 type oracle_response =
   | Solver_response of Solver.canonical
@@ -509,9 +492,7 @@ type oracle_response =
 
 let request_key = function
   | Solve (_, request) -> "solve " ^ Solver.request_key request
-  | Run (Template_check evaluation) ->
-      "template " ^ Digest.to_hex (Digest.string (Marshal.to_string evaluation []))
-  | Run (Call call) -> "call " ^ Digest.to_hex (Digest.string (Marshal.to_string call []))
+  | Run evaluation -> "template " ^ Digest.to_hex (Digest.string (Marshal.to_string evaluation []))
 
 let oracle_response : (string, oracle_response) Query.input =
   Query.input ~name:"oracle_response" ~show:Fun.id ()
@@ -520,25 +501,19 @@ type outcome =
   | Decided of (span state * (Names.key * Syntax.span) option) list
   | Pending of oracle_request list
 
-let run_result database run =
-  match Query.find database oracle_response (request_key (Run run)) with
+let run_result database evaluation =
+  match Query.find database oracle_response (request_key (Run evaluation)) with
   | Some (Run_response response) -> Some response.result
   | Some (Solver_response _) | None -> None
 
-let call_value database call =
-  match run_result database (Call call) with Some (Returned value) -> Some value | _ -> None
-
-let runs =
-  Query.query ~name:"proof_runs" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
+let evaluations =
+  Query.query ~name:"proof_evaluations" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
       match Query.demand database proof key with
       | Obligations outcome ->
           List.sort_uniq compare
-            (List.concat_map
-               (fun (obligation : State.obligation) ->
-                 Option.to_list
-                   (Option.map (fun evaluation -> Template_check evaluation) obligation.evaluation)
-                 @ List.map (fun call -> Call call) obligation.known_calls)
+            (List.filter_map
+               (fun (obligation : State.obligation) -> obligation.evaluation)
                outcome.obligations)
       | Not_proven_here | Unsupported _ -> [])
 
@@ -560,7 +535,7 @@ let question_query database question =
                    obligation.decisions)
             else []
           in
-          Some (query_of ~call:(call_value database) obligation, symbols, terms)
+          Some (obligation.query, symbols, terms)
       | None -> None)
   | Not_proven_here | Unsupported _ -> None
 
@@ -575,9 +550,11 @@ let outcome =
   Query.query ~name:"proof_outcome" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
       match
-        List.filter (fun run -> run_result database run = None) (Query.demand database runs key)
+        List.filter
+          (fun evaluation -> run_result database evaluation = None)
+          (Query.demand database evaluations key)
       with
-      | _ :: _ as pending -> Pending (List.map (fun run -> Run run) pending)
+      | _ :: _ as pending -> Pending (List.map (fun evaluation -> Run evaluation) pending)
       | [] -> (
           let pending = ref [] in
           let oracles =
@@ -596,17 +573,18 @@ let outcome =
                             pending := oracle_request :: !pending;
                           Unanswered));
               check_template =
-                (fun evaluation ->
-                  Option.value (run_result database (Template_check evaluation)) ~default:Not_run);
-              call = call_value database;
+                (fun evaluation -> Option.value (run_result database evaluation) ~default:Not_run);
             }
           in
           let states = definition_states oracles database key in
           match !pending with [] -> Decided states | pending -> Pending (List.rev pending)))
 
-let run_response (evaluator : evaluator) run code_key =
+let run_response (evaluator : evaluator) evaluation code_key =
   Run_response
-    { code_key; result = (match code_key with None -> Not_run | Some _ -> evaluator.run run) }
+    {
+      code_key;
+      result = (match code_key with None -> Not_run | Some _ -> evaluator.run evaluation);
+    }
 
 let responses (evaluator : evaluator) database solver requests =
   let distinct_requests = Hashtbl.create 64 in
@@ -636,18 +614,19 @@ let responses (evaluator : evaluator) database solver requests =
         match request with
         | Solve (_, solver_request) ->
             Solver_response (Hashtbl.find answers (Solver.request_key solver_request))
-        | Run run -> run_response evaluator run (evaluator.code_key run) ))
+        | Run evaluation -> run_response evaluator evaluation (evaluator.code_key evaluation) ))
     requests
 
 let rerun_changed (evaluator : evaluator) database keys =
-  List.sort_uniq compare (List.concat_map (Query.demand database runs) keys)
-  |> List.filter_map (fun run ->
-      let code_key = evaluator.code_key run in
-      match Query.find database oracle_response (request_key (Run run)) with
+  List.sort_uniq compare (List.concat_map (Query.demand database evaluations) keys)
+  |> List.filter_map (fun evaluation ->
+      let code_key = evaluator.code_key evaluation in
+      match Query.find database oracle_response (request_key (Run evaluation)) with
       | Some (Run_response recorded)
         when recorded.code_key = code_key && recorded.result <> Timed_out ->
           None
-      | Some _ | None -> Some (request_key (Run run), run_response evaluator run code_key))
+      | Some _ | None ->
+          Some (request_key (Run evaluation), run_response evaluator evaluation code_key))
 
 let solve_ahead ?(evaluator = no_evaluator) ~record database solver files =
   let keys =

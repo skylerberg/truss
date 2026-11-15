@@ -51,51 +51,6 @@ let () =
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
-let counting = Fixtures.Evaluate.counting
-
-let () =
-  test "a call whose arguments are known is evaluated by running it" (fun () ->
-      match
-        proven_with_running
-          (counting ^ Fixtures.Evaluate.call_whose_arguments_are_known_is_evaluated_by)
-      with
-      | [] -> ()
-      | actual ->
-          fail "%s"
-            (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-  test "without running it, such a call is known only by its contract" (fun () ->
-      let database, _ =
-        load (counting ^ Fixtures.Evaluate.without_running_it_such_a_call_is_known_only_by)
-      in
-      match
-        Prover.diagnostics ~record:(record database) database (Lazy.force solver) example_file
-      with
-      | [ _ ] -> ()
-      | actual -> fail "%d diagnostics" (List.length actual));
-  test "running a call gives its real result, not the hoped one" (fun () ->
-      match
-        proven_with_running
-          (counting ^ Fixtures.Evaluate.running_a_call_gives_its_real_result_not_the)
-      with
-      | [ _ ] -> ()
-      | actual -> fail "%d diagnostics" (List.length actual))
-
-let () =
-  test "a call that is run uses the argument it gives a parameter that has a default" (fun () ->
-      let source promised =
-        Fixtures.Evaluate.promised ^ promised ^ "\n{\n  count_to(limit: 4)\n}\n"
-      in
-      (match proven_with_running (source "4") with
-      | [] -> ()
-      | actual ->
-          fail "%s"
-            (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-      match proven_with_running (source "3") with
-      | [ _ ] -> ()
-      | actual -> fail "%d diagnostics for the default's value" (List.length actual))
-
 let () =
   test "a template's check is done again when the code it runs has changed" (fun () ->
       let use = Fixtures.Evaluate.use in
@@ -121,30 +76,6 @@ let () =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
 let () =
-  test "a call is run again when the callee's body has changed" (fun () ->
-      let source body =
-        "fn same(value: UInt8) -> UInt8\n  cost time finite\n{\n  " ^ body
-        ^ "\n}\n\nfn f() -> UInt8\n  ensures result == 7\n{\n  same(7)\n}\n"
-      in
-      let database, compile = load (source "value") in
-      let proven () =
-        Prover.diagnostics
-          ~evaluator:(Evaluator.of_compiler (lazy compile))
-          ~record:(record database) database (Lazy.force solver) example_file
-      in
-      (match proven () with
-      | [] -> ()
-      | actual ->
-          fail "%s"
-            (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-      Database.For_testing.set_text (Engine.of_context database) example_file (source "0");
-      match proven () with
-      | [ _ ] -> ()
-      | actual ->
-          fail "expected the changed callee to fail, got %d diagnostics" (List.length actual))
-
-let () =
   test "a template check that timed out is run again on the next check" (fun () ->
       let database, _ =
         load (shout ^ Fixtures.Evaluate.template_check_that_timed_out_is_run_again_on_the)
@@ -156,7 +87,7 @@ let () =
           run =
             (fun _ ->
               incr runs;
-              if !runs = 1 then Timed_out else Returned Z.one);
+              if !runs = 1 then Timed_out else Ran true);
         }
       in
       let proven () =
@@ -178,23 +109,31 @@ let () =
 let () =
   test "a state says whether its proof trusts compiled code" (fun () ->
       let database, compile =
-        load (counting ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
+        load (shout ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
       in
       let states =
         Prover.states
           ~evaluator:(Evaluator.of_compiler (lazy compile))
           ~record:(record database) database (Lazy.force solver) example_file
       in
-      let ensures =
+      let with_code code =
         List.filter
           (fun (state : Diagnostic.span Prover.state) ->
-            Diagnostic.Code.name (Prover state.code) = "prover.ensures")
+            Diagnostic.Code.name (Prover state.code) = code)
           states
       in
-      match ensures with
-      | [ first; second ] ->
-          if not (first.trusts_compiled_code && first.failure = None) then
-            fail "the proof of f's ensures should trust compiled code";
-          if second.trusts_compiled_code || second.failure <> None then
-            fail "the proof of g's ensures should be proven without trusting compiled code"
-      | actual -> fail "expected 2 ensures states, got %d" (List.length actual))
+      let trusting =
+        List.filter
+          (fun (state : Diagnostic.span Prover.state) -> state.trusts_compiled_code)
+          states
+      in
+      match (trusting, with_code "prover.ensures") with
+      | [ template ], [ ensured ] ->
+          if
+            Diagnostic.Code.name (Prover template.code) <> "prover.requires"
+            || template.failure <> None
+          then fail "only the proof of the template's requires should trust compiled code";
+          if ensured.failure <> None then fail "the proof of g's ensures should hold"
+      | trusting, ensured ->
+          fail "expected 1 state that trusts compiled code and 1 ensures state, got %d and %d"
+            (List.length trusting) (List.length ensured))
