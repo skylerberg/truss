@@ -351,7 +351,6 @@ let evaluate arguments =
   Format.pp_print_flush err ();
   Output.print (Buffer.contents buffer_out);
   Output.eprint (Buffer.contents buffer_err);
-  Database.flush ();
   outcome
 
 let run_command_line ?(directory = Sys.getcwd ()) arguments =
@@ -426,13 +425,19 @@ let request arguments =
     columns = Output.columns ();
   }
 
-let ask_running arguments : (response, string) result list =
+let ask_running arguments : (string * (response, string) result) list =
   List.map
-    (fun key -> Database.call ~start_server:false ~key ~progress:Output.eprint (request arguments))
+    (fun key ->
+      (key, Database.call ~start_server:false ~key ~progress:Output.eprint (request arguments)))
     (Database.servers ())
 
+let wait_until_stopped answers =
+  List.iter
+    (fun (key, answer) -> if Result.is_ok answer then Database.wait_until_ended ~key)
+    answers
+
 let clean_store () =
-  ignore (ask_running [ "stop" ]);
+  wait_until_stopped (ask_running [ "stop" ]);
   Database.reset ();
   let directory = Database.store_directory () in
   match File_system.remove directory with
@@ -460,7 +465,11 @@ let language_server ~no_server =
       { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
     in
     let response =
-      if no_server then Ok (handle ~progress:ignore request)
+      if no_server then begin
+        let response = handle ~progress:ignore request in
+        Database.flush ();
+        Ok response
+      end
       else Database.call ~key:(Database.server_key root) ~progress:ignore request
     in
     match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
@@ -471,28 +480,36 @@ let client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
   let arguments = List.filter (( <> ) "--no-server") arguments in
-  let local () = finish (run_command_line arguments) in
+  let local () =
+    let outcome = run_command_line arguments in
+    Database.flush ();
+    finish outcome
+  in
   match command_of arguments with
   | Some "clean" -> clean_store ()
   | Some "lsp" -> language_server ~no_server
   | None | Some "new" -> local ()
   | _ when no_server -> local ()
-  | Some ("status" | "stop") -> (
+  | Some (("status" | "stop") as command) -> (
       match ask_running arguments with
       | [] ->
           Output.eprint_line "No background process is running.";
           0
       | answers ->
-          List.fold_left
-            (fun status answer ->
-              match answer with
-              | Ok response ->
-                  Output.print response.output;
-                  max status (finish response.outcome)
-              | Error message ->
-                  Output.eprint_line message;
-                  status)
-            0 answers)
+          let status =
+            List.fold_left
+              (fun status (_, answer) ->
+                match answer with
+                | Ok response ->
+                    Output.print response.output;
+                    max status (finish response.outcome)
+                | Error message ->
+                    Output.eprint_line message;
+                    status)
+              0 answers
+          in
+          if command = "stop" then wait_until_stopped answers;
+          status)
   | Some _ -> (
       match
         (Database.call

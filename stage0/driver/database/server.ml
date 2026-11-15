@@ -1,33 +1,42 @@
 let executable () =
   try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> Sys.executable_name
 
-let executable_identity () =
-  let directory = Store.default_directory () in
-  let path = executable () in
+let stamp path =
   match Unix.stat path with
-  | exception Unix.Unix_error _ -> "unknown"
-  | stat -> (
-      let tag =
-        Printf.sprintf "%s %d %h %h %d" path stat.st_size stat.st_mtime stat.st_ctime stat.st_ino
+  | stat -> Some (Printf.sprintf "%d %h %h %d" stat.st_size stat.st_mtime stat.st_ctime stat.st_ino)
+  | exception Unix.Unix_error _ -> None
+
+let executable_identity () =
+  let path = executable () in
+  match stamp path with
+  | None -> "unknown"
+  | Some current -> (
+      let remembered = Filename.concat (Store.default_directory ()) "identities" in
+      let entries =
+        (try In_channel.with_open_bin remembered In_channel.input_lines with Sys_error _ -> [])
+        |> List.filter_map (fun line ->
+            match String.split_on_char '\t' line with
+            | [ path; stamp; identity ] -> Some (path, stamp, identity)
+            | _ -> None)
       in
-      let remembered = Filename.concat directory "identities" in
-      let known =
-        try
-          In_channel.with_open_bin remembered In_channel.input_lines
-          |> List.find_map (fun line ->
-              match String.index_opt line '\t' with
-              | Some separator when String.sub line 0 separator = tag ->
-                  Some (String.sub line (separator + 1) (String.length line - separator - 1))
-              | _ -> None)
-        with Sys_error _ -> None
-      in
-      match known with
-      | Some identity -> identity
+      match
+        List.find_opt (fun (known, known_stamp, _) -> known = path && known_stamp = current) entries
+      with
+      | Some (_, _, identity) -> identity
       | None ->
           let identity = Blake3.hex_digest (File_system.read path) in
+          let existing =
+            List.filter
+              (fun (known, known_stamp, _) -> known <> path && stamp known = Some known_stamp)
+              entries
+          in
           (try
-             Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o644 remembered
-               (fun out -> Printf.fprintf out "%s\t%s\n" tag identity)
+             File_system.write_atomically remembered
+               (String.concat ""
+                  (List.map
+                     (fun (path, stamp, identity) ->
+                       Printf.sprintf "%s\t%s\t%s\n" path stamp identity)
+                     (existing @ [ (path, current, identity) ])))
            with Sys_error _ -> ());
           identity)
 
@@ -57,7 +66,12 @@ let socket_path server_path =
       (fun directory -> Filename.concat directory (Blake3.hex_digest ~digits:16 path ^ ".socket"))
       (private_directory (Printf.sprintf "/tmp/truss-%d" (Unix.getuid ())))
 
-let locked path =
+let server_paths identity key =
+  Result.bind (servers_directory ()) (fun directory ->
+      let server_path = server_path directory identity key in
+      Result.map (fun path -> (directory, server_path, path)) (socket_path server_path))
+
+let is_locked path =
   match Unix.openfile path [ O_RDWR; O_CLOEXEC ] 0 with
   | exception Unix.Unix_error _ -> false
   | descriptor ->
@@ -68,13 +82,21 @@ let locked path =
           | () -> false
           | exception Unix.Unix_error _ -> true)
 
+let with_lock path work =
+  let descriptor = Unix.openfile path [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close descriptor)
+    (fun () ->
+      Unix.lockf descriptor F_LOCK 0;
+      work ())
+
 let served : string option ref = ref None
 
 let running key =
   !served = Some key
   ||
   match servers_directory () with
-  | Ok directory -> locked (server_path directory (executable_identity ()) key ^ ".lock")
+  | Ok directory -> is_locked (server_path directory (executable_identity ()) key ^ ".lock")
   | Error _ -> false
 
 let serving () =
@@ -92,7 +114,32 @@ let serving () =
           else None)
       |> List.sort compare
 
+let wait_until_ended ~key =
+  match server_paths (executable_identity ()) key with
+  | Ok (_, server_path, _) -> with_lock (server_path ^ ".lock") ignore
+  | Error _ -> ()
+
 let idle_limit = 3. *. 3600.
+let backlog = 128
+
+let bind server_path path =
+  with_lock (server_path ^ ".lock") ignore;
+  (try Unix.unlink path with Unix.Unix_error _ -> ());
+  let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+  match
+    Unix.bind socket (ADDR_UNIX path);
+    Unix.listen socket backlog
+  with
+  | () -> Ok socket
+  | exception Unix.Unix_error (error, _, _) ->
+      Unix.close socket;
+      Error (Printf.sprintf "Cannot listen on %s: %s." path (Unix.error_message error))
+
+let listen ~key =
+  Result.bind
+    (server_paths (executable_identity ()) key)
+    (fun (_, server_path, path) ->
+      with_lock (server_path ^ ".start") (fun () -> bind server_path path))
 
 let send channel value =
   Marshal.to_channel channel value [];
@@ -103,73 +150,81 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve_at ~key ~identity ~alive ~collect ~watched ~changed ~handle server_path path =
+let serve_on ~key ~identity ~alive ~collect ~watched ~changed ~handle ~answered ~close server_path
+    path socket =
   let lock = Unix.openfile (server_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
-  match Unix.lockf lock F_TLOCK 0 with
-  | exception Unix.Unix_error _ -> ()
-  | () ->
-      served := Some key;
-      Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
-      (try Unix.unlink path with Unix.Unix_error _ -> ());
-      let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-      Unix.bind socket (ADDR_UNIX path);
-      Unix.listen socket 16;
-      let last = ref (Unix.time ()) in
-      let last_collection = ref 0. in
-      while (not !stopping) && Unix.time () -. !last < idle_limit && alive () do
-        match Unix.select (socket :: watched ()) [] [] 1.0 with
-        | exception Unix.Unix_error (EINTR, _, _) -> ()
-        | [], _, _ ->
-            let now = Unix.time () in
-            if now -. !last_collection > 60. then begin
-              last_collection := now;
-              if executable_identity () <> identity then stopping := true;
-              collect ()
-            end
-        | ready, _, _ when not (List.mem socket ready) -> List.iter changed ready
-        | _ -> (
-            match Unix.accept ~cloexec:true socket with
-            | exception Unix.Unix_error _ -> ()
-            | client, _ -> (
-                last := Unix.time ();
-                let input = Unix.in_channel_of_descr client in
-                let output = Unix.out_channel_of_descr client in
-                (try
-                   let request = Marshal.from_channel input in
-                   let progress text = send output (Progress text) in
-                   send output (Final (handle ~progress request))
-                 with _ -> ());
-                try Unix.close client with Unix.Unix_error _ -> ()))
-      done;
-      (try Unix.unlink path with Unix.Unix_error _ -> ());
-      (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
-      Unix.close lock
+  Unix.lockf lock F_LOCK 0;
+  served := Some key;
+  Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
+  let last = ref (Unix.time ()) in
+  let last_collection = ref 0. in
+  while (not !stopping) && Unix.time () -. !last < idle_limit && alive () && Sys.file_exists path do
+    match Unix.select (socket :: watched ()) [] [] 1.0 with
+    | exception Unix.Unix_error (EINTR, _, _) -> ()
+    | [], _, _ ->
+        let now = Unix.time () in
+        if now -. !last_collection > 60. then begin
+          last_collection := now;
+          if executable_identity () <> identity then stopping := true;
+          collect ()
+        end
+    | ready, _, _ when not (List.mem socket ready) -> List.iter changed ready
+    | _ -> (
+        match Unix.accept ~cloexec:true socket with
+        | exception Unix.Unix_error _ -> ()
+        | client, _ -> (
+            last := Unix.time ();
+            let input = Unix.in_channel_of_descr client in
+            let output = Unix.out_channel_of_descr client in
+            (try
+               let request = Marshal.from_channel input in
+               let progress text = send output (Progress text) in
+               send output (Final (handle ~progress request))
+             with _ -> ());
+            (try Unix.close client with Unix.Unix_error _ -> ());
+            try answered () with failure -> prerr_endline (Printexc.to_string failure)))
+  done;
+  (try Unix.unlink path with Unix.Unix_error _ -> ());
+  Unix.close socket;
+  close ();
+  (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
+  Unix.close lock
 
-let serve ~key ~alive ~collect ~watched ~changed ~handle =
+let inherited_socket () =
+  match Unix.fstat Unix.stdin with
+  | { st_kind = S_SOCK; _ } ->
+      let socket = Unix.dup ~cloexec:true Unix.stdin in
+      let null = Unix.openfile "/dev/null" [ O_RDONLY; O_CLOEXEC ] 0 in
+      Unix.dup2 null Unix.stdin;
+      Unix.close null;
+      Some socket
+  | _ | (exception Unix.Unix_error _) -> None
+
+let serve ~key ~alive ~collect ~watched ~changed ~handle ~answered ~close =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  match servers_directory () with
-  | Error message -> prerr_endline message
-  | Ok directory -> (
-      let identity = executable_identity () in
-      let server_path = server_path directory identity key in
-      match socket_path server_path with
-      | Error message -> prerr_endline message
-      | Ok path ->
-          serve_at ~key ~identity ~alive ~collect ~watched ~changed ~handle server_path path)
+  let identity = executable_identity () in
+  match (server_paths identity key, inherited_socket ()) with
+  | Error message, _ -> prerr_endline message
+  | Ok _, None -> prerr_endline "The background process was started without its socket."
+  | Ok (_, server_path, path), Some socket ->
+      serve_on ~key ~identity ~alive ~collect ~watched ~changed ~handle ~answered ~close server_path
+        path socket
 
-let start directory program key =
+let start directory program key socket =
   let log = Filename.concat directory "server.log" in
   match Unix.fork () with
   | 0 -> (
       ignore (Unix.setsid ());
       match Unix.fork () with
       | 0 ->
-          let null = Unix.openfile "/dev/null" [ O_RDONLY ] 0 in
           let out = Unix.openfile log [ O_WRONLY; O_CREAT; O_APPEND ] 0o644 in
-          Unix.dup2 null Unix.stdin;
+          Unix.dup2 socket Unix.stdin;
           Unix.dup2 out Unix.stdout;
           Unix.dup2 out Unix.stderr;
-          (try Unix.execv program [| program; "__serve"; key |] with _ -> ());
+          (try Unix.execv program [| program; "__serve"; key |]
+           with Unix.Unix_error (error, _, _) ->
+             File_system.write_all Unix.stderr
+               (Printf.sprintf "Cannot start %s: %s.\n" program (Unix.error_message error)));
           Unix._exit 1
       | _ -> Unix._exit 0)
   | child -> ignore (Unix.waitpid [] child)
@@ -182,46 +237,51 @@ let connect path =
       Unix.close socket;
       None
 
+let connect_or_start ~program ~key directory server_path path =
+  match connect path with
+  | Some socket -> Ok socket
+  | None ->
+      with_lock (server_path ^ ".start") (fun () ->
+          match connect path with
+          | Some socket -> Ok socket
+          | None when Sys.file_exists path && is_locked (server_path ^ ".lock") ->
+              Error "The background process refused the connection; try again, or try --no-server."
+          | None ->
+              Result.bind (bind server_path path) (fun listening ->
+                  Fun.protect
+                    ~finally:(fun () -> Unix.close listening)
+                    (fun () ->
+                      start directory program key listening;
+                      Option.to_result ~none:"Cannot reach the background process; try --no-server."
+                        (connect path))))
+
 let call ?program ?(start_server = true) ~key ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let identity = executable_identity () in
   let program = Option.value program ~default:(executable ()) in
   let ( let* ) = Result.bind in
-  let* directory = servers_directory () in
-  let* path = socket_path (server_path directory identity key) in
-  let rec attempt tries =
-    match connect path with
-    | Some socket -> Some socket
-    | None ->
-        if tries = 0 || not start_server then None
-        else begin
-          if tries = 50 then start directory program key;
-          Unix.sleepf 0.1;
-          attempt (tries - 1)
-        end
+  let* directory, server_path, path = server_paths (executable_identity ()) key in
+  let* socket =
+    if start_server then connect_or_start ~program ~key directory server_path path
+    else Option.to_result ~none:"No background process is running." (connect path)
   in
-  match attempt 50 with
-  | None when not start_server -> Error "No background process is running."
-  | None -> Error "could not start or reach the background process; try --no-server."
-  | Some socket -> (
-      let input = Unix.in_channel_of_descr socket in
-      let output = Unix.out_channel_of_descr socket in
-      let rec receive () =
-        match Marshal.from_channel input with
-        | Progress text ->
-            progress text;
-            receive ()
-        | Final response -> response
-      in
-      match
-        send output request;
+  let input = Unix.in_channel_of_descr socket in
+  let output = Unix.out_channel_of_descr socket in
+  let rec receive () =
+    match Marshal.from_channel input with
+    | Progress text ->
+        progress text;
         receive ()
-      with
-      | response ->
-          Unix.close socket;
-          Ok response
-      | exception _ ->
-          (try Unix.close socket with Unix.Unix_error _ -> ());
-          Error
-            "the background process ended while answering; see its log in the store's servers \
-             directory.")
+    | Final response -> response
+  in
+  match
+    send output request;
+    receive ()
+  with
+  | response ->
+      Unix.close socket;
+      Ok response
+  | exception _ ->
+      (try Unix.close socket with Unix.Unix_error _ -> ());
+      Error
+        "the background process ended while answering; see its log in the store's servers \
+         directory."

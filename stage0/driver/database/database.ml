@@ -833,6 +833,10 @@ let close_all () =
       close database)
     (Hashtbl.fold (fun _ database databases -> database :: databases) databases [])
 
+let flush () =
+  if !is_serving then Hashtbl.iter (fun _ database -> commit database) databases else close_all ();
+  flush_store ()
+
 let serve ~key ~handle =
   is_serving := true;
   Server.serve ~key
@@ -845,26 +849,25 @@ let serve ~key ~handle =
             ~some:(fun watcher -> Watcher.descriptor watcher :: descriptors)
             database.watcher)
         databases [])
-    ~changed:propagate_changes ~handle;
-  close_all ();
-  is_serving := false;
-  reset ()
+    ~changed:propagate_changes ~handle ~answered:flush
+    ~close:(fun () ->
+      close_all ();
+      reset ());
+  is_serving := false
 
 let call ?program ?start_server ?key ~progress request =
   let key = match key with Some key -> key | None -> server_key (Sys.getcwd ()) in
   Server.call ?program ?start_server ~key ~progress request
 
-let flush () =
-  if !is_serving then Hashtbl.iter (fun _ database -> commit database) databases else close_all ();
-  flush_store ()
-
 let servers = Server.serving
 let stop = Server.stop
+let wait_until_ended = Server.wait_until_ended
 
 module For_testing = struct
   let standard_state () = (Lazy.force standard_state).state
   let cold_pipeline = cold_pipeline ~checks:true
   let collect_store = collect
+  let listen = Server.listen
 
   let interrupt_commit root =
     match Hashtbl.find_opt databases root with
