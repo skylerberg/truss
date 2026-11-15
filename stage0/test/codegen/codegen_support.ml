@@ -199,11 +199,8 @@ let compiler =
    infeasible paths, such as the code after a [concurrent] block whose
    every branch returns, and an infeasible path may read a local that it
    never wrote. Clang and GCC name that warning differently, and Clang
-   rejects GCC's name. On a feasible path, the sanitizer job of CI reports
-   a use of a pointer that only some paths wrote: it fills every local
-   that has no initializer with a pattern, which makes the pointer a wild
-   address. No check reports an integer or a [Bool] that only some paths
-   wrote. *)
+   rejects GCC's name. No check reports a local that only some feasible
+   paths wrote. *)
 let strict =
   lazy
     [
@@ -226,8 +223,8 @@ let counter = ref 0
    compiled. *)
 let cache = lazy (Build.cache (Database.objects_directory ()))
 
-(* The flags in [TRUSS_CFLAGS], as [truss] adds them. CI sets them to a
-   sanitizer's, so a report is a compiler bug. *)
+(* The flags in [TRUSS_CFLAGS], as [truss] adds them. CI sets them to
+   ThreadSanitizer's, so a report is a compiler bug. *)
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
