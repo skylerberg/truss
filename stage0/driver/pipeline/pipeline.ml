@@ -67,9 +67,12 @@ type state = {
   mutable dependencies : Manifest.dependency list;
   mutable modules : Path.module_ list;
   mutable files : Path.file list;
+  module_files : (Path.module_, Path.file list) Hashtbl.t;
   sources : (Path.file, Source.t) Hashtbl.t;
   parsed : (Path.file, Parsed.file) Hashtbl.t;
-  mutable namespace : Names.namespace option;
+  entries : (Path.module_, Names.module_names) Hashtbl.t;
+  namespaces : (Path.module_, Names.module_namespace) Hashtbl.t;
+  mutable package_index : Names.package_index option;
   resolved_names : (Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
   import_checks : (Path.file, Diagnostic.t list) Hashtbl.t;
   trait_headers : (Names.key, Resolve.trait_header part) Hashtbl.t;
@@ -103,7 +106,8 @@ type t = {
   reads : Part.t list Part_table.t;
   readers : unit Part_table.t Part_table.t;
   stale : (Path.package * Stage.t, unit Part_table.t) Hashtbl.t;
-  implied : (Path.package, Part.t list) Hashtbl.t;
+  implied : Part.t list Part_table.t;
+  implied_counts : int Part_table.t;
   graphs : (Path.package, Call_graph.t) Hashtbl.t;
   lowering : Compile.Lookups.settings option;
   ground_types : Compile.ground_types part Instance_table.t;
@@ -126,9 +130,12 @@ let empty_state name ~dependencies =
     dependencies;
     modules = [];
     files = [];
+    module_files = Hashtbl.create 64;
     sources = Hashtbl.create 64;
     parsed = Hashtbl.create 64;
-    namespace = None;
+    entries = Hashtbl.create 64;
+    namespaces = Hashtbl.create 64;
+    package_index = None;
     resolved_names = Hashtbl.create 1024;
     import_checks = Hashtbl.create 64;
     trait_headers = Hashtbl.create 64;
@@ -157,8 +164,15 @@ let empty_state name ~dependencies =
 
 let list_files (state : state) files =
   state.files <- List.sort compare files;
+  Hashtbl.reset state.module_files;
+  List.iter
+    (fun (file : Path.file) ->
+      Hashtbl.replace state.module_files file.module_
+        (file :: Option.value ~default:[] (Hashtbl.find_opt state.module_files file.module_)))
+    (List.rev state.files);
   state.modules <-
-    List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) state.files)
+    List.sort compare
+      (Hashtbl.fold (fun module_ _ modules -> module_ :: modules) state.module_files [])
 
 let source_of (file : Path.file) text = Source.create ~path:(Path.show_file file) text
 
@@ -211,6 +225,14 @@ let stale_parts pipeline package stage =
   | Some parts -> Part_table.fold (fun part () parts -> part :: parts) parts []
   | None -> []
 
+let mark_modules_stale pipeline (state : state) modules =
+  List.iter
+    (fun module_ ->
+      mark_stale pipeline (Entries module_);
+      mark_stale pipeline (Namespace module_))
+    modules;
+  mark_stale pipeline (Package_index state.name)
+
 let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
   let states = Hashtbl.create 8 in
   List.iter (fun state -> Hashtbl.replace states state.name state) loaded;
@@ -222,7 +244,8 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       reads = Part_table.create 4096;
       readers = Part_table.create 4096;
       stale = Hashtbl.create 64;
-      implied = Hashtbl.create 8;
+      implied = Part_table.create 1024;
+      implied_counts = Part_table.create 4096;
       graphs = Hashtbl.create 8;
       lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
       ground_types = Instance_table.create 1024;
@@ -243,7 +266,7 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       Hashtbl.replace states package.name state;
       mark_state_unsaved pipeline state;
       List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
-      mark_stale pipeline (Namespace package.name))
+      mark_modules_stale pipeline state state.modules)
     packages;
   pipeline
 
@@ -253,9 +276,12 @@ let copy_state (state : state) =
     dependencies = state.dependencies;
     modules = state.modules;
     files = state.files;
+    module_files = Hashtbl.copy state.module_files;
     sources = Hashtbl.copy state.sources;
     parsed = Hashtbl.copy state.parsed;
-    namespace = state.namespace;
+    entries = Hashtbl.copy state.entries;
+    namespaces = Hashtbl.copy state.namespaces;
+    package_index = state.package_index;
     resolved_names = Hashtbl.copy state.resolved_names;
     import_checks = Hashtbl.copy state.import_checks;
     trait_headers = Hashtbl.copy state.trait_headers;
@@ -302,7 +328,8 @@ let copy pipeline =
     reads = Part_table.copy pipeline.reads;
     readers;
     stale;
-    implied = Hashtbl.copy pipeline.implied;
+    implied = Part_table.copy pipeline.implied;
+    implied_counts = Part_table.copy pipeline.implied_counts;
     graphs;
     lowering = pipeline.lowering;
     ground_types = Instance_table.copy pipeline.ground_types;
@@ -410,7 +437,7 @@ let owner pipeline package =
       | Some state -> state
       | None ->
           let state = empty_state package ~dependencies:[] in
-          state.namespace <- Some Names.empty_namespace;
+          state.package_index <- Some Names.empty_package_index;
           Hashtbl.replace pipeline.absent package state;
           state)
 
@@ -455,9 +482,6 @@ let dependency_names pipeline name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let modules pipeline name =
-  match package pipeline name with Some package -> package.modules | None -> []
-
 let source pipeline (file : Path.file) =
   match Hashtbl.find_opt (owner pipeline file.module_.package).sources file with
   | Some source -> source
@@ -491,20 +515,29 @@ let in_dependency_order pipeline packages =
   List.iter visit packages;
   List.rev !order
 
-let namespace pipeline package =
-  match (owner pipeline package).namespace with
-  | Some namespace -> namespace
-  | None -> unchecked (Part.show (Namespace package))
+let read_package_index pipeline package =
+  match (owner pipeline package).package_index with
+  | Some index -> index
+  | None -> unchecked (Part.show (Package_index package))
 
-let names_over pipeline ~namespace =
-  Names.of_namespaces ~namespace
+let names_over pipeline ~index =
+  Names.make_lookups
+    ~entries:(fun (module_ : Path.module_) ->
+      Hashtbl.find_opt (owner pipeline module_.package).entries module_)
+    ~namespace:(fun (module_ : Path.module_) ->
+      Hashtbl.find_opt (owner pipeline module_.package).namespaces module_)
+    ~index
     ~module_exists:(fun (module_ : Path.module_) ->
-      module_ = Intrinsic.module_ || List.mem module_ (modules pipeline module_.package))
+      module_ = Intrinsic.module_
+      ||
+      match package pipeline module_.package with
+      | Some state -> Hashtbl.mem state.module_files module_
+      | None -> false)
     ~split_module:
       (Path.split_module ~is_package:(fun name -> Option.is_some (package pipeline name)))
     ~dependency_names:(dependency_names pipeline)
 
-let names_lookups pipeline = names_over pipeline ~namespace:(namespace pipeline)
+let names_lookups pipeline = names_over pipeline ~index:(read_package_index pipeline)
 
 let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
   let noting (part : Part.t) read =
@@ -563,21 +596,13 @@ let parsed_file pipeline (file : Path.file) =
   | Some parsed -> parsed
   | None -> unchecked (Part.show (Parsed file))
 
-let build_namespace pipeline note (state : state) =
-  Names.namespace (recording_names pipeline note) state.name
-    (List.map
-       (fun module_ ->
-         ( module_,
-           List.filter_map
-             (fun (file : Path.file) ->
-               if file.module_ = module_ then begin
-                 read pipeline note (Parsed file);
-                 let parsed = parsed_file pipeline file in
-                 Some (file, parsed.file, parsed.text)
-               end
-               else None)
-             state.files ))
-       state.modules)
+let read_module_sources pipeline note (state : state) module_ =
+  List.map
+    (fun (file : Path.file) ->
+      read pipeline note (Parsed file);
+      let parsed = parsed_file pipeline file in
+      (file, parsed.file, parsed.text))
+    (Option.value ~default:[] (Hashtbl.find_opt state.module_files module_))
 
 let file_keys pipeline file = List.map Names.key_of ((names_lookups pipeline).declarations_in file)
 
@@ -666,7 +691,7 @@ let type_interface lookups path =
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
-let impl_methods (names : Names.lookups) package =
+let list_impl_methods (names : Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
       match names.key trait with
@@ -680,60 +705,52 @@ let impl_methods (names : Names.lookups) package =
       | None -> [])
     (names.impls package)
 
-let derived_paths names package =
-  List.filter
-    (function Path.Method { owner = Derived _; _ } -> true | _ -> false)
-    (impl_methods names package)
-
-let list_package_parts pipeline (names : Names.lookups) package : Part.t list =
-  let state = owner pipeline package in
-  let declarations = names.package_declarations package in
-  let paths = List.map (fun (declaration : Names.declaration) -> declaration.path) declarations in
-  let of_declaration (declaration : Names.declaration) : Part.t list =
-    let key = Names.key_of declaration in
-    List.map (fun section -> Part.Resolved (key, section)) Resolve.sections
-    @ [
-        Part.Interface key;
-        Signature_check key;
-        Contract key;
-        Checked_body key;
-        Body_mir key;
-        Contract_mir key;
-        Patterns key;
-        Usage key;
-        Ownership key;
-        Used_packages key;
-        Proof key;
-      ]
-    @ (match declaration.kind with
-      | Trait -> [ Part.Trait_header key; Header key ]
-      | Impl | Capability -> [ Part.Header key ]
-      | _ -> [])
-    @
-    match declaration.kind with
+let list_declaration_parts package (declaration : Names.declaration) : Part.t list =
+  let key = Names.key_of declaration in
+  List.map (fun section -> Part.Resolved (key, section)) Resolve.sections
+  @ [
+      Part.Interface key;
+      Signature_check key;
+      Contract key;
+      Checked_body key;
+      Body_mir key;
+      Contract_mir key;
+      Patterns key;
+      Usage key;
+      Ownership key;
+      Used_packages key;
+      Proof key;
+    ]
+  @ (match declaration.kind with
+    | Trait -> [ Part.Trait_header key; Header key ]
+    | Impl | Capability -> [ Part.Header key ]
+    | _ -> [])
+  @ (match declaration.kind with
     | (Constant | Member_constant) when declaration.ordinal = 0 -> [ Part.Constant_value key.path ]
     | Type when declaration.ordinal = 0 -> [ Part.Type_facts key.path ]
-    | _ -> []
-  in
-  List.concat_map of_declaration declarations
-  @ List.filter_map
-      (function _, (Path.Derived _ as impl) -> Some (Part.Derived_interface impl) | _ -> None)
-      (names.impls package)
-  @ List.concat_map
-      (fun path -> [ Part.Derived_form path; Generated_mir path ])
-      (derived_paths names package)
+    | _ -> [])
+  @ (if declaration.ordinal = 0 then [ Part.Call_edges key.path; Successors (key.path, package) ]
+     else [])
   @ List.map
-      (fun path -> Part.Call_edges path)
-      (List.sort_uniq Path.compare (paths @ impl_methods names package))
-  @ List.map (fun path -> Part.Successors (path, package)) (List.sort_uniq Path.compare paths)
+      (fun check -> Part.Package_check (package, check))
+      (Package_checks.list_declaration_checks declaration)
+
+let list_package_parts (names : Names.lookups) package : Part.t list =
+  let methods = list_impl_methods names package in
+  List.filter_map
+    (function _, (Path.Derived _ as impl) -> Some (Part.Derived_interface impl) | _ -> None)
+    (names.impls package)
+  @ List.concat_map
+      (function
+        | Path.Method { owner = Derived _; _ } as path ->
+            [ Part.Derived_form path; Generated_mir path ]
+        | _ -> [])
+      methods
+  @ List.map (fun path -> Part.Call_edges path) (List.sort_uniq Path.compare methods)
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
       (List.sort_uniq Path.compare_package (names.dependency_names package))
-  @ List.map (fun file -> Part.Import_check file) state.files
-  @ List.map
-      (fun check -> Part.Package_check (package, check))
-      (List.concat_map Package_checks.list_declaration_checks declarations
-      @ Package_checks.package_wide_checks)
+  @ List.map (fun check -> Part.Package_check (package, check)) Package_checks.package_wide_checks
 
 let checked_body pipeline note key =
   read_part pipeline note (fun key -> Part.Checked_body key) (fun owner -> owner.checked_bodies) key
@@ -1013,11 +1030,24 @@ let stored pipeline (part : Part.t) =
   in
   match part with
   | Parsed file -> keyed ~is_failed:never (fun state -> state.parsed) file
-  | Namespace _ ->
+  | Entries module_ ->
+      {
+        (keyed ~is_failed:never (fun state -> state.entries) module_) with
+        saved = unsaved;
+        restore = (fun _ -> unsaved ());
+      }
+  | Namespace module_ ->
+      {
+        (keyed ~is_failed:never (fun state -> state.namespaces) module_) with
+        saved = unsaved;
+        restore = (fun _ -> unsaved ());
+      }
+  | Package_index _ ->
       {
         is_failed = false;
-        remove = (fun () -> state.namespace <- None);
-        is_equal_in = (fun other -> compare (owner other package).namespace state.namespace = 0);
+        remove = (fun () -> state.package_index <- None);
+        is_equal_in =
+          (fun other -> compare (owner other package).package_index state.package_index = 0);
         saved = unsaved;
         restore = (fun _ -> unsaved ());
       }
@@ -1075,7 +1105,7 @@ let stored pipeline (part : Part.t) =
         restore =
           (fun bytes -> Type_table.replace pipeline.layouts ty (Marshal.from_string bytes 0));
       }
-  | Source _ | Packages | Module _ | Dependencies _ | Entry _ | Entries _ | Imports _
+  | Source _ | Packages | Module _ | Dependencies _ | Entry _ | Module_index _ | Imports _
   | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _ | Module_declarations _
   | File_declarations _ | Package_declarations _ | Members _ | Traits_declaring _ | Impl_index _
   | Impls_of_type _ | Impls_of_trait _ | Law_proofs _ ->
@@ -1288,16 +1318,17 @@ let entry_point (names : Names.lookups) package =
       | _ -> None)
     (names.declarations { package; modules = [] })
 
-let own_lowering_roots pipeline (names : Names.lookups) package =
+let own_module_roots pipeline (names : Names.lookups) (module_ : Path.module_) =
   if Option.is_some pipeline.lowering then
-    own_roots pipeline (Namespace package)
+    own_roots pipeline (Namespace module_)
       (Compile.roots
          ~tests:
            (List.filter_map
               (fun (declaration : Names.declaration) ->
                 match declaration.path with Test _ -> Some declaration.path | _ -> None)
-              (names.package_declarations package))
-         ~mains:(Option.to_list (entry_point names package)))
+              (names.declarations module_))
+         ~mains:
+           (if module_.modules = [] then Option.to_list (entry_point names module_.package) else []))
 
 let holds_position pipeline (part : Part.t) =
   match part with
@@ -1308,7 +1339,6 @@ let mark_change pipeline package (change : Names.change) =
   let part : Part.t =
     match change with
     | Entry (module_, name) -> Entry (module_, name)
-    | Entries module_ -> Entries module_
     | Imports key -> Imports key
     | Declaration key -> Declaration key
     | Tree key | Positions key -> Tree key
@@ -1318,6 +1348,7 @@ let mark_change pipeline package (change : Names.change) =
     | Contained key -> Contained key
     | Module_declarations module_ -> Module_declarations module_
     | File_declarations file -> File_declarations file
+    | Module_index module_ -> Module_index module_
     | Package_declarations -> Package_declarations package
     | Members (owner, name) -> Members (owner, name)
     | Traits_declaring name -> Traits_declaring (package, name)
@@ -1330,55 +1361,137 @@ let mark_change pipeline package (change : Names.change) =
   | Positions _ -> mark_readers ~only:(holds_position pipeline) pipeline part
   | _ -> mark_readers pipeline part
 
-let is_own_namespace_part package (part : Part.t) =
-  match part with
-  | Packages -> false
-  | part -> Stage.of_part part = Namespaces && Part.package part = package
+let own_implied pipeline owner parts =
+  let before = Option.value ~default:[] (Part_table.find_opt pipeline.implied owner) in
+  if parts = before then ([], [])
+  else begin
+    if parts = [] then Part_table.remove pipeline.implied owner
+    else Part_table.replace pipeline.implied owner parts;
+    let count_changes = Part_table.create 64 in
+    let adjust change part =
+      Part_table.replace count_changes part
+        (change + Option.value ~default:0 (Part_table.find_opt count_changes part))
+    in
+    List.iter (adjust (-1)) before;
+    List.iter (adjust 1) parts;
+    Part_table.fold
+      (fun part change (newly_implied, no_longer_implied) ->
+        let count = Option.value ~default:0 (Part_table.find_opt pipeline.implied_counts part) in
+        let updated = count + change in
+        if updated = 0 then Part_table.remove pipeline.implied_counts part
+        else Part_table.replace pipeline.implied_counts part updated;
+        if count = 0 && updated > 0 then (part :: newly_implied, no_longer_implied)
+        else if count > 0 && updated = 0 then (newly_implied, part :: no_longer_implied)
+        else (newly_implied, no_longer_implied))
+      count_changes ([], [])
+  end
 
-let namespace_and_implied pipeline (state : state) =
+let root_successors pipeline (newly_implied, no_longer_implied) =
+  List.iter
+    (function
+      | Part.Successors (root, viewer) -> Call_graph.remove_root (call_graph pipeline viewer) root
+      | _ -> ())
+    no_longer_implied;
+  List.iter
+    (function
+      | Part.Successors (root, viewer) ->
+          ignore (Call_graph.add_root (call_graph pipeline viewer) root)
+      | _ -> ())
+    newly_implied
+
+let apply_implied pipeline ((newly_implied, no_longer_implied) as implied) =
+  root_successors pipeline implied;
+  List.iter (mark_stale pipeline) newly_implied;
+  forget pipeline no_longer_implied
+
+let update_entries pipeline (state : state) module_ =
+  let part = Part.Entries module_ in
+  let before = Hashtbl.find_opt state.entries module_ in
+  let after =
+    if Hashtbl.mem state.module_files module_ then
+      Some
+        (computing pipeline [ part ] (fun note ->
+             Names.index_entries
+               (List.map
+                  (fun (_, file, _) -> file)
+                  (read_module_sources pipeline note state module_))))
+    else begin
+      discard pipeline part;
+      None
+    end
+  in
+  (match after with
+  | Some entries -> Hashtbl.replace state.entries module_ entries
+  | None -> Hashtbl.remove state.entries module_);
+  (before <> after, Names.list_entry_changes module_ before after)
+
+let update_module_namespace pipeline (state : state) module_ =
+  let part = Part.Namespace module_ in
+  let before = Hashtbl.find_opt state.namespaces module_ in
+  let after =
+    if Hashtbl.mem state.module_files module_ then
+      Some
+        (computing pipeline [ part ] (fun note ->
+             Names.build_module_namespace (recording_names pipeline note)
+               (read_module_sources pipeline note state module_)))
+    else begin
+      discard pipeline part;
+      None
+    end
+  in
+  (match after with
+  | Some namespace -> Hashtbl.replace state.namespaces module_ namespace
+  | None -> Hashtbl.remove state.namespaces module_);
+  let names = names_lookups pipeline in
+  ( Names.list_module_changes module_ before after,
+    own_implied pipeline part
+      (List.concat_map (list_declaration_parts state.name) (names.declarations module_)
+      @ List.map
+          (fun file -> Part.Import_check file)
+          (Option.value ~default:[] (Hashtbl.find_opt state.module_files module_))) )
+
+let is_own_index_part package (part : Part.t) =
+  Stage.of_part part = Package_indexes && Part.package part = package
+
+let update_package_index pipeline (state : state) =
   let package = state.name in
-  let namespace, implied =
-    computing pipeline [ Part.Namespace package ] (fun note ->
-        let note part = if not (is_own_namespace_part package part) then note part in
-        let own_namespace = build_namespace pipeline note state in
-        let names =
-          names_over pipeline ~namespace:(fun name ->
-              if name = package then own_namespace else namespace pipeline name)
+  let part = Part.Package_index package in
+  let before = Option.value state.package_index ~default:Names.empty_package_index in
+  let after, package_parts =
+    computing pipeline [ part ] (fun note ->
+        let index =
+          Names.build_package_index
+            (List.filter_map
+               (fun module_ ->
+                 note (Part.Module_index module_);
+                 Hashtbl.find_opt state.namespaces module_)
+               state.modules)
         in
-        (own_namespace, list_package_parts pipeline (recording names note) package))
+        let names =
+          names_over pipeline ~index:(fun name ->
+              if name = package then index else read_package_index pipeline name)
+        in
+        let note part = if not (is_own_index_part package part) then note part in
+        (index, list_package_parts (recording names note) package))
   in
-  state.namespace <- Some namespace;
-  Hashtbl.replace pipeline.implied package implied;
-  (namespace, implied)
+  state.package_index <- Some after;
+  (Names.list_index_changes before after, own_implied pipeline part package_parts)
 
-let compute_namespace pipeline (state : state) =
-  let package = state.name in
-  let before = Option.value state.namespace ~default:Names.empty_namespace in
-  let implied_before = Option.value ~default:[] (Hashtbl.find_opt pipeline.implied package) in
-  let after, implied = namespace_and_implied pipeline state in
-  let membership parts =
-    let members = Part_table.create 256 in
-    List.iter (fun part -> Part_table.replace members part ()) parts;
-    Part_table.mem members
-  in
-  let was_implied = membership implied_before and is_implied = membership implied in
-  let graph = call_graph pipeline package in
-  List.iter
-    (function
-      | Part.Successors (root, _) as part when not (is_implied part) ->
-          Call_graph.remove_root graph root
-      | _ -> ())
-    implied_before;
-  List.iter
-    (function
-      | Part.Successors (root, _) as part when not (was_implied part) ->
-          ignore (Call_graph.add_root graph root)
-      | _ -> ())
-    implied;
-  List.iter (mark_change pipeline package) (Names.changes before after);
-  List.iter (fun part -> if not (was_implied part) then mark_stale pipeline part) implied;
-  forget pipeline (List.filter (fun part -> not (is_implied part)) implied_before);
-  own_lowering_roots pipeline (names_lookups pipeline) package
+let compute_entries pipeline (state : state) module_ =
+  let is_changed, changes = update_entries pipeline state module_ in
+  if is_changed then mark_readers pipeline (Entries module_);
+  List.iter (mark_change pipeline state.name) changes
+
+let compute_module_namespace pipeline (state : state) module_ =
+  let changes, implied = update_module_namespace pipeline state module_ in
+  List.iter (mark_change pipeline state.name) changes;
+  apply_implied pipeline implied;
+  own_module_roots pipeline (names_lookups pipeline) module_
+
+let compute_package_index pipeline (state : state) =
+  let changes, implied = update_package_index pipeline state in
+  List.iter (mark_change pipeline state.name) changes;
+  apply_implied pipeline implied
 
 let compute_type_facts pipeline paths =
   let facts =
@@ -1416,7 +1529,9 @@ let compute_part pipeline (part : Part.t) =
       into (keyed state.parsed file) (fun note ->
           note (Source file);
           Some (Parsed.parse (source pipeline file)))
-  | Namespace _ -> compute_namespace pipeline state
+  | Entries module_ -> compute_entries pipeline state module_
+  | Namespace module_ -> compute_module_namespace pipeline state module_
+  | Package_index _ -> compute_package_index pipeline state
   | Resolved (key, section) ->
       into
         (keyed state.resolved_names (key, section))
@@ -1658,7 +1773,7 @@ let compute_part pipeline (part : Part.t) =
             | layout -> Value layout
             | exception Reads_failed_part -> Blocked
             | exception Compile.Todo_type _ -> Failed []))
-  | Source _ | Packages | Module _ | Dependencies _ | Derived_interface _ | Entry _ | Entries _
+  | Source _ | Packages | Module _ | Dependencies _ | Derived_interface _ | Entry _ | Module_index _
   | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
   | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _ | Law_proofs _
@@ -1936,7 +2051,7 @@ let changes pipeline other =
   let parts = Part_table.create 1024 in
   let add part =
     match Stage.of_part part with
-    | Input | Namespaces -> ()
+    | Input | Entries | Namespaces | Package_indexes -> ()
     | _ ->
         if is_checked part && Option.is_some (Part.definition part) then
           Part_table.replace parts part ()
@@ -1995,7 +2110,9 @@ let update pipeline changes =
           list_files state
             (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else []);
           mark_module_readers pipeline ~before:modules ~after:state.modules;
-          mark_stale pipeline (Namespace package)
+          mark_stale pipeline (Entries file.module_);
+          mark_stale pipeline (Namespace file.module_);
+          if modules <> state.modules then mark_stale pipeline (Package_index package)
         end
       end)
     changes
@@ -2006,6 +2123,9 @@ let state_parts (state : state) : Part.t list =
   List.concat
     [
       keyed state.parsed (fun file -> Part.Parsed file);
+      keyed state.entries (fun module_ -> Part.Entries module_);
+      keyed state.namespaces (fun module_ -> Part.Namespace module_);
+      Option.fold ~none:[] ~some:(fun _ -> [ Part.Package_index state.name ]) state.package_index;
       keyed state.resolved_names (fun (key, section) -> Part.Resolved (key, section));
       keyed state.import_checks (fun file -> Part.Import_check file);
       keyed state.trait_headers (fun key -> Part.Trait_header key);
@@ -2035,13 +2155,23 @@ let state_parts (state : state) : Part.t list =
 let mark_differences pipeline name ~(before : state option) ~(after : state option) =
   let empty () =
     let state = empty_state name ~dependencies:[] in
-    state.namespace <- Some Names.empty_namespace;
+    state.package_index <- Some Names.empty_package_index;
     state
   in
   let before = match before with Some state -> state | None -> empty () in
   let after = match after with Some state -> state | None -> empty () in
-  let namespace (state : state) = Option.value state.namespace ~default:Names.empty_namespace in
-  List.iter (mark_change pipeline name) (Names.changes (namespace before) (namespace after));
+  let index (state : state) = Option.value state.package_index ~default:Names.empty_package_index in
+  List.iter
+    (fun module_ ->
+      List.iter (mark_change pipeline name)
+        (Names.list_entry_changes module_
+           (Hashtbl.find_opt before.entries module_)
+           (Hashtbl.find_opt after.entries module_)
+        @ Names.list_module_changes module_
+            (Hashtbl.find_opt before.namespaces module_)
+            (Hashtbl.find_opt after.namespaces module_)))
+    (List.sort_uniq compare (before.modules @ after.modules));
+  List.iter (mark_change pipeline name) (Names.list_index_changes (index before) (index after));
   let text (state : state) file = Option.map Source.text (Hashtbl.find_opt state.sources file) in
   List.iter
     (fun file -> if text before file <> text after file then mark_readers pipeline (Source file))
@@ -2062,7 +2192,7 @@ let mark_differences pipeline name ~(before : state option) ~(after : state opti
 
 let retire pipeline (state : state) =
   let package = state.name in
-  own_roots pipeline (Namespace package) [];
+  List.iter (fun module_ -> own_roots pipeline (Namespace module_) []) state.modules;
   Hashtbl.iter (fun key _ -> own_roots pipeline (Proof key) []) state.proofs;
   let is_own (part : Part.t) =
     match Stage.of_part part with
@@ -2087,7 +2217,12 @@ let retire pipeline (state : state) =
       else Some parts)
     pipeline.stale;
   Hashtbl.remove pipeline.graphs package;
-  Hashtbl.remove pipeline.implied package;
+  Part_table.filter_map_inplace
+    (fun owner parts -> if Part.package owner = package then None else Some parts)
+    pipeline.implied;
+  Part_table.filter_map_inplace
+    (fun part count -> if Part.package part = package then None else Some count)
+    pipeline.implied_counts;
   Hashtbl.remove pipeline.states package
 
 let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
@@ -2123,8 +2258,7 @@ let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
           if state.dependencies <> package.dependencies then begin
             state.dependencies <- package.dependencies;
             mark_unsaved pipeline (Package package.name);
-            mark_readers pipeline (Dependencies package.name);
-            mark_stale pipeline (Namespace package.name)
+            mark_readers pipeline (Dependencies package.name)
           end;
           update pipeline
             (List.map (fun (file, text) -> (file, Some text)) package.files
@@ -2139,7 +2273,7 @@ let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
           mark_module_readers pipeline ~before:[] ~after:state.modules;
           mark_readers pipeline (Dependencies package.name);
           List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
-          mark_stale pipeline (Namespace package.name))
+          mark_modules_stale pipeline state state.modules)
     packages;
   let names_after = Hashtbl.fold (fun name _ names -> name :: names) pipeline.states [] in
   if List.sort compare names_before <> List.sort compare names_after then
@@ -2150,7 +2284,7 @@ let fingerprint text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
 let is_saved_part pipeline (part : Part.t) =
   match Stage.of_part part with
-  | Input | Namespaces -> false
+  | Input | Entries | Namespaces | Package_indexes -> false
   | stage -> Stage.is_lowering stage || List.mem (Part.package part) pipeline.project
 
 let saved_value pipeline (entry : Entry.t) =
@@ -2176,7 +2310,7 @@ let saved_value pipeline (entry : Entry.t) =
   | Owned owner -> Option.map marshalled (Part_table.find_opt pipeline.owned owner)
 
 let unsaved pipeline =
-  drain pipeline ~through:Namespaces pipeline.project;
+  drain pipeline ~through:Package_indexes pipeline.project;
   List.iter (update_groups pipeline) pipeline.project;
   Entry_table.fold
     (fun entry () entries ->
@@ -2230,12 +2364,13 @@ let restore_namespaces pipeline =
   List.iter
     (fun name ->
       if List.mem name pipeline.project then begin
-        let _, implied = namespace_and_implied pipeline (Hashtbl.find pipeline.states name) in
-        let graph = call_graph pipeline name in
+        let state = Hashtbl.find pipeline.states name in
+        List.iter (fun module_ -> ignore (update_entries pipeline state module_)) state.modules;
         List.iter
-          (function
-            | Part.Successors (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
-          implied
+          (fun module_ ->
+            root_successors pipeline (snd (update_module_namespace pipeline state module_)))
+          state.modules;
+        root_successors pipeline (snd (update_package_index pipeline state))
       end)
     (in_dependency_order pipeline pipeline.project)
 
@@ -2485,7 +2620,7 @@ let parsed pipeline (file : Path.file) =
   parsed_file pipeline file
 
 let names pipeline packages =
-  drain pipeline ~through:Namespaces packages;
+  drain pipeline ~through:Package_indexes packages;
   names_lookups pipeline
 
 let resolved pipeline (key : Names.key) =
@@ -2610,7 +2745,7 @@ let lowering_requests pipeline packages : Compile.requests =
   }
 
 let main pipeline package =
-  drain pipeline ~through:Namespaces [ package ];
+  drain pipeline ~through:Package_indexes [ package ];
   entry_point (names_lookups pipeline) package
 
 let callers pipeline ~viewer path =

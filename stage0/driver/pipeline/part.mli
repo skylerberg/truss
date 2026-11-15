@@ -4,9 +4,11 @@ type t =
   | Packages
   | Module of Path.module_
   | Dependencies of Path.package
-  | Namespace of Path.package
-  | Entry of Path.module_ * string
   | Entries of Path.module_
+  | Entry of Path.module_ * string
+  | Namespace of Path.module_
+  | Module_index of Path.module_
+  | Package_index of Path.package
   | Imports of Resolve.Names.key
   | Declaration of Resolve.Names.key
   | Tree of Resolve.Names.key

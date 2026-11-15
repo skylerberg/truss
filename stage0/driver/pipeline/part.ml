@@ -4,9 +4,11 @@ type t =
   | Packages
   | Module of Path.module_
   | Dependencies of Path.package
-  | Namespace of Path.package
-  | Entry of Path.module_ * string
   | Entries of Path.module_
+  | Entry of Path.module_ * string
+  | Namespace of Path.module_
+  | Module_index of Path.module_
+  | Package_index of Path.package
   | Imports of Resolve.Names.key
   | Declaration of Resolve.Names.key
   | Tree of Resolve.Names.key
@@ -58,7 +60,7 @@ let package_of_definition = function
   | Packages -> Compiler_bug.bug ~stage:"Pipeline" "the set of packages belongs to no package"
   | Module module_ -> module_.package
   | Dependencies package
-  | Namespace package
+  | Package_index package
   | Package_declarations package
   | Traits_declaring (package, _)
   | Impl_index package
@@ -69,7 +71,12 @@ let package_of_definition = function
   | Package_check (package, _)
   | Successors (_, package) ->
       package
-  | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
+  | Entry (module_, _)
+  | Entries module_
+  | Namespace module_
+  | Module_index module_
+  | Module_declarations module_ ->
+      module_.package
   | Imports key
   | Declaration key
   | Tree key
@@ -145,7 +152,9 @@ let show part =
   | Packages -> "packages"
   | Module module_ -> "module " ^ Path.show_module module_
   | Dependencies package -> "dependencies " ^ Path.show_package package
-  | Namespace package -> "namespace " ^ Path.show_package package
+  | Namespace module_ -> "namespace " ^ Path.show_module module_
+  | Module_index module_ -> "module index " ^ Path.show_module module_
+  | Package_index package -> "package index " ^ Path.show_package package
   | Entry (module_, name) -> Printf.sprintf "entry %s %s" (Path.show_module module_) name
   | Entries module_ -> "entries " ^ Path.show_module module_
   | Imports declared -> "imports " ^ key declared
@@ -232,9 +241,9 @@ let rec instance_definition : Instance.key -> Path.t option = function
   | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_definition key
 
 let definition = function
-  | Source _ | Parsed _ | Packages | Module _ | Dependencies _ | Namespace _ | Entries _
-  | Module_declarations _ | File_declarations _ | Package_declarations _ | Traits_declaring _
-  | Impl_index _ | Grant _ | Import_check _
+  | Source _ | Parsed _ | Packages | Module _ | Dependencies _ | Namespace _ | Module_index _
+  | Package_index _ | Entries _ | Module_declarations _ | File_declarations _
+  | Package_declarations _ | Traits_declaring _ | Impl_index _ | Grant _ | Import_check _
   | Package_check (_, (Instantiations | Tests | Grants | Dependencies | Code_packages)) ->
       None
   | Entry (module_, name) -> Some (Path.Top { module_; name })
@@ -283,9 +292,11 @@ let kind_name = function
   | Packages -> "packages"
   | Module _ -> "module"
   | Dependencies _ -> "dependencies"
-  | Namespace _ -> "namespace"
-  | Entry _ -> "namespace entry"
-  | Entries _ -> "namespace entries of its module"
+  | Entries _ -> "entries of a module"
+  | Entry _ -> "entry of a module"
+  | Namespace _ -> "namespace of a module"
+  | Module_index _ -> "a module's part of its package's index"
+  | Package_index _ -> "index of a package"
   | Imports _ -> "imports"
   | Declaration _ -> "declaration"
   | Tree _ -> "source tree"

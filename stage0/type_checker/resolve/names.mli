@@ -97,19 +97,17 @@ type generic_kind = Type_kind | Value_kind | Capability_kind
 val generics_of : lookups -> Path.t -> (string * generic_kind) list option
 val kind_of : lookups -> Path.t -> named option
 
-type namespace
+type module_names
+type module_namespace
+type package_index
 
-val namespace :
-  lookups ->
-  Path.package ->
-  (Path.module_ * (Path.file * Syntax.file * string) list) list ->
-  namespace
-
-val empty_namespace : namespace
+val index_entries : Syntax.file list -> module_names
+val build_module_namespace : lookups -> (Path.file * Syntax.file * string) list -> module_namespace
+val build_package_index : module_namespace list -> package_index
+val empty_package_index : package_index
 
 type change =
   | Entry of Path.module_ * string
-  | Entries of Path.module_
   | Imports of key
   | Declaration of key
   | Tree of key
@@ -120,6 +118,7 @@ type change =
   | Contained of key
   | Module_declarations of Path.module_
   | File_declarations of Path.file
+  | Module_index of Path.module_
   | Package_declarations
   | Members of Path.t * string
   | Traits_declaring of string
@@ -128,10 +127,17 @@ type change =
   | Impls_of_trait of Path.t
   | Law_proofs of law_proof_name
 
-val changes : namespace -> namespace -> change list
+val list_entry_changes : Path.module_ -> module_names option -> module_names option -> change list
 
-val of_namespaces :
-  namespace:(Path.package -> namespace) ->
+val list_module_changes :
+  Path.module_ -> module_namespace option -> module_namespace option -> change list
+
+val list_index_changes : package_index -> package_index -> change list
+
+val make_lookups :
+  entries:(Path.module_ -> module_names option) ->
+  namespace:(Path.module_ -> module_namespace option) ->
+  index:(Path.package -> package_index) ->
   module_exists:(Path.module_ -> bool) ->
   split_module:(string list -> Path.module_ option) ->
   dependency_names:(Path.package -> Path.package list) ->

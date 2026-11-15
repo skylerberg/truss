@@ -1,7 +1,9 @@
 type t =
   | Input
   | Parse
+  | Entries
   | Namespaces
+  | Package_indexes
   | Resolution
   | Import_checks
   | Trait_headers

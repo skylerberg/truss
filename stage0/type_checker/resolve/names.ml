@@ -514,33 +514,45 @@ type declared = {
   contained : key list;
 }
 
-type module_names = {
-  entries : entry list;
-  index : entry String_map.t;
-  module_declarations : declaration list;
+type module_names = { entries : entry list; by_name : entry String_map.t }
+
+type module_index = {
+  declarations : declaration list;
+  members : key list Member_map.t;
+  traits : Path.t list String_map.t;
+  impls : ((Path.t * Path.t) * Path.t) list;
+  law_proofs : key list Law_proof_map.t;
 }
 
-type namespace = {
-  modules : module_names Module_map.t;
-  files : declaration list File_map.t;
-  declarations : declaration list;
+type module_namespace = {
   declared : declared Key_map.t;
+  files : declaration list File_map.t;
+  module_index : module_index;
+}
+
+type package_index = {
+  declarations : declaration list;
   members : key list Member_map.t;
   traits : Path.t list String_map.t;
   impls : impl_index;
   law_proofs : key list Law_proof_map.t;
 }
 
-let module_names entries =
+let index_by_name entries =
   {
     entries;
-    index =
+    by_name =
       List.fold_left
-        (fun index (entry : entry) ->
-          if String_map.mem entry.name index then index else String_map.add entry.name entry index)
+        (fun by_name (entry : entry) ->
+          if String_map.mem entry.name by_name then by_name
+          else String_map.add entry.name entry by_name)
         String_map.empty entries;
-    module_declarations = [];
   }
+
+let index_entries (files : Syntax.file list) =
+  index_by_name (List.concat_map (fun (file : Syntax.file) -> file_entries file.definitions) files)
+
+let intrinsic_names = index_by_name builtin_entries
 
 let numbered (written : written list) =
   let counts = Hashtbl.create 16 in
@@ -602,70 +614,37 @@ let law_proof_entry lookups ~imports (declaration : declaration) (definition : d
       | _ -> None)
   | _ -> None
 
-let namespace lookups package
-    (modules : (Path.module_ * (Path.file * Syntax.file * string) list) list) =
-  let modules_map =
-    List.fold_left
-      (fun map (module_, files) ->
-        Module_map.add module_
-          (module_names
-             (List.concat_map
-                (fun (_, (file : Syntax.file), _) -> file_entries file.definitions)
-                files))
-          map)
-      (if Intrinsic.module_.package = package then
-         Module_map.singleton Intrinsic.module_ (module_names builtin_entries)
-       else Module_map.empty)
-      modules
-  in
-  let own_find (module_ : Path.module_) name =
-    if module_.package = package then
-      Option.bind (Module_map.find_opt module_ modules_map) (fun names ->
-          String_map.find_opt name names.index)
-    else lookups.find module_ name
-  in
-  let own_module_exists (module_ : Path.module_) =
-    if module_.package = package then Module_map.mem module_ modules_map
-    else lookups.module_exists module_
-  in
-  let imports_of (file : Path.file) (uses : path Syntax.item list) =
-    List.map
-      (fun (item : path Syntax.item) ->
-        let used = used_module lookups ~from:file.module_ item.value in
-        (last_name used, used))
-      uses
-  in
+let resolve_imports lookups (file : Path.file) (uses : path Syntax.item list) =
+  List.map
+    (fun (item : path Syntax.item) ->
+      let used = used_module lookups ~from:file.module_ item.value in
+      (last_name used, used))
+    uses
+
+let sort_by_key declarations =
+  List.sort
+    (fun (left : declaration) (right : declaration) -> compare_key (key_of left) (key_of right))
+    declarations
+
+let build_module_namespace lookups (files : (Path.file * Syntax.file * string) list) =
   let imports =
-    List.fold_left
-      (fun map (_, files) ->
-        List.fold_left
-          (fun map ((file : Path.file), (parsed : Syntax.file), _) ->
-            File_map.add file (imports_of file parsed.uses) map)
-          map files)
-      File_map.empty modules
-  in
-  let file_imports file = Option.value ~default:[] (File_map.find_opt file imports) in
-  let pass_lookups = { lookups with find = own_find; module_exists = own_module_exists } in
-  let module_declarations =
     List.map
-      (fun (module_, files) ->
-        ( module_,
-          numbered
-            (List.concat_map
-               (fun ((file : Path.file), (parsed : Syntax.file), text) ->
-                 file_declarations pass_lookups file ~imports:(file_imports file) ~text
-                   parsed.definitions)
-               files) ))
-      modules
+      (fun ((file : Path.file), (parsed : Syntax.file), _) ->
+        (file, resolve_imports lookups file parsed.uses))
+      files
   in
-  let written = List.concat_map snd module_declarations in
-  let by_key declarations =
-    List.sort
-      (fun (left : declaration) (right : declaration) -> compare_key (key_of left) (key_of right))
-      (List.map (fun (written : written) -> written.declaration) declarations)
+  let file_imports file = Option.value ~default:[] (List.assoc_opt file imports) in
+  let written =
+    numbered
+      (List.concat_map
+         (fun ((file : Path.file), (parsed : Syntax.file), text) ->
+           file_declarations lookups file ~imports:(file_imports file) ~text parsed.definitions)
+         files)
   in
-  let declarations = by_key written in
-  let by_file = Hashtbl.create 16 in
+  let declarations =
+    sort_by_key (List.map (fun (written : written) -> written.declaration) written)
+  in
+  let by_file = Hashtbl.create 4 in
   List.iter
     (fun (written : written) ->
       Hashtbl.replace by_file written.file
@@ -744,79 +723,94 @@ let namespace lookups package
   let first_written =
     List.filter (fun (written : written) -> written.declaration.ordinal = 0) written
   in
-  let impl_entries =
-    List.concat_map
-      (fun (written : written) ->
-        impl_entries pass_lookups ~imports:(file_imports written.file) written.declaration
-          written.item.value)
-      first_written
-  in
   {
-    modules =
-      List.fold_left
-        (fun map (module_, module_declarations) ->
-          Module_map.update module_
-            (Option.map (fun names ->
-                 { names with module_declarations = by_key module_declarations }))
-            map)
-        modules_map module_declarations;
-    files =
-      File_map.mapi
-        (fun file _ -> List.map (fun (written : written) -> written.declaration) (in_file file))
-        imports;
-    declarations;
     declared;
-    members;
-    traits;
-    impls =
+    files =
+      List.fold_left
+        (fun map (file, _, _) ->
+          File_map.add file
+            (List.map (fun (written : written) -> written.declaration) (in_file file))
+            map)
+        File_map.empty files;
+    module_index =
       {
-        impls = impl_entries;
-        by_type =
-          List.fold_right
-            (fun ((trait, type_), impl) by_type ->
-              Path.Map.update type_
-                (fun impls -> Some ((trait, impl) :: Option.value ~default:[] impls))
-                by_type)
-            impl_entries Path.Map.empty;
-        by_trait =
-          List.fold_right
-            (fun ((trait, _), impl) by_trait ->
-              Path.Map.update trait
-                (fun impls -> Some (impl :: Option.value ~default:[] impls))
-                by_trait)
-            impl_entries Path.Map.empty;
+        declarations;
+        members;
+        traits;
+        impls =
+          List.concat_map
+            (fun (written : written) ->
+              impl_entries lookups ~imports:(file_imports written.file) written.declaration
+                written.item.value)
+            first_written;
+        law_proofs =
+          Law_proof_map.map List.rev
+            (List.fold_left
+               (fun index (written : written) ->
+                 match
+                   law_proof_entry lookups ~imports:(file_imports written.file) written.declaration
+                     written.item.value
+                 with
+                 | Some name ->
+                     Law_proof_map.update name
+                       (fun keys -> Some (key_of_written written :: Option.value ~default:[] keys))
+                       index
+                 | None -> index)
+               Law_proof_map.empty first_written);
       };
-    law_proofs =
-      Law_proof_map.map List.rev
-        (List.fold_left
-           (fun index (written : written) ->
-             match
-               law_proof_entry pass_lookups ~imports:(file_imports written.file) written.declaration
-                 written.item.value
-             with
-             | Some name ->
-                 Law_proof_map.update name
-                   (fun keys -> Some (key_of_written written :: Option.value ~default:[] keys))
-                   index
-             | None -> index)
-           Law_proof_map.empty first_written);
   }
 
-let empty_namespace =
+let index_impls impls : impl_index =
   {
-    modules = Module_map.empty;
-    files = File_map.empty;
+    impls;
+    by_type =
+      List.fold_right
+        (fun ((trait, type_), impl) by_type ->
+          Path.Map.update type_
+            (fun impls -> Some ((trait, impl) :: Option.value ~default:[] impls))
+            by_type)
+        impls Path.Map.empty;
+    by_trait =
+      List.fold_right
+        (fun ((trait, _), impl) by_trait ->
+          Path.Map.update trait
+            (fun impls -> Some (impl :: Option.value ~default:[] impls))
+            by_trait)
+        impls Path.Map.empty;
+  }
+
+let empty_package_index =
+  {
     declarations = [];
-    declared = Key_map.empty;
     members = Member_map.empty;
     traits = String_map.empty;
-    impls = { impls = []; by_type = Path.Map.empty; by_trait = Path.Map.empty };
+    impls = index_impls [];
     law_proofs = Law_proof_map.empty;
+  }
+
+let build_package_index (namespaces : module_namespace list) =
+  let indexes = List.map (fun namespace -> namespace.module_index) namespaces in
+  let append _ earlier later = Some (earlier @ later) in
+  {
+    declarations = List.concat_map (fun (index : module_index) -> index.declarations) indexes;
+    members =
+      List.fold_left
+        (fun members (index : module_index) -> Member_map.union append members index.members)
+        Member_map.empty indexes;
+    traits =
+      List.fold_left
+        (fun traits (index : module_index) -> String_map.union append traits index.traits)
+        String_map.empty indexes;
+    impls = index_impls (List.concat_map (fun (index : module_index) -> index.impls) indexes);
+    law_proofs =
+      List.fold_left
+        (fun law_proofs (index : module_index) ->
+          Law_proof_map.union append law_proofs index.law_proofs)
+        Law_proof_map.empty indexes;
   }
 
 type change =
   | Entry of Path.module_ * string
-  | Entries of Path.module_
   | Imports of key
   | Declaration of key
   | Tree of key
@@ -827,6 +821,7 @@ type change =
   | Contained of key
   | Module_declarations of Path.module_
   | File_declarations of Path.file
+  | Module_index of Path.module_
   | Package_declarations
   | Members of Path.t * string
   | Traits_declaring of string
@@ -836,126 +831,120 @@ type change =
   | Law_proofs of law_proof_name
 
 let differs before after = compare before after <> 0
-let pairs merge before after = merge (fun _ before after -> Some (before, after)) before after
+let pair_up merge before after = merge (fun _ before after -> Some (before, after)) before after
 
-let changes before after =
-  let entries_of = Option.fold ~none:String_map.empty ~some:(fun names -> names.index) in
-  let modules =
-    Module_map.fold
-      (fun module_ ((before : module_names option), (after : module_names option)) changes ->
-        let before_and_after select = (Option.map select before, Option.map select after) in
-        let entries_before, entries_after = before_and_after (fun names -> names.entries) in
-        let declarations_before, declarations_after =
-          before_and_after (fun names -> names.module_declarations)
-        in
-        (if differs entries_before entries_after then [ Entries module_ ] else [])
-        @ (if differs declarations_before declarations_after then [ Module_declarations module_ ]
-           else [])
-        @ String_map.fold
-            (fun name (before, after) changes ->
-              if differs before after then Entry (module_, name) :: changes else changes)
-            (pairs String_map.merge (entries_of before) (entries_of after))
-            []
-        @ changes)
-      (pairs Module_map.merge before.modules after.modules)
-      []
+let list_entry_changes module_ (before : module_names option) (after : module_names option) =
+  let by_name names = Option.fold ~none:String_map.empty ~some:(fun names -> names.by_name) names in
+  String_map.fold
+    (fun name (before, after) changes ->
+      if differs before after then Entry (module_, name) :: changes else changes)
+    (pair_up String_map.merge (by_name before) (by_name after))
+    []
+
+let list_declared_changes key (before : declared option) (after : declared option) =
+  match (before, after) with
+  | Some before, Some after ->
+      let changed change select =
+        if differs (select before) (select after) then [ change ] else []
+      in
+      changed (Declaration key) (fun declared -> declared.declaration)
+      @ (if not (differs before.item.value after.item.value) then []
+         else if
+           differs
+             (Syntax_walk.without_positions before.item.value)
+             (Syntax_walk.without_positions after.item.value)
+         then [ Tree key ]
+         else [ Positions key ])
+      @ changed (Text key) (fun declared -> declared.text)
+      @ changed (Place key) (fun declared -> declared.place)
+      @ changed (Imports key) (fun declared -> declared.imports)
+      @ changed (Container key) (fun declared -> declared.container)
+      @ changed (Contained key) (fun declared -> declared.contained)
+  | Some _, None | None, Some _ ->
+      [ Declaration key; Tree key; Text key; Place key; Imports key; Container key; Contained key ]
+  | None, None -> []
+
+let list_module_changes module_ (before : module_namespace option) (after : module_namespace option)
+    =
+  let select field empty namespace = Option.fold ~none:empty ~some:field namespace in
+  let index namespace = Option.map (fun namespace -> namespace.module_index) namespace in
+  let declarations namespace =
+    Option.map (fun (index : module_index) -> index.declarations) (index namespace)
   in
-  let files =
-    File_map.fold
+  (if differs (declarations before) (declarations after) then [ Module_declarations module_ ]
+   else [])
+  @ (if differs (index before) (index after) then [ Module_index module_ ] else [])
+  @ File_map.fold
       (fun file (before, after) changes ->
         if differs before after then File_declarations file :: changes else changes)
-      (pairs File_map.merge before.files after.files)
+      (pair_up File_map.merge
+         (select (fun namespace -> namespace.files) File_map.empty before)
+         (select (fun namespace -> namespace.files) File_map.empty after))
       []
-  in
-  let declared =
-    Key_map.fold
-      (fun key ((before : declared option), (after : declared option)) changes ->
-        (match (before, after) with
-          | Some before, Some after ->
-              let changed change select =
-                if differs (select before) (select after) then [ change ] else []
-              in
-              changed (Declaration key) (fun declared -> declared.declaration)
-              @ (if not (differs before.item.value after.item.value) then []
-                 else if
-                   differs
-                     (Syntax_walk.without_positions before.item.value)
-                     (Syntax_walk.without_positions after.item.value)
-                 then [ Tree key ]
-                 else [ Positions key ])
-              @ changed (Text key) (fun declared -> declared.text)
-              @ changed (Place key) (fun declared -> declared.place)
-              @ changed (Imports key) (fun declared -> declared.imports)
-              @ changed (Container key) (fun declared -> declared.container)
-              @ changed (Contained key) (fun declared -> declared.contained)
-          | Some _, None | None, Some _ ->
-              [
-                Declaration key;
-                Tree key;
-                Text key;
-                Place key;
-                Imports key;
-                Container key;
-                Contained key;
-              ]
-          | None, None -> [])
-        @ changes)
-      (pairs Key_map.merge before.declared after.declared)
+  @ Key_map.fold
+      (fun key (before, after) changes -> list_declared_changes key before after @ changes)
+      (pair_up Key_map.merge
+         (select (fun namespace -> namespace.declared) Key_map.empty before)
+         (select (fun namespace -> namespace.declared) Key_map.empty after))
       []
-  in
+
+let list_index_changes (before : package_index) (after : package_index) =
   let members =
     Member_map.fold
       (fun (owner, name) (before, after) changes ->
         if differs before after then Members (owner, name) :: changes else changes)
-      (pairs Member_map.merge before.members after.members)
+      (pair_up Member_map.merge before.members after.members)
       []
   in
   let traits =
     String_map.fold
       (fun name (before, after) changes ->
         if differs before after then Traits_declaring name :: changes else changes)
-      (pairs String_map.merge before.traits after.traits)
+      (pair_up String_map.merge before.traits after.traits)
       []
   in
   let law_proofs =
     Law_proof_map.fold
       (fun name (before, after) changes ->
         if differs before after then Law_proofs name :: changes else changes)
-      (pairs Law_proof_map.merge before.law_proofs after.law_proofs)
+      (pair_up Law_proof_map.merge before.law_proofs after.law_proofs)
       []
   in
   let impls change select =
     Path.Map.fold
       (fun path (before, after) changes ->
         if differs before after then change path :: changes else changes)
-      (pairs Path.Map.merge (select before.impls) (select after.impls))
+      (pair_up Path.Map.merge (select before.impls) (select after.impls))
       []
   in
-  modules @ files
-  @ (if differs before.declarations after.declarations then [ Package_declarations ] else [])
-  @ declared @ members @ traits
+  (if differs before.declarations after.declarations then [ Package_declarations ] else [])
+  @ members @ traits
   @ (if differs before.impls.impls after.impls.impls then [ Impl_index ] else [])
   @ impls (fun type_ -> Impls_of_type type_) (fun impls -> impls.by_type)
   @ impls (fun trait -> Impls_of_trait trait) (fun impls -> impls.by_trait)
   @ law_proofs
 
-let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split_module
-    ~dependency_names : lookups =
-  let of_module (module_ : Path.module_) =
-    Module_map.find_opt module_ (namespace module_.package).modules
+let make_lookups ~(entries : Path.module_ -> module_names option)
+    ~(namespace : Path.module_ -> module_namespace option) ~(index : Path.package -> package_index)
+    ~module_exists ~split_module ~dependency_names : lookups =
+  let entries module_ =
+    if module_ = Intrinsic.module_ then Some intrinsic_names else entries module_
   in
-  let of_file (file : Path.file) = File_map.find_opt file (namespace file.module_.package).files in
-  let declared (key : key) = Key_map.find_opt key (namespace key.module_.package).declared in
+  let of_file (file : Path.file) =
+    Option.bind (namespace file.module_) (fun namespace -> File_map.find_opt file namespace.files)
+  in
+  let declared (key : key) =
+    Option.bind (namespace key.module_) (fun namespace -> Key_map.find_opt key namespace.declared)
+  in
   let members owner name =
     Option.value ~default:[]
-      (Member_map.find_opt (owner, name) (namespace (Path.package owner)).members)
+      (Member_map.find_opt (owner, name) (index (Path.package owner)).members)
   in
   {
     find =
       (fun module_ name ->
-        Option.bind (of_module module_) (fun names -> String_map.find_opt name names.index));
-    entries =
-      (fun module_ -> match of_module module_ with Some names -> names.entries | None -> []);
+        Option.bind (entries module_) (fun names -> String_map.find_opt name names.by_name));
+    entries = (fun module_ -> match entries module_ with Some names -> names.entries | None -> []);
     imports = (fun key -> match declared key with Some declared -> declared.imports | None -> []);
     module_exists;
     split_module;
@@ -976,9 +965,11 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
     declaration = (fun key -> Option.map (fun declared -> declared.declaration) (declared key));
     declarations =
       (fun module_ ->
-        match of_module module_ with Some names -> names.module_declarations | None -> []);
+        match namespace module_ with
+        | Some namespace -> namespace.module_index.declarations
+        | None -> []);
     declarations_in = (fun file -> Option.value ~default:[] (of_file file));
-    package_declarations = (fun package -> (namespace package).declarations);
+    package_declarations = (fun package -> (index package).declarations);
     definition = (fun key -> Option.map (fun declared -> declared.item.value) (declared key));
     text = (fun key -> Option.map (fun (declared : declared) -> declared.text) (declared key));
     spans = (fun key -> Option.map (fun declared -> declared.spans) (declared key));
@@ -989,15 +980,15 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
     members;
     traits_declaring =
       (fun package name ->
-        Option.value ~default:[] (String_map.find_opt name (namespace package).traits));
-    impls = (fun package -> (namespace package).impls.impls);
+        Option.value ~default:[] (String_map.find_opt name (index package).traits));
+    impls = (fun package -> (index package).impls.impls);
     impls_of_type =
       (fun package type_ ->
-        Option.value ~default:[] (Path.Map.find_opt type_ (namespace package).impls.by_type));
+        Option.value ~default:[] (Path.Map.find_opt type_ (index package).impls.by_type));
     impls_of_trait =
       (fun package trait ->
-        Option.value ~default:[] (Path.Map.find_opt trait (namespace package).impls.by_trait));
+        Option.value ~default:[] (Path.Map.find_opt trait (index package).impls.by_trait));
     law_proofs =
       (fun package name ->
-        Option.value ~default:[] (Law_proof_map.find_opt name (namespace package).law_proofs));
+        Option.value ~default:[] (Law_proof_map.find_opt name (index package).law_proofs));
   }

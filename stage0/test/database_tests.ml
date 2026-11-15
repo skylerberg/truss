@@ -298,8 +298,9 @@ let () =
              ])
         ~exactly:
           [
+            "entries app::main";
             "import check app/main/main.truss";
-            "namespace app";
+            "namespace app::main";
             "parsed app/main/main.truss";
             "proof app::main::callee";
           ]);
@@ -315,9 +316,10 @@ let () =
              ])
         ~exactly:
           [
+            "entries app::main";
             "import check app/main/main.truss";
             "import check app/main/other.truss";
-            "namespace app";
+            "namespace app::main";
             "parsed app/main/main.truss";
             "parsed app/main/other.truss";
           ]);
@@ -451,8 +453,9 @@ let () =
              ])
         ~exactly:
           [
+            "entries app::main";
             "import check app/main/main.truss";
-            "namespace app";
+            "namespace app::main";
             "parsed app/main/main.truss";
             "proof app::main::callee";
           ]);
@@ -572,7 +575,7 @@ let () =
         (relaid ~before:(Support.setup tool_user)
            ~after:(Support.setup ~dependencies:[ ("app", "lib") ] tool_user)
            ())
-        ~parts:[ "namespace app"; "checked body app::main::caller" ]);
+        ~parts:[ "namespace app::main"; "checked body app::main::caller" ]);
   test "adding a package and then removing it matches a cold build each time" (fun () ->
       let alone = Support.setup [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
       let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
@@ -621,8 +624,9 @@ let () =
           [
             "derived form derived standard::serialization::Deserialize for \
              app::main::Signup.deserialize";
+            "entries app::main";
             "import check app/main/main.truss";
-            "namespace app";
+            "namespace app::main";
             "package check app type app::main::Signup";
             "parsed app/main/main.truss";
             "proof app::main::Signup";
@@ -764,7 +768,7 @@ let () =
                 else line)
               (String.split_on_char '\n' (File_system.read list))));
       expect_included (settled_on_disk root)
-        ~parts:[ "namespace app"; "checked body app::main::caller" ];
+        ~parts:[ "namespace app::main"; "checked body app::main::caller" ];
       Database.flush ())
 
 let expect_cold pipeline snapshot =
