@@ -39,16 +39,33 @@ and is_trivial_member context : Memory_layout.member -> bool = function
   | Raw _ -> true
 
 let needs_drop context member = not (is_trivial_member context member)
-let any_drop_slot = 0
-let any_copy_slot = 1
+
+type any_operation = Drop_operation | Copy_operation
+
+let lay_out_any_operations ~is_copyable =
+  Drop_operation :: (if is_copyable then [ Copy_operation ] else [])
+
+let find_operation_slot operation =
+  match
+    List.sort_uniq Int.compare
+      (List.filter_map
+         (fun is_copyable ->
+           List.find_index (( = ) operation) (lay_out_any_operations ~is_copyable))
+         [ false; true ])
+  with
+  | [ slot ] -> slot
+  | _ -> bug "the slot of an any value's operation depends on whether the value is Copyable"
 
 let box_signature result : Lowered.signature =
   { parameters = [ Raw (Pointer Opaque) ]; result; returns = true }
 
 let any_drop_signature = box_signature None
 let any_copy_signature = box_signature (Some (Raw (Pointer Opaque)))
-let make_any_drop_entry ty = (Instance.Any_drop ty, any_drop_signature)
-let make_any_copy_entry ty = (Instance.Any_copy ty, any_copy_signature)
+
+let make_any_entry operation ty =
+  match operation with
+  | Drop_operation -> (Instance.Any_drop ty, any_drop_signature)
+  | Copy_operation -> (Instance.Any_copy ty, any_copy_signature)
 
 open Emit_c.Builder
 
@@ -95,7 +112,7 @@ let drop context ty =
                  {
                    table = Copy (value / Field "vtable");
                    value = Copy (value / Field "value");
-                   slot = any_drop_slot;
+                   slot = find_operation_slot Drop_operation;
                    signature = any_drop_signature;
                  };
              arguments = [];
@@ -286,7 +303,7 @@ let copy context ty =
                  {
                    table = Copy (self / Field "vtable");
                    value = Copy (self / Field "value");
-                   slot = any_copy_slot;
+                   slot = find_operation_slot Copy_operation;
                    signature = any_copy_signature;
                  };
              arguments = [];

@@ -30,7 +30,7 @@ type any_method = {
   substitution : Types.substitution;
 }
 
-type any_slot = Drop_slot | Copy_slot | Method_slot of any_method
+type any_slot = Operation_slot of Drop_and_copy.any_operation | Method_slot of any_method
 
 val lay_out_any_vtable : Definitions.context -> Types.trait_reference -> any_slot list
 

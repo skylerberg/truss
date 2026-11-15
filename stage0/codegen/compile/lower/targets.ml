@@ -116,7 +116,7 @@ type any_method = {
   substitution : Types.substitution;
 }
 
-type any_slot = Drop_slot | Copy_slot | Method_slot of any_method
+type any_slot = Operation_slot of Drop_and_copy.any_operation | Method_slot of any_method
 
 let lay_out_any_vtable context (any : Types.trait_reference) =
   let traits =
@@ -154,7 +154,9 @@ let lay_out_any_vtable context (any : Types.trait_reference) =
           interface.methods
     | None -> bug "no interface for %s" (Path.show trait.trait)
   in
-  (Drop_slot :: (if is_copyable_any context any then [ Copy_slot ] else []))
+  List.map
+    (fun operation -> Operation_slot operation)
+    (Drop_and_copy.lay_out_any_operations ~is_copyable:(is_copyable_any context any))
   @ List.concat_map lay_out_methods traits
 
 let find_any_method context ~(any : Types.trait_reference) trait name =
@@ -165,7 +167,7 @@ let find_any_method context ~(any : Types.trait_reference) trait name =
           when Path.equal any_method.trait.trait trait && any_method.trait_method.method_name = name
           ->
             Some (slot, any_method)
-        | Drop_slot | Copy_slot | Method_slot _ -> None)
+        | Operation_slot _ | Method_slot _ -> None)
       (lay_out_any_vtable context any)
   with
   | Some found -> found

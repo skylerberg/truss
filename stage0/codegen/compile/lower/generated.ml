@@ -451,8 +451,7 @@ let any_table context (key : Instance.key) : Lowered.table =
       let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
       let any = Types.substitute_trait substitution interface.implements in
       let make_entry = function
-        | Drop_slot -> Drop_and_copy.make_any_drop_entry self_ty
-        | Copy_slot -> Drop_and_copy.make_any_copy_entry self_ty
+        | Operation_slot operation -> Drop_and_copy.make_any_entry operation self_ty
         | Method_slot any_method ->
             let owner_impl, owner_arguments =
               if Path.equal any_method.trait.trait interface.implements.trait then

@@ -511,7 +511,7 @@ and walk_any_methods walk impl type_arguments ~only =
   | None ->
       List.iter
         (function
-          | Targets.Method_slot any_method -> walk_method any_method | Drop_slot | Copy_slot -> ())
+          | Targets.Method_slot any_method -> walk_method any_method | Operation_slot _ -> ())
         (Targets.lay_out_any_vtable walk.context any)
 
 let rec reached context (ty : Ground.ty) =
