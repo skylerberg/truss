@@ -17,7 +17,6 @@ let phase ~name ~after =
   Hashtbl.replace declared name ();
   rank
 
-let phase_rank phase = phase
 let input = Incremental.input
 
 let query ~name ~show ~phase ?saved ?portable ?equal ?about compute =

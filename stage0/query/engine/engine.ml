@@ -87,7 +87,5 @@ module For_testing = struct
   let clear_log = clear_log
   let differing = differing
   let count = count
-
-  let audit ?include_bases ?before engine =
-    Incremental.audit ?include_bases ?before:(Option.map Query.phase_rank before) engine
+  let audit = Incremental.audit
 end

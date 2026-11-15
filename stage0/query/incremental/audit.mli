@@ -1,1 +1,1 @@
-val audit : ?include_bases:bool -> ?before:int -> Nodes.t -> string list
+val audit : ?include_bases:bool -> Nodes.t -> string list

@@ -64,5 +64,5 @@ module For_testing : sig
   val clear_log : t -> unit
   val differing : t -> node list
   val count : t -> int
-  val audit : ?include_bases:bool -> ?before:Query.phase -> t -> string list
+  val audit : ?include_bases:bool -> t -> string list
 end
