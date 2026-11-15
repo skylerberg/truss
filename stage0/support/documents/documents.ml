@@ -1,5 +1,3 @@
-let read path = In_channel.with_open_bin path In_channel.input_all
-
 let truss_blocks text =
   let rec loop inside current blocks = function
     | [] -> List.rev blocks

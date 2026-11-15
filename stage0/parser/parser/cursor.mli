@@ -1,22 +1,6 @@
 exception Failed
 
-type t = {
-  tokens : Token.t array;
-  first : int;
-  stop : int;
-  base : int;
-  closers : int array;
-  text : string;
-  diagnostics : Diagnostic.Collector.t;
-  mutable index : int;
-  mutable nesting_depth : int;
-  next_id : int ref;
-  recoveries : Source.span list ref;
-  methods : Split.piece list ref;
-  mutable after_inserted_closer : bool;
-  mutable is_unterminated_interpolation : bool;
-  mutable ended_by_arm_comma : bool;
-}
+type t
 
 val create :
   text:string ->
@@ -27,8 +11,10 @@ val create :
   stop:int ->
   t
 
-val sub_cursor : ?stop:int -> t -> Token.t array -> t
+val sub_cursor : t -> Token.t array -> t
+val interpolation : t -> Token.interpolation -> t
 val restarted : t -> t
+val index : t -> int
 val fresh_id : t -> int
 val token_at : t -> int -> Token.t
 val peek : t -> Token.t
@@ -43,6 +29,7 @@ val is_keyword : t -> Token.keyword -> bool
 val accept_punctuation : t -> Token.punctuation -> bool
 val accept_keyword : t -> Token.keyword -> bool
 val span : t -> Source.span -> Syntax.Span.t
+val previous_token : t -> Token.t option
 val previous_stop : t -> int
 val span_from : t -> int -> Syntax.Span.t
 val absolute : t -> Syntax.span -> Source.span
@@ -65,6 +52,12 @@ val check_chain_length : t -> chain_length:int -> unit
 val closer : t -> int -> int
 val skip_to : t -> int -> unit
 val skip_one : t -> unit
+val group : t -> Token.t array
+val skip_method : t -> unit
+val skip_trailing_comma : t -> unit
+val is_after_inserted_closer : t -> bool
 val bracketed : t -> item:(t -> 'a) -> recover:(Syntax.Span.t -> 'a) -> 'a list
 val lines : t -> item:(t -> 'a) -> recover:(int -> Syntax.Span.t -> 'a) -> 'a list
 val blank_line_before : t -> int -> bool
+val recovered : t -> Syntax.span list
+val methods : t -> Split.piece list

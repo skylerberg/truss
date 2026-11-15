@@ -46,5 +46,5 @@ let () =
                       fail "%s"
                         (String.concat ""
                            (List.map (Diagnostic.render (source_of database file)) diagnostics))))
-        (Documents.truss_blocks (Documents.read (Harness.workspace_path name))))
+        (Documents.truss_blocks (File_system.read (Harness.workspace_path name))))
     markdown_files

@@ -1,12 +1,10 @@
-type kind = Owned | Borrowed | Borrowed_mut
-
 type context = {
   database : Query.context;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : (Core.local, string) Hashtbl.t;
-  kinds : (Core.local, kind) Hashtbl.t;
+  binding_modes : (Core.local, Types.mode) Hashtbl.t;
   types : (Core.local, Types.ty) Hashtbl.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
@@ -31,7 +29,7 @@ val report :
   string ->
   unit
 
-val kind : context -> Place.root -> kind
+val binding_mode : context -> Place.root -> Types.mode
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
 val collect : context -> Mir.Graph.t -> unit

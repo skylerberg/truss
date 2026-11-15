@@ -2,4 +2,4 @@
 
 (library
  (name lexer)
- (libraries source diagnostic token unicode zarith))
+ (libraries source diagnostic token unicode zarith compiler_bug))

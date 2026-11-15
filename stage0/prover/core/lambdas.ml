@@ -54,40 +54,40 @@ let add_lambda_facts context frame ~capture_free function_type term ~called ~arg
               | None -> captures_fresh name
             in
             if is_fresh_in_body then begin
-              let over = Symbol.Over name in
-              declare context (Logic.Function (over, List.map snd parameters, sort));
-              Hashtbl.replace renamed name (Logic.Apply (over, variables))
+              let lifted = Symbol.Lifted name in
+              declare context (Logic.Function (lifted, List.map snd parameters, sort));
+              Hashtbl.replace renamed name (Logic.Apply (lifted, variables))
             end
         | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Hashtbl.find_opt context.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
-                let over = Symbol.Over name in
-                declare context (Logic.Function (over, inputs @ List.map snd parameters, sort));
-                Hashtbl.replace functions name over
+                let lifted = Symbol.Lifted name in
+                declare context (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
+                Hashtbl.replace functions name lifted
             | _ -> ())
         | _ -> ())
       declared_here;
-    let rec over = function
+    let rec lift = function
       | Logic.Symbol name as symbol -> Option.value (Hashtbl.find_opt renamed name) ~default:symbol
       | (Logic.Integer _ | Logic.Boolean _ | Logic.Bits _) as term -> term
       | Logic.Apply (name, _)
         when match called with Logic.Apply (called_name, _) -> called_name = name | _ -> false ->
           Logic.Boolean true
       | Logic.Apply (name, arguments) when Hashtbl.mem functions name ->
-          Logic.Apply (Hashtbl.find functions name, List.map over arguments @ variables)
-      | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments over term
-      | Logic.Forall (bound, trigger, body) -> Logic.Forall (bound, List.map over trigger, over body)
-      | Logic.Exists (bound, body) -> Logic.Exists (bound, over body)
+          Logic.Apply (Hashtbl.find functions name, List.map lift arguments @ variables)
+      | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments lift term
+      | Logic.Forall (bound, trigger, body) -> Logic.Forall (bound, List.map lift trigger, lift body)
+      | Logic.Exists (bound, body) -> Logic.Exists (bound, lift body)
     in
-    let premise = over (Logic.conjunction premises) in
+    let premise = lift (Logic.conjunction premises) in
     let applied_here = applied context function_type term variables in
     let statements =
-      List.map over shown
+      List.map lift shown
       @ List.filter_map
           (fun ((exit_ : frame), value) ->
             Option.map
               (fun value ->
-                Logic.( ==> ) (over exit_.condition) (Logic.equal applied_here (over value)))
+                Logic.( ==> ) (lift exit_.condition) (Logic.equal applied_here (lift value)))
               value)
           ended
     in

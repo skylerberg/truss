@@ -2,6 +2,30 @@ open Tree
 
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
+let graph_statement (statement : statement) : Graph.statement =
+  let kind : Graph.in_graph statement_kind =
+    match statement.kind with
+    | Assign { target; value; node } -> Assign { target; value; node }
+    | Call { destination; call } -> Call { destination; call }
+    | Lend { part; call } -> Lend { part; call }
+    | Slice { destination; base; call } -> Slice { destination; base; call }
+    | Template { destination; literals; call } -> Template { destination; literals; call }
+    | Live locals -> Live locals
+    | Dead locals -> Dead locals
+    | Assert { condition; bit_vector } -> Assert { condition; bit_vector }
+    | Echo operand -> Echo operand
+    | Provide { provided; can_use_tasks } -> Provide { provided; can_use_tasks }
+    | Provide_end -> Provide_end
+    | Loan_start { loan; borrowed; mode; duration } -> Loan_start { loan; borrowed; mode; duration }
+    | Loan_end loans -> Loan_end loans
+    | Ghost_assert { condition; by_bit_vector } -> Ghost_assert { condition; by_bit_vector }
+    | Matched { patterns } -> Matched { patterns }
+    | Proof code -> Proof code
+    | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+        bug "a statement that holds blocks or jumps, in a basic block"
+  in
+  { kind; origin = statement.origin }
+
 type jump_targets = {
   break_ : Graph.block option;
   continue_ : Graph.terminator option;
@@ -19,7 +43,7 @@ let expanded_body (body : body) : Graph.body =
     Dynarray.set blocks index
       { statements = List.rev emitted; terminator; terminator_origin = origin }
   in
-  let assigned target value origin : statement =
+  let assigned target value origin : Graph.statement =
     { kind = Assign { target; value = Operand value; node = None }; origin }
   in
   let whole_local : operand -> local option = function
@@ -91,11 +115,15 @@ let expanded_body (body : body) : Graph.body =
             if reaches then go_on joined else None
         | Assert { condition; bit_vector = Some { names; code } } ->
             let index, emitted = block targets (decided ()) code.statements in
-            let assert_ =
-              Assert
-                { condition; bit_vector = Some { names; code = { code with statements = [] } } }
+            let assert_ : Graph.statement =
+              {
+                kind =
+                  Assert
+                    { condition; bit_vector = Some { names; code = { code with statements = [] } } };
+                origin;
+              }
             in
-            emit targets (index, { statement with kind = assert_ } :: emitted) [] rest
+            emit targets (index, assert_ :: emitted) [] rest
         | While { condition; body; failed; _ } ->
             let header = fresh () and inside = fresh () and failing = fresh () in
             let after = fresh () in
@@ -238,7 +266,7 @@ let expanded_body (body : body) : Graph.body =
             None
         | _ ->
             let index, emitted = decided () in
-            emit targets (index, statement :: emitted) [] rest)
+            emit targets (index, graph_statement statement :: emitted) [] rest)
   and block targets current (statements : statement list) =
     match emit targets current [] statements with
     | Some (current, undecided) -> with_values targets current undecided
@@ -294,7 +322,7 @@ let expanded_body (body : body) : Graph.body =
         (joined, [])
     | last :: before ->
         let index, emitted = with_values targets current (List.rev before) in
-        (index, last :: emitted)
+        (index, graph_statement last :: emitted)
   and arm targets entry (block : block) ~target ~joined origin =
     match (emit targets (entry, []) [] block.statements, block.value) with
     | Some (current, undecided), Some value ->

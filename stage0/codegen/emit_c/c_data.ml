@@ -1,6 +1,3 @@
-(* Static data as C: constants' values, storage and blocks as static
-   objects of their own, capability tables, and evidence. *)
-
 open C_runtime
 open C_types
 open C_values
@@ -9,9 +6,6 @@ let static_name context =
   let name = Printf.sprintf "%s_static_%d" context.prefix (List.length context.statics) in
   name
 
-(* A static value as a C initializer, or [None] for a value of zero size.
-   Storage elements and the blocks of [indirect] variants become static
-   objects of their own, defined before the data that points at them. *)
 let rec initializer_c context ty (value : Lowered.static_value) : string option =
   let layout = layout context ty in
   let fields_c (fields : Memory_layout.field list) (values : (string * Lowered.static_value) list)

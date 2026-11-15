@@ -7,36 +7,36 @@ type t = {
   first : int;
   stop : int;
   base : int;
-  closers : int array;
+  group_ends : int array;
   text : string;
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable nesting_depth : int;
   next_id : int ref;
   recoveries : Source.span list ref;
-  methods : Split.piece list ref;
+  mutable methods : Split.piece list;
   mutable after_inserted_closer : bool;
-  mutable is_unterminated_interpolation : bool;
-  mutable ended_by_arm_comma : bool;
+  is_unterminated_interpolation : bool;
+  mutable skipped_trailing_comma : bool;
 }
 
 let nesting_limit = 256
 
-let compute_closers tokens ~first ~stop =
-  let closers = Array.make (stop - first) (-1) in
-  let stack = ref [] in
+let group_ends tokens ~first ~stop =
+  let ends = Array.init (stop - first) (fun offset -> first + offset) in
+  let openers = ref [] in
   for index = first to stop - 1 do
     match tokens.(index).kind with
-    | Punctuation (Open _) -> stack := index :: !stack
+    | Punctuation (Open _) -> openers := index :: !openers
     | Punctuation (Close _) -> (
-        match !stack with
+        match !openers with
         | opener :: rest ->
-            closers.(opener - first) <- index;
-            stack := rest
+            ends.(opener - first) <- index;
+            openers := rest
         | [] -> ())
     | _ -> ()
   done;
-  closers
+  ends
 
 let create ~text ~diagnostics ~base tokens ~first ~stop =
   {
@@ -44,33 +44,49 @@ let create ~text ~diagnostics ~base tokens ~first ~stop =
     first;
     stop;
     base;
-    closers = compute_closers tokens ~first ~stop;
+    group_ends = group_ends tokens ~first ~stop;
     text;
     diagnostics;
     index = first;
     nesting_depth = 0;
     next_id = ref 0;
     recoveries = ref [];
-    methods = ref [];
+    methods = [];
     after_inserted_closer = false;
     is_unterminated_interpolation = false;
-    ended_by_arm_comma = false;
+    skipped_trailing_comma = false;
   }
 
-let sub_cursor ?stop cursor tokens =
-  let stop = Option.value stop ~default:(Array.length tokens) in
-  let inner =
-    create ~text:cursor.text ~diagnostics:cursor.diagnostics ~base:cursor.base tokens ~first:0 ~stop
+let derived cursor tokens ~stop =
+  {
+    (create ~text:cursor.text ~diagnostics:cursor.diagnostics ~base:cursor.base tokens ~first:0
+       ~stop)
+    with
+    nesting_depth = cursor.nesting_depth;
+    recoveries = cursor.recoveries;
+    next_id = cursor.next_id;
+  }
+
+let sub_cursor cursor tokens = derived cursor tokens ~stop:(Array.length tokens)
+
+let interpolation cursor (inner : Token.interpolation) =
+  let is_closed =
+    inner.span.stop > inner.span.start && cursor.text.[inner.span.stop - 1 - cursor.base] = '}'
   in
-  inner.nesting_depth <- cursor.nesting_depth;
-  { inner with recoveries = cursor.recoveries; next_id = cursor.next_id }
+  {
+    (derived cursor inner.tokens ~stop:(Array.length inner.tokens - 1)) with
+    is_unterminated_interpolation = not is_closed;
+  }
 
 let restarted cursor =
-  let restarted =
-    create ~text:cursor.text ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base
-      cursor.tokens ~first:cursor.first ~stop:cursor.stop
-  in
-  { restarted with next_id = cursor.next_id }
+  {
+    (create ~text:cursor.text ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base
+       cursor.tokens ~first:cursor.first ~stop:cursor.stop)
+    with
+    next_id = cursor.next_id;
+  }
+
+let index cursor = cursor.index
 
 let fresh_id cursor =
   let id = !(cursor.next_id) in
@@ -144,8 +160,11 @@ let accept_keyword cursor keyword =
 
 let span cursor span = Syntax.Span.of_source ~base:cursor.base span
 
+let previous_token cursor =
+  if cursor.index > cursor.first then Some cursor.tokens.(cursor.index - 1) else None
+
 let previous_stop cursor =
-  if cursor.index > cursor.first then cursor.tokens.(cursor.index - 1).span.stop else cursor.base
+  match previous_token cursor with Some token -> token.span.stop | None -> cursor.base
 
 let span_from cursor start_index =
   let start = (token_at cursor start_index).span.start in
@@ -247,8 +266,7 @@ let check_chain_length cursor ~chain_length =
     raise Failed
   end
 
-let closer cursor index =
-  if index >= cursor.first && index < cursor.stop then cursor.closers.(index - cursor.first) else -1
+let closer cursor index = cursor.group_ends.(index - cursor.first)
 
 let skip_to cursor limit =
   while cursor.index < min limit cursor.stop do
@@ -256,8 +274,21 @@ let skip_to cursor limit =
   done
 
 let skip_one cursor =
-  let closer_index = closer cursor cursor.index in
-  if closer_index >= 0 then skip_to cursor (closer_index + 1) else advance cursor
+  if cursor.index < cursor.stop then skip_to cursor (closer cursor cursor.index + 1)
+
+let group cursor =
+  Array.sub cursor.tokens cursor.index (closer cursor cursor.index - cursor.index + 1)
+
+let skip_method cursor =
+  let stop = Split.stop cursor.tokens ~first:cursor.index in
+  cursor.methods <- { first = cursor.index; stop } :: cursor.methods;
+  skip_to cursor stop
+
+let skip_trailing_comma cursor =
+  advance cursor;
+  cursor.skipped_trailing_comma <- true
+
+let is_after_inserted_closer cursor = cursor.after_inserted_closer
 
 let skip_line cursor ~closer_index =
   while cursor.index < closer_index && cursor.index < cursor.stop && peek_kind cursor <> Newline do
@@ -294,7 +325,7 @@ let bracketed cursor ~item ~recover =
 
 let lines cursor ~item ~recover =
   let enclosing_after_inserted_closer = cursor.after_inserted_closer
-  and enclosing_ended_by_arm_comma = cursor.ended_by_arm_comma in
+  and enclosing_skipped_trailing_comma = cursor.skipped_trailing_comma in
   let opener = cursor.index in
   let closer_index = closer cursor opener in
   advance cursor;
@@ -304,12 +335,12 @@ let lines cursor ~item ~recover =
       let start = cursor.index in
       let value =
         match
-          cursor.ended_by_arm_comma <- false;
+          cursor.skipped_trailing_comma <- false;
           cursor.after_inserted_closer <- false;
           let value = item cursor in
           let separated =
             peek_kind cursor = Newline
-            || (cursor.ended_by_arm_comma && (peek cursor).line_break_before)
+            || (cursor.skipped_trailing_comma && (peek cursor).line_break_before)
           in
           if cursor.index < closer_index && not separated then fail cursor "a line break or `}`";
           value
@@ -324,8 +355,10 @@ let lines cursor ~item ~recover =
   in
   let items = loop [] in
   cursor.after_inserted_closer <- enclosing_after_inserted_closer;
-  cursor.ended_by_arm_comma <- enclosing_ended_by_arm_comma;
+  cursor.skipped_trailing_comma <- enclosing_skipped_trailing_comma;
   skip_to cursor (closer_index + 1);
   items
 
 let blank_line_before cursor index = (token_at cursor index).blank_line_before
+let recovered cursor = List.sort_uniq compare (List.map (span cursor) !(cursor.recoveries))
+let methods cursor = List.rev cursor.methods

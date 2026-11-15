@@ -1,11 +1,5 @@
-(* The C every file starts with: the build and linkage kinds, the
-   runtime's declarations, and the helpers a file includes when it uses
-   them. *)
-
 type build = Development | Release
 type linkage = External | Internal
-
-(* A position in a definition, relative to the line it starts on. *)
 type site = { definition : Path.t; line : int; column : int }
 type failure = Echo | Todo
 
@@ -85,8 +79,6 @@ let runtime_declarations =
       "uint64_t t_runtime_live_blocks(void);\n";
     ]
 
-(* Small functions that generated code calls, each emitted only into the
-   files that use it. *)
 let helpers =
   [
     ( "t_lend",

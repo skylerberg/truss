@@ -1,5 +1,3 @@
-(* The solver's logic, and the canonical text of a query. *)
-
 type sort = Int | Bool | Float of int * int | Uninterpreted of string
 
 module Symbol = struct
@@ -10,10 +8,10 @@ module Symbol = struct
     | Function_value of { callee : Path.t; instance : string list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
-    | Literal of { type_key : string; text : string }
-    | Argument of 'term
+    | Text_literal of { type_key : string; text : string }
+    | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
-    | Over of 'term t
+    | Lifted of 'term t
     | Constructor of { type_key : string; type_name : string; variant : string option }
     | Field of { type_key : string; variant : string option; field : string }
     | Unit
@@ -62,7 +60,6 @@ type declaration =
 
 type query = { declarations : declaration list; facts : term list; goal : term }
 
-(* A bit-vector literal, most significant bit first. *)
 let bits_text width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
 
@@ -86,10 +83,10 @@ let rec show_symbol : symbol -> string = function
   | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
-  | Literal { type_key; text } -> Printf.sprintf "literal.%s.%S" type_key text
-  | Argument term -> "argument(" ^ show_term term ^ ")"
+  | Text_literal { type_key; text } -> Printf.sprintf "text_literal.%s.%S" type_key text
+  | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
-  | Over symbol -> show_symbol symbol ^ ".over"
+  | Lifted symbol -> show_symbol symbol ^ ".lifted"
   | Constructor { type_key; variant; _ } -> "constructor." ^ type_key ^ "." ^ variant_text variant
   | Field { type_key; variant; field } ->
       "field." ^ type_key ^ "." ^ variant_text variant ^ "." ^ field
@@ -202,9 +199,6 @@ let disjunction terms = List.fold_left ( ||| ) (Boolean false) terms
 let zero = Integer Z.zero
 let negate value = Operation ("-", [ value ])
 
-(* SMT-LIB's [div] and [mod] round so that the remainder is never
-   negative. Truss rounds toward zero, which agrees with them when both
-   operands are at or above zero, so each sign is handled by negating. *)
 let truncated_divide left right =
   let ge0 value = Operation (">=", [ value; zero ]) in
   let div dividend divisor = Operation ("div", [ dividend; divisor ]) in
@@ -225,22 +219,20 @@ let rec mentions symbols = function
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
 
-let rec free_symbols = function
+let rec free_constants = function
   | Symbol name -> [ name ]
   | Integer _ | Boolean _ | Bits _ -> []
-  | Apply (_, arguments) | Operation (_, arguments) -> List.concat_map free_symbols arguments
-  | Is (_, argument) -> free_symbols argument
+  | Apply (_, arguments) | Operation (_, arguments) -> List.concat_map free_constants arguments
+  | Is (_, argument) -> free_constants argument
   | Forall (bound, _, body) | Exists (bound, body) ->
-      List.filter (fun name -> not (List.mem_assoc name bound)) (free_symbols body)
+      List.filter (fun name -> not (List.mem_assoc name bound)) (free_constants body)
 
-let rec quantified = function
+let rec has_quantifier = function
   | Forall _ | Exists _ -> true
   | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
-  | Apply (_, arguments) | Operation (_, arguments) -> List.exists quantified arguments
-  | Is (_, argument) -> quantified argument
+  | Apply (_, arguments) | Operation (_, arguments) -> List.exists has_quantifier arguments
+  | Is (_, argument) -> has_quantifier argument
 
-(* Each occurrence of a term, outside the quantifiers that bind its
-   symbols, replaced. *)
 let rec replace ~from ~into term =
   if term = from then into
   else
@@ -255,9 +247,6 @@ let rec replace ~from ~into term =
     | Exists (bound, body) ->
         if mentions (List.map fst bound) from then term else Exists (bound, replace ~from ~into body)
 
-(* Each symbol of [substitution] replaced by its term at once, so a term
-   put in for one symbol is not rewritten for another, except under a
-   quantifier that binds the symbol. *)
 let rec substitute substitution term =
   match term with
   | Symbol name -> ( match List.assoc_opt name substitution with Some into -> into | None -> term)
@@ -273,25 +262,15 @@ let rec substitute substitution term =
 and unbound bound substitution =
   List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
-(* The terms that make the solver use a quantified statement, as Dafny
-   chooses them: sets of applications of the query's own functions that
-   together name every bound variable, each variable as an argument and not
-   under arithmetic, since the solver matches a trigger by its shape. An
-   application that contains another with the same variables is left out
-   for the smaller one, and so is one that the statement's own body would
-   match with a larger term, which would use the statement again and again,
-   unless nothing else is left. An equation that defines a function on its
-   left side is triggered by that side alone. With no trigger, the solver
-   chooses its own. *)
 let triggers ~triggering variables body =
   let names = List.map fst variables in
-  let rec usable = function
+  let rec is_trigger_term = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
-    | Apply (name, arguments) when triggering name -> List.for_all usable arguments
+    | Apply (name, arguments) when triggering name -> List.for_all is_trigger_term arguments
     | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term -> not (mentions names term)
   in
   let candidate = function
-    | Apply (name, _ :: _) as term -> triggering name && mentions names term && usable term
+    | Apply (name, _ :: _) as term -> triggering name && mentions names term && is_trigger_term term
     | _ -> false
   in
   let applications = ref [] in
@@ -316,7 +295,6 @@ let triggers ~triggering variables body =
     | Is (_, argument) -> argument = inner || is_proper_subterm inner argument
     | _ -> false
   in
-  (* Whether [pattern] matches [term], binding its bound variables. *)
   let rec matching bindings pattern term =
     match (pattern, bindings) with
     | _, None -> None
@@ -331,7 +309,7 @@ let triggers ~triggering variables body =
         | _ -> None)
     | _ -> if pattern = term then bindings else None
   in
-  let loops trigger =
+  let makes_matching_loop trigger =
     List.exists
       (fun term ->
         term <> trigger
@@ -346,13 +324,10 @@ let triggers ~triggering variables body =
     | Operation ("=>", [ _; inner ]) -> conclusion inner
     | term -> term
   in
-  (* An equation between two applications that both name every bound
-     name, such as one sequence's elements equal to another's, defines
-     neither, and either triggers it. *)
-  let is_whole term = candidate term && bound_names_in term = names in
+  let names_every_variable term = candidate term && bound_names_in term = names in
   match conclusion body with
-  | Operation ("=", [ (Apply _ as defined); other ]) when is_whole defined && not (is_whole other)
-    ->
+  | Operation ("=", [ (Apply _ as defined); other ])
+    when names_every_variable defined && not (names_every_variable other) ->
       [ [ defined ] ]
   | _ -> (
       let candidates = List.filter candidate applications in
@@ -366,11 +341,6 @@ let triggers ~triggering variables body =
                  candidates))
           candidates
       in
-      (* A set of applications triggers with every other candidate of the
-         same functions, so an instance makes no new application of them:
-         transitivity triggered by two of its three comparisons would make
-         the third, which would match again with every other, without end
-         on a long enough chain of terms. *)
       let with_same_functions trigger =
         let function_of = function Apply (name, _) -> Some name | _ -> None in
         let functions = List.map function_of trigger in
@@ -382,7 +352,7 @@ let triggers ~triggering variables body =
       in
       let covering_triggers candidates =
         match List.filter (fun term -> bound_names_in term = names) candidates with
-        | _ :: _ as whole -> List.map (fun term -> [ term ]) whole
+        | _ :: _ as covering -> List.map (fun term -> [ term ]) covering
         | [] ->
             List.concat_map
               (fun first ->
@@ -400,21 +370,18 @@ let triggers ~triggering variables body =
               candidates
             |> List.sort_uniq compare
       in
-      match covering_triggers (List.filter (fun term -> not (loops term)) candidates) with
+      match
+        covering_triggers (List.filter (fun term -> not (makes_matching_loop term)) candidates)
+      with
       | [] -> covering_triggers candidates
       | triggers -> triggers)
 
-(* A quantified fact whose triggers {!triggers} chooses. *)
 let forall ?(trigger = []) (variables, body) =
   match variables with [] -> body | _ -> Forall (variables, trigger, body)
 
-(* A quantified fact's triggers: the one it names, or else those
-   [triggers] chooses. *)
 let chosen_triggers ~triggering variables trigger body =
   match trigger with [] -> triggers ~triggering variables body | terms -> [ terms ]
 
-(* The functions a trigger may apply: a declared function or a datatype's
-   constructor or selector. *)
 let triggering_in declarations =
   let functions = Hashtbl.create 64 in
   List.iter
@@ -430,10 +397,7 @@ let triggering_in declarations =
     declarations;
   Hashtbl.mem functions
 
-(* Whether a fact of a query is quantified with no trigger, so the solver
-   chooses its own way to use it, or none. A fact under a path's condition
-   is read through it. *)
-let untriggered query =
+let has_untriggered_fact query =
   let triggering = triggering_in query.declarations in
   let rec without = function
     | Operation ("=>", [ _; inner ]) -> without inner
@@ -442,9 +406,6 @@ let untriggered query =
   in
   List.exists without query.facts
 
-(* The declared symbols a term mentions. A datatype's constructors and
-   selectors are shared vocabulary, like SMT-LIB's own operations, so they
-   connect nothing. *)
 let declared_symbols declared term =
   let symbols = ref [] in
   let rec walk bound = function
@@ -473,9 +434,6 @@ let prune query =
   let reach symbols = List.iter (fun symbol -> Hashtbl.replace reached symbol ()) symbols in
   reach (declared_symbols declared query.goal);
   let triggering = triggering_in query.declarations in
-  (* A quantified fact can be used only where terms of the shape of one of
-     its triggers are, so it waits until each symbol of one of them is
-     kept. A fact under a path's condition is read through it. *)
   let rec needs fact symbols =
     match fact with
     | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
@@ -488,8 +446,6 @@ let prune query =
               List.exists (fun trigger -> List.for_all (Hashtbl.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Hashtbl.mem reached) symbols
   in
-  (* A fact stated twice, such as a law that two bounds both give, is kept
-     once, since the solver would instantiate each copy. *)
   let distinct =
     let seen = Hashtbl.create 64 in
     List.filter
@@ -523,17 +479,10 @@ let prune query =
   done;
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
 
-(* Numbering: every declared symbol and every sort is named by the order
-   of its first appearance in a walk of the facts, in order, and then the
-   goal. A datatype's constructors and selectors are named after
-   its sort and their positions. Bound variables are named by their depth
-   and position, so a quantifier's text does not depend on its
-   variables' names. *)
 type numbering = {
   declared : (symbol, declaration) Hashtbl.t;
   datatypes : (string, (symbol * (symbol * sort) list) list) Hashtbl.t;
   member_of : (symbol, string * string) Hashtbl.t;
-      (** Each constructor and selector: its datatype and its canonical suffix. *)
   triggering : symbol -> bool;
   symbol_names : (symbol, string) Hashtbl.t;
   symbol_order : symbol Dynarray.t;
@@ -552,7 +501,6 @@ let rec sort_name numbering = function
           let canonical = Printf.sprintf "S%d" (Hashtbl.length numbering.sort_names) in
           Hashtbl.replace numbering.sort_names name canonical;
           Dynarray.add_last numbering.sort_order name;
-          (* A datatype's fields' sorts are numbered with it. *)
           (match Hashtbl.find_opt numbering.datatypes name with
           | Some constructors ->
               List.iter
@@ -572,7 +520,6 @@ let symbol_name numbering name =
           let canonical = Printf.sprintf "x%d" (Hashtbl.length numbering.symbol_names) in
           Hashtbl.replace numbering.symbol_names name canonical;
           Dynarray.add_last numbering.symbol_order name;
-          (* The sorts a declaration mentions are numbered with it. *)
           (match declaration with
           | Constant (_, sort) -> ignore (sort_name numbering sort)
           | Function (_, inputs, output) ->
@@ -586,7 +533,6 @@ let member_name numbering name =
     (fun (datatype, suffix) -> sort_name numbering (Uninterpreted datatype) ^ suffix)
     (Hashtbl.find_opt numbering.member_of name)
 
-(* A function's name in the text: a datatype's member or a declared symbol. *)
 let function_name numbering name =
   match member_name numbering name with
   | Some canonical -> canonical
@@ -696,8 +642,6 @@ let numbering query =
     sort_order = Dynarray.create ();
   }
 
-(* A query's canonical text, with the names it gives the query's symbols,
-   sorts and members. *)
 type rendering = { text : string; numbering : numbering }
 
 let render query =
@@ -709,7 +653,8 @@ let render query =
     Buffer.add_string buffer ")\n";
     Buffer.contents buffer
   in
-  let assertions = List.map assertion query.facts @ [ assertion (not_ query.goal) ] in
+  let negated_goal = assertion (not_ query.goal) in
+  let assertions = List.map assertion query.facts @ [ negated_goal ] in
   let declarations =
     List.map
       (fun name ->
@@ -724,9 +669,6 @@ let render query =
         | Datatype _ -> "")
       (Dynarray.to_list numbering.symbol_order)
   in
-  (* Every datatype goes in one block, so that datatypes may refer to each
-     other; every other sort is declared on its own. Sorts are listed only
-     once the walk above has numbered them all. *)
   let sort_order = Dynarray.to_list numbering.sort_order in
   let sorts =
     List.filter_map
@@ -777,8 +719,6 @@ let rendered_text rendering = rendering.text
 let text query = (render query).text
 
 let term_text { numbering; _ } term =
-  (* A symbol the query declares but its text does not mention has no
-     canonical name, and the solver would not know it. *)
   let rec named = function
     | Symbol name -> Hashtbl.mem numbering.symbol_names name
     | Integer _ | Boolean _ | Bits _ -> true

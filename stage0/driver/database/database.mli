@@ -40,7 +40,7 @@ val manifest_problems :
 val packages : session -> (string * Path.package) list
 (** Every package of the project: its directory relative to the root, and its name. *)
 
-val time_limit : session -> int
+val time_limit_ms : session -> int
 (** The time each test of the project may take, in seconds. *)
 
 val registry_packages : session -> (Path.package * Registry.Version.t * string) list

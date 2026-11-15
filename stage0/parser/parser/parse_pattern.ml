@@ -16,7 +16,7 @@ let string_literal cursor ~start ~modules literal =
   Atoms.string_literal cursor ~start ~modules literal ~interpolation
 
 let literal cursor : literal option =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   let take literal =
     Cursor.advance cursor;
     Some literal
@@ -57,7 +57,7 @@ and range_or cursor start end_kind kind =
   match Cursor.peek_kind cursor with
   | Punctuation ((Dot_dot | Dot_dot_equal) as operator) ->
       Cursor.advance cursor;
-      let stop_start = cursor.index in
+      let stop_start = Cursor.index cursor in
       let stop =
         match literal cursor with
         | Some literal ->
@@ -93,7 +93,7 @@ and constant_end cursor start : range_end =
   { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
 and primary cursor : pattern =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   match literal cursor with
   | Some literal -> range_or cursor start (End_literal literal) (Literal literal)
   | None -> (
@@ -127,7 +127,7 @@ and named cursor start =
 
 and unqualified_variant cursor start (path : path) =
   let rec last_name (qualified : Token.t option) =
-    match (Cursor.peek_kind cursor, Cursor.token_at cursor (cursor.index + 1)) with
+    match (Cursor.peek_kind cursor, Cursor.token_at cursor (Cursor.index cursor + 1)) with
     | Punctuation (Dot | Colon_colon), ({ kind = Upper _; _ } as variant) ->
         Cursor.advance cursor;
         Cursor.advance cursor;
@@ -141,13 +141,13 @@ and unqualified_variant cursor start (path : path) =
       { modules = []; last = Atoms.name cursor variant text }
   | _ when path.modules <> [] && not (Cursor.is_punctuation cursor Dot) ->
       Habits.qualified_variant cursor ~qualifier_start
-        ~variant:(Cursor.token_at cursor (cursor.index - 1));
+        ~variant:(Cursor.token_at cursor (Cursor.index cursor - 1));
       { path with modules = [] }
   | _ -> path
 
 and pattern_fields cursor =
   let field cursor : pattern_field =
-    let start = cursor.Cursor.index in
+    let start = Cursor.index cursor in
     let kind =
       match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
       | Punctuation Dot_dot, _ ->
@@ -181,7 +181,7 @@ and pattern_fields cursor =
 and pattern cursor : pattern = Cursor.nested cursor alternatives
 
 and alternatives cursor : pattern =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   let first = primary cursor in
   if Cursor.is_punctuation cursor Bar then begin
     let rec loop alternatives =

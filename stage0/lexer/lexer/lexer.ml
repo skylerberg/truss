@@ -150,14 +150,16 @@ let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
   in
   walk (tokens written) (tokens fixed)
 
-let membership (diagnostics : Diagnostic.t list) =
+let membership fixes =
   let table = Hashtbl.create 64 in
   List.iter
-    (fun (diagnostic : Diagnostic.t) ->
-      Hashtbl.add table (diagnostic.span.start, diagnostic.span.stop) diagnostic)
-    diagnostics;
-  fun (diagnostic : Diagnostic.t) ->
-    List.memq diagnostic (Hashtbl.find_all table (diagnostic.span.start, diagnostic.span.stop))
+    (fun (((diagnostic : Diagnostic.t), _) as fix) ->
+      Hashtbl.add table (diagnostic.span.start, diagnostic.span.stop) fix)
+    fixes;
+  fun (diagnostic : Diagnostic.t) fix ->
+    List.exists
+      (fun (other_diagnostic, other_fix) -> other_diagnostic == diagnostic && other_fix == fix)
+      (Hashtbl.find_all table (diagnostic.span.start, diagnostic.span.stop))
 
 let works source tokens diagnostics fixes =
   let edits =
@@ -168,8 +170,12 @@ let works source tokens diagnostics fixes =
       (Source.create ~path:(Source.path source) (Diagnostic.apply_edits (Source.text source) edits))
   in
   let fixed_tokens = Array.map (original_token (placed_edits edits)) fixed_tokens in
-  let is_fixed = membership (List.map fst fixes) in
-  let others = List.filter (fun diagnostic -> not (is_fixed diagnostic)) diagnostics in
+  let is_fixed = membership fixes in
+  let others =
+    List.filter
+      (fun (diagnostic : Diagnostic.t) -> not (List.exists (is_fixed diagnostic) diagnostic.fixes))
+      diagnostics
+  in
   match joined ~written:tokens ~fixed:fixed_tokens @ joined ~written:fixed_tokens ~fixed:tokens with
   | [] when Diagnostic.adds_none ~before:others ~after:remaining -> Some fixed_tokens
   | _ -> None
@@ -234,85 +240,65 @@ let rec failing source tokens diagnostics ~fixes_of groups =
 
 let largest_checked_cluster = 8
 
-let failing_alone source tokens diagnostics fixes =
-  let clusters, unchecked =
-    List.partition
-      (fun cluster -> List.length cluster <= largest_checked_cluster)
-      (clusters tokens fixes)
+let accepted source tokens diagnostics ~combines fixes =
+  let clusters =
+    Array.of_list
+      (List.map Array.of_list
+         (List.filter
+            (fun cluster -> List.length cluster <= largest_checked_cluster)
+            (clusters tokens fixes)))
   in
-  let clusters = List.map Array.of_list clusters in
-  let rounds = List.fold_left (fun most cluster -> max most (Array.length cluster)) 0 clusters in
-  List.concat_map
-    (fun round ->
-      failing source tokens diagnostics
-        ~fixes_of:(fun fix -> [ fix ])
-        (List.filter_map
-           (fun cluster -> if round < Array.length cluster then Some cluster.(round) else None)
-           clusters))
-    (List.init rounds Fun.id)
-  @ List.concat unchecked
+  let accepted = Array.make (Array.length clusters) [] in
+  let rounds = Array.fold_left (fun most cluster -> max most (Array.length cluster)) 0 clusters in
+  for round = 0 to rounds - 1 do
+    let candidate index = clusters.(index).(round) in
+    let candidates =
+      List.filter
+        (fun index -> round < Array.length clusters.(index))
+        (List.init (Array.length clusters) Fun.id)
+    in
+    let rejected = Array.make (Array.length clusters) false in
+    let reject = List.iter (fun index -> rejected.(index) <- true) in
+    reject
+      (failing source tokens diagnostics ~fixes_of:(fun index -> [ candidate index ]) candidates);
+    if combines then
+      reject
+        (failing source tokens diagnostics
+           ~fixes_of:(fun index -> candidate index :: accepted.(index))
+           (List.filter (fun index -> (not rejected.(index)) && accepted.(index) <> []) candidates));
+    List.iter
+      (fun index ->
+        if not rejected.(index) then accepted.(index) <- candidate index :: accepted.(index))
+      candidates
+  done;
+  List.concat (Array.to_list accepted)
 
-let conflicting source tokens diagnostics fixes =
-  let greedy clusters =
-    let clusters = Array.of_list (List.map Array.of_list clusters) in
-    let accepted = Array.make (Array.length clusters) [] in
-    let rounds = Array.fold_left (fun most cluster -> max most (Array.length cluster)) 0 clusters in
-    List.concat_map
-      (fun round ->
-        let candidates =
-          List.filter
-            (fun index -> round < Array.length clusters.(index))
-            (List.init (Array.length clusters) Fun.id)
-        in
-        let rejected =
-          failing source tokens diagnostics
-            ~fixes_of:(fun index -> clusters.(index).(round) :: accepted.(index))
-            candidates
-        in
-        let is_rejected = Array.make (Array.length clusters) false in
-        List.iter (fun index -> is_rejected.(index) <- true) rejected;
-        List.iter
-          (fun index ->
-            if not is_rejected.(index) then
-              accepted.(index) <- clusters.(index).(round) :: accepted.(index))
-          candidates;
-        List.map (fun index -> clusters.(index).(round)) rejected)
-      (List.init rounds Fun.id)
-  in
-  match failing source tokens diagnostics ~fixes_of:Fun.id (clusters tokens fixes) with
-  | [] -> greedy [ fixes ]
-  | broken -> greedy broken
-
-let rec recover source tokens diagnostics =
+let recover source tokens diagnostics =
   let fixes =
     List.filter_map
       (fun (diagnostic : Diagnostic.t) ->
         match diagnostic.fixes with [ fix ] -> Some (diagnostic, fix) | _ -> None)
       (Diagnostic.machine_applicable diagnostics)
   in
-  let withhold wrong =
-    let is_wrong = membership (List.map fst wrong) in
-    recover source tokens
-      (List.map
-         (fun (diagnostic : Diagnostic.t) ->
-           if is_wrong diagnostic then { diagnostic with fixes = [] } else diagnostic)
-         diagnostics)
+  let applied = accepted source tokens diagnostics ~combines:true fixes in
+  let is_applied = membership applied and is_offered = membership fixes in
+  let diagnostics =
+    List.map
+      (fun (diagnostic : Diagnostic.t) ->
+        match diagnostic.fixes with
+        | [ fix ] when is_offered diagnostic fix && not (is_applied diagnostic fix) ->
+            { diagnostic with fixes = [] }
+        | _ -> diagnostic)
+      diagnostics
   in
-  let applied () =
-    match works source tokens diagnostics fixes with
-    | Some fixed_tokens -> (fixed_tokens, diagnostics)
-    | None -> (
-        match conflicting source tokens diagnostics fixes with
-        | [] -> (tokens, diagnostics)
-        | wrong -> withhold wrong)
-  in
-  match fixes with
+  match applied with
   | [] -> (tokens, diagnostics)
-  | [ _ ] -> applied ()
   | _ -> (
-      match failing_alone source tokens diagnostics fixes with
-      | [] -> applied ()
-      | wrong -> withhold wrong)
+      match works source tokens diagnostics applied with
+      | Some fixed_tokens -> (fixed_tokens, diagnostics)
+      | None ->
+          Compiler_bug.bug ~stage:"Lexer"
+            "the fixes of %s that each work in their cluster fail together" (Source.path source))
 
 let with_working_alternatives source tokens diagnostics =
   let alternatives =
@@ -323,22 +309,12 @@ let with_working_alternatives source tokens diagnostics =
         | _ -> [])
       diagnostics
   in
-  let broken = failing_alone source tokens diagnostics alternatives in
-  let has_broken = membership (List.map fst broken) in
+  let works_alone = membership (accepted source tokens diagnostics ~combines:false alternatives) in
   List.map
     (fun (diagnostic : Diagnostic.t) ->
       match diagnostic.fixes with
-      | _ :: _ :: _ when has_broken diagnostic -> (
-          match
-            List.filter
-              (fun fix ->
-                not
-                  (List.exists
-                     (fun (broken_diagnostic, broken_fix) ->
-                       broken_diagnostic == diagnostic && broken_fix == fix)
-                     broken))
-              diagnostic.fixes
-          with
+      | _ :: _ :: _ -> (
+          match List.filter (works_alone diagnostic) diagnostic.fixes with
           | _ :: _ :: _ as fixes -> { diagnostic with fixes }
           | _ -> { diagnostic with fixes = [] })
       | _ -> diagnostic)

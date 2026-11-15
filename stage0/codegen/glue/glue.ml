@@ -54,17 +54,14 @@ open Emit_c.Builder
 
 let loop glue builder ~count body = loop builder ~index_type:(Value glue.uint64) ~count body
 
-(* Writes a test, and gives its result, a [Bool]. *)
 let test builder rvalue =
   let result = local builder (Raw Bool) in
   emit builder (Assign (at result, rvalue));
   Lowered.Copy (at result)
 
-(* Writes a test of whether the storage at a place owns a buffer. *)
 let owns_buffer builder storage =
   test builder (Binary (Not_equal, Copy (Storage.capacity storage), constant_uint64 0))
 
-(* Writes a test of whether the storage at a place has no elements. *)
 let is_empty builder storage =
   test builder (Binary (Equal, Copy (Storage.length storage), constant_uint64 0))
 
@@ -84,7 +81,6 @@ let drop glue ty =
   start builder (block builder);
   (match (ty, glue.representation ty) with
   | Any _, _ ->
-      (* The value's own drop, from slot 0 of its table, then its block. *)
       emit builder
         (Call
            {
@@ -116,8 +112,6 @@ let drop glue ty =
              result = Discarded;
            })
   | _, Shared inner ->
-      (* The last reference drops the value, by a call of its type's drop
-         function, and frees the block. *)
       let pointer = Lowered.Copy (value / Field "value") in
       let last = local builder (Raw Bool) in
       emit builder
@@ -204,8 +198,6 @@ let drop glue ty =
   build builder ~parameters:[ pointer ] ~result:None;
   built builder
 
-(* The drop in slot 0 of an [any] table, which takes the value's pointer
-   untyped, as the slot is called. It calls the type's drop function. *)
 let any_drop glue ty =
   let builder = create glue.env ~key:(Any_drop ty) in
   let untyped = local builder ~name:"value" (Raw (Pointer Opaque)) in
@@ -250,8 +242,6 @@ let copy_into glue builder ~destination ~source ty =
            result = Convention.(destination (result glue.env ty)) destination;
          })
 
-(* The operand for a copy of a field, through a temporary when the field's
-   type is not trivial. *)
 let copied_field glue builder ~source (name, member) =
   match member with
   | Memory_layout.Raw _ -> (name, Lowered.Copy source)
@@ -294,7 +284,6 @@ let copy glue ty =
      match glue.representation ty with
      | Handle -> bug "a copy of a handle, which is not Copyable"
      | Shared _ ->
-         (* A copy is another reference to the same block. *)
          emit builder
            (Call
               {
@@ -304,10 +293,6 @@ let copy glue ty =
               });
          emit builder (Assign (result, Use (Copy self)))
      | Storage element ->
-         (* A storage that owns no buffer, empty or static, is shared. One
-            that owns a buffer is never shared, or two would free it: with
-            no elements its copy is empty, and otherwise its copy gets a
-            buffer of exactly its length. *)
          let layout = Memory_layout.of_type glue.env element in
          let share = block builder and owning = block builder and hollow = block builder in
          let allocate = block builder and after = block builder in
@@ -426,9 +411,6 @@ let debug_signature glue ty : Lowered.signature =
     returns = true;
   }
 
-(* A call of one of the standard library's functions that append to the
-   output, each in [standard::writing]: it takes the output, and a value of
-   [ty] to write, which is at [place]. *)
 let write glue builder ~output name ty (place : Lowered.place) =
   let key = Instance.Code { path = Path.standard [ "writing" ] name; type_arguments = [] } in
   let parameter, written =
@@ -450,7 +432,6 @@ let write glue builder ~output name ty (place : Lowered.place) =
          result = Discarded;
        })
 
-(* A view of bytes, in a local. *)
 let bytes builder ~elements ~length =
   let view = local builder (Value bytes_ty) in
   emit builder (Assign (at view, Storage.view bytes_ty ~elements ~length));
@@ -616,7 +597,6 @@ let encode glue ty =
   let output = Lowered.Copy (at out) in
   let encode_call = encode_call glue builder ~output in
   start builder (block builder);
-  (* The value's own bytes, read as bytes whatever it is. *)
   let bytes (place : Lowered.place) size =
     let first = local builder (Raw (Pointer (Data (builtin UInt8)))) in
     emit builder

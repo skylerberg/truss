@@ -55,6 +55,11 @@ let () =
       not_proven Fixtures.Prover.division_by_a_value_that_may_be_zero "prover.division");
   test "a signed division by -1 can overflow" (fun () ->
       not_proven Fixtures.Prover.signed_division_by_1_can_overflow "prover.overflow");
+  test "a signed division rounds toward zero" (fun () ->
+      proven Fixtures.Prover.signed_division_rounds_toward_zero;
+      not_proven Fixtures.Prover.signed_division_does_not_round_down "prover.ensures");
+  test "a remainder has the sign of its left operand" (fun () ->
+      proven Fixtures.Prover.remainder_has_the_sign_of_its_left_operand);
   test "a shift amount must be less than the width" (fun () ->
       not_proven Fixtures.Prover.shift_amount_must_be_less_than_the_width "prover.shift");
   test "negating the least signed value overflows" (fun () ->
@@ -1460,14 +1465,15 @@ let () =
   test "a quantified fact with no trigger is told apart" (fun () ->
       if
         not
-          (untriggered
+          (has_untriggered_fact
              (query
                 (forall
                    ( [ (variable "i", Int) ],
                      positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))))
       then fail "a fact on f(i + 1) alone has no trigger";
-      if untriggered (query (forall ([ (variable "i", Int) ], positive (applied_f i_term)))) then
-        fail "a fact on f(i) has one");
+      if
+        has_untriggered_fact (query (forall ([ (variable "i", Int) ], positive (applied_f i_term))))
+      then fail "a fact on f(i) has one");
   test "variables named by no one application share a trigger" (fun () ->
       expect
         (forall
@@ -1482,7 +1488,8 @@ let () =
     in
     count 1
   in
-  test "transitivity triggers on all three of its applications" (fun () ->
+  test "transitivity triggers on all three of its applications, so it makes no matching loop"
+    (fun () ->
       let k_term = Symbol (variable "k") in
       let at_most first second =
         Operation ("<=", [ Apply (variable "h", [ first; second ]); int 0 ])

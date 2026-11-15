@@ -1,7 +1,3 @@
-(** The module [standard::intrinsic], which exists in no source file. The compiler declares its
-    contents: the built-in types, whose rules no definition could state, and the operations the
-    standard library is written on top of. Only the [standard] package can import it. *)
-
 val module_ : Path.module_
 
 type builtin =
@@ -19,36 +15,19 @@ type builtin =
   | Character
   | Unit
   | Never
-  | Integer  (** The mathematical integers, in specifications only. *)
+  | Integer
   | Array
   | Storage
-      (** [Storage[Element]]: owned storage on the heap, a buffer, a length, and a capacity, with
-          the elements below the length live. The compiler generates its drop and copy, so [List]
-          and [String] need no destructor. It is [Copyable] when its elements are, and never
-          [Plain]. *)
-  | View  (** [View[Element]]: a read-only view of elements, a pointer and a length. A view type. *)
+  | View
   | Handle
-      (** An operating system's descriptor for an open file, owned: dropping it closes it, so it is
-          neither [Copyable] nor [Plain]. *)
   | Shared
-      (** [Shared[Value: Storable]]: a reference to a heap block that holds one value, a reference
-          count, and a mutex. A copy increments the count and refers to the same value, and the last
-          drop drops the value. The value is read and mutated only through [shared_update], which
-          holds the mutex. It is [Copyable], never [Plain], and not a view type. *)
 
 val builtins : builtin list
 val builtin_name : builtin -> string
 val builtin_path : builtin -> Path.t
 val builtin_of_path : Path.t -> builtin option
-
 val libc_builtin : Libc.scalar -> builtin
-(** The built-in type of a number the C library takes or gives. *)
 
-(** The operations of [standard::intrinsic], which the standard library is written on. The type
-    checker gives each its signature, and code generation lowers each directly; both match on this
-    type exhaustively, so a new operation cannot compile until both handle it. Arithmetic and
-    comparison are generic over the built-in number type, which code generation sees after
-    monomorphization. *)
 type operation =
   | Add
   | Subtract
@@ -96,13 +75,7 @@ type operation =
   | Storage_length
   | Storage_capacity
   | Storage_set_capacity
-      (** [(storage, capacity)]: gives the storage a buffer of its own with room for exactly that
-          many elements, at least as many as it has. Nothing else makes room: [storage_push] and
-          [storage_insert] write into room the storage has, and how much to grow by is the standard
-          library's to say. *)
   | Storage_lengthen
-      (** [(storage, by)]: the [by] elements after the last, which a function of the C library wrote
-          into room the storage had, are the storage's *)
   | Storage_shorten
   | Storage_push
   | Storage_pop
@@ -110,115 +83,45 @@ type operation =
   | Storage_remove
   | Storage_swap
   | Storage_from_array
-      (** [storage_from_array(array)]: new storage that holds the elements of an [own] array, in
-          order, with the array's length as its length and its capacity. The array is moved. *)
   | Array_from_storage
-      (** [array_from_storage(storage)]: an array of the elements of an [own] storage, in order,
-          whose length is the array's. The storage is moved, and its buffer freed. A checked build
-          stops if the lengths differ. *)
   | Array_view
-      (** [array_view(array)]: a view of an array's elements, in order, which is valid for as long
-          as the array is *)
   | Array_at_mut
-      (** [array_at_mut(mut array, index)]: lends the element at an index, to mutate. The index is
-          less than the array's length. *)
   | Storage_at
   | Storage_at_mut
   | Storage_view
-  | Storage_view_mut
-      (** [storage_view_mut(mut storage)]: a view of the storage's elements to mutate them through,
-          with [view_at_mut] and [view_swap]. Storage whose elements are static gets a buffer of its
-          own first, as it does before any other change. *)
   | View_length
   | View_at
   | View_at_mut
-      (** [view_at_mut(mut view, index)]: lends the element at an index, to mutate. The index is
-          less than the view's length, and the view is of elements that may be changed: it came from
-          [storage_view_mut] or from an array held [mut]. *)
   | View_swap
-      (** [view_swap(mut view, first, second)]: exchanges two elements of a view of elements that
-          may be changed. Each index is less than the view's length. *)
-  | Storage_take_view
-      (** [storage_take_view(mut storage, view, start)]: says that the storage's elements from
-          [start] are the view's, where the view was made from this storage to mutate them through.
-          In memory they already are, so it does nothing; the prover gives the storage's model the
-          view's elements. A checked build stops if the view is not of those elements. *)
-  | View_take_view  (** [view_take_view(mut view, part, start)]: the same for a view of a view *)
-  | Array_take_view
-      (** [array_take_view(mut array, view, start)]: the same for a view of an array *)
   | View_slice
-  | Storage_model  (** [(storage) -> Sequence]: its elements, in specifications only *)
-  | View_model  (** [(view) -> Sequence]: its elements, in specifications only *)
-  | Array_model  (** [(array) -> Sequence]: its elements, in specifications only *)
+  | Storage_model
+  | View_model
+  | Array_model
   | View_address
   | Crash
   | Handle_from
-      (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
-  | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
+  | Handle_descriptor
   | Handle_release
-      (** [(own handle) -> Int32]: the descriptor of a handle, which is consumed without closing it,
-          so that the caller can close it and see whether closing failed *)
   | Run_test
-      (** [(index)]: runs a test of the test program, by its place in the program's table of them *)
   | Report_tests_to
-      (** [(descriptor)]: from here on a panic, a failed [assert], a [todo], and an [echo] are
-          written as records to the descriptor, for a test's worker *)
   | Live_blocks
   | Environment_entry
-      (** [environment_entry(index, found: mut found)]: the text of the entry at an index of the
-          environment the process was started with, [NAME=value], as a view, with [found] false
-          where the environment has no entry there. It counts from the first entry each time, so it
-          never reads past the last. *)
   | Coroutine_start
   | Coroutine_resume
-      (** [coroutine_resume(coroutine) -> Bool]: runs the coroutine until it suspends or its
-          function returns. Returns true if it suspended. Returns false if its function returned,
-          which also frees the coroutine. *)
   | Coroutine_suspend
-      (** [coroutine_suspend()]: called in a coroutine. Switches to the code that resumed the
-          coroutine, and returns when the coroutine is resumed again. *)
   | Tasks_spawn
-      (** [tasks_spawn(group, work: own fn(UInt64), item: UInt64) -> Bool]: spawns a runtime task
-          that calls [work(item)], and returns true. If the group is already cancelled, spawns
-          nothing and returns false. The runtime's other task functions take only integers, so they
-          are rows of the C library's table. *)
-  | Shared_new  (** [shared_new(value: own Value) -> Shared[Value]], with a count of one *)
+  | Shared_new
   | Shared_update
-      (** [shared_update(shared, input: own Input, change: fn(mut Value, own Input) -> Result) ->
-           Result]: locks the mutex, calls [change] on the value and [input], unlocks, and returns
-          the result. [change] uses no capability, so it cannot block or call [shared_update], and
-          two updates cannot deadlock. [Result] is [Storable], so no view of the value escapes the
-          lock. *)
   | Holds_invariant
   | Shared_key
-      (** [shared_key(shared) -> UInt64]: the address of the heap block, as a key for [Tasks.wait]
-          and [Tasks.wake]. Every copy of one [Shared] has the same key. *)
   | System_is_os of Libc.os
-      (** [system_is_linux()], [system_is_macos()]: whether the program is built for that operating
-          system, which lowering knows *)
-  | System_is_architecture of Libc.architecture  (** [system_is_x86_64()], [system_is_arm64()] *)
+  | System_is_architecture of Libc.architecture
   | Libc of Libc.function_
-      (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
   | Libc_number of Libc.number
-      (** A number the C library's headers define, which differs between systems, as an operation
-          that takes nothing: [libc_o_creat()] *)
 
 val operations : operation list
-
 val primitive : operation -> bool
-(** Whether an operation is a primitive operation on built-in values: arithmetic, comparison,
-    conversion, and the bitwise and float operations. Its result depends only on its operands, it
-    changes nothing, and an operator such as [+] means the same operation. *)
-
 val operation_name : operation -> string
 val operation_path : operation -> Path.t
 val operation_of_path : Path.t -> operation option
-
 val uses : operation -> Path.t list
-(** The capabilities that a call of the operation requires. An intrinsic takes no evidence, so only
-    the capability check reads this. The check allows the call where each capability is available.
-    It also allows the call directly in a method of an [impl] of any capability, because such a
-    method is reachable only through a capability call, which is already an effect of its caller. A
-    lambda, a [parallel] branch, a specification, and a helper function in such a method are not
-    exempt. [Shared_update] and [Shared_key] require [Tasks]: which task updates first, and a heap
-    address, both differ from run to run, so code that observes them is not pure. *)

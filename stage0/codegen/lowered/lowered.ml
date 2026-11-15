@@ -1,5 +1,3 @@
-(* The statements' types, and the queries over them. *)
-
 include Lowered_types
 
 let local_place local = { root = Local local; projections = [] }

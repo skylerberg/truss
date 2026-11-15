@@ -482,7 +482,7 @@ let definition_states oracles database (key : Names.key) =
                       (" The solver ran out of steps, so it may hold but needs help: a `proof` \
                         block or a theorem."
                       ^
-                      if Logic.untriggered obligation.query then
+                      if Logic.has_untriggered_fact obligation.query then
                         " A quantified fact it may need has no term for the solver to use it by, \
                          so an `assert` that names the term it is needed for may be enough."
                       else ""));
@@ -546,7 +546,7 @@ let question_query database question =
   | Obligations outcome -> (
       match List.nth_opt outcome.obligations question.index with
       | Some obligation ->
-          let values =
+          let symbols =
             List.map fst obligation.values
             @ if question.with_locals then List.map fst obligation.locals else []
           in
@@ -559,7 +559,7 @@ let question_query database question =
                    obligation.decisions)
             else []
           in
-          Some (query_of ~call:(call_value database) obligation, values, terms)
+          Some (query_of ~call:(call_value database) obligation, symbols, terms)
       | None -> None)
   | Not_proven_here | Unsupported _ -> None
 
@@ -567,7 +567,7 @@ let question_request =
   Query.query ~name:"question_request" ~phase:Phases.verdicts ~saved:true ~show:show_question
     (fun database question ->
       Option.map
-        (fun (query, values, terms) -> Solver.request ~values ~terms query)
+        (fun (query, symbols, terms) -> Solver.request ~symbols ~terms query)
         (question_query database question))
 
 let outcome =

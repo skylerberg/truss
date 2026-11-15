@@ -19,7 +19,6 @@ let anchors_file anchors =
   ^ String.concat ""
       (List.map
          (fun anchor ->
-           (* A site's line counts from 0 at the definition's first line. *)
            Printf.sprintf "const struct t_anchor %s = { (const uint8_t *)%s, %d, %d };\n"
              (Emit_c.anchor_symbol anchor.definition)
              (c_string anchor.path) (String.length anchor.path) anchor.first_line)

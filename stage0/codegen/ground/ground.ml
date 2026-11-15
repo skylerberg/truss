@@ -10,56 +10,7 @@ and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
 and result = Returns of ty | Lends of mode * ty
 
-let ( >>= ) order next = if order <> 0 then order else next ()
-
-let rec compare left right =
-  match (left, right) with
-  | Named left, Named right ->
-      Path.compare left.path right.path >>= fun () ->
-      compare_arguments left.arguments right.arguments
-  | Function left, Function right -> compare_function left right
-  | Any left, Any right ->
-      Path.compare left.trait right.trait >>= fun () ->
-      compare_arguments left.arguments right.arguments >>= fun () ->
-      List.compare
-        (fun (left_name, left_type) (right_name, right_type) ->
-          String.compare left_name right_name >>= fun () -> compare left_type right_type)
-        left.associated right.associated
-  | Never, Never -> 0
-  | _ -> Int.compare (rank left) (rank right)
-
-and rank = function Named _ -> 0 | Function _ -> 1 | Any _ -> 2 | Never -> 3
-
-(* [Z.t] is compared by [Z.compare], since the polymorphic comparison does
-   not accept it. Every other part is a string, a list, or a constructor. *)
-and compare_argument left right =
-  match (left, right) with
-  | Type left, Type right -> compare left right
-  | Value left, Value right -> Z.compare left right
-  | Capabilities left, Capabilities right -> List.compare Path.compare left right
-  | _ ->
-      let rank = function Type _ -> 0 | Value _ -> 1 | Capabilities _ -> 2 in
-      Int.compare (rank left) (rank right)
-
-and compare_arguments left right = List.compare compare_argument left right
-
-and compare_function left right =
-  List.compare
-    (fun (right_name, left_type) (left_name, right_type) ->
-      Stdlib.compare right_name left_name >>= fun () -> compare left_type right_type)
-    left.parameters right.parameters
-  >>= fun () ->
-  compare_result left.result right.result >>= fun () ->
-  List.compare Path.compare left.uses right.uses
-
-and compare_result left right =
-  match (left, right) with
-  | Returns left, Returns right -> compare left right
-  | Lends (right_name, left), Lends (left_name, right) ->
-      Stdlib.compare right_name left_name >>= fun () -> compare left right
-  | _ ->
-      let rank = function Returns _ -> 0 | Lends _ -> 1 in
-      Int.compare (rank left) (rank right)
+let compare = Stdlib.compare
 
 let rec path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name

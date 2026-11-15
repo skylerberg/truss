@@ -28,6 +28,17 @@ val query :
   (context -> 'key -> 'value) ->
   ('key, 'value) query
 
+val recursive_query :
+  name:string ->
+  show:('key -> string) ->
+  phase:phase ->
+  ?saved:bool ->
+  ?portable:bool ->
+  ?equal:('value -> 'value -> bool) ->
+  ?about:('key -> subject option) ->
+  (('key, 'value) query -> context -> 'key -> 'value) ->
+  ('key, 'value) query
+
 val find : context -> ('key, 'value) input -> 'key -> 'value option
 val demand : context -> ('key, 'value) query -> 'key -> 'value
 
