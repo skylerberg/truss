@@ -1,4 +1,0 @@
-(library
- (name graph_types)
- (modules_without_implementation graph_types)
- (libraries path query))

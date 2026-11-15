@@ -31,12 +31,11 @@ let () =
   if wanted checking then test checking load else load ();
   match !loaded with
   | None -> ()
-  | Some (database, _)
-    when List.exists (fun (file, _) -> Checks.diagnostics database file <> []) files ->
-      ()
   | Some (database, compile) -> (
       let tests =
-        List.concat_map (fun ((file : Path.file), _) -> tests_in database file.module_) files
+        List.concat_map
+          (fun ((file : Path.file), _) -> tests_in (pipeline database) file.module_)
+          files
         |> List.filter (fun path -> wanted (name_of path))
       in
       match Compile.run_tests compile ~time_limit_ms:10000 tests with

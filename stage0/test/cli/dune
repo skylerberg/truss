@@ -9,9 +9,7 @@
   source
   diagnostic
   database
-  graph_types
   build
-  checks
   manifest
   registry
   project

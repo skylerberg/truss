@@ -1,6 +1,11 @@
 open Harness
 open Support
 
+let core_of database key =
+  Option.map
+    (fun (checked : Infer.checked) -> checked.form)
+    (Pipeline.For_testing.checked_body (pipeline database) key)
+
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
 let form_of (core : Core.t) = { core; names = Core_walk.local_names core.definition }
@@ -72,9 +77,8 @@ let definition_form text name =
      List.map
        (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
        (parse_errors database file)
-     @ Resolve.diagnostics database file
-     @ Interface.diagnostics database file
-     @ Infer.diagnostics database file
+     @ Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+         (Support.pipeline database) file
    with
   | [] -> ()
   | reported ->
@@ -86,13 +90,15 @@ let definition_form text name =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         if Path.show key.path = "app::main::" ^ name then
-          Option.map (fun core -> (key, core)) (Query.demand database Infer.core key)
+          Option.map (fun core -> (key, core)) (core_of database key)
         else None)
-      (Query.demand database Resolve.Names.declarations_in file)
+      ((Support.names database file.module_.package).declarations_in file)
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check database key core;
+      Core_lint.check
+        (Pipeline.interface_lookups (pipeline database) [ key.module_.package ])
+        key core;
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
 
@@ -116,7 +122,7 @@ let final_expression form =
     | None, _ -> []
   in
   match form.core.definition with
-  | Function { body = Some body; _ } | Law_proof { body; _ } -> of_block body
+  | Function { body = Some body; _ } | Law_proof { body = Some body; _ } -> of_block body
   | _ -> []
 
 let capabilities (set : Types.capability_set) =
@@ -154,9 +160,8 @@ let () =
       test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
           no_diagnostics
             ~check:(fun database module_ ->
-              Resolve.diagnostics database module_
-              @ Interface.diagnostics database module_
-              @ Infer.diagnostics database module_)
+              Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+                (Support.pipeline database) module_)
             [
               ( "app::main",
                 "type Config(port: Int64)\n\n\
@@ -227,7 +232,7 @@ let () =
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           if Path.show key.path = "app::main::g" then
-            match Query.demand database Infer.core key with
+            match core_of database key with
             | Some form ->
                 Core_walk.definition
                   {
@@ -244,7 +249,7 @@ let () =
                   }
                   form.definition
             | None -> fail "no core form")
-        (Query.demand database Resolve.Names.declarations (module_of "app::main"));
+        (Support.declarations database (Support.module_of "app::main"));
       if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
         fail "found [%s]" (String.concat "; " !actual));
   test "a capability parameter in a result type is inferred separately for each call" (fun () ->
@@ -255,7 +260,7 @@ let () =
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           if Path.show key.path = "app::main::g" then
-            match Query.demand database Infer.core key with
+            match core_of database key with
             | Some form ->
                 Core_walk.definition
                   {
@@ -269,7 +274,7 @@ let () =
                   }
                   form.definition
             | None -> fail "no core form")
-        (Query.demand database Resolve.Names.declarations (module_of "app::main"));
+        (Support.declarations database (Support.module_of "app::main"));
       if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
       then fail "found [%s]" (String.concat "; " !actual))
 
@@ -281,9 +286,9 @@ let () =
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           match
-            ( Query.demand database Infer.core key,
-              Query.demand database Resolve.Names.spans key,
-              Query.demand database Resolve.Names.text key )
+            ( core_of database key,
+              (Support.names database key.module_.package).spans key,
+              (Support.names database key.module_.package).text key )
           with
           | Some form, Some spans, Some written ->
               let actual = ref [] in
@@ -302,7 +307,7 @@ let () =
                 form.definition;
               if !actual <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !actual)
           | _ -> fail "no core form")
-        (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+        (Support.declarations database (Support.module_of "app::main")))
 
 let () =
   let applied form =
@@ -373,9 +378,8 @@ let () =
   test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       no_diagnostics
         ~check:(fun database module_ ->
-          Resolve.diagnostics database module_
-          @ Interface.diagnostics database module_
-          @ Infer.diagnostics database module_)
+          Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+            (Support.pipeline database) module_)
         [ ("app::main", Fixtures.Core.in_a_trait_time_self_method_names_the_traits_own) ])
 
 let () =
@@ -386,9 +390,9 @@ let () =
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           match
-            ( Query.demand database Infer.core key,
-              Query.demand database Resolve.Names.spans key,
-              Query.demand database Resolve.Names.text key )
+            ( core_of database key,
+              (Support.names database key.module_.package).spans key,
+              (Support.names database key.module_.package).text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               Some spans,
@@ -397,7 +401,7 @@ let () =
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then fail "found `%s`" quoted
           | _ -> fail "no core form with exactly one cost")
-        (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+        (Support.declarations database (Support.module_of "app::main")))
 
 let () =
   let database = setup [] in
@@ -406,7 +410,12 @@ let () =
     (fun ((file : Path.file), _) ->
       test
         (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
-        (fun () -> forms := !forms + Core_lint.check_file database file))
+        (fun () ->
+          forms :=
+            !forms
+            + Core_lint.check_file
+                (Pipeline.interface_lookups (pipeline database) [ file.module_.package ])
+                ~core:(core_of database) file))
     Standard_library.files;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
@@ -427,26 +436,27 @@ let () =
             receiver = Read;
           }
       in
-      if Query.demand database Infer.derived path <> None then fail "it has a core form");
+      if Pipeline.For_testing.derived (pipeline database) path <> None then
+        fail "it has a core form");
   test
     "every method of a derived impl in the standard library has a core form that satisfies the \
      invariants" (fun () ->
       let database = setup [] in
+      let interface = Pipeline.interface_lookups (pipeline database) [ Path.standard_package ] in
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-          (Query.demand database Interface.Impls.index Path.standard_package)
+          (interface.names.impl_index Path.standard_package).impls
       in
       if derived = [] then fail "the standard library derives nothing";
       List.iter
         (fun impl ->
-          match Interface.Impls.impl_interface database impl with
+          match Interface.Impls.impl_interface interface impl with
           | None -> fail "`%s` has no interface" (Path.show impl)
-          | Some interface ->
+          | Some impl_interface ->
               let provided =
                 match
-                  Query.demand database Interface.Environment.trait_interface
-                    interface.implements.trait
+                  Interface.Definition.trait_interface interface impl_interface.implements.trait
                 with
                 | Some trait ->
                     List.filter_map
@@ -456,20 +466,20 @@ let () =
                 | None -> []
               in
               List.iter
-                (fun (name, receiver, _) ->
+                (fun (name, receiver) ->
                   let path : Path.t = Method { owner = impl; name; receiver } in
-                  match Query.demand database Infer.derived path with
+                  match Pipeline.For_testing.derived (pipeline database) path with
                   | Some form -> (
                       match impl with
                       | Derived { type_ = Top { module_; _ }; _ } ->
-                          Core_lint.check database { module_; path; ordinal = 0 } form
+                          Core_lint.check interface { module_; path; ordinal = 0 } form
                       | _ -> fail "`%s` is not derived for a top-level type" (Path.show impl))
                   | None ->
                       if not (List.mem name provided) then
                         fail "`%s` has no core form for `%s`" (Path.show impl) name
                   | exception Compiler_bug.Bug bug ->
                       fail "`%s`, `%s`: %s" (Path.show impl) name (Compiler_bug.to_string bug))
-                interface.impl_methods)
+                impl_interface.impl_methods)
         derived)
 
 let () =
@@ -484,18 +494,24 @@ let () =
   in
   let core_of_method name =
     let database = setup [ ("app::main", text) ] in
+    let both_package = Path.package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
       match
-        Interface.Impls.implements database ~bounds
+        Interface.Impls.implements
+          (Pipeline.interface_lookups (pipeline database) [ both_package ])
+          ~bounds
           (Types.named both [ Types.Parameter parameter ])
           described
       with
       | Some (From_impl { impl; _ }) -> impl
       | _ -> failwith "no impl"
     in
-    match Query.demand database Infer.core_of_path (Method { owner; name; receiver = Read }) with
+    match
+      Pipeline.For_testing.core_of_path (pipeline database)
+        (Method { owner; name; receiver = Read })
+    with
     | Some (form, substitution) ->
         ( form_of form,
           List.map
@@ -523,9 +539,9 @@ let () =
       let database = setup [ ("app::main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
       match
-        ( Query.demand database Infer.core_of_path
+        ( Pipeline.For_testing.core_of_path (pipeline database)
             (Method { owner; name = "equal"; receiver = Read }),
-          Query.demand database Infer.core_of_path
+          Pipeline.For_testing.core_of_path (pipeline database)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
       | Some (_, []), Some (_, [ _ ]) -> ()

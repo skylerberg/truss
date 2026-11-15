@@ -82,7 +82,7 @@ let to_any context frame (site : Invocation.site) =
 
 let current_bounds context : Interface.Impls.bounds =
   let impl_generics path =
-    match Interface.Impls.impl_interface context.database path with
+    match Interface.Impls.impl_interface context.lookups.interface path with
     | Some interface -> interface.impl_generics
     | None -> []
   in
@@ -91,11 +91,11 @@ let current_bounds context : Interface.Impls.bounds =
     | Method { owner; _ } -> (
         impl_generics owner
         @
-        match Interface.Impls.signature context.database context.current with
+        match Interface.Impls.signature context.lookups.interface context.current with
         | Some signature -> signature.generics
         | None -> [])
     | current -> (
-        match Interface.Impls.signature context.database current with
+        match Interface.Impls.signature context.lookups.interface current with
         | Some signature -> signature.generics
         | None -> impl_generics current)
   in
@@ -114,7 +114,7 @@ let concrete_impl context (trait : Types.trait_reference) (ty : Types.ty) =
         (fun package ->
           List.find_map
             (fun impl ->
-              match Interface.Impls.impl_interface context.database impl with
+              match Interface.Impls.impl_interface context.lookups.interface impl with
               | Some interface -> (
                   let variables =
                     List.map
@@ -132,13 +132,14 @@ let concrete_impl context (trait : Types.trait_reference) (ty : Types.ty) =
                          || List.for_all
                               (fun (argument, bound) ->
                                 Option.is_some
-                                  (Interface.Impls.implements context.database ~bounds argument
-                                     bound))
+                                  (Interface.Impls.implements context.lookups.interface ~bounds
+                                     argument bound))
                               (Interface.Impls.required interface.impl_generics arguments) ->
                       Some (impl, arguments)
                   | _ -> None)
               | None -> None)
-            (Query.demand context.database Interface.Impls.impls_in (trait.trait, path, package)))
+            (Interface.Impls.impls_in context.lookups.interface ~trait:trait.trait ~type_:path
+               package))
         packages
   | _ -> None
 
@@ -147,7 +148,7 @@ let written_equal context ty left right =
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : evidence = Impl { impl; arguments } in
       match
-        method_contract context.database
+        method_contract context.lookups
           { trait = equal_trait; trait_arguments = []; associated = [] }
           "equal" Read evidence
       with

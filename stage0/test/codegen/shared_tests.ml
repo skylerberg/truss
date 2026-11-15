@@ -7,27 +7,31 @@ let source = Fixtures.Shared.shared_probe
 
 let loaded =
   lazy
-    (let engine = Engine.create () in
-     Database.load_package engine ~name:Path.standard_package ~dependencies:[]
-       (Standard_library.files @ [ (probe, source) ]);
-     let database = Engine.context engine in
-     let text = Query.demand database Packages.source probe in
-     (match Checks.diagnostics database probe with
+    (let pipeline =
+       Pipeline.create
+         [
+           {
+             name = Path.standard_package;
+             dependencies = [];
+             files = Standard_library.files @ [ (probe, source) ];
+           };
+         ]
+     in
+     let text = Source.create ~path:(Path.show_file probe) source in
+     (match diagnostics pipeline probe with
      | [] -> ()
      | diagnostics ->
          fail "the source has diagnostics:\n%s"
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
-     ( database,
+     ( pipeline,
        Compile.create
-         ~want:(fun lowering wanted ->
-           Engine.set engine Compile.roots lowering
-             (Compile.add_roots (Engine.context engine) lowering wanted))
-         database host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
+         (Pipeline.lowering_lookups pipeline [ Path.standard_package ])
+         host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
 
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->
-      let database, compile = Lazy.force loaded in
-      match Compile.run_tests compile ~time_limit_ms:2000 (tests_in database probe.module_) with
+      let pipeline, compile = Lazy.force loaded in
+      match Compile.run_tests compile ~time_limit_ms:2000 (tests_in pipeline probe.module_) with
       | Ok records ->
           expect_string
             ~expected:(String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n")))
@@ -59,18 +63,24 @@ let () =
   test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
-      let engine = Engine.create () in
-      Database.load_package engine ~name:Path.standard_package ~dependencies:[]
-        (Standard_library.files @ [ (checks, checks_source) ]);
-      let database = Engine.context engine in
-      let text = Source.text (Query.demand database Packages.source checks) in
+      let pipeline =
+        Pipeline.create
+          [
+            {
+              name = Path.standard_package;
+              dependencies = [];
+              files = Standard_library.files @ [ (checks, checks_source) ];
+            };
+          ]
+      in
+      let text = checks_source in
       let actual =
         List.map
           (fun (diagnostic : Diagnostic.t) ->
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Checks.diagnostics database checks)
+          (diagnostics pipeline checks)
       in
       let expected =
         [
@@ -78,7 +88,6 @@ let () =
           ("capabilities.not_available", "intrinsic::shared_key(self.ticks)");
           ("capabilities.not_available", "intrinsic::shared_key(ticks)");
           ("types.unsatisfied_bound", "intrinsic::Shared[Slice[Int64]]");
-          ("types.unsatisfied_bound", "intrinsic::shared_key(numbers)");
         ]
       in
       let show = List.map (fun (code, excerpt) -> code ^ " at " ^ excerpt) in

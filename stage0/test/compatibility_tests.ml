@@ -3,14 +3,11 @@ open Harness
 open Support
 
 let changes before after =
+  let package : Path.package = { owner = None; name = "lib" } in
   let state text =
-    let database = setup [] in
-    Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
-      ~dependencies:[]
-      [ (file_of "lib::shapes", text) ];
-    database
+    Pipeline.interface_lookups (pipeline (setup [ ("lib::shapes", text) ])) [ package ]
   in
-  Compatibility.compare ~before:(state before) ~after:(state after) { owner = None; name = "lib" }
+  Compatibility.compare ~before:(state before) ~after:(state after) package
 
 let show actual =
   List.map

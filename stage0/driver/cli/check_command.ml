@@ -1,9 +1,9 @@
 let rounds = 32
 
-let unused_dependencies session packages =
-  let root = Database.root session in
+let unused_dependencies snapshot pipeline packages =
+  let root = Database.root snapshot in
   List.filter_map
-    (fun (file, package, (problem : Checks.manifest_problem)) ->
+    (fun (file, package, (problem : Package_checks.manifest_problem)) ->
       match problem with
       | Unused dependency ->
           let path = Filename.concat root file in
@@ -14,16 +14,16 @@ let unused_dependencies session packages =
                (Json.Object
                   [
                     ("file", Json.String (Shown_path.shown path));
-                    ("message", Json.String (Checks.manifest_sentence ~package problem));
+                    ("message", Json.String (Package_checks.manifest_sentence ~package problem));
                   ]))
       | Not_a_capability _ -> None)
-    (Database.manifest_problems session packages)
+    (Command_packages.manifest_problems snapshot pipeline packages)
 
-let lock_file session =
-  match Database.lock_fix session with
+let lock_file snapshot =
+  match Database.lock_fix snapshot with
   | None -> []
   | Some text ->
-      let path = Filename.concat (Database.root session) "truss.lock" in
+      let path = Filename.concat (Database.root snapshot) "truss.lock" in
       Command_packages.write_file path text;
       [
         Json.to_string
@@ -34,16 +34,18 @@ let lock_file session =
              ]);
       ]
 
-let fix session packages =
-  let rec round number fixed =
+let fix snapshot packages =
+  let rec round snapshot number fixed =
+    let pipeline = Database.pipeline snapshot in
+    Pipeline.check pipeline packages;
     let applied =
       List.concat_map
         (fun file ->
-          let diagnostics = Database.diagnostics session file in
+          let diagnostics = Pipeline.file_diagnostics pipeline file in
           match Diagnostic.machine_applicable diagnostics with
           | [] -> []
           | chosen ->
-              let source = Command_packages.source session packages file in
+              let source = Command_packages.source snapshot packages file in
               let edits =
                 List.concat_map
                   (fun (diagnostic : Diagnostic.t) ->
@@ -51,40 +53,31 @@ let fix session packages =
                   chosen
               in
               Command_packages.write_file
-                (Command_packages.path session file)
+                (Command_packages.path snapshot file)
                 (Diagnostic.apply_edits (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
-        (Command_packages.files session packages)
-      @ unused_dependencies session packages
-      @ lock_file session
+        (Command_packages.files snapshot packages)
+      @ unused_dependencies snapshot pipeline packages
+      @ lock_file snapshot
     in
-    if applied = [] || number = rounds then List.rev fixed
-    else begin
-      Database.refresh session;
-      round (number + 1) (List.rev_append applied fixed)
-    end
+    if applied = [] || number = rounds then (snapshot, List.rev fixed)
+    else round (Database.retake snapshot) (number + 1) (List.rev_append applied fixed)
   in
-  round 1 []
+  round snapshot 1 []
 
 let run ~fix:fixing ~proofs =
-  let session, packages = Command_packages.current () in
-  let fixed = if fixing then fix session packages else [] in
-  let report = Report.gather ~proofs session packages in
-  let overlaps = Overlap_command.with_other_worktrees session in
+  let snapshot, packages = Command_packages.current () in
+  let snapshot, fixed = if fixing then fix snapshot packages else (snapshot, []) in
+  let report = Report.gather ~proofs (Database.pipeline snapshot) snapshot packages in
   if Output.json () then
     Json.print
       (Report.document report
-         ((if fixing then
-             [ ("fixed", Json.List (List.map (fun fixed_text -> Json.Raw fixed_text) fixed)) ]
-           else [])
-         @ [ ("overlaps", Overlap_command.to_json overlaps) ]))
+         (if fixing then
+            [ ("fixed", Json.List (List.map (fun fixed_text -> Json.Raw fixed_text) fixed)) ]
+          else []))
   else begin
     if fixed <> [] then
       Output.eprintf "Fixed %s.\n" (Report.plural (List.length fixed) "error" "errors");
-    Report.print report;
-    if overlaps <> [] then begin
-      Output.print_line "Overlaps with other worktrees:";
-      Overlap_command.print overlaps
-    end
+    Report.print report
   end;
   if Report.clean report then 0 else 1

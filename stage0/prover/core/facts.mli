@@ -7,6 +7,7 @@ exception Foreign_unsupported of string
 
 val unsupported : span -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
+val is_in_recursion_group : context -> Path.t -> bool
 val clauses : Mir.requirement list -> Mir.formula list
 val declare : context -> Logic.declaration -> unit
 val add_fact : context -> Logic.term -> unit

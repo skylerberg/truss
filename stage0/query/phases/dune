@@ -1,3 +1,0 @@
-(library
- (name phases)
- (libraries query))

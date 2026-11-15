@@ -9,8 +9,6 @@
   intrinsic
   syntax
   well_known
-  query
-  phases
   resolve
   infer
   interface

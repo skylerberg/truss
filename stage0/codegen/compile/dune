@@ -2,15 +2,14 @@
 
 (library
  (name compile)
+ (modules_without_implementation lookups)
  (libraries
   compiler_bug
+  components
   path
   well_known
-  query
-  phases
   resolve
   interface
-  packages
   source
   ground
   instance

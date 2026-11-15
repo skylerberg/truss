@@ -62,7 +62,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   must not see its consumer's dependencies.** Code that one library alone uses
   is a module of that library, so that nothing else can come to depend on
   it. It stays a library of its own when its short dependency list
-  keeps it independent of a layer, as `session` knows no compiler stage and the
+  keeps it independent of a layer, as `store` knows no compiler stage and the
   move analysis, `moves`, knows nothing of code generation.
 - **Each library belongs to one area of stage0,** a directory under
   `stage0`. The dependencies between areas form no cycle.
@@ -125,9 +125,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `break`, and a `continue` are each a `Jump`, the last statement of its
   block. A clause that can run is one formula. A quantifier that runs is
   its loop, whose body holds the quantifier's body.
-- **`Mir.graph` derives the control-flow graph.** Ownership and code
-  generation read it, a `Mir.Graph.t`: blocks and terminators. It is
-  derived once for a definition, a default, and a constant. No stage
+- **A MIR part holds the control-flow graph beside the tree.** Ownership
+  and code generation read the graph, a `Mir.Graph.t`: blocks and
+  terminators. It is derived once for a definition, a default, and a
+  constant. No stage
   builds a graph but the expansion, and no stage finds a loop in a
   graph. Where a `Connective` or its negation decides a branch, control
   goes straight to the branch's target, so a name that `is` binds is read
@@ -147,14 +148,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   write-back of a part lent `mut` are merged with the paths, and a loop's
   head forgets the slice of a local that the loop assigns. One table for a
   body gave every path the answer of one path.
-- **The MIR library's modules:** `Tree` holds the types, `Graph` the
-  control-flow graph, `Walk` the readings that every stage makes,
-  `Emitter` the state of a body being built, `Builder` the lowering of the
-  core form, `Expansion` the derivation of the graph, and `Mir` the
-  queries. `Mir` includes `Tree` and `Walk`, and is the one module that
-  other libraries name. The emitter's state is abstract: the lowering
-  changes it through the emitter's operations alone, and passes what a
-  callee needs to know as an argument.
+- **`Mir` is the one module of the MIR library that other libraries
+  name,** and it includes `Tree` and `Walk`. The emitter's state is
+  abstract: the lowering changes it through the emitter's operations
+  alone, and passes what a callee needs to know as an argument.
 - **A module of the prover opens only the modules before it:** `State`,
   `Facts`, `Contracts`, the rules from `Validity` to `Loops`, `Assertions`,
   `Reader`, and `Translate`. A rule reads a body or a formula through the context, which
@@ -218,15 +215,14 @@ Every stage of stage0 is tested the same way:
   `stage0/tools/` and are run by hand. Each problem a fuzzer finds becomes a
   focused test of its own.
 - **Tests share one checked standard library.** A test that needs the
-  standard library creates its engine over a frozen base engine that
-  checked the library once for the whole test executable. A test of the
-  code database copies a store that already holds the library's state. A
-  test must not load the library's sources into a new engine: that parses
+  standard library creates its pipeline over the standard library's stored
+  state, which a test executable loads once from the user's store.
+  A test must not give a new pipeline the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
 - **A test run reuses the previous run's results.** Two results are
   keyed by their inputs alone, so they hold for every compiler and are
-  kept between runs in the code database's store, as the `truss` command
+  kept between runs in the user's store, as the `truss` command
   keeps them: the solver's answer to a query, as a result of kind
   `solver`, and the object compiled from a file of generated C, in the
   store's `caches/objects`. A run solves and compiles only what no earlier
@@ -249,11 +245,6 @@ Every stage of stage0 is tested the same way:
   test. Text that is not a whole module stays in OCaml: a template with a
   hole that the test fills, a line given to the lexer or the parser, and a
   snippet of one or two lines.
-- **The tests of propagation check the code database.** The engine fuzzer,
-  and each test that asserts an edit left a result uncomputed, compute every
-  result the engine holds again, in a new engine with the same inputs, and
-  fail if one differs. A stale result needs an edit that failed to
-  propagate, so a test that applies no edit does not pay for the check.
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".

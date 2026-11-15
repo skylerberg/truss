@@ -1,6 +1,8 @@
 fn g(count: UInt16) {}
 
-fn f(count: UInt16) {
+fn f(count: UInt16)
+  uses Tasks
+{
   concurrent {
     g(count + 2)
   }

@@ -5,19 +5,14 @@
   compiler_bug
   blake3
   cbor
-  engine
-  query
   store
-  session
-  graph_types
   path
-  packages
+  source
   manifest
   project
   diagnostic
+  file_system
   standard_library
   compiler_version
-  checks
-  registry
-  resolve
-  process))
+  pipeline
+  registry))

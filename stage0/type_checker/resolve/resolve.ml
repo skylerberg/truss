@@ -24,20 +24,31 @@ type target = Walk.target =
   | Unknown of Diagnostic.reported
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
-
-type value = Walk.value =
-  | Value_local of Syntax.id
-  | Value_generic of Types.parameter
-  | Value_field of string
-  | Value_law_parameter of int
+type section = Walk.section = Interface | Contract | Body
 
 type resolved = {
   names : target option array;
   brackets : bracket option array;
-  holes : (Syntax.id * (string * value) list) list;
   used_imports : string list;
-  diagnostics : Syntax.diagnostic list;
 }
+
+let sections = [ Interface; Contract; Body ]
+
+let merge = function
+  | [] -> { names = [||]; brackets = [||]; used_imports = [] }
+  | first :: _ as parts ->
+      let pick select index = List.find_map (fun part -> (select part).(index)) parts in
+      {
+        names = Array.init (Array.length first.names) (pick (fun part -> part.names));
+        brackets = Array.init (Array.length first.brackets) (pick (fun part -> part.brackets));
+        used_imports =
+          List.sort_uniq compare (List.concat_map (fun part -> part.used_imports) parts);
+      }
+
+let whole ?(sections = sections) read key =
+  match List.map (fun section -> read section key) sections with
+  | parts when List.for_all Option.is_some parts -> Some (merge (List.filter_map Fun.id parts))
+  | _ -> None
 
 type head = {
   name : Syntax.name;
@@ -71,124 +82,120 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | Impl _ | Test _ | Definition_error _ -> None
 
-let resolved =
-  Query.query ~name:"resolved" ~phase:Phases.resolution ~show:Names.show_key ~saved:true
-    ~about:(fun (key : Names.key) -> Some { path = key.path; part = Resolved })
-    (fun database (key : Names.key) ->
-      match
-        (Query.demand database Names.definition key, Query.demand database Names.file_of key)
-      with
-      | Some definition, Some file ->
-          let module_ = key.module_ in
-          let size = definition.id + 1 in
-          let state : Walk.state =
-            {
-              database;
-              file;
-              names = Array.make size None;
-              brackets = Array.make size None;
-              diagnostics = [];
-              holes = [];
-              used_imports = [];
-            }
+let resolve (lookups : Names.lookups) (key : Names.key) =
+  match (lookups.definition key, lookups.declaration key) with
+  | Some definition, Some declaration ->
+      let module_ = key.module_ in
+      let file = declaration.file in
+      let state = Walk.create lookups file ~size:(definition.id + 1) in
+      let container =
+        Option.bind (lookups.container key) (fun (container : Names.key) ->
+            Option.map
+              (fun definition -> (container.path, definition))
+              (lookups.definition container))
+      in
+      let is_walked =
+        (not (Parts.broken definition Header))
+        &&
+        match container with
+        | Some (_, enclosing) -> not (Parts.broken enclosing Header)
+        | None -> true
+      in
+      if is_walked then Walk.definition state ~path:key.path ?container definition;
+      (match key.path with
+      | Top { name; _ } when List.mem name Prelude.names -> (
+          let defines_it =
+            match Prelude.find_type name with
+            | Some prelude_module -> prelude_module = module_
+            | None -> false
           in
-          let container =
-            Option.bind (Query.demand database Names.container key) (fun (container : Names.key) ->
-                Option.map
-                  (fun definition -> (container.path, definition))
-                  (Query.demand database Names.definition container))
-          in
-          (match container with
-          | Some (_, enclosing) when Parts.broken enclosing Header -> ()
-          | _ -> Walk.definition state ~path:key.path ?container definition);
-          (match key.path with
-          | Top { name; _ } when List.mem name Prelude.names -> (
-              let defines_it =
-                match Prelude.find_type name with
-                | Some prelude_module -> prelude_module = module_
-                | None -> false
-              in
-              match declared_name definition with
-              | Some declared when not defines_it ->
-                  Walk.report state Shadowed_name declared.span
-                    (Printf.sprintf
-                       "`%s` is a name in the prelude, and a name cannot shadow another. Choose \
-                        another name."
-                       name)
-              | _ -> ())
-          | _ -> ());
-          if key.ordinal > 0 then begin
-            let span =
-              match declared_name definition with
-              | Some name -> name.span
-              | None -> Syntax.Span.make definition.span.start definition.span.start
-            in
-            let first =
-              match Query.demand database Names.file_of { key with ordinal = 0 } with
-              | Some first when first <> file -> Path.show_file first
-              | _ -> "this file"
-            in
-            Walk.report state Duplicate_definition span
-              (Printf.sprintf "%s is already defined in %s, so this definition is never used."
-                 (Path.show key.path) first)
-          end;
-          Some
-            {
-              names = state.names;
-              brackets = state.brackets;
-              holes = List.rev state.holes;
-              used_imports = List.sort compare state.used_imports;
-              diagnostics =
-                List.sort
-                  (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-                    compare left.span right.span)
-                  state.diagnostics;
-            }
-      | _ -> None)
+          match declared_name definition with
+          | Some declared when not defines_it ->
+              Walk.report state Shadowed_name declared.span
+                (Printf.sprintf
+                   "`%s` is a name in the prelude, and a name cannot shadow another. Choose \
+                    another name."
+                   name)
+          | _ -> ())
+      | _ -> ());
+      if key.ordinal > 0 then begin
+        let span =
+          match declared_name definition with
+          | Some name -> name.span
+          | None -> Syntax.Span.make definition.span.start definition.span.start
+        in
+        let first =
+          match lookups.declaration { key with ordinal = 0 } with
+          | Some first when first.file <> file -> Path.show_file first.file
+          | _ -> "this file"
+        in
+        Walk.report state Duplicate_definition span
+          (Printf.sprintf "%s is already defined in %s, so this definition is never used."
+             (Path.show key.path) first)
+      end;
+      let outcome section =
+        let walked = Walk.names_of state section in
+        let resolved =
+          {
+            names = walked.names;
+            brackets = walked.brackets;
+            used_imports = List.sort compare walked.used_imports;
+          }
+        in
+        match walked.diagnostics with
+        | [] -> Ok resolved
+        | diagnostics ->
+            Error
+              (List.sort
+                 (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+                   compare left.span right.span)
+                 diagnostics)
+      in
+      let parsed = function
+        | Interface | Contract -> is_walked
+        | Body -> is_walked && not (Parts.broken definition Body)
+      in
+      List.filter_map
+        (fun section ->
+          if parsed section || (Walk.names_of state section).diagnostics <> [] then
+            Some (section, outcome section)
+          else None)
+        sections
+  | _ -> []
 
-let file_diagnostics =
-  Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_file ~saved:true
-    (fun database (path : Path.file) ->
-      let module_ = path.module_ in
-      let file = Query.demand database Parsed.file path in
-      let is_recovered (item : Syntax.definition Syntax.item) =
-        match item.value with
-        | { kind = Definition_error _; _ } -> true
-        | { recovered; _ } -> recovered <> []
-      in
-      let has_recovery = List.exists is_recovered file.definitions in
-      let used =
-        List.concat_map
-          (fun declaration ->
-            match Query.demand database resolved (Names.key_of declaration) with
-            | Some resolved -> resolved.used_imports
-            | None -> [])
-          (Query.demand database Names.declarations_in path)
-      in
-      let text = Source.text (Query.demand database Packages.source path) in
-      let diagnostics = ref [] in
-      let report ?fixes code span message =
-        diagnostics := Diagnostic.make ?fixes ~code:(Resolve code) span message :: !diagnostics
-      in
-      ignore
-        (List.fold_left
-           (fun seen (item : Syntax.path Syntax.item) ->
-             let span = Source.span item.base (item.base + String.length item.text) in
-             let used_module = Names.used_module database ~from:module_ item.value in
-             let last = Names.last_name used_module in
-             if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
-               report Intrinsic_import span
-                 "Only the `standard` package can use `standard::intrinsic`."
-             else if not (Names.module_exists database used_module) then
-               report Unknown_module span
-                 (Printf.sprintf "No module `%s` exists." (Path.show_module used_module))
-             else if List.mem last seen then
-               report Duplicate_import span
-                 (Printf.sprintf
-                    "Another `use` already imports a module named `%s`. Write one of them by its \
-                     full path instead."
-                    last)
-             else if (not has_recovery) && not (List.mem last used) then begin
+let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
+    ~(used : string list option) =
+  let module_ = path.module_ in
+  let is_recovered (item : Syntax.definition Syntax.item) =
+    match item.value with
+    | { kind = Definition_error _; _ } -> true
+    | { recovered; _ } -> recovered <> []
+  in
+  let used = if List.exists is_recovered file.definitions then None else used in
+  let diagnostics = ref [] in
+  let report ?fixes code span message =
+    diagnostics := Diagnostic.make ?fixes ~code:(Resolve code) span message :: !diagnostics
+  in
+  ignore
+    (List.fold_left
+       (fun seen (item : Syntax.path Syntax.item) ->
+         let span = Source.span item.base (item.base + String.length item.text) in
+         let used_module = Names.used_module lookups ~from:module_ item.value in
+         let last = Names.last_name used_module in
+         if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
+           report Intrinsic_import span "Only the `standard` package can use `standard::intrinsic`."
+         else if not (Names.is_visible_module lookups ~from:module_ used_module) then
+           report Unknown_module span
+             (Printf.sprintf "No module `%s` exists." (Path.show_module used_module))
+         else if List.mem last seen then
+           report Duplicate_import span
+             (Printf.sprintf
+                "Another `use` already imports a module named `%s`. Write one of them by its full \
+                 path instead."
+                last)
+         else
+           begin match used with
+           | Some used when not (List.mem last used) ->
                let stop = span.stop in
                let stop =
                  if stop < String.length text && text.[stop] = '\n' then stop + 1 else stop
@@ -200,17 +207,38 @@ let file_diagnostics =
                        [ Diagnostic.delete (Source.span item.base stop) ];
                    ]
                  (Printf.sprintf "Nothing in this file uses `%s`." (Path.show_module used_module))
-             end;
-             last :: seen)
-           [] file.uses);
-      List.rev !diagnostics)
+           | Some _ | None -> ()
+           end;
+         last :: seen)
+       [] file.uses);
+  List.rev !diagnostics
 
-let diagnostics database file =
-  List.sort
-    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-      compare (left.span, left.code) (right.span, right.code))
-    (Query.demand database file_diagnostics file
-    @ Names.per_definition database file (fun key ->
-        match Query.demand database resolved key with
-        | Some resolved -> resolved.diagnostics
-        | None -> []))
+type trait_header = {
+  associated : string list;
+  capabilities : string list;
+  required : Path.t list;
+  laws : string list;
+}
+
+let trait_header (definition : Syntax.definition) (resolved : resolved) =
+  match definition.kind with
+  | Trait { requires; members; _ } ->
+      let member_names select =
+        List.filter_map (fun (line : Syntax.trait_member Syntax.line) -> select line.kind) members
+      in
+      Some
+        {
+          associated =
+            member_names (function Associated_type (name, _) -> Some name.text | _ -> None);
+          capabilities =
+            member_names (function Associated_capability name -> Some name.text | _ -> None);
+          required =
+            List.filter_map
+              (fun (bound : Syntax.path_type) ->
+                match resolved.names.(bound.path.last.id) with
+                | Some (Definition (_, path)) -> Some path
+                | _ -> None)
+              requires;
+          laws = member_names (function Law law -> Some law.name.text | _ -> None);
+        }
+  | _ -> None

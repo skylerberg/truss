@@ -1,4 +1,4 @@
-module Members = Members
+module Lookups = Lookups
 
 type resolution = Tables.resolution =
   | Local_value of Syntax.id
@@ -16,78 +16,37 @@ type tables = Tables.published = {
   callees : Path.t option array;
 }
 
-type type_check_result = Body.type_check_result = {
+type checked = Body.checked = {
+  form : Core.t;
   tables : tables;
-  core : Core.t option;
-  diagnostics : Syntax.diagnostic list;
   evidence_packages : Path.package list;
 }
 
-let type_check_result = Body.type_check_result
-let derived = Derived.core
-let show_resolution = Tables.show_resolution
-let diagnostics = Body.diagnostics
+let check lookups (key : Resolve.Names.key) ~checks_body =
+  Compiler_bug.while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
+      Body.check lookups key ~checks_body)
 
-let core =
-  Query.query ~name:"core" ~phase:Phases.bodies ~show:Resolve.Names.show_key (fun database key ->
-      Option.bind (Query.demand database type_check_result key) (fun (result : type_check_result) ->
-          result.core))
+let contract lookups key = check lookups key ~checks_body:false
+
+let body (lookups : Lookups.t) key =
+  ignore (lookups.contract key);
+  check lookups key ~checks_body:true
+
+let derived = Derived.form
+let show_resolution = Tables.show_resolution
 
 type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key
 
-let form_origin =
-  Query.query ~name:"form_origin" ~phase:Phases.bodies ~show:Path.show
-    (fun database (path : Path.t) ->
-      let checked path =
-        Option.bind (Query.demand database Interface.Summary.key path) (fun key ->
-            Option.map (fun _ -> key) (Query.demand database core key))
-      in
-      match (checked path, path) with
-      | Some key, _ -> Some (Written key, [])
-      | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-          match Query.demand database derived path with
-          | Some _ -> Some (Generated, [])
-          | None ->
-              Option.bind (Interface.Impls.impl_interface database owner)
-                (fun (impl : Types.impl_interface) ->
-                  Option.bind (Interface.Impls.trait_substitution database owner)
-                    (fun substitution ->
-                      Option.map
-                        (fun key -> (Inherited key, substitution))
-                        (checked (Method { owner = impl.implements.trait; name; receiver })))))
-      | None, _ -> None)
-
-let core_of_path =
-  Query.query ~name:"core_of_path" ~phase:Phases.bodies ~show:Path.show
-    (fun database (path : Path.t) ->
-      Option.bind (Query.demand database form_origin path) (fun (origin, substitution) ->
-          Option.map
-            (fun form -> (form, substitution))
-            (match origin with
-            | Written key | Inherited key -> Query.demand database core key
-            | Generated -> Query.demand database derived path)))
-
-let evidence_packages =
-  Query.query ~name:"evidence_packages" ~phase:Phases.bodies ~show:Resolve.Names.show_key
-    (fun database key ->
-      match Query.demand database type_check_result key with
-      | Some (result : type_check_result) -> result.evidence_packages
-      | None -> [])
-
-let clean_tables database key =
-  match
-    ( Query.demand database Resolve.Names.definition key,
-      Query.demand database Resolve.resolved key,
-      Query.demand database type_check_result key )
-  with
-  | Some definition, Some resolved, Some { tables; diagnostics = []; _ }
-    when resolved.diagnostics = []
-         && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
-         &&
-         match Query.demand database Interface.Environment.lowered_interface key with
-         | Some { interface = Error_interface _; _ } -> false
-         | _ -> true ->
-      Some tables
-  | _ -> None
-
-let is_clean database key = Option.is_some (clean_tables database key)
+let form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
+  match (interface.names.key path, path) with
+  | Some key, _ -> Some (Written key, [])
+  | None, Method { owner = Impl _ | Derived _; _ } when is_derived path -> Some (Generated, [])
+  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
+      Option.bind (Interface.Impls.impl_interface interface owner)
+        (fun (impl : Types.impl_interface) ->
+          Option.bind (Interface.Impls.trait_substitution interface owner) (fun substitution ->
+              Option.map
+                (fun key -> (Inherited key, substitution))
+                (interface.names.key
+                   (Path.Method { owner = impl.implements.trait; name; receiver }))))
+  | None, _ -> None

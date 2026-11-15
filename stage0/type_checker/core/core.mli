@@ -200,9 +200,9 @@ type definition =
       potential : expression option;
     }
   | Trait of law list
-  | Constant of expression
-  | Test of block
-  | Law_proof of { parameters : parameter list; body : block }
+  | Constant of expression option
+  | Test of block option
+  | Law_proof of { parameters : parameter list; body : block option }
   | Empty
 
 type t = { definition : definition }

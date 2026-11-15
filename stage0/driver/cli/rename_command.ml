@@ -8,8 +8,8 @@ type plan = {
   moved : (Path.module_ * Path.module_) option;
 }
 
-let module_exists session packages (module_ : Path.module_) =
-  List.mem module_ (Command_packages.modules session packages)
+let module_exists snapshot packages (module_ : Path.module_) =
+  List.mem module_ (Command_packages.modules snapshot packages)
 
 let moved_file plan (file : Path.file) =
   match plan.moved with
@@ -37,14 +37,14 @@ let in_package packages from_ =
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
-let target_of session packages from_ =
+let target_of snapshot pipeline packages from_ =
   let { Path.package; modules = names }, member = in_package packages from_ in
   let package_name = Path.show_package package in
-  if member = None && module_exists session packages { package; modules = names } then
+  if member = None && module_exists snapshot packages { package; modules = names } then
     Module { package; modules = names }
   else
     match List.rev names with
-    | last :: rest when module_exists session packages { package; modules = List.rev rest } ->
+    | last :: rest when module_exists snapshot packages { package; modules = List.rev rest } ->
         let module_ : Path.module_ = { package; modules = List.rev rest } in
         let declared path =
           List.exists
@@ -54,9 +54,8 @@ let target_of session packages from_ =
                 ->
                   Path.equal owner other_owner && name = other_name
               | candidate, path -> Path.equal candidate path)
-            (List.concat_map
-               (Query.demand (Database.context session) Names.declarations)
-               (Command_packages.modules session packages))
+            (List.concat_map (Pipeline.names pipeline packages).declarations
+               (Command_packages.modules snapshot packages))
         in
         let path : Path.t =
           match member with
@@ -84,34 +83,35 @@ let new_name ~from_ to_ =
   if name = "" then Outcome.cannot_run "`%s` gives no new name." to_;
   name
 
-let occurrences session packages =
-  let context = Database.context session in
+let occurrences pipeline snapshot packages =
+  let names = Pipeline.names pipeline packages in
   List.concat_map
     (fun file ->
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
-          match Query.demand context Names.base key with
-          | Some (file, base) ->
+          match (names.base key, names.definition key, Pipeline.resolved pipeline key) with
+          | Some (file, base), Some definition, Some resolved ->
+              let tables = Pipeline.tables pipeline key in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
                   (file, Syntax.Span.to_source ~base span, target))
-                (Query.demand context References.occurrences key)
-          | None -> [])
-        (Query.demand context Names.declarations_in file))
-    (Command_packages.files session packages)
+                (References.occurrences ~path:key.path definition resolved tables)
+          | _ -> [])
+        (names.declarations_in file))
+    (Command_packages.files snapshot packages)
 
-let plan_definition session packages path name =
+let plan_definition pipeline snapshot packages path name =
   let edits =
     List.filter_map
       (fun (file, span, target) ->
         if References.names_definition path target then Some (file, Diagnostic.replace span name)
         else None)
-      (occurrences session packages)
+      (occurrences pipeline snapshot packages)
   in
   { edits = by_file edits; moved = None }
 
-let plan_module session packages (old_module : Path.module_) to_ =
+let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
     match in_package packages to_ with
@@ -127,7 +127,7 @@ let plan_module session packages (old_module : Path.module_) to_ =
         Outcome.cannot_run "`%s` is not a lower_snake_case name, which a module's must be." name)
     modules;
   let new_module : Path.module_ = { package; modules } in
-  if module_exists session packages new_module then Outcome.cannot_run "`%s` already exists." to_;
+  if module_exists snapshot packages new_module then Outcome.cannot_run "`%s` already exists." to_;
   let full = Path.show_module new_module in
   let last = List.nth modules (List.length modules - 1) in
   let edits =
@@ -135,47 +135,49 @@ let plan_module session packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Query.demand (Database.context session) Packages.source file) in
+            let text = Source.text (Database.source snapshot file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
-      (occurrences session packages)
+      (occurrences pipeline snapshot packages)
     @ List.concat_map
-        (fun file ->
+        (fun (file : Path.file) ->
           List.filter_map
             (fun (module_, span) ->
               if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
-            (Query.demand (Database.context session) References.uses file))
-        (Command_packages.files session packages)
+            (References.uses
+               ~used_module:
+                 (Names.used_module (Pipeline.names pipeline packages) ~from:file.module_)
+               (Pipeline.parsed pipeline file).uses))
+        (Command_packages.files snapshot packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }
 
-let text_of session file =
-  Source.text (Query.demand (Database.context session) Packages.source file)
+let text_of snapshot file = Source.text (Database.source snapshot file)
 
-let applied session packages plan =
+let applied snapshot packages plan =
   List.map
     (fun file ->
       let text =
         match List.assoc_opt file plan.edits with
-        | Some edits -> Diagnostic.apply_edits (text_of session file) edits
-        | None -> text_of session file
+        | Some edits -> Diagnostic.apply_edits (text_of snapshot file) edits
+        | None -> text_of snapshot file
       in
       (file, moved_file plan file, text))
-    (Command_packages.files session packages)
+    (Command_packages.files snapshot packages)
 
-let directory_of session packages (module_ : Path.module_) =
+let directory_of snapshot packages (module_ : Path.module_) =
   if List.mem module_.package packages then
     List.fold_left Filename.concat
-      (Command_packages.directory session module_.package)
+      (Command_packages.directory snapshot module_.package)
       module_.modules
   else Outcome.cannot_run "%s is not in this project." (Path.show_module module_)
 
-let path_of session packages (file : Path.file) =
-  Filename.concat (directory_of session packages file.module_) (file.name ^ ".truss")
+let path_of snapshot packages (file : Path.file) =
+  Filename.concat (directory_of snapshot packages file.module_) (file.name ^ ".truss")
 
-let trial session after =
-  let path file = Database.file_path session file in
+let trial snapshot after =
+  let path file = Database.file_path snapshot file in
   let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
   let removed =
     List.filter_map
@@ -184,12 +186,12 @@ let trial session after =
         if List.mem_assoc old_path written then None else Some (old_path, None))
       after
   in
-  Database.trial session (written @ removed)
+  Database.trial snapshot (written @ removed)
 
-let edits_json session packages plan =
+let edits_json snapshot packages plan =
   List.concat_map
     (fun (file, edits) ->
-      let source = Command_packages.source session packages file in
+      let source = Command_packages.source snapshot packages file in
       List.map
         (fun (edit : Diagnostic.span Diagnostic.edit) ->
           Json.Object
@@ -204,26 +206,29 @@ let edits_json session packages plan =
 
 let run ~from_ ~to_ =
   let json = Output.json () in
-  let session, packages = Command_packages.worktree () in
-  let report = Report.gather session packages in
+  let snapshot, packages = Command_packages.worktree () in
+  let pipeline = Database.pipeline snapshot in
+  let report = Report.gather pipeline snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let plan =
-    match target_of session packages from_ with
-    | Definition path -> plan_definition session packages path (new_name ~from_ to_)
-    | Module module_ -> plan_module session packages module_ to_
+    match target_of snapshot pipeline packages from_ with
+    | Definition path -> plan_definition pipeline snapshot packages path (new_name ~from_ to_)
+    | Module module_ -> plan_module pipeline snapshot packages module_ to_
   in
-  let after = applied session packages plan in
-  let checked = Database.context (trial session after) in
+  let after = applied snapshot packages plan in
+  let pipeline = Database.pipeline (trial snapshot after) in
+  Pipeline.check pipeline packages;
   let caused =
     List.filter_map
       (fun (_, file, text) ->
-        match Diagnostic.shown (Checks.diagnostics checked file) with
+        match Diagnostic.shown (Pipeline.file_diagnostics pipeline file) with
         | [] -> None
         | diagnostics ->
             Some
               {
                 Report.file;
-                source = Source.create ~path:(Shown_path.shown (path_of session packages file)) text;
+                source =
+                  Source.create ~path:(Shown_path.shown (path_of snapshot packages file)) text;
                 diagnostics;
               })
       after
@@ -238,17 +243,16 @@ let run ~from_ ~to_ =
       end;
       1
   | [] ->
-      let edits = edits_json session packages plan in
+      let edits = edits_json snapshot packages plan in
       List.iter
         (fun (old_file, file, text) ->
           if List.mem_assoc old_file plan.edits || old_file <> file then begin
-            let path = path_of session packages file in
+            let path = path_of snapshot packages file in
             File_system.make_directory (Filename.dirname path);
             Command_packages.write_file path text;
-            if old_file <> file then Sys.remove (Command_packages.path session old_file)
+            if old_file <> file then Sys.remove (Command_packages.path snapshot old_file)
           end)
         after;
-      Database.refresh session;
       let count = List.length edits in
       if json then
         Json.print
@@ -259,7 +263,7 @@ let run ~from_ ~to_ =
                  match plan.moved with
                  | Some (old_m, new_m) ->
                      let directory module_ =
-                       Json.String (Shown_path.shown (directory_of session packages module_))
+                       Json.String (Shown_path.shown (directory_of snapshot packages module_))
                      in
                      Json.Object [ ("from", directory old_m); ("to", directory new_m) ]
                  | None -> Json.Null );

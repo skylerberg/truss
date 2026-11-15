@@ -1,4 +1,0 @@
-
-fn another() -> Int64 {
-  1
-}

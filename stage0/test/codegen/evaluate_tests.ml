@@ -1,17 +1,17 @@
 open Codegen_support
 
-let record database responses =
-  let engine = Engine.of_context database in
-  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
-
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
+let verdicts ~evaluator database =
+  Pipeline.decide ~evaluator (Lazy.force solver)
+    (Pipeline.prove (pipeline database) [ example_file ])
+
 let proven_with_running text =
   let database, compile = load text in
-  Prover.diagnostics
-    ~evaluator:(Evaluator.of_compiler (lazy compile))
-    ~record:(record database) database (Lazy.force solver) example_file
+  Pipeline.diagnostics
+    (verdicts ~evaluator:(Evaluator.of_compiler (lazy compile)) database)
+    example_file
 
 let shout = Fixtures.Evaluate.shout
 
@@ -82,18 +82,11 @@ let () =
       in
       let runs = ref 0 in
       let evaluator : Prover.evaluator =
-        {
-          code_key = (fun _ -> Some "unchanged");
-          run =
-            (fun _ ->
-              incr runs;
-              if !runs = 1 then Timed_out else Ran true);
-        }
+       fun _ ->
+        incr runs;
+        if !runs = 1 then Timed_out else Ran true
       in
-      let proven () =
-        Prover.diagnostics ~evaluator ~record:(record database) database (Lazy.force solver)
-          example_file
-      in
+      let proven () = Pipeline.diagnostics (verdicts ~evaluator database) example_file in
       (match proven () with
       | [ _ ] -> ()
       | actual ->
@@ -112,9 +105,9 @@ let () =
         load (shout ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
       in
       let states =
-        Prover.states
-          ~evaluator:(Evaluator.of_compiler (lazy compile))
-          ~record:(record database) database (Lazy.force solver) example_file
+        Pipeline.states
+          (verdicts ~evaluator:(Evaluator.of_compiler (lazy compile)) database)
+          example_file
       in
       let with_code code =
         List.filter

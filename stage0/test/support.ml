@@ -16,36 +16,50 @@ let file_of text : Path.file =
       let module_ = module_of text in
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
-let top_key module_name name : Resolve.Names.key =
-  let module_ = module_of module_name in
-  { module_; path = Top { module_; name }; ordinal = 0 }
+let standard_state = lazy (Database.For_testing.standard_state ())
+let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] database
 
-let standard = lazy (Database.For_testing.standard_base ())
-
-let setup ?(dependencies = []) files =
-  let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in
+let setup ?(dependencies = []) files : Project.package list =
   let files = List.map (fun (name, text) -> (file_of name, text)) files in
   let package_of ((file : Path.file), _) = file.module_.package in
-  let dependencies_of (package : Path.package) =
-    List.filter_map
-      (fun (dependent, dependency) ->
-        if dependent = package.name then
-          Some { Manifest.package = { owner = None; name = dependency }; capabilities = [] }
-        else None)
-      dependencies
-  in
-  List.iter
-    (fun package ->
-      Database.load_package (Engine.of_context database) ~name:package
-        ~dependencies:(dependencies_of package)
-        (List.filter (fun file -> package_of file = package) files))
-    (List.sort_uniq compare (List.map package_of files));
-  database
+  List.map
+    (fun (package : Path.package) : Project.package ->
+      {
+        name = package;
+        dependencies =
+          List.filter_map
+            (fun (dependent, dependency) ->
+              if dependent = package.name then
+                Some { Manifest.package = { owner = None; name = dependency }; capabilities = [] }
+              else None)
+            dependencies;
+        files = List.filter (fun file -> package_of file = package) files;
+      })
+    (List.sort_uniq compare (List.map package_of files))
+
+let with_dependencies database name dependencies =
+  List.map
+    (fun (package : Project.package) ->
+      if package.name = name then { package with dependencies } else package)
+    database
+
+let source database (file : Path.file) =
+  match
+    List.find_map
+      (fun (package : Project.package) -> List.assoc_opt file package.files)
+      (database : Project.package list)
+  with
+  | Some text -> Source.create ~path:(Path.show_file file) text
+  | None -> failwith ("no file " ^ Path.show_file file)
 
 let parse_errors database file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (Query.demand database Parsed.file file).diagnostics
+    (Parsed.parse (source database file)).diagnostics
+
+let diagnostics pipeline (file : Path.file) =
+  Pipeline.check pipeline [ file.module_.package ];
+  Pipeline.file_diagnostics pipeline file
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -64,9 +78,9 @@ type core_nodes = {
 }
 
 let core_nodes database (key : Resolve.Names.key) : core_nodes =
-  match Query.demand database Infer.core key with
+  match Pipeline.For_testing.checked_body (pipeline database) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
-  | Some form ->
+  | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
       Core_walk.definition
         {
@@ -82,14 +96,19 @@ let core_nodes database (key : Resolve.Names.key) : core_nodes =
         patterns = List.rev !patterns;
       }
 
+let names database (package : Path.package) = Pipeline.names (pipeline database) [ package ]
+
+let declarations database (module_ : Path.module_) =
+  (names database module_.package).declarations module_
+
 let first_core_nodes text =
   let database = setup [ ("app::main", text) ] in
   core_nodes database
-    (Resolve.Names.key_of
-       (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main"))))
+    (Resolve.Names.key_of (List.hd (declarations database (module_of "app::main"))))
 
 let no_diagnostics ~check files =
   let database = setup files in
+  let pipeline = pipeline database in
   List.iter
     (fun (name, _) ->
       (match checked ~check database name with
@@ -101,7 +120,14 @@ let no_diagnostics ~check files =
                   (fun (diagnostic : Diagnostic.t) ->
                     Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
                   reported)));
-      ignore (Core_lint.check_file database (file_of name)))
+      ignore
+        (Core_lint.check_file
+           (Pipeline.interface_lookups pipeline [ (file_of name).module_.package ])
+           ~core:(fun key ->
+             Option.map
+               (fun (checked : Infer.checked) -> checked.form)
+               (Pipeline.For_testing.checked_body pipeline key))
+           (file_of name)))
     files
 
 let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main") ?(others = [])
@@ -135,10 +161,6 @@ let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::mai
                 Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
               reported))
 
-let record database responses =
-  let engine = Engine.of_context database in
-  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
-
 let solver =
   lazy
     (match Solver.find () with
@@ -146,3 +168,17 @@ let solver =
     | Error message ->
         prerr_endline message;
         exit 1)
+
+let proven pipeline file = Pipeline.prove pipeline [ file ]
+let verdicts pipeline file = Pipeline.decide (Lazy.force solver) (proven pipeline file)
+let proof_diagnostics pipeline file = Pipeline.diagnostics (verdicts pipeline file) file
+let proof_states pipeline file = Pipeline.states (verdicts pipeline file) file
+
+let proofs pipeline file =
+  let proofs = proven pipeline file in
+  fun key ->
+    match Pipeline.proof proofs key with
+    | Some (Value proof) -> proof
+    | Some (Failed _ | Blocked) ->
+        failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")
+    | None -> failwith (Resolve.Names.show_key key ^ " is not proven")

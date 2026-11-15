@@ -1,3 +1,0 @@
-(executable
- (name engine_fuzz)
- (libraries query phases engine store unix file_system))

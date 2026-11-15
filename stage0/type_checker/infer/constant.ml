@@ -34,7 +34,7 @@ let rec offending state (value : expression) : expression option =
 
 let rec check_arithmetic state (value : expression) =
   let worked_out part =
-    Interface.Constants.expression state.database ~visiting:[] state.resolved part
+    Interface.Constants.expression state.lookups.interface ~visiting:[] state.resolved part
   in
   (match (value.kind, state.tables.types.(value.id)) with
   | Prefix (Negate, { kind = Integer _; _ }), _ -> ()

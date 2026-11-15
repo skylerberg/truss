@@ -3,34 +3,34 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 open State
 
-let public database (module_ : Path.module_) name =
-  match Query.demand database Names.find (module_, name) with
+let public (lookups : Lookups.t) (module_ : Path.module_) name =
+  match lookups.interface.names.find module_ name with
   | Some entry -> Names.is_public entry.visibility
   | None -> true
 
-let visible_to_other_packages database (path : Path.t) =
+let visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   match path with
-  | Top { module_; name } -> module_ = Intrinsic.module_ || public database module_ name
+  | Top { module_; name } -> module_ = Intrinsic.module_ || public lookups module_ name
   | Method { owner = Top { module_; name }; _ }
   | Member_constant { owner = Top { module_; name }; _ } -> (
-      public database module_ name
+      public lookups module_ name
       &&
-      match Interface.Summary.definition database path with
+      match Resolve.Names.definition_of_path lookups.interface.names path with
       | Some (_, definition) -> Names.is_public definition.visibility
       | None -> true)
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
 
 let called_from_other_packages (state : state) =
-  match Query.demand state.database Names.container state.key with
+  match state.lookups.interface.names.container state.key with
   | None -> Names.is_public state.definition.visibility
   | Some container -> (
-      match Query.demand state.database Environment.interface container.path with
-      | Some (Trait_interface _) -> visible_to_other_packages state.database container.path
+      match Interface.Definition.interface state.lookups.interface container.path with
+      | Some (Trait_interface _) -> visible_to_other_packages state.lookups container.path
       | Some (Impl_interface impl) -> (
-          visible_to_other_packages state.database impl.implements.trait
+          visible_to_other_packages state.lookups impl.implements.trait
           &&
           match impl.for_type with
-          | Types.Named { path; _ } -> visible_to_other_packages state.database path
+          | Types.Named { path; _ } -> visible_to_other_packages state.lookups path
           | _ -> true)
       | _ -> false)
 
@@ -58,7 +58,7 @@ let check (state : state) =
         List.exists
           (fun (clause : span) -> clause.start <= span.start && span.stop <= clause.stop)
           requires_and_costs
-        && not (visible_to_other_packages state.database path)
+        && not (visible_to_other_packages state.lookups path)
       then
         let hidden = Path.show path in
         report state Private_in_public span

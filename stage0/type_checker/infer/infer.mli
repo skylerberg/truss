@@ -1,10 +1,4 @@
-module Members : sig
-  val trait_methods : Query.context -> Path.t -> string -> Types.trait_method list
-  val trait_method : Query.context -> Path.t -> string -> Path.receiver -> Types.trait_method option
-  val fields : Query.context -> Path.t -> Types.argument list -> Types.field list option
-  val variants : Query.context -> Path.t -> Types.argument list -> Types.variant list option
-  val shape : Query.context -> Path.t -> Types.shape option
-end
+module Lookups = Lookups
 
 type resolution = Tables.resolution =
   | Local_value of Syntax.id
@@ -24,22 +18,20 @@ type tables = Tables.published = {
   callees : Path.t option array;
 }
 
-type type_check_result = Body.type_check_result = {
+type checked = Body.checked = {
+  form : Core.t;
   tables : tables;
-  core : Core.t option;
-  diagnostics : Syntax.diagnostic list;
   evidence_packages : Path.package list;
 }
 
-val type_check_result : (Resolve.Names.key, type_check_result option) Query.query
-val diagnostics : Query.context -> Path.file -> Diagnostic.t list
-val derived : (Path.t, Core.t option) Query.query
-val core : (Resolve.Names.key, Core.t option) Query.query
+val contract : Lookups.t -> Resolve.Names.key -> (checked, Syntax.diagnostic list) result option
+val body : Lookups.t -> Resolve.Names.key -> (checked, Syntax.diagnostic list) result option
+val derived : Lookups.t -> Path.t -> Core.t option
 
 type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key
 
-val form_origin : (Path.t, (form_origin * Types.substitution) option) Query.query
-val core_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
-val evidence_packages : (Resolve.Names.key, Path.package list) Query.query
-val clean_tables : Query.context -> Resolve.Names.key -> tables option
-val is_clean : Query.context -> Resolve.Names.key -> bool
+val form_origin :
+  Interface.Lookups.t ->
+  is_derived:(Path.t -> bool) ->
+  Path.t ->
+  (form_origin * Types.substitution) option

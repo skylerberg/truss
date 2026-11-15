@@ -56,12 +56,11 @@
   glue
   reachable
   build
-  query
-  engine
   database
-  packages
+  project
   standard_library
   interface
+  infer
   types
   intrinsic
   intrinsic_signatures
@@ -73,7 +72,8 @@
   diagnostic
   source
   compile
-  checks
+  pipeline
+  components
   prover
   evaluator
   solver

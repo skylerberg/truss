@@ -1,24 +1,30 @@
 open Harness
 open Support
 
-let check = Checks.For_testing.through Interface
+let check database =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface ]) (Support.pipeline database)
+
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
+
+let interface database =
+  Pipeline.interface_lookups (Support.pipeline database) [ (module_of "app::main").package ]
+
 let standard = Path.standard
 let int64 = Types.builtin Int64
 
 let () =
   let database = setup [] in
   List.iter
-    (fun ((file : Path.file), _) ->
+    (fun ((file : Path.file), text) ->
       test
         (Printf.sprintf "%s has no interface errors" (Path.show_file file))
         (fun () ->
-          let source = Query.demand database Packages.source file in
+          let source = Source.create ~path:(Path.show_file file) text in
           List.iter
             (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
-            (Interface.diagnostics database file)))
+            (Pipeline.For_testing.(diagnostics [ Interface ]) (Support.pipeline database) file)))
     Standard_library.files
 
 let () =
@@ -29,7 +35,7 @@ let () =
             ("app::main", "fn count(items: List[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
           ]
       in
-      match Query.demand database Interface.Environment.signature (app "count") with
+      match Interface.Definition.signature (interface database) (app "count") with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
           if Types.show items.type_ <> "List[Int64]" then fail "items: %s" (Types.show items.type_);
           if limit.mode <> Own || not limit.has_default then fail "limit";
@@ -41,7 +47,7 @@ let () =
           [ ("app::main", Fixtures.Interface.methods_receiver_has_its_types_generic_parameters) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
-      match Query.demand database Interface.Environment.signature path with
+      match Interface.Definition.signature (interface database) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then fail "self: %s" (Types.show self)
       | _ -> fail "no receiver");
@@ -79,7 +85,7 @@ let () =
               "fn first[Items: Iterable](items: Items) -> Option[Items.Element] { todo }\n" );
           ]
       in
-      match Query.demand database Interface.Environment.signature (app "first") with
+      match Interface.Definition.signature (interface database) (app "first") with
       | Some { output = Returns output; _ } ->
           if Types.show output <> "Option[Items.Element]" then fail "output %s" (Types.show output)
       | _ -> fail "no signature")
@@ -165,7 +171,7 @@ let () =
 let property name expected text type_ check =
   test name (fun () ->
       let database = setup [ ("app::main", text) ] in
-      let actual = check database ~bounds:(fun _ -> []) (type_ database) in
+      let actual = check (interface database) ~bounds:(fun _ -> []) (type_ database) in
       if actual <> expected then fail "expected %b" expected)
 
 let option type_ = Types.named (standard [ "option" ] "Option") [ type_ ]
@@ -303,7 +309,7 @@ let () =
   test "Int64 implements Add[Int64] with Output Int64" (fun () ->
       let database = setup [] in
       match
-        Interface.Impls.associated_type database
+        Interface.Impls.associated_type (interface database)
           ~bounds:(fun _ -> [])
           int64 (trait "Add" [ int64 ]) "Output"
       with
@@ -314,7 +320,7 @@ let () =
       let database = setup [] in
       if
         Option.is_some
-          (Interface.Impls.implements database
+          (Interface.Impls.implements (interface database)
              ~bounds:(fun _ -> [])
              int64
              (trait "Add" [ Types.builtin Int32 ]))
@@ -323,7 +329,7 @@ let () =
       let database = setup [] in
       if
         Option.is_none
-          (Interface.Impls.implements database
+          (Interface.Impls.implements (interface database)
              ~bounds:(fun _ -> [])
              (option int64) (trait "Equal" []))
       then fail "no impl");
@@ -332,7 +338,7 @@ let () =
       let opaque = Types.named (app "Opaque") [] in
       if
         Option.is_some
-          (Interface.Impls.implements database
+          (Interface.Impls.implements (interface database)
              ~bounds:(fun _ -> [])
              (option opaque) (trait "Equal" []))
       then fail "found an impl");
@@ -340,7 +346,7 @@ let () =
       let database = setup [] in
       if
         Option.is_none
-          (Interface.Impls.implements database
+          (Interface.Impls.implements (interface database)
              ~bounds:(fun _ -> [])
              int64
              (trait "From" [ Types.builtin Int32 ]))
@@ -349,13 +355,15 @@ let () =
 let () =
   let text = Fixtures.Interface.described in
   let impl_of database type_ wanted : Path.t =
-    match Interface.Impls.implements database ~bounds:(fun _ -> []) type_ wanted with
+    match Interface.Impls.implements (interface database) ~bounds:(fun _ -> []) type_ wanted with
     | Some (From_impl { impl; _ }) -> impl
     | _ -> failwith "no impl"
   in
   let at database type_ wanted name : Types.signature =
     let owner = impl_of database type_ wanted in
-    match Interface.Impls.signature database (Method { owner; name; receiver = Read }) with
+    match
+      Interface.Impls.signature (interface database) (Method { owner; name; receiver = Read })
+    with
     | Some signature -> signature
     | None -> failwith "no signature"
   in
@@ -416,33 +424,12 @@ let () =
       one_diagnostic (boxed ^ "proof Joined.associative for Box {\n}\n") "types.arity")
 
 let () =
-  test "adding an impl of one trait re-checks nothing that asked about another" (fun () ->
-      let base = Fixtures.Interface.base in
-      let database = setup [ ("app::main", base) ] in
-      let point = Types.named (app "Point") [] in
-      let asker =
-        Query.query ~name:"asker" ~phase:Phases.bodies
-          ~show:(fun () -> "")
-          (fun database () ->
-            Option.is_some
-              (Interface.Impls.implements database ~bounds:(fun _ -> []) point (trait "Equal" [])))
-      in
-      let engine = Engine.of_context database in
-      expect_not_recomputed engine
-        ~first:(fun () -> if not (Query.demand database asker ()) then fail "no impl of Equal")
-        ~again:(fun () ->
-          Database.For_testing.set_text engine (file_of "app::main")
-            (base ^ Fixtures.Interface.adding_an_impl_of_one_trait_re_checks_nothing_that);
-          ignore (Query.demand database asker ()))
-        asker [ () ])
-
-let () =
   test "a type that contains itself with growing arguments does not hang" (fun () ->
       let database =
         setup [ ("app::main", Fixtures.Interface.type_that_contains_itself_with_growing_arguments) ]
       in
       ignore
-        (Interface.Impls.copyable database
+        (Interface.Impls.copyable (interface database)
            ~bounds:(fun _ -> [])
            (Types.named (app "Nested") [ int64 ])));
   test "an impl's method may have the trait method's own generic parameters" (fun () ->
@@ -467,7 +454,10 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
       in
-      match Interface.diagnostics database (file_of "app::main") with
+      match
+        Pipeline.For_testing.(diagnostics [ Interface ])
+          (Support.pipeline database) (file_of "app::main")
+      with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an opaque generic type is Copyable by its declaration and its arguments" (fun () ->
@@ -476,7 +466,7 @@ let () =
       in
       if
         not
-          (Interface.Impls.copyable database
+          (Interface.Impls.copyable (interface database)
              ~bounds:(fun _ -> [])
              (Types.named (app "Box") [ int64 ]))
       then fail "not Copyable");
@@ -497,7 +487,12 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Interface.constant_in_a_type_argument_must_have_a_value) ]
       in
-      if not (List.mem "types.arity" (codes (Interface.diagnostics database (file_of "app::main"))))
+      if
+        not
+          (List.mem "types.arity"
+             (codes
+                (Pipeline.For_testing.(diagnostics [ Interface ])
+                   (Support.pipeline database) (file_of "app::main"))))
       then fail "accepted");
   test "any must fix every associated type" (fun () ->
       one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
@@ -513,14 +508,16 @@ let () =
       let database = setup [] in
       if
         Option.is_some
-          (Interface.Impls.implements database ~bounds:(fun _ -> []) Types.Never (trait "Hash" []))
+          (Interface.Impls.implements (interface database)
+             ~bounds:(fun _ -> [])
+             Types.Never (trait "Hash" []))
       then fail "it does");
   test "an any value implements its trait only with the same arguments" (fun () ->
       let database = setup [] in
       let any = Types.Any (trait "From" [ int64 ]) in
       if
         Option.is_some
-          (Interface.Impls.implements database
+          (Interface.Impls.implements (interface database)
              ~bounds:(fun _ -> [])
              any
              (trait "From" [ Types.builtin Int32 ]))
@@ -550,7 +547,7 @@ let () =
       let declared =
         List.map
           (fun (declaration : Resolve.Names.declaration) -> declaration.path)
-          (Query.demand database Resolve.Names.package_declarations Path.standard_package)
+          ((Support.names database Path.standard_package).package_declarations Path.standard_package)
       in
       List.iter
         (fun known ->

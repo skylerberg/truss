@@ -99,9 +99,9 @@ let argument_expressions state (call : Tables.call) =
 let constructor_fields state type_ variant type_arguments =
   let fields =
     match variant with
-    | None -> Members.fields state.database type_ type_arguments
+    | None -> Members.fields state.lookups type_ type_arguments
     | Some variant ->
-        Option.bind (Members.variants state.database type_ type_arguments) (fun variants ->
+        Option.bind (Members.variants state.lookups type_ type_arguments) (fun variants ->
             Option.bind
               (List.find_opt
                  (fun (written : Types.variant) -> written.variant_name = variant)
@@ -257,7 +257,7 @@ let self_local state (env : env) ~origin : Core.place =
   Local { local = Self; type_ = self_type state env; origin }
 
 let constant_place state ~origin (path : Path.t) : Core.place =
-  match Query.demand state.database Environment.constant_type path with
+  match Interface.Definition.constant_type state.lookups.interface path with
   | Some type_ -> Constant { path; type_; origin }
   | None -> bug "the constant `%s` has no type" (Path.show path)
 
@@ -284,17 +284,17 @@ let capability_impls (state : state) (type_ : Types.ty) =
   | Types.Named { path; _ } ->
       List.filter_map
         (fun (trait, _) ->
-          if Interface.Summary.kind_of state.database trait = Some Capability then
+          if Resolve.Names.kind_of state.lookups.interface.names trait = Some Capability then
             match implements state type_ (trait_reference trait) with
             | Some (Interface.Impls.From_impl { impl; substitution }) ->
                 Option.map
                   (fun interface ->
                     ({ Core.capability = trait; impl; arguments = substitution }, interface))
-                  (Interface.Impls.impl_interface state.database impl)
+                  (Interface.Impls.impl_interface state.lookups.interface impl)
             | _ -> None
           else None)
         (List.concat_map
-           (fun package -> Interface.Impls.impls_for state.database path package)
+           (fun package -> Interface.Impls.impls_for state.lookups.interface path package)
            (List.sort_uniq compare [ Path.package path; state.package; Path.standard_package ]))
   | _ -> []
 
@@ -728,13 +728,14 @@ let is_executable state (condition : Core.expression) =
     match callee with
     | Function { path; _ } -> (
         match function_signature state path with
-        | Some (Ok signature) -> signature.specification_only
+        | Some signature -> signature.specification_only
         | _ -> false)
     | Trait_method { trait; name; receiver; _ } ->
         List.exists
           (fun (method_ : Types.trait_method) ->
-            method_.method_receiver = receiver && method_.method_signature.specification_only)
-          (Members.trait_methods state.database trait.trait name)
+            method_.method_receiver = receiver
+            && (Members.method_signature state.lookups trait.trait method_).specification_only)
+          (Members.trait_methods state.lookups trait.trait name)
     | Capability_method _ | Intrinsic _ | Indirect _ -> false
   in
   Core_walk.expression
@@ -1093,7 +1094,7 @@ let try_ state (value : expression) (inner : expression) ~(output : Types.ty) : 
   let variants (type_ : Types.ty) =
     match type_ with
     | Types.Named { path; arguments } -> (
-        match Members.variants state.database path arguments with
+        match Members.variants state.lookups path arguments with
         | Some [ success; failure ] -> (success, failure)
         | _ -> bug "`?` on `%s`" (Types.show type_))
     | _ -> bug "`?` on `%s`" (Types.show type_)

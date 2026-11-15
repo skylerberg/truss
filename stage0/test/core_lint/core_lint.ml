@@ -7,8 +7,19 @@ let callee_name : Core.callee -> string = function
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
   | Indirect _ -> "a function value"
 
+let method_signature interface owner name receiver =
+  Interface.Definition.signature interface (Method { owner; name; receiver })
+
+let declared_fields interface path arguments =
+  Option.bind (Interface.Definition.type_interface interface path) (fun type_interface ->
+      Types.fields_of type_interface arguments)
+
+let declared_variants interface path arguments =
+  Option.bind (Interface.Definition.type_interface interface path) (fun type_interface ->
+      Types.variants_of type_interface arguments)
+
 type context = {
-  database : Query.context;
+  interface : Interface.Lookups.t;
   wrong : 'a. ('a, unit, string, unit) format4 -> 'a;
   at : Core.origin option ref;
   bounds : Interface.Impls.bounds;
@@ -41,7 +52,7 @@ let excerpt text =
 let operand_type (operand : Core.operand) =
   match operand with Place place -> Core_walk.place_type place | Value value -> value.type_
 
-let normal context ty = Interface.Impls.normalize context.database ~bounds:context.bounds ty
+let normal context ty = Interface.Impls.normalize context.interface ~bounds:context.bounds ty
 
 let fits context ~expected ~found =
   match found with
@@ -72,7 +83,7 @@ let instantiated context (callee : Core.callee) =
   in
   match callee with
   | Function { path; type_arguments } -> (
-      match Interface.Impls.signature context.database path with
+      match Interface.Impls.signature context.interface path with
       | Some signature ->
           of_signature (substitution context signature.generics type_arguments ~subject) signature
       | None -> None)
@@ -81,20 +92,19 @@ let instantiated context (callee : Core.callee) =
       of_signature (substitution context signature.generics type_arguments ~subject) signature
   | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
       match
-        ( Infer.Members.trait_method context.database reference.trait name receiver,
-          Query.demand context.database Interface.Environment.trait_interface reference.trait )
+        ( method_signature context.interface reference.trait name receiver,
+          Interface.Definition.trait_interface context.interface reference.trait )
       with
-      | Some method_, Some interface ->
-          let signature = method_.method_signature in
+      | Some signature, Some interface ->
           of_signature
             (Interface.Properties.trait_substitution interface ~self:self_type reference
             @ substitution context signature.generics type_arguments ~subject)
             signature
       | _ -> None)
   | Capability_method { capability; name } -> (
-      match Infer.Members.trait_methods context.database capability name with
-      | [ method_ ] -> of_signature ~has_receiver:false [] method_.method_signature
-      | _ -> None)
+      match method_signature context.interface capability name Static with
+      | Some signature -> of_signature ~has_receiver:false [] signature
+      | None -> None)
   | Indirect function_value -> (
       match operand_type function_value with
       | Function { inputs; output; _ } -> Some (List.map snd inputs, output)
@@ -183,12 +193,12 @@ let construct_fields context (node : Core.expression) variant fields =
   | Named { path; arguments } -> (
       let declared =
         match variant with
-        | None -> Infer.Members.fields context.database path arguments
+        | None -> declared_fields context.interface path arguments
         | Some name ->
             Option.map
               (fun (variant : Types.variant) -> Option.value ~default:[] variant.fields)
               (Option.bind
-                 (Infer.Members.variants context.database path arguments)
+                 (declared_variants context.interface path arguments)
                  (List.find_opt (fun (declared : Types.variant) -> declared.variant_name = name)))
       in
       let type_name = Types.show node.type_ in
@@ -279,7 +289,7 @@ let is_executable context (condition : Core.expression) =
          match node.kind with
          | Quantified _ | Old _ | Result | Specification_function _ | Method_time _ -> true
          | Call { callee = Function { path; _ }; _ } -> (
-             match Interface.Impls.signature context.database path with
+             match Interface.Impls.signature context.interface path with
              | Some signature -> signature.specification_only
              | None -> false)
          | _ -> false)
@@ -421,15 +431,12 @@ let check_semantics context (form : Core.t) =
        })
     form.definition
 
-let check database (key : Resolve.Names.key) (form : Core.t) =
+let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
   let at = ref None in
   let source =
     lazy
-      (match
-         ( Query.demand database Resolve.Names.spans key,
-           Query.demand database Resolve.Names.text key )
-       with
+      (match (interface.names.spans key, interface.names.text key) with
       | Some spans, Some text -> Some (spans, text)
       | _ -> None)
   in
@@ -448,7 +455,7 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
   let own =
     let of_generics = List.map (fun (generic : T.generic) -> generic.generic) in
     let declared path =
-      match Query.demand database Interface.Environment.interface path with
+      match Interface.Definition.interface interface path with
       | Some (Function_interface signature | Theorem_interface signature) ->
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics
@@ -459,11 +466,11 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
       | _ -> []
     in
     declared key.path
-    @ (match Interface.Impls.signature database key.path with
+    @ (match Interface.Impls.signature interface key.path with
       | Some signature -> of_generics signature.generics
       | None -> [])
     @
-    match Query.demand database Resolve.Names.container key with
+    match interface.names.container key with
     | Some container -> declared container.path
     | None -> []
   in
@@ -557,16 +564,14 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
     in
     match callee with
     | Function { path; _ } ->
-        Option.map (of_signature ~has_receiver:true) (Interface.Impls.signature database path)
+        Option.map (of_signature ~has_receiver:true) (Interface.Impls.signature interface path)
     | Trait_method { trait = reference; name; receiver; _ } ->
+        Option.map (of_signature ~has_receiver:true)
+          (method_signature interface reference.trait name receiver)
+    | Capability_method { capability; name } ->
         Option.map
-          (fun (method_ : T.trait_method) ->
-            of_signature ~has_receiver:true method_.method_signature)
-          (Infer.Members.trait_method database reference.trait name receiver)
-    | Capability_method { capability; name } -> (
-        match Infer.Members.trait_methods database capability name with
-        | [ method_ ] -> Some (of_signature ~has_receiver:false method_.method_signature)
-        | _ -> None)
+          (of_signature ~has_receiver:false)
+          (method_signature interface capability name Static)
     | Intrinsic { operation; _ } ->
         Some (of_signature ~has_receiver:true (Intrinsic_signatures.signature operation))
     | Indirect function_value -> (
@@ -857,24 +862,23 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
       !compound_assignments;
   let bounds parameter =
     let of_key key =
-      match Query.demand database Interface.Environment.lowered_interface key with
-      | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds)
+      match interface.lowered_interface key with
+      | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds)
       | None -> []
     in
-    of_key key
-    @ Option.fold ~none:[] ~some:of_key (Query.demand database Resolve.Names.container key)
+    of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
   in
   at := None;
-  check_semantics { database; wrong; at; bounds } form
+  check_semantics { interface; wrong; at; bounds } form
 
-let check_file database (file : Path.file) =
+let check_file (interface : Interface.Lookups.t) ~core (file : Path.file) =
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
-      match Query.demand database Infer.core key with
+      match core key with
       | Some form ->
-          check database key form;
+          check interface key form;
           count + 1
       | None -> count)
     0
-    (Query.demand database Resolve.Names.declarations_in file)
+    (interface.names.declarations_in file)

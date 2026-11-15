@@ -1,18 +1,20 @@
 module Names = Resolve.Names
 
-let capability database ~package written : Path.t option =
+let capability (lookups : Lookups.t) ~package written : Path.t option =
   let visible_capability (module_ : Path.module_) name =
-    match Query.demand database Names.find (module_, name) with
-    | Some { kind = Capability; visibility; _ }
-      when module_.package = package || Names.is_public visibility ->
-        Some (Path.Top { module_; name })
-    | _ -> None
+    if not (Names.is_visible_module lookups.names ~from:{ package; modules = [] } module_) then None
+    else
+      match lookups.names.find module_ name with
+      | Some { kind = Capability; visibility; _ }
+        when module_.package = package || Names.is_public visibility ->
+          Some (Path.Top { module_; name })
+      | _ -> None
   in
   match Option.map List.rev (Path.parse_names written) with
   | Some [ name ] ->
       Option.bind (Resolve.Prelude.find_type name) (fun module_ -> visible_capability module_ name)
   | Some (name :: modules) -> (
-      match Packages.split_module database (List.rev modules) with
+      match lookups.names.split_module (List.rev modules) with
       | Some module_ -> visible_capability module_ name
       | None -> None)
   | Some [] | None -> None
@@ -22,36 +24,21 @@ let written (path : Path.t) =
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
   | _ -> Path.show path
 
-type grant = { capabilities : Path.t list; unknown : string list }
+let grant lookups ~package (entry : Manifest.dependency) : Environment.grant =
+  let resolved_entries =
+    List.map (fun name -> (name, capability lookups ~package name)) entry.capabilities
+  in
+  {
+    capabilities = List.filter_map snd resolved_entries;
+    unknown =
+      List.filter_map (fun (name, path) -> if path = None then Some name else None) resolved_entries;
+  }
 
-let granted =
-  Query.query ~name:"granted" ~phase:Phases.interfaces ~saved:true
-    ~show:(fun (package, dependency) ->
-      Printf.sprintf "%s to %s" (Path.show_package package) (Path.show_package dependency))
-    (fun database (package, dependency) ->
-      Option.map
-        (fun (entry : Manifest.dependency) ->
-          let resolved_entries =
-            List.map (fun name -> (name, capability database ~package name)) entry.capabilities
-          in
-          {
-            capabilities = List.filter_map snd resolved_entries;
-            unknown =
-              List.filter_map
-                (fun (name, path) -> if path = None then Some name else None)
-                resolved_entries;
-          })
-        (List.find_opt
-           (fun (entry : Manifest.dependency) -> entry.package = dependency)
-           (Query.demand database Packages.dependencies package)))
-
-let missing database ~package ~of_ (uses : Types.capability_set) =
+let missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_set) =
   if of_ = package || of_ = Path.standard_package then []
   else
     let granted =
-      match Query.demand database granted (package, of_) with
-      | Some grant -> grant.capabilities
-      | None -> []
+      match lookups.granted package of_ with Some grant -> grant.capabilities | None -> []
     in
     List.filter_map
       (function
@@ -66,27 +53,29 @@ let message ~subject ~of_ capability =
      for `%s` in `truss.toml`."
     subject (written capability) of_ (written capability) of_
 
-let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) =
+let rec evidence_uses lookups ~bounds ?(depth = 0) (evidence : Impls.evidence) =
   match evidence with
   | From_impl { impl; substitution } when depth < 16 -> (
-      match Impls.impl_interface database impl with
+      match Impls.impl_interface lookups impl with
       | None -> []
       | Some interface ->
           ( impl,
             interface,
             List.fold_left
-              (fun uses (_, _, (signature : Types.signature)) ->
-                Types.capability_union uses signature.uses)
+              (fun uses (name, receiver) ->
+                match Impls.signature lookups (Method { owner = impl; name; receiver }) with
+                | Some signature -> Types.capability_union uses signature.uses
+                | None -> uses)
               interface.impl_uses interface.impl_methods )
           :: List.concat_map
                (fun (argument, bound) ->
-                 match Impls.implements database ~bounds argument bound with
-                 | Some nested -> evidence_uses database ~bounds ~depth:(depth + 1) nested
+                 match Impls.implements lookups ~bounds argument bound with
+                 | Some nested -> evidence_uses lookups ~bounds ~depth:(depth + 1) nested
                  | None -> [])
                (Impls.required interface.impl_generics substitution))
   | _ -> []
 
-let messages database ~package impls =
+let messages lookups ~package impls =
   List.concat_map
     (fun (impl, (interface : Types.impl_interface), uses) ->
       let of_ = Path.package impl in
@@ -97,8 +86,8 @@ let messages database ~package impls =
                 (Types.show_trait interface.implements)
                 (Types.show interface.for_type))
            ~of_)
-        (missing database ~package ~of_ uses))
+        (missing lookups ~package ~of_ uses))
     impls
 
-let evidence_messages database ~package ~bounds evidence =
-  messages database ~package (evidence_uses database ~bounds evidence)
+let evidence_messages lookups ~package ~bounds evidence =
+  messages lookups ~package (evidence_uses lookups ~bounds evidence)

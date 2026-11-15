@@ -197,6 +197,11 @@ and those that they use in turn. This lock file is the package's *record*.
 ## Choosing versions
 
 - **A build holds one version of each package.**
+- **The packages of a build cannot depend on each other in a cycle,** a
+  project's own packages included. A cycle is one of names, since a build
+  holds one version of each package: if `acme::a` 1.1.0 depends on
+  `acme::b` 1.0.0, and `acme::b` 1.0.0 depends on `acme::a`, a build that
+  holds both has a cycle.
 - **The version of a package in a build is the highest version that the
   project's lock file or the record of any package of the build names.**
   Nothing newer enters a build until `truss upgrade` or `truss add` writes

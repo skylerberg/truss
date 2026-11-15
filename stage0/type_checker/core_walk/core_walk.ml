@@ -238,8 +238,8 @@ let definition_children visit = function
           List.iter visit.expression law.requires;
           block visit law.body)
         laws
-  | Constant value -> visit.expression value
-  | Test body | Law_proof { body; _ } -> block visit body
+  | Constant value -> Option.iter visit.expression value
+  | Test body | Law_proof { body; _ } -> Option.iter (block visit) body
   | Empty -> ()
 
 let definition visit core_definition = definition_children (deep visit) core_definition

@@ -10,6 +10,9 @@ let unsupported span format =
 
 let bug format = Compiler_bug.bug ~stage:"Prover" format
 
+let is_in_recursion_group context path =
+  List.exists (Path.equal path) (context.lookups.recursion_group context.current)
+
 let clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
@@ -137,7 +140,7 @@ let assume context frame term =
 let add_requires context frame required =
   let text = Lazy.force frame.source.text in
   let brace =
-    match Option.bind frame.source.key (Query.demand context.database Names.definition) with
+    match Option.bind frame.source.key context.lookups.interface.names.definition with
     | Some { kind = Function { body; _ }; _ } when body.span.start < String.length text ->
         Some body.span.start
     | _ -> None
@@ -323,7 +326,7 @@ let equal_trait = Well_known.path Equal
 let visible_type context (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when builtin ty = None -> (
-      match Query.demand context.database Interface.Environment.interface path with
+      match Interface.Definition.interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque) || Path.package path = Path.package context.current ->
           let substitution =
@@ -353,7 +356,7 @@ let constructors context ty =
                     ( Some variant.variant_name,
                       match variant.fields with Some list -> fields list | None -> [] ))
                   variants))
-      | Todo_type | Builtin_type _ | Error_shape _ -> None)
+      | Todo_type | Builtin_type _ -> None)
   | None -> None
 
 let rec sort_of context (ty : Types.ty) : Logic.sort =
@@ -440,8 +443,7 @@ let bind frame local ty term =
   }
 
 let substituted context frame ty =
-  Interface.Impls.normalize context.database
-    ~bounds:(fun _ -> [])
+  (Interface.Impls.normalize context.lookups.interface ~bounds:Interface.Impls.no_bounds)
     (Types.substitute frame.substitution ty)
 
 let local_type context frame local =

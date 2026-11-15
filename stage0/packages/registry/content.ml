@@ -45,6 +45,11 @@ let published_files =
     ~keeps_file:(fun ~relative ~entry ->
       is_published entry && (entry <> "truss.lock" || relative = ""))
 
+let input_files =
+  walk
+    ~enters_directory:(fun ~entry ~full:_ -> not (skipped entry))
+    ~keeps_file:(fun ~relative:_ ~entry -> is_input entry)
+
 let all_files =
   walk
     ~enters_directory:(fun ~entry:_ ~full:_ -> true)

@@ -20,15 +20,14 @@
    It prints each such mutant, function, and arguments, and exits with
    status 1 if there was one. *)
 
-(* The oracles' responses, recorded in the engine, as the database does for
-   a session. *)
-let record database responses =
-  let engine = Engine.of_context database in
-  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
-
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let standard = lazy (Database.For_testing.standard_base ())
+let standard_state = lazy (Database.For_testing.standard_state ())
+
+let example_pipeline text =
+  Pipeline.create
+    ~loaded:[ Lazy.force standard_state ]
+    [ { name = example.package; dependencies = []; files = [ (example_file, text) ] } ]
 
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
@@ -46,22 +45,16 @@ let system =
   | None -> failwith "the fuzzer runs programs, so it runs only on Linux and macOS"
 
 let load text =
-  let engine = Engine.create ~bases:[ Lazy.force standard ] () in
-  Database.load_package engine
-    ~name:{ owner = None; name = "example" }
-    ~dependencies:[]
-    [ (example_file, text) ];
-  let database = Engine.context engine in
-  if Checks.diagnostics database example_file <> [] then None
+  let pipeline = example_pipeline text in
+  Pipeline.check pipeline [ example_file.module_.package ];
+  if Pipeline.file_diagnostics pipeline example_file <> [] then None
   else
     Some
-      ( database,
+      ( pipeline,
         lazy
           (Compile.create ~evaluation_time_limit_ms:2000
-             ~want:(fun lowering wanted ->
-               Engine.set engine Compile.roots lowering
-                 (Compile.add_roots (Engine.context engine) lowering wanted))
-             database system (Lazy.force compiler) (Lazy.force cache) settings) )
+             (Pipeline.lowering_lookups pipeline [ example.package ])
+             system (Lazy.force compiler) (Lazy.force cache) settings) )
 
 (* The bits and signedness of a built-in integer type, or of [Bool] as one
    bit. *)
@@ -86,17 +79,20 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
-let runnable database =
+let runnable pipeline =
+  let mir = Pipeline.For_testing.mir pipeline example.package in
+  let interface = Pipeline.interface_lookups pipeline [ example.package ] in
+  let lookups = Pipeline.For_testing.proof_lookups pipeline in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
       match
-        ( Query.demand database Interface.Environment.signature declaration.path,
-          Prover.Contracts.source_at_key database key,
-          Query.demand database Mir.contract_of_path declaration.path )
+        ( Interface.Definition.signature interface declaration.path,
+          Prover.Contracts.source_at_key lookups key,
+          Mir.contract_of_path mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
-          Some source,
+          source,
           Some { requires; _ } )
         when uses = Types.no_capabilities
              && integer output <> None
@@ -123,13 +119,11 @@ let runnable database =
               Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
-    (Query.demand database Resolve.Names.declarations example)
+    (lookups.interface.names.declarations example)
 
 (* Whether every obligation of a definition proves. *)
-let proven database key states =
-  match
-    (Query.demand database Resolve.Names.base key, Query.demand database Resolve.Names.text key)
-  with
+let proven (names : Resolve.Names.lookups) key states =
+  match (names.base key, names.text key) with
   | Some (_, base), Some text ->
       List.for_all
         (fun (state : Diagnostic.span Prover.state) ->
@@ -157,13 +151,18 @@ let runs = ref 0
 let run_mutant ~samples text =
   match load text with
   | None -> ()
-  | Some (database, _) -> (
+  | Some (pipeline, _) -> (
       incr checked;
       let states =
-        Prover.states ~record:(record database) database (Lazy.force solver) example_file
+        Pipeline.states
+          (Pipeline.decide (Lazy.force solver) (Pipeline.prove pipeline [ example_file ]))
+          example_file
       in
       let candidates =
-        List.filter (fun candidate -> proven database candidate.key states) (runnable database)
+        List.filter
+          (fun candidate ->
+            proven (Pipeline.names pipeline [ example.package ]) candidate.key states)
+          (runnable pipeline)
       in
       let with_admitting =
         text
@@ -272,20 +271,18 @@ let () =
                   diagnostics
             in
             match load text with
-            | Some (database, _) ->
+            | Some (pipeline, _) ->
                 let unproven =
-                  Prover.diagnostics ~record:(record database) database (Lazy.force solver)
+                  Pipeline.diagnostics
+                    (Pipeline.decide (Lazy.force solver) (Pipeline.prove pipeline [ example_file ]))
                     example_file
                 in
                 shown unproven;
                 unproven = []
             | None ->
-                let engine = Engine.create ~bases:[ Lazy.force standard ] () in
-                Database.load_package engine
-                  ~name:{ owner = None; name = "example" }
-                  ~dependencies:[]
-                  [ (example_file, text) ];
-                shown (Checks.diagnostics (Engine.context engine) example_file);
+                let pipeline = example_pipeline text in
+                Pipeline.check pipeline [ example_file.module_.package ];
+                shown (Pipeline.file_diagnostics pipeline example_file);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (File_system.read file)
            else [ File_system.read file ]))

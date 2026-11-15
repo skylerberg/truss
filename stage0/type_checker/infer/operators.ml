@@ -6,7 +6,7 @@ module Lower = Interface.Lower
 open State
 open Instantiation
 open Hooks
-open Lookups
+open Name_lookup
 open Pattern_typing
 
 let rec try_ state env (value : expression) (inner : expression) =
@@ -44,7 +44,7 @@ and with_ state env (value : expression) (base : expression) updates =
   let base_type = normalize state (expression state env base) in
   (match base_type with
   | Types.Named { path; _ }
-    when not (Members.fields_visible state.database ~package:state.package path) ->
+    when not (Members.fields_visible state.lookups ~package:state.package path) ->
       report state Private_field value.span
         (Printf.sprintf "`%s` is opaque, so only its own package can update its fields."
            (Types.show base_type))
@@ -57,7 +57,7 @@ and with_ state env (value : expression) (base : expression) updates =
             match (names, normalize state type_) with
             | [], type_ -> Some type_
             | (name : name) :: rest, (Types.Named { path; arguments } as record_type) -> (
-                match Members.fields state.database path arguments with
+                match Members.fields state.lookups path arguments with
                 | Some fields -> (
                     match
                       List.find_opt
@@ -597,13 +597,15 @@ and any_ state env ?expected (value : expression) (inner : expression) =
             if Option.is_some (implements state inner_type trait) then
               List.iter
                 (fun (bound : Types.trait_reference) ->
-                  match Query.demand state.database Environment.trait_interface bound.trait with
+                  match
+                    Interface.Definition.trait_interface state.lookups.interface bound.trait
+                  with
                   | Some interface ->
                       List.iter
                         (fun name ->
                           match
-                            (Impls.capability_set state.database ~bounds:(bounds state) inner_type
-                               { bound with associated = [] } name
+                            (Interface.Impls.capability_set state.lookups.interface
+                               ~bounds:(bounds state) inner_type { bound with associated = [] } name
                               :> Types.capability list)
                           with
                           | [] -> ()
@@ -620,7 +622,7 @@ and any_ state env ?expected (value : expression) (inner : expression) =
                                          set))))
                         interface.associated_capabilities
                   | None -> ())
-                (Interface.Properties.bound_closure state.database ~self:inner_type trait);
+                (Interface.Properties.bound_closure state.lookups.interface ~self:inner_type trait);
             true
           end);
       any_type

@@ -1,7 +1,9 @@
 open Harness
 open Support
 
-let check = Checks.For_testing.through Infer
+let check database =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline database)
+
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -94,20 +96,20 @@ let () =
               Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it_time );
           ]
       in
-      Database.For_testing.set_manifest (Engine.of_context database)
-        ~name:{ owner = None; name = "app" }
-        ~dependencies:[ { package = { owner = None; name = "clock_library" }; capabilities = [] } ];
+      let database =
+        with_dependencies database { owner = None; name = "app" }
+          [ { package = { owner = None; name = "clock_library" }; capabilities = [] } ]
+      in
       match codes (check database (file_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual))
 
 let () =
   let with_grant files granted =
-    let database = setup files in
-    Database.For_testing.set_manifest (Engine.of_context database)
-      ~name:{ owner = None; name = "app" }
-      ~dependencies:
-        [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ];
+    let database =
+      with_dependencies (setup files) { owner = None; name = "app" }
+        [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ]
+    in
     codes (check database (file_of "app::main"))
   in
   let library = ("clock_library::time", Fixtures.Capabilities.library_time) in
@@ -153,11 +155,12 @@ let () =
       fine Fixtures.Capabilities.implementation_of_a_capability_may_hand_the)
 
 let codes_with_grants files grants =
-  let database = setup files in
-  Database.For_testing.set_manifest (Engine.of_context database)
-    ~name:{ owner = None; name = "app" }
-    ~dependencies:
-      (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants);
+  let database =
+    with_dependencies
+      (setup ~dependencies:[ ("plugins", "framework") ] files)
+      { owner = None; name = "app" }
+      (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants)
+  in
   (database, codes (check database (file_of "app::main")))
 
 let expect_codes ~expected (_, actual) =
@@ -212,7 +215,10 @@ let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
 let problems database =
-  Query.demand database Checks.manifest_problems { owner = None; name = "app" }
+  let app : Path.package = { owner = None; name = "app" } in
+  let pipeline = pipeline database in
+  Pipeline.check pipeline [ app ];
+  Pipeline.manifest_problems pipeline app
 
 let () =
   test "a grant names a capability outside the prelude by its full path" (fun () ->

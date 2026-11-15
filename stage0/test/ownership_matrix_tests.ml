@@ -1,7 +1,10 @@
 open Harness
 open Support
 
-let check = Checks.For_testing.through Ownership
+let check database =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
+    (Support.pipeline database)
+
 let helpers = Fixtures.Ownership_matrix.helpers
 
 type source = {

@@ -1,13 +1,9 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-
-val visible_packages : Query.context -> Path.package -> Path.package list
-val own_methods : Query.context -> Path.t -> string -> (Path.receiver * Path.t) list
-val own_constant : Query.context -> Path.t -> string -> Path.t option
-val trait_methods : Query.context -> Path.t -> string -> Types.trait_method list
-val trait_method : Query.context -> Path.t -> string -> Path.receiver -> Types.trait_method option
-val fields : Query.context -> Path.t -> Types.argument list -> Types.field list option
-val variants : Query.context -> Path.t -> Types.argument list -> Types.variant list option
-val shape : Query.context -> Path.t -> Types.shape option
-val broken : Query.context -> Path.t -> Diagnostic.reported option
-val fields_visible : Query.context -> package:Path.package -> Path.t -> bool
+val visible_packages : Lookups.t -> Path.package -> Path.package list
+val own_methods : Lookups.t -> Path.t -> string -> (Path.receiver * Path.t) list
+val own_constant : Lookups.t -> Path.t -> string -> Path.t option
+val trait_methods : Lookups.t -> Path.t -> string -> Types.trait_method list
+val trait_method : Lookups.t -> Path.t -> string -> Path.receiver -> Types.trait_method option
+val method_signature : Lookups.t -> Path.t -> Types.trait_method -> Types.signature
+val fields : Lookups.t -> Path.t -> Types.argument list -> Types.field list option
+val variants : Lookups.t -> Path.t -> Types.argument list -> Types.variant list option
+val fields_visible : Lookups.t -> package:Path.package -> Path.t -> bool

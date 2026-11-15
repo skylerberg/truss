@@ -147,8 +147,7 @@ let callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
   let is_recursive_call =
     counter.counting = Units
     && List.mem counter context.own_bounds
-    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
-         ~target:context.current
+    && is_in_recursion_group context path
   in
   let clauses_of (part : part) =
     let frame = bound_frame part in
@@ -280,7 +279,7 @@ let step_amount context frame (invocation : Invocation.t) (values : passed list)
       match counter.resource with
       | Calls _ -> direct
       | _ -> (
-          match capability_part context.database capability name with
+          match capability_part context.lookups capability name with
           | Some part ->
               let inside =
                 part_frame frame part
@@ -322,7 +321,7 @@ let find_buffer_elements context (ty : Types.ty) =
     when Intrinsic.builtin_of_path path = Some View ->
       Some (element, fun term -> buffer_model context View element term)
   | Types.Named { path; arguments } when builtin ty = None -> (
-      match Query.demand context.database Interface.Environment.interface path with
+      match Interface.Definition.interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
           let substitution =
@@ -399,7 +398,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
     | Types.Named { path; arguments } when builtin ty = None -> (
         potential_clause context ty <> None
         ||
-        match Query.demand context.database Interface.Environment.interface path with
+        match Interface.Definition.interface context.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             let substitution =
               try
@@ -417,7 +416,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
                   List.concat_map
                     (fun (variant : Types.variant) -> Option.value variant.fields ~default:[])
                     variants
-              | Todo_type | Builtin_type _ | Error_shape _ -> []
+              | Todo_type | Builtin_type _ -> []
             in
             List.exists
               (fun (field : Types.field) ->
@@ -536,7 +535,7 @@ let method_time_bound context (method_ : Path.t) self_type =
   | Method { owner = trait; name; receiver } -> (
       if Path.equal trait Interface.Impls.copyable_path then
         if
-          Interface.Impls.plain context.database ~bounds:(current_bounds context) self_type
+          Interface.Impls.plain context.lookups.interface ~bounds:(current_bounds context) self_type
           && not (holds self_type)
         then Some Z.one
         else None
@@ -546,7 +545,7 @@ let method_time_bound context (method_ : Path.t) self_type =
         | Some (impl, arguments) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
-              match Interface.Impls.signature context.database path with
+              match Interface.Impls.signature context.lookups.interface path with
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->
@@ -557,7 +556,7 @@ let method_time_bound context (method_ : Path.t) self_type =
               | None -> false
             in
             match
-              method_contract context.database reference name receiver (Impl { impl; arguments })
+              method_contract context.lookups reference name receiver (Impl { impl; arguments })
             with
             | Some contract when makes_no_potential ->
                 List.find_map

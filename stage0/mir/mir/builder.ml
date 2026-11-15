@@ -1479,9 +1479,13 @@ let of_definition ?(is_specification = false) (definition : Core.definition) =
   let code =
     match definition with
     | Function { parameters; body = Some body; _ } -> Some (parameters, body, true)
-    | Test body -> Some ([], body, false)
-    | Law_proof { parameters; body } -> Some (parameters, body, false)
-    | Function { body = None; _ } | Type _ | Trait _ | Constant _ | Empty -> None
+    | Test (Some body) -> Some ([], body, false)
+    | Law_proof { parameters; body = Some body } -> Some (parameters, body, false)
+    | Function { body = None; _ }
+    | Test None
+    | Law_proof { body = None; _ }
+    | Type _ | Trait _ | Constant _ | Empty ->
+        None
   in
   Option.map
     (fun ((parameters : Core.parameter list), (body : Core.block), returns) ->

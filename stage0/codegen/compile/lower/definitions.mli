@@ -1,23 +1,22 @@
 module Names = Resolve.Names
-module Environment = Interface.Environment
 
 val bug : ('a, unit, string, 'b) format4 -> 'a
 
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
+  constant : Path.t -> Lowered.static_value option;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
   checks : bool;
-  constant : Path.t -> Lowered.static_value option;
 }
 
 val context :
   ?checks:bool ->
-  constant:(context -> Path.t -> Lowered.static_value option) ->
-  Query.context ->
+  constant:(Path.t -> Lowered.static_value option) ->
+  Lookups.t ->
   Libc.system ->
   context
 
@@ -34,8 +33,6 @@ type code = {
   real : Path.t list;
   has_defaults : bool;
 }
-
-val demand : context -> ('a, 'b) Query.query -> 'a -> 'b
 
 val unwritten :
   definition_key:Names.key ->

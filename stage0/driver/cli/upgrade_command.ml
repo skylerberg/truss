@@ -99,101 +99,34 @@ let change_json = function
           ("gained", Json.List (List.map (fun held -> Json.String held) gained));
         ]
 
-type signature = {
-  path : Path.t;
-  before : string option;
-  after : string option;
-  dependents : Path.t list;
-}
-
-let consequences session text =
-  let trial = Database.trial session [ ("truss.lock", Some text) ] in
-  let own = List.map snd (Database.packages session) in
-  let ours path = List.mem (Path.package path) own in
-  let changed =
-    List.sort_uniq Path.compare
-      (List.filter_map
-         (fun (path, part, (difference : Graph_types.difference)) ->
-           if difference = Changed && List.mem part Signatures.parts && not (ours path) then
-             Some path
-           else None)
-         (Database.changes trial session))
-  in
-  let edges = Database.dependents trial changed in
-  let signatures =
-    List.filter_map
-      (fun path ->
-        match
-          List.sort_uniq Path.compare
-            (List.filter_map
-               (fun (edge : Graph_types.edge) ->
-                 if Path.equal edge.dependency path && ours edge.dependent then Some edge.dependent
-                 else None)
-               edges)
-        with
-        | [] -> None
-        | dependents ->
-            Some
-              {
-                path;
-                before = Signatures.of_path (Database.context session) path;
-                after = Signatures.of_path (Database.context trial) path;
-                dependents;
-              })
-      changed
-  in
-  let diagnostics (session : Database.session) =
-    List.map Project.show_problem (Database.problems session)
+let new_errors snapshot text =
+  let trial = Database.trial snapshot [ ("truss.lock", Some text) ] in
+  let own = List.map snd (Database.packages snapshot) in
+  let diagnostics (snapshot : Database.snapshot) =
+    let pipeline = Database.pipeline snapshot in
+    Pipeline.check pipeline own;
+    List.map Project.show_problem (Database.problems snapshot)
     @ List.concat_map
         (fun file ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
-              Printf.sprintf "%s: %s" (Database.file_path session file) diagnostic.message)
-            (Database.diagnostics session file))
-        (List.concat_map (Database.package_files session) own)
+              Printf.sprintf "%s: %s" (Database.file_path snapshot file) diagnostic.message)
+            (Pipeline.file_diagnostics pipeline file))
+        (List.concat_map (Database.package_files snapshot) own)
   in
-  let now = diagnostics session in
-  (signatures, List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial))
+  let now = diagnostics snapshot in
+  List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)
 
-let report ~lock ~signatures ~broken =
+let report ~lock ~broken =
   if Output.json () then
     Json.print
       (Json.document ~diagnostics:[]
          [
            ("changes", Json.List (List.map change_json lock));
-           ( "signatures",
-             Json.List
-               (List.map
-                  (fun (changed : signature) ->
-                    Json.Object
-                      [
-                        ("path", Json.String (Path.show changed.path));
-                        ("before", Json.option (fun text -> Json.String text) changed.before);
-                        ("after", Json.option (fun text -> Json.String text) changed.after);
-                        ( "read_by",
-                          Json.List
-                            (List.map (fun path -> Json.String (Path.show path)) changed.dependents)
-                        );
-                      ])
-                  signatures) );
            ("breaks", Json.List (List.map (fun sentence -> Json.String sentence) broken));
          ])
   else begin
     List.iter (fun change -> Output.print_line (change_sentence change)) lock;
-    if signatures <> [] then begin
-      Output.print_line "";
-      Output.print_line "Signatures the project reads that change:";
-      List.iter
-        (fun (changed : signature) ->
-          Output.printf "  %s\n" (Path.show changed.path);
-          Option.iter
-            (fun text -> Output.print_line (Signatures.labeled "was:" text))
-            changed.before;
-          Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) changed.after;
-          Output.printf "    read by: %s\n"
-            (String.concat ", " (List.map Path.show changed.dependents)))
-        signatures
-    end;
     if broken <> [] then begin
       Output.print_line "";
       Output.print_line "With these versions the project has errors it does not have now:";
@@ -201,12 +134,12 @@ let report ~lock ~signatures ~broken =
     end
   end
 
-let lock_file session = Filename.concat (Database.root session) "truss.lock"
+let lock_file snapshot = Filename.concat (Database.root snapshot) "truss.lock"
 
 let run ~names =
-  let session, _ = Command_packages.current () in
+  let snapshot, _ = Command_packages.current () in
   let set = List.map wanted names in
-  match Database.plan_lock session ~set ~all:(names = []) with
+  match Database.plan_lock snapshot ~set ~all:(names = []) with
   | Error message -> Outcome.cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
@@ -217,9 +150,8 @@ let run ~names =
         0
       end
       else begin
-        let signatures, broken = consequences session plan.text in
-        Command_packages.write_file (lock_file session) plan.text;
-        Database.refresh session;
-        report ~lock ~signatures ~broken;
+        let broken = new_errors snapshot plan.text in
+        Command_packages.write_file (lock_file snapshot) plan.text;
+        report ~lock ~broken;
         if broken = [] then 0 else 1
       end

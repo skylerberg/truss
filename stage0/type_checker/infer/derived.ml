@@ -14,14 +14,14 @@ let gives (trait : Path.t) name =
       true
   | _ -> false
 
-let form database (path : Path.t) : Core.t option =
+let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match path with
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
     -> (
       match
-        ( Impls.impl_interface database impl,
-          Query.demand database Environment.type_interface type_,
-          Impls.signature database path )
+        ( Interface.Impls.impl_interface lookups.interface impl,
+          Interface.Definition.type_interface lookups.interface type_,
+          Interface.Impls.signature lookups.interface path )
       with
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
@@ -90,7 +90,7 @@ let form database (path : Path.t) : Core.t option =
               { trait = wanted; trait_arguments = []; associated = [] }
             in
             let evidence : Core.evidence =
-              match Impls.implements database ~bounds of_type reference with
+              match Interface.Impls.implements lookups.interface ~bounds of_type reference with
               | Some (From_impl { impl; substitution }) -> Impl { impl; arguments = substitution }
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
@@ -162,7 +162,7 @@ let form database (path : Path.t) : Core.t option =
                        (variant.variant_name, Option.value variant.fields ~default:[]))
                      variants)
             | Record _ -> None
-            | Todo_type | Builtin_type _ | Error_shape _ ->
+            | Todo_type | Builtin_type _ ->
                 bug "`%s` is derived for a type with no fields" (Path.show trait)
           in
           let alone = match variants with Some [ _ ] -> true | _ -> false in
@@ -329,7 +329,7 @@ let form database (path : Path.t) : Core.t option =
                 let other = other_place () in
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
                 let declared variant fields =
-                  Environment.in_declared_order database type_ ~variant
+                  Interface.Definition.in_declared_order lookups.interface type_ ~variant
                     ~name:(fun ((field : Types.field), _) -> field.field_name)
                     fields
                 in
@@ -503,7 +503,7 @@ let form database (path : Path.t) : Core.t option =
                             "end_variant" )
                     in
                     let mine =
-                      Environment.in_declared_order database type_ ~variant
+                      Interface.Definition.in_declared_order lookups.interface type_ ~variant
                         ~name:(fun ((field : Types.field), _) -> field.field_name)
                         mine
                     in
@@ -625,19 +625,15 @@ let form database (path : Path.t) : Core.t option =
                           }))
                 in
                 let invariant_clauses =
-                  match Query.demand database Interface.Summary.key type_ with
+                  match lookups.interface.names.key type_ with
                   | None -> []
                   | Some key -> (
-                      match Query.demand database Body.type_check_result key with
-                      | Some { core = Some { definition = Type { invariants; _ } }; _ } ->
+                      match lookups.contract key with
+                      | { definition = Type { invariants; _ } } ->
                           let spans =
-                            Option.value
-                              (Query.demand database Resolve.Names.spans key)
-                              ~default:[||]
+                            Option.value (lookups.interface.names.spans key) ~default:[||]
                           in
-                          let text =
-                            Option.value (Query.demand database Resolve.Names.text key) ~default:""
-                          in
+                          let text = Option.value (lookups.interface.names.text key) ~default:"" in
                           let quoted (origin : Core.origin) =
                             if origin >= 0 && origin < Array.length spans then
                               let span = spans.(origin) in
@@ -869,7 +865,9 @@ let form database (path : Path.t) : Core.t option =
                       let reference : Types.trait_reference =
                         { trait = Well_known.path Equal; trait_arguments = []; associated = [] }
                       in
-                      match Impls.implements database ~bounds string_type reference with
+                      match
+                        Interface.Impls.implements lookups.interface ~bounds string_type reference
+                      with
                       | Some (From_impl { impl; substitution }) ->
                           Core.Trait_method
                             {
@@ -963,5 +961,3 @@ let form database (path : Path.t) : Core.t option =
             }
       | _ -> None)
   | _ -> None
-
-let core = Query.query ~name:"derived" ~phase:Phases.bodies ~show:Path.show form

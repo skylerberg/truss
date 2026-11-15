@@ -34,51 +34,74 @@ val show_key : key -> string
 val spell_path : Syntax.path -> string
 val signature_name : Syntax.signature -> Syntax.name
 val receiver : Syntax.parameter list -> Path.receiver
-val used_module : Query.context -> from:Path.module_ -> Syntax.path -> Path.module_
 val last_name : Path.module_ -> string
-val module_exists : Query.context -> Path.module_ -> bool
 
 type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
 
-val entries : (Path.module_, entry list) Query.query
-
 module String_map : Map.S with type key = String.t
 
-val find : (Path.module_ * String_map.key, entry option) Query.query
 val is_type_kind : named -> bool
 val is_value_kind : named -> bool
 val is_public : Syntax.visibility -> bool
 val visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
+
+type impl_index = {
+  impls : ((Path.t * Path.t) * Path.t) list;
+  by_type : (Path.t * Path.t) list Path.Map.t;
+}
+
+type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
+
+val derivable : Path.t -> bool
+
+type lookups = {
+  find : Path.module_ -> string -> entry option;
+  entries : Path.module_ -> entry list;
+  imports : Path.file -> (string * Path.module_) list;
+  module_exists : Path.module_ -> bool;
+  split_module : string list -> Path.module_ option;
+  dependency_names : Path.package -> Path.package list;
+  key : Path.t -> key option;
+  declaration : key -> declaration option;
+  declarations : Path.module_ -> declaration list;
+  declarations_in : Path.file -> declaration list;
+  package_declarations : Path.package -> declaration list;
+  definition : key -> Syntax.definition option;
+  text : key -> string option;
+  spans : key -> Syntax.span array option;
+  base : key -> (Path.file * int) option;
+  container : key -> key option;
+  contained : key -> key list;
+  members : Path.t -> string -> key list;
+  traits_declaring : Path.package -> string -> Path.t list;
+  impl_index : Path.package -> impl_index;
+  law_proofs : Path.package -> law_proof_name -> key list;
+}
 
 type module_lookup =
   | Found_module of Path.module_ * [ `Import of string | `Package ]
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
-val imports : (Path.file, (string * Path.module_) list) Query.query
-val lookup_module : Query.context -> from:Path.file -> string list -> module_lookup
-val declarations : (Path.module_, declaration list) Query.query
-val declarations_in : (Path.file, declaration list) Query.query
+val used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
+val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
+val lookup_module : lookups -> from:Path.file -> string list -> module_lookup
+val definition_of_path : lookups -> Path.t -> (key * Syntax.definition) option
+val law_parameters : lookups -> Path.t -> string -> string list option
 
-module Member_map : Map.S with type key = Path.t * string
+type generic_kind = Type_kind | Value_kind | Capability_kind
 
-val package_declarations : (Path.package, declaration list) Query.query
-val impl_types : (Path.module_, (Path.t option * Path.t) list) Query.query
-val traits_declaring : (Path.package * String_map.key, Path.t list) Query.query
-val members : (Path.t * string, key list) Query.query
+val generics_of : lookups -> Path.t -> (string * generic_kind) list option
+val kind_of : lookups -> Path.t -> named option
 
-module Declaration_map : Map.S with type key = Path.t * int
+type namespace
 
-val declaration_index : (Path.module_, declaration Declaration_map.t) Query.query
-val file_of : (key, Path.file option) Query.query
-val container : (key, key option) Query.query
-val contained : (key, key list) Query.query
-val definition : (key, Syntax.definition option) Query.query
-val law_parameters : (Path.t * string, string list option) Query.query
-val spans : (key, Syntax.span array option) Query.query
-val base : (key, (Path.file * int) option) Query.query
+val namespace :
+  lookups -> Path.package -> (Path.module_ * (Path.file * Syntax.file) list) list -> namespace
 
-val per_definition :
-  Query.context -> Path.file -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
-
-val text : (key, string option) Query.query
+val of_namespaces :
+  namespace:(Path.package -> namespace) ->
+  module_exists:(Path.module_ -> bool) ->
+  split_module:(string list -> Path.module_ option) ->
+  dependency_names:(Path.package -> Path.package list) ->
+  lookups

@@ -1,9 +1,13 @@
-module Table = Hashtbl.Make (struct
+module Node = struct
   type t = Instance.key
 
   let equal = Instance.equal
   let hash key = Hashtbl.hash_param 64 256 key
-end)
+  let compare = Instance.compare
+end
+
+module Table = Hashtbl.Make (Node)
+module Instance_components = Components.Make (Node)
 
 let bug format = Compiler_bug.bug ~stage:"Reachable" format
 
@@ -59,61 +63,6 @@ module Keys = Map.Make (struct
   let compare = Instance.compare
 end)
 
-let groups ~edges roots =
-  let counter = ref 0 in
-  let number = Table.create 1024 and low = Table.create 1024 in
-  let waiting = Table.create 1024 in
-  let stack = ref [] in
-  let groups = ref Keys.empty in
-  let work = Stack.create () in
-  let enter key =
-    Table.replace number key !counter;
-    Table.replace low key !counter;
-    incr counter;
-    stack := key :: !stack;
-    Table.replace waiting key ();
-    Stack.push (key, ref (edges key)) work
-  in
-  let lower key to_ = if to_ < Table.find low key then Table.replace low key to_ in
-  let leave key =
-    if Table.find low key = Table.find number key then begin
-      let rec pop members =
-        match !stack with
-        | [] -> members
-        | top :: rest ->
-            stack := rest;
-            Table.remove waiting top;
-            let members = top :: members in
-            if Instance.equal top key then members else pop members
-      in
-      match pop [] with
-      | [] | [ _ ] -> ()
-      | members ->
-          let members = List.sort Instance.compare members in
-          groups :=
-            List.fold_left (fun groups member -> Keys.add member members groups) !groups members
-    end
-  in
-  List.iter
-    (fun root ->
-      if not (Table.mem number root) then begin
-        enter root;
-        while not (Stack.is_empty work) do
-          let key, rest = Stack.top work in
-          match !rest with
-          | next :: more ->
-              rest := more;
-              if not (Table.mem number next) then enter next
-              else if Table.mem waiting next then lower key (Table.find number next)
-          | [] ->
-              ignore (Stack.pop work);
-              if not (Stack.is_empty work) then lower (fst (Stack.top work)) (Table.find low key);
-              leave key
-        done
-      end)
-    roots;
-  !groups
-
 let derive_reach_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
 let key_of parts = derive_reach_key (Cbor.encode (Cbor.Array parts))
 
@@ -152,3 +101,28 @@ let group_key ~link ~deep ~members start =
                ])
            walked);
     ]
+
+let reach_keys ~link ~known root =
+  let computed = Table.create 64 in
+  let reach_of key =
+    match known key with Some reach_key -> reach_key | None -> Table.find computed key
+  in
+  if Option.is_none (known root) then
+    List.iter
+      (fun members ->
+        let keys =
+          match members with
+          | [ key ] ->
+              let own, references = link key in
+              [ (key, unit_key ~own (List.map reach_of references)) ]
+          | members ->
+              List.map
+                (fun member -> (member, group_key ~link ~deep:reach_of ~members member))
+                members
+        in
+        List.iter (fun (key, reach_key) -> Table.replace computed key reach_key) keys)
+      (Instance_components.of_graph
+         ~successors:(fun key ->
+           List.filter (fun next -> Option.is_none (known next)) (snd (link key)))
+         [ root ]);
+  List.of_seq (Table.to_seq computed)

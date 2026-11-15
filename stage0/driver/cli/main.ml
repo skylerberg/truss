@@ -122,13 +122,6 @@ let build =
        reaches a $(b,todo) or an $(b,echo)."
     Term.(const (fun () output -> Program_command.build ~output) $ common $ output)
 
-let holes =
-  command "holes"
-    ~doc:
-      "List every $(b,todo) with its expected type, the bindings in scope, and the tests and \
-       $(b,main) that reach it."
-    Term.(const (fun () paths -> Outcome.Exit (Holes_command.run ~paths)) $ common $ paths "holes")
-
 let show =
   let paths =
     Arg.(
@@ -145,39 +138,6 @@ let show =
       const (fun () paths body -> Outcome.Exit (Show_command.run ~paths ~body))
       $ common $ paths $ body)
 
-let impact =
-  let base =
-    Arg.(
-      value
-      & opt (some string) None
-      & info [ "base" ] ~docv:"REVISION"
-          ~doc:"Compare with the commit $(docv) instead of the merge base with the default branch.")
-  in
-  command "impact"
-    ~doc:"List the definitions that the worktree changes since a base commit, and their dependents."
-    Term.(const (fun () base -> Outcome.Exit (Impact_command.run ~base)) $ common $ base)
-
-let name_argument =
-  Arg.(
-    required
-    & pos 0 (some string) None
-    & info [] ~docv:"NAME"
-        ~doc:
-          "A definition: its full path, or a suffix of one, such as $(b,parse) or \
-           $(b,Forecast.summary).")
-
-let references =
-  command "references" ~doc:"List the dependents of a definition, by part."
-    Term.(
-      const (fun () name -> Outcome.Exit (Graph_command.run ~direction:References ~name))
-      $ common $ name_argument)
-
-let dependencies =
-  command "dependencies" ~doc:"List the dependencies of a definition, by part."
-    Term.(
-      const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
-      $ common $ name_argument)
-
 let explain =
   let position =
     Arg.(
@@ -191,25 +151,6 @@ let explain =
        its definition."
     Term.(
       const (fun () position -> Outcome.Exit (Explain_command.run ~position)) $ common $ position)
-
-let overlap =
-  let with_ =
-    Arg.(
-      value
-      & opt (some string) None
-      & info [ "with" ] ~docv:"BRANCH"
-          ~doc:"Compare with $(docv) instead of the other open worktrees.")
-  in
-  let merge =
-    Arg.(
-      value & flag
-      & info [ "merge" ] ~doc:"Also check the merge result and list the diagnostics only it has.")
-  in
-  command "overlap"
-    ~doc:"List where this worktree's changes overlap those of other worktrees or of a branch."
-    Term.(
-      const (fun () with_ merge -> Outcome.Exit (Overlap_command.run ~with_ ~merge))
-      $ common $ with_ $ merge)
 
 let rename =
   let from_ = Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
@@ -257,21 +198,11 @@ let new_ =
   command "new" ~doc:"Create a package in a directory named $(i,NAME)."
     Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
 
-let sync =
-  command "sync" ~doc:"Update the project's session from its files, and do nothing else."
-    Term.(
-      const (fun () ->
-          ignore (Command_packages.current ());
-          Outcome.Exit 0)
-      $ common)
-
 let status =
-  command "status" ~doc:"List the background process's sessions."
+  command "status" ~doc:"List the package states that the background process holds."
     Term.(
       const (fun () ->
-          List.iter
-            (fun (name, nodes) -> Output.printf "%s: %d results\n" name nodes)
-            (Database.sessions ());
+          List.iter Output.print_line (Database.states ());
           Outcome.Exit 0)
       $ common)
 
@@ -298,27 +229,7 @@ let truss =
               command in its own process, and not in the background process.";
          ]
        ~doc:"Check, test, build, and change Truss code.")
-    [
-      check;
-      test;
-      run;
-      build;
-      holes;
-      show;
-      impact;
-      references;
-      dependencies;
-      explain;
-      overlap;
-      rename;
-      add;
-      upgrade;
-      publish;
-      new_;
-      sync;
-      status;
-      stop;
-    ]
+    [ check; test; run; build; show; explain; rename; add; upgrade; publish; new_; status; stop ]
 
 let evaluate arguments =
   Output.set_json false;
@@ -360,7 +271,7 @@ let evaluate arguments =
   Format.pp_print_flush err ();
   Output.print (Buffer.contents buffer_out);
   Output.eprint (Buffer.contents buffer_err);
-  Database.save_opened ();
+  Database.flush ();
   outcome
 
 let run_command_line ?(directory = Sys.getcwd ()) arguments =
@@ -369,7 +280,7 @@ let run_command_line ?(directory = Sys.getcwd ()) arguments =
     ~finally:(fun () -> try Sys.chdir previous with Sys_error _ -> ())
     (fun () ->
       Sys.chdir directory;
-      match Database.recovering (fun () -> evaluate arguments) with
+      match evaluate arguments with
       | outcome -> outcome
       | exception exception_ ->
           Output.eprintf "The compiler failed: %s\n" (Printexc.to_string exception_);

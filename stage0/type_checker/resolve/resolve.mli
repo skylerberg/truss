@@ -24,20 +24,21 @@ type target = Walk.target =
   | Unknown of Diagnostic.reported
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
-
-type value =
-  | Value_local of Syntax.id
-  | Value_generic of Types.parameter
-  | Value_field of string
-  | Value_law_parameter of int
+type section = Walk.section = Interface | Contract | Body
 
 type resolved = {
   names : target option array;
   brackets : bracket option array;
-  holes : (Syntax.id * (string * value) list) list;
   used_imports : string list;
-  diagnostics : Syntax.diagnostic list;
 }
+
+val sections : section list
+
+val whole :
+  ?sections:section list ->
+  (section -> Names.key -> resolved option) ->
+  Names.key ->
+  resolved option
 
 type head = {
   name : Syntax.name;
@@ -46,5 +47,23 @@ type head = {
 }
 
 val head : resolved -> Syntax.expression -> head option
-val resolved : (Names.key, resolved option) Query.query
-val diagnostics : Query.context -> Path.file -> Diagnostic.t list
+
+val resolve :
+  Names.lookups -> Names.key -> (section * (resolved, Syntax.diagnostic list) result) list
+
+val file_diagnostics :
+  Names.lookups ->
+  Path.file ->
+  Syntax.file ->
+  text:string ->
+  used:string list option ->
+  Diagnostic.t list
+
+type trait_header = {
+  associated : string list;
+  capabilities : string list;
+  required : Path.t list;
+  laws : string list;
+}
+
+val trait_header : Syntax.definition -> resolved -> trait_header option

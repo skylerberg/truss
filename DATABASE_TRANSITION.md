@@ -36,13 +36,16 @@ These commands read relationships, so they are disabled until step 3:
 | Command | Reads |
 |---|---|
 | `graph` | Dependencies and dependents |
-| `holes`, and the report of the holes `main` reaches in `prove` | Reachability |
+| `holes` | Reachability |
 | `impact` | The changes between two commits, and dependents |
 | `overlap` | Other worktrees, their overlap, and merge previews |
 | The report of an upgrade's consequences in `upgrade` | Changes and dependents |
 
 `lsp` and `rename` keep working: each builds with some files' contents
-replaced, which a pipeline does by taking those contents as input.
+replaced, which a pipeline does by taking those contents as input. `build`
+keeps refusing a program whose `main` reaches a proof hole: the build holds
+the instances the program reaches, and each definition's proof holds its
+holes, so the refusal reads no stored relationship.
 
 The tests of the engine's propagation go with the engine: the tests of the
 code database and of the query engine and store, the engine fuzzer, the

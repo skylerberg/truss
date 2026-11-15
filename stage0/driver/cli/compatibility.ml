@@ -8,10 +8,10 @@ type public_change = { path : Path.t; change : change }
 let public (declaration : Names.declaration) =
   declaration.ordinal = 0 && declaration.container = None && Names.is_public declaration.visibility
 
-let declarations database package = Query.demand database Names.package_declarations package
+let declarations (side : Interface.Lookups.t) package = side.names.package_declarations package
 
-let definition database declaration =
-  Query.demand database Names.definition (Names.key_of declaration)
+let definition (side : Interface.Lookups.t) declaration =
+  side.names.definition (Names.key_of declaration)
 
 let written kind (clauses : clause list) =
   List.filter_map
@@ -129,9 +129,9 @@ let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~befo
        else []);
     ]
 
-let member_clauses database (owner : Path.t) name receiver =
-  match Interface.Summary.definition database (Method { owner; name; receiver }) with
-  | Some (_, { kind = Function { signature; _ } | Method_declaration signature; _ }) ->
+let member_clauses (side : Interface.Lookups.t) (owner : Path.t) name receiver =
+  match Option.bind (side.names.key (Method { owner; name; receiver })) side.names.definition with
+  | Some { kind = Function { signature; _ } | Method_declaration signature; _ } ->
       Some signature.clauses
   | _ -> None
 
@@ -146,7 +146,7 @@ let laws (definition : definition option) =
   | _ -> []
 
 let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_definition
-    ~after_definition ~clauses_before ~clauses_after =
+    ~after_definition ~signature_before ~signature_after ~clauses_before ~clauses_after =
   let same (was : Types.trait_method) (now : Types.trait_method) =
     was.method_name = now.method_name && was.method_receiver = now.method_receiver
   in
@@ -164,7 +164,7 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
         | None -> [ Breaks (Printf.sprintf "no longer has the method `%s`" was.method_name) ]
         | Some now ->
             List.map named
-              (signature ~before:was.method_signature ~after:now.method_signature
+              (signature ~before:(signature_before was) ~after:(signature_after now)
               @ contract
                   ~before:
                     (Option.value ~default:[] (clauses_before was.method_name was.method_receiver))
@@ -208,20 +208,20 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
       gained;
     ]
 
-let constant_value database path (definition : definition option) =
-  match Query.demand database Interface.Constants.value_of path with
+let constant_value (side : Interface.Lookups.t) path (definition : definition option) =
+  match side.constant_value path with
   | Some _ as value -> `Value value
   | None -> (
       match definition with
       | Some { kind = Constant { value; _ }; _ } -> `Written (Syntax_print.expression value)
       | _ -> `Value None)
 
-let impls database package =
+let impls (side : Interface.Lookups.t) package =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
-        match Query.demand database Environment.impl_interface declaration.path with
-        | Some (impl : Types.impl_interface) when not impl.impl_broken ->
+        match Interface.Definition.impl_interface side declaration.path with
+        | Some (impl : Types.impl_interface) ->
             Some
               ( declaration.path,
                 Printf.sprintf "the `impl` of `%s` for `%s`"
@@ -230,7 +230,7 @@ let impls database package =
                 impl.capability_sets )
         | _ -> None
       else None)
-    (declarations database package)
+    (declarations side package)
 
 let compare ~before ~after package =
   let old = List.filter public (declarations before package) in
@@ -249,8 +249,8 @@ let compare ~before ~after package =
             and after_definition = definition after is in
             List.map (public_change path)
               (match
-                 ( Query.demand before Environment.interface path,
-                   Query.demand after Environment.interface path )
+                 ( Interface.Definition.interface before path,
+                   Interface.Definition.interface after path )
                with
               | ( Some (Function_interface old_signature | Theorem_interface old_signature),
                   Some (Function_interface new_signature | Theorem_interface new_signature) ) ->
@@ -261,6 +261,8 @@ let compare ~before ~after package =
                   type_ ~before:old_type ~after:new_type ~before_definition ~after_definition
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->
                   trait ~before:old_trait ~after:new_trait ~before_definition ~after_definition
+                    ~signature_before:(Interface.Definition.method_signature before ~owner:path)
+                    ~signature_after:(Interface.Definition.method_signature after ~owner:path)
                     ~clauses_before:(member_clauses before path)
                     ~clauses_after:(member_clauses after path)
               | Some (Constant_interface old_constant), Some (Constant_interface new_constant) ->

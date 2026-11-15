@@ -2,48 +2,45 @@ open Syntax
 module State = State
 module Facts = Facts
 module Contracts = Contracts
+module Lookups = Lookups
 module Names = Resolve.Names
 module Symbol = Logic.Symbol
 
 type proof = Obligations of State.outcome | Unsupported of span * string | Not_proven_here
 
-let inherited database (path : Path.t) =
+let inherited (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { owner = impl; name; receiver } -> (
-      match Query.demand database Interface.Environment.interface impl with
+      match Interface.Definition.interface lookups.interface impl with
       | Some (Interface.Environment.Impl_interface interface) -> (
           let implemented = interface.implements.trait in
           let substitution =
-            Option.value ~default:[] (Interface.Impls.trait_substitution database impl)
+            Option.value ~default:[] (Interface.Impls.trait_substitution lookups.interface impl)
           in
-          match Contracts.trait_part database implemented name receiver with
+          match Contracts.trait_part lookups implemented name receiver with
           | Some part -> Some (part, substitution)
           | None ->
               Option.map
                 (fun part -> (part, substitution))
-                (Contracts.capability_part database implemented name))
+                (Contracts.capability_part lookups implemented name))
       | _ -> None)
   | _ -> None
 
-let impl_laws database (key : Names.key) source =
-  match Query.demand database Interface.Environment.interface key.path with
+let impl_laws (lookups : Lookups.t) (key : Names.key) source =
+  match Interface.Definition.interface lookups.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
-    when not (Contracts.impl_unfinished database key) ->
+    when not (Contracts.impl_unfinished lookups key) ->
       [
-        Translate.laws database source ~impl:key.path ~trait:interface.implements
+        Translate.laws lookups source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
-            (Contracts.law_proofs database (Path.package key.path) interface.implements
+            (Contracts.law_proofs lookups (Path.package key.path) interface.implements
                interface.for_type)
           ~at:(Translate.definition_span source);
       ]
   | _ -> []
 
 let is_specification_module (key : Names.key) = key.module_ = Well_known.specification
-
-let declaration database (key : Names.key) =
-  Names.Declaration_map.find_opt (key.path, key.ordinal)
-    (Query.demand database Names.declaration_index key.module_)
 
 let integer_implementors (bounds : Types.trait_reference list) =
   let signed = Intrinsic.[ Int8; Int16; Int32; Int64 ]
@@ -61,9 +58,9 @@ let integer_implementors (bounds : Types.trait_reference list) =
       | None, these | these, None -> these)
     None bounds
 
-let integer_instances database (path : Path.t) =
+let integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
-    match Interface.Impls.signature database path with
+    match Interface.Impls.signature lookups.interface path with
     | Some signature ->
         List.filter_map
           (fun (generic : Types.generic) ->
@@ -103,11 +100,12 @@ let integer_instances database (path : Path.t) =
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
-let derived_default database (key : Names.key) (source : State.source) =
+let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.source) =
   let derives_default =
-    match Query.demand database Interface.Environment.type_interface key.path with
-    | Some interface -> List.exists (Well_known.is Default) interface.derives
-    | None -> false
+    match Interface.Definition.interface lookups.interface key.path with
+    | Some (Interface.Environment.Type_interface interface) ->
+        List.exists (Well_known.is Default) interface.derives
+    | _ -> false
   in
   let path =
     Path.Method
@@ -117,8 +115,8 @@ let derived_default database (key : Names.key) (source : State.source) =
         receiver = Static;
       }
   in
-  if derives_default && Option.is_some (Query.demand database Mir.of_path path) then
-    let outcome = Translate.function_ database source ~path in
+  if derives_default && Option.is_some (Mir.code_of_path lookups.mir path) then
+    let outcome = Translate.function_ lookups source ~path in
     let span = Translate.definition_span source in
     List.map
       (fun (obligation : State.obligation) ->
@@ -133,22 +131,22 @@ let derived_default database (key : Names.key) (source : State.source) =
       outcome.obligations
   else []
 
-let prove database (key : Names.key) =
-  match (declaration database key, Contracts.source_at_key database key) with
+let proof (lookups : Lookups.t) (key : Names.key) =
+  match (lookups.interface.names.declaration key, Contracts.source_at_key lookups key) with
   | _ when is_specification_module key -> Not_proven_here
-  | Some declaration, Some source -> (
+  | Some declaration, source -> (
+      lookups.patterns key;
       try
         match declaration.kind with
-        | (Function | Method) when Query.demand database Mir.mir key = None -> Not_proven_here
-        | Theorem -> Obligations (Translate.theorem database source ~path:key.path)
+        | (Function | Method) when Mir.code (lookups.mir.body_part key) = None -> Not_proven_here
+        | Theorem -> Obligations (Translate.theorem lookups source ~path:key.path)
         | Function | Method -> (
             let prove_with substitution =
               Translate.function_
-                ~is_updating_helper:(Contracts.is_updating_helper database key.path)
-                ?inherited:(inherited database key.path) ~substitution database source
-                ~path:key.path
+                ~is_updating_helper:(Contracts.is_updating_helper lookups key.path)
+                ?inherited:(inherited lookups key.path) ~substitution lookups source ~path:key.path
             in
-            match integer_instances database key.path with
+            match integer_instances lookups key.path with
             | [] -> Obligations (prove_with [])
             | instances ->
                 let outcomes =
@@ -176,10 +174,10 @@ let prove database (key : Names.key) =
                       List.sort_uniq compare
                         (List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes);
                   })
-        | Test -> Obligations (Translate.test database source ~path:key.path)
-        | Constant -> Obligations (Translate.constant database source ~path:key.path)
+        | Test -> Obligations (Translate.test lookups source ~path:key.path)
+        | Constant -> Obligations (Translate.constant lookups source ~path:key.path)
         | Impl ->
-            let outcomes = impl_laws database key source in
+            let outcomes = impl_laws lookups key source in
             Obligations
               {
                 obligations =
@@ -188,28 +186,26 @@ let prove database (key : Names.key) =
               }
         | Type -> (
             let has_defaults () =
-              match Query.demand database Mir.defaults_of_path key.path with
+              match Mir.defaults_of_path lookups.mir key.path with
               | Some (Field_defaults (_ :: _)) -> true
               | Some (Field_defaults [] | Parameter_defaults _) | None -> false
             in
-            match Query.demand database Mir.type_clauses_of_path key.path with
+            match Mir.type_clauses_of_path lookups.mir key.path with
             | Some { invariants = _ :: _; _ } ->
-                let outcome = Translate.type_ database source ~path:key.path in
+                let outcome = Translate.type_ lookups source ~path:key.path in
                 Obligations
                   {
                     outcome with
-                    obligations = outcome.obligations @ derived_default database key source;
+                    obligations = outcome.obligations @ derived_default lookups key source;
                   }
             | Some { potential; _ } when Option.is_some potential || has_defaults () ->
-                Obligations (Translate.type_ database source ~path:key.path)
+                Obligations (Translate.type_ lookups source ~path:key.path)
             | Some _ | None -> Not_proven_here)
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
       with
       | Facts.Unsupported (span, message) -> Unsupported (span, message)
       | Facts.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
-  | _ -> Not_proven_here
-
-let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key prove
+  | None, _ -> Not_proven_here
 
 let float_text bits =
   let shortest ~most ~same value =
@@ -359,49 +355,14 @@ let counterexample members (obligation : State.obligation) answer_values =
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
-let clamp_to_definition database (key : Names.key) (span : span) =
-  match Query.demand database Names.text key with
+let clamp_to_definition (lookups : Lookups.t) (key : Names.key) (span : span) =
+  match lookups.interface.names.text key with
   | Some text when span.stop <= String.length text -> span
   | _ -> Syntax.Span.make 0 0
 
-type answer = Solved of Solver.answer | Ran_true | Ran_false | Run_timed_out | Pending_answer
+type answer = Solved of Solver.answer | Ran_true | Ran_false | Run_timed_out
 type run_result = Ran of bool | Timed_out | Not_run
-
-type evaluator = {
-  code_key : State.evaluation -> string option;
-  run : State.evaluation -> run_result;
-}
-
-let no_evaluator = { code_key = (fun _ -> None); run = (fun _ -> Not_run) }
-
-type oracles = {
-  solve : index:int -> with_locals:bool -> solver_response;
-  check_template : State.evaluation -> run_result;
-}
-
-and solver_response = Answered of Solver.answer | Unanswered
-
-let answers (oracles : oracles) (obligations : State.obligation list) =
-  List.mapi
-    (fun index (obligation : State.obligation) ->
-      let answer =
-        match Option.map oracles.check_template obligation.evaluation with
-        | Some (Ran true) -> Ran_true
-        | Some (Ran false) -> Ran_false
-        | Some Timed_out -> Run_timed_out
-        | Some Not_run | None -> (
-            match oracles.solve ~index ~with_locals:false with
-            | Unanswered -> Pending_answer
-            | Answered (Solver.Counterexample _ as plain)
-              when obligation.locals <> [] || obligation.decisions <> [] -> (
-                match oracles.solve ~index ~with_locals:true with
-                | Answered (Solver.Counterexample _ as answer) -> Solved answer
-                | Answered _ -> Solved plain
-                | Unanswered -> Pending_answer)
-            | Answered answer -> Solved answer)
-      in
-      (obligation, answer))
-    obligations
+type evaluator = State.evaluation -> run_result
 
 type 'span state = {
   code : Diagnostic.Code.prover;
@@ -411,9 +372,11 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-let definition_states oracles database (key : Names.key) =
-  let clamp_to_definition span = clamp_to_definition database key span in
-  match Query.demand database proof key with
+type verdict = (span state * (Names.key * span) option) list
+
+let definition_states lookups (key : Names.key) proof answers =
+  let clamp_to_definition span = clamp_to_definition lookups key span in
+  match proof with
   | Not_proven_here -> []
   | Unsupported (span, construct) ->
       let message =
@@ -431,8 +394,8 @@ let definition_states oracles database (key : Names.key) =
           None );
       ]
   | Obligations outcome ->
-      List.map
-        (fun ((obligation : State.obligation), (answer : answer)) ->
+      List.map2
+        (fun (obligation : State.obligation) answer ->
           let span = clamp_to_definition obligation.span in
           let others =
             match obligation.code with
@@ -454,7 +417,7 @@ let definition_states oracles database (key : Names.key) =
               shows = obligation.message;
               failure =
                 (match answer with
-                | Solved Proven | Ran_true | Pending_answer -> None
+                | Solved Proven | Ran_true -> None
                 | Ran_false -> failed " Running it on this template's text gives `false`."
                 | Run_timed_out ->
                     failed
@@ -474,198 +437,128 @@ let definition_states oracles database (key : Names.key) =
               trusts_compiled_code = (match answer with Ran_true -> true | _ -> false);
             },
             obligation.cited ))
-        (answers oracles outcome.obligations)
+        outcome.obligations answers
 
-type question = { definition : Names.key; index : int; with_locals : bool }
+let request ~with_locals (obligation : State.obligation) =
+  let symbols =
+    List.map fst obligation.values @ if with_locals then List.map fst obligation.locals else []
+  in
+  let terms =
+    if with_locals then
+      List.concat
+        (List.mapi
+           (fun index (_, _, reached, condition) ->
+             [ (Symbol.Reached index, reached); (Symbol.Condition index, condition) ])
+           obligation.decisions)
+    else []
+  in
+  (Solver.request ~symbols ~terms obligation.query, obligation.query)
 
-let show_question question =
-  Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
-
-type oracle_request = Solve of question * Solver.request | Run of State.evaluation
-
-type oracle_response =
-  | Solver_response of Solver.canonical
-  | Run_response of { code_key : string option; result : run_result }
-
-let request_key = function
-  | Solve (_, request) -> "solve " ^ Solver.request_key request
-  | Run evaluation -> "template " ^ Digest.to_hex (Digest.string (Marshal.to_string evaluation []))
-
-let oracle_response : (string, oracle_response) Query.input =
-  Query.input ~name:"oracle_response" ~show:Fun.id ()
-
-type outcome =
-  | Decided of (span state * (Names.key * Syntax.span) option) list
-  | Pending of oracle_request list
-
-let run_result database evaluation =
-  match Query.find database oracle_response (request_key (Run evaluation)) with
-  | Some (Run_response response) -> Some response.result
-  | Some (Solver_response _) | None -> None
-
-let evaluations =
-  Query.query ~name:"proof_evaluations" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
-    (fun database key ->
-      match Query.demand database proof key with
-      | Obligations outcome ->
-          List.sort_uniq compare
-            (List.filter_map
-               (fun (obligation : State.obligation) -> obligation.evaluation)
-               outcome.obligations)
-      | Not_proven_here | Unsupported _ -> [])
-
-let question_query database question =
-  match Query.demand database proof question.definition with
-  | Obligations outcome -> (
-      match List.nth_opt outcome.obligations question.index with
-      | Some obligation ->
-          let symbols =
-            List.map fst obligation.values
-            @ if question.with_locals then List.map fst obligation.locals else []
-          in
-          let terms =
-            if question.with_locals then
-              List.concat
-                (List.mapi
-                   (fun index (_, _, reached, condition) ->
-                     [ (Symbol.Reached index, reached); (Symbol.Condition index, condition) ])
-                   obligation.decisions)
-            else []
-          in
-          Some (obligation.query, symbols, terms)
-      | None -> None)
-  | Not_proven_here | Unsupported _ -> None
-
-let question_request =
-  Query.query ~name:"question_request" ~phase:Phases.verdicts ~saved:true ~show:show_question
-    (fun database question ->
-      Option.map
-        (fun (query, symbols, terms) -> Solver.request ~symbols ~terms query)
-        (question_query database question))
-
-let outcome =
-  Query.query ~name:"proof_outcome" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
-    (fun database key ->
-      match
-        List.filter
-          (fun evaluation -> run_result database evaluation = None)
-          (Query.demand database evaluations key)
-      with
-      | _ :: _ as pending -> Pending (List.map (fun evaluation -> Run evaluation) pending)
-      | [] -> (
-          let pending = ref [] in
-          let oracles =
-            {
-              solve =
-                (fun ~index ~with_locals ->
-                  let question = { definition = key; index; with_locals } in
-                  match Query.demand database question_request question with
-                  | None -> Answered Out_of_steps
-                  | Some request -> (
-                      let oracle_request = Solve (question, request) in
-                      match Query.find database oracle_response (request_key oracle_request) with
-                      | Some (Solver_response canonical) -> Answered (Solver.read request canonical)
-                      | Some (Run_response _) | None ->
-                          if not (List.mem oracle_request !pending) then
-                            pending := oracle_request :: !pending;
-                          Unanswered));
-              check_template =
-                (fun evaluation -> Option.value (run_result database evaluation) ~default:Not_run);
-            }
-          in
-          let states = definition_states oracles database key in
-          match !pending with [] -> Decided states | pending -> Pending (List.rev pending)))
-
-let run_response (evaluator : evaluator) evaluation code_key =
-  Run_response
-    {
-      code_key;
-      result = (match code_key with None -> Not_run | Some _ -> evaluator.run evaluation);
-    }
-
-let responses (evaluator : evaluator) database solver requests =
-  let distinct_requests = Hashtbl.create 64 in
+let solve solver requests =
+  let distinct = Hashtbl.create 64 in
   List.iter
-    (function
-      | Solve (question, request)
-        when not (Hashtbl.mem distinct_requests (Solver.request_key request)) ->
-          Hashtbl.replace distinct_requests (Solver.request_key request) (question, request)
-      | Solve _ | Run _ -> ())
+    (fun ((request, _) as asked) ->
+      if not (Hashtbl.mem distinct (Solver.request_key request)) then
+        Hashtbl.replace distinct (Solver.request_key request) asked)
     requests;
-  let solver_requests =
-    Hashtbl.fold
-      (fun _ (question, request) solver_requests ->
-        match question_query database question with
-        | Some (query, _, _) -> (request, query) :: solver_requests
-        | None -> Compiler_bug.bug ~stage:"Prover" "a pending question asks no query")
-      distinct_requests []
+  let distinct_requests =
+    Hashtbl.fold (fun _ asked distinct_requests -> asked :: distinct_requests) distinct []
   in
-  let answers = Hashtbl.create (List.length solver_requests) in
+  let answers = Hashtbl.create (List.length distinct_requests) in
   List.iter2
-    (fun (request, _) answer -> Hashtbl.replace answers (Solver.request_key request) answer)
-    solver_requests
-    (Solver.solve_all solver solver_requests);
+    (fun (request, _) canonical ->
+      Hashtbl.replace answers (Solver.request_key request) (Solver.read request canonical))
+    distinct_requests
+    (Solver.solve_all solver distinct_requests);
+  fun request -> Hashtbl.find answers (Solver.request_key request)
+
+type question = Decided of answer | Asked of (Solver.request * Logic.query)
+
+let verdicts ?(evaluator = fun _ -> Not_run) lookups solver proofs =
+  let runs = Hashtbl.create 16 in
+  let ran evaluation =
+    match Hashtbl.find_opt runs evaluation with
+    | Some result -> result
+    | None ->
+        let result = evaluator evaluation in
+        Hashtbl.replace runs evaluation result;
+        result
+  in
+  let question (obligation : State.obligation) =
+    match Option.map ran obligation.evaluation with
+    | Some (Ran true) -> Decided Ran_true
+    | Some (Ran false) -> Decided Ran_false
+    | Some Timed_out -> Decided Run_timed_out
+    | Some Not_run | None -> Asked (request ~with_locals:false obligation)
+  in
+  let questions =
+    List.map
+      (fun (key, proof) ->
+        let obligations =
+          match proof with
+          | Obligations (outcome : State.outcome) -> outcome.obligations
+          | Unsupported _ | Not_proven_here -> []
+        in
+        (key, proof, List.map (fun obligation -> (obligation, question obligation)) obligations))
+      proofs
+  in
+  let plain_answer =
+    solve solver
+      (List.concat_map
+         (fun (_, _, questions) ->
+           List.filter_map
+             (function _, Asked asked -> Some asked | _, Decided _ -> None)
+             questions)
+         questions)
+  in
+  let local_questions =
+    List.map
+      (fun (key, proof, questions) ->
+        ( key,
+          proof,
+          List.map
+            (fun ((obligation : State.obligation), question) ->
+              let local_request =
+                match question with
+                | Asked (plain_request, _)
+                  when (obligation.locals <> [] || obligation.decisions <> [])
+                       &&
+                       match plain_answer plain_request with
+                       | Counterexample _ -> true
+                       | Proven | Out_of_steps -> false ->
+                    Some (request ~with_locals:true obligation)
+                | Asked _ | Decided _ -> None
+              in
+              (question, local_request))
+            questions ))
+      questions
+  in
+  let local_answer =
+    solve solver
+      (List.concat_map (fun (_, _, questions) -> List.filter_map snd questions) local_questions)
+  in
   List.map
-    (fun request ->
-      ( request_key request,
-        match request with
-        | Solve (_, solver_request) ->
-            Solver_response (Hashtbl.find answers (Solver.request_key solver_request))
-        | Run evaluation -> run_response evaluator evaluation (evaluator.code_key evaluation) ))
-    requests
+    (fun (key, proof, questions) ->
+      let answers =
+        List.map
+          (fun (question, local_request) ->
+            match (question, local_request) with
+            | Decided answer, _ -> answer
+            | Asked (plain_request, _), None -> Solved (plain_answer plain_request)
+            | Asked (plain_request, _), Some (local_request, _) -> (
+                match local_answer local_request with
+                | Counterexample _ as answer -> Solved answer
+                | Proven | Out_of_steps -> Solved (plain_answer plain_request)))
+          questions
+      in
+      (key, definition_states lookups key proof answers))
+    local_questions
 
-let rerun_changed (evaluator : evaluator) database keys =
-  List.sort_uniq compare (List.concat_map (Query.demand database evaluations) keys)
-  |> List.filter_map (fun evaluation ->
-      let code_key = evaluator.code_key evaluation in
-      match Query.find database oracle_response (request_key (Run evaluation)) with
-      | Some (Run_response recorded)
-        when recorded.code_key = code_key && recorded.result <> Timed_out ->
-          None
-      | Some _ | None ->
-          Some (request_key (Run evaluation), run_response evaluator evaluation code_key))
-
-let solve_ahead ?(evaluator = no_evaluator) ~record database solver files =
-  let keys =
-    List.concat_map
-      (fun file ->
-        List.filter_map
-          (fun declaration ->
-            let key = Names.key_of declaration in
-            match Query.demand database Names.base key with Some _ -> Some key | None -> None)
-          (Query.demand database Names.declarations_in file))
-      files
-  in
-  (match rerun_changed evaluator database keys with [] -> () | changed -> record changed);
-  let rec round keys =
-    let pending =
-      List.filter_map
-        (fun key ->
-          match Query.demand database outcome key with
-          | Decided _ -> None
-          | Pending requests -> Some (key, requests))
-        keys
-    in
-    if pending <> [] then begin
-      record
-        (responses evaluator database solver (List.sort_uniq compare (List.concat_map snd pending)));
-      round (List.map fst pending)
-    end
-  in
-  round keys
-
-let decided database key =
-  match Query.demand database outcome key with
-  | Decided states -> states
-  | Pending _ -> Compiler_bug.bug ~stage:"Prover" "an outcome is still pending once decided"
-
-let file_states ?evaluator ~record database solver file =
-  solve_ahead ?evaluator ~record database solver [ file ];
+let file_states (lookups : Lookups.t) ~verdict file =
   List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
-      let base_of key = Query.demand database Names.base key in
-      match base_of key with
+      match lookups.interface.names.base key with
       | Some (_, base) ->
           Some
             (List.map
@@ -673,10 +566,10 @@ let file_states ?evaluator ~record database solver file =
                  let note =
                    match cited with
                    | Some (cited, span) -> (
-                       match base_of cited with
+                       match lookups.interface.names.base cited with
                        | Some (cited_file, offset) when cited_file = file ->
                            Some
-                             ( Span.to_source ~base:offset (clamp_to_definition database cited span),
+                             ( Span.to_source ~base:offset (clamp_to_definition lookups cited span),
                                "This is the clause that must hold." )
                        | _ -> None)
                    | _ -> None
@@ -684,13 +577,13 @@ let file_states ?evaluator ~record database solver file =
                  let elsewhere =
                    match cited with
                    | Some (cited, span) -> (
-                       match base_of cited with
+                       match lookups.interface.names.base cited with
                        | Some (cited_file, offset) when cited_file <> file -> (
-                           match Query.demand database Packages.source cited_file with
+                           match lookups.source cited_file with
                            | source ->
                                let start =
                                  (Span.to_source ~base:offset
-                                    (clamp_to_definition database cited span))
+                                    (clamp_to_definition lookups cited span))
                                    .start
                                in
                                let line, _ = Source.position source start in
@@ -713,9 +606,9 @@ let file_states ?evaluator ~record database solver file =
                          | None -> failure)
                        state.failure;
                  })
-               (decided database key))
+               (verdict key))
       | None -> None)
-    (Query.demand database Names.declarations_in file)
+    (lookups.interface.names.declarations_in file)
 
 let sorted_diagnostics list =
   List.sort
@@ -723,11 +616,11 @@ let sorted_diagnostics list =
       compare (left.span, left.code) (right.span, right.code))
     list
 
-let states ?evaluator ~record database solver file =
-  List.concat (file_states ?evaluator ~record database solver file)
+let states lookups ~verdict file =
+  List.concat (file_states lookups ~verdict file)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
-let diagnostics ?evaluator ~record database solver file =
+let diagnostics lookups ~verdict file =
   List.concat_map
     (fun states ->
       List.fold_left
@@ -738,5 +631,5 @@ let diagnostics ?evaluator ~record database solver file =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (file_states ?evaluator ~record database solver file)
+    (file_states lookups ~verdict file)
   |> sorted_diagnostics

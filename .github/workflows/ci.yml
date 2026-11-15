@@ -18,10 +18,6 @@ env:
   DUNE_CACHE: enabled
 
 jobs:
-  # The build, the formatting, the opam file, and the compiler's tests, in
-  # one dune run so that they overlap. The tests of generated code, the
-  # prover's and the code database's tests, and the standard library's
-  # proofs run in jobs of their own.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -60,7 +56,7 @@ jobs:
       # which leaves out stage0/test/codegen.
       - name: Build, check formatting and truss.opam, and test the compiler
         env:
-          TRUSS_SKIP_SUITES: standard_library_tests,prover_tests,database_tests
+          TRUSS_SKIP_SUITES: standard_library_tests,prover_tests
         run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest
 
       - name: Check that truss.opam matches dune-project
@@ -77,11 +73,7 @@ jobs:
           path: ~/.cache/dune
           key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
 
-  # The prover's and the code database's tests: the longest of the
-  # compiler's own, and the check's cores are busy with the rest, so they
-  # run on a runner of their own, each suite as two processes, which keep
-  # its four cores busy.
-  prover-and-database-tests:
+  prover-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -101,11 +93,11 @@ jobs:
 
       - uses: ./.github/actions/z3
 
-      - name: Test the prover and the code database
+      - name: Test the prover
         run: |
-          opam exec -- dune build ./stage0/test/prover_tests.exe ./stage0/test/database_tests.exe
+          opam exec -- dune build ./stage0/test/prover_tests.exe
           cd _build/default/stage0/test
-          "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" 2 ./prover_tests.exe ./database_tests.exe
+          "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" 4 ./prover_tests.exe
 
   # The tests of generated code, which compile and run C: the longest tests
   # after the proofs, so they run beside the check, on a runner of their own.
@@ -183,28 +175,20 @@ jobs:
 
       - uses: ./.github/actions/z3
 
-      # The code database's store for this share. It holds the solver's
-      # answers, each kept by the text of its query, the solver's version,
-      # and its limit, which hold for every compiler; and the state the
-      # last run saved, which only the compiler that wrote it reads. The key
-      # names the compiler's sources, so a run starts from its own
-      # compiler's store, and else from the newest store of any compiler,
-      # for its answers. A share with no store yet starts from another
-      # share's, which is how a new share begins with the answers of the
-      # ones it was split from.
+      # The store for this share. It holds the solver's answers, each kept
+      # by the text of its query, the solver's version, and its limit, which
+      # hold for every compiler. A share with no store yet starts from
+      # another share's, which is how a new share begins with the answers
+      # of the ones it was split from.
       - uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/truss-proofs
-          key: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-${{ github.sha }}
+          key: proofs-share-${{ matrix.share }}-${{ github.sha }}
           restore-keys: |
-            proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-
             proofs-share-${{ matrix.share }}-
             proofs-
 
       - name: Prove a share of the standard library
-        # The run collects the store once it has saved its state, which
-        # drops the states of other compilers once the store is past this
-        # budget, so the cache does not keep a state for every compiler.
         env:
           TRUSS_CACHE: /home/runner/.cache/truss-proofs
           TRUSS_CACHE_SIZE: 104857600
@@ -217,7 +201,7 @@ jobs:
         uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/truss-proofs
-          key: proofs-share-${{ matrix.share }}-${{ hashFiles('stage0/**', '!stage0/test/**', '!stage0/tools/**', 'dune-project') }}-${{ github.sha }}
+          key: proofs-share-${{ matrix.share }}-${{ github.sha }}
 
   # The programs that run on several threads, again under ThreadSanitizer:
   # a report is a data race in the runtime or in generated code. The tests

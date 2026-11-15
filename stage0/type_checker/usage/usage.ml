@@ -1,4 +1,5 @@
 open Syntax
+module Lookups = Lookups
 
 type context = {
   resolved : Resolve.resolved;
@@ -182,24 +183,19 @@ let check_unreachable context (definition : definition) =
   List.iter (check_block context) bodies;
   Syntax_walk.definition ~statement expression definition
 
-let definition_diagnostics =
-  Query.query ~name:"usage_diagnostics" ~phase:Phases.bodies ~saved:true
-    ~show:Resolve.Names.show_key (fun database key ->
-      match
-        ( Query.demand database Resolve.Names.definition key,
-          Query.demand database Resolve.resolved key,
-          Infer.clean_tables database key,
-          Query.demand database Resolve.Names.text key )
-      with
-      | Some definition, Some resolved, Some tables, Some text ->
-          let context = { resolved; tables; text; diagnostics = [] } in
-          check_unused context definition;
-          check_unreachable context definition;
-          List.sort
-            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-              compare left.span right.span)
-            context.diagnostics
-      | _ -> [])
-
-let diagnostics database file =
-  Resolve.Names.per_definition database file (Query.demand database definition_diagnostics)
+let check (lookups : Lookups.t) key =
+  match
+    ( lookups.names.definition key,
+      Resolve.whole lookups.resolved key,
+      lookups.tables key,
+      lookups.names.text key )
+  with
+  | Some definition, Some resolved, Some tables, Some text ->
+      let context = { resolved; tables; text; diagnostics = [] } in
+      check_unused context definition;
+      check_unreachable context definition;
+      List.sort
+        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+          compare left.span right.span)
+        context.diagnostics
+  | _ -> []

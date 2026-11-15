@@ -1,5 +1,5 @@
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
   resolved : Resolve.resolved;
   bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
   self_type : Types.ty option;
@@ -10,7 +10,8 @@ type context = {
   named : (Syntax.span * Types.ty) list ref;
 }
 
-val create : Query.context -> Resolve.resolved -> context
+val create : Lookups.t -> Resolve.resolved -> Environment.scope -> context
+val scope : context -> Environment.scope
 val report : context -> Diagnostic.Code.types -> Syntax.span -> string -> unit
 val error : context -> Diagnostic.Code.types -> Syntax.span -> string -> Types.ty
 val bug : ('a, unit, string, 'b) format4 -> 'a

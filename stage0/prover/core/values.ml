@@ -171,7 +171,7 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match method_contract context.database trait name receiver evidence with
+      match method_contract context.lookups trait name receiver evidence with
       | Some contract ->
           let own = List.hd contract.parts in
           let entry = part_frame frame own ~arguments:[ (0, value_) ] ~substitution:[] in
@@ -358,11 +358,7 @@ let contract_for_every_argument context frame (contract : contract) parameters v
 
 let named_function context frame (site : Invocation.site) path type_arguments contract ~is_argument
     =
-  if
-    context.terminates && frame.makes_obligations
-    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
-         ~target:context.current
-  then
+  if context.terminates && frame.makes_obligations && is_in_recursion_group context path then
     oblige context frame Termination
       (span_of frame.source site.origin)
       (Printf.sprintf
@@ -430,7 +426,7 @@ let named_function context frame (site : Invocation.site) path type_arguments co
   term
 
 let global_value context frame (site : Invocation.site) path type_arguments ~is_argument =
-  match function_contract context.database path with
+  match function_contract context.lookups path with
   | Some contract -> named_function context frame site path type_arguments contract ~is_argument
   | None ->
       unsupported
@@ -438,12 +434,12 @@ let global_value context frame (site : Invocation.site) path type_arguments ~is_
         "a function the prover cannot read, used as a value"
 
 let constant_type context path =
-  match Query.demand context.database Interface.Environment.constant_type path with
+  match Interface.Definition.constant_type context.lookups.interface path with
   | Some ty -> ty
   | None -> raise (Foreign_unsupported "a constant with errors")
 
 let constant_value context frame path =
-  match (source_at context.database path, Query.demand context.database Mir.of_constant path) with
+  match (source_at context.lookups path, Mir.initializer_of_path context.lookups.mir path) with
   | Some (constant_source, _, _), Some code ->
       let symbol = Symbol.Constant path in
       let empty =
@@ -472,7 +468,7 @@ let constant_value context frame path =
 let field_default context frame (site : Invocation.site) ty variant field =
   match (ty, type_source context ty) with
   | Types.Named { path; _ }, Some source -> (
-      match Query.demand context.database Mir.defaults_of_path path with
+      match Mir.defaults_of_path context.lookups.mir path with
       | Some (Field_defaults defaults) -> (
           match
             List.find_opt
@@ -498,7 +494,7 @@ let check_built context frame (site : Invocation.site) ty term =
 let indirect context (ty : Types.ty) variant =
   match (ty, variant) with
   | Types.Named { path; _ }, Some variant -> (
-      match Query.demand context.database Interface.Environment.interface path with
+      match Interface.Definition.interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
           List.exists
             (fun (written : Types.variant) -> written.variant_name = variant && written.indirect)
@@ -635,7 +631,7 @@ let apply_specification_function context frame ~span (measure : specification_fu
 let copied context frame ty term =
   if
     context.counters = []
-    || Interface.Impls.plain context.database ~bounds:(current_bounds context) ty
+    || Interface.Impls.plain context.lookups.interface ~bounds:(current_bounds context) ty
        && not (try has_potential context ty with Foreign_unsupported _ -> true)
   then frame
   else

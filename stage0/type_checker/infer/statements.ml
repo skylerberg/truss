@@ -6,7 +6,7 @@ module Lower = Interface.Lower
 open State
 open Modes
 open Hooks
-open Lookups
+open Name_lookup
 open Pattern_typing
 open Operators
 
@@ -294,7 +294,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
       let trait = trait_reference (Well_known.path Index_assign) in
       match
         ( implements state base_type trait,
-          Members.trait_method state.database trait.trait "assign" Mut )
+          Members.trait_method state.lookups trait.trait "assign" Mut )
       with
       | Some ((Impls.From_impl _ | From_bound | From_any) as evidence_source), Some method_ ->
           let index = trait_reference (Well_known.path Index) in
@@ -335,7 +335,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
                     };
                 arguments = [ argument base 0 Mut; argument key 1 Own; argument value 2 Own ];
                 omitted_defaults = [];
-                uses = method_.method_signature.uses;
+                uses = (Members.method_signature state.lookups trait.trait method_).uses;
                 callee_result = Types.unit;
               };
           Form.register_call state call;

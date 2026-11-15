@@ -1,7 +1,8 @@
 open Syntax
+module Names = Resolve.Names
 
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
   resolved : Resolve.resolved;
   bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
   self_type : Types.ty option;
@@ -12,18 +13,47 @@ type context = {
   named : (span * Types.ty) list ref;
 }
 
-let create database resolved =
+let create lookups resolved (scope : Environment.scope) =
+  let bounds = Hashtbl.create 8 in
+  List.iter (fun (parameter, traits) -> Hashtbl.replace bounds parameter traits) scope.bounds;
   {
-    database;
+    lookups;
     resolved;
-    bounds = Hashtbl.create 8;
-    self_type = None;
-    self_trait = None;
-    self_associated = [];
-    self_capabilities = [];
+    bounds;
+    self_type = scope.self_type;
+    self_trait = scope.self_trait;
+    self_associated = scope.self_associated;
+    self_capabilities = scope.self_capabilities;
     diagnostics = ref [];
     named = ref [];
   }
+
+let scope context : Environment.scope =
+  {
+    self_type = context.self_type;
+    self_trait = context.self_trait;
+    self_associated = context.self_associated;
+    self_capabilities = context.self_capabilities;
+    bounds =
+      List.sort compare
+        (Hashtbl.fold
+           (fun parameter bounds bounds_by_parameter -> (parameter, bounds) :: bounds_by_parameter)
+           context.bounds []);
+  }
+
+let rec trait_closure context ?(seen = []) path =
+  if List.exists (Path.equal path) seen then []
+  else
+    match context.lookups.trait_header path with
+    | None -> [ path ]
+    | Some header ->
+        path
+        :: List.concat_map
+             (fun required -> trait_closure context ~seen:(path :: seen) required)
+             header.required
+        |> List.fold_left
+             (fun acc path -> if List.exists (Path.equal path) acc then acc else acc @ [ path ])
+             []
 
 let reported context code (span : span) message =
   let diagnostic = Diagnostic.make ~code:(Types code) span message in
@@ -65,13 +95,13 @@ let rec type_ context (written : type_expression) : Types.ty =
           let open_names =
             List.concat_map
               (fun trait_path ->
-                match Query.demand context.database Summary.trait_header trait_path with
+                match context.lookups.trait_header trait_path with
                 | Some header ->
                     List.filter
                       (fun name -> not (List.mem_assoc name trait.associated))
                       header.associated
                 | None -> [])
-              (Summary.trait_closure context.database trait.trait)
+              (trait_closure context trait.trait)
           in
           if open_names <> [] then
             report context Associated_type_not_fixed path.span
@@ -122,10 +152,10 @@ and self_associated context (span : span) (key : name) =
 and declaring ?(capability = false) context trait name =
   List.find_opt
     (fun path ->
-      match Query.demand context.database Summary.trait_header path with
+      match context.lookups.trait_header path with
       | Some header -> List.mem name (if capability then header.capabilities else header.associated)
       | None -> false)
-    (Summary.trait_closure context.database trait)
+    (trait_closure context trait)
 
 and associated context base parameter (key : name) =
   let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
@@ -164,13 +194,13 @@ and count_name context (name : name) : Types.argument =
   match target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
-      if not (Constants.is_uint64 context.database path) then
+      if not (Constants.is_uint64 context.lookups path) then
         Types.Type
           (error context Arity name.span
              (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`."
                 name.text))
       else
-        match Query.demand context.database Constants.value_of path with
+        match context.lookups.constant_value path with
         | Some value -> Types.Value (Types.Known value)
         | None ->
             Types.Type
@@ -201,11 +231,11 @@ and check_arity context (path : path_type) shown expected =
           (fun argument (name, kind) ->
             let is_value = match argument with Count _ | Count_name _ -> true | _ -> false in
             match (kind, is_value) with
-            | Summary.Value_kind, false ->
+            | Resolve.Names.Value_kind, false ->
                 report context Argument_kind path.span
                   (Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type." shown
                      name)
-            | (Summary.Type_kind | Summary.Capability_kind), true ->
+            | (Resolve.Names.Type_kind | Resolve.Names.Capability_kind), true ->
                 report context Argument_kind path.span
                   (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
             | _ -> ())
@@ -228,8 +258,7 @@ and path_type context (path : path_type) : Types.ty =
       | Some Never -> Types.Never
       | Some Integer -> Types.Integer
       | Some _ | None ->
-          check_arity context path shown
-            (Query.demand context.database Summary.generics_of definition_path);
+          check_arity context path shown (Names.generics_of context.lookups.names definition_path);
           let type_ = Types.Named { path = definition_path; arguments = arguments context path } in
           context.named := (path.span, type_) :: !(context.named);
           type_)
@@ -246,7 +275,7 @@ and trait_reference ?(capability = false) context (path : path_type) :
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
   let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
-    check_arity context path shown (Query.demand context.database Summary.generics_of trait);
+    check_arity context path shown (Names.generics_of context.lookups.names trait);
     let associated =
       List.sort compare
         (List.filter_map
@@ -369,9 +398,7 @@ and costs context clauses =
     match target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_
-          when Query.demand context.database Resolve.Names.members (capability, method_.text) = []
-          ->
+        | Some method_ when context.lookups.names.members capability method_.text = [] ->
             report context Unknown_member method_.span
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text);
             None

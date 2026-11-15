@@ -7,7 +7,7 @@ open State
 open Modes
 open Instantiation
 open Hooks
-open Lookups
+open Name_lookup
 
 let arguments_alone state env (arguments : argument list) (type_ : Types.ty) =
   List.iter (fun (argument : argument) -> ignore (expression state env argument.value)) arguments;
@@ -316,18 +316,15 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
   let fields =
     match variant with
     | None -> (
-        match Members.fields state.database type_path type_arguments with
+        match Members.fields state.lookups type_path type_arguments with
         | Some fields -> Some fields
         | None ->
-            (match Members.shape state.database type_path with
-            | Some (Error_shape _) -> ()
-            | _ ->
-                report state Not_a_record value.span
-                  (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
-                     (show state type_)));
+            report state Not_a_record value.span
+              (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
+                 (show state type_));
             None)
     | Some variant -> (
-        match Members.variants state.database type_path type_arguments with
+        match Members.variants state.lookups type_path type_arguments with
         | Some variants -> (
             match
               List.find_opt
@@ -345,7 +342,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
                 None)
         | None -> None)
   in
-  if not (Members.fields_visible state.database ~package:state.package type_path) then
+  if not (Members.fields_visible state.lookups ~package:state.package type_path) then
     report state Private_field value.span
       (Printf.sprintf "`%s` is opaque, so only its own package can build it." (show state type_));
   match fields with

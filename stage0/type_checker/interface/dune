@@ -1,17 +1,14 @@
 (library
  (name interface)
+ (modules_without_implementation lookups)
  (libraries
   manifest
   compiler_bug
-  query
-  phases
   path
   well_known
   intrinsic
   types
-  packages
   syntax
   resolve
   diagnostic
-  source
   zarith))

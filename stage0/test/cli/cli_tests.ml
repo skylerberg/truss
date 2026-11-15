@@ -29,7 +29,7 @@ let captured work =
       }
       work
   in
-  Database.save_opened ();
+  Database.flush ();
   (result, Buffer.contents out ^ Buffer.contents err)
 
 let truss arguments =
@@ -41,11 +41,6 @@ let truss arguments =
 
 let quietly arguments = fst (truss arguments)
 let document arguments = Json.parse (snd (truss (arguments @ [ "--json" ])))
-
-let strings = function
-  | Json.List items -> List.filter_map (function Json.String text -> Some text | _ -> None) items
-  | _ -> []
-
 let objects = function Json.List items -> items | _ -> []
 let text_field name value = match Json.field name value with Json.String text -> text | _ -> ""
 
@@ -53,8 +48,6 @@ let shown root path =
   List.map (text_field "text")
     (objects (Json.field "definitions" (document [ "show"; "-C"; root; path ])))
 
-let holes root = objects (Json.field "holes" (document [ "holes"; "-C"; root ]))
-let impact root = objects (Json.field "changes" (document [ "impact"; "-C"; root ]))
 let () = Unix.putenv "TRUSS_CACHE" (Harness.scratch "store")
 
 let () =
@@ -75,11 +68,14 @@ let () =
         (Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
 
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
-let modules (session, packages) = Command_packages.modules session packages
-let files (session, packages) = Command_packages.files session packages
-let gather ?proofs (session, packages) = Report.gather ?proofs session packages
-let select (session, packages) = Test_command.select session packages
-let mains (session, packages) = Program_command.mains session packages
+let modules (snapshot, packages) = Command_packages.modules snapshot packages
+let files (snapshot, packages) = Command_packages.files snapshot packages
+
+let gather ?proofs (snapshot, packages) =
+  Report.gather ?proofs (Database.pipeline snapshot) snapshot packages
+
+let select (snapshot, packages) = Test_command.select snapshot (Database.pipeline snapshot) packages
+let mains (snapshot, packages) = Program_command.mains snapshot packages
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
@@ -271,14 +267,16 @@ let () =
         [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\ndemo = []\n") ]
         "`demo` cannot depend on itself");
   test "packages cannot depend on each other in a cycle" (fun () ->
-      expect_problem
-        [
-          ("truss.toml", "[project]\n");
-          ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
-          ("two/truss.toml", manifest_of "two" ^ "[dependencies]\nthree = []\n");
-          ("three/truss.toml", manifest_of "three" ^ "[dependencies]\none = []\n");
-        ]
-        "Packages cannot depend on each other in a cycle: `one` -> `two` -> `three` -> `one`");
+      expect_problem_in
+        (directory
+           [
+             ("truss.toml", "[project]\n");
+             ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
+             ("two/truss.toml", manifest_of "two" ^ "[dependencies]\nthree = []\n");
+             ("three/truss.toml", manifest_of "three" ^ "[dependencies]\none = []\n");
+           ])
+        "one/truss.toml: Packages cannot depend on each other in a cycle: `one` -> `two` -> \
+         `three` -> `one`");
   test "a package's name cannot be the owner in another's" (fun () ->
       expect_problem
         [
@@ -507,38 +505,7 @@ let () =
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (shown root "demo::Point"))
 
-let unfinished = Fixtures.unfinished
-
-let () =
-  test "a hole has the type it must have and the names in scope with theirs" (fun () ->
-      match holes (package [ ("main.truss", unfinished) ]) with
-      | [ hole ] ->
-          if text_field "type" hole <> "String" then fail "the type is not String";
-          expect_strings
-            ~expected:[ "count: Int64"; "header: String"; "title: String" ]
-            (List.map
-               (fun binding -> text_field "name" binding ^ ": " ^ text_field "type" binding)
-               (objects (Json.field "in_scope" hole)))
-      | found -> fail "found %d holes" (List.length found));
-  test "a hole blocks the tests that can reach it, and only those" (fun () ->
-      match holes (package [ ("main.truss", unfinished) ]) with
-      | [ hole ] ->
-          expect_strings ~expected:[ "test demo \"renders\"" ] (strings (Json.field "blocks" hole))
-      | found -> fail "found %d holes" (List.length found));
-  test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
-      match
-        holes (package [ ("main.truss", Fixtures.hole_whose_type_nothing_fixes_such_as_one) ])
-      with
-      | [ hole ] ->
-          if text_field "type" hole <> "not decided yet" then
-            fail "type %s" (text_field "type" hole)
-      | found -> fail "found %d holes" (List.length found));
-  test "a type defined as todo is a hole" (fun () ->
-      match holes (package [ ("main.truss", "type Session = todo\n") ]) with
-      | [ hole ] -> if text_field "kind" hole <> "type" then fail "kind %s" (text_field "kind" hole)
-      | found -> fail "found %d holes" (List.length found))
-
-let lowering (session, _) = Compiler.lowering_only session (Database.context session)
+let lowering (snapshot, packages) = Compiler.lowering_only (Database.pipeline snapshot) packages
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
@@ -682,119 +649,17 @@ let () =
       if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
         fail "wrote %s" text)
 
-let git = Harness.git
-let doubling = Fixtures.doubling
-
-let repository text =
-  let root = package [ ("main.truss", text) ] in
-  git root [ "init"; "-q"; "-b"; "main" ];
-  git root [ "add"; "-A" ];
-  git root [ "commit"; "-q"; "-m"; "base" ];
-  root
-
-let replace text part by =
-  let part_length = String.length part in
-  let rec at position =
-    if String.sub text position part_length = part then position else at (position + 1)
-  in
-  let position = at 0 in
-  String.sub text 0 position ^ by
-  ^ String.sub text (position + part_length) (String.length text - position - part_length)
-
 let rewrite root path text =
   Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
   let now = Unix.gettimeofday () in
   Unix.utimes (Filename.concat root path) now (now +. 10.)
 
-let nested_repository text =
-  let top =
-    directory
-      [
-        ("services/demo/truss.toml", manifest_of "demo");
-        ("services/demo/main.truss", text);
-        ("tools/truss.toml", manifest_of "tools");
-        ("tools/main.truss", Fixtures.nested_repository);
-      ]
-  in
-  git top [ "init"; "-q"; "-b"; "main" ];
-  git top [ "add"; "-A" ];
-  git top [ "commit"; "-q"; "-m"; "base" ];
-  top
-
 let () =
-  test "a project below the top of its repository is compared with its own files at a commit"
-    (fun () ->
-      let top = nested_repository doubling in
-      let root = Filename.concat top "services/demo" in
-      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
-      match impact root with
-      | [ change ] ->
-          expect_string ~expected:"demo::double" (text_field "path" change);
-          if not (List.mem "body" (strings (Json.field "parts" change))) then
-            fail "%s" (Json.to_string change)
-      | changes -> fail "found %d changes" (List.length changes));
-  test "a change to a body alone is a change of the body, which nothing reads" (fun () ->
-      let root = repository doubling in
-      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
-      match impact root with
-      | [ change ]
-        when objects (Json.field "read_by" change) = []
-             && not (List.mem "signature" (strings (Json.field "parts" change))) ->
-          if not (List.mem "body" (strings (Json.field "parts" change))) then
-            fail "%s" (Json.to_string change)
-      | changes -> fail "found [%s]" (String.concat "; " (List.map Json.to_string changes)));
-  test "a changed signature is shown before and after, with its readers" (fun () ->
-      let root = repository doubling in
-      rewrite root "main.truss"
-        (replace doubling "fn double(value: Int64) -> Int64"
-           "fn double(value: Int64, by: Int64 = 2) -> Int64");
-      match
-        List.find_opt (fun change -> text_field "path" change = "demo::double") (impact root)
-      with
-      | Some change ->
-          let before = text_field "before" change and after = text_field "after" change in
-          if not (contains before "(value: Int64)" && contains after "by: Int64 = 2") then
-            fail "signatures %s, %s" before after;
-          if
-            not
-              (List.exists
-                 (fun edge -> text_field "reader" edge = "demo::four")
-                 (objects (Json.field "read_by" change)))
-          then fail "four does not read it"
-      | None -> fail "double did not change");
-  test "impact lists the tests a change reaches" (fun () ->
-      let root = repository doubling in
-      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
-      let status, output = truss [ "impact"; "-C"; root ] in
-      if status <> 0 then fail "status %d: %s" status output;
-      if not (contains output "Tests whose code changed: 1") then fail "wrote %s" output);
-  test "moving a definition within its file changes nothing" (fun () ->
-      let one = Fixtures.one and two = Fixtures.moving_a_definition_within_its_file_changes in
-      let root = repository (one ^ "\n" ^ two) in
-      rewrite root "main.truss" (two ^ "\n" ^ one);
-      match impact root with [] -> () | changes -> fail "found %d changes" (List.length changes))
-
-let () =
-  test "references list a definition's readers, part by part" (fun () ->
-      let root = package [ ("main.truss", doubling) ] in
-      let status, output = truss [ "references"; "-C"; root; "double" ] in
-      if status <> 0 then fail "status %d" status;
-      if not (contains output "demo::four: its body reads the signature of demo::double") then
-        fail "wrote %s" output);
-  test "references to a mut self method are found by its name without the receiver" (fun () ->
-      let root = package [ ("main.truss", Fixtures.counter) ] in
-      let status, output = truss [ "references"; "-C"; root; "Counter.bump" ] in
-      if status <> 0 then fail "status %d" status;
-      if
-        not
-          (contains output
-             "demo::bumped: its body reads the signature of demo::Counter.bump(mut self)")
-      then fail "wrote %s" output);
   test "a position's line and column count characters, as diagnostics do" (fun () ->
       let source = Source.create ~path:"" "ab\ncé x" in
       if Source.offset Source.Scalar_values source ~line:1 ~column:3 <> 7 then fail "wrong offset");
   test "explaining a name gives its meaning and the signature it refers to" (fun () ->
-      let root = package [ ("main.truss", doubling) ] in
+      let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, output =
         truss [ "explain"; "-C"; root; Filename.concat root "main.truss" ^ ":8:3" ]
       in
@@ -828,31 +693,7 @@ let () =
       let root = package [ ("main.truss", Fixtures.counter) ] in
       let output = explain root "8:8" in
       if not (contains output "means a name bound here" && contains output "has type Counter") then
-        fail "wrote %s" output);
-  test "an overlap is told as a sentence about the parts that meet" (fun () ->
-      let place name part : Graph_types.place =
-        {
-          subject =
-            Some
-              {
-                path =
-                  Path.Top
-                    {
-                      module_ = { package = { Path.owner = None; name = "demo" }; modules = [] };
-                      name;
-                    };
-                part;
-              };
-          label = "";
-        }
-      in
-      expect_string
-        ~expected:
-          "this worktree's change to the body of demo::four reads the signature of demo::double, \
-           which the other changes"
-        (Overlap_command.For_testing.sentence
-           (Reads
-              { this_worktree = true; change = place "four" Body; reads = place "double" Signature })))
+        fail "wrote %s" output)
 
 let registry_root = ref ""
 
@@ -983,6 +824,46 @@ let () =
         ->
           ()
       | _ -> fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
+  test "registry packages that depend on each other in a cycle are a problem, and none is built"
+    (fun () ->
+      let registry = registry () in
+      let acme name : Path.package = { owner = Some "acme"; name } in
+      publish registry "acme::rings" (1, 0, 0) [ ("ring/ring.truss", "") ];
+      publish registry "acme::chains" (1, 0, 0)
+        ~dependencies:[ ("acme::rings", []) ]
+        ~record:[ (acme "rings", (1, 0, 0)) ]
+        [];
+      publish registry "acme::rings" (1, 1, 0)
+        ~dependencies:[ ("acme::chains", []) ]
+        ~record:[ (acme "chains", (1, 0, 0)) ]
+        [];
+      let root = package [ ("main.truss", "") ] in
+      if add root [ "acme::rings" ] <> 0 then fail "not added";
+      expect_versions root [ ("acme::chains", "1.0.0"); ("acme::rings", "1.1.0") ];
+      expect_problem_in root
+        "truss.lock: Packages cannot depend on each other in a cycle: `acme::chains` -> \
+         `acme::rings` -> `acme::chains`";
+      if
+        List.exists
+          (fun state -> contains state "acme::rings" || contains state "acme::chains")
+          (Database.states ())
+      then fail "a package of the cycle has a state");
+  test "a project's package and a registry package that depend on each other form a cycle"
+    (fun () ->
+      let _ = stocked () in
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+            ( "units/truss.toml",
+              manifest_of "acme::units" ^ "[dependencies]\n\"acme::geometry\" = []\n" );
+          ]
+      in
+      if add (Filename.concat root "app") [ "acme::geometry" ] <> 0 then fail "not added";
+      expect_problem_in root
+        "units/truss.toml: Packages cannot depend on each other in a cycle: `acme::units` -> \
+         `acme::geometry` -> `acme::units`");
   test "a lock file that is not the one the manifests give is a problem, which check --fix fixes"
     (fun () ->
       let _ = stocked () in
@@ -1080,28 +961,17 @@ let () =
       if status <> 0 || not (contains output "Every package is at the version asked for") then
         fail "status %d: %s" status output;
       expect_string ~expected:before (read root "truss.lock"));
-  test "an upgrade says which signatures the project reads change, and which code breaks" (fun () ->
+  test "an upgrade says which code breaks" (fun () ->
       let registry = stocked () in
-      let root =
-        package [ ("main.truss", Fixtures.upgrade_says_which_signatures_the_project_reads) ]
-      in
+      let root = package [ ("main.truss", Fixtures.upgrade_says_which_code_breaks) ] in
       ignore (add root [ "acme::units" ]);
       publish registry "acme::units" (1, 2, 0)
-        [
-          ("lengths/lengths.truss", Fixtures.upgrade_says_which_signatures_the_project_reads_lengths);
-        ];
+        [ ("lengths/lengths.truss", Fixtures.upgrade_says_which_code_breaks_lengths) ];
       let status, output = upgrade root [ "acme::units" ] in
       if status <> 1 then fail "status %d: %s" status output;
       List.iter
         (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
-        [
-          "`acme::units` goes from 1.1.0 to 1.2.0";
-          "acme::units::lengths::meter";
-          "was: public fn meter() -> Int64";
-          "now: public fn meter(scale: Int64) -> Int64";
-          "read by: demo::meter";
-          "errors it does not have now";
-        ]);
+        [ "`acme::units` goes from 1.1.0 to 1.2.0"; "errors it does not have now" ]);
   test "an upgrade says which packages would hold a capability they did not" (fun () ->
       let registry = stocked () in
       let root = package [ uses_geometry ] in
@@ -1337,7 +1207,7 @@ let () =
 
 let () =
   test "a command line is parsed and run as the client would run it" (fun () ->
-      let root = package [ ("main.truss", doubling) ] in
+      let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, _ =
         captured (fun () -> Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in

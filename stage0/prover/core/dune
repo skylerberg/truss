@@ -1,14 +1,12 @@
 (library
  (name prover)
- (modules_without_implementation state invocation)
+ (modules_without_implementation state invocation lookups)
  (libraries
   manifest
   source
   compiler_bug
   logic
   solver
-  query
-  phases
   path
   well_known
   types
@@ -17,9 +15,7 @@
   resolve
   interface
   infer
-  packages
   diagnostic
-  ownership
   mir
   intrinsic
   intrinsic_signatures

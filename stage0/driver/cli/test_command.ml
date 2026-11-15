@@ -1,9 +1,10 @@
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
-let select session packages ~paths ~match_ =
+let select snapshot pipeline packages ~paths ~match_ =
+  let names = Pipeline.names pipeline packages in
   List.concat_map
     (fun (file : Path.file) ->
-      let source = Command_packages.source session packages file in
+      let source = Command_packages.source snapshot packages file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match declaration.path with
@@ -11,10 +12,7 @@ let select session packages ~paths ~match_ =
             when declaration.ordinal = 0
                  && match match_ with Some text -> Substring.contains name text | None -> true ->
               let line =
-                match
-                  Query.demand (Database.context session) Resolve.Names.base
-                    (Resolve.Names.key_of declaration)
-                with
+                match names.base (Resolve.Names.key_of declaration) with
                 | Some (_, base) -> fst (Source.position source base)
                 | None -> 0
               in
@@ -27,8 +25,8 @@ let select session packages ~paths ~match_ =
                   line;
                 }
           | _ -> None)
-        (Query.demand (Database.context session) Resolve.Names.declarations_in file))
-    (Command_packages.selected session packages paths)
+        (names.declarations_in file))
+    (Command_packages.selected snapshot packages paths)
 
 let label test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
 
@@ -179,13 +177,13 @@ let on_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-let run_tests ?rerun ?progress session packages tests =
+let run_tests ?rerun ?progress pipeline snapshot packages tests =
   if tests = [] then []
   else
     match
       Compile.run_tests ?rerun ?progress
-        (Compiler.create session packages Development)
-        ~time_limit_ms:(Database.time_limit_ms session)
+        (Compiler.create pipeline snapshot packages Development)
+        ~time_limit_ms:(Database.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
     with
     | Ok records -> records
@@ -194,10 +192,11 @@ let run_tests ?rerun ?progress session packages tests =
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in
   let started = now_microseconds () in
-  let session, packages = Command_packages.current () in
-  let report = Report.gather session packages in
+  let snapshot, packages = Command_packages.current () in
+  let pipeline = Database.pipeline snapshot in
+  let report = Report.gather pipeline snapshot packages in
   let checked = now_microseconds () in
-  let tests = select session packages ~paths ~match_ in
+  let tests = select snapshot pipeline packages ~paths ~match_ in
   if not (Report.clean report) then raise (Report.Errors report);
   let progress =
     {
@@ -214,7 +213,9 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
     Fun.protect
       ~finally:(fun () -> Status_line.clear progress.line)
       (fun () ->
-        run_tests ~rerun ~progress:(on_progress progress ~build_ended) session packages tests)
+        run_tests ~rerun
+          ~progress:(on_progress progress ~build_ended)
+          pipeline snapshot packages tests)
   in
   let ended = now_microseconds () in
   let build_end = Option.value !build_ended ~default:ended in

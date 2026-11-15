@@ -1,15 +1,11 @@
 (library
  (name resolve)
  (libraries
-  manifest
   zarith
-  query
-  phases
   path
   intrinsic
+  well_known
   types
-  packages
-  parsed
   source
   diagnostic
   syntax

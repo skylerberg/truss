@@ -1,0 +1,13 @@
+type Secret(code: Int64)
+
+public fn secret() -> Secret {
+  Secret(1)
+}
+
+fn double(value: Int64) -> Int64
+  requires value < 1000 && value > -1000
+  ensures result == value * 2
+{
+  let _ = secret()
+  value * 2
+}

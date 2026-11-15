@@ -1,3 +1,0 @@
-use standard::intrinsic
-
-public opaque type String(storage: intrinsic::Storage[UInt8])

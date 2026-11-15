@@ -1,5 +1,5 @@
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;

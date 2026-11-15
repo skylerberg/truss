@@ -1,3 +1,0 @@
-public fn same(value: Int64) -> Int64 {
-  value
-}

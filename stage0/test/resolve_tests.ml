@@ -11,30 +11,14 @@ let standard =
     ("standard::list", "public opaque type List[Element](length: UInt64)\n");
   ]
 
-let setup files =
-  let database = Engine.context (Engine.create ~log:true ()) in
-  let all = standard @ files in
-  let by_package = Hashtbl.create 4 in
-  List.iter
-    (fun (name, text) ->
-      let file = file_of name in
-      let package = file.module_.package in
-      Hashtbl.replace by_package package
-        ((file, text) :: Option.value ~default:[] (Hashtbl.find_opt by_package package)))
-    all;
-  Hashtbl.iter
-    (fun package files ->
-      Database.load_package (Engine.of_context database) ~name:package ~dependencies:[]
-        (List.rev files))
-    by_package;
-  database
+let setup ?dependencies files = Support.setup ?dependencies (standard @ files)
 
 let diagnostics database name =
   let file = file_of name in
   (match Support.parse_errors database file with
   | [] -> ()
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-  Resolve.diagnostics database file
+  Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database) file
 
 let codes = Support.codes
 
@@ -50,11 +34,12 @@ let no_diagnostics files =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
-let one_diagnostic = Support.one_diagnostic ~setup ~check:Resolve.diagnostics
+let check database = Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database)
+let one_diagnostic = Support.one_diagnostic ~setup:(fun files -> setup files) ~check
 
 let name_at database name text occurrence =
   let file = file_of name in
-  let source = Source.text (Query.demand database Packages.source file) in
+  let source = Source.text (Support.source database file) in
   let offset = Option.get (Substring.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let located =
@@ -62,9 +47,9 @@ let name_at database name text occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         match
-          ( Query.demand database Resolve.Names.definition key,
-            Query.demand database Resolve.Names.base key,
-            Query.demand database Resolve.resolved key )
+          ( (Support.names database key.module_.package).definition key,
+            (Support.names database key.module_.package).base key,
+            Pipeline.resolved (Support.pipeline database) key )
         with
         | Some definition, Some (_, base), Some resolved ->
             let names = Syntax_walk.names definition in
@@ -72,7 +57,7 @@ let name_at database name text occurrence =
               (fun (name : Syntax.name) -> (name, names, base, resolved))
               (List.find_opt (fun (name : Syntax.name) -> base + name.span.start = offset) names)
         | _ -> None)
-      (Query.demand database Resolve.Names.declarations_in file)
+      ((Support.names database file.module_.package).declarations_in file)
   in
   match located with
   | Some located -> located
@@ -126,7 +111,7 @@ let () =
       refers_to_binding Fixtures.Resolve.parameter_is_a_local_of_the_body ~use:("count", 2)
         ~binding:("count", 1));
   test "a function type's input is the binding its requires refers to" (fun () ->
-      refers_to_binding "fn f(visit: (fn(index: USize) requires index < 3)) {}\n" ~use:("index", 2)
+      refers_to_binding "fn f(visit: (fn(index: UInt64) requires index < 3)) {}\n" ~use:("index", 2)
         ~binding:("index", 1));
   test "a name bound by is is in scope in the if's block" (fun () ->
       refers_to_binding Fixtures.Resolve.name_bound_by_is_is_in_scope_in_the_ifs_block
@@ -249,14 +234,14 @@ let () =
 let bracket_of text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let offset = Option.get (Substring.find ~occurrence text written) in
-  let declarations = Query.demand database Resolve.Names.declarations (module_of "app::main") in
+  let declarations = Support.declarations database (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
       match
-        ( Query.demand database Resolve.Names.definition key,
-          Query.demand database Resolve.Names.base key,
-          Query.demand database Resolve.resolved key )
+        ( (Support.names database key.module_.package).definition key,
+          (Support.names database key.module_.package).base key,
+          Pipeline.resolved (Support.pipeline database) key )
       with
       | Some definition, Some (_, base), Some resolved ->
           let bracket = ref None in
@@ -351,15 +336,16 @@ let () =
           @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
       in
       let file = file_of "app::main" in
-      if (Query.demand database Parsed.file file).diagnostics = [] then fail "parsed";
-      match Resolve.diagnostics database file with
+      if Support.parse_errors database file = [] then fail "parsed";
+      match Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database) file with
       | [] -> ()
       | reported -> fail "reported %s" (String.concat "; " (codes reported)));
   test "an import of a module that does not exist is an error" (fun () ->
       one_diagnostic Fixtures.Resolve.import_of_a_module_that_does_not_exist_is_an_error
         "resolve.unknown_module");
   test "two imports with one last name are an error at the second" (fun () ->
-      one_diagnostic
+      Support.one_diagnostic ~check
+        ~setup:(setup ~dependencies:[ ("app", "other") ])
         ~others:
           [
             ("app::shapes", "public fn area() -> Int64 { 0 }\n");
@@ -378,7 +364,8 @@ let () =
   test "a method's type head names its type" (fun () ->
       let database = setup [ ("app::main", Fixtures.Resolve.methods_type_head_names_its_type) ] in
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
-      match Query.demand database Resolve.Names.members (owner, "get") with
+      let owner_package = (module_of "app::main").package in
+      match (Support.names database owner_package).members owner "get" with
       | [ { path = Method { receiver = Read; _ }; _ } ] -> ()
       | reported -> fail "found %d members" (List.length reported));
   test "a method can be written in another file of its type's package" (fun () ->
@@ -390,7 +377,8 @@ let () =
           ]
       in
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
-      match Query.demand database Resolve.Names.members (owner, "get") with
+      let owner_package = (module_of "app::main").package in
+      match (Support.names database owner_package).members owner "get" with
       | [ _ ] -> ()
       | reported -> fail "found %d members" (List.length reported));
   test "a body the parser could not read is not resolved" (fun () ->
@@ -398,36 +386,10 @@ let () =
         setup [ ("app::main", Fixtures.Resolve.body_the_parser_could_not_read_is_not_resolved) ]
       in
       let file = file_of "app::main" in
-      if (Query.demand database Parsed.file file).diagnostics = [] then fail "parsed";
-      match Resolve.diagnostics database file with
+      if Support.parse_errors database file = [] then fail "parsed";
+      match Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database) file with
       | [] -> ()
       | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))
-
-let () =
-  test "editing one body resolves only that definition again" (fun () ->
-      let text body = "fn first() -> Int64 { 1 }\n\nfn second() -> Int64 { " ^ body ^ " }\n" in
-      let database = setup [ ("app::main", text "2") ] in
-      let file = file_of "app::main" in
-      ignore (Resolve.diagnostics database file);
-      Database.For_testing.set_text (Engine.of_context database) file (text "3");
-      Engine.For_testing.clear_log (Engine.of_context database);
-      ignore (Resolve.diagnostics database file);
-      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
-      if resolved <> [ Support.top_key "app::main" "second" ] then
-        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved));
-      expect_results_current (Engine.of_context database));
-  test "moving a definition down resolves nothing again" (fun () ->
-      let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
-      let engine = Engine.of_context database in
-      let file = file_of "app::main" in
-      expect_not_recomputed engine
-        ~first:(fun () -> ignore (Resolve.diagnostics database file))
-        ~again:(fun () ->
-          Database.For_testing.set_text engine file
-            Fixtures.Resolve.moving_a_definition_down_resolves_nothing_again;
-          ignore (Resolve.diagnostics database file))
-        Resolve.resolved
-        [ Support.top_key "app::main" "first" ])
 
 let () =
   test "a method in another file of its type's package is resolved, and its import counts"
@@ -442,62 +404,6 @@ let () =
       match codes (diagnostics database "app::extra") with
       | [ "resolve.unknown_name" ] -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
-  test "a definition added above another resolves nothing else again" (fun () ->
-      let database =
-        setup [ ("app::main", Fixtures.Resolve.definition_added_above_another_resolves_nothing) ]
-      in
-      let file = file_of "app::main" in
-      ignore (Resolve.diagnostics database file);
-      Database.For_testing.set_text (Engine.of_context database) file
-        Fixtures.Resolve.definition_added_above_another_resolves_nothing_2;
-      Engine.For_testing.clear_log (Engine.of_context database);
-      ignore (Resolve.diagnostics database file);
-      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
-      if resolved <> [ Support.top_key "app::main" "z" ] then
-        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved));
-      expect_results_current (Engine.of_context database));
-  test "a definition added to one file of a module resolves only its own file's definitions again"
-    (fun () ->
-      let database =
-        setup
-          [
-            ("app::main", "fn f() -> Int64 { g() }\n");
-            ("app::main/helpers", "fn g() -> Int64 { 1 }\n");
-          ]
-      in
-      let main = file_of "app::main" and helpers = file_of "app::main/helpers" in
-      let resolve_all () =
-        ignore (Resolve.diagnostics database main);
-        ignore (Resolve.diagnostics database helpers)
-      in
-      resolve_all ();
-      Database.For_testing.set_text (Engine.of_context database) helpers
-        "fn z() {}\n\nfn g() -> Int64 { 1 }\n";
-      Engine.For_testing.clear_log (Engine.of_context database);
-      resolve_all ();
-      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
-      if resolved <> [ Support.top_key "app::main" "z" ] then
-        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved));
-      expect_results_current (Engine.of_context database));
-  test "moving a definition to another file of its module keeps its key" (fun () ->
-      let database =
-        setup
-          [
-            ("app::main", "fn f() -> Int64 { g() }\n\nfn g() -> Int64 { 1 }\n");
-            ("app::main/helpers", "fn h() {}\n");
-          ]
-      in
-      let main = file_of "app::main" and helpers = file_of "app::main/helpers" in
-      ignore (Resolve.diagnostics database main);
-      let engine = Engine.of_context database in
-      Database.For_testing.set_text engine main "fn f() -> Int64 { g() }\n";
-      Database.For_testing.set_text engine helpers "fn h() {}\n\nfn g() -> Int64 { 1 }\n";
-      (match Resolve.diagnostics database main @ Resolve.diagnostics database helpers with
-      | [] -> ()
-      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-      match Query.demand database Resolve.Names.file_of (Support.top_key "app::main" "g") with
-      | Some file when file = helpers -> ()
-      | _ -> fail "the key does not find the moved definition");
   test "an import used only in a part the parser could not read is not unused" (fun () ->
       let database =
         setup
@@ -506,7 +412,10 @@ let () =
             ("app::main", Fixtures.Resolve.import_used_only_in_a_part_the_parser_could_not);
           ]
       in
-      match Resolve.diagnostics database (file_of "app::main") with
+      match
+        Pipeline.For_testing.(diagnostics [ Resolve ])
+          (Pipeline.create database) (file_of "app::main")
+      with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an element of a field is a place" (fun () ->
@@ -525,7 +434,10 @@ let () =
       let database =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]
       in
-      match Resolve.diagnostics database (file_of "app::main") with
+      match
+        Pipeline.For_testing.(diagnostics [ Resolve ])
+          (Pipeline.create database) (file_of "app::main")
+      with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)))
 
@@ -534,16 +446,17 @@ let () =
     { package = { Path.owner = Some "acme"; name = "geometry" }; modules = [ "vector" ] }
   in
   let with_geometry ~dependencies text =
-    let database = setup [ ("app::main", text) ] in
-    let engine = Engine.of_context database in
-    Database.load_package engine
-      ~name:{ Path.owner = Some "acme"; name = "geometry" }
-      ~dependencies:[]
-      [ ({ module_ = geometry; name = "vector" }, Fixtures.Resolve.geometry_length) ];
-    Database.For_testing.set_manifest engine
-      ~name:{ Path.owner = None; name = "app" }
-      ~dependencies:(List.map (fun package -> { Manifest.package; capabilities = [] }) dependencies);
-    database
+    Support.with_dependencies
+      (setup [ ("app::main", text) ]
+      @ [
+          {
+            name = { Path.owner = Some "acme"; name = "geometry" };
+            dependencies = [];
+            files = [ ({ module_ = geometry; name = "vector" }, Fixtures.Resolve.geometry_length) ];
+          };
+        ])
+      { Path.owner = None; name = "app" }
+      (List.map (fun package -> { Manifest.package; capabilities = [] }) dependencies)
   in
   let uses_both = Fixtures.Resolve.uses_both in
   test "a path into a package with an owner starts with the owner and the name" (fun () ->
@@ -553,7 +466,9 @@ let () =
       (match diagnostics database "app::main" with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-      match Query.demand database Resolve.Names.imports (file_of "app::main") with
+      match
+        (Support.names database (file_of "app::main").module_.package).imports (file_of "app::main")
+      with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
   test "a package with an owner that the manifest does not list cannot be named" (fun () ->

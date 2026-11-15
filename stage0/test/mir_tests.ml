@@ -1,7 +1,10 @@
 open Harness
 open Support
 
-let mir_of database key = Query.demand database Mir.graph key
+let mir_parts database package = Pipeline.For_testing.mir (pipeline database) package
+let app_parts database = mir_parts database (module_of "app::main").package
+let graph_of (parts : Mir.lookups) key = Mir.graph (parts.body_part key)
+let code_of (parts : Mir.lookups) key = Mir.code (parts.body_part key)
 
 let place_locals (place : Mir.place) =
   match place.root with Local local -> [ local ] | Constant _ -> []
@@ -400,6 +403,7 @@ let validate definition (body : Mir.Graph.body) =
 
 let () =
   let database = setup [] in
+  let parts = lazy (mir_parts database Path.standard_package) in
   let built = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
@@ -411,7 +415,7 @@ let () =
               let key = Resolve.Names.key_of declaration in
               let definition = Resolve.Names.show_key key in
               match
-                try mir_of database key
+                try graph_of (Lazy.force parts) key
                 with Compiler_bug.Bug bug ->
                   fail "%s: %s" definition bug.message;
                   None
@@ -421,7 +425,7 @@ let () =
                   validate definition mir.body;
                   Array.iter (validate definition) mir.lambdas
               | None -> ())
-            (Query.demand database Resolve.Names.declarations_in file)))
+            ((Support.names database file.module_.package).declarations_in file)))
     Standard_library.files;
   test "the standard library has MIR" (fun () ->
       if !built < 500 then fail "only %d of its definitions have MIR" !built)
@@ -434,10 +438,11 @@ let both_of_g text =
         let key = Resolve.Names.key_of declaration in
         if key.path = Path.Top { module_ = module_of "app::main"; name = "g" } then Some key
         else None)
-      (Query.demand database Resolve.Names.declarations (module_of "app::main"))
+      (Support.declarations database (Support.module_of "app::main"))
   with
   | Some key -> (
-      match (Query.demand database Mir.mir key, mir_of database key) with
+      let parts = app_parts database in
+      match (code_of parts key, graph_of parts key) with
       | Some built, Some graph ->
           validate "g" graph.body;
           Array.iter (validate "g") graph.lambdas;
@@ -846,15 +851,18 @@ let () =
       let impl_for type_name : Path.t =
         Impl { module_; trait = "Shape"; for_type = { type_name; generics = [] } }
       in
+      let parts = app_parts database in
       let by_path path =
-        match Query.demand database Mir.graph_of_path path with
+        match Mir.graph_of_path parts path with
         | Some mir -> mir
         | None -> failwith (Path.show path ^ " has no MIR")
       in
       let default_method = method_of (Top { module_; name = "Shape" }) "doubled" in
       let default_mir =
         match
-          Option.bind (Query.demand database Interface.Summary.key default_method) (mir_of database)
+          Option.bind
+            ((Support.names database (Path.package default_method)).key default_method)
+            (graph_of parts)
         with
         | Some mir -> mir
         | None -> failwith "the default method has no MIR"
@@ -874,8 +882,9 @@ let () =
       let database = setup [ ("app::main", Fixtures.Mir.defaults_have_bodies_of_their_own) ] in
       let module_ = module_of "app::main" in
       let top name : Path.t = Top { module_; name } in
+      let parts = app_parts database in
       let defaults_of path =
-        match Query.demand database Mir.default_graphs_of_path path with
+        match Mir.default_graphs_of_path parts path with
         | Some defaults -> defaults
         | None -> failwith (Path.show path ^ " has no defaults")
       in
@@ -894,7 +903,7 @@ let () =
         | Field_defaults _ -> failwith "a function with field defaults"
       in
       let add : Path.t = Method { owner = top "Tally"; name = "add"; receiver = Static } in
-      if Query.demand database Mir.of_path add <> None then fail "`Tally.add` has a body's MIR";
+      if Mir.code_of_path parts add <> None then fail "`Tally.add` has a body's MIR";
       if positions (defaults_of add) <> [ (0, Some 5) ] then
         fail "`Tally.add` does not have its default at position 0";
       let advance : Path.t = Method { owner = top "Counter"; name = "advance"; receiver = Mut } in
@@ -943,7 +952,7 @@ let () =
             match statement.kind with Assign { value = Compare _; _ } -> true | _ -> false)
           block.statements
       in
-      match Query.demand database Mir.contract_of_path g with
+      match Mir.contract_of_path (app_parts database) g with
       | Some { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ } -> (
           List.iter
             (fun clause ->
@@ -986,12 +995,12 @@ let () =
       let module_ = module_of "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
-        match Query.demand database Interface.Summary.key g with
+        match (Support.names database (Path.package g)).key g with
         | Some key -> key
         | None -> failwith "the program has no g"
       in
       let mir =
-        match Query.demand database Mir.mir key with
+        match code_of (app_parts database) key with
         | Some mir -> mir
         | None -> failwith "g has no MIR"
       in

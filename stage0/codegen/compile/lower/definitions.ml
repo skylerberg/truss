@@ -1,17 +1,16 @@
 module Names = Resolve.Names
-module Environment = Interface.Environment
 
 let bug format = Compiler_bug.bug ~stage:"Lower" format
 
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
+  constant : Path.t -> Lowered.static_value option;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
   checks : bool;
-  constant : Path.t -> Lowered.static_value option;
 }
 
 let debug_form : Ground.ty -> Glue.debug_form = function
@@ -22,33 +21,30 @@ let debug_form : Ground.ty -> Glue.debug_form = function
       | _ -> Structure)
   | _ -> Structure
 
-let context ?(checks = false) ~constant database system =
-  let rec monomorphic : Monomorphic.context =
+let context ?(checks = false) ~constant (lookups : Lookups.t) system =
+  let monomorphic : Monomorphic.context =
     {
-      type_interface = (fun path -> Query.demand database Environment.type_interface path);
-      normalize = Interface.Impls.normalize database ~bounds:(fun _ -> []);
-      normalize_capabilities = Interface.Impls.normalize_capabilities database ~bounds:(fun _ -> []);
+      type_interface = Interface.Definition.type_interface lookups.interface;
+      normalize = Interface.Impls.normalize lookups.interface ~bounds:Interface.Impls.no_bounds;
+      normalize_capabilities =
+        Interface.Impls.normalize_capabilities lookups.interface ~bounds:Interface.Impls.no_bounds;
     }
-  and context =
-    lazy
-      (let env = Memory_layout.create system ~shape_of:(Monomorphic.shape monomorphic) in
-       let uint64 = Monomorphic.builtin UInt64 in
-       {
-         database;
-         env;
-         glue =
-           Glue.create env
-             ~representation:(Monomorphic.representation monomorphic)
-             ~uint64 ~debug_form ();
-         monomorphic;
-         types =
-           { uint64; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
-         bool = Monomorphic.builtin Bool;
-         checks;
-         constant = (fun path -> constant (Lazy.force context) path);
-       })
   in
-  Lazy.force context
+  let env = Memory_layout.create system ~shape_of:(Monomorphic.shape monomorphic) in
+  let uint64 = Monomorphic.builtin UInt64 in
+  {
+    lookups;
+    constant;
+    env;
+    glue =
+      Glue.create env
+        ~representation:(Monomorphic.representation monomorphic)
+        ~uint64 ~debug_form ();
+    monomorphic;
+    types = { uint64; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
+    bool = Monomorphic.builtin Bool;
+    checks;
+  }
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 
@@ -64,8 +60,6 @@ type code = {
   has_defaults : bool;
 }
 
-let demand context query key = Query.demand context.database query key
-
 let unwritten ~definition_key ~anchor ~substitution ~result =
   {
     definition_key;
@@ -80,30 +74,32 @@ let unwritten ~definition_key ~anchor ~substitution ~result =
   }
 
 let key_of context path =
-  match demand context Interface.Summary.key path with
+  match context.lookups.interface.names.key path with
   | Some key -> key
   | None -> bug "no definition for %s" (Path.show path)
 
-let text_of context key = match demand context Names.text key with Some text -> text | None -> ""
+let text_of context key =
+  match context.lookups.interface.names.text key with Some text -> text | None -> ""
+
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =
-  match Interface.Impls.impl_interface context.database impl with
+  match Interface.Impls.impl_interface context.lookups.interface impl with
   | Some position -> position
   | None -> bug "no interface for %s" (Path.show impl)
 
 let trait_substitution context impl =
-  match Interface.Impls.trait_substitution context.database impl with
+  match Interface.Impls.trait_substitution context.lookups.interface impl with
   | Some substitution -> substitution
   | None -> bug "no trait for %s" (Path.show impl)
 
 let signature_of context (path : Path.t) =
-  match Interface.Impls.signature context.database path with
+  match Interface.Impls.signature context.lookups.interface path with
   | Some signature -> signature
   | None -> bug "no signature for %s" (Path.show path)
 
 let written context path =
-  match Interface.Summary.definition context.database path with
+  match Resolve.Names.definition_of_path context.lookups.interface.names path with
   | Some (key, { kind = Function { signature; body }; _ }) -> Some (key, signature, body)
   | _ -> None
 
@@ -127,21 +123,20 @@ let code_of context (path : Path.t) type_arguments : code =
   in
   match path with
   | Test _ -> (
-      let key = key_of context path in
-      match demand context Names.definition key with
-      | Some { kind = Test _; _ } ->
+      match Resolve.Names.definition_of_path context.lookups.interface.names path with
+      | Some (key, { kind = Test _; _ }) ->
           {
             (unwritten ~definition_key:key ~anchor:path ~substitution:[]
                ~result:(Returns Types.unit))
             with
             text = text_of context key;
             real =
-              (match demand context Environment.interface path with
-              | Some (Test_interface uses) ->
+              (match Interface.Definition.test_uses context.lookups.interface path with
+              | Some uses ->
                   List.filter_map
                     (function Types.Capability path -> Some path | _ -> None)
                     (uses :> Types.capability list)
-              | _ -> []);
+              | None -> []);
           }
       | _ -> bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (
@@ -154,8 +149,8 @@ let code_of context (path : Path.t) type_arguments : code =
       in
       match (written context path, path) with
       | Some code, _ -> function_code ~anchor:path ~enclosing_impl code ~interface ~substitution
-      | None, Method { owner = Derived { type_; _ }; _ } when Mir.is_generated context.database path
-        ->
+      | None, Method { owner = Derived { type_; _ }; _ }
+        when Mir.is_generated context.lookups.mir path ->
           {
             (unwritten ~definition_key:(key_of context type_) ~anchor:path ~substitution
                ~result:interface.output)

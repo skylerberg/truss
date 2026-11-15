@@ -1,0 +1,11 @@
+fn total(box: Box) -> Int64
+  ensures result >= 0
+{
+  box.size()
+}
+
+fn generic_total[T: Measured](value: T) -> Int64
+  ensures result >= 0
+{
+  value.size()
+}

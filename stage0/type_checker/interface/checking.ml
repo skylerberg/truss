@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 
 type state = {
-  database : Query.context;
+  lookups : Lookups.t;
   key : Names.key;
   definition : definition;
   lowered : Environment.lowered_interface;
@@ -17,7 +17,6 @@ let reported state ?fixes code (span : span) message =
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
 
 let bounds state parameter =
-  Option.value ~default:[] (List.assoc_opt parameter state.lowered.bounds)
+  Option.value ~default:[] (List.assoc_opt parameter state.lowered.scope.bounds)
 
-let implements state type_ trait =
-  Impls.implements state.database ~bounds:(bounds state) type_ trait
+let implements state type_ trait = Impls.implements state.lookups ~bounds:(bounds state) type_ trait

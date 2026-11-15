@@ -1,16 +1,14 @@
 (library
  (name ownership)
+ (modules_without_implementation lookups)
  (libraries
   compiler_bug
-  query
-  phases
   path
   well_known
   types
   core
   mir
   moves
-  infer
   interface
   resolve
   syntax

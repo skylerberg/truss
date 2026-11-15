@@ -1,7 +1,11 @@
 open Syntax
 
-let rec expression database ~visiting resolved (value : expression) : Z.t option =
-  let recurse = expression database ~visiting resolved in
+let definition (lookups : Lookups.t) path =
+  Option.bind (lookups.names.key path) (fun key ->
+      Option.map (fun tree -> (key, tree)) (lookups.names.definition key))
+
+let rec expression lookups ~visiting resolved (value : expression) : Z.t option =
+  let recurse = expression lookups ~visiting resolved in
   match value.kind with
   | Integer value -> Some value
   | Parenthesized inner -> recurse inner
@@ -19,33 +23,31 @@ let rec expression database ~visiting resolved (value : expression) : Z.t option
       | _ -> None)
   | Name path -> (
       match (resolved : Resolve.resolved).names.(path.last.id) with
-      | Some (Definition (Constant, path)) -> evaluate database ~visiting path
+      | Some (Definition (Constant, path)) -> evaluate lookups ~visiting path
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
       match resolved.names.(owner.last.id) with
       | Some (Definition (Type, owner)) ->
-          evaluate database ~visiting (Member_constant { owner; name = member.text })
+          evaluate lookups ~visiting (Member_constant { owner; name = member.text })
       | _ -> None)
   | _ -> None
 
-and evaluate database ~visiting path =
+and evaluate (lookups : Lookups.t) ~visiting path =
   if List.exists (Path.equal path) visiting then None
   else
-    match Summary.definition database path with
+    match definition lookups path with
     | Some (key, { kind = Constant { value; _ }; _ }) -> (
-        match Query.demand database Resolve.resolved key with
-        | Some resolved -> expression database ~visiting:(path :: visiting) resolved value
+        match lookups.resolved Body key with
+        | Some resolved -> expression lookups ~visiting:(path :: visiting) resolved value
         | None -> None)
     | _ -> None
 
-let value_of =
-  Query.query ~name:"constant_value" ~phase:Phases.interfaces ~saved:true ~show:Path.show
-    (fun database path -> evaluate database ~visiting:[] path)
+let value_of lookups path = evaluate lookups ~visiting:[] path
 
-let is_uint64 database path =
-  match Summary.definition database path with
+let is_uint64 (lookups : Lookups.t) path =
+  match definition lookups path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (
-      match Query.demand database Resolve.resolved key with
+      match lookups.resolved Interface key with
       | Some resolved ->
           resolved.names.(written.path.last.id)
           = Some (Definition (Type, Intrinsic.builtin_path UInt64))

@@ -4,49 +4,27 @@ let solver () =
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message
 
-let evaluator session packages =
-  Evaluator.of_compiler (lazy (Compiler.create session packages Development))
+type t = { proofs : Pipeline.proofs; verdicts : Pipeline.verdicts Lazy.t }
 
-let checked session packages files =
-  match List.filter (fun file -> Database.diagnostics session file = []) files with
-  | [] -> fun _ -> ([], [])
-  | provable ->
-      let solver = solver () and evaluator = evaluator session packages in
-      let record responses =
-        List.iter
-          (fun (key, response) -> Database.set session Prover.oracle_response key response)
-          responses
-      in
-      Prover.solve_ahead ~evaluator ~record (Database.context session) solver provable;
-      fun file ->
-        if List.mem file provable then
-          ( Prover.diagnostics ~evaluator ~record (Database.context session) solver file,
-            Prover.states ~evaluator ~record (Database.context session) solver file )
-        else ([], [])
+let check pipeline snapshot packages files =
+  let proofs = Pipeline.prove pipeline files in
+  {
+    proofs;
+    verdicts =
+      lazy
+        (Pipeline.decide
+           ~evaluator:
+             (Evaluator.of_compiler (lazy (Compiler.create pipeline snapshot packages Development)))
+           (solver ()) proofs);
+  }
 
-let diagnostics session packages files =
-  let checked = checked session packages files in
-  fun file -> fst (checked file)
+let diagnostics checked file = Pipeline.diagnostics (Lazy.force checked.verdicts) file
+let states checked file = Pipeline.states (Lazy.force checked.verdicts) file
 
-let holes_reached session packages main =
-  let reached = List.hd (Database.reachable session [ main ]) in
-  List.concat_map
-    (fun file ->
-      List.concat_map
-        (fun (declaration : Resolve.Names.declaration) ->
-          match
-            Query.demand (Database.context session) Prover.proof (Resolve.Names.key_of declaration)
-          with
-          | Obligations { holes; _ } when Path.Set.mem declaration.path reached ->
-              List.filter_map
-                (fun (home, (span : Syntax.span)) ->
-                  Option.map
-                    (fun (file, base) ->
-                      let source = Command_packages.source session packages file in
-                      let line, column = Source.position source (base + span.start) in
-                      (declaration.path, Shown_path.shown (Source.path source), line, column))
-                    (Query.demand (Database.context session) Resolve.Names.base home))
-                holes
-          | _ -> [])
-        (Query.demand (Database.context session) Resolve.Names.declarations_in file))
-    (Command_packages.program_files session packages)
+let holes snapshot packages checked definition =
+  List.map
+    (fun (file, offset) ->
+      let source = Command_packages.source snapshot packages file in
+      let line, column = Source.position source offset in
+      (Shown_path.shown (Source.path source), line, column))
+    (Pipeline.holes checked.proofs definition)

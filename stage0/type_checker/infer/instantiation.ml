@@ -3,14 +3,16 @@ open State
 module Environment = Interface.Environment
 
 let check_evidence_grants state (span : span) evidence =
-  let impls = Interface.Grants.evidence_uses state.database ~bounds:(bounds state) evidence in
+  let impls =
+    Interface.Grants.evidence_uses state.lookups.interface ~bounds:(bounds state) evidence
+  in
   state.evidence_packages <-
     List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence_packages;
   List.iter
     (fun message ->
       state.diagnostics <-
         Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
-    (Interface.Grants.messages state.database ~package:state.package impls)
+    (Interface.Grants.messages state.lookups.interface ~package:state.package impls)
 
 let error_at state ?fixes code (value : expression) message =
   match head state value with
@@ -35,7 +37,8 @@ let require state ~(at : span) type_ (bound : Types.trait_reference) ~unmet =
             List.iter
               (fun (name, wanted) ->
                 match
-                  Impls.associated_type state.database ~bounds:(bounds state) type_ trait name
+                  Interface.Impls.associated_type state.lookups.interface ~bounds:(bounds state)
+                    type_ trait name
                 with
                 | Some associated_type when not (unify state associated_type wanted) ->
                     unmet type_ (Some (name, associated_type))
@@ -73,7 +76,7 @@ let require_bounds state (span : span) ?of_type generics substitution =
     (Impls.required generics substitution)
 
 let fresh_arguments state (path : Path.t) =
-  match Query.demand state.database Environment.type_interface path with
+  match Interface.Definition.type_interface state.lookups.interface path with
   | Some interface ->
       List.map
         (fun (generic : Types.generic) ->
@@ -85,7 +88,7 @@ let fresh_arguments state (path : Path.t) =
   | None -> []
 
 let require_type_bounds state span path arguments =
-  match Query.demand state.database Environment.type_interface path with
+  match Interface.Definition.type_interface state.lookups.interface path with
   | Some interface ->
       Option.iter
         (require_bounds state span
@@ -126,7 +129,7 @@ and named_type state (value : expression) path type_arguments =
   | None -> type_ (instantiate_type state value.span path)
   | Some items ->
       let arguments = written_arguments state items in
-      (match Query.demand state.database Interface.Summary.generics_of path with
+      (match Resolve.Names.generics_of state.lookups.interface.names path with
       | Some expected when List.length expected <> List.length arguments ->
           report state Arity value.span
             (Printf.sprintf "`%s` takes %d %s, and %d %s given."
@@ -154,7 +157,7 @@ and type_argument_of_expression state (value : expression) : Types.argument =
   | Integer value, _ -> Types.Value (Known value)
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
-      match Query.demand state.database Interface.Constants.value_of path with
+      match state.lookups.interface.constant_value path with
       | Some value -> Types.Value (Known value)
       | None ->
           Types.Type
@@ -204,5 +207,5 @@ let intrinsic_signature path =
 
 let function_signature state (path : Path.t) =
   match intrinsic_signature path with
-  | Some signature -> Some (Ok signature)
-  | None -> Environment.signature_or_report state.database path
+  | Some signature -> Some signature
+  | None -> Interface.Definition.signature state.lookups.interface path

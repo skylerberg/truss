@@ -25,17 +25,23 @@ let lookup instances key =
 let references program key = Emit_c.references (lookup program key)
 
 let reach_key program root =
-  let own key = Reachable.own_hash (lookup program key) in
-  let groups = Reachable.groups ~edges:(references program) [ root ] in
-  let rec reach key =
-    match Reachable.Keys.find_opt key groups with
-    | None -> Reachable.unit_key ~own:(own key) (List.map reach (references program key))
-    | Some members ->
-        Reachable.group_key
-          ~link:(fun member -> (own member, references program member))
-          ~deep:reach ~members key
-  in
-  reach root
+  List.assoc root
+    (Reachable.reach_keys
+       ~link:(fun key -> (Reachable.own_hash (lookup program key), references program key))
+       ~known:(fun _ -> None)
+       root)
+
+module Instance_components = Components.Make (struct
+  type t = Instance.key
+
+  let equal = Instance.equal
+  let hash = Hashtbl.hash
+  let compare = Instance.compare
+end)
+
+let components program root =
+  List.map (List.map Instance.to_string)
+    (Instance_components.of_graph ~successors:(references program) [ key root ])
 
 let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   let calls name callees =
@@ -95,20 +101,19 @@ let () =
       in
       if own 1 "helper" = own 2 "helper" then fail "the helper's hash is the same";
       if own 1 "start" <> own 2 "start" then fail "the caller's hash changed");
-  test "instances that call each other are one group" (fun () ->
-      let actual = Reachable.groups ~edges:(references (ping_pong 1)) [ key "start" ] in
-      let names key = List.map Instance.to_string (Reachable.Keys.find key actual) in
-      expect_string ~expected:"test::ping test::pong" (String.concat " " (names (key "ping")));
-      if Reachable.Keys.mem (key "start") actual then fail "the caller is in a group");
-  test "an instance that calls only itself is in no group" (fun () ->
+  test "instances that call each other are one component, after the ones they reach" (fun () ->
+      Harness.expect_strings
+        ~expected:[ "test::helper"; "test::ping test::pong"; "test::start" ]
+        (List.map (String.concat " ") (components (ping_pong 1) "start")));
+  test "an instance that calls only itself is a component of its own" (fun () ->
       let again =
         instance "again"
           (function_ ~result:(value int32)
              [ local (Lowered.Value int32) ]
              [ block [ call "again" [] (Some (at 0)) ] (Return (Some (copy 0))) ])
       in
-      let actual = Reachable.groups ~edges:(references [ again ]) [ key "again" ] in
-      if not (Reachable.Keys.is_empty actual) then fail "found a group");
+      Harness.expect_strings ~expected:[ "test::again" ]
+        (List.map (String.concat " ") (components [ again ] "again")));
   test "a test that reaches instances that call each other has a key" (fun () ->
       if reach_key (ping_pong 1) (key "start") = reach_key (ping_pong 2) (key "start") then
         fail "a change inside the group left the key the same");

@@ -59,7 +59,7 @@ let compiler_implements (impl : Types.impl_interface) =
   || Path.equal impl.implements.trait Properties.plain_trait
   || Path.equal impl.implements.trait Properties.storable_trait
 
-let impl_view database ~bounds (impl : Types.impl_interface) (trait_path : path_type) =
+let impl_view lookups ~bounds (impl : Types.impl_interface) (trait_path : path_type) =
   let shown_trait = Names.spell_path trait_path.path in
   let impl_bounds parameter =
     match
@@ -102,8 +102,8 @@ let impl_view database ~bounds (impl : Types.impl_interface) (trait_path : path_
                   | None, Some missing when Path.equal projected.trait impl.implements.trait ->
                       Some (Types.Error (Diagnostic.reported missing))
                   | None, _ ->
-                      Impls.associated_type database ~bounds:impl_bounds impl.for_type projected
-                        name)
+                      Impls.associated_type lookups ~bounds:impl_bounds impl.for_type projected name
+                  )
               | _ -> None)
             (Types.substitute substitution type_)
         in
@@ -118,7 +118,7 @@ let impl_view database ~bounds (impl : Types.impl_interface) (trait_path : path_
                     Option.value ~default:Types.no_capabilities
                       (List.assoc_opt name impl.capability_sets)
                 | capability ->
-                    Impls.normalize_capabilities database ~bounds:impl_bounds
+                    Impls.normalize_capabilities lookups ~bounds:impl_bounds
                       (Types.capability_set [ capability ])
               in
               (set :> Types.capability list))
@@ -133,11 +133,11 @@ let impl_view database ~bounds (impl : Types.impl_interface) (trait_path : path_
           normalize_capabilities;
           missing_associated;
         })
-      (Query.demand database Environment.trait_interface impl.implements.trait)
+      (Definition.trait_interface lookups impl.implements.trait)
 
 let check_impl state (written_members : impl_member line list) (impl : Types.impl_interface)
     (trait_path : path_type) =
-  let database = state.database in
+  let lookups = state.lookups in
   if Well_known.is Panic impl.implements.trait then
     report state Implements_panic trait_path.span
       "Nothing can implement `Panic`, since a panic cannot be caught."
@@ -147,14 +147,14 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
          "The compiler implements `%s` from a type's fields; no `impl` of it can be written."
          (Names.spell_path trait_path.path))
   else
-    match impl_view database ~bounds:(bounds state) impl trait_path with
+    match impl_view lookups ~bounds:(bounds state) impl trait_path with
     | None -> ()
     | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
         let check_evidence_grants (span : span) evidence =
           state.diagnostics <-
             List.map
               (Diagnostic.make ~code:(Capabilities Not_granted) span)
-              (Grants.evidence_messages database ~package:state.key.module_.package
+              (Grants.evidence_messages lookups ~package:state.key.module_.package
                  ~bounds:impl_bounds evidence)
             @ state.diagnostics
         in
@@ -165,7 +165,7 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
               match member.path with
               | Method { name; receiver; _ } -> Some (name, receiver)
               | _ -> None)
-            (Query.demand database Names.contained state.key)
+            (lookups.names.contained state.key)
         in
         List.iter
           (fun (method_ : Types.trait_method) ->
@@ -180,7 +180,9 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
               report state Missing_member trait_path.span
                 (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
                    method_.method_name
-                   (show_signature (Types.map_signature normalize method_.method_signature))
+                   (show_signature
+                      (Types.map_signature normalize
+                         (Definition.method_signature lookups ~owner:impl.implements.trait method_)))
                    shown_trait))
           trait.methods;
         List.iter
@@ -191,7 +193,7 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
                 List.iter
                   (fun bound ->
                     let bound = Types.substitute_trait substitution bound in
-                    match Impls.implements database ~bounds:impl_bounds chosen bound with
+                    match Impls.implements lookups ~bounds:impl_bounds chosen bound with
                     | None ->
                         report state Unsatisfied_bound trait_path.span
                           (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
@@ -233,7 +235,7 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
         List.iter
           (fun (required : Types.trait_reference) ->
             let required = Types.substitute_trait substitution required in
-            match Impls.implements database ~bounds:impl_bounds impl.for_type required with
+            match Impls.implements lookups ~bounds:impl_bounds impl.for_type required with
             | None ->
                 report state Missing_required_impl trait_path.span
                   (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
@@ -247,7 +249,7 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
 
 let check_impl_method state (name : name) (receiver : Path.receiver) (written : Types.signature)
     (impl : Types.impl_interface) (trait_path : path_type) =
-  match impl_view state.database ~bounds:(bounds state) impl trait_path with
+  match impl_view state.lookups ~bounds:(bounds state) impl trait_path with
   | None -> ()
   | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (
       let declared =
@@ -262,6 +264,9 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
           report state Extra_member name.span
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
       | Some declared ->
+          let declared =
+            Definition.method_signature state.lookups ~owner:impl.implements.trait declared
+          in
           if trait.is_capability && not (receiver = Read || receiver = Mut) then
             report state Wrong_receiver name.span
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
@@ -281,9 +286,9 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
               Types.map_signature normalize
                 (Types.substitute_signature
                    (Option.value ~default:[]
-                      (Types.substitution_of declared.method_signature.generics
+                      (Types.substitution_of declared.generics
                          (Types.generic_arguments written.generics)))
-                   declared.method_signature)
+                   declared)
             in
             let expected =
               if trait.is_capability then { expected with receiver = written.receiver }

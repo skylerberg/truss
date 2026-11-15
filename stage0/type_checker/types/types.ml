@@ -476,7 +476,6 @@ type shape =
   | Sum of variant list
   | Todo_type
   | Builtin_type of Intrinsic.builtin
-  | Error_shape of Diagnostic.reported
 
 type type_interface = {
   type_generics : generic list;
@@ -485,14 +484,32 @@ type type_interface = {
   derives : Path.t list;
 }
 
-type associated_type = { associated_name : string; associated_bounds : trait_reference list }
+let substitute_fields interface arguments fields =
+  let substitution = Option.value ~default:[] (substitution_of interface.type_generics arguments) in
+  List.map
+    (fun (field : field) -> { field with field_type = substitute substitution field.field_type })
+    fields
 
-type trait_method = {
-  method_name : string;
-  method_receiver : Path.receiver;
-  method_signature : signature;
-  provided : bool;
-}
+let fields_of interface arguments =
+  match interface.shape with
+  | Record fields -> Some (substitute_fields interface arguments fields)
+  | Sum _ | Todo_type | Builtin_type _ -> None
+
+let variants_of interface arguments =
+  match interface.shape with
+  | Sum variants ->
+      Some
+        (List.map
+           (fun (variant : variant) ->
+             {
+               variant with
+               fields = Option.map (substitute_fields interface arguments) variant.fields;
+             })
+           variants)
+  | Record _ | Todo_type | Builtin_type _ -> None
+
+type associated_type = { associated_name : string; associated_bounds : trait_reference list }
+type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }
 
 type trait_interface = {
   trait_generics : generic list;
@@ -502,7 +519,6 @@ type trait_interface = {
   methods : trait_method list;
   laws : (string * (string * ty) list) list;
   is_capability : bool;
-  broken_methods : (string * Diagnostic.reported) list;
 }
 
 type impl_interface = {
@@ -511,8 +527,7 @@ type impl_interface = {
   for_type : ty;
   impl_uses : capability_set;
   capability_sets : (string * capability_set) list;
-  impl_methods : (string * Path.receiver * signature) list;
-  impl_broken : bool;
+  impl_methods : (string * Path.receiver) list;
 }
 
 type constant_interface = { constant_type : ty }

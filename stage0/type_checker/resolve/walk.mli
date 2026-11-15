@@ -1,5 +1,3 @@
-module String_map : Map.S with type key = String.t
-
 type specification_function = Log | Power | Time | Calls
 
 type target =
@@ -22,38 +20,19 @@ type target =
   | Unknown of Diagnostic.reported
 
 type bracket = Index | Type_arguments | Method_bracket
+type section = Interface | Contract | Body
 
-type value =
-  | Value_local of Syntax.id
-  | Value_generic of Types.parameter
-  | Value_field of string
-  | Value_law_parameter of int
-
-type specification = {
-  active : bool;
-  names_result : bool;
-  cost_bound : bool;
-  names_visited : bool;
-  names_final : bool;
-  elements : string list;
-}
-
-type scope = {
-  values : (value * string) String_map.t;
-  types : target String_map.t;
-  specification : specification;
-  is_lending_method : bool;
-}
-
-type state = {
-  database : Query.context;
-  file : Path.file;
+type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;
-  mutable holes : (Syntax.id * (string * value) list) list;
   mutable used_imports : string list;
 }
+
+type state
+
+val create : Names.lookups -> Path.file -> size:int -> state
+val names_of : state -> section -> section_names
 
 val report :
   state ->

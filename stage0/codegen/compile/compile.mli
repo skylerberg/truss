@@ -1,9 +1,6 @@
+module Lookups = Lookups
+
 type t
-type lowering
-
-val roots : (lowering, Instance.key list) Query.input
-val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key list
-
 type results = { find : string -> string option; add : string -> string -> unit }
 type 'a ran = Ran of 'a | Ran_too_long
 
@@ -13,9 +10,8 @@ val create :
   ?results:results ->
   ?evaluation_time_limit_ms:int ->
   ?programs:string ->
-  want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
-  Query.context ->
+  Lookups.t ->
   Libc.system ->
   Toolchain.t ->
   Build.cache ->
@@ -49,8 +45,6 @@ val run_tests :
   Path.t list ->
   (record list, string) result
 
-val test_keys : t -> Path.t list -> (Path.t * string) list
-
 type unshippable = {
   failure : [ `Todo | `Echo ];
   file : string;
@@ -60,9 +54,9 @@ type unshippable = {
 }
 
 val unshippable : t -> main:Path.t -> (unshippable list, string) result
+val reached_definitions : t -> main:Path.t -> (Path.t list, string) result
 val fresh_program : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
-val run_key : t -> Instance.key -> (string, string) result
 
 val check_template :
   t -> from_template:Path.t -> texts:string list -> ((int * bool) list ran, string) result
@@ -71,20 +65,7 @@ val evaluate_call :
   t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
 
 module For_testing : sig
-  module Lower : sig
-    type context
-    type constant = Lower.constant = Folded of Lowered.data | Run of Ground.ty
-
-    val context :
-      ?checks:bool ->
-      constant:(context -> Path.t -> Lowered.static_value option) ->
-      Query.context ->
-      Libc.system ->
-      context
-
-    val constant : context -> Path.t -> constant
-    val constant_value : context -> Path.t -> Lowered.static_value option
-  end
+  val is_folded : t -> Path.t -> bool
 
   module Intrinsics = Intrinsics
 

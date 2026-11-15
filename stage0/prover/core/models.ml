@@ -53,9 +53,8 @@ let rec sequence_at context element term index =
   let sequence = sequence_type element in
   let index_trait = Well_known.path Index in
   match
-    Call_graph.impls_for
-      (Query.demand context.database Call_graph.package_impls Path.standard_package)
-      [ index_trait ] sequence
+    Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ index_trait ]
+      sequence
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
@@ -135,9 +134,7 @@ let model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
 let find_model_function context (ty : Types.ty) ~(model : Types.ty) =
   let model_trait = Well_known.path Model in
   match
-    Call_graph.impls_for
-      (Query.demand context.database Call_graph.package_impls Path.standard_package)
-      [ model_trait ] ty
+    Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in

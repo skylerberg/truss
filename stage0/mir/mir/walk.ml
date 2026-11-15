@@ -1,7 +1,7 @@
 open Tree
 
-let nested_blocks (statement : statement) : block list =
-  match statement.kind with
+let nested_blocks_of (type form) (kind : form statement_kind) : block list =
+  match kind with
   | Assign { value = Specification (Quantified { matches; body; _ }); _ } -> [ matches; body ]
   | Assign { value = Cases cases; _ } ->
       List.concat_map
@@ -21,16 +21,37 @@ let nested_blocks (statement : statement) : block list =
   | Yield _ | Jump _ ->
       []
 
-let rec iter_places_read visit (block : block) =
-  let operand = function
-    | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
-    | Constant _ -> ()
-  in
-  let callee : callee -> unit = function Indirect callee -> operand callee | _ -> () in
-  let call (call : call) =
-    callee call.callee;
-    List.iter (function Passed { value; _ } -> operand value | Default -> ()) call.arguments
-  in
+let nested_blocks (statement : statement) = nested_blocks_of statement.kind
+
+let operand_place visit = function
+  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
+  | Constant _ -> ()
+
+let callee_places visit : callee -> unit = function
+  | Indirect callee -> operand_place visit callee
+  | _ -> ()
+
+let call_places visit (call : call) =
+  callee_places visit call.callee;
+  List.iter
+    (function Passed { value; _ } -> operand_place visit value | Default -> ())
+    call.arguments
+
+let iteration_places visit = function
+  | Range { start; stop; _ } ->
+      operand_place visit start;
+      operand_place visit stop
+  | Pull { cursor; next } ->
+      visit cursor;
+      callee_places visit next
+
+let rec yielded_places visit = function
+  | Part part -> operand_place visit part
+  | Built { fields; _ } ->
+      List.iter (fun (_, field) -> Option.iter (yielded_places visit) field) fields
+
+let rvalue_places visit rvalue =
+  let operand = operand_place visit in
   let specification = function
     | Result | Yielded -> ()
     | Entry local -> visit { root = Local local; projections = [] }
@@ -38,7 +59,7 @@ let rec iter_places_read visit (block : block) =
         operand first;
         operand second
     | Applied { arguments; _ } -> List.iter operand arguments
-    | Method_time method_ -> callee method_
+    | Method_time method_ -> callee_places visit method_
     | Map entries ->
         List.iter
           (fun (key, value) ->
@@ -53,55 +74,77 @@ let rec iter_places_read visit (block : block) =
             operand stop
         | Over_collection collection -> operand collection)
   in
-  let rvalue = function
-    | Cases _ -> ()
-    | Conditional { condition; _ } -> operand condition
-    | Connective { left; _ } -> operand left
-    | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
-        operand value
-    | Operation { operands; _ } | Array operands -> List.iter operand operands
-    | Compare { left; right; _ } ->
-        operand left;
-        operand right
-    | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter operand field) fields
-    | Is_variant { place; _ } -> visit place
-    | Lambda { captures; _ } -> List.iter (fun (capture : capture) -> visit capture.place) captures
-    | Function_value _ | Value_parameter _ -> ()
-    | Specification value -> specification value
+  match rvalue with
+  | Cases _ -> ()
+  | Conditional { condition; _ } -> operand condition
+  | Connective { left; _ } -> operand left
+  | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
+      operand value
+  | Operation { operands; _ } | Array operands -> List.iter operand operands
+  | Compare { left; right; _ } ->
+      operand left;
+      operand right
+  | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter operand field) fields
+  | Is_variant { place; _ } -> visit place
+  | Lambda { captures; _ } -> List.iter (fun (capture : capture) -> visit capture.place) captures
+  | Function_value _ | Value_parameter _ -> ()
+  | Specification value -> specification value
+
+let rec iter_places_read visit (block : block) =
+  List.iter (fun (statement : statement) -> statement_places visit statement.kind) block.statements;
+  Option.iter (operand_place visit) block.value
+
+and statement_places : type form. (place -> unit) -> form statement_kind -> unit =
+ fun visit kind ->
+  (match kind with
+  | Assign { value; _ } -> rvalue_places visit value
+  | Call { call; _ } | Lend { call; _ } | Template { call; _ } -> call_places visit call
+  | Slice { base; call; _ } ->
+      visit base;
+      call_places visit call
+  | Assert { condition = value; _ } | Echo value | Loan_start { borrowed = value; _ } ->
+      operand_place visit value
+  | Provide { provided; _ } ->
+      List.iter (fun (provided : provided) -> operand_place visit provided.value) provided
+  | For { iteration; _ } -> iteration_places visit iteration
+  | Yield { part; _ } -> yielded_places visit part
+  | Jump (Return returned) -> Option.iter (operand_place visit) returned
+  | Jump (Cancel { returned; _ }) ->
+      Option.iter (fun (value, _) -> operand_place visit value) returned
+  | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
+  | Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ | While _
+  | Fork _ | Resume _ ->
+      ());
+  List.iter (iter_places_read visit) (nested_blocks_of kind)
+
+let iter_graph ~statement ~terminator (graph : Graph.t) =
+  let body (body : Graph.body) =
+    Array.iter
+      (fun (basic : Graph.basic_block) ->
+        List.iter
+          (fun (graph_statement : Graph.statement) -> statement graph_statement.kind)
+          basic.statements;
+        terminator basic.terminator)
+      body.blocks
   in
-  let rec yielded = function
-    | Part part -> operand part
-    | Built { fields; _ } -> List.iter (fun (_, field) -> Option.iter yielded field) fields
+  body graph.body;
+  Array.iter body graph.lambdas
+
+let constants_named (graph : Graph.t) =
+  let named = ref Path.Set.empty in
+  let visit (place : place) =
+    match place.root with Constant path -> named := Path.Set.add path !named | Local _ -> ()
   in
-  List.iter
-    (fun (statement : statement) ->
-      (match statement.kind with
-      | Assign { value; _ } -> rvalue value
-      | Call { call = called; _ } | Lend { call = called; _ } | Template { call = called; _ } ->
-          call called
-      | Slice { base; call = called; _ } ->
-          visit base;
-          call called
-      | Assert { condition = value; _ } | Echo value | Loan_start { borrowed = value; _ } ->
-          operand value
-      | Provide { provided; _ } ->
-          List.iter (fun (provided : provided) -> operand provided.value) provided
-      | For { iteration = Range { start; stop; _ }; _ } ->
-          operand start;
-          operand stop
-      | For { iteration = Pull { cursor; next }; _ } ->
-          visit cursor;
-          callee next
-      | Yield { part; _ } -> yielded part
-      | Jump (Return returned) -> Option.iter operand returned
-      | Jump (Cancel { returned; _ }) -> Option.iter (fun (value, _) -> operand value) returned
-      | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
-      | Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ | While _
-      | Fork _ | Resume _ ->
-          ());
-      List.iter (iter_places_read visit) (nested_blocks statement))
-    block.statements;
-  Option.iter operand block.value
+  iter_graph graph ~statement:(statement_places visit) ~terminator:(function
+    | Branch { condition; _ } -> operand_place visit condition
+    | For { iteration; _ } -> iteration_places visit iteration
+    | Yield { part; _ } -> yielded_places visit part
+    | Return returned -> Option.iter (operand_place visit) returned
+    | Cancel { returned; _ } -> Option.iter (fun (value, _) -> operand_place visit value) returned
+    | Goto _ | Fork _ | Join _ | Iteration_end _ | Resume _ | Unreachable | Written_unreachable
+    | Todo ->
+        ());
+  Path.Set.elements !named
 
 let rec visit_block visit (block : block) =
   List.iter

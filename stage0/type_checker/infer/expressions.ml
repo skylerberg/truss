@@ -6,7 +6,7 @@ module Lower = Interface.Lower
 open State
 open Modes
 open Instantiation
-open Lookups
+open Name_lookup
 open Pattern_typing
 open Methods
 open Operators
@@ -297,7 +297,7 @@ and is_field state env (inner : expression) (member : name) =
   in
   match normalize state base_type with
   | Types.Named { path; arguments } -> (
-      match Members.fields state.database path arguments with
+      match Members.fields state.lookups path arguments with
       | Some fields ->
           List.exists (fun (field : Types.field) -> field.field_name = member.text) fields
       | None -> false)

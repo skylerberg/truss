@@ -82,8 +82,8 @@ let type_frame context frame source (ty : Types.ty) ~self =
 
 let type_source context (ty : Types.ty) =
   match ty with
-  | Types.Named { path; _ } when Interface.Summary.kind_of context.database path = Some Type ->
-      Option.map (fun (source, _, _) -> source) (source_at context.database path)
+  | Types.Named { path; _ } when Names.kind_of context.lookups.interface.names path = Some Type ->
+      Option.map (fun (source, _, _) -> source) (source_at context.lookups path)
   | _ -> None
 
 let type_clauses context (ty : Types.ty) =
@@ -91,7 +91,7 @@ let type_clauses context (ty : Types.ty) =
   | Types.Named { path; _ }, Some source ->
       Option.map
         (fun (clauses : Mir.type_clauses) -> (source, clauses))
-        (Query.demand context.database Mir.type_clauses_of_path path)
+        (Mir.type_clauses_of_path context.lookups.mir path)
   | _ -> None
 
 let invariants (clauses : Mir.loop_clause list) =
@@ -245,14 +245,14 @@ let callback_facts context frame (invocation : Invocation.t) position known argu
   match invocation.callee with
   | Function { path; type_arguments } -> (
       match
-        Option.bind (source_at context.database path) (fun (callee, _, _) ->
-            part_of context.database path callee)
+        Option.bind (source_at context.lookups path) (fun (callee, _, _) ->
+            part_of context.lookups path callee)
       with
       | Some part -> (
           match List.assoc_opt position part.callbacks with
           | Some { inputs; requires } when List.length inputs = List.length arguments ->
               let substitution =
-                match Interface.Impls.signature context.database path with
+                match Interface.Impls.signature context.lookups.interface path with
                 | Some (signature : Types.signature) ->
                     callee_substitution frame signature type_arguments
                 | None -> []
@@ -275,7 +275,7 @@ let callback_facts context frame (invocation : Invocation.t) position known argu
 let parameter_type context frame (invocation : Invocation.t) index =
   match invocation.callee with
   | Function { path; type_arguments } -> (
-      match Interface.Impls.signature context.database path with
+      match Interface.Impls.signature context.lookups.interface path with
       | Some (signature : Types.signature) ->
           let types =
             (match signature.receiver with

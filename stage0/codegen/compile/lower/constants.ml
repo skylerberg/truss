@@ -140,6 +140,27 @@ let literal st ty (constant : Mir.constant) =
       | _ -> None)
   | Unit -> None
 
+let constant_state context path =
+  let key = key_of context path in
+  let mir =
+    match Mir.initializer_graph_of_path context.lookups.mir path with
+    | Some mir -> mir
+    | None -> bug "%s is not a constant" (Path.show path)
+  in
+  let ty =
+    match Interface.Definition.constant_type context.lookups.interface path with
+    | Some ty -> Monomorphic.ground context.monomorphic [] ty
+    | None -> bug "%s has no type" (Path.show path)
+  in
+  let code =
+    {
+      (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns Types.unit)) with
+      text = text_of context key;
+    }
+  in
+  let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in
+  (st, mir, ty)
+
 let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.static_value list) =
   let body = mir.body in
   let locals = Hashtbl.create 16 in
@@ -225,7 +246,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
             Some ()
         | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
-        let* callee_mir = demand st.context Mir.graph_of_path path in
+        let* callee_mir = Mir.graph_of_path st.context.lookups.mir path in
         let type_arguments =
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
@@ -282,27 +303,6 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
     end
   in
   run 0
-
-let constant_state context path =
-  let key = key_of context path in
-  let mir =
-    match demand context Mir.graph_of_constant path with
-    | Some mir -> mir
-    | None -> bug "%s is not a constant" (Path.show path)
-  in
-  let ty =
-    match demand context Environment.constant_type path with
-    | Some ty -> Monomorphic.ground context.monomorphic [] ty
-    | None -> bug "%s has no type" (Path.show path)
-  in
-  let code =
-    {
-      (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns Types.unit)) with
-      text = text_of context key;
-    }
-  in
-  let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in
-  (st, mir, ty)
 
 type constant = Folded of Lowered.data | Run of Ground.ty
 

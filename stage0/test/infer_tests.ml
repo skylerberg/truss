@@ -1,7 +1,9 @@
 open Harness
 open Support
 
-let check = Checks.For_testing.through Infer
+let check database =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline database)
+
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
@@ -15,9 +17,9 @@ let expression_at text written occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         match
-          ( Query.demand database Resolve.Names.definition key,
-            Query.demand database Resolve.Names.base key,
-            Query.demand database Infer.type_check_result key )
+          ( (Support.names database key.module_.package).definition key,
+            (Support.names database key.module_.package).base key,
+            Pipeline.For_testing.checked_body (pipeline database) key )
         with
         | Some definition, Some (_, base), Some result ->
             let best = ref None in
@@ -39,7 +41,7 @@ let expression_at text written occurrence =
             Syntax_walk.definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      (Query.demand database Resolve.Names.declarations_in file)
+      ((Support.names database file.module_.package).declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -52,19 +54,17 @@ let has_integer text value =
     (first_core_nodes text).expressions
 
 let core_at text written occurrence =
-  let value, (result : Infer.type_check_result) = expression_at text written occurrence in
-  match result.core with
-  | None -> failwith (Printf.sprintf "no core form holds %S" written)
-  | Some form ->
-      let nodes = ref [] in
-      Core_walk.definition
-        {
-          Core_walk.ignore_all with
-          expression =
-            (fun (node : Core.expression) -> if node.origin = value.id then nodes := node :: !nodes);
-        }
-        form.definition;
-      List.rev !nodes
+  let value, (result : Infer.checked) = expression_at text written occurrence in
+  let form = result.form in
+  let nodes = ref [] in
+  Core_walk.definition
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) -> if node.origin = value.id then nodes := node :: !nodes);
+    }
+    form.definition;
+  List.rev !nodes
 
 let core_call_at text written occurrence =
   match
@@ -88,7 +88,7 @@ let is_view : Core.argument -> bool = function
   | _ -> false
 
 let has_type text written ?(occurrence = 1) expected =
-  let value, (result : Infer.type_check_result) = expression_at text written occurrence in
+  let value, (result : Infer.checked) = expression_at text written occurrence in
   match result.tables.types.(value.id) with
   | Some type_ ->
       if Types.show type_ <> expected then
@@ -206,6 +206,15 @@ let () =
       fine Fixtures.Infer.operand_can_be_the_result_of_an_operators_method);
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic Fixtures.Infer.type_without_the_operators_trait_is_an_error "types.no_impl")
+
+let () =
+  test "a call to a function whose signature fails a check reports nothing" (fun () ->
+      one_diagnostic Fixtures.Infer.call_to_a_function_whose_signature_fails_a_check_reports_nothing
+        "types.private_in_public");
+  test "a call to a function whose parameter type is unknown reports nothing" (fun () ->
+      one_diagnostic
+        Fixtures.Infer.call_to_a_function_whose_parameter_type_is_unknown_reports_nothing
+        "resolve.unknown_name")
 
 let () =
   let functions = "fn copy_file(source: Int64, destination: Int64) {}\n\n" in
@@ -510,29 +519,15 @@ let () =
       fine Fixtures.Infer.for_loop_over_a_list_visits_its_positions)
 
 let () =
-  test "editing a function's body re-checks no caller" (fun () ->
-      let text body =
-        "fn callee() -> Int64 { " ^ body ^ " }\n\nfn caller() -> Int64 {\n  callee()\n}\n"
-      in
-      let database = setup [ ("app::main", text "1") ] in
-      let engine = Engine.of_context database in
-      let file = file_of "app::main" in
-      expect_not_recomputed engine
-        ~first:(fun () -> ignore (Infer.diagnostics database file))
-        ~again:(fun () ->
-          Database.For_testing.set_text engine file (text "2");
-          ignore (Infer.diagnostics database file))
-        Infer.type_check_result
-        [ top_key "app::main" "caller" ]);
   test "checking twice gives the same result" (fun () ->
       let text = Fixtures.Infer.checking_twice_gives_the_same_result in
       let type_check_result () =
         let database = setup [ ("app::main", text) ] in
         let key =
           Resolve.Names.key_of
-            (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+            (List.hd (Support.declarations database (Support.module_of "app::main")))
         in
-        Query.demand database Infer.type_check_result key
+        Pipeline.For_testing.checked_body (pipeline database) key
       in
       if type_check_result () <> type_check_result () then fail "different")
 
@@ -544,7 +539,8 @@ let () =
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
-                Query.demand database Infer.type_check_result (Resolve.Names.key_of declaration)
+                Pipeline.For_testing.checked_body (pipeline database)
+                  (Resolve.Names.key_of declaration)
               with
               | Some { tables; _ } ->
                   List.iter
@@ -557,7 +553,7 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            (Query.demand database Resolve.Names.declarations_in file))
+            ((Support.names database file.module_.package).declarations_in file))
         Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
@@ -577,14 +573,20 @@ let () =
   test
     "storage_lengthen rejects an element type with a drop, which would free memory that nothing \
      wrote" (fun () ->
-      let in_standard files =
-        let database = Engine.context (Engine.create ()) in
-        Database.load_package (Engine.of_context database) ~name:Path.standard_package
-          ~dependencies:[]
-          (Standard_library.files @ List.map (fun (name, text) -> (file_of name, text)) files);
-        database
+      let in_standard files : Project.package list =
+        [
+          {
+            name = Path.standard_package;
+            dependencies = [];
+            files =
+              Standard_library.files @ List.map (fun (name, text) -> (file_of name, text)) files;
+          };
+        ]
       in
-      one_diagnostic ~setup:in_standard ~file:"standard::probe"
+      Support.one_diagnostic ~setup:in_standard ~file:"standard::probe"
+        ~check:(fun database ->
+          Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+            (Pipeline.create database))
         Fixtures.Infer.storage_lengthen_rejects_an_element_type_with_a_drop
         "types.unsatisfied_bound");
   test "a type written in a body that is not a type is an error" (fun () ->

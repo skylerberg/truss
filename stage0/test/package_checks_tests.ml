@@ -1,7 +1,7 @@
 open Harness
 open Support
 
-let check = Checks.diagnostics
+let check database = Support.diagnostics (Support.pipeline database)
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -200,7 +200,7 @@ let () =
             ("app::main", Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on_2);
           ]
       in
-      match codes (Checks.diagnostics database (file_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "an impl in another package cannot give a type another overload of its method" (fun () ->
@@ -214,7 +214,7 @@ let () =
               Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another_2 );
           ]
       in
-      match codes (Checks.diagnostics database (file_of "app::main")) with
+      match codes (check database (file_of "app::main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "impls whose heads unify only through an infinite type do not overlap" (fun () ->

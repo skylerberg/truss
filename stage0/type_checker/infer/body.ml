@@ -6,12 +6,7 @@ open State
 open Statements
 open Expressions
 
-type type_check_result = {
-  tables : Tables.published;
-  core : Core.t option;
-  diagnostics : Syntax.diagnostic list;
-  evidence_packages : Path.package list;
-}
+type checked = { form : Core.t; tables : Tables.published; evidence_packages : Path.package list }
 
 let no_output : env =
   {
@@ -148,7 +143,8 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
           | Some info ->
               in_statement state env value.span (fun () ->
                   let actual = expression state env ~expected:info.type_ value in
-                  Lookups.coerce state env ~argument:info.mode value ~actual ~expected:info.type_);
+                  Name_lookup.coerce state env ~argument:info.mode value ~actual
+                    ~expected:info.type_);
               Constant.check state ~default:true value
           | None -> ())
       | _ -> ())
@@ -258,10 +254,10 @@ let check_function state ~broken_body (written : signature) (body_block : block 
   check_clauses state env written.clauses;
   state.form.definition_builder <-
     Some
-      (fun () ->
+      (fun ~holds_body ->
         let parameters = core_parameters state written.parameters signature in
         let contract = core_contract state written.clauses in
-        let body = Option.map (build_block state) body_block in
+        let body = if holds_body then Option.map (build_block state) body_block else None in
         let body =
           match signature.output with
           | Lends (mode, _) -> Option.map (Form.lend_block state mode) body
@@ -286,9 +282,11 @@ let check_deserialized_invariants state (lowered : Environment.lowered_interface
         invariants
   | _ -> ()
 
-let check_definition state (lowered : Environment.lowered_interface) =
+let check_definition state (lowered : Environment.lowered_interface) ~checks_body =
   let definition = state.definition in
-  let broken part = Resolve.Parts.broken definition part in
+  let broken (part : Resolve.Parts.part) =
+    Resolve.Parts.broken definition part || (part = Body && not checks_body)
+  in
   if not (broken Header) then
     match (definition.kind, lowered.interface) with
     | Function { signature; body = written }, Function_interface lowered_signature ->
@@ -321,7 +319,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
         in
         state.form.definition_builder <-
           Some
-            (fun () ->
+            (fun ~holds_body:_ ->
               let defaults =
                 List.map
                   (fun (variant, name, value) -> (variant, name, build_expression state value))
@@ -394,7 +392,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
         let self = Types.Parameter { owner = state.key.path; name = "Self" } in
         state.form.definition_builder <-
           Some
-            (fun () ->
+            (fun ~holds_body:_ ->
               Trait
                 (List.concat
                    (List.mapi
@@ -454,14 +452,20 @@ let check_definition state (lowered : Environment.lowered_interface) =
               | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
+        state.form.definition_builder <-
+          Some
+            (fun ~holds_body ->
+              Constant (if holds_body then Some (build_expression state value) else None));
         if not (broken Body) then begin
           in_statement state constant_expression value.span (fun () ->
               check state constant_expression value constant.constant_type);
-          state.form.definition_builder <- Some (fun () -> Constant (build_expression state value));
           Constant.check state ~default:false value
         end
     | Test { body = written; _ }, _ ->
-        state.form.definition_builder <- Some (fun () -> Test (build_block state written));
+        state.form.definition_builder <-
+          Some
+            (fun ~holds_body ->
+              Test (if holds_body then Some (build_block state written) else None));
         if not (broken Body) then
           body state { no_output with output = Some (Returns Types.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
@@ -472,13 +476,18 @@ let check_definition state (lowered : Environment.lowered_interface) =
         check_clauses state env clauses;
         state.form.definition_builder <-
           Some
-            (fun () ->
+            (fun ~holds_body ->
               let parameters = core_parameters state parameters signature in
               let contract = core_contract state clauses in
-              Function { parameters; contract; body = Some (build_block state written) });
+              Function
+                {
+                  parameters;
+                  contract;
+                  body = (if holds_body then Some (build_block state written) else None);
+                });
         if not (broken Body) then body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (match Query.demand state.database Environment.trait_interface trait.trait with
+        (match Interface.Definition.trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
               Interface.Properties.trait_substitution interface ~self:for_type trait
@@ -490,7 +499,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
         | None -> ());
         state.form.definition_builder <-
           Some
-            (fun () ->
+            (fun ~holds_body ->
               let parameters =
                 List.mapi
                   (fun index (name, type_) : Core.parameter ->
@@ -505,14 +514,24 @@ let check_definition state (lowered : Environment.lowered_interface) =
                   state.law_parameters
               in
               state.form.next_synthetic_local <- List.length parameters;
-              Law_proof { parameters; body = build_block state written });
+              Law_proof
+                {
+                  parameters;
+                  body = (if holds_body then Some (build_block state written) else None);
+                });
         if not (broken Body) then
           body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | Law_proof { body = written; _ }, _ ->
         state.form.definition_builder <-
-          Some (fun () -> Law_proof { parameters = []; body = build_block state written });
+          Some
+            (fun ~holds_body ->
+              Law_proof
+                {
+                  parameters = [];
+                  body = (if holds_body then Some (build_block state written) else None);
+                });
         if not (broken Body) then
           body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
@@ -628,21 +647,25 @@ let integer_literal_range (bounds : Types.trait_reference list) =
           | None, found | found, None -> found)
         None builtins)
 
-let check database (key : Names.key) =
+let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   match
-    (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
+    ( lookups.interface.names.definition key,
+      Resolve.whole
+        ~sections:(if checks_body then Resolve.sections else [ Interface; Contract ])
+        lookups.interface.resolved key,
+      lookups.interface.lowered_interface key )
   with
-  | Some definition, Some resolved ->
+  | Some definition, Some resolved, Some lowered ->
       let module_ = key.module_ in
-      let lowered, context = Environment.lower database key definition resolved in
-      let text = Option.value ~default:"" (Query.demand database Names.text key) in
+      let context = Interface.Lower.create lookups.interface resolved lowered.scope in
+      let text = Option.value ~default:"" (lookups.interface.names.text key) in
       let binding_spans = Hashtbl.create 64 in
       List.iter
         (fun (name : name) -> Hashtbl.replace binding_spans name.id name.span)
         (Syntax_walk.names definition);
       let state : state =
         {
-          database;
+          lookups;
           key;
           package = module_.package;
           definition;
@@ -680,24 +703,21 @@ let check database (key : Names.key) =
           annotatable = Hashtbl.create 8;
         }
       in
-      let interface_diagnostics = List.length !(context.diagnostics) in
-      let interface_named = List.length !(context.named) in
       state.unifier.integer_range <-
         (fun type_ ->
           integer_literal_range
-            (Interface.Properties.known_bounds database ~bounds:(bounds state) type_));
-      check_definition state lowered;
-      let since count list = List.filteri (fun index _ -> index < List.length list - count) list in
-      state.diagnostics <- since interface_diagnostics !(context.diagnostics) @ state.diagnostics;
+            (Interface.Properties.known_bounds lookups.interface ~bounds:(bounds state) type_));
+      check_definition state lowered ~checks_body;
+      state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
       state.diagnostics <-
-        Interface.Check.bound_diagnostics database ~package:state.package ~bounds:(bounds state)
-          (since interface_named !(context.named))
+        Interface.Check.bound_diagnostics lookups.interface ~package:state.package
+          ~bounds:(bounds state) !(context.named)
         @ state.diagnostics;
       finalize state;
       Exported_parts.check state;
       let any_type unwanted =
         let contains table =
-          Array.exists
+          Seq.exists
             (function
               | Some type_ ->
                   let has_unwanted = ref false in
@@ -709,35 +729,16 @@ let check database (key : Names.key) =
                        type_);
                   !has_unwanted
               | None -> false)
-            table
+            (Array.to_seq table)
         in
         contains state.tables.types || contains state.tables.local_types
         || contains state.tables.scrutinee_types
       in
-      let broken =
-        let shapes = Hashtbl.create 8 in
-        fun (part : Types.ty) ->
-          Types.is_error part
-          ||
-          match part with
-          | Types.Named { path; _ } -> (
-              match Hashtbl.find_opt shapes path with
-              | Some broken -> broken
-              | None ->
-                  let broken =
-                    match Members.shape state.database path with
-                    | Some (Error_shape _) -> true
-                    | _ -> false
-                  in
-                  Hashtbl.replace shapes path broken;
-                  broken)
-          | _ -> false
-      in
-      let whole =
-        state.diagnostics = [] && resolved.diagnostics = []
-        && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
-        && (match lowered.interface with Error_interface _ -> false | _ -> true)
-        && not (any_type broken)
+      let is_clean () =
+        state.diagnostics = []
+        && (not (Resolve.Parts.broken definition Header))
+        && (not (checks_body && Resolve.Parts.broken definition Body))
+        && not (any_type Types.is_error)
       in
       let build () : Core.t =
         state.form.next_node_id <- 0;
@@ -749,47 +750,37 @@ let check database (key : Names.key) =
           finalize state
         end;
         let definition =
-          match state.form.definition_builder with Some build -> build () | None -> Core.Empty
+          match state.form.definition_builder with
+          | Some build -> build ~holds_body:checks_body
+          | None -> Core.Empty
         in
         state.tables <- checked;
         state.form.tables_with_holes <- None;
         { definition }
       in
-      let form = if whole then Some (build ()) else None in
-      (match form with
+      let checked = if is_clean () then Some (build ()) else None in
+      (match checked with
       | Some form ->
           Capabilities.check state lowered form;
           check_deserialized_invariants state lowered form
       | None -> state.capability_solution <- Some (Hashtbl.create 1));
       let has_capability_variables = state.unifier.capability_variable_count > 0 in
       if has_capability_variables then finalize state;
-      let core : Core.t option =
-        match form with
-        | Some form when state.diagnostics = [] ->
-            Some (if has_capability_variables then build () else form)
-        | _ -> None
-      in
       Some
-        {
-          tables = Tables.publish state.tables;
-          core;
-          diagnostics =
-            List.sort_uniq
-              (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-                compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-              state.diagnostics;
-          evidence_packages = List.sort_uniq compare state.evidence_packages;
-        }
+        (match checked with
+        | Some form when is_clean () ->
+            Ok
+              {
+                form = (if has_capability_variables then build () else form);
+                tables = Tables.publish state.tables;
+                evidence_packages = List.sort_uniq compare state.evidence_packages;
+              }
+        | _ ->
+            Error
+              (List.sort_uniq
+                 (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+                   compare
+                     (left.span, left.code, left.message)
+                     (right.span, right.code, right.message))
+                 state.diagnostics))
   | _ -> None
-
-let type_check_result =
-  Query.query ~name:"type_check_result" ~phase:Phases.bodies ~show:Names.show_key ~saved:true
-    ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Body })
-    (fun database key ->
-      Compiler_bug.while_doing ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
-
-let diagnostics database file =
-  Names.per_definition database file (fun key ->
-      match Query.demand database type_check_result key with
-      | Some result -> result.diagnostics
-      | None -> [])

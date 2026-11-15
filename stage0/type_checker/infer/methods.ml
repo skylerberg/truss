@@ -8,7 +8,7 @@ open State
 open Modes
 open Instantiation
 open Hooks
-open Lookups
+open Name_lookup
 open Calls
 
 let rec call state env ?expected (value : expression) (callee : expression)
@@ -149,11 +149,10 @@ and call_named state env ?expected (value : expression) (callee : expression)
       construct state env ?expected value type_path (Some variant) arguments
   | Definition ((Function | Theorem), path) -> (
       match function_signature state path with
-      | Some (Ok signature) ->
+      | Some signature ->
           named_call state env ?expected value path signature
             ~type_arguments:(Option.value ~default:[] type_arguments)
             arguments
-      | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition ((Trait | Capability), _) | Type_parameter _ | Capability_parameter _ ->
       arguments_alone state env arguments
@@ -181,9 +180,9 @@ and method_time state (value : expression) (type_ : Types.ty) (member : name) =
             then methods
             else methods @ [ (bound, method_) ])
           methods
-          (Members.trait_methods state.database bound.trait member.text))
+          (Members.trait_methods state.lookups bound.trait member.text))
       []
-      (Properties.known_bounds state.database ~bounds:(bounds state) type_)
+      (Interface.Properties.known_bounds state.lookups.interface ~bounds:(bounds state) type_)
   in
   let chosen =
     match overloads with
@@ -247,10 +246,10 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
   | Types.Named { path; arguments = type_arguments } when names_variant member ->
       construct state env ?expected ~type_arguments value path (Some member.text) arguments
   | Types.Named { path; _ } -> (
-      match List.assoc_opt Path.Static (Members.own_methods state.database path member.text) with
+      match List.assoc_opt Path.Static (Members.own_methods state.lookups path member.text) with
       | Some method_path -> (
           match function_signature state method_path with
-          | Some (Ok signature) ->
+          | Some signature ->
               let instance = instantiate state value.span signature in
               let head =
                 List.filteri
@@ -276,7 +275,6 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               finish_call state value
                 (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
                 instance checked left_out
-          | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
           | None -> bug "the method `%s` has no signature" (Path.show method_path))
       | None -> (
           match trait_static_method state path member.text Static with
@@ -318,17 +316,14 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                         "A method written in full takes its receiver as its first argument."
                   | _ ->
                       arguments_alone state env arguments
-                        (match Members.broken state.database path with
-                        | Some report -> Types.Error report
-                        | None ->
-                            error state Unknown_member member.span
-                              (Printf.sprintf "`%s` has no method `%s`." (show state type_)
-                                 member.text))))))
+                        (error state Unknown_member member.span
+                           (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text))
+                  ))))
   | Types.Parameter parameter -> (
       let without_self =
         List.fold_left
           (fun methods (bound : Types.trait_reference) ->
-            match Members.trait_method state.database bound.trait member.text Static with
+            match Members.trait_method state.lookups bound.trait member.text Static with
             | Some method_
               when not
                      (List.exists
@@ -338,7 +333,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                 methods @ [ (bound, method_) ]
             | _ -> methods)
           []
-          (Properties.known_bounds state.database ~bounds:(bounds state) (Types.Parameter parameter))
+          (Interface.Properties.known_bounds state.lookups.interface ~bounds:(bounds state)
+             (Types.Parameter parameter))
       in
       match (without_self, overloads state type_ member.text) with
       | [ (trait, method_) ], _ ->
@@ -363,7 +359,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
 and trait_method_through_type state env ?expected:_ ?trait_arguments (value : expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments =
   let trait_generics =
-    match Query.demand state.database Environment.trait_interface trait.trait with
+    match Interface.Definition.trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -384,7 +380,8 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type self_type)
     :: Option.value ~default:[] (Types.substitution_of trait_generics trait_arguments)
   in
-  let instance = instantiate state value.span ~extra method_.method_signature in
+  let signature = Members.method_signature state.lookups trait.trait method_ in
+  let instance = instantiate state value.span ~extra signature in
   let parameters = instance.signature.parameters in
   let receiver_argument, receiver_offset, parameters, arguments =
     match instance.signature.receiver with
@@ -419,9 +416,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   let result = Types.result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let own_arguments =
-    List.filteri
-      (fun index _ -> index < List.length method_.method_signature.generics)
-      instance.type_arguments
+    List.filteri (fun index _ -> index < List.length signature.generics) instance.type_arguments
   in
   state.tables.calls.(value.id) <-
     Some
@@ -450,12 +445,12 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
-  let overload = Members.trait_method state.database trait member.text in
+  let overload = Members.trait_method state.lookups trait member.text in
   match match overload Static with None -> overload wanted | trait_method -> trait_method with
   | Some method_ ->
       trait_method_through_type state env ?trait_arguments value (fresh state)
         (trait_reference trait) method_ arguments
-  | None when Members.trait_methods state.database trait member.text <> [] ->
+  | None when Members.trait_methods state.lookups trait member.text <> [] ->
       arguments_alone state env arguments
         (error state Wrong_receiver member.span
            (Printf.sprintf
@@ -467,9 +462,11 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
         (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
 
 and capability_call state env (value : expression) capability (member : name) arguments =
-  match Members.trait_method state.database capability member.text Static with
+  match Members.trait_method state.lookups capability member.text Static with
   | Some method_ ->
-      let instance = instantiate state value.span method_.method_signature in
+      let instance =
+        instantiate state value.span (Members.method_signature state.lookups capability method_)
+      in
       let matched, left_out =
         match_arguments state value instance.signature.parameters arguments ~record:false
       in
@@ -561,31 +558,23 @@ and method_call state env ?expected (value : expression) (base : expression) (me
           let candidates =
             match receiver_type with
             | Types.Named { path; arguments } -> (
-                match Members.fields state.database path arguments with
+                match Members.fields state.lookups path arguments with
                 | Some fields -> List.map (fun (field : Types.field) -> field.field_name) fields
                 | None -> [])
             | _ -> []
           in
-          let broken =
-            match receiver_type with
-            | Types.Named { path; _ } -> Members.broken state.database path
-            | _ -> None
-          in
           arguments_alone state env arguments
-            (match broken with
-            | Some report -> Types.Error report
-            | None ->
-                error state Unknown_member member.span
-                  ~fixes:
-                    (match Diagnostic.closest member.text candidates with
-                    | Some candidate ->
-                        [
-                          fix
-                            (Printf.sprintf "Write `%s`." candidate)
-                            [ replace member.span candidate ];
-                        ]
-                    | None -> [])
-                  (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
+            (error state Unknown_member member.span
+               ~fixes:
+                 (match Diagnostic.closest member.text candidates with
+                 | Some candidate ->
+                     [
+                       fix
+                         (Printf.sprintf "Write `%s`." candidate)
+                         [ replace member.span candidate ];
+                     ]
+                 | None -> [])
+               (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
       | Ok overloads -> (
           match choose_temporary overloads with
           | None -> missing_receiver_mode overloads
@@ -631,8 +620,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
     ~(receiver : expression) ~receiver_type method_path arguments =
   match function_signature state method_path with
   | None -> bug "the method `%s` has no signature" (Path.show method_path)
-  | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
-  | Some (Ok signature) ->
+  | Some signature ->
       let instance = instantiate state value.span signature in
       explicit_type_arguments
         ~head:
@@ -672,7 +660,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
 and trait_method_call state env (value : expression) ~(receiver : expression) ~receiver_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
-    match Query.demand state.database Environment.trait_interface trait.trait with
+    match Interface.Definition.trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -686,7 +674,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   (match receiver_type with
   | Types.Any _ -> (
-      match Impls.through_any ~trait:trait.trait method_ with
+      match Impls.through_any state.lookups.interface ~trait:trait.trait method_ with
       | Callable -> ()
       | Has_generics ->
           report state Not_callable value.span
@@ -702,7 +690,9 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
                 it cannot be called through it. Call it on a value whose type is known."
                method_.method_name (show state receiver_type)))
   | _ -> ());
-  let instance = instantiate state value.span ~extra method_.method_signature in
+  let instance =
+    instantiate state value.span ~extra (Members.method_signature state.lookups trait.trait method_)
+  in
   explicit_type_arguments state value instance type_arguments;
   let matched, left_out =
     match_arguments state value instance.signature.parameters arguments ~record:false

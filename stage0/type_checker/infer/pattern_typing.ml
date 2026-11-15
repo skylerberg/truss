@@ -80,9 +80,9 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | Types.Named { path; arguments } -> (
-          match Members.variants state.database path arguments with
+          match Members.variants state.lookups path arguments with
           | Some variants -> (
-              if not (Members.fields_visible state.database ~package:state.package path) then
+              if not (Members.fields_visible state.lookups ~package:state.package path) then
                 report state Private_field written.span
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (Types.show type_));
@@ -133,13 +133,10 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                          | None -> [])
                        (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
                           variant_name.text))
-          | None -> (
-              match Members.broken state.database path with
-              | Some report -> unknown (Types.Error report)
-              | None ->
-                  unknown
-                    (error state Unknown_variant written.span
-                       (Printf.sprintf "`%s` has no variants." (Types.show type_)))))
+          | None ->
+              unknown
+                (error state Unknown_variant written.span
+                   (Printf.sprintf "`%s` has no variants." (Types.show type_))))
       | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
@@ -148,9 +145,9 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
   | Record fields -> (
       match type_ with
       | Types.Named { path; arguments } -> (
-          match Members.fields state.database path arguments with
+          match Members.fields state.lookups path arguments with
           | Some record_fields ->
-              if not (Members.fields_visible state.database ~package:state.package path) then
+              if not (Members.fields_visible state.lookups ~package:state.package path) then
                 report state Private_field written.span
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (Types.show type_));
@@ -158,13 +155,10 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
               let matched = pattern_fields state env written record_fields fields ~is_var ~mode in
               register_pattern state written (fun () ->
                   Record (Form.pattern_fields state record_fields matched))
-          | None -> (
-              match Members.broken state.database path with
-              | Some report -> unknown (Types.Error report)
-              | None ->
-                  unknown
-                    (error state Not_a_record written.span
-                       (Printf.sprintf "`%s` is not a record." (show state type_)))))
+          | None ->
+              unknown
+                (error state Not_a_record written.span
+                   (Printf.sprintf "`%s` is not a record." (show state type_))))
       | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
@@ -282,7 +276,7 @@ and unknown_pattern state env (written : pattern) unknown ~is_var ~mode =
 
 and constant_pattern state id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
-  match Query.demand state.database Environment.constant_type path with
+  match Interface.Definition.constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (unify state constant_type type_) then
         mismatch state span ~expected:type_ ~actual:constant_type
@@ -309,7 +303,7 @@ and structural ?(seen = []) state (type_ : Types.ty) =
   else
     match type_ with
     | Types.Named { path; arguments } -> (
-        match Query.demand state.database Environment.interface path with
+        match Interface.Definition.interface state.lookups.interface path with
         | Some (Environment.Type_interface interface)
           when (not interface.opaque) || Path.package path = state.package ->
             let derives_equal =
@@ -335,7 +329,7 @@ and structural ?(seen = []) state (type_ : Types.ty) =
                     | Some fields -> fields_structural fields
                     | None -> true)
                   variants
-            | Todo_type | Builtin_type _ | Error_shape _ -> false
+            | Todo_type | Builtin_type _ -> false
             end
         | _ -> false)
     | _ -> false
@@ -349,7 +343,7 @@ and qualified_constant state id span constant type_ =
         | _ -> None)
     | Type_constant (written_path, member) -> (
         match target state written_path.last with
-        | Some (Definition (Type, owner)) -> Members.own_constant state.database owner member.text
+        | Some (Definition (Type, owner)) -> Members.own_constant state.lookups owner member.text
         | _ -> None)
   in
   match path with
