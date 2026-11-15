@@ -4,10 +4,9 @@ let document name = File_system.read (Harness.workspace_path name)
 let source text = Source.create ~path:"test.truss" text
 
 let parse text =
-  let source = source text in
-  let tokens, lexer_diagnostics = Lexer.lex source in
-  let file, parser_diagnostics = Parser.parse source tokens in
-  let diagnostics = lexer_diagnostics @ parser_diagnostics in
+  let parsed = Parsed.parse (source text) in
+  let file = { Syntax.uses = parsed.uses; definitions = parsed.definitions } in
+  let diagnostics = parsed.diagnostics in
   if
     diagnostics = []
     && List.exists

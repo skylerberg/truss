@@ -137,11 +137,11 @@ and unqualified_variant cursor start (path : path) =
   let qualifier_start = (Cursor.token_at cursor start).span.start in
   match last_name None with
   | Some ({ kind = Upper text; _ } as variant) ->
+      let variant = Atoms.name cursor variant text in
       Habits.qualified_variant cursor ~qualifier_start ~variant;
-      { modules = []; last = Atoms.name cursor variant text }
+      { modules = []; last = variant }
   | _ when path.modules <> [] && not (Cursor.is_punctuation cursor Dot) ->
-      Habits.qualified_variant cursor ~qualifier_start
-        ~variant:(Cursor.token_at cursor (Cursor.index cursor - 1));
+      Habits.qualified_variant cursor ~qualifier_start ~variant:path.last;
       { path with modules = [] }
   | _ -> path
 

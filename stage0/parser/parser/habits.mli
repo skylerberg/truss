@@ -33,7 +33,7 @@ val brace_record :
 val turbofish : Cursor.t -> colons:Token.t -> less:Token.t -> greater:Token.t -> unit
 val angle_brackets : Cursor.t -> angles:Token.t list -> unit
 val path_separator : Cursor.t -> separator:Token.t -> unit
-val qualified_variant : Cursor.t -> qualifier_start:int -> variant:Token.t -> unit
+val qualified_variant : Cursor.t -> qualifier_start:int -> variant:Syntax.name -> unit
 val macro_call : Cursor.t -> name:Syntax.name -> bang:Token.t -> opening:Token.t -> unit
 val keyword_macro : Cursor.t -> bang:Token.t -> closing:Token.t -> has_arguments:bool -> unit
 val tuple : Cursor.t -> opening:Token.t -> 'a
@@ -71,4 +71,4 @@ val as_conversion :
 
 val elif : Cursor.t -> previous_stop:int -> elif_token:Token.t -> unit
 val loop : Cursor.t -> loop_token:Token.t -> unit
-val constant_keyword : Cursor.t -> token:Token.t -> unit
+val constant_keyword : Cursor.t -> token:Token.t -> reserved:Token.reserved -> unit

@@ -159,19 +159,19 @@ module Snippet = struct
         match kind 2 with Punctuation (Dot | Open Square) -> true | _ -> false)
     | _ -> false
 
-  let parse source tokens =
+  let parse tokens =
     let pieces =
       List.map
         (fun (piece : Parser.piece) ->
           let kind, diagnostics =
             if Parser.is_use tokens piece then
-              let parsed = Parser.use_line source tokens piece in
+              let parsed = Parser.use_line tokens piece in
               (Use, Parser.diagnostics_in_file parsed)
             else if starts_definition tokens piece then
-              match Parser.example_definition source tokens piece with
+              match Parser.example_definition tokens piece with
               | Example_definition, diagnostics -> (Definition, diagnostics)
               | Example_signature, diagnostics -> (Signature, diagnostics)
-            else (Statement, Parser.example_statement source tokens piece)
+            else (Statement, Parser.example_statement tokens piece)
           in
           ({ kind; first = piece.first; stop = piece.stop }, diagnostics))
         (Parser.split tokens)

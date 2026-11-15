@@ -1,7 +1,6 @@
 open Syntax
 
-let text cursor (span : Source.span) = Cursor.text cursor span
-let node_text cursor span = text cursor (Cursor.absolute cursor span)
+let node_spelling cursor span = Cursor.spelling cursor (Cursor.absolute cursor span)
 
 let report cursor code (span : Source.span) message fix_title edits =
   Cursor.report cursor code span message ~fixes:[ Diagnostic.fix fix_title edits ]
@@ -13,10 +12,14 @@ let increment cursor ~(target : expression) ~(operator : Token.t) =
   let replacement, sign =
     match operator.kind with Foreign Plus_plus -> (" += 1", "+") | _ -> (" -= 1", "-")
   in
-  let target_text = node_text cursor target.span in
+  let written =
+    match node_spelling cursor target.span with
+    | Some target -> Printf.sprintf "%s %s= 1" target sign
+    | None -> Printf.sprintf "%s= 1" sign
+  in
   report cursor Increment operator.span
-    (Printf.sprintf "Truss has no `%s%s`; write `%s %s= 1`." sign sign target_text sign)
-    (Printf.sprintf "Write `%s %s= 1`" target_text sign)
+    (Printf.sprintf "Truss has no `%s%s`; write `%s`." sign sign written)
+    (Printf.sprintf "Write `%s`" written)
     [ Diagnostic.replace operator.span replacement ]
 
 let double_negation cursor ~(operator : Token.t) ~(operand : expression) =
@@ -35,16 +38,16 @@ let match_arm_comma cursor ~(comma : Token.t) =
 
 let conditional cursor ~(condition : expression) ~(then_ : expression) ~(else_ : expression)
     ~(question : Token.t) =
-  let whole =
-    Source.span (Cursor.absolute cursor condition.span).start
-      (Cursor.absolute cursor else_.span).stop
-  in
+  let condition = Cursor.absolute cursor condition.span
+  and then_ = Cursor.absolute cursor then_.span
+  and else_ = Cursor.absolute cursor else_.span in
   report cursor Conditional_operator question.span
     "Truss has no conditional operator; write `if x { a } else { b }`." "Write an `if` expression"
     [
-      Diagnostic.replace whole
-        (Printf.sprintf "if %s { %s } else { %s }" (node_text cursor condition.span)
-           (node_text cursor then_.span) (node_text cursor else_.span));
+      Diagnostic.insert (Source.zero_width condition.start) "if ";
+      Diagnostic.replace (Source.span condition.stop then_.start) " { ";
+      Diagnostic.replace (Source.span then_.stop else_.start) " } else { ";
+      Diagnostic.insert (Source.zero_width else_.stop) " }";
     ]
 
 let let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
@@ -138,15 +141,16 @@ let path_separator cursor ~(separator : Token.t) =
     "Write `.`"
     [ Diagnostic.replace separator.span "." ]
 
-let qualified_variant cursor ~qualifier_start ~(variant : Token.t) =
+let qualified_variant cursor ~qualifier_start ~(variant : name) =
+  let variant_start = (Cursor.absolute cursor variant.span).start in
   report cursor Qualified_variant
-    (Source.span qualifier_start variant.span.start)
+    (Source.span qualifier_start variant_start)
     (Printf.sprintf
        "A pattern names a variant alone: `%s`. The type of the scrutinee says which type's variant \
         it is."
-       (Cursor.text cursor variant.span))
+       variant.text)
     "Remove the qualifier"
-    [ Diagnostic.delete (Source.span qualifier_start variant.span.start) ]
+    [ Diagnostic.delete (Source.span qualifier_start variant_start) ]
 
 let macro_advice = function
   | "println" | "print" | "eprintln" | "eprint" ->
@@ -215,15 +219,16 @@ let pipe_operator cursor ~(value : expression) ~(operator : Token.t) ~(callee : 
     | Member (receiver, _) -> is_path receiver
     | _ -> false
   in
-  if is_path callee then
-    report cursor Pipe_operator operator.span message "Write the call"
-      [
-        Diagnostic.replace
-          (Source.span (Cursor.absolute cursor value.span).start
-             (Cursor.absolute cursor callee.span).stop)
-          (Printf.sprintf "%s(%s)" (node_text cursor callee.span) (node_text cursor value.span));
-      ]
-  else Cursor.report cursor Pipe_operator operator.span message
+  match if is_path callee then node_spelling cursor callee.span else None with
+  | Some callee_spelling ->
+      let value = Cursor.absolute cursor value.span
+      and callee = Cursor.absolute cursor callee.span in
+      report cursor Pipe_operator operator.span message "Write the call"
+        [
+          Diagnostic.insert (Source.zero_width value.start) (callee_spelling ^ "(");
+          Diagnostic.replace (Source.span value.stop callee.stop) ")";
+        ]
+  | None -> Cursor.report cursor Pipe_operator operator.span message
 
 let lambda_annotation cursor ~from ~stop =
   report cursor Lambda_annotation (Source.span from stop)
@@ -257,7 +262,7 @@ let null_coalescing cursor ~(value : expression) ~(first : Token.t) ~(second : T
     (Printf.sprintf
        "Truss has no `%s`. An `Option`'s value, or a default when it has none, is \
         `option.unwrap_or(default)`."
-       (Cursor.text cursor (Source.span first.span.start second.span.stop)))
+       (match second.kind with Punctuation Colon -> "?:" | _ -> "??"))
     "Call `unwrap_or`"
     ((if needs_parentheses then [ Diagnostic.insert (Source.zero_width value_span.start) "(" ]
       else [])
@@ -304,21 +309,29 @@ let trailing_lambda cursor ~(callee : expression) ~parameter ~(opening : Token.t
     :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
 
 let as_conversion cursor ~(value : expression) ~(as_token : Token.t) ~(target : type_expression) =
-  let whole =
-    Source.span (Cursor.absolute cursor value.span).start (Cursor.absolute cursor target.span).stop
-  in
-  let target_text = node_text cursor target.span and value_text = node_text cursor value.span in
-  let conversion name =
-    Diagnostic.fix
-      (Printf.sprintf "Write `%s.%s(...)`" target_text name)
-      [ Diagnostic.replace whole (Printf.sprintf "%s.%s(%s)" target_text name value_text) ]
-  in
-  Cursor.report cursor As_conversion as_token.span
-    (Printf.sprintf
-       "Truss has no `as`; write `%s.from(x)`, or `%s.try_from(x)` when the conversion can lose \
-        information."
-       target_text target_text)
-    ~fixes:[ conversion "from"; conversion "try_from" ]
+  match node_spelling cursor target.span with
+  | Some target_spelling ->
+      let value = Cursor.absolute cursor value.span
+      and target = Cursor.absolute cursor target.span in
+      let conversion name =
+        Diagnostic.fix
+          (Printf.sprintf "Write `%s.%s(...)`" target_spelling name)
+          [
+            Diagnostic.insert (Source.zero_width value.start)
+              (Printf.sprintf "%s.%s(" target_spelling name);
+            Diagnostic.replace (Source.span value.stop target.stop) ")";
+          ]
+      in
+      Cursor.report cursor As_conversion as_token.span
+        (Printf.sprintf
+           "Truss has no `as`; write `%s.from(x)`, or `%s.try_from(x)` when the conversion can \
+            lose information."
+           target_spelling target_spelling)
+        ~fixes:[ conversion "from"; conversion "try_from" ]
+  | None ->
+      Cursor.report cursor As_conversion as_token.span
+        "Truss has no `as`; call the target type's `from`, or its `try_from` when the conversion \
+         can lose information."
 
 let elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
   report cursor Elif elif_token.span "Truss writes `else if`, not `elif`." "Write `else if`"
@@ -329,8 +342,8 @@ let loop cursor ~(loop_token : Token.t) =
     "Write `while true`"
     [ Diagnostic.replace loop_token.span "while true" ]
 
-let constant_keyword cursor ~(token : Token.t) =
-  let word = Cursor.text cursor token.span in
+let constant_keyword cursor ~(token : Token.t) ~reserved =
+  let word = Token.reserved_spelling reserved in
   report cursor Reserved_word token.span
     (Printf.sprintf "Truss has no `%s`; a constant is a `let` at the top level." word)
     "Write `let`"

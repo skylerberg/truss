@@ -119,7 +119,13 @@ module Decimal : sig
   val normalized : significand:Z.t -> exponent:Z.t -> t
 end
 
-type t = { kind : kind; span : Source.span; line_break_before : bool; blank_line_before : bool }
+type t = {
+  kind : kind;
+  span : Source.span;
+  line_break_before : bool;
+  blank_line_before : bool;
+  is_inserted_closer : bool;
+}
 
 and kind =
   | Upper of string
@@ -144,7 +150,7 @@ and string_literal = {
 
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
 and text = { value : string; span : Source.span }
-and interpolation = { tokens : t array; span : Source.span }
+and interpolation = { tokens : t array; span : Source.span; is_closed : bool }
 
 val equal_punctuation : punctuation -> punctuation -> bool
 val texts : string_literal -> text array
@@ -158,3 +164,4 @@ val reserved_spelling : reserved -> string
 val punctuation_spelling : punctuation -> string
 val foreign_spelling : foreign -> string
 val definition_keywords : keyword list
+val spelling : ?insertions:(int * string) list -> t array -> string option

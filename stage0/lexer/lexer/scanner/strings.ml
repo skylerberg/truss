@@ -78,9 +78,11 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
               span = end_of_input;
               line_break_before = false;
               blank_line_before = false;
+              is_inserted_closer = false;
             };
           |];
         span = span start cursor.position;
+        is_closed = false;
       },
       Unterminated )
   end
@@ -144,7 +146,7 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
            else [])
         interpolation_span "An interpolation needs an expression."
     end;
-    ({ tokens; span = interpolation_span }, !ending)
+    ({ tokens; span = interpolation_span; is_closed = !closed }, !ending)
   end
 
 and scan_string cursor ~scan ~tag ~nesting =

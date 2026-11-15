@@ -30,7 +30,7 @@ let () =
         | [ item ] ->
             List.map
               (fun (span : Source.Definition_span.t) ->
-                String.sub item.text span.start (span.stop - span.start))
+                String.sub text (item.base + span.start) (span.stop - span.start))
               item.value.recovered
         | _ -> [ "wrong definitions" ]
       in
@@ -39,10 +39,11 @@ let () =
         fail "the inserted closer is not recorded";
       if recovered "fn f() {\n  assert true\n}" <> [] then
         fail "a rule checked after parsing is recorded";
-      if recovered "fn f(x: Int64) -> Int64" = [] then fail "the missing body is not recorded");
+      if recovered "fn f(x: Int64) -> Int64" <> [] then fail "the body its fix writes is recorded");
   test "a missing body's recovery is where the body starts" (fun () ->
-      match (fst (parse "fn f(x: Int64) -> Int64\nfn g() {}")).definitions with
-      | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
+      let tokens, _ = Lexer.lex (source "fn f(x: Int64) -> Int64\nfn g() {}") in
+      match Parser.For_testing.definition tokens (List.hd (Parser.split tokens)) with
+      | { value = { value = { kind = Function { body; _ }; recovered; _ }; _ }; _ }, _ ->
           if
             List.map (fun (span : Source.Definition_span.t) -> (span.start, span.stop)) recovered
             <> [ (body.span.start, body.span.start) ]
@@ -81,7 +82,7 @@ let () =
       | first :: _ ->
           if
             Syntax_print.For_testing.definition first.value
-            <> "(fn f ((x: Int64)) -> Int64 (block error))"
+            <> "(fn f ((x: Int64)) -> Int64 (block todo))"
           then fail "got %s" (Syntax_print.For_testing.definition first.value)
       | [] -> fail "no definitions");
   test "the definition after a broken one parses" (fun () ->
@@ -103,7 +104,7 @@ let () =
       | [ _; second ] ->
           if second.base <> 11 then fail "base %d" second.base;
           if second.value.span.start <> 0 || second.value.span.stop <> 9 then fail "span";
-          if second.text <> "fn g() {}" then fail "text %S" second.text;
+          if second.stop <> 20 then fail "stop %d" second.stop;
           if not second.blank_line_before then fail "blank line"
       | _ -> fail "expected two definitions");
   test "moving a definition changes nothing in its tree" (fun () ->
@@ -237,8 +238,9 @@ let () =
       | [ impl_item; method_ ] ->
           if impl_item.container_index <> None then fail "the impl is inside something";
           if method_.container_index <> Some 0 then fail "the method is not inside the impl";
-          if method_.text <> "fn now(self) -> Instant {\n    todo\n  }" then
-            fail "the method's text is %S" method_.text;
+          let method_text = String.sub text method_.base (method_.stop - method_.base) in
+          if method_text <> "fn now(self) -> Instant {\n    todo\n  }" then
+            fail "the method's text is %S" method_text;
           if method_.base <> 25 then fail "the method starts at %d" method_.base
       | definitions -> fail "%d definitions" (List.length definitions));
   test "a method's tree does not depend on its surroundings" (fun () ->
@@ -256,8 +258,8 @@ let () =
       then fail "the trees differ");
   test "a definition's diagnostics are placed in the file by its base" (fun () ->
       match pieces "fn g() {}\nfn f() { x = }" with
-      | source, tokens, [ _; second ] -> (
-          let parsed, _ = Parser.For_testing.definition source tokens second in
+      | _, tokens, [ _; second ] -> (
+          let parsed, _ = Parser.For_testing.definition tokens second in
           match Parser.diagnostics_in_file parsed with
           | [ diagnostic ] ->
               if diagnostic.span.start <> 23 then fail "start %d" diagnostic.span.start
@@ -266,9 +268,9 @@ let () =
   test "moving a definition changes neither its tree nor its diagnostics" (fun () ->
       let text = "fn f(items: List[Int64]) {\n  let total = items[0] +\n}" in
       let parsed text =
-        let source, tokens, pieces = pieces text in
+        let _, tokens, pieces = pieces text in
         let last = List.nth pieces (List.length pieces - 1) in
-        let parsed, _ = Parser.For_testing.definition source tokens last in
+        let parsed, _ = Parser.For_testing.definition tokens last in
         (parsed.value.value, parsed.diagnostics)
       in
       if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ");
@@ -277,16 +279,19 @@ let () =
         let source, tokens, pieces =
           pieces ("impl Clock for Fixed {\n" ^ indentation ^ "fn now(self) -> Instant\n}")
         in
-        match Parser.For_testing.definition source tokens (List.hd pieces) with
+        match Parser.For_testing.definition tokens (List.hd pieces) with
         | _, [ method_ ] ->
             if Parser.diagnostics_in_file method_ = [] then fail "the method has no diagnostic";
-            (method_.value.value, method_.value.text, method_.diagnostics)
+            let item = method_.value in
+            ( item.value,
+              String.sub (Source.text source) item.base (item.stop - item.base),
+              method_.diagnostics )
         | _ -> failwith "expected one method"
       in
       if method_of ~indentation:"  " <> method_of ~indentation:"\t\t" then fail "the results differ");
   test "an example's diagnostics include those of the methods declared inside it" (fun () ->
-      let source, tokens, pieces = pieces "impl Clock for Fixed {\n  fn now(self) -> { todo }\n}" in
-      match Parser.example_definition source tokens (List.hd pieces) with
+      let _, tokens, pieces = pieces "impl Clock for Fixed {\n  fn now(self) -> { todo }\n}" in
+      match Parser.example_definition tokens (List.hd pieces) with
       | _, [ diagnostic ] ->
           if Diagnostic.Code.name diagnostic.code <> "parser.unexpected_token" then
             fail "code %s" (Diagnostic.Code.name diagnostic.code);

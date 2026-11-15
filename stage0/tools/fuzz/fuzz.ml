@@ -73,9 +73,9 @@ let check_robust text =
 
 let parse text =
   let source = Source.create ~path:"fuzz.truss" text in
-  let tokens, lexer_diagnostics = Lexer.lex source in
-  let file, parser_diagnostics = Parser.parse source tokens in
-  (tokens, file, lexer_diagnostics @ parser_diagnostics)
+  let tokens, _ = Lexer.lex source in
+  let parsed = Parsed.parse source in
+  (tokens, { Syntax.uses = parsed.uses; definitions = parsed.definitions }, parsed.diagnostics)
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
@@ -89,23 +89,20 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
     Hashtbl.replace ids value.id ();
     if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
-    let holds_recovery =
-      List.exists (fun recovery -> contains_span value.span recovery) item.value.recovered
-    in
     let previous = ref value.span.start in
     Syntax_walk.children
       (fun (inner : Syntax.expression) ->
-        if inner.span.start < !previous && not holds_recovery then
-          fail "expressions out of order in %s" quoted;
+        if inner.span.start < !previous then fail "expressions out of order in %s" quoted;
         previous := inner.span.start;
         expression value.span inner)
       value
   in
-  if item.value.span.start <> 0 || item.value.span.stop > String.length item.text then
+  let length = item.stop - item.base in
+  if item.value.span.start <> 0 || item.value.span.stop > length then
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter
     (fun (span : Source.Definition_span.t) ->
-      if span.stop > String.length item.text then fail "a recovery is out of bounds in %s" quoted)
+      if span.stop > length then fail "a recovery is out of bounds in %s" quoted)
     item.value.recovered;
   Syntax_walk.definition (expression item.value.span) item.value
 

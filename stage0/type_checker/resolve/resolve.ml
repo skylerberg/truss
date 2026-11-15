@@ -184,7 +184,7 @@ let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax
   ignore
     (List.fold_left
        (fun seen (item : Syntax.path Syntax.item) ->
-         let span = Source.span item.base (item.base + String.length item.text) in
+         let span = Source.span item.base item.stop in
          let used_module = Names.used_module lookups ~from:module_ item.value in
          let last = Names.last_name used_module in
          if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then

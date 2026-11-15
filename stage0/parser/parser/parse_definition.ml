@@ -545,8 +545,8 @@ let top_level cursor ~function_ =
         Left (impl cursor)
     | Keyword Capability -> Left (capability cursor)
     | Keyword Let -> Left (constant cursor)
-    | Reserved (Const | Static) ->
-        Habits.constant_keyword cursor ~token:(Cursor.peek cursor);
+    | Reserved ((Const | Static) as reserved) ->
+        Habits.constant_keyword cursor ~token:(Cursor.peek cursor) ~reserved;
         Left (constant cursor)
     | Keyword Test ->
         no_visibility "A test";
