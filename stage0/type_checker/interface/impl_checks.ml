@@ -59,8 +59,8 @@ let compiler_implements (impl : Types.impl_interface) =
   || Path.equal impl.implements.trait Properties.plain_trait
   || Path.equal impl.implements.trait Properties.storable_trait
 
-let impl_view lookups ~bounds ~(spans : Source.Definition_span.t array)
-    (impl : Types.impl_interface) (trait_path : path_type) =
+let impl_view lookups ~bounds ~(trait_span : Source.Definition_span.t) (impl : Types.impl_interface)
+    (trait_path : path_type) =
   let shown_trait = Names.spell_path trait_path.path in
   let impl_bounds parameter =
     match
@@ -85,7 +85,7 @@ let impl_view lookups ~bounds ~(spans : Source.Definition_span.t array)
               else
                 Some
                   ( associated.associated_name,
-                    Diagnostic.make ~code:(Types Missing_member) spans.(trait_path.id)
+                    Diagnostic.make ~code:(Types Missing_member) trait_span
                       (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares."
                          associated.associated_name shown_trait) ))
             trait.associated_types
@@ -148,7 +148,10 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
          "The compiler implements `%s` from a type's fields; no `impl` of it can be written."
          (Names.spell_path trait_path.path))
   else
-    match impl_view lookups ~bounds:(bounds state) ~spans:state.spans impl trait_path with
+    match
+      impl_view lookups ~bounds:(bounds state) ~trait_span:state.spans.(trait_path.id) impl
+        trait_path
+    with
     | None -> ()
     | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
         let check_evidence_grants (span : Source.Definition_span.t) evidence =
@@ -249,8 +252,8 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
              capabilities the trait declares."
 
 let check_impl_method state (name : name) (receiver : Path.receiver) (written : Types.signature)
-    (impl : Types.impl_interface) (trait_path : path_type) =
-  match impl_view state.lookups ~bounds:(bounds state) ~spans:state.spans impl trait_path with
+    (impl : Types.impl_interface) ~trait_span (trait_path : path_type) =
+  match impl_view state.lookups ~bounds:(bounds state) ~trait_span impl trait_path with
   | None -> ()
   | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (
       let declared =

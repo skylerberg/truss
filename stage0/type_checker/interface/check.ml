@@ -416,20 +416,21 @@ let check state =
             let name = Names.signature_name signature in
             match
               ( lookups.names.definition container,
+                lookups.names.spans container,
                 Option.map
                   (fun (lowered : Environment.lowered_interface) -> lowered.interface)
                   (lookups.lowered_interface container) )
             with
-            | Some { kind = Trait _; visibility; _ }, Some (Trait_interface trait) ->
+            | Some { kind = Trait _; visibility; _ }, _, Some (Trait_interface trait) ->
                 check_redeclared state name
                   (Names.receiver signature.parameters)
                   ~trait_path:container.path trait;
                 check_private_in_public state ~visibility (signature_types written)
                   state.spans.(name.id)
-            | Some { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
+            | Some { kind = Impl { trait_; _ }; _ }, Some impl_spans, Some (Impl_interface impl) ->
                 check_impl_method state name
                   (Names.receiver signature.parameters)
-                  written impl trait_
+                  written impl ~trait_span:impl_spans.(trait_.id) trait_
             | _ -> ())
         | Some _, _, _ -> ()
         | None, Function { signature; _ }, Function_interface lowered ->
