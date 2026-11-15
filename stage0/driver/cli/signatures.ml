@@ -11,7 +11,7 @@ let bodies ~opaque (definition : definition) =
   | Law_proof { body; _ } -> [ body.span ]
   | Trait { members; _ } ->
       List.concat_map
-        (fun (member : trait_member line) ->
+        (fun (member : trait_member node) ->
           match member.kind with Law law -> [ law.body.span ] | _ -> [])
         members
   | Type_definition { name; generics; _ } when opaque ->

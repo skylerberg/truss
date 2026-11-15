@@ -373,7 +373,7 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
     match definition.kind with
     | Impl { members; _ } ->
         List.find_map
-          (fun (member : impl_member line) ->
+          (fun (member : impl_member node) ->
             match member.kind with
             | Associated_definition (written, _) when written.text = name -> Some member.span
             | _ -> None)

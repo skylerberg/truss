@@ -7,5 +7,5 @@ val file : Syntax.file -> string
 
 module For_testing : sig
   val definition : ?methods:string list -> Syntax.definition -> string
-  val definitions : Syntax.definition Syntax.item list -> string list
+  val definitions : Syntax.top_level list -> string list
 end

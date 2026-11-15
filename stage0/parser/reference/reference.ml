@@ -164,9 +164,7 @@ module Snippet = struct
       List.map
         (fun (piece : Parser.piece) ->
           let kind, diagnostics =
-            if Parser.is_use tokens piece then
-              let parsed = Parser.use_line tokens piece in
-              (Use, Parser.diagnostics_in_file parsed)
+            if Parser.is_use tokens piece then (Use, snd (Parser.use_line tokens piece))
             else if starts_definition tokens piece then
               match Parser.example_definition tokens piece with
               | Example_definition, diagnostics -> (Definition, diagnostics)

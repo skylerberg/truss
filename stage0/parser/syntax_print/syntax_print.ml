@@ -377,8 +377,8 @@ let field (field : field) =
 
 let fields list_ = form "" (list field list_)
 
-let members print (members : _ line list) =
-  list (fun (member : _ line) -> print member.kind) members
+let members print (members : _ node list) =
+  list (fun (member : _ node) -> print member.kind) members
 
 let definition ?(methods = []) (definition : definition) =
   let body =
@@ -473,20 +473,14 @@ let definition ?(methods = []) (definition : definition) =
   in
   match visibility definition.visibility with "" -> body | written -> form written [ body ]
 
-let definitions (items : definition item list) =
-  let inside index =
-    List.filter_map
-      (fun (item : definition item) ->
-        if item.container_index = Some index then Some (definition item.value) else None)
-      items
-  in
-  List.concat
-    (List.mapi
-       (fun index (item : definition item) ->
-         match item.container_index with
-         | Some _ -> []
-         | None -> [ definition ~methods:(inside index) item.value ])
-       items)
+let definitions (top_levels : top_level list) =
+  List.map
+    (fun (top_level : top_level) ->
+      definition
+        ~methods:
+          (List.map (fun (method_ : definition item) -> definition method_.value) top_level.methods)
+        top_level.definition.value)
+    top_levels
 
 let file (file : file) =
   String.concat "\n"

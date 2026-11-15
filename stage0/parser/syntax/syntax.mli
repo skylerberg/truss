@@ -39,14 +39,6 @@ type assignment =
   | Shift_right_assign
 
 type quantifier = Forall | Exists
-
-type 'kind line = {
-  kind : 'kind;
-  span : Source.Definition_span.t;
-  blank_line_before : bool;
-  id : id;
-}
-
 type 'kind node = { kind : 'kind; span : Source.Definition_span.t; id : id }
 
 type type_expression = type_kind node
@@ -183,7 +175,7 @@ and update_kind =
 and binder = Binder_in of pattern * expression | Binder_type of name * type_expression
 and else_branch = Else of block | Else_if of expression
 and block = { statements : statement list; span : Source.Definition_span.t; id : id }
-and statement = statement_kind line
+and statement = statement_kind node
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
 and statement_kind =
@@ -223,7 +215,6 @@ and arm = {
   guard : expression option;
   body : statement;
   span : Source.Definition_span.t;
-  blank_line_before : bool;
   id : id;
 }
 
@@ -347,15 +338,15 @@ type definition_kind =
       name : name;
       generics : generic_parameter list;
       requires : path_type list;
-      members : trait_member line list;
+      members : trait_member node list;
     }
   | Impl of {
       trait_ : path_type;
       type_ : type_head;
       uses : capability_reference list;
-      members : impl_member line list;
+      members : impl_member node list;
     }
-  | Capability of { name : name; members : capability_member line list }
+  | Capability of { name : name; members : capability_member node list }
   | Constant of { name : definition_name; type_ : type_expression; value : expression }
   | Test of { name : string_literal; uses : capability_reference list; body : block }
   | Theorem of {
@@ -376,12 +367,6 @@ type definition = {
   id : id;
 }
 
-type 'value item = {
-  base : int;
-  stop : int;
-  blank_line_before : bool;
-  value : 'value;
-  container_index : int option;
-}
-
-type file = { uses : path item list; definitions : definition item list }
+type 'value item = { base : int; stop : int; value : 'value }
+type top_level = { definition : definition item; methods : definition item list }
+type file = { uses : path item list; definitions : top_level list }

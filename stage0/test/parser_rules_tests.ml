@@ -295,7 +295,7 @@ let () =
       if codes diagnostics <> [ "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       match file.definitions with
-      | [ { value; _ } ] ->
+      | [ { definition = { value; _ }; _ } ] ->
           if Syntax_print.For_testing.definition value <> "(fn f () error (ensures true) (block x))"
           then fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");

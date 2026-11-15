@@ -4,16 +4,22 @@ let document name = File_system.read (Harness.workspace_path name)
 let source text = Source.create ~path:"test.truss" text
 
 let parse text =
-  let parsed = Parsed.parse (source text) in
-  let file = { Syntax.uses = parsed.uses; definitions = parsed.definitions } in
-  let diagnostics = parsed.diagnostics in
+  let { Parsed.file; diagnostics; _ } = Parsed.parse (source text) in
   if
     diagnostics = []
     && List.exists
-         (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
+         (fun (top_level : Syntax.top_level) ->
+           List.exists
+             (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
+             (top_level.definition :: top_level.methods))
          file.definitions
   then fail "the parser recovered in %S with no error" text;
   (file, diagnostics)
+
+let items (file : Syntax.file) =
+  List.concat_map
+    (fun (top_level : Syntax.top_level) -> top_level.definition :: top_level.methods)
+    file.definitions
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -37,7 +43,8 @@ let definition text expected = definitions text [ expected ]
 let body_of text =
   let file, diagnostics = parse ("fn example() {\n" ^ text ^ "\n}") in
   match file.definitions with
-  | [ { value = { kind = Function { body; _ }; _ }; _ } ] -> (body.statements, diagnostics)
+  | [ { definition = { value = { kind = Function { body; _ }; _ }; _ }; _ } ] ->
+      (body.statements, diagnostics)
   | _ -> ([], diagnostics)
 
 let statements text expected =

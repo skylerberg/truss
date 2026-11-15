@@ -142,7 +142,7 @@ let laws (definition : definition option) =
   | Some { kind = Trait { members; _ }; _ } ->
       List.sort String.compare
         (List.filter_map
-           (fun (member : trait_member line) ->
+           (fun (member : trait_member node) ->
              match member.kind with Law law -> Some (Syntax_print.law law) | _ -> None)
            members)
   | _ -> []

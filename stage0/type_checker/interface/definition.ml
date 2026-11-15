@@ -87,7 +87,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
       let requires = Lower.trait_bounds context requires in
       let associated_types =
         List.filter_map
-          (fun (line : trait_member line) ->
+          (fun (line : trait_member node) ->
             match line.kind with
             | Associated_type (name, bounds) ->
                 Some
@@ -100,13 +100,13 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
       in
       let associated_capabilities =
         List.filter_map
-          (fun (line : trait_member line) ->
+          (fun (line : trait_member node) ->
             match line.kind with Associated_capability name -> Some name.text | _ -> None)
           members
       in
       let laws =
         List.filter_map
-          (fun (line : trait_member line) ->
+          (fun (line : trait_member node) ->
             match line.kind with
             | Law law ->
                 Some
@@ -131,7 +131,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
           let associated =
             List.sort compare
               (List.filter_map
-                 (fun (line : impl_member line) ->
+                 (fun (line : impl_member node) ->
                    match line.kind with
                    | Associated_definition (name, written) ->
                        Some
@@ -150,7 +150,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
           in
           let capability_sets =
             List.fold_left
-              (fun sets (line : impl_member line) ->
+              (fun sets (line : impl_member node) ->
                 match line.kind with
                 | Capability_definition (name, written) ->
                     let set =

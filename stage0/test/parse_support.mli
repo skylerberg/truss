@@ -1,6 +1,7 @@
 val document : string -> string
 val source : string -> Source.t
 val parse : string -> Syntax.file * Diagnostic.t list
+val items : Syntax.file -> Syntax.definition Syntax.item list
 val codes : Diagnostic.t list -> string list
 val no_diagnostics : string -> Diagnostic.t list -> unit
 val definitions : string -> string list -> unit

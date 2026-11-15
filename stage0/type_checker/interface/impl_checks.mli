@@ -1,6 +1,6 @@
 val check_impl :
   Checking.state ->
-  Syntax.impl_member Syntax.line list ->
+  Syntax.impl_member Syntax.node list ->
   Types.impl_interface ->
   Syntax.path_type ->
   unit

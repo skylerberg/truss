@@ -396,7 +396,7 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
               Trait
                 (List.concat
                    (List.mapi
-                      (fun index (line : trait_member line) ->
+                      (fun index (line : trait_member node) ->
                         match line.kind with
                         | Law law
                           when not (broken (Member_header index) || broken (Member_body index)) ->
@@ -429,7 +429,7 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                         | _ -> [])
                       members)));
         List.iteri
-          (fun index (line : trait_member line) ->
+          (fun index (line : trait_member node) ->
             if not (broken (Member_header index)) then
               match line.kind with
               | Law law ->

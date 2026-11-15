@@ -176,7 +176,15 @@ let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax
     | { kind = Definition_error _; _ } -> true
     | { recovered; _ } -> recovered <> []
   in
-  let used = if List.exists is_recovered file.definitions then None else used in
+  let used =
+    if
+      List.exists
+        (fun (top_level : Syntax.top_level) ->
+          is_recovered top_level.definition || List.exists is_recovered top_level.methods)
+        file.definitions
+    then None
+    else used
+  in
   let diagnostics = ref [] in
   let report ?fixes code span message =
     diagnostics := Diagnostic.make ?fixes ~code:(Resolve code) span message :: !diagnostics
@@ -229,7 +237,7 @@ let trait_header (definition : Syntax.definition) (resolved : resolved) =
   match definition.kind with
   | Trait { requires; members; _ } ->
       let member_names select =
-        List.filter_map (fun (line : Syntax.trait_member Syntax.line) -> select line.kind) members
+        List.filter_map (fun (line : Syntax.trait_member Syntax.node) -> select line.kind) members
       in
       Some
         {

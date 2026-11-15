@@ -491,7 +491,9 @@ and binary cursor ~level ~open_range =
     | Punctuation ((Dot_dot | Dot_dot_equal) as range) when level <= range_level ->
         let token = Cursor.next cursor in
         if not open_range then open_range_error cursor token "start";
-        let stop = range_stop cursor ~open_range ~inclusive:(range = Dot_dot_equal) in
+        let stop =
+          range_stop cursor ~open_range ~inclusive:(range = Dot_dot_equal) ~operator:token
+        in
         expression_node cursor start
           (Range
              {
@@ -507,7 +509,8 @@ and binary cursor ~level ~open_range =
     | Some operator when operator_level operator >= level -> (
         Cursor.check_chain_length cursor ~chain_length;
         let loop = loop ~chain_length:(chain_length + 1) in
-        let operator_span = Cursor.span cursor (Cursor.next cursor).span in
+        let operator_token = Cursor.next cursor in
+        let operator_span = Cursor.span cursor operator_token.span in
         match operator with
         | Binary_operator operator ->
             let right = binary cursor ~level:(binary_level operator + 1) ~open_range:false in
@@ -516,7 +519,7 @@ and binary cursor ~level ~open_range =
             let pattern = Parse_pattern.pattern cursor in
             loop (expression_node cursor start (Is { value = left; operator_span; pattern }))
         | Range_operator inclusive ->
-            let stop = range_stop cursor ~open_range ~inclusive in
+            let stop = range_stop cursor ~open_range ~inclusive ~operator:operator_token in
             loop
               (expression_node cursor start
                  (Range { start = Some left; operator_span; stop; inclusive })))
@@ -532,17 +535,17 @@ and binary cursor ~level ~open_range =
   in
   loop ~chain_length:0 left
 
-and range_stop cursor ~open_range ~inclusive =
+and range_stop cursor ~open_range ~inclusive ~(operator : Token.t) =
   match Cursor.peek_kind cursor with
   | Punctuation (Close Square | Comma) when open_range ->
       if inclusive then
-        Cursor.report cursor Open_range (Cursor.token_at cursor (Cursor.index cursor - 1)).span
+        Cursor.report cursor Open_range operator.span
           "A range that includes its end needs the end, as in `items[2..=4]`.";
       None
   | kind when begins_expression kind ->
       Some (binary cursor ~level:(range_level + 1) ~open_range:false)
   | _ ->
-      open_range_error cursor (Cursor.token_at cursor (Cursor.index cursor - 1)) "end";
+      open_range_error cursor operator "end";
       None
 
 and open_range_message part =
@@ -664,6 +667,7 @@ and postfix cursor : expression =
           Cursor.advance cursor;
           Cursor.fail cursor "an index or type arguments"
         end;
+        let opener = Cursor.index cursor in
         let items =
           Cursor.bracketed cursor ~item:bracket_item ~recover:(fun span ->
               Item { kind = Expression_error; span; id = Cursor.fresh_id cursor })
@@ -674,7 +678,7 @@ and postfix cursor : expression =
         in
         (match items with
         | [ item ] when is_open_range item -> (
-            match Cursor.token_at cursor (Cursor.index cursor - 2) with
+            match Cursor.token_at cursor (Cursor.closer cursor opener - 1) with
             | { kind = Punctuation Comma; span; _ } ->
                 Cursor.report cursor Open_range span
                   "A range without a start or an end has no comma after it, as in `items[2..]`."
@@ -1025,14 +1029,12 @@ and match_expression cursor =
   let scrutinees = expression_list cursor in
   body_opening cursor;
   let arms =
-    Cursor.lines cursor ~item:arm ~recover:(fun start span ->
+    Cursor.lines cursor ~item:arm ~recover:(fun span ->
         {
           patterns = [];
           guard = None;
-          body =
-            { kind = Statement_error; span; blank_line_before = false; id = Cursor.fresh_id cursor };
+          body = { kind = Statement_error; span; id = Cursor.fresh_id cursor };
           span;
-          blank_line_before = Cursor.blank_line_before cursor start;
           id = Cursor.fresh_id cursor;
         })
   in
@@ -1051,16 +1053,9 @@ and arm cursor : arm =
   (match Cursor.peek cursor with
   | { kind = Punctuation Comma; _ } as comma ->
       Habits.match_arm_comma cursor ~comma;
-      Cursor.skip_trailing_comma cursor
+      Cursor.advance cursor
   | _ -> ());
-  {
-    patterns;
-    guard;
-    body;
-    span = Cursor.span_from cursor start;
-    blank_line_before = Cursor.blank_line_before cursor start;
-    id = Cursor.fresh_id cursor;
-  }
+  { patterns; guard; body; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
 and opens_body cursor =
   Cursor.is_punctuation cursor (Open Curly)
@@ -1086,34 +1081,25 @@ and block_in cursor : block =
     statement
   in
   let statements =
-    Cursor.lines cursor ~item ~recover:(fun start span ->
+    Cursor.lines cursor ~item ~recover:(fun span ->
         previous := None;
-        {
-          kind = Statement_error;
-          span;
-          blank_line_before = Cursor.blank_line_before cursor start;
-          id = Cursor.fresh_id cursor;
-        })
+        { kind = Statement_error; span; id = Cursor.fresh_id cursor })
   in
   { statements; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
 and statement_line cursor ~previous : statement =
   match (Cursor.peek cursor, previous) with
-  | ({ kind = Lower "elif"; _ } as elif_token), Some { kind = Expression { kind = If _; _ }; _ }
+  | ( ({ kind = Lower "elif"; _ } as elif_token),
+      Some ({ kind = Expression { kind = If _; _ }; _ } as previous_if) )
     when begins_expression (Cursor.peek_ahead cursor 1) ->
       let start = Cursor.index cursor in
-      Habits.elif cursor ~previous_stop:(Cursor.token_at cursor (start - 2)).span.stop ~elif_token;
+      Habits.elif cursor ~previous_stop:(Cursor.absolute cursor previous_if.span).stop ~elif_token;
       Cursor.advance cursor;
       let condition = expression cursor in
       let then_ = body cursor in
       let else_ = else_branch cursor ~chain_length:0 in
       let value = expression_node cursor start (If { condition; then_; else_ }) in
-      {
-        kind = Expression value;
-        span = value.span;
-        blank_line_before = Cursor.blank_line_before cursor start;
-        id = Cursor.fresh_id cursor;
-      }
+      { kind = Expression value; span = value.span; id = Cursor.fresh_id cursor }
   | _ ->
       let statement = statement cursor in
       end_of_statement cursor statement
@@ -1179,9 +1165,8 @@ and trailing_lambda cursor (statement : statement) =
 
 and statement cursor : statement =
   let start = Cursor.index cursor in
-  let blank_line_before = Cursor.blank_line_before cursor start in
   let finish kind : statement =
-    { kind; span = Cursor.span_from cursor start; blank_line_before; id = Cursor.fresh_id cursor }
+    { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
   in
   match Cursor.peek_kind cursor with
   | Keyword Let ->
@@ -1252,21 +1237,21 @@ and binding cursor ~is_var =
   let value = expression cursor in
   let else_ =
     if Cursor.is_keyword cursor Else then begin
-      let before = Cursor.token_at cursor (Cursor.index cursor - 1) in
-      if before.kind = Punctuation (Close Curly) then begin
-        let span = Cursor.absolute cursor value.span in
-        Cursor.report cursor Let_else_brace (Cursor.peek cursor).span
-          "The expression before the `else` of a `let ... else` cannot end with `}`; put it in \
-           parentheses."
-          ~fixes:
-            [
-              Diagnostic.fix "Put the expression in parentheses"
-                [
-                  Diagnostic.insert (Source.zero_width span.start) "(";
-                  Diagnostic.insert (Source.zero_width span.stop) ")";
-                ];
-            ]
-      end;
+      (match Cursor.previous_token cursor with
+      | Some { kind = Punctuation (Close Curly); _ } ->
+          let span = Cursor.absolute cursor value.span in
+          Cursor.report cursor Let_else_brace (Cursor.peek cursor).span
+            "The expression before the `else` of a `let ... else` cannot end with `}`; put it in \
+             parentheses."
+            ~fixes:
+              [
+                Diagnostic.fix "Put the expression in parentheses"
+                  [
+                    Diagnostic.insert (Source.zero_width span.start) "(";
+                    Diagnostic.insert (Source.zero_width span.stop) ")";
+                  ];
+              ]
+      | _ -> ());
       Cursor.advance cursor;
       Some (body cursor)
     end

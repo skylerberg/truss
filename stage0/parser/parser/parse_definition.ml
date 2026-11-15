@@ -191,15 +191,7 @@ let body cursor =
             ];
         let at = Cursor.span cursor (Source.zero_width stop) in
         {
-          statements =
-            [
-              {
-                kind = Statement_error;
-                span = at;
-                blank_line_before = false;
-                id = Cursor.fresh_id cursor;
-              };
-            ];
+          statements = [ { kind = Statement_error; span = at; id = Cursor.fresh_id cursor } ];
           span = at;
           id = Cursor.fresh_id cursor;
         }
@@ -233,31 +225,15 @@ let function_signature cursor ~name =
 
 let members cursor ~member ~error =
   Parse_expression.body_opening cursor;
-  List.filter_map Fun.id
+  List.partition_map Fun.id
     (Cursor.lines cursor
        ~item:(fun cursor ->
          let start = Cursor.index cursor in
-         if Cursor.is_keyword cursor Fn then begin
-           Cursor.skip_method cursor;
-           None
-         end
+         if Cursor.is_keyword cursor Fn then Either.Right (Cursor.skip_piece cursor)
          else
            let kind = member cursor in
-           Some
-             {
-               kind;
-               span = Cursor.span_from cursor start;
-               blank_line_before = Cursor.blank_line_before cursor start;
-               id = Cursor.fresh_id cursor;
-             })
-       ~recover:(fun start span ->
-         Some
-           {
-             kind = error;
-             span;
-             blank_line_before = Cursor.blank_line_before cursor start;
-             id = Cursor.fresh_id cursor;
-           }))
+           Either.Left { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor })
+       ~recover:(fun span -> Either.Left { kind = error; span; id = Cursor.fresh_id cursor }))
 
 let trait_member cursor =
   match Cursor.peek_kind cursor with
@@ -417,13 +393,8 @@ let trait cursor ~name =
   let requires =
     if Cursor.accept_punctuation cursor Colon then Parse_expression.bounds cursor else []
   in
-  Trait
-    {
-      name;
-      generics;
-      requires;
-      members = members cursor ~member:trait_member ~error:Trait_member_error;
-    }
+  let members, methods = members cursor ~member:trait_member ~error:Trait_member_error in
+  (Trait { name; generics; requires; members }, methods)
 
 let impl cursor =
   Cursor.advance cursor;
@@ -451,12 +422,12 @@ let impl cursor =
   let uses =
     if Cursor.accept_keyword cursor Uses then Parse_expression.capability_list cursor else []
   in
-  Impl
-    { trait_; type_; uses; members = members cursor ~member:impl_member ~error:Impl_member_error }
+  let members, methods = members cursor ~member:impl_member ~error:Impl_member_error in
+  (Impl { trait_; type_; uses; members }, methods)
 
 let capability cursor ~name =
-  Capability
-    { name; members = members cursor ~member:capability_member ~error:Capability_member_error }
+  let members, methods = members cursor ~member:capability_member ~error:Capability_member_error in
+  (Capability { name; members }, methods)
 
 let constant cursor ~name =
   Cursor.expect_punctuation cursor Colon;
@@ -510,8 +481,8 @@ let top_level cursor ~function_ =
   let ended kind =
     (match (visibility, opaque, kind) with
     | _, None, _
-    | Public_opaque, Some _, Either.Left (Type_definition _)
-    | _, Some _, Left (Impl _ | Test _ | Law_proof _) ->
+    | Public_opaque, Some _, Either.Left (Type_definition _, _)
+    | _, Some _, Left ((Impl _ | Test _ | Law_proof _), _) ->
         ()
     | _, Some (public, opaque), _ ->
         Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
@@ -523,7 +494,7 @@ let top_level cursor ~function_ =
     if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the definition";
     kind
   in
-  let failed intended name = Either.Left (Definition_error { intended; name }) in
+  let failed intended name = Either.Left (Definition_error { intended; name }, []) in
   let unnamed parse =
     match ended (parse ()) with kind -> kind | exception Cursor.Failed -> failed None None
   in
@@ -546,7 +517,7 @@ let top_level cursor ~function_ =
           ~written:Fun.id ~parse:(function_ cursor)
     | Keyword Type ->
         named Intended_type ~name:(upper "the name of the type") ~written:plain ~parse:(fun name ->
-            Either.Left (type_definition cursor ~name))
+            Either.Left (type_definition cursor ~name, []))
     | Keyword Trait ->
         named Intended_trait ~name:(upper "the name of the trait") ~written:plain
           ~parse:(fun name -> Either.Left (trait cursor ~name))
@@ -562,24 +533,24 @@ let top_level cursor ~function_ =
         named Intended_constant
           ~name:(fun () -> definition_name cursor)
           ~written:Fun.id
-          ~parse:(fun name -> Either.Left (constant cursor ~name))
+          ~parse:(fun name -> Either.Left (constant cursor ~name, []))
     | Reserved ((Const | Static) as reserved) ->
         Habits.constant_keyword cursor ~token:(Cursor.peek cursor) ~reserved;
         named Intended_constant
           ~name:(fun () -> definition_name cursor)
           ~written:Fun.id
-          ~parse:(fun name -> Either.Left (constant cursor ~name))
+          ~parse:(fun name -> Either.Left (constant cursor ~name, []))
     | Keyword Test ->
         no_visibility "A test";
-        unnamed (fun () -> Either.Left (test cursor))
+        unnamed (fun () -> Either.Left (test cursor, []))
     | Keyword Theorem ->
         named Intended_theorem
           ~name:(fun () -> Atoms.lower cursor "the name of the theorem")
           ~written:plain
-          ~parse:(fun name -> Either.Left (theorem cursor ~name))
+          ~parse:(fun name -> Either.Left (theorem cursor ~name, []))
     | Keyword Proof ->
         no_visibility "A law's proof";
-        unnamed (fun () -> Either.Left (law_proof cursor))
+        unnamed (fun () -> Either.Left (law_proof cursor, []))
     | kind when visibility = Private && Atoms.begins_statement kind ->
         unnamed (fun () ->
             Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
@@ -591,24 +562,27 @@ let top_level cursor ~function_ =
               "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, \
                `theorem`, or `proof`")
   in
-  Either.map ~left:(finish cursor start visibility) ~right:(fun other -> (visibility, other)) kind
+  Either.map
+    ~left:(fun (kind, methods) -> (finish cursor start visibility kind, methods))
+    ~right:(fun other -> (visibility, other))
+    kind
 
-let definition cursor : definition =
-  let function_ cursor name : (definition_kind, empty) Either.t =
+let definition cursor : definition * Split.piece list =
+  let function_ cursor name : (definition_kind * Split.piece list, empty) Either.t =
     let signature = function_signature cursor ~name in
-    Left (Function { signature; body = body cursor })
+    Left (Function { signature; body = body cursor }, [])
   in
   match top_level cursor ~function_ with Left definition -> definition | Right (_, _) -> .
 
-type example = Whole of definition | Signature_alone of visibility * signature
+type example = Whole of definition * Split.piece list | Signature_alone of visibility * signature
 
 let example cursor =
   let function_ cursor name =
     let signature = function_signature cursor ~name in
     match optional_body cursor with
-    | Some body -> Either.Left (Function { signature; body })
+    | Some body -> Either.Left (Function { signature; body }, [])
     | None -> Right signature
   in
   match top_level cursor ~function_ with
-  | Left definition -> Whole definition
+  | Left (definition, methods) -> Whole (definition, methods)
   | Right (visibility, signature) -> Signature_alone (visibility, signature)

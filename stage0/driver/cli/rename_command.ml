@@ -148,7 +148,7 @@ let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
             (References.uses
                ~used_module:
                  (Names.used_module (Pipeline.names pipeline packages) ~from:file.module_)
-               (Pipeline.parsed pipeline file).uses))
+               (Pipeline.parsed pipeline file).file.uses))
         (Command_packages.files snapshot packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }

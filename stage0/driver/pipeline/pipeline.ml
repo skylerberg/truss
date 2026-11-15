@@ -574,10 +574,7 @@ let namespace_of pipeline note (state : state) =
                if file.module_ = module_ then begin
                  read pipeline note (Parsed file);
                  let parsed = parsed_file pipeline file in
-                 Some
-                   ( file,
-                     { Syntax.uses = parsed.uses; definitions = parsed.definitions },
-                     parsed.text )
+                 Some (file, parsed.file, parsed.text)
                end
                else None)
              state.files ))
@@ -839,8 +836,7 @@ let import_diagnostics pipeline note (file : Path.file) =
   read pipeline note (Parsed file);
   note (Source file);
   let parsed = parsed_file pipeline file in
-  Resolve.file_diagnostics (recording_names pipeline note) file
-    { uses = parsed.uses; definitions = parsed.definitions }
+  Resolve.file_diagnostics (recording_names pipeline note) file parsed.file
     ~text:(Source.text (source pipeline file))
     ~used:(used_imports pipeline note file)
 

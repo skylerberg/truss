@@ -9,7 +9,7 @@ let spans (definition : definition) =
   let members lines body_of =
     List.concat
       (List.mapi
-         (fun index (line : _ line) ->
+         (fun index (line : _ node) ->
            match body_of line.kind with
            | Some (body : Source.Definition_span.t) ->
                split (Member_header index) (Member_body index) line.span body
@@ -19,7 +19,7 @@ let spans (definition : definition) =
   let with_members lines body_of =
     let header =
       match lines with
-      | (first : _ line) :: _ -> Source.Definition_span.make definition.span.start first.span.start
+      | (first : _ node) :: _ -> Source.Definition_span.make definition.span.start first.span.start
       | [] -> definition.span
     in
     (Header, header) :: members lines body_of

@@ -236,7 +236,7 @@ let definition cursor (definition : definition) =
   | Trait { generics; members; _ } ->
       generic_parameters cursor generics;
       List.iter
-        (fun (member : trait_member line) ->
+        (fun (member : trait_member node) ->
           match member.kind with
           | Law law ->
               parameters cursor law.parameters;
@@ -247,7 +247,7 @@ let definition cursor (definition : definition) =
   | Impl { type_; members; _ } ->
       generic_parameters cursor type_.generics;
       List.iter
-        (fun (member : impl_member line) ->
+        (fun (member : impl_member node) ->
           match member.kind with
           | Associated_definition (_, type_) -> types cursor plain type_
           | Capability_definition _ | Impl_member_error -> ())

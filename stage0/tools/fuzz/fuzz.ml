@@ -75,7 +75,7 @@ let parse text =
   let source = Source.create ~path:"fuzz.truss" text in
   let tokens, _ = Lexer.lex source in
   let parsed = Parsed.parse source in
-  (tokens, { Syntax.uses = parsed.uses; definitions = parsed.definitions }, parsed.diagnostics)
+  (tokens, parsed.file, parsed.diagnostics)
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
@@ -111,13 +111,18 @@ let check_parse_robust text =
   | exception exception_ ->
       fail "the parser raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
   | _, file, diagnostics ->
-      List.iter (check_tree text) file.definitions;
+      let items =
+        List.concat_map
+          (fun (top_level : Syntax.top_level) -> top_level.definition :: top_level.methods)
+          file.definitions
+      in
+      List.iter (check_tree text) items;
       List.iter (check_diagnostic_spans text) diagnostics;
       if
         diagnostics = []
         && List.exists
              (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
-             file.definitions
+             items
       then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
 
 type verdict = Grammar_rejects | Grammar_accepts | Unknown

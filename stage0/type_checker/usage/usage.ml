@@ -37,7 +37,7 @@ let parameter_names (definition : definition) =
   | Theorem { parameters; _ } -> add parameters
   | Trait { members; _ } ->
       List.iter
-        (fun (line : trait_member line) ->
+        (fun (line : trait_member node) ->
           match line.kind with Law law -> add law.parameters | _ -> ())
         members
   | _ -> ());
@@ -175,7 +175,7 @@ let check_unreachable context (definition : definition) =
         [ body ]
     | Trait { members; _ } ->
         List.filter_map
-          (fun (line : trait_member line) ->
+          (fun (line : trait_member node) ->
             match line.kind with Law law -> Some law.body | _ -> None)
           members
     | _ -> []
