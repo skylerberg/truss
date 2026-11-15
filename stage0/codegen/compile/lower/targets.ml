@@ -100,10 +100,6 @@ let entry_signature context (signature : Types.signature) =
   in
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
-let callable_through_any context ~any trait (trait_method : Types.trait_method) =
-  trait_method.method_receiver <> Static
-  && Interface.Impls.through_any context.lookups.interface ~any ~trait trait_method = Callable
-
 let is_copyable_any context (any : Types.trait_reference) =
   Interface.Properties.has context.lookups.interface
     ~bounds:(fun _ -> [])
@@ -120,46 +116,27 @@ type any_slot = Operation_slot of Drop_and_copy.any_operation | Method_slot of a
 
 let lay_out_any_vtable context (any : Types.trait_reference) =
   let self = Interface.Definition.make_self_parameter any.trait in
-  let traits =
-    List.fold_left
-      (fun traits (bound : Types.trait_reference) ->
-        if
-          List.exists
-            (fun (trait : Types.trait_reference) -> Path.equal trait.trait bound.trait)
-            traits
-        then traits
-        else traits @ [ bound ])
-      []
-      (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Parameter self) any)
-  in
-  let lay_out_methods (trait : Types.trait_reference) =
-    match Interface.Definition.trait_interface context.lookups.interface trait.trait with
+  let make_method_slot (dispatched : Interface.Impls.method_through_any) =
+    match Interface.Definition.trait_interface context.lookups.interface dispatched.trait.trait with
     | Some interface ->
-        let substitution =
-          Interface.Properties.trait_substitution interface ~self:(Types.Any any)
-            (Types.substitute_trait [ (self, Types.Type (Types.Any any)) ] trait)
-        in
-        List.filter_map
-          (fun trait_method ->
-            if callable_through_any context ~any trait.trait trait_method then
-              Some
-                (Method_slot
-                   {
-                     trait;
-                     trait_method;
-                     signature =
-                       Interface.Definition.method_signature context.lookups.interface
-                         ~owner:trait.trait trait_method;
-                     substitution;
-                   })
-            else None)
-          interface.methods
-    | None -> bug "no interface for %s" (Path.show trait.trait)
+        Method_slot
+          {
+            trait = dispatched.trait;
+            trait_method = dispatched.trait_method;
+            signature =
+              Interface.Definition.method_signature context.lookups.interface
+                ~owner:dispatched.trait.trait dispatched.trait_method;
+            substitution =
+              Interface.Properties.trait_substitution interface ~self:(Types.Any any)
+                (Types.substitute_trait [ (self, Types.Type (Types.Any any)) ] dispatched.trait);
+          }
+    | None -> bug "no interface for %s" (Path.show dispatched.trait.trait)
   in
   List.map
     (fun operation -> Operation_slot operation)
     (Drop_and_copy.lay_out_any_operations ~is_copyable:(is_copyable_any context any))
-  @ List.concat_map lay_out_methods traits
+  @ List.map make_method_slot
+      (Interface.Impls.list_dispatched_methods context.lookups.interface any)
 
 let find_any_method context ~(any : Types.trait_reference) trait name =
   match

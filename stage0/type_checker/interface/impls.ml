@@ -107,9 +107,7 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-let through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
-    (method_ : Types.trait_method) : through_any =
-  let self = Definition.make_self_parameter any.trait in
+let judge_through_any ~(self : Types.parameter) (signature : Types.signature) : through_any =
   let names_self type_ =
     let mentions_self = ref false in
     ignore
@@ -124,25 +122,6 @@ let through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
          type_);
     !mentions_self
   in
-  let reference =
-    match
-      List.find_opt
-        (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-        (Properties.bound_closure lookups ~self:(Types.Parameter self) any)
-    with
-    | Some reference -> reference
-    | None -> { trait; trait_arguments = []; associated = [] }
-  in
-  let substitution =
-    match Definition.trait_interface lookups trait with
-    | Some interface ->
-        Properties.trait_substitution interface ~self:(Types.Parameter self) reference
-    | None -> []
-  in
-  let signature =
-    Types.substitute_signature substitution
-      (Definition.method_signature lookups ~owner:trait method_)
-  in
   let result = Types.result_type signature.output in
   if signature.generics <> [] then Has_generics
   else if
@@ -150,6 +129,68 @@ let through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
     || names_self result
   then Names_self
   else Callable
+
+type method_through_any = {
+  trait : Types.trait_reference;
+  trait_method : Types.trait_method;
+  callability : through_any;
+}
+
+let list_methods_through_any lookups (any : Types.trait_reference) =
+  let self = Definition.make_self_parameter any.trait in
+  let traits =
+    List.fold_left
+      (fun traits (bound : Types.trait_reference) ->
+        if
+          List.exists
+            (fun (trait : Types.trait_reference) -> Path.equal trait.trait bound.trait)
+            traits
+        then traits
+        else traits @ [ bound ])
+      []
+      (Properties.bound_closure lookups ~self:(Types.Parameter self) any)
+  in
+  List.concat_map
+    (fun (trait : Types.trait_reference) ->
+      match Definition.trait_interface lookups trait.trait with
+      | Some interface ->
+          let substitution =
+            Properties.trait_substitution interface ~self:(Types.Parameter self) trait
+          in
+          List.map
+            (fun trait_method ->
+              {
+                trait;
+                trait_method;
+                callability =
+                  judge_through_any ~self
+                    (Types.substitute_signature substitution
+                       (Definition.method_signature lookups ~owner:trait.trait trait_method));
+              })
+            interface.methods
+      | None -> [])
+    traits
+
+let list_dispatched_methods lookups any =
+  List.filter
+    (fun (any_method : method_through_any) ->
+      any_method.callability = Callable && any_method.trait_method.method_receiver <> Static)
+    (list_methods_through_any lookups any)
+
+let through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
+    (method_ : Types.trait_method) : through_any =
+  match
+    List.find_opt
+      (fun (any_method : method_through_any) ->
+        Path.equal any_method.trait.trait trait
+        && any_method.trait_method.method_name = method_.method_name)
+      (list_methods_through_any lookups any)
+  with
+  | Some any_method -> any_method.callability
+  | None ->
+      judge_through_any
+        ~self:(Definition.make_self_parameter trait)
+        (Definition.method_signature lookups ~owner:trait method_)
 
 let copyable_path = Properties.copyable_trait
 let plain_path = Properties.plain_trait

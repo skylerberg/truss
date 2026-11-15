@@ -30,6 +30,14 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
+type method_through_any = {
+  trait : Types.trait_reference;
+  trait_method : Types.trait_method;
+  callability : through_any;
+}
+
+val list_dispatched_methods : Lookups.t -> Types.trait_reference -> method_through_any list
+
 val through_any :
   Lookups.t -> any:Types.trait_reference -> trait:Path.t -> Types.trait_method -> through_any
 
