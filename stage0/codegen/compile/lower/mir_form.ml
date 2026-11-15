@@ -29,7 +29,7 @@ let spans st =
 let site_of st (origin : Core.origin) =
   let spans = spans st in
   if origin >= 0 && origin < Array.length spans then site st spans.(origin)
-  else site st (Syntax.Span.make 0 0)
+  else site st (Source.Definition_span.make 0 0)
 
 let reported_site st : Lowered.operand option =
   match st.frame.mir with

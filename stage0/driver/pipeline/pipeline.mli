@@ -31,7 +31,7 @@ val dependencies : t -> Path.t list -> read list
 val dependents : t -> Path.t list -> read list
 val changes : t -> t -> Part.t list
 
-type 'a part = Value of 'a | Failed of Syntax.diagnostic list | Blocked
+type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 type proofs
 
 val prove : t -> Path.file list -> proofs
@@ -52,7 +52,7 @@ val decide :
   proofs ->
   verdicts
 
-val states : verdicts -> Path.file -> Diagnostic.span Prover.state list
+val states : verdicts -> Path.file -> Source.span Prover.state list
 val diagnostics : verdicts -> Path.file -> Diagnostic.t list
 
 module For_testing : sig

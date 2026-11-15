@@ -121,7 +121,7 @@ and specification =
   | Method_time of callee
   | Map of (operand * operand) list
   | Quantified of {
-      quantifier : Syntax.quantifier;
+      quantifier : Core.quantifier;
       range : quantifier_range;
       parameter : local;
       matches : block;
@@ -151,7 +151,7 @@ and cost = { origin : Core.origin; amortized : bool; resource : Core.resource; b
 and loop_clause = Invariant of formula | Decreases of formula list | Cost of cost
 
 and quantified = {
-  quantifier : Syntax.quantifier;
+  quantifier : Core.quantifier;
   binding_count : int;
   decision : int;
   holds : operand;

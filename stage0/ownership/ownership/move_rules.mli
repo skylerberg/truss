@@ -1,10 +1,17 @@
-type verdict = Moves | Reads | Refused of (Context.context -> Syntax.span -> Types.ty -> unit)
+type verdict =
+  | Moves
+  | Reads
+  | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
 val verdict :
   Context.context -> Place.t -> type_:Types.ty -> is_returned:bool -> is_captured:bool -> verdict
 
 val copy_fix :
-  Context.context -> string -> Types.ty -> Syntax.span -> Syntax.span Diagnostic.fix list
+  Context.context ->
+  string ->
+  Types.ty ->
+  Source.Definition_span.t ->
+  Source.Definition_span.t Diagnostic.fix list
 
 val analyse : Context.context -> Mir.Graph.body -> Moves.t
 

@@ -10,7 +10,7 @@ type quantified_range =
       collection_type : Types.ty;
       collected : Logic.term;
       element : Types.ty;
-      span : span;
+      span : Source.Definition_span.t;
     }
 
 let under_binder :
@@ -172,7 +172,7 @@ let rec model_of context (ty : Types.ty) term ~element =
 and model_as context (ty : Types.ty) term ~(model : Types.ty) =
   Option.map (fun model_of -> model_of term) (model_function context ty ~model)
 
-let quantified_over context frame (quantifier : Syntax.quantifier) (range : quantified_range) ~bind
+let quantified_over context frame (quantifier : Core.quantifier) (range : quantified_range) ~bind
     ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
     let mark = context.fresh in

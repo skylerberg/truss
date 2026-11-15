@@ -32,7 +32,7 @@ type frame = {
   mutable deferred_checks : (unit -> bool) list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
   frame_specification : bool;
-  span : span;
+  span : Source.Definition_span.t;
 }
 
 type undecided_literal = { index : int; kind : Types.literal_kind; local : id; owner : frame }
@@ -40,7 +40,7 @@ type undecided_literal = { index : int; kind : Types.literal_kind; local : id; o
 type literal_decision = {
   decided_local : id;
   decided_type : Types.ty;
-  decided_at : span;
+  decided_at : Source.Definition_span.t;
   is_default : bool;
   mutable decision_report : Diagnostic.reported option;
 }
@@ -65,7 +65,7 @@ type state = {
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
   mutable law_parameters : (string * Types.ty) list;
@@ -74,8 +74,8 @@ type state = {
   mutable receiver_modes : (id * Types.mode) list;
   yielded : (id, Types.mode) Hashtbl.t;
   lent_tails : (id, unit) Hashtbl.t;
-  binding_spans : (id, span) Hashtbl.t;
-  mutable lambdas : span list;
+  binding_spans : (id, Source.Definition_span.t) Hashtbl.t;
+  mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
@@ -85,7 +85,7 @@ type state = {
   annotatable : (id, unit) Hashtbl.t;
 }
 
-let reported state ?notes ?(fixes = []) code (span : span) message =
+let reported state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?notes ~fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
@@ -104,7 +104,7 @@ let reject_in_formula state env span what =
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
 
-let source state (span : span) =
+let source state (span : Source.Definition_span.t) =
   let text = Lazy.force state.text in
   if span.stop <= String.length text then String.sub text span.start (span.stop - span.start)
   else ""
@@ -273,7 +273,7 @@ let fresh_synthetic_local state : Core.local =
 
 let fix title edits = Diagnostic.fix title edits
 let replace = Diagnostic.replace
-let insert position text = Diagnostic.insert (Span.zero_width position) text
+let insert position text = Diagnostic.insert (Source.Definition_span.zero_width position) text
 let current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
 let record state (value : expression) type_ =
@@ -318,7 +318,7 @@ let unsolved state =
   | None ->
       let report =
         reported state Cannot_infer
-          (Span.make state.definition.span.start state.definition.span.start)
+          (Source.Definition_span.make state.definition.span.start state.definition.span.start)
           "A type in this definition cannot be inferred. Give the `let` a type, or the call type \
            arguments."
       in
@@ -398,7 +398,7 @@ let plain state type_ =
 let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~bounds:(bounds state) (zonk state type_)
 
-let associated state type_ (trait : Types.trait_reference) name ~(at : span) =
+let associated state type_ (trait : Types.trait_reference) name ~(at : Source.Definition_span.t) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match
     Interface.Impls.associated_type state.lookups.interface ~bounds:(bounds state) type_ trait name
@@ -421,7 +421,7 @@ let trait_reference ?(arguments = []) trait : Types.trait_reference =
 let string_type = Types.Named { path = Well_known.path String; arguments = [] }
 let undecided_type (undecided : undecided_literal) = Types.Literal (undecided.kind, undecided.index)
 
-let decide_literals state ~(at : span) ~is_default =
+let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
   state.undecided <-
     List.filter
       (fun (undecided : undecided_literal) ->
@@ -583,7 +583,7 @@ let settle state frame =
   | Some parent -> parent.deferred_checks <- frame.deferred_checks @ parent.deferred_checks
   | None -> ()
 
-let in_statement state env (span : span) body =
+let in_statement state env (span : Source.Definition_span.t) body =
   let frame =
     {
       first_variable = state.unifier.next + 1;
@@ -670,8 +670,8 @@ let literal_decision state type_ =
   in
   follow type_
 
-let reported_mismatch state ?(fixes = []) code (span : span) ~(sides : (Types.ty * Types.ty) list)
-    message =
+let reported_mismatch state ?(fixes = []) code (span : Source.Definition_span.t)
+    ~(sides : (Types.ty * Types.ty) list) message =
   let other_fixes = fixes in
   match
     List.find_map
@@ -722,7 +722,7 @@ let reported_mismatch state ?(fixes = []) code (span : span) ~(sides : (Types.ty
       decision.decision_report <- Some report;
       report
 
-let mismatched state (span : span) ~expected ~actual =
+let mismatched state (span : Source.Definition_span.t) ~expected ~actual =
   let sides = [ (actual, expected); (expected, actual) ] in
   let expected = zonk state expected and actual = zonk state actual in
   match (resolve state actual, expected) with
@@ -844,7 +844,7 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
-let convert state env ?argument ?expression (span : span) ~actual ~expected =
+let convert state env ?argument ?expression (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
   let converted (conversion : conversion option) =
     match (conversion, expression) with

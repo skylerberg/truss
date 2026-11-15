@@ -9,7 +9,7 @@ let tasks : Types.capability = Capability (Well_known.path Tasks)
 
 type checking = {
   state : state;
-  spans : span array;
+  spans : Source.Definition_span.t array;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
 }
 
@@ -301,14 +301,15 @@ and check_provide checking scope implementations body =
           ~fixes:
             [
               Diagnostic.fix "Provide it `mut`."
-                [ Diagnostic.insert (Span.zero_width start) "mut " ];
+                [ Diagnostic.insert (Source.Definition_span.zero_width start) "mut " ];
             ]
           "This implementation mutates its own state, so the place is provided `mut`."
       else if provided_mut && not mutates then
         report checking Provide_mode implementation.origin
           ~fixes:
             [
-              Diagnostic.fix "Remove the `mut`." [ Diagnostic.delete (Span.make start (start + 4)) ];
+              Diagnostic.fix "Remove the `mut`."
+                [ Diagnostic.delete (Source.Definition_span.make start (start + 4)) ];
             ]
           "This implementation never mutates its own state, so the place is provided without `mut`.";
       List.iter

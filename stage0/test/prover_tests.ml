@@ -1226,7 +1226,7 @@ let () =
       in
       let states = Support.proof_states (Support.pipeline database) (Support.file_of "app::main") in
       let failed =
-        List.filter (fun (state : Diagnostic.span Prover.state) -> state.failure <> None) states
+        List.filter (fun (state : Source.span Prover.state) -> state.failure <> None) states
       in
       if List.length failed <> 1 || List.length states < 2 then
         fail "%d states, %d failed" (List.length states) (List.length failed));

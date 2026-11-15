@@ -56,7 +56,8 @@ let check (state : state) =
       let span = spans.(id) in
       if
         List.exists
-          (fun (clause : span) -> clause.start <= span.start && span.stop <= clause.stop)
+          (fun (clause : Source.Definition_span.t) ->
+            clause.start <= span.start && span.stop <= clause.stop)
           requires_and_costs
         && not (visible_to_other_packages state.lookups path)
       then

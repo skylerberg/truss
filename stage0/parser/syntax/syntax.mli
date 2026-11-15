@@ -1,9 +1,5 @@
-module Span = Span
-
-type span = Span.t
-type diagnostic = span Diagnostic.diagnostic
 type id = int
-type name = { text : string; span : span; id : id }
+type name = { text : string; span : Source.Definition_span.t; id : id }
 type path = { modules : name list; last : name }
 type mode = Mut | Own
 type prefix = Negate | Not | Complement
@@ -43,8 +39,15 @@ type assignment =
   | Shift_right_assign
 
 type quantifier = Forall | Exists
-type 'kind line = { kind : 'kind; span : span; blank_line_before : bool; id : id }
-type 'kind node = { kind : 'kind; span : span; id : id }
+
+type 'kind line = {
+  kind : 'kind;
+  span : Source.Definition_span.t;
+  blank_line_before : bool;
+  id : id;
+}
+
+type 'kind node = { kind : 'kind; span : Source.Definition_span.t; id : id }
 
 type type_expression = type_kind node
 
@@ -56,11 +59,16 @@ and type_kind =
   | Function_type of function_type
   | Type_error
 
-and path_type = { path : path; arguments : type_argument list; span : span; id : id }
+and path_type = {
+  path : path;
+  arguments : type_argument list;
+  span : Source.Definition_span.t;
+  id : id;
+}
 
 and type_argument =
   | Type_argument of type_expression
-  | Count of Z.t * span
+  | Count of Z.t * Source.Definition_span.t
   | Count_name of name
   | Constraint of name * type_expression
 
@@ -128,11 +136,16 @@ and expression_kind =
   | Prefix of prefix * expression
   | Mode of mode * expression
   | Any of expression
-  | Binary of { operator : binary; operator_span : span; left : expression; right : expression }
-  | Is of { value : expression; operator_span : span; pattern : pattern }
+  | Binary of {
+      operator : binary;
+      operator_span : Source.Definition_span.t;
+      left : expression;
+      right : expression;
+    }
+  | Is of { value : expression; operator_span : Source.Definition_span.t; pattern : pattern }
   | Range of {
       start : expression option;
-      operator_span : span;
+      operator_span : Source.Definition_span.t;
       stop : expression option;
       inclusive : bool;
     }
@@ -154,11 +167,11 @@ and string_literal = {
   form : Token.form;
   first : text;
   rest : (expression * text) list;
-  span : span;
+  span : Source.Definition_span.t;
   id : id;
 }
 
-and text = { value : string; span : span }
+and text = { value : string; span : Source.Definition_span.t }
 and argument = { label : name option; value : expression }
 and bracket_item = Item of expression | Item_constraint of name * type_expression
 and update = update_kind node
@@ -169,7 +182,7 @@ and update_kind =
 
 and binder = Binder_in of pattern * expression | Binder_type of name * type_expression
 and else_branch = Else of block | Else_if of expression
-and block = { statements : statement list; span : span; id : id }
+and block = { statements : statement list; span : Source.Definition_span.t; id : id }
 and statement = statement_kind line
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
@@ -209,7 +222,7 @@ and arm = {
   patterns : pattern list;
   guard : expression option;
   body : statement;
-  span : span;
+  span : Source.Definition_span.t;
   blank_line_before : bool;
   id : id;
 }
@@ -241,7 +254,14 @@ and pattern_field = pattern_field_kind node
 and pattern_field_kind = Named_field of name * pattern | Field of pattern | Rest
 
 type visibility = Private | Internal | Public | Public_opaque
-type type_head = { path : path; generics : generic_parameter list; span : span; id : id }
+
+type type_head = {
+  path : path;
+  generics : generic_parameter list;
+  span : Source.Definition_span.t;
+  id : id;
+}
+
 type definition_name = Plain_name of name | Member_name of type_head * name
 
 type parameter = parameter_kind node
@@ -274,7 +294,14 @@ and field_kind =
   | Field_declaration of { name : name; type_ : type_expression; default : expression option }
   | Field_error
 
-type variant = { indirect : bool; name : name; fields : field list option; span : span; id : id }
+type variant = {
+  indirect : bool;
+  name : name;
+  fields : field list option;
+  span : Source.Definition_span.t;
+  id : id;
+}
+
 type type_body = Fields of field list | Variants of variant list | Type_todo
 
 type type_clause = type_clause_kind node
@@ -344,8 +371,8 @@ type definition_kind =
 type definition = {
   visibility : visibility;
   kind : definition_kind;
-  span : span;
-  recovered : span list;
+  span : Source.Definition_span.t;
+  recovered : Source.Definition_span.t list;
   id : id;
 }
 

@@ -12,16 +12,17 @@ type space = Wild | Constructed of constructor * space list | Alternatives of sp
 
 type context = {
   lookups : Lookups.t;
-  spans : Syntax.span array Lazy.t;
+  spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
 }
 
-let span context (origin : Core.origin) : Syntax.span =
+let span context (origin : Core.origin) : Source.Definition_span.t =
   let spans = Lazy.force context.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
+  if origin >= 0 && origin < Array.length spans then spans.(origin)
+  else Source.Definition_span.make 0 0
 
-let report context ?(fixes = []) code (span : Syntax.span) message =
+let report context ?(fixes = []) code (span : Source.Definition_span.t) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Patterns code) span message :: context.diagnostics
 
@@ -437,7 +438,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                   Diagnostic.fix "Delete the arm."
                     [
                       Diagnostic.delete
-                        (Syntax.Span.make
+                        (Source.Definition_span.make
                            (arm_span.start
                            - String.length (indentation (Lazy.force context.text) arm_span.start)
                            - 1)
@@ -460,10 +461,12 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                       let alternative_span = at alternative in
                       let deleted =
                         match if index > 0 then List.nth_opt alternatives (index - 1) else None with
-                        | Some previous -> Syntax.Span.make (at previous).stop alternative_span.stop
+                        | Some previous ->
+                            Source.Definition_span.make (at previous).stop alternative_span.stop
                         | None -> (
                             match List.nth_opt alternatives 1 with
-                            | Some next -> Syntax.Span.make alternative_span.start (at next).start
+                            | Some next ->
+                                Source.Definition_span.make alternative_span.start (at next).start
                             | None -> alternative_span)
                       in
                       report context Unreachable_alternative alternative_span
@@ -497,7 +500,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                 Diagnostic.fix "Add an arm for each missing case."
                   [
                     Diagnostic.replace
-                      (Syntax.Span.zero_width last.stop)
+                      (Source.Definition_span.zero_width last.stop)
                       (String.concat ""
                          (List.map
                             (fun witness ->

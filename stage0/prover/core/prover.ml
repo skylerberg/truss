@@ -1,4 +1,3 @@
-open Syntax
 module State = State
 module Facts = Facts
 module Contracts = Contracts
@@ -6,7 +5,10 @@ module Lookups = Lookups
 module Names = Resolve.Names
 module Symbol = Logic.Symbol
 
-type proof = Obligations of State.outcome | Unsupported of span * string | Not_proven_here
+type proof =
+  | Obligations of State.outcome
+  | Unsupported of Source.Definition_span.t * string
+  | Not_proven_here
 
 let inherited (lookups : Lookups.t) (path : Path.t) =
   match path with
@@ -207,7 +209,7 @@ let proof (lookups : Lookups.t) (key : Names.key) =
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
       with
       | Facts.Unsupported (span, message) -> Unsupported (span, message)
-      | Facts.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
+      | Facts.Foreign_unsupported message -> Unsupported (Source.Definition_span.make 0 0, message))
   | None, _ -> Not_proven_here
 
 let float_text bits =
@@ -358,10 +360,10 @@ let counterexample members (obligation : State.obligation) answer_values =
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
-let clamp_to_definition (lookups : Lookups.t) (key : Names.key) (span : span) =
+let clamp_to_definition (lookups : Lookups.t) (key : Names.key) (span : Source.Definition_span.t) =
   match lookups.interface.names.text key with
   | Some text when span.stop <= String.length text -> span
-  | _ -> Syntax.Span.make 0 0
+  | _ -> Source.Definition_span.make 0 0
 
 let node_span (lookups : Lookups.t) (key : Names.key) origin =
   match (lookups.interface.names.text key, lookups.interface.names.spans key) with
@@ -374,7 +376,7 @@ let substituted text spans clause replacements =
   let buffer = Buffer.create (String.length clause_text) in
   let next =
     List.fold_left
-      (fun next ((span : span), replacement) ->
+      (fun next ((span : Source.Definition_span.t), replacement) ->
         let start = span.start - clause_span.start and stop = span.stop - clause_span.start in
         if start < next || stop > String.length clause_text then next
         else begin
@@ -418,7 +420,10 @@ let rendered_fix lookups ({ title; edits } : State.fix) =
 let cited_place (lookups : Lookups.t) ((key : Names.key), origin) =
   match (lookups.interface.names.place key, lookups.interface.names.spans key) with
   | Some place, Some spans when origin >= 0 && origin < Array.length spans ->
-      Some (place, Span.to_source ~base:place.base (clamp_to_definition lookups key spans.(origin)))
+      Some
+        ( place,
+          Source.Definition_span.to_file ~base:place.base
+            (clamp_to_definition lookups key spans.(origin)) )
   | _ -> None
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
@@ -431,7 +436,7 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-type verdict = (span state * (Names.key * Core.origin) option) list
+type verdict = (Source.Definition_span.t state * (Names.key * Core.origin) option) list
 
 let definition_states lookups (key : Names.key) proof answers =
   let clamp_to_definition span = clamp_to_definition lookups key span in
@@ -639,11 +644,13 @@ let file_states (lookups : Lookups.t) ~verdict file =
                  in
                  {
                    state with
-                   span = Span.to_source ~base state.span;
+                   span = Source.Definition_span.to_file ~base state.span;
                    failure =
                      Option.map
                        (fun failure ->
-                         let failure = Diagnostic.map_spans (Span.to_source ~base) failure in
+                         let failure =
+                           Diagnostic.map_spans (Source.Definition_span.to_file ~base) failure
+                         in
                          let failure = { failure with message = failure.message ^ elsewhere } in
                          match note with
                          | Some note -> { failure with notes = failure.notes @ [ note ] }

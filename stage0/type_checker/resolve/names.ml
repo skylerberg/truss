@@ -147,7 +147,7 @@ type lookups = {
   package_declarations : Path.package -> declaration list;
   definition : key -> definition option;
   text : key -> string option;
-  spans : key -> span array option;
+  spans : key -> Source.Definition_span.t array option;
   place : key -> place option;
   container : key -> key option;
   contained : key -> key list;
@@ -497,7 +497,7 @@ type declared = {
   item : definition Syntax.item;
   place : place;
   imports : (string * Path.module_) list;
-  spans : span array;
+  spans : Source.Definition_span.t array;
   container : key option;
   contained : key list;
 }

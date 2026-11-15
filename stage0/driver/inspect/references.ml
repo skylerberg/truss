@@ -1,7 +1,7 @@
 module Names = Resolve.Names
 
 type target = Definition of Path.t | Module of Path.module_
-type occurrence = { span : Syntax.span; target : target }
+type occurrence = { span : Source.Definition_span.t; target : target }
 
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
@@ -65,7 +65,11 @@ let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Re
                  | Some (last : Syntax.name) -> last
                  | None -> name
                in
-               [ occurrence (Syntax.Span.make name.span.start last.span.stop) (Module module_) ]
+               [
+                 occurrence
+                   (Source.Definition_span.make name.span.start last.span.stop)
+                   (Module module_);
+               ]
            | _ -> [])
          names)
   in
@@ -92,7 +96,8 @@ let uses ~(used_module : Syntax.path -> Path.module_) (items : Syntax.path Synta
       let path = item.value in
       let first = match path.modules with first :: _ -> first | [] -> path.last in
       ( used_module path,
-        Source.span (item.base + first.span.start) (item.base + path.last.span.stop) ))
+        Source.Definition_span.to_file ~base:item.base
+          (Source.Definition_span.make first.span.start path.last.span.stop) ))
     items
 
 let names_definition (definition : Path.t) target =

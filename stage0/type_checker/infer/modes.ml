@@ -41,7 +41,7 @@ let rec immutable state env (value : expression) : immutable option =
       | Some (Local id) -> (
           let captured =
             match (state.lambdas, Hashtbl.find_opt state.binding_spans id) with
-            | (lambda : span) :: _, Some (binding : span) ->
+            | (lambda : Source.Definition_span.t) :: _, Some (binding : Source.Definition_span.t) ->
                 binding.start < lambda.start || binding.start >= lambda.stop
             | _ -> false
           in
@@ -187,7 +187,7 @@ let lent_field state (value : expression) type_ : Types.mode option =
   | _ -> None
 
 let mode_keyword_span (value : expression) (inner : expression) =
-  Span.make value.span.start inner.span.start
+  Source.Definition_span.make value.span.start inner.span.start
 
 let check_mode state env (value : expression) (parameter : Types.parameter_info) type_ =
   let name = parameter.name in
@@ -198,7 +198,7 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
         ~fixes:
           [
             fix "Remove the keyword."
-              [ Diagnostic.delete (Span.make value.span.start inner.span.start) ];
+              [ Diagnostic.delete (Source.Definition_span.make value.span.start inner.span.start) ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." name)
   | Mut, With_mode (Mut, inner) -> mutate state env ~by:Passed_mut inner

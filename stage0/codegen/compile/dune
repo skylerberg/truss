@@ -34,5 +34,4 @@
   types
   core
   mir
-  syntax
   convention))

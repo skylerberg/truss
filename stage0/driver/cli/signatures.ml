@@ -21,19 +21,22 @@ let bodies ~opaque (definition : definition) =
           name.span.stop generics
       in
       let stop = if generics = [] then stop else stop + 1 in
-      [ Span.make stop definition.span.stop ]
+      [ Source.Definition_span.make stop definition.span.stop ]
   | Method_declaration _ | Type_definition _ | Impl _ | Capability _ | Constant _
   | Definition_error _ ->
       []
 
 let cut text spans =
   let spans =
-    List.sort (fun (left : span) (right : span) -> compare left.start right.start) spans
+    List.sort
+      (fun (left : Source.Definition_span.t) (right : Source.Definition_span.t) ->
+        compare left.start right.start)
+      spans
   in
   let buffer = Buffer.create (String.length text) in
   let at =
     List.fold_left
-      (fun at (span : span) ->
+      (fun at (span : Source.Definition_span.t) ->
         if span.start >= at && span.stop <= String.length text then begin
           Buffer.add_string buffer (String.sub text at (span.start - at));
           span.stop
@@ -64,8 +67,9 @@ let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key)
                 match (names.place member, names.definition member) with
                 | Some { base = member_base; _ }, Some written ->
                     List.map
-                      (fun (span : span) ->
-                        Span.make (span.start + member_base - base) (span.stop + member_base - base))
+                      (fun (span : Source.Definition_span.t) ->
+                        Source.Definition_span.of_file ~base
+                          (Source.Definition_span.to_file ~base:member_base span))
                       (bodies ~opaque:false written)
                 | _ -> [])
               (names.contained key)

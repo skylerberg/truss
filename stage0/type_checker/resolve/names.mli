@@ -62,7 +62,7 @@ type lookups = {
   package_declarations : Path.package -> declaration list;
   definition : key -> Syntax.definition option;
   text : key -> string option;
-  spans : key -> Syntax.span array option;
+  spans : key -> Source.Definition_span.t array option;
   place : key -> place option;
   container : key -> key option;
   contained : key -> key list;

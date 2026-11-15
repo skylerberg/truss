@@ -594,7 +594,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                   | Some label -> label.span.start
                   | None -> argument.value.span.start
                 in
-                source state (Span.make start argument.value.span.stop))
+                source state (Source.Definition_span.make start argument.value.span.stop))
               arguments
           in
           error state Ambiguous_method member.span

@@ -2,6 +2,7 @@
  (name ownership)
  (modules_without_implementation lookups)
  (libraries
+  source
   path
   well_known
   types
@@ -10,5 +11,4 @@
   moves
   interface
   resolve
-  syntax
   diagnostic))

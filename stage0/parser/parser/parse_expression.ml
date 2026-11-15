@@ -1263,7 +1263,7 @@ and end_of_statement cursor (statement : statement) =
       {
         statement with
         kind = Assignment { target; operator = operator_kind; value = one };
-        span = Syntax.Span.make statement.span.start stop;
+        span = Source.Definition_span.make statement.span.start stop;
       }
   | Punctuation (Open Curly), _ when not (Cursor.peek cursor).line_break_before ->
       trailing_lambda cursor statement
@@ -1272,7 +1272,7 @@ and end_of_statement cursor (statement : statement) =
 and replace_trailing (statement : statement) ~replace =
   let rec rightmost (value : expression) =
     let with_operand kind (inner : expression) : expression =
-      { value with kind; span = Syntax.Span.make value.span.start inner.span.stop }
+      { value with kind; span = Source.Definition_span.make value.span.start inner.span.stop }
     in
     match value.kind with
     | Name _ | Member _ -> Some (replace value)
@@ -1289,7 +1289,7 @@ and replace_trailing (statement : statement) ~replace =
     | _ -> None
   in
   let rebuilt kind (value : expression) : statement =
-    { statement with kind; span = Syntax.Span.make statement.span.start value.span.stop }
+    { statement with kind; span = Source.Definition_span.make statement.span.start value.span.stop }
   in
   match statement.kind with
   | Expression value -> Option.map (fun value -> rebuilt (Expression value) value) (rightmost value)
@@ -1341,7 +1341,7 @@ and trailing_lambda cursor statement =
     let renamed = rename_it block_tokens ~parameter in
     let body = block (Cursor.sub_cursor cursor renamed) in
     Cursor.skip_to cursor (closer + 1);
-    let at_start = Syntax.Span.make body.span.start body.span.start in
+    let at_start = Source.Definition_span.make body.span.start body.span.start in
     let lambda : expression =
       {
         kind =
@@ -1364,7 +1364,7 @@ and trailing_lambda cursor statement =
     in
     {
       kind = Call (callee, [ { label = None; value = lambda } ]);
-      span = Syntax.Span.make callee.span.start body.span.stop;
+      span = Source.Definition_span.make callee.span.start body.span.stop;
       id = Cursor.fresh_id cursor;
     }
   in

@@ -2,10 +2,10 @@ open State
 
 val variable : ?numbers:int list -> string -> 'a Symbol.t
 
-exception Unsupported of span * string
+exception Unsupported of Source.Definition_span.t * string
 exception Foreign_unsupported of string
 
-val unsupported : span -> ('a, unit, string, 'b) format4 -> 'a
+val unsupported : Source.Definition_span.t -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : context -> Path.t -> bool
 val clauses : Mir.requirement list -> Mir.formula list
@@ -27,7 +27,7 @@ val oblige :
   context ->
   frame ->
   Code.prover ->
-  span ->
+  Source.Definition_span.t ->
   message ->
   Logic.term ->
   unit
@@ -37,7 +37,7 @@ val obligation_at :
   context ->
   frame ->
   Code.prover ->
-  span ->
+  Source.Definition_span.t ->
   message ->
   Logic.term ->
   obligation option
@@ -47,14 +47,14 @@ val make_obligation :
   context ->
   frame ->
   Code.prover ->
-  span ->
+  Source.Definition_span.t ->
   message ->
   Logic.term ->
   obligation
 
-val span_of : source -> int -> span
+val span_of : source -> int -> Source.Definition_span.t
 val quote : source -> int -> piece
-val quoted : string -> span -> string
+val quoted : string -> Source.Definition_span.t -> string
 val text_of : source -> int -> string
 val builtin : Types.ty -> Intrinsic.builtin option
 val bounds : Types.ty -> (Z.t * Z.t) option

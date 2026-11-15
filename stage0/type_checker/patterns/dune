@@ -6,7 +6,6 @@
   diagnostic
   source
   resolve
-  syntax
   types
   core
   core_walk

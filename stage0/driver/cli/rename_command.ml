@@ -4,7 +4,7 @@ module References = Inspect.References
 type target = Definition of Path.t | Module of Path.module_
 
 type plan = {
-  edits : (Path.file * Diagnostic.span Diagnostic.edit list) list;
+  edits : (Path.file * Source.span Diagnostic.edit list) list;
   moved : (Path.module_ * Path.module_) option;
 }
 
@@ -95,7 +95,7 @@ let occurrences pipeline snapshot packages =
               let tables = Pipeline.tables pipeline key in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
-                  (file, Syntax.Span.to_source ~base span, target))
+                  (file, Source.Definition_span.to_file ~base span, target))
                 (References.occurrences ~path:key.path definition resolved tables)
           | _ -> [])
         (names.declarations_in file))
@@ -193,7 +193,7 @@ let edits_json snapshot packages plan =
     (fun (file, edits) ->
       let source = Command_packages.source snapshot packages file in
       List.map
-        (fun (edit : Diagnostic.span Diagnostic.edit) ->
+        (fun (edit : Source.span Diagnostic.edit) ->
           Json.Object
             [
               ("file", Json.String (Source.path source));

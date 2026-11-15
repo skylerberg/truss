@@ -1264,7 +1264,7 @@ and cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
             ~loop ~each)
         (callee_of builder next)
 
-and quantifier_loop builder (node : Core.expression) (quantifier : Syntax.quantifier)
+and quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifier)
     (body : Core.expression) run =
   let origin = node.origin in
   let result = temporary builder Types.bool origin in
@@ -1309,7 +1309,7 @@ and quantifier_loop builder (node : Core.expression) (quantifier : Syntax.quanti
             (expression builder body)));
   Some (Use { place = at result; type_ = Types.bool; node = node.id; origin })
 
-and quantified builder (node : Core.expression) (quantifier : Syntax.quantifier)
+and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
     (binder : Core.binder) (body : Core.expression) =
   let origin = node.origin in
   let range, value_type =

@@ -65,15 +65,15 @@ let applies_first language ~first ~second = level language first >= level langua
 
 type grouping = Left_first | Right_first
 
-let report cursor (span : span) message fixes =
+let report cursor (span : Source.Definition_span.t) message fixes =
   Cursor.report cursor Needs_parentheses (Cursor.absolute cursor span) message
     ~fixes:(List.map (fun (title, edits) -> Diagnostic.fix title edits) fixes)
 
-let fix cursor (whole : span) edits =
+let fix cursor (whole : Source.Definition_span.t) edits =
   let whole_source = Cursor.absolute cursor whole in
   let shifted =
     List.map
-      (fun (edit : Diagnostic.span Diagnostic.edit) ->
+      (fun (edit : Source.span Diagnostic.edit) ->
         {
           edit with
           span =
@@ -85,7 +85,7 @@ let fix cursor (whole : span) edits =
       (Diagnostic.apply_fix (Cursor.text cursor whole_source) (Diagnostic.fix "" shifted)),
     edits )
 
-let parentheses cursor (first : span) (last : span) =
+let parentheses cursor (first : Source.Definition_span.t) (last : Source.Definition_span.t) =
   [
     Diagnostic.insert (Source.zero_width (Cursor.absolute cursor first).start) "(";
     Diagnostic.insert (Source.zero_width (Cursor.absolute cursor last).stop) ")";

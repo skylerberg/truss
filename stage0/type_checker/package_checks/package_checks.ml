@@ -3,9 +3,9 @@ open Syntax
 module Names = Resolve.Names
 module Properties = Interface.Properties
 
-type placed = { key : Names.key; diagnostic : Syntax.diagnostic }
+type placed = { key : Names.key; diagnostic : Diagnostic.in_definition }
 
-let diagnostic_at (key : Names.key) ?(fixes = []) code (span : span) message =
+let diagnostic_at (key : Names.key) ?(fixes = []) code (span : Source.Definition_span.t) message =
   { key; diagnostic = Diagnostic.make ~fixes ~code:(Package code) span message }
 
 let dependency_names (lookups : Lookups.t) package =
@@ -341,7 +341,11 @@ let check_recursion lookups ~contained (declaration : Names.declaration) (defini
                      ~fixes:
                        [
                          Diagnostic.fix "Declare the variant `indirect`."
-                           [ Diagnostic.insert (Span.zero_width span.start) "indirect " ];
+                           [
+                             Diagnostic.insert
+                               (Source.Definition_span.zero_width span.start)
+                               "indirect ";
+                           ];
                        ]
                      "This type contains itself in place, so it would be infinitely large. Declare \
                       the variant `indirect` to keep its fields on the heap.")

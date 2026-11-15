@@ -3,7 +3,7 @@ type piece = Split.piece = { first : int; stop : int }
 val split : Token.t array -> piece list
 val is_use : Token.t array -> piece -> bool
 
-type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnostic list }
+type 'value parsed = { value : 'value Syntax.item; diagnostics : Diagnostic.in_definition list }
 
 val diagnostics_in_file : _ parsed -> Diagnostic.t list
 val use_line : Source.t -> Token.t array -> piece -> Syntax.path option parsed

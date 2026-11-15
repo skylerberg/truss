@@ -15,11 +15,11 @@ let local_type (tables : Infer.tables) id =
 let from_tables (tables : Infer.tables option) show id =
   match tables with Some tables -> show tables id | None -> "an unknown type"
 
-type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : span }
+type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : Source.Definition_span.t }
 
 let unfinished (definition : definition) =
   let found = ref [] in
-  let add keyword id (span : span) = found := { keyword; id; span } :: !found in
+  let add keyword id (span : Source.Definition_span.t) = found := { keyword; id; span } :: !found in
   let rec visit (value : expression) =
     (match value.kind with
     | Todo -> add `Todo (Some value.id) value.span
@@ -94,7 +94,7 @@ let resolved_meaning (resolved : Resolve.resolved) (name : name) =
   | None -> (None, None)
 
 let definition_meaning path = (Some (Printf.sprintf "the definition %s" (Path.show path)), Some path)
-let contains (span : span) offset = span.start <= offset && offset <= span.stop
+let contains (span : Source.Definition_span.t) offset = span.start <= offset && offset <= span.stop
 
 let known_type (tables : Infer.tables) id =
   Option.map (fun _ -> show_type tables id) (at tables.types id)

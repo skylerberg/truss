@@ -1,6 +1,7 @@
 type id = int
-type origin = Syntax.id
-type local = Named of Syntax.id | Self | Synthetic of int
+type origin = int
+type local = Named of origin | Self | Synthetic of int
+type quantifier = Forall | Exists
 type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
 
 type 'indirect target =
@@ -86,7 +87,7 @@ and kind =
   | Result
   | Old of expression
   | Current_target
-  | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
+  | Quantified of { quantifier : quantifier; binder : binder; body : expression }
   | Yielded
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }

@@ -249,10 +249,11 @@ and lambda state env ?expected (value : expression) parameters body =
     else match list with [] -> acc | id :: rest -> newer (id :: acc) rest
   in
   let read = newer [] state.locals_read in
-  let inside = Span.make value.span.start value.span.stop in
+  let inside = Source.Definition_span.make value.span.start value.span.stop in
   let outer id =
     match Hashtbl.find_opt state.binding_spans id with
-    | Some (span : span) -> span.start < inside.start || span.start >= inside.stop
+    | Some (span : Source.Definition_span.t) ->
+        span.start < inside.start || span.start >= inside.stop
     | None -> true
   in
   let captures =

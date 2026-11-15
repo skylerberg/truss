@@ -168,7 +168,7 @@ and scan_string cursor ~scan ~tag ~nesting =
 and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
   let open_quote = cursor.position in
   let literal_start =
-    match tag with Some (_, (tag_span : span)) -> tag_span.start | None -> open_quote
+    match tag with Some (_, (tag_span : Source.span)) -> tag_span.start | None -> open_quote
   in
   cursor.position <- open_quote + 1;
   let builder = builder cursor.position in
@@ -305,7 +305,7 @@ and scan_escape cursor buffer =
 and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
   let delimiter_start = cursor.position in
   let literal_start =
-    match tag with Some (_, (tag_span : span)) -> tag_span.start | None -> delimiter_start
+    match tag with Some (_, (tag_span : Source.span)) -> tag_span.start | None -> delimiter_start
   in
   let delimiter_stop = delimiter_start + dollars + quotes in
   let line_end = end_of_line cursor delimiter_stop in

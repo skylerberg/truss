@@ -32,7 +32,7 @@ type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable holes : (Syntax.id * (string * value) list) list;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
   mutable used_imports : string list;
 }
 
@@ -43,9 +43,9 @@ val names_of : state -> section -> section_names
 
 val report :
   state ->
-  ?fixes:Syntax.span Diagnostic.fix list ->
+  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
   Diagnostic.Code.resolve ->
-  Syntax.span ->
+  Source.Definition_span.t ->
   string ->
   unit
 

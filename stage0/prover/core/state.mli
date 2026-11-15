@@ -1,10 +1,8 @@
 module Symbol = Logic.Symbol
 module Names = Resolve.Names
 module Code = Diagnostic.Code
-module Span = Syntax.Span
 module Locals = Locals
 
-type span = Syntax.span
 type template_check = { from_template : Path.t; literals : string list; clauses : int list }
 type template_clause = { check : template_check; clause : int }
 
@@ -18,12 +16,12 @@ type piece =
     }
 
 type message = piece list
-type edit = { at : span; replacement : message }
+type edit = { at : Source.Definition_span.t; replacement : message }
 type fix = { title : message; edits : edit list }
 
 type obligation = {
   code : Code.prover;
-  span : span;
+  span : Source.Definition_span.t;
   message : message;
   cited : (Names.key * Core.origin) option;
   fixes : fix list;
@@ -34,12 +32,15 @@ type obligation = {
   decisions : (string * string option * Logic.term * Logic.term) list;
 }
 
-type outcome = { obligations : obligation list; holes : (Names.key * span) list }
+type outcome = {
+  obligations : obligation list;
+  holes : (Names.key * Source.Definition_span.t) list;
+}
 
 type source = {
   key : Names.key option;
   name : string;
-  spans : span array Lazy.t;
+  spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
 }
 
@@ -150,7 +151,7 @@ type context = {
   mutable open_axioms : open_axiom list;
   axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
   disjoint : (int * int) list;
-  mutable indexes : (int * (place_value * span)) list;
+  mutable indexes : (int * (place_value * Source.Definition_span.t)) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Names.key;
@@ -171,7 +172,7 @@ type context = {
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
   mutable proving : bool;
-  mutable holes : (Names.key * span) list;
+  mutable holes : (Names.key * Source.Definition_span.t) list;
   mutable unfinished : Logic.term list;
   mutable call_targets : (Logic.term * Core.local) list;
   mutable reading_callback : bool;

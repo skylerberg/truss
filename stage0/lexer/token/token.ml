@@ -1,5 +1,3 @@
-type span = Source.span = private { start : int; stop : int }
-
 type keyword =
   | Any
   | Assert
@@ -141,7 +139,7 @@ end = struct
         }
 end
 
-type t = { kind : kind; span : span; line_break_before : bool; blank_line_before : bool }
+type t = { kind : kind; span : Source.span; line_break_before : bool; blank_line_before : bool }
 
 and kind =
   | Upper of string
@@ -158,15 +156,15 @@ and kind =
   | End_of_file
 
 and string_literal = {
-  tag : (string * span) option;
+  tag : (string * Source.span) option;
   form : form;
   first : text;
   rest : (interpolation * text) array;
 }
 
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
-and text = { value : string; span : span }
-and interpolation = { tokens : t array; span : span }
+and text = { value : string; span : Source.span }
+and interpolation = { tokens : t array; span : Source.span }
 
 let equal_punctuation (first : punctuation) (second : punctuation) =
   match (first, second) with

@@ -7,7 +7,6 @@
   core
   core_walk
   intrinsic
-  syntax
   well_known
   resolve
   infer

@@ -5,7 +5,7 @@ type quantified_range =
       collection_type : Types.ty;
       collected : Logic.term;
       element : Types.ty;
-      span : State.span;
+      span : Source.Definition_span.t;
     }
 
 val under_binder :
@@ -43,7 +43,7 @@ val model_of : State.context -> Types.ty -> Logic.term -> element:Types.ty -> Lo
 val quantified_over :
   State.context ->
   State.frame ->
-  Syntax.quantifier ->
+  Core.quantifier ->
   quantified_range ->
   bind:(State.frame -> Logic.term -> Types.ty -> Logic.term * State.frame) ->
   read:(State.frame -> Logic.term -> State.frame * Logic.term) ->

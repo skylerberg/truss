@@ -1,5 +1,5 @@
 type target = Definition of Path.t | Module of Path.module_
-type occurrence = { span : Syntax.span; target : target }
+type occurrence = { span : Source.Definition_span.t; target : target }
 
 val declared_name : Syntax.definition -> Syntax.name option
 

@@ -9,7 +9,7 @@ type context = {
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
-  diagnostics : Syntax.diagnostic list ref;
+  diagnostics : Diagnostic.in_definition list ref;
   named : (id * Types.ty) list ref;
 }
 
@@ -55,7 +55,7 @@ let rec trait_closure context ?(seen = []) path =
              (fun acc path -> if List.exists (Path.equal path) acc then acc else acc @ [ path ])
              []
 
-let reported context code (span : span) message =
+let reported context code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ~code:(Types code) span message in
   context.diagnostics := diagnostic :: !(context.diagnostics);
   Diagnostic.reported diagnostic
@@ -113,7 +113,7 @@ let rec type_ context (written : type_expression) : Types.ty =
   | Function_type function_type -> Types.Function (function_type_ context function_type)
   | Type_error -> Types.Error (Resolve.Parts.recovery_report written.span)
 
-and self context (span : span) =
+and self context (span : Source.Definition_span.t) =
   match context.self_type with
   | Some self -> Ok self
   | None ->
@@ -121,7 +121,7 @@ and self context (span : span) =
         (reported context Misplaced_self_type span
            "`Self` names a type only in a type's definition, a trait, an `impl`, or a method.")
 
-and self_associated context (span : span) (key : name) =
+and self_associated context (span : Source.Definition_span.t) (key : name) =
   match List.assoc_opt key.text context.self_associated with
   | Some fixed -> fixed
   | None -> (

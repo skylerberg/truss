@@ -56,7 +56,7 @@ type head = {
 val head : resolved -> Syntax.expression -> head option
 
 val resolve :
-  Names.lookups -> Names.key -> section -> (resolved, Syntax.diagnostic list) result option
+  Names.lookups -> Names.key -> section -> (resolved, Diagnostic.in_definition list) result option
 
 val file_diagnostics :
   Names.lookups ->

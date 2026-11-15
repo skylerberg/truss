@@ -1,6 +1,7 @@
 (library
  (name core_lint)
  (libraries
+  source
   harness
   path
   types
@@ -10,5 +11,4 @@
   core_walk
   intrinsic
   intrinsic_signatures
-  well_known
-  syntax))
+  well_known))

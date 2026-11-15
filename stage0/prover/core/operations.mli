@@ -1,5 +1,5 @@
 val compared_terms : Types.ty -> Core.comparison -> Logic.term -> Logic.term -> Logic.term
-val check_widened : State.span -> is_written:bool -> Types.ty -> Types.ty -> unit
+val check_widened : Source.Definition_span.t -> is_written:bool -> Types.ty -> Types.ty -> unit
 val from_integer : State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
