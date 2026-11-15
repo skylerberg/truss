@@ -37,7 +37,7 @@ let input ~name ~show ?(equal = ( = )) ?(about = fun _ -> None) () =
           | Some cell -> cell.input_node
           | None ->
               let cell = make_input engine input key ~below:None in
-              Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
+              Hashtbl.replace engine.unwritten_nodes cell.input_node.id cell.input_node;
               cell.input_node);
       find =
         (fun engine ~key ->
@@ -56,7 +56,7 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
       if engine.frozen then None
       else begin
         let cell = make_input engine input key ~below:None in
-        Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
+        Hashtbl.replace engine.unwritten_nodes cell.input_node.id cell.input_node;
         record_read context cell.input_node;
         if context.frame = None && context.observing then begin
           defer_collection engine cell.input_node;
@@ -71,7 +71,7 @@ let change engine (cell : ('key, 'value) input_cell) slot =
   forget_fingerprint node;
   node.changed_at <- tick engine;
   engine.activity <- engine.activity + 1;
-  Hashtbl.replace engine.unsaved node.id node;
+  Hashtbl.replace engine.unwritten_nodes node.id node;
   seed engine node
 
 let own_input engine (input : ('key, 'value) input) key =

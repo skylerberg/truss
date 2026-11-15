@@ -69,12 +69,9 @@ let ensure_stored ?(stores_every_value = false) engine (node : node) =
   | Some store, Result (query, { outcome = Some (Value value); _ })
     when query.saved || stores_every_value -> (
       match node.fingerprint with
-      | Hashed { hash; stored = false } -> (
-          match bytes_of value with
-          | bytes ->
-              ignore (store.put bytes);
-              node.fingerprint <- Hashed { hash; stored = true }
-          | exception Invalid_argument _ when not query.saved -> ())
+      | Hashed { hash; stored = false } ->
+          ignore (store.put (bytes_of value));
+          node.fingerprint <- Hashed { hash; stored = true }
       | Hashed { stored = true; _ } | Opaque _ | Unknown -> ())
   | _ -> ()
 

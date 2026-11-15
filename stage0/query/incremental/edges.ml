@@ -4,8 +4,10 @@ let resolve engine (node : node) =
   if node.engine == engine then node
   else match Hashtbl.find_opt engine.shadows node.id with Some own -> own | None -> node
 
+let necessary (node : node) = node.root || node.below <> None || Hashtbl.length node.readers > 0
+
 let defer_collection engine (node : node) =
-  if node.engine == engine && node.below = None && not node.root then
+  if node.engine == engine && not (necessary node) then
     engine.candidates <- node :: engine.candidates
 
 let forget engine (node : node) =
@@ -26,15 +28,11 @@ let collectable (node : node) =
   | Input _ | Unfilled -> false
 
 let rec collect engine (node : node) =
-  if
-    node.alive && (not node.root) && (not node.busy) && node.below = None
-    && Hashtbl.length node.readers = 0
-    && collectable node
-  then begin
+  if node.alive && (not node.busy) && (not (necessary node)) && collectable node then begin
     node.alive <- false;
     forget engine node;
     Hashtbl.remove engine.own node.id;
-    Hashtbl.remove engine.unsaved node.id;
+    Hashtbl.remove engine.unwritten_nodes node.id;
     if node.written <> Unwritten then
       engine.collected <- (name node, key_bytes node) :: engine.collected;
     engine.tally.collections <- engine.tally.collections + 1;
@@ -99,9 +97,9 @@ let shadow engine (base : node) =
       let reads = List.map (resolve engine) base.reads in
       own.reads <- reads;
       List.iter (fun read -> add_reader engine read own) reads;
-      (match Hashtbl.find_opt engine.foreign base.id with
+      (match Hashtbl.find_opt engine.readers_of_base_nodes base.id with
       | Some readers ->
-          Hashtbl.remove engine.foreign base.id;
+          Hashtbl.remove engine.readers_of_base_nodes base.id;
           Hashtbl.iter
             (fun _ (reader : node) ->
               reader.reads <- List.map (fun read -> if read == base then own else read) reader.reads;
@@ -131,7 +129,7 @@ let readers_here engine (node : node) ~phase =
       in
       List.fold_left
         (fun readers (other : t) ->
-          match Hashtbl.find_opt other.foreign base.id with
+          match Hashtbl.find_opt other.readers_of_base_nodes base.id with
           | Some table -> from table readers
           | None -> readers)
         (from base.readers own) engine.bases
@@ -181,7 +179,7 @@ let record_read (context : context) (node : node) =
         match own with
         | Some own when not own.root ->
             own.root <- true;
-            Hashtbl.replace engine.unsaved own.id own
+            Hashtbl.replace engine.unwritten_nodes own.id own
         | Some _ | None -> ()
       end
 

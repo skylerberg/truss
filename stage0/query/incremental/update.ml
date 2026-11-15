@@ -7,8 +7,6 @@ let phase_error (reader : node) read_label =
     (Printf.sprintf "Incremental: %s, of phase %d, reads %s, of a later phase" (label reader)
        reader.phase read_label)
 
-let necessary (node : node) = node.root || node.below <> None || Hashtbl.length node.readers > 0
-
 let rec ensure engine (node : node) =
   if node.engine == engine then
     match node.cell with
@@ -124,7 +122,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   Dynarray.add_last engine.computed node;
   engine.tally.computations <- engine.tally.computations + 1;
   engine.activity <- engine.activity + 1;
-  Hashtbl.replace engine.unsaved node.id node
+  Hashtbl.replace engine.unwritten_nodes node.id node
 
 and adopt :
     'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> node list -> bool =
@@ -133,8 +131,8 @@ and adopt :
   match engine.store with
   | Some store when query.saved && candidates <> [] -> (
       let was_marked = node.marked in
-      let held () = cell.outcome <> None || node.fingerprint <> Unknown in
-      let had = held () in
+      let has_result () = cell.outcome <> None || node.fingerprint <> Unknown in
+      let had_result = has_result () in
       let rec parts parts_so_far = function
         | [] -> Some (List.rev parts_so_far)
         | read :: rest ->
@@ -150,12 +148,15 @@ and adopt :
       match parts [] candidates with
       | None -> false
       | Some parts -> (
-          if (was_marked && not node.marked) || ((not had) && held ()) then true
+          let is_settled_by_candidates =
+            (was_marked && not node.marked) || ((not had_result) && has_result ())
+          in
+          if is_settled_by_candidates then true
           else
             match store.find ~kind:"fact" ~key:(fact_key store node parts) with
             | None -> false
             | Some stored_fingerprint ->
-                let unchanged = had && fingerprint engine node = Some stored_fingerprint in
+                let unchanged = had_result && fingerprint engine node = Some stored_fingerprint in
                 commit_reads engine node (List.map fst parts);
                 if not unchanged then begin
                   cell.outcome <- None;
@@ -169,7 +170,7 @@ and adopt :
                 node.marked <- false;
                 engine.tally.adoptions <- engine.tally.adoptions + 1;
                 engine.activity <- engine.activity + 1;
-                Hashtbl.replace engine.unsaved node.id node;
+                Hashtbl.replace engine.unwritten_nodes node.id node;
                 true))
   | _ -> false
 

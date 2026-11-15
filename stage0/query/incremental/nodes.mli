@@ -34,6 +34,8 @@ type store = {
 
 val phases : int
 
+type chain_size = { whole : int; differences : int; depth : int }
+
 type t = {
   id : int;
   bases : t list;
@@ -41,7 +43,7 @@ type t = {
   mutable fixed : bool;
   tables : (int, binding) Hashtbl.t;
   own : (int, node) Hashtbl.t;
-  foreign : (int, (int, node) Hashtbl.t) Hashtbl.t;
+  readers_of_base_nodes : (int, (int, node) Hashtbl.t) Hashtbl.t;
   shadows : (int, node) Hashtbl.t;
   mutable clock : int;
   mutable frames : frame list;
@@ -55,13 +57,11 @@ type t = {
   changed : node Dynarray.t;
   tally : tally;
   mutable store : store option;
-  unsaved : (int, node) Hashtbl.t;
+  unwritten_nodes : (int, node) Hashtbl.t;
   mutable collected : (string * string) list;
   mutable chain : string option;
   mutable on_whole : bool;
-  mutable whole : int;
-  mutable differences : int;
-  mutable depth : int;
+  mutable chain_size : chain_size;
   mutable activity : int;
   mutable audited : int;
 }

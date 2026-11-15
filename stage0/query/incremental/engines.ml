@@ -33,7 +33,7 @@ let unroot engine (query : ('key, 'value) query) key =
   | Some cell ->
       if cell.node.root then begin
         cell.node.root <- false;
-        Hashtbl.replace engine.unsaved cell.node.id cell.node
+        Hashtbl.replace engine.unwritten_nodes cell.node.id cell.node
       end;
       collect_or_defer engine cell.node;
       sweep engine
@@ -86,7 +86,7 @@ let readers engine (node : node) =
     if node.engine == engine then
       Hashtbl.fold (fun _ reader readers -> reader :: readers) node.readers []
     else
-      match Hashtbl.find_opt engine.foreign node.id with
+      match Hashtbl.find_opt engine.readers_of_base_nodes node.id with
       | Some table -> Hashtbl.fold (fun _ reader readers -> reader :: readers) table []
       | None -> []
   in
@@ -102,7 +102,7 @@ let readers engine (node : node) =
         in
         List.fold_left
           (fun readers (other : t) ->
-            match Hashtbl.find_opt other.foreign base.id with
+            match Hashtbl.find_opt other.readers_of_base_nodes base.id with
             | Some table -> from table readers
             | None -> readers)
           (if base.engine == engine then own else from base.readers own)

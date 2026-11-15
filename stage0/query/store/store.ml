@@ -1,6 +1,13 @@
 let header = "TRUSS-SEGMENT-1\n"
+let kind_width = 1
 let key_width = 32
-let entry_width = key_width + 8 + 4
+let length_width = 4
+let offset_width = 8
+let checksum_width = 8
+let length_position = kind_width + key_width
+let record_head_width = length_position + length_width
+let entry_width = key_width + offset_width + length_width
+let pointer_head_width = length_width + checksum_width
 let seal_size = 64 * 1024 * 1024
 
 let fnv hash bytes =
@@ -14,7 +21,7 @@ let fnv hash bytes =
   !hash
 
 let checksum parts =
-  let buffer = Bytes.create 8 in
+  let buffer = Bytes.create checksum_width in
   Bytes.set_int64_le buffer 0 (List.fold_left fnv 0xcbf29ce484222325L parts);
   Bytes.to_string buffer
 
@@ -81,17 +88,18 @@ let channel segment =
 let read_record channel ~offset =
   try
     seek_in channel offset;
-    let head = really_input_string channel (1 + key_width + 4) in
-    let length = Int32.to_int (String.get_int32_le head (1 + key_width)) in
+    let head = really_input_string channel record_head_width in
+    let length = Int32.to_int (String.get_int32_le head length_position) in
     if length < 0 then None
     else
       let value = really_input_string channel length in
-      let check = really_input_string channel 8 in
-      if checksum [ head; value ] = check then Some (head.[0], String.sub head 1 key_width, value)
+      let check = really_input_string channel checksum_width in
+      if checksum [ head; value ] = check then
+        Some (head.[0], String.sub head kind_width key_width, value)
       else None
   with End_of_file | Sys_error _ -> None
 
-let record_size length = 1 + key_width + 4 + length + 8
+let record_size length = record_head_width + length + checksum_width
 
 let scan segment =
   match open_in_bin segment.path with
@@ -129,6 +137,12 @@ let compare_key index position key =
   in
   loop 0
 
+let entry_location index position =
+  {
+    offset = Int64.to_int (String.get_int64_le index (position + key_width));
+    length = Int32.to_int (String.get_int32_le index (position + key_width + offset_width));
+  }
+
 let search index key =
   let rec halve low high =
     if low >= high then None
@@ -136,12 +150,7 @@ let search index key =
       let middle = (low + high) / 2 in
       let position = middle * entry_width in
       let order = compare_key index position key in
-      if order = 0 then
-        Some
-          {
-            offset = Int64.to_int (String.get_int64_le index (position + key_width));
-            length = Int32.to_int (String.get_int32_le index (position + key_width + 8));
-          }
+      if order = 0 then Some (entry_location index position)
       else if order < 0 then halve (middle + 1) high
       else halve low middle
   in
@@ -272,10 +281,10 @@ let writer store =
 
 let append_record store kind key value =
   let writer = writer store in
-  let head = Bytes.create (1 + key_width + 4) in
+  let head = Bytes.create record_head_width in
   Bytes.set head 0 kind;
-  Bytes.blit_string key 0 head 1 key_width;
-  Bytes.set_int32_le head (1 + key_width) (Int32.of_int (String.length value));
+  Bytes.blit_string key 0 head kind_width key_width;
+  Bytes.set_int32_le head length_position (Int32.of_int (String.length value));
   let head = Bytes.unsafe_to_string head in
   Hashtbl.replace writer.segment.table key { offset = writer.size; length = String.length value };
   Buffer.add_string writer.pending head;
@@ -310,7 +319,7 @@ let read_from segment key location =
 let read_own writer key location =
   let written = writer.size - Buffer.length writer.pending in
   if location.offset >= written then
-    Some (Buffer.sub writer.pending (location.offset - written + 1 + key_width + 4) location.length)
+    Some (Buffer.sub writer.pending (location.offset - written + record_head_width) location.length)
   else read_from writer.segment key location
 
 let lookup_once store key =
@@ -448,7 +457,7 @@ let unlock pointer =
   | None -> ()
 
 let framed bytes =
-  let length = Bytes.create 4 in
+  let length = Bytes.create length_width in
   Bytes.set_int32_le length 0 (Int32.of_int (String.length bytes));
   let head = Bytes.to_string length in
   head ^ checksum [ head; bytes ] ^ bytes
@@ -458,14 +467,14 @@ let read pointer =
   | exception Sys_error _ -> None
   | contents ->
       let total = String.length contents in
-      if total < 12 then None
+      if total < pointer_head_width then None
       else
         let length = Int32.to_int (String.get_int32_le contents 0) in
-        if length < 0 || 12 + length <> total then None
+        if length < 0 || pointer_head_width + length <> total then None
         else
-          let head = String.sub contents 0 4 in
-          let check = String.sub contents 4 8 in
-          let bytes = String.sub contents 12 length in
+          let head = String.sub contents 0 length_width in
+          let check = String.sub contents length_width checksum_width in
+          let bytes = String.sub contents pointer_head_width length in
           if checksum [ head; bytes ] = check then Some bytes else None
 
 let write_pointer pointer bytes =
@@ -505,13 +514,9 @@ let entries segment =
   | Some index ->
       List.init
         (String.length index / entry_width)
-        (fun offset ->
-          let position = offset * entry_width in
-          ( String.sub index position key_width,
-            {
-              offset = Int64.to_int (String.get_int64_le index (position + key_width));
-              length = Int32.to_int (String.get_int32_le index (position + key_width + 8));
-            } ))
+        (fun entry ->
+          let position = entry * entry_width in
+          (String.sub index position key_width, entry_location index position))
   | None -> Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table []
 
 let rewrite store candidates ~keep =

@@ -640,3 +640,84 @@ let () =
           Engine.skip_audit opened;
           Engine.set opened closure_input () 6;
           if Engine.get opened applies () <> 7 then fail "the result after the input changed")
+
+let saved_raising =
+  unit_query "saved_raising" ~saved:true (fun database () ->
+      match get database raising_input () with
+      | value when value < 0 -> failwith "negative"
+      | value -> value)
+
+let () =
+  test "a saved result that raised raises, in a reopened state, an exception its handler matches"
+    (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      Engine.set engine raising_input () (-1);
+      (match Engine.get engine saved_raising () with
+      | _ -> fail "no exception"
+      | exception Failure _ -> ());
+      match Engine.get (opened store (Engine.write engine)) saved_raising () with
+      | _ -> fail "no exception in the reopened state"
+      | exception Failure _ -> ()
+      | exception other ->
+          fail "raised %s, which a handler of Failure does not match" (Printexc.to_string other))
+
+let copied_input = Query.input ~name:"copied_input" ~show:(fun () -> "") ()
+
+let copied_closure =
+  Query.query ~name:"copied_closure" ~phase:Phases.syntax
+    ~show:(fun () -> "")
+    ~equal:(fun _ _ -> false)
+    (fun database () ->
+      let value = get database copied_input () in
+      fun more -> value + more)
+
+let copied_applied =
+  unit_query "copied_applied" ~phase:Phases.bodies (fun database () ->
+      (Query.demand database copied_closure ()) 1)
+
+let copied_reader =
+  unit_query "copied_reader" ~phase:Phases.bodies (fun database () ->
+      let applied = Query.demand database copied_applied () in
+      applied + (Query.demand database copied_closure ()) 10)
+
+let () =
+  test "a query that read a base result before the result was copied sees the copy's changes"
+    (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let base = attached store in
+      Engine.skip_audit base;
+      Engine.set base copied_input () 4;
+      ignore (Engine.get base copied_applied ());
+      match
+        Engine.open_base store ~version ~bases:[] (Engine.write ~stores_every_value:true base)
+      with
+      | None -> fail "the base did not open"
+      | Some fixed ->
+          let engine = Engine.create ~bases:[ fixed ] () in
+          Engine.attach engine store ~version;
+          Engine.skip_audit engine;
+          if Engine.get engine copied_reader () <> 19 then fail "the first result";
+          Engine.set engine copied_input () 6;
+          let value = Engine.get engine copied_reader () in
+          if value <> 23 then fail "the reader holds %d, its result before the change" value)
+
+let hidden = ref 1
+
+let impure =
+  unit_query "saved_impure" ~saved:true ~portable:true (fun database () ->
+      get database value_input () + !hidden)
+
+let () =
+  test "an audit computes a saved result again instead of adopting the fact the engine recorded"
+    (fun () ->
+      let engine = attached (Store.open_ (fresh_directory ())) in
+      Engine.set engine value_input () 1;
+      ignore (Engine.get engine impure ());
+      Engine.record_facts engine;
+      hidden := 2;
+      let problems = Engine.audit engine in
+      hidden := 1;
+      match problems with
+      | [ _ ] -> ()
+      | problems -> fail "found [%s]" (String.concat "; " problems))

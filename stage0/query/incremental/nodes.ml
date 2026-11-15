@@ -34,6 +34,8 @@ type store = {
 
 let phases = 16
 
+type chain_size = { whole : int; differences : int; depth : int }
+
 type t = {
   id : int;
   bases : t list;
@@ -41,7 +43,7 @@ type t = {
   mutable fixed : bool;
   tables : (int, binding) Hashtbl.t;
   own : (int, node) Hashtbl.t;
-  foreign : (int, (int, node) Hashtbl.t) Hashtbl.t;
+  readers_of_base_nodes : (int, (int, node) Hashtbl.t) Hashtbl.t;
   shadows : (int, node) Hashtbl.t;
   mutable clock : int;
   mutable frames : frame list;
@@ -55,13 +57,11 @@ type t = {
   changed : node Dynarray.t;
   tally : tally;
   mutable store : store option;
-  unsaved : (int, node) Hashtbl.t;
+  unwritten_nodes : (int, node) Hashtbl.t;
   mutable collected : (string * string) list;
   mutable chain : string option;
   mutable on_whole : bool;
-  mutable whole : int;
-  mutable differences : int;
-  mutable depth : int;
+  mutable chain_size : chain_size;
   mutable activity : int;
   mutable audited : int;
 }
@@ -196,7 +196,7 @@ let create ?(log = false) ?(bases = []) () =
       fixed = false;
       tables = Hashtbl.create 64;
       own = Hashtbl.create 1024;
-      foreign = Hashtbl.create 64;
+      readers_of_base_nodes = Hashtbl.create 64;
       shadows = Hashtbl.create 64;
       clock = 1;
       frames = [];
@@ -219,13 +219,11 @@ let create ?(log = false) ?(bases = []) () =
           collections = 0;
         };
       store = List.find_map (fun base -> base.store) all;
-      unsaved = Hashtbl.create 256;
+      unwritten_nodes = Hashtbl.create 256;
       collected = [];
       chain = None;
       on_whole = false;
-      whole = 0;
-      differences = 0;
-      depth = 0;
+      chain_size = { whole = 0; differences = 0; depth = 0 };
       activity = 0;
       audited = 0;
     }
@@ -383,11 +381,11 @@ let add_reader engine (read : node) (reader : node) =
   if read.engine == engine then Hashtbl.replace read.readers reader.id reader
   else
     let table =
-      match Hashtbl.find_opt engine.foreign read.id with
+      match Hashtbl.find_opt engine.readers_of_base_nodes read.id with
       | Some table -> table
       | None ->
           let table = Hashtbl.create 2 in
-          Hashtbl.replace engine.foreign read.id table;
+          Hashtbl.replace engine.readers_of_base_nodes read.id table;
           table
     in
     Hashtbl.replace table reader.id reader
@@ -395,8 +393,8 @@ let add_reader engine (read : node) (reader : node) =
 let remove_reader engine (read : node) (reader : node) =
   if read.engine == engine then Hashtbl.remove read.readers reader.id
   else
-    match Hashtbl.find_opt engine.foreign read.id with
+    match Hashtbl.find_opt engine.readers_of_base_nodes read.id with
     | Some table ->
         Hashtbl.remove table reader.id;
-        if Hashtbl.length table = 0 then Hashtbl.remove engine.foreign read.id
+        if Hashtbl.length table = 0 then Hashtbl.remove engine.readers_of_base_nodes read.id
     | None -> ()
