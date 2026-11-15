@@ -60,18 +60,21 @@ public trait FixedWidthInteger:
   }
 
   fn to_float64(self) -> Float64
+    ensures identical(result, intrinsic::convert(self))
     cost time O(1)
   {
     intrinsic::convert(self)
   }
 
   fn to_float32(self) -> Float32
+    ensures identical(result, intrinsic::convert(self))
     cost time O(1)
   {
     intrinsic::convert(self)
   }
 
   fn saturating_from(value: Float64) -> Self
+    ensures result == (if intrinsic::fits[Float64, Self](value) { intrinsic::convert(value) } else if intrinsic::is_nan(value) { 0 } else if value < 0.0 { Self.minimum_value() } else { Self.maximum_value() })
     cost time O(1)
   {
     if intrinsic::fits[Float64, Self](value) {
@@ -86,6 +89,7 @@ public trait FixedWidthInteger:
   }
 
   fn exact_sum(items: Slice[Self]) -> Integer
+    ensures result == items.model().sum(fn(item) { item })
     cost time finite
   {
     items.model().sum(fn(item) { item })
@@ -134,6 +138,7 @@ public trait FixedWidthInteger:
 
   fn count_ones(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == intrinsic::count_ones(self)
     cost time O(1)
   {
     intrinsic::count_ones(self)
@@ -141,6 +146,7 @@ public trait FixedWidthInteger:
 
   fn count_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == Self.bit_width() - intrinsic::count_ones(self)
     cost time O(1)
   {
     Self.bit_width() - intrinsic::count_ones(self)
@@ -148,6 +154,7 @@ public trait FixedWidthInteger:
 
   fn leading_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == intrinsic::leading_zeros(self)
     cost time O(1)
   {
     intrinsic::leading_zeros(self)
@@ -155,12 +162,14 @@ public trait FixedWidthInteger:
 
   fn trailing_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == intrinsic::trailing_zeros(self)
     cost time O(1)
   {
     intrinsic::trailing_zeros(self)
   }
 
   fn rotate_left(self, amount: UInt64) -> Self
+    ensures result == intrinsic::rotate_left(self, amount: amount)
     cost time O(1)
     cost allocations == 0
   {
@@ -168,6 +177,7 @@ public trait FixedWidthInteger:
   }
 
   fn rotate_right(self, amount: UInt64) -> Self
+    ensures result == intrinsic::rotate_right(self, amount: amount)
     cost time O(1)
     cost allocations == 0
   {
@@ -175,6 +185,7 @@ public trait FixedWidthInteger:
   }
 
   fn swap_bytes(self) -> Self
+    ensures result == intrinsic::swap_bytes(self)
     cost time O(1)
   {
     intrinsic::swap_bytes(self)
@@ -182,6 +193,7 @@ public trait FixedWidthInteger:
 
   fn checked_shift_left(self, amount: UInt64) -> Option[Self]
     ensures (result is None) == (amount >= Self.bit_width())
+    ensures identical(result, if amount >= Self.bit_width() { None } else { Some(self << amount) })
     cost time O(1)
   {
     if amount >= Self.bit_width() { None } else { Some(self << amount) }
@@ -189,42 +201,49 @@ public trait FixedWidthInteger:
 
   fn checked_shift_right(self, amount: UInt64) -> Option[Self]
     ensures (result is None) == (amount >= Self.bit_width())
+    ensures identical(result, if amount >= Self.bit_width() { None } else { Some(self >> amount) })
     cost time O(1)
   {
     if amount >= Self.bit_width() { None } else { Some(self >> amount) }
   }
 
   fn wrapping_shift_left(self, amount: UInt64) -> Self
+    ensures result == (self << intrinsic::remainder(amount, right: Self.bit_width()))
     cost time O(1)
   {
     self << (amount % Self.bit_width())
   }
 
   fn wrapping_shift_right(self, amount: UInt64) -> Self
+    ensures result == (self >> intrinsic::remainder(amount, right: Self.bit_width()))
     cost time O(1)
   {
     self >> (amount % Self.bit_width())
   }
 
   fn checked_add(self, other: Self) -> Option[Self]
+    ensures identical(result, if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) })
     cost time O(1)
   {
     if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
   }
 
   fn checked_subtract(self, other: Self) -> Option[Self]
+    ensures identical(result, if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) })
     cost time O(1)
   {
     if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
   }
 
   fn checked_multiply(self, other: Self) -> Option[Self]
+    ensures identical(result, if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) })
     cost time O(1)
   {
     if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
   }
 
   fn wrapping_add(self, other: Self) -> Self
+    ensures result == intrinsic::wrapping_add(self, right: other)
     cost time O(1)
     cost allocations == 0
   {
@@ -232,6 +251,7 @@ public trait FixedWidthInteger:
   }
 
   fn wrapping_subtract(self, other: Self) -> Self
+    ensures result == intrinsic::wrapping_subtract(self, right: other)
     cost time O(1)
     cost allocations == 0
   {
@@ -239,6 +259,7 @@ public trait FixedWidthInteger:
   }
 
   fn wrapping_multiply(self, other: Self) -> Self
+    ensures result == intrinsic::wrapping_multiply(self, right: other)
     cost time O(1)
     cost allocations == 0
   {
@@ -246,6 +267,7 @@ public trait FixedWidthInteger:
   }
 
   fn saturating_add(self, other: Self) -> Self
+    ensures result == (if intrinsic::add_overflows(self, right: other) { if other < 0 { Self.minimum_value() } else { Self.maximum_value() } } else { intrinsic::add(self, right: other) })
     cost time O(1)
   {
     if intrinsic::add_overflows(self, right: other) {
@@ -315,6 +337,8 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     requires self != Self.minimum_value() || divisor != -1
     ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
     ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
+    ensures self % divisor != 0 && (self < 0) != (divisor < 0) ==> result == self / divisor - 1
+    ensures self % divisor == 0 || (self < 0) == (divisor < 0) ==> result == self / divisor
     cost time O(1)
   {
     let quotient = self / divisor
@@ -403,12 +427,14 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
   }
 
   fn is_negative(self) -> Bool
+    ensures result == (self < 0)
     cost time O(1)
   {
     self < 0
   }
 
   fn is_positive(self) -> Bool
+    ensures result == (self > 0)
     cost time O(1)
   {
     self > 0
@@ -541,6 +567,7 @@ public trait UnsignedInteger: FixedWidthInteger {
 
   fn is_power_of_two(self) -> Bool
     ensures result ==> self > 0
+    ensures result == (self != 0 && (self & intrinsic::wrapping_subtract(self, right: 1)) == 0)
     cost time O(1)
   {
     self != 0 && (self & (self - 1)) == 0

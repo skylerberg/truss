@@ -19,6 +19,7 @@ impl Model for Map[Key: Hash + Ordered, Value] {
   type Value = FiniteMap[Key, Value]
 
   fn model(self) -> FiniteMap[Key, Value]
+    ensures identical(result, entries_model(self.entries.model()))
     cost time finite
   {
     entries_model(self.entries.model())
@@ -620,7 +621,9 @@ internal theorem entries_inclusion_is_transitive[Key: Hash + Ordered, Value: Equ
 }
 
 impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
-  fn equal(self, other: Map[Key, Value]) -> Bool {
+  fn equal(self, other: Map[Key, Value]) -> Bool
+    ensures result == (self.entries.length() == other.entries.length() && self.entries_included_in(other) && other.entries_included_in(self))
+  {
     self.entries.length() == other.entries.length() && self.entries_included_in(other) && other.entries_included_in(self)
   }
 }

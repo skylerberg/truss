@@ -277,6 +277,8 @@ impl TryFrom[Character] for UInt8 {
 
 impl core::Countable for Character {
   fn successor(self) -> Option[Character]
+    ensures (result is None) == (self.scalar_index() == 1112063)
+    ensures !(result is Some(next) && next.scalar_index() != self.scalar_index() + 1)
     cost time O(1)
   {
     let index = self.scalar_index()
@@ -284,6 +286,8 @@ impl core::Countable for Character {
   }
 
   fn predecessor(self) -> Option[Character]
+    ensures (result is None) == (self.scalar_index() == 0)
+    ensures !(result is Some(previous) && previous.scalar_index() != self.scalar_index() - 1)
     cost time O(1)
   {
     let index = self.scalar_index()
@@ -291,6 +295,8 @@ impl core::Countable for Character {
   }
 
   fn advanced(self, by: UInt64) -> Option[Character]
+    ensures (result is None) == (by > 1112063 - self.scalar_index())
+    ensures !(result is Some(value) && value.scalar_index() != self.scalar_index() + by)
     cost time O(1)
   {
     let index: UInt64 = intrinsic::convert(self.scalar_index())
@@ -298,6 +304,8 @@ impl core::Countable for Character {
   }
 
   fn retreated(self, by: UInt64) -> Option[Character]
+    ensures (result is None) == (by > self.scalar_index())
+    ensures !(result is Some(value) && value.scalar_index() != self.scalar_index() - by)
     cost time O(1)
   {
     let index: UInt64 = intrinsic::convert(self.scalar_index())
@@ -305,6 +313,8 @@ impl core::Countable for Character {
   }
 
   fn steps_to(self, other: Character) -> Option[UInt64]
+    ensures (result is None) == (other.scalar_index() < self.scalar_index())
+    ensures !(result is Some(steps) && steps != other.scalar_index() - self.scalar_index())
     cost time O(1)
   {
     let from = self.scalar_index()

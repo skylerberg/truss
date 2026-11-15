@@ -11,6 +11,7 @@ type Nibble(bits: UInt8)
 
 impl Masked for Nibble {
   fn low(self) -> UInt8
+    ensures result == (self.bits & 15)
     cost time finite
   {
     self.bits & 15

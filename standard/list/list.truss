@@ -68,6 +68,8 @@ impl Iterable for Windows[Element] {
 
   fn count(self) -> UInt64
     ensures result <= self.elements.length()
+    ensures self.size <= self.elements.length() ==> result == self.elements.length() - self.size + 1
+    ensures self.size > self.elements.length() ==> result == 0
     cost time O(1)
     cost allocations == 0
   {
@@ -92,6 +94,8 @@ impl Iterable for Chunks[Element] {
 
   fn count(self) -> UInt64
     ensures result <= self.elements.length()
+    ensures self.elements.length() == 0 ==> result == 0
+    ensures self.elements.length() > 0 ==> result == (self.elements.length() - 1) / self.size + 1
     cost time O(1)
     cost allocations == 0
   {
@@ -139,6 +143,7 @@ impl Model for List[Element] {
   type Value = Sequence[Element]
 
   fn model(self) -> Sequence[Element]
+    ensures identical(result, intrinsic::storage_model(self.storage))
     cost time finite
   {
     intrinsic::storage_model(self.storage)
@@ -149,6 +154,7 @@ impl Model for Slice[Element] {
   type Value = Sequence[Element]
 
   fn model(self) -> Sequence[Element]
+    ensures identical(result, intrinsic::view_model(self.elements))
     cost time finite
   {
     intrinsic::view_model(self.elements)
@@ -521,6 +527,7 @@ impl Index for List[Element] {
   type Output = Element
 
   fn contains_key(self, key: UInt64) -> Bool
+    ensures result == (key < self.length())
     cost time O(1)
     cost allocations == 0
   {
@@ -555,6 +562,7 @@ impl Index for Slice[Element] {
   type Output = Element
 
   fn contains_key(self, key: UInt64) -> Bool
+    ensures result == (key < self.length())
     cost time O(1)
     cost allocations == 0
   {

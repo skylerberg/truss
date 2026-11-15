@@ -468,13 +468,17 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
 }
 
 impl Equal for Path {
-  fn equal(self, other: Path) -> Bool {
+  fn equal(self, other: Path) -> Bool
+    ensures result == (self.text == other.text)
+  {
     self.text == other.text
   }
 }
 
 impl Ordered for Path {
-  fn compare(self, other: Path) -> Ordering {
+  fn compare(self, other: Path) -> Ordering
+    ensures result == (self.text.compare(other.text))
+  {
     self.text.compare(other.text)
   }
 }

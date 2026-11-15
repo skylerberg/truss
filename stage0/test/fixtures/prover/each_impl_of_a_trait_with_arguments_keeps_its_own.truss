@@ -9,6 +9,7 @@ type Box()
 
 impl Scale[Int64] for Box {
   fn scale(self, by: Int64) -> Int64
+    ensures result == 0
     cost time finite
   {
     0
@@ -17,6 +18,7 @@ impl Scale[Int64] for Box {
 
 impl Scale[Bool] for Box {
   fn scale(self, by: Bool) -> Int64
+    ensures result == 1
     cost time finite
   {
     1

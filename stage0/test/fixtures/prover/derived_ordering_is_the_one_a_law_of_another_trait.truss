@@ -17,6 +17,10 @@ impl core::Countable for Day {
   }
 
   fn advanced(self, by: UInt64) -> Option[Day]
+    ensures identical(result, match self.count.advanced(by: by) {
+      Some(count) => Some(Day(count: count))
+      None => None
+    })
     cost time O(1)
   {
     match self.count.advanced(by: by) {
@@ -26,6 +30,10 @@ impl core::Countable for Day {
   }
 
   fn retreated(self, by: UInt64) -> Option[Day]
+    ensures identical(result, match self.count.retreated(by: by) {
+      Some(count) => Some(Day(count: count))
+      None => None
+    })
     cost time O(1)
   {
     match self.count.retreated(by: by) {
@@ -35,6 +43,7 @@ impl core::Countable for Day {
   }
 
   fn steps_to(self, other: Day) -> Option[UInt64]
+    ensures identical(result, self.count.steps_to(other.count))
     cost time O(1)
   {
     self.count.steps_to(other.count)

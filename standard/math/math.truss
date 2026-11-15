@@ -1146,6 +1146,7 @@ impl Add[BigInteger] for BigInteger {
   type Output = BigInteger
 
   fn add_is_defined(self, right: BigInteger) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1160,6 +1161,7 @@ impl Subtract[BigInteger] for BigInteger {
   type Output = BigInteger
 
   fn subtract_is_defined(self, right: BigInteger) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1174,6 +1176,7 @@ impl Multiply[BigInteger] for BigInteger {
   type Output = BigInteger
 
   fn multiply_is_defined(self, right: BigInteger) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1188,6 +1191,7 @@ impl Negate for BigInteger {
   type Output = BigInteger
 
   fn negate_is_defined(self) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1199,7 +1203,15 @@ impl Negate for BigInteger {
 }
 
 impl Ordered for BigInteger {
-  fn compare(self, other: BigInteger) -> Ordering {
+  fn compare(self, other: BigInteger) -> Ordering
+    ensures result == (if self.negative != other.negative {
+        if self.negative { Ordering.Less } else { Ordering.Greater }
+      } else if self.negative {
+        compare_magnitudes(other.magnitude.slice(), second: self.magnitude.slice())
+      } else {
+        compare_magnitudes(self.magnitude.slice(), second: other.magnitude.slice())
+      })
+  {
     if self.negative != other.negative {
       if self.negative { Ordering.Less } else { Ordering.Greater }
     } else if self.negative {
@@ -1517,6 +1529,7 @@ impl Add[Decimal] for Decimal {
   type Output = Decimal
 
   fn add_is_defined(self, right: Decimal) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1532,6 +1545,7 @@ impl Subtract[Decimal] for Decimal {
   type Output = Decimal
 
   fn subtract_is_defined(self, right: Decimal) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1547,6 +1561,7 @@ impl Multiply[Decimal] for Decimal {
   type Output = Decimal
 
   fn multiply_is_defined(self, right: Decimal) -> Bool
+    ensures result == (-2147483648 <= self.scale + right.scale && self.scale + right.scale <= 2147483647)
     cost time O(1)
   {
     let scale: Int64 = intrinsic::convert[Int32, Int64](self.scale) + intrinsic::convert[Int32, Int64](right.scale)
@@ -1562,6 +1577,7 @@ impl Negate for Decimal {
   type Output = Decimal
 
   fn negate_is_defined(self) -> Bool
+    ensures result == (true)
     cost time O(1)
   {
     true
@@ -1642,13 +1658,17 @@ fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
 }
 
 impl Equal for Decimal {
-  fn equal(self, other: Decimal) -> Bool {
+  fn equal(self, other: Decimal) -> Bool
+    ensures result == (self.key() == other.key())
+  {
     self.key() == other.key()
   }
 }
 
 impl Ordered for Decimal {
-  fn compare(self, other: Decimal) -> Ordering {
+  fn compare(self, other: Decimal) -> Ordering
+    ensures result == (key_order(self.key(), second: other.key()))
+  {
     key_order(self.key(), second: other.key())
   }
 }

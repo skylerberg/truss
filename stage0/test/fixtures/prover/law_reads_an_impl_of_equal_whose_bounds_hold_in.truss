@@ -10,13 +10,16 @@ trait Named: Equal {
 type Wrapped[Item](items: List[Item], name: List[UInt64])
 
 impl Equal for Wrapped[Item: Equal] {
-  fn equal(self, other: Wrapped[Item]) -> Bool {
+  fn equal(self, other: Wrapped[Item]) -> Bool
+    ensures result == (self.name == other.name)
+  {
     self.name == other.name
   }
 }
 
 impl Named for Wrapped[Item: Equal] {
   fn name(self) -> List[UInt64]
+    ensures identical(result, self.name)
     cost time finite
   {
     self.name.copy()

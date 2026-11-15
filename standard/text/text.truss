@@ -24,6 +24,7 @@ impl Model for String {
   type Value = Sequence[UInt8]
 
   fn model(self) -> Sequence[UInt8]
+    ensures identical(result, intrinsic::storage_model(self.storage))
     cost time finite
   {
     intrinsic::storage_model(self.storage)
@@ -34,6 +35,7 @@ impl Model for StringSlice {
   type Value = Sequence[UInt8]
 
   fn model(self) -> Sequence[UInt8]
+    ensures identical(result, intrinsic::view_model(self.bytes))
     cost time finite
   {
     intrinsic::view_model(self.bytes)
@@ -44,6 +46,7 @@ impl Model for Literal {
   type Value = Sequence[UInt8]
 
   fn model(self) -> Sequence[UInt8]
+    ensures identical(result, self.text.model())
     cost time finite
   {
     self.text.model()
@@ -274,7 +277,15 @@ impl Equal for String {
 }
 
 impl Ordered for String {
-  fn compare(self, other: String) -> Ordering {
+  fn compare(self, other: String) -> Ordering
+    ensures result == (if intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) < 0 {
+        Ordering.Less
+      } else if intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) > 0 {
+        Ordering.Greater
+      } else {
+        Ordering.Equal
+      })
+  {
     let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
   }

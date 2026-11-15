@@ -31,6 +31,7 @@ public trait Equal {
     cost time finite
 
   fn not_equal(self, other: Self) -> Bool
+    ensures result == !self.equal(other)
     cost time finite
   {
     !self.equal(other)
@@ -59,12 +60,14 @@ public trait Ordered: Equal {
     cost time finite
 
   fn max(own self, other: own Self) -> Self
+    ensures identical(result, if self.compare(other) == Ordering.Less { other } else { self })
     cost time finite
   {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
 
   fn min(own self, other: own Self) -> Self
+    ensures identical(result, if self.compare(other) == Ordering.Greater { other } else { self })
     cost time finite
   {
     if self.compare(other) == Ordering.Greater { other } else { self }
@@ -72,6 +75,13 @@ public trait Ordered: Equal {
 
   fn clamp(own self, low: own Self, high: own Self) -> Self
     requires low <= high
+    ensures identical(result, if self.compare(low) == Ordering.Less {
+      low
+    } else if self.compare(high) == Ordering.Greater {
+      high
+    } else {
+      self
+    })
     cost time finite
   {
     if self.compare(low) == Ordering.Less {
@@ -508,7 +518,15 @@ impl Equal for Character {
 }
 
 impl Ordered for Character {
-  fn compare(self, other: Character) -> Ordering {
+  fn compare(self, other: Character) -> Ordering
+    ensures result == (if intrinsic::less(self, right: other) {
+        Ordering.Less
+      } else if intrinsic::equal(self, right: other) {
+        Ordering.Equal
+      } else {
+        Ordering.Greater
+      })
+  {
     if intrinsic::less(self, right: other) {
       Ordering.Less
     } else if intrinsic::equal(self, right: other) {
