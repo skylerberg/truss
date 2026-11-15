@@ -1,7 +1,3 @@
-(* The ownership check: moves, loans, and views, checked within each
-   function. It prevents use after move, dangling views, mutation of a
-   borrowed place, and data races. *)
-
 type result = { diagnostics : Syntax.diagnostic list; disjoint : (Core.origin * Core.origin) list }
 
 (* The inputs of the check of one definition: a new context, the lowered
@@ -43,7 +39,15 @@ let inputs database (key : Resolve.Names.key) =
           must_be_disjoint = [];
         }
       in
-      let mir = Query.demand database Mir.mir key in
+      (* A function for specifications only never runs, so it has no moves or
+         borrows to check. *)
+      let mir =
+        match lowered.interface with
+        | (Function_interface signature | Theorem_interface signature)
+          when signature.specification_only ->
+            None
+        | _ -> Query.demand database Mir.graph key
+      in
       Option.iter (Context.collect context) mir;
       Some (context, lowered, mir)
   | _ -> None
@@ -58,7 +62,7 @@ let check database (key : Resolve.Names.key) : result option =
   Option.map
     (fun ((context : Context.context), (lowered : Interface.Environment.lowered_interface), mir) ->
       Option.iter
-        (fun (mir : Mir.t) ->
+        (fun (mir : Mir.Graph.t) ->
           let returns =
             match lowered.interface with
             | Function_interface _ | Theorem_interface _ -> true

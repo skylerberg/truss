@@ -2,7 +2,7 @@ let bug format = Compiler_bug.bug ~stage:"Instance MIR" format
 
 type change = {
   local : Mir.local -> Mir.local;
-  block : Mir.block -> Mir.block;
+  block : Mir.Graph.block -> Mir.Graph.block;
   lambda : int -> int;
   fork : Core.origin -> Core.origin;
   ty : Types.ty -> Types.ty;
@@ -68,7 +68,23 @@ let change_call change (call : Mir.call) : Mir.call =
       List.map
         (function
           | Mir.Passed passed ->
-              Mir.Passed { passed with value = change_operand change passed.value }
+              Mir.Passed
+                {
+                  passed with
+                  value = change_operand change passed.value;
+                  function_ =
+                    Option.map
+                      (function
+                        | Mir.Lambda_expression lambda ->
+                            Mir.Lambda_expression
+                              {
+                                lambda with
+                                body = change.lambda lambda.body;
+                                type_ = change.ty lambda.type_;
+                              }
+                        | Function_reference _ as reference -> reference)
+                      passed.function_;
+                }
           | Default -> Default)
         call.arguments;
   }
@@ -104,8 +120,8 @@ let change_rvalue change : Mir.rvalue -> Mir.rvalue =
           evidence = change_evidence change any.evidence;
         }
   | Copy value -> Copy (operand value)
-  | Function_value { path; type_arguments } ->
-      Function_value { path; type_arguments = List.map change.argument type_arguments }
+  | Function_value { path; type_arguments; is_argument } ->
+      Function_value { path; type_arguments = List.map change.argument type_arguments; is_argument }
   | Lambda lambda ->
       Lambda
         {
@@ -127,6 +143,9 @@ let change_rvalue change : Mir.rvalue -> Mir.rvalue =
           Operand (Constant { value = Integer number; type_ = Types.builtin USize })
       | Value (Value_parameter parameter) -> Value_parameter parameter
       | _ -> bug "a value parameter that is no value")
+  | Conditional _ | Cases _ | Connective _ ->
+      bug "a value that chooses between blocks, in a control-flow graph"
+  | Specification _ -> bug "a specification's expression in code that runs"
 
 let rec change_yielded change : Mir.yielded -> Mir.yielded = function
   | Part value -> Part (change_operand change value)
@@ -173,10 +192,12 @@ let change_statement change (statement : Mir.statement) : Mir.statement =
           }
     | Loan_start loan -> Loan_start { loan with borrowed = operand loan.borrowed }
     | (Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _) as kind -> kind
+    (* A graph holds none of these: they are blocks and terminators. *)
+    | (While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _) as kind -> kind
   in
   { statement with kind }
 
-let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
+let change_terminator change (terminator : Mir.Graph.terminator) : Mir.Graph.terminator =
   let block = change.block and operand = change_operand change in
   match terminator with
   | Goto target -> Goto (block target)
@@ -187,12 +208,6 @@ let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
           condition = operand branch.condition;
           yes = block branch.yes;
           no = block branch.no;
-        }
-  | Switch_variant { place; cases } ->
-      Switch_variant
-        {
-          place = change_place change place;
-          cases = List.map (fun (variant, target) -> (variant, block target)) cases;
         }
   | For loop ->
       For
@@ -220,8 +235,8 @@ let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
           fork = change.fork fork.fork;
           branches =
             List.map
-              (fun (branch : Mir.branch) ->
-                { Mir.entry = block branch.entry; blocks = List.map block branch.blocks })
+              (fun (branch : Mir.Graph.branch) ->
+                { Mir.Graph.entry = block branch.entry; blocks = List.map block branch.blocks })
               fork.branches;
           join = Option.map block fork.join;
         }
@@ -248,33 +263,26 @@ let change_terminator change (terminator : Mir.terminator) : Mir.terminator =
           winner = change.local winner;
           exits =
             List.map
-              (fun (exit : Mir.early_exit) ->
-                { Mir.resume = block exit.resume; returned = Option.map change.local exit.returned })
+              (fun (exit : Mir.Graph.early_exit) ->
+                {
+                  Mir.Graph.resume = block exit.resume;
+                  returned = Option.map change.local exit.returned;
+                })
               exits;
           next = block next;
         }
   | Iteration_end { loop } -> Iteration_end { loop = block loop }
   | (Unreachable | Written_unreachable | Todo) as terminator -> terminator
 
-let change_block change (basic : Mir.basic_block) : Mir.basic_block =
+let change_block change (basic : Mir.Graph.basic_block) : Mir.Graph.basic_block =
   {
     basic with
     statements = List.map (change_statement change) basic.statements;
     terminator = change_terminator change basic.terminator;
-    header =
-      Option.map
-        (fun (natural : Mir.natural_loop) ->
-          {
-            natural with
-            body = change.block natural.body;
-            after = Option.map change.block natural.after;
-          })
-        basic.header;
   }
 
-let change_body change (body : Mir.body) : Mir.body =
+let change_body change (body : Mir.Graph.body) : Mir.Graph.body =
   {
-    body with
     parameters = List.map change.local body.parameters;
     captures = List.map change.local body.captures;
     locals =
@@ -284,9 +292,7 @@ let change_body change (body : Mir.body) : Mir.body =
     blocks = Array.map (change_block change) body.blocks;
   }
 
-(* A method's MIR with its type arguments substituted, which makes its
-   types the instance's. *)
-let substituted (substitution : Types.substitution) (mir : Mir.t) : Mir.t =
+let substituted (substitution : Types.substitution) (mir : Mir.Graph.t) : Mir.Graph.t =
   let change =
     {
       unchanged with
@@ -294,22 +300,7 @@ let substituted (substitution : Types.substitution) (mir : Mir.t) : Mir.t =
       argument = Types.substitute_argument substitution;
     }
   in
-  {
-    body =
-      {
-        (change_body change mir.body) with
-        defaults =
-          List.map
-            (fun (local, (default : Mir.t)) ->
-              ( local,
-                {
-                  Mir.body = change_body change default.body;
-                  lambdas = Array.map (change_body change) default.lambdas;
-                } ))
-            mir.body.defaults;
-      };
-    lambdas = Array.map (change_body change) mir.lambdas;
-  }
+  { body = change_body change mir.body; lambdas = Array.map (change_body change) mir.lambdas }
 
 (* Inlining *)
 
@@ -317,12 +308,12 @@ module Locals = Set.Make (Int)
 
 type building = {
   locals : Mir.local_info Dynarray.t;
-  blocks : Mir.basic_block Dynarray.t;
-  lambdas : Mir.body Dynarray.t;
+  blocks : Mir.Graph.basic_block Dynarray.t;
+  lambdas : Mir.Graph.body Dynarray.t;
   mutable last_fork : Core.origin;
 }
 
-let add_block building (basic : Mir.basic_block) =
+let add_block building (basic : Mir.Graph.basic_block) =
   let block = Dynarray.length building.blocks in
   Dynarray.add_last building.blocks basic;
   block
@@ -346,7 +337,7 @@ let fresh_forks building =
         building.last_fork
 
 let copy building ~path ~type_arguments ~origin ~(inlined : Mir.inlined list) ?same_locals
-    (mir : Mir.t) =
+    (mir : Mir.Graph.t) =
   let local_offset, lambda_offset =
     match same_locals with
     | Some offsets -> offsets
@@ -372,7 +363,7 @@ let copy building ~path ~type_arguments ~origin ~(inlined : Mir.inlined list) ?s
     }
   in
   Array.iter
-    (fun (basic : Mir.basic_block) ->
+    (fun (basic : Mir.Graph.basic_block) ->
       ignore
         (add_block building
            {
@@ -391,7 +382,9 @@ let bind_parameter building ~origin ~temporaries ~is_default parameter (value : 
     }
   in
   let held type_ mode =
-    let temporary = new_local building { kind = Temporary; type_; origin } in
+    let temporary =
+      new_local building { kind = Temporary; type_; origin; has_several_bindings = false }
+    in
     temporaries := temporary :: !temporaries;
     [
       assign temporary (Operand value);
@@ -411,8 +404,9 @@ let bind_parameter building ~origin ~temporaries ~is_default parameter (value : 
       held type_ mode
   | _ -> [ assign parameter (Operand value) ]
 
-let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : change) (mir : Mir.t)
-    (arguments : Mir.argument list) ~entry =
+let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : change)
+    (mir : Mir.Graph.t) ~(defaults : (int * Mir.Graph.t) list) (arguments : Mir.argument list)
+    ~entry =
   let parameters = List.map change.local mir.body.parameters in
   let temporaries = ref [] in
   let bound =
@@ -428,11 +422,11 @@ let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : c
   (* Each default runs in turn, from the last, so that the first runs first. *)
   let first =
     List.fold_right2
-      (fun (local, parameter) (argument : Mir.argument) next ->
+      (fun (position, parameter) (argument : Mir.argument) next ->
         match argument with
         | Passed _ -> next
         | Default -> (
-            match List.assoc_opt local mir.body.defaults with
+            match List.assoc_opt position defaults with
             | None -> bug "%s is given no argument for a parameter" (Path.show path)
             | Some default ->
                 let _, _, offset, count =
@@ -454,7 +448,7 @@ let bind_parameters building ~path ~type_arguments ~origin ~inlined ~(change : c
                   | _ -> ()
                 done;
                 offset))
-      (List.combine mir.body.parameters parameters)
+      (List.mapi (fun position parameter -> (position, parameter)) parameters)
       arguments entry
   in
   (bound, first, !temporaries)
@@ -475,7 +469,7 @@ let written (statement : Mir.statement) =
   | Dead locals -> ([], locals)
   | Call { destination = None; _ }
   | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _
-  | Matched _ | Proof _ ->
+  | Matched _ | Proof _ | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
       ([], [])
 
 let alive building ~entry ~bound ~(is_method_local : Mir.local -> bool) =
@@ -509,7 +503,7 @@ let alive building ~entry ~bound ~(is_method_local : Mir.local -> bool) =
         | For { iteration = Pull _; part; body; _ } when target = body && is_method_local part ->
             flow target (Locals.add part locals)
         | _ -> flow target locals)
-      (Mir.successors basic.terminator)
+      (Mir.Graph.successors basic.terminator)
   done;
   fun block -> Option.value (Hashtbl.find_opt ending block) ~default:Locals.empty
 
@@ -535,7 +529,12 @@ let rec yielded_into building ~part ~(mode : Types.mode) ~origin (yielded : Mir.
             | Some (Built inner as built) ->
                 let held =
                   new_local building
-                    { kind = (Dynarray.get building.locals part).kind; type_ = inner.type_; origin }
+                    {
+                      kind = (Dynarray.get building.locals part).kind;
+                      type_ = inner.type_;
+                      origin;
+                      has_several_bindings = false;
+                    }
                 in
                 ( statements @ yielded_into building ~part:held ~mode ~origin built,
                   fields
@@ -556,7 +555,7 @@ let rec yielded_into building ~part ~(mode : Types.mode) ~origin (yielded : Mir.
 
 (* The blocks of a loop's body that end its own iterations, not those of a
    loop nested in it. *)
-let own_iteration_ends building (blocks : Mir.block list) =
+let own_iteration_ends building (blocks : Mir.Graph.block list) =
   let nested =
     List.concat_map
       (fun block ->
@@ -574,7 +573,7 @@ let own_iteration_ends building (blocks : Mir.block list) =
 (* The tasks that run in [blocks]: each iteration of a loop there and each
    branch of a fork there, and each iteration of the loop with the origin
    [iteration], if its iterations run as tasks. *)
-let tasks_in building (blocks : Mir.block list) ~iteration : Core.task list =
+let tasks_in building (blocks : Mir.Graph.block list) ~iteration : Core.task list =
   Option.to_list (Option.map (fun loop -> Core.Iteration { loop }) iteration)
   @ List.concat_map
       (fun block ->
@@ -585,7 +584,7 @@ let tasks_in building (blocks : Mir.block list) ~iteration : Core.task list =
         | _ -> [])
       blocks
 
-let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~origin =
+let end_on_exits building ~(blocks : Mir.Graph.block list) ~stays ~locals ~iteration ~origin =
   if locals <> [] then begin
     let dead : Mir.statement = { kind = Dead locals; origin } in
     let pads = Hashtbl.create 4 in
@@ -601,7 +600,6 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
                   statements = [ dead ];
                   terminator = Goto target;
                   terminator_origin = origin;
-                  header = None;
                   inlined = (block_at building target).inlined;
                 }
             in
@@ -628,11 +626,14 @@ let end_on_exits building ~(blocks : Mir.block list) ~stays ~locals ~iteration ~
       blocks
   end
 
-(* A method the instance calls, ready to inline: its path, its type
-   arguments, and its MIR with them substituted. *)
-type callee = { path : Path.t; type_arguments : Types.argument list; mir : Mir.t }
+type callee = {
+  path : Path.t;
+  type_arguments : Types.argument list;
+  mir : Mir.Graph.t;
+  defaults : (int * Mir.Graph.t) list;
+}
 
-let copied_locals (change : change) (mir : Mir.t) ~temporaries =
+let copied_locals (change : change) (mir : Mir.Graph.t) ~temporaries =
   let first = change.local 0 and count = Array.length mir.body.locals in
   ( (fun local -> (local >= first && local < first + count) || List.mem local temporaries),
     List.map change.local mir.body.parameters @ temporaries )
@@ -646,7 +647,8 @@ let join_regions building ~at ~start =
         set_block building block
           { basic with terminator = For { loop with blocks = loop.blocks @ made } }
     | Fork fork
-      when List.exists (fun (branch : Mir.branch) -> List.mem at branch.blocks) fork.branches ->
+      when List.exists (fun (branch : Mir.Graph.branch) -> List.mem at branch.blocks) fork.branches
+      ->
         set_block building block
           {
             basic with
@@ -656,7 +658,7 @@ let join_regions building ~at ~start =
                   fork with
                   branches =
                     List.map
-                      (fun (branch : Mir.branch) ->
+                      (fun (branch : Mir.Graph.branch) ->
                         if List.mem at branch.blocks then
                           { branch with blocks = branch.blocks @ made }
                         else branch)
@@ -667,7 +669,7 @@ let join_regions building ~at ~start =
   done
 
 (* The blocks of a body being built, as a body, for an analysis of it. *)
-let snapshot building (body : Mir.body) =
+let snapshot building (body : Mir.Graph.body) =
   {
     body with
     locals = Dynarray.to_array building.locals;
@@ -687,7 +689,7 @@ let ends_of building part ~from =
           basic.statements
       with
       | Some position -> ends := (block, position) :: !ends
-      | None -> List.iter visit (Mir.successors basic.terminator)
+      | None -> List.iter visit (Mir.Graph.successors basic.terminator)
     end
   in
   visit from;
@@ -704,11 +706,13 @@ let region_entry building block =
       | _ -> innermost := Some (entry, List.length blocks)
   in
   Dynarray.iter
-    (fun (basic : Mir.basic_block) ->
+    (fun (basic : Mir.Graph.basic_block) ->
       match basic.terminator with
       | For { body; blocks; _ } -> consider body blocks
       | Fork { branches; _ } ->
-          List.iter (fun (branch : Mir.branch) -> consider branch.entry branch.blocks) branches
+          List.iter
+            (fun (branch : Mir.Graph.branch) -> consider branch.entry branch.blocks)
+            branches
       | _ -> ())
     building.blocks;
   match !innermost with Some (entry, _) -> entry | None -> 0
@@ -721,20 +725,21 @@ let constant_int number : Mir.operand =
 let local_operand local type_ origin : Mir.operand =
   Use { place = { root = Local local; projections = [] }; type_; node = origin; origin }
 
-let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : callee)
+let inline_lend building ~(body : Mir.Graph.body) ~at ~position ~part ~(callee : callee)
     ~(call : Mir.call) ~origin =
   let basic = block_at building at in
-  let conditional = List.mem part (Mir.conditional_lends (snapshot building body)) in
+  let conditional = List.mem part (Mir.Graph.conditional_lends (snapshot building body)) in
   let before = List.filteri (fun index _ -> index < position) basic.statements
   and rest = List.filteri (fun index _ -> index > position) basic.statements in
-  let continuation = add_block building { basic with statements = rest; header = None } in
+  let continuation = add_block building { basic with statements = rest } in
   let change, offsets, offset, count =
     copy building ~path:callee.path ~type_arguments:callee.type_arguments ~origin
       ~inlined:basic.inlined callee.mir
   in
   let bound, first, temporaries =
     bind_parameters building ~path:callee.path ~type_arguments:callee.type_arguments ~origin
-      ~inlined:basic.inlined ~change callee.mir call.arguments ~entry:offset
+      ~inlined:basic.inlined ~change callee.mir ~defaults:callee.defaults call.arguments
+      ~entry:offset
   in
   set_block building at { basic with statements = before @ bound; terminator = Goto first };
   let yields =
@@ -755,7 +760,9 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
   in
   let selector =
     if List.length yields > 1 || conditional then
-      Some (new_local building { kind = Temporary; type_ = int_type; origin })
+      Some
+        (new_local building
+           { kind = Temporary; type_ = int_type; origin; has_several_bindings = false })
     else None
   in
   let set_selector number : Mir.statement list =
@@ -780,6 +787,10 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
     let basic = block_at building entry in
     set_block building entry { basic with statements = set_selector 0 @ basic.statements }
   end;
+  (* A part that more than one yield binds says so. *)
+  if List.length yields > 1 then
+    Dynarray.set building.locals part
+      { (Dynarray.get building.locals part) with has_several_bindings = true };
   List.iteri
     (fun index (block, (yielded, mode), _) ->
       (* The part is the caller's, so the caller's code binds it. *)
@@ -789,7 +800,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
             statements = yielded_into building ~part ~mode ~origin yielded @ set_selector (index + 1);
             terminator = Goto continuation;
             terminator_origin = origin;
-            header = None;
             inlined = basic.inlined;
           }
       in
@@ -811,7 +821,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
                 (if held = [] then [] else [ { Mir.kind = Dead held; origin } ])
                 @ (if conditional then set_selector 0 else [])
                 @ after;
-              header = None;
             }
         in
         let _, _, again, _ =
@@ -825,7 +834,7 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
           | Yield _ -> set_block building block { copied with terminator = Unreachable }
           | _ -> ()
         done;
-        let resume_of (_, _, (resume : Mir.block)) = resume - offset + again in
+        let resume_of (_, _, (resume : Mir.Graph.block)) = resume - offset + again in
         let dispatch =
           match selector with
           | None -> (
@@ -838,7 +847,8 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
               List.fold_right
                 (fun (number, target) otherwise ->
                   let tested =
-                    new_local building { kind = Temporary; type_ = Types.bool; origin }
+                    new_local building
+                      { kind = Temporary; type_ = Types.bool; origin; has_several_bindings = false }
                   in
                   add_block building
                     {
@@ -870,7 +880,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
                             is_if_condition = false;
                           };
                       terminator_origin = origin;
-                      header = None;
                       inlined = ended.inlined;
                     })
                 choices
@@ -879,7 +888,6 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
                      statements = [];
                      terminator = Unreachable;
                      terminator_origin = origin;
-                     header = None;
                      inlined = ended.inlined;
                    })
         in
@@ -890,11 +898,11 @@ let inline_lend building ~(body : Mir.body) ~at ~position ~part ~(callee : calle
    exit goes on once a group of tasks has ended. *)
 let ends_only_in_statements building part =
   Dynarray.for_all
-    (fun (basic : Mir.basic_block) ->
+    (fun (basic : Mir.Graph.basic_block) ->
       match basic.terminator with
       | Resume { exits; _ } ->
           List.for_all
-            (fun (exit : Mir.early_exit) ->
+            (fun (exit : Mir.Graph.early_exit) ->
               List.for_all
                 (fun (statement : Mir.statement) ->
                   match statement.kind with Dead locals -> not (List.mem part locals) | _ -> true)
@@ -919,7 +927,8 @@ let end_loop_parts building =
     | _ -> ()
   done
 
-let rec inlined ~(resolve : Mir.callee -> callee option) ~enclosing (mir : Mir.t) : Mir.t =
+let rec inlined ~(resolve : Mir.callee -> callee option) ~enclosing (mir : Mir.Graph.t) :
+    Mir.Graph.t =
   let lambdas = Dynarray.of_array mir.lambdas in
   let body = inlined_body ~resolve ~enclosing ~lambdas mir.body in
   for index = 0 to Array.length mir.lambdas - 1 do
@@ -928,7 +937,7 @@ let rec inlined ~(resolve : Mir.callee -> callee option) ~enclosing (mir : Mir.t
   done;
   { body; lambdas = Dynarray.to_array lambdas }
 
-and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
+and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.Graph.body) : Mir.Graph.body =
   let building =
     {
       locals = Dynarray.of_array body.locals;
@@ -976,5 +985,5 @@ and inlined_body ~resolve ~enclosing ~lambdas (body : Mir.body) : Mir.body =
   {
     body with
     locals = Dynarray.to_array building.locals;
-    blocks = Mir.canonical (Dynarray.to_array building.blocks);
+    blocks = Mir.Graph.canonical (Dynarray.to_array building.blocks);
   }

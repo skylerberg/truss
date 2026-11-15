@@ -26,8 +26,8 @@ type frame = {
 }
 
 and mir_frame = {
-  body : Mir.body;
-  lambdas : Mir.body array;
+  body : Mir.Graph.body;
+  lambdas : Mir.Graph.body array;
   places : (Mir.local, Lowered.place) Hashtbl.t;
   owner : scope option;
   returns_into : Lowered.place option;

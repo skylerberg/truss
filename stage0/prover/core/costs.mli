@@ -7,7 +7,6 @@ type resource = Time | Allocations | Allocated_bytes | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
 
-val covers : clause:target -> counter:target -> bool
 val bound : Logic.term -> Logic.term
 val plus : Logic.term -> Logic.term -> Logic.term
 val minus : Logic.term -> Logic.term -> Logic.term
@@ -16,14 +15,8 @@ val at_most : Logic.term -> Logic.term -> Logic.term
 val at_least_zero : Logic.term -> Logic.term
 val larger : Logic.term -> Logic.term -> Logic.term
 val units : Logic.term -> Logic.term
-val log_facts : Logic.term -> halving:bool -> Logic.term list * Logic.term option
-val log_order : Logic.term -> Logic.term -> Logic.term
-val power_facts : Logic.term -> Logic.term -> Logic.term list * (Logic.term * Logic.term)
-val power_order : Logic.term -> Logic.term -> Logic.term -> Logic.term
 val normalize : Logic.term -> Logic.term
 val since : start:Logic.term -> Logic.term -> Logic.term
-
-type polarity = Grows | Shrinks | Both
 
 val bound_on :
   varies:(Logic.term -> bool) -> facts:Logic.term list -> Logic.term -> Logic.term option

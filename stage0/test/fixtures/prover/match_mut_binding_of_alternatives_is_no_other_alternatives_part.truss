@@ -1,0 +1,14 @@
+type Side =
+  | Left(value: Int64)
+  | Right(value: Int64)
+  derives Equal
+
+fn f() -> Side
+  ensures result == Side.Left(value: 5)
+{
+  var side = Side.Right(value: 1)
+  match mut side {
+    Left(value) | Right(value) => { value = 5 }
+  }
+  side
+}

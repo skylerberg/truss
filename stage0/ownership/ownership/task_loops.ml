@@ -1,15 +1,14 @@
-(* The rules on a [parallel for] and a [concurrent for], whose iterations
-   run at the same time. An iteration outlives the step of the loop that
-   started it, so what it is given stays valid, and distinct from what the
-   other iterations are given, until the loop ends. Both rules read the
-   loop and the types it names, never the body of a callee. *)
+(* An iteration outlives the step of the loop that started it, so what it
+   is given stays valid, and distinct from what the other iterations are
+   given, until the loop ends. Both rules read the loop and the types it
+   names, never the body of a callee. *)
 open Context
 
 let is_storage type_ =
   Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_
 
 (* The type of the collection whose [element] lends a loop's element. *)
-let collection_type (body : Mir.body) ~(inside : Mir.block) (element : Mir.local) =
+let collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (element : Mir.local) =
   List.find_map
     (fun (statement : Mir.statement) ->
       match statement.kind with
@@ -19,11 +18,11 @@ let collection_type (body : Mir.body) ~(inside : Mir.block) (element : Mir.local
       | _ -> None)
     body.blocks.(inside).statements
 
-let check context (mir : Mir.t) =
+let check context (mir : Mir.Graph.t) =
   List.iter
-    (fun (body : Mir.body) ->
+    (fun (body : Mir.Graph.body) ->
       Array.iter
-        (fun (block : Mir.basic_block) ->
+        (fun (block : Mir.Graph.basic_block) ->
           match block.terminator with
           | For
               {

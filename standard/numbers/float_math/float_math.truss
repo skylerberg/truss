@@ -886,6 +886,19 @@ internal fn Float64.scaled_by_power(self, power: Int64) -> Float64
   if subnormal { scaled * 1.1102230246251565e-16 } else { scaled }
 }
 
+internal fn Float64.squared_fraction(self, exponent: Int64) -> Parts
+  requires -4096 <= exponent && exponent <= 4096
+  ensures result.exponent == exponent * 2 || result.exponent == exponent * 2 - 1
+  cost time O(1)
+{
+  let square = self * self
+  if square < 0.5 {
+    Parts(fraction: square + square, exponent: exponent * 2 - 1)
+  } else {
+    Parts(fraction: square, exponent: exponent * 2)
+  }
+}
+
 internal fn Float64.raised_to_whole(self, start: Float64, whole: UInt64) -> Parts
   ensures -540000 <= result.exponent && result.exponent <= 540000
   cost time O(1)
@@ -913,12 +926,9 @@ internal fn Float64.raised_to_whole(self, start: Float64, whole: UInt64) -> Part
         mantissa = mantissa * base
         power_of_two += base_power
       }
-      base = base * base
-      base_power = base_power * 2
-      if base < 0.5 {
-        base = base + base
-        base_power -= 1
-      }
+      let squared = base.squared_fraction(base_power)
+      base = squared.fraction
+      base_power = squared.exponent
       remaining = remaining / 2
       bit += 1
     }

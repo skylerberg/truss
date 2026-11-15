@@ -1,0 +1,20 @@
+fn set(part: mut Slice[Int64])
+  requires part.length() >= 1
+  ensures part[0] == 7
+{
+  part[0] = 7
+}
+
+fn f(count: Int64, first: mut List[Int64], second: mut List[Int64])
+  requires first.length() >= 2
+  requires second.length() >= 2
+  ensures second[0] == old(second[0])
+{
+  var part = first[0..2]
+  for _ in 0..count
+    invariant part.length() == 2
+  {
+    part = second[0..2]
+  }
+  set(mut part)
+}

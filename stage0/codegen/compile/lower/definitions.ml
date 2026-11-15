@@ -164,8 +164,8 @@ let code_of context (path : Path.t) type_arguments : code =
       in
       match (written context path, path) with
       | Some code, _ -> function_code ~anchor:path ~enclosing_impl code ~interface ~substitution
-      | None, Method { owner = Derived { type_; _ }; _ }
-        when demand context Infer.derived path <> None ->
+      | None, Method { owner = Derived { type_; _ }; _ } when Mir.is_generated context.database path
+        ->
           {
             (unwritten ~definition_key:(key_of context type_) ~anchor:path ~substitution
                ~result:interface.output)

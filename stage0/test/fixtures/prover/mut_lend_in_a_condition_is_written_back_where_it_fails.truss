@@ -1,0 +1,18 @@
+fn bump(part: mut Int64) -> Bool
+  requires -100 < part && part < 100
+  ensures part == old(part) + 1
+  ensures result == (part > 0)
+{
+  part = part + 1
+  part > 0
+}
+
+fn f(items: mut List[Int64])
+  requires items.length() >= 1
+  requires -100 < items[0] && items[0] < 0
+  ensures items[0] == old(items[0])
+{
+  if bump(mut items[0]) {
+  } else {
+  }
+}

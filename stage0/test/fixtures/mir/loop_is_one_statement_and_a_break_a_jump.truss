@@ -1,0 +1,10 @@
+fn g(items: List[Int64]) -> USize {
+  var index: USize = 0
+  while index < items.length() {
+    if items[index] < 0 {
+      break
+    }
+    index += 1
+  }
+  index
+}

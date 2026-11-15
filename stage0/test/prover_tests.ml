@@ -50,6 +50,18 @@ let () =
       if not (contains actual "`Number` is `UInt8`") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven Fixtures.Prover.requires_rules_out_the_overflow);
+  test "a requires clause read from its code holds or fails at a call as the clause written does"
+    (fun () ->
+      (* The clause can run, so the prover reads its MIR: a short circuit on each side, a field
+         read, and a pattern that binds a name the clause then reads. *)
+      proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call;
+      not_proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call_2
+        "prover.requires");
+  test "a name that `is` binds in an `&&` is read by the operands after it" (fun () ->
+      (* [a && b is Ok(x) && c] is [(a && b is Ok(x)) && c], so [c] reads a name that the
+         right operand of the first [&&] binds. The callee's [ensures] says nothing where the
+         prover cannot read it, so the proof needs it read. *)
+      proven Fixtures.Prover.name_that_is_binds_in_an_and_is_read_after_it);
   test "a check in an if rules out the overflow" (fun () ->
       proven Fixtures.Prover.check_in_an_if_rules_out_the_overflow);
   test "a division by a value that may be zero" (fun () ->
@@ -95,7 +107,31 @@ let () =
       proven Fixtures.Prover.for_loop_over_a_range_knows_its_index_is_in_range);
   test "recursion that decreases" (fun () -> proven Fixtures.Prover.recursion_that_decreases);
   test "recursion that does not decrease" (fun () ->
-      not_proven Fixtures.Prover.recursion_that_does_not_decrease "prover.termination")
+      not_proven Fixtures.Prover.recursion_that_does_not_decrease "prover.termination");
+  test "a contract that calls its own function applies the function's limited copy" (fun () ->
+      let database =
+        Support.setup
+          [
+            ( "app::main",
+              Fixtures.Prover.contract_that_calls_its_own_function_applies_its_limited_copy );
+          ]
+      in
+      let caller =
+        List.hd (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
+      in
+      let rec applies_limited (term : Logic.term) =
+        match term with
+        | Apply (Limited _, _) -> true
+        | Apply (_, terms) | Operation (_, terms) -> List.exists applies_limited terms
+        | Is (_, term) | Exists (_, term) -> applies_limited term
+        | Forall (_, triggers, body) -> List.exists applies_limited (body :: triggers)
+        | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
+      in
+      match Query.demand database Prover.proof (Resolve.Names.key_of caller) with
+      | Obligations { obligations = [ obligation ]; _ } ->
+          if not (List.exists applies_limited obligation.query.facts) then
+            fail "no fact applies the limited copy: %s" (Logic.text obligation.query)
+      | _ -> fail "expected one obligation")
 
 let () =
   test "mutual recursion without measures cannot be shown to end" (fun () ->
@@ -240,7 +276,10 @@ let () =
   test "a loop's element is the list's element at its position" (fun () ->
       proven Fixtures.Prover.loops_element_is_the_lists_element_at_its_position);
   test "a loop over a list does not run once more" (fun () ->
-      not_proven Fixtures.Prover.loop_over_a_list_does_not_run_once_more "prover.ensures")
+      not_proven Fixtures.Prover.loop_over_a_list_does_not_run_once_more "prover.ensures");
+  test "a loop over the elements of a constant is proven" (fun () ->
+      (* The collection's place is the constant itself, which has the type the constant declares. *)
+      proven Fixtures.Prover.loop_over_the_elements_of_a_constant_is_proven)
 
 let couple = Fixtures.Prover.couple
 
@@ -270,6 +309,8 @@ let () =
       not_proven
         (couple ^ Fixtures.Prover.elements_that_a_loop_has_read_are_not_known_beyond)
         "prover.invariant");
+  test "a loop that mutates a collection's elements must keep their count" (fun () ->
+      not_proven Fixtures.Prover.loop_that_mutates_elements_must_keep_their_count "prover.invariant");
   test "a loop over a range has visited its indexes" (fun () ->
       proven Fixtures.Prover.loop_over_a_range_has_its_indexes_as_visited);
   test "a range loop's index in its clauses is the next index" (fun () ->
@@ -285,6 +326,9 @@ let () =
       proven Fixtures.Prover.range_loops_index_bounds_its_cost);
   test "a loop over a type's own cursor calls its next" (fun () ->
       proven Fixtures.Prover.loop_over_a_types_own_cursor_calls_its_next);
+  test "a loop over a type's own cursor that must end needs a decreases clause" (fun () ->
+      not_proven Fixtures.Prover.cursor_loop_that_must_end_needs_a_decreases_clause
+        "prover.termination");
   test "a loop over a cursor in a field calls its next" (fun () ->
       proven Fixtures.Prover.loop_over_a_cursor_in_a_field_calls_its_next);
   (* The loop holds the potential of [output], which the body's amortized
@@ -342,7 +386,9 @@ let () =
   test "an impl whose methods break its trait's law" (fun () ->
       not_proven (monoid ^ flag_impl "true") "prover.law");
   test "generic code relies on a bound's laws" (fun () ->
-      proven (monoid ^ flag_impl "false" ^ Fixtures.Prover.generic_code_relies_on_a_bounds_laws))
+      proven (monoid ^ flag_impl "false" ^ Fixtures.Prover.generic_code_relies_on_a_bounds_laws));
+  test "a law holds on every path after its first use" (fun () ->
+      proven Fixtures.Prover.law_holds_on_every_path_after_its_first_use)
 
 let () =
   test "an impl's method keeps its trait's time clause, so its body is its definition" (fun () ->
@@ -750,6 +796,8 @@ let () =
   let encoder = "type Encoder(bytes: List[UInt8])\n\n" in
   test "a record with no potential clause holds its parts'" (fun () ->
       proven (encoder ^ Fixtures.Prover.record_with_no_potential_clause_holds_its_parts));
+  test "the potential of a type that holds itself is read" (fun () ->
+      proven Fixtures.Prover.potential_of_a_type_that_holds_itself_is_read);
   test "a loop that pushes into a record's list is amortized linear" (fun () ->
       proven (encoder ^ Fixtures.Prover.loop_that_pushes_into_a_records_list_is_amortized));
   let bag = Fixtures.Prover.bag in
@@ -1198,7 +1246,12 @@ let () =
   test "a proof for a generic impl names its own generic parameters" (fun () ->
       proven Fixtures.Prover.proof_for_a_generic_impl_names_its_own_generic);
   test "a law's proof names the law's parameters, where its requires hold" (fun () ->
-      proven Fixtures.Prover.laws_proof_names_the_laws_parameters_where_its)
+      proven Fixtures.Prover.laws_proof_names_the_laws_parameters_where_its);
+  test "a law's proof reads the specifications that its own body holds" (fun () ->
+      (* The proof is run while its [impl] is proven, and its body holds an [assert] of a
+         quantifier and an [assert] that bit vectors prove: each is read by its id in the proof's
+         definition, not in the [impl]'s. *)
+      proven Fixtures.Prover.laws_proof_reads_the_specifications_that_its_own)
 
 (* Concurrent code *)
 
@@ -1309,7 +1362,37 @@ let () =
   test "a call under a quantifier gives a value for each value, not one for all" (fun () ->
       not_proven Fixtures.Prover.call_under_a_quantifier_gives_a_value_for_each "prover.ensures");
   test "alternatives bind each name to the part that matched" (fun () ->
-      proven Fixtures.Prover.alternatives_bind_each_name_to_the_part_that)
+      proven Fixtures.Prover.alternatives_bind_each_name_to_the_part_that);
+  test "a match mut binding of alternatives is the part of the alternative that matched" (fun () ->
+      proven Fixtures.Prover.match_mut_binding_of_alternatives_is_the_part_that_matched);
+  test "a slice chosen by a condition gives its run back to the collection it views" (fun () ->
+      proven Fixtures.Prover.slice_chosen_by_a_condition_gives_its_run_back_to_its_collection);
+  test "a copy of a mut slice parameter cannot be passed mut" (fun () ->
+      not_proven Fixtures.Prover.copy_of_a_mut_slice_parameter_cannot_be_passed_mut
+        "prover.unsupported");
+  test "a slice that a loop assigns cannot be passed mut after the loop" (fun () ->
+      not_proven Fixtures.Prover.slice_that_a_loop_assigns_cannot_be_passed_mut_after
+        "prover.unsupported");
+  test "a slice chosen by a condition may mutate either collection" (fun () ->
+      not_proven Fixtures.Prover.slice_chosen_by_a_condition_may_mutate_either_collection
+        "prover.ensures");
+  test "a match mut binding of alternatives is no other alternative's part" (fun () ->
+      not_proven Fixtures.Prover.match_mut_binding_of_alternatives_is_no_other_alternatives_part
+        "prover.ensures");
+  test "a mut lend in a condition is written back on each path" (fun () ->
+      proven Fixtures.Prover.mut_lend_in_a_condition_is_written_back_on_each_path);
+  test "a mut lend in a condition is written back where the condition holds" (fun () ->
+      not_proven Fixtures.Prover.mut_lend_in_a_condition_is_written_back_where_it_holds
+        "prover.ensures");
+  test "a mut lend in a condition is written back where the condition fails" (fun () ->
+      not_proven Fixtures.Prover.mut_lend_in_a_condition_is_written_back_where_it_fails
+        "prover.ensures");
+  test "a mut lend in a loop's condition is written back" (fun () ->
+      proven Fixtures.Prover.mut_lend_in_a_loops_condition_is_written_back);
+  test "a mut lend in the right operand of && is written back where the operand ran" (fun () ->
+      proven Fixtures.Prover.mut_lend_in_a_right_operand_is_written_back_where_it_ran);
+  test "a mut lend in the right operand of && changes the element" (fun () ->
+      not_proven Fixtures.Prover.mut_lend_in_a_right_operand_changes_the_element "prover.ensures")
 
 (* Queries *)
 
@@ -1433,7 +1516,7 @@ let () =
         match Query.demand database Prover.proof (Resolve.Names.key_of key) with
         | Obligations { obligations; _ } ->
             List.fold_left
-              (fun most (obligation : Prover.Translate.obligation) ->
+              (fun most (obligation : Prover.State.obligation) ->
                 let text = Logic.text obligation.query in
                 let rec count from actual =
                   match String.index_from_opt text from '1' with
@@ -1757,4 +1840,11 @@ let () =
         Support.codes (in_standard Fixtures.Prover.intrinsic_shift_has_its_operators_obligation_on)
       with
       | [ "prover.shift" ] -> ()
-      | codes -> fail "expected prover.shift, found %s" (String.concat ", " codes))
+      | codes -> fail "expected prover.shift, found %s" (String.concat ", " codes));
+  test "a character made from an integer must be a Unicode scalar value" (fun () ->
+      match
+        Support.codes
+          (in_standard Fixtures.Prover.character_from_an_integer_must_be_a_unicode_scalar_value)
+      with
+      | [ "prover.requires" ] -> ()
+      | codes -> fail "expected prover.requires, found %s" (String.concat ", " codes))

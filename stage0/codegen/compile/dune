@@ -35,8 +35,6 @@
   intrinsic
   types
   core
-  core_walk
   mir
   syntax
-  infer
   convention))

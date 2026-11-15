@@ -1,0 +1,33 @@
+type while_loop = {
+  while_at : Core.origin;
+  while_clauses : Mir.loop_clause list;
+  changed : State.changed;
+  bind_parts : State.frame -> State.frame;
+  test : State.frame -> (State.frame * Logic.term) option;
+  run_body : State.frame -> State.frame list * State.frame list;
+  on_failure : State.frame -> State.frame option;
+  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+}
+
+type iterable =
+  | Over_range of { low : Logic.term; high : Logic.term; inclusive : bool }
+  | Over_cursor of { cursor : State.passed_place; cursor_type : Types.ty; next : Invocation.callee }
+
+type for_loop = {
+  for_at : Core.origin;
+  for_clauses : Mir.loop_clause list;
+  iterable : iterable;
+  element_type : Types.ty;
+  lent_element : Types.ty option;
+  invariant_count : (State.frame -> Logic.term) option;
+  collection : (State.frame -> Types.ty * Logic.term) option;
+  element_call : (State.frame -> Logic.term) option;
+  bind_element : State.frame -> Logic.term -> State.frame;
+  changed_in : State.frame -> State.changed;
+  changed_by_body : State.frame -> State.changed;
+  run_body : State.frame -> Logic.term -> State.frame list * State.frame list;
+  bind_parts : State.frame -> State.frame;
+}
+
+val while_ : State.context -> State.frame -> while_loop -> State.frame option
+val for_ : State.context -> State.frame -> for_loop -> State.frame option

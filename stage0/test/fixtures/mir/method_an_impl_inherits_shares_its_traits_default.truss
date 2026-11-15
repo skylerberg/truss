@@ -1,0 +1,23 @@
+trait Shape {
+  fn side(self) -> Int64
+
+  fn doubled(self) -> Int64 {
+    self.side() + self.side()
+  }
+}
+
+type Square(side: Int64)
+
+impl Shape for Square {
+  fn side(self) -> Int64 {
+    self.side
+  }
+}
+
+type Cube(side: Int64)
+
+impl Shape for Cube {
+  fn side(self) -> Int64 {
+    self.side
+  }
+}

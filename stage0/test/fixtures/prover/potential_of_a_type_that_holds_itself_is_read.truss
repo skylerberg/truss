@@ -1,0 +1,9 @@
+type Chain =
+  | End
+  | indirect Link(items: List[UInt8], rest: Chain)
+
+fn same(chain: own Chain) -> Chain
+  cost amortized time O(1)
+{
+  chain
+}
