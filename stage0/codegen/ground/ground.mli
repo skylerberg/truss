@@ -11,6 +11,7 @@ and function_type = { parameters : (mode * ty) list; result : result; uses : Pat
 and result = Returns of ty | Lends of mode * ty
 
 val compare : ty -> ty -> int
+val builtin : Intrinsic.builtin -> ty
 val path_name : Path.t -> string
 val to_string : ty -> string
 val argument_to_string : argument -> string

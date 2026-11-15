@@ -111,7 +111,7 @@ let outlined st ~parts body =
   (nested, Lowered.Address { place = at holder; writable = false })
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
-let trivial st ty = Glue.trivial st.context.glue ty
+let is_trivial st ty = Drop_and_copy.is_trivial st.context.drop_and_copy ty
 let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
 let site st (span : Syntax.span) : Lowered.site =
@@ -157,7 +157,7 @@ let own_in_scope st place =
 
 let owned_local st ?name (scope : scope) ty =
   let place = at (local st.builder ?name (Value ty)) in
-  if not (trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
+  if not (is_trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
 let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
@@ -165,7 +165,7 @@ let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
 let flagged_binding st ty ~flag =
   let place = at (local st.builder (Value ty)) in
-  if not (trivial st ty) then begin
+  if not (is_trivial st ty) then begin
     let scope = binding_scope st.scopes in
     scope.owned <- Drop_flagged { place; flag } :: scope.owned
   end;
@@ -173,7 +173,7 @@ let flagged_binding st ty ~flag =
 
 let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let how = Option.value how ~default:(Convention.parameter st.context.env) in
-  let own place = if in_scope && owned && not (trivial st ty) then own_in_scope st place in
+  let own place = if in_scope && owned && not (is_trivial st ty) then own_in_scope st place in
   match how mode ty with
   | None -> (None, temporary st ty)
   | Some (Lowered.Pointer _ as pointer) ->
@@ -272,12 +272,12 @@ let unreachable_block st =
   finish st.builder Unreachable;
   start st.builder (block st.builder)
 
-let owned st place ty = if trivial st ty then Lowered.Copy place else moved st place
+let owned st place ty = if is_trivial st ty then Lowered.Copy place else moved st place
 
 let take st (place : Lowered.place) ty ~destination =
   match place.root with
-  | Static _ when not (trivial st ty) ->
-      Glue.copy_into st.context.glue st.builder ~destination ~source:place ty
+  | Static _ when not (is_trivial st ty) ->
+      Drop_and_copy.copy_into st.context.drop_and_copy st.builder ~destination ~source:place ty
   | Static _ | Local _ -> emit st.builder (Assign (destination, Use (owned st place ty)))
 
 let snapshot st (place : Lowered.place) =

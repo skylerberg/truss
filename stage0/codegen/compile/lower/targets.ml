@@ -350,24 +350,16 @@ let in_type_definition st (ty : Ground.ty) nested_function =
   st.frame <- caller;
   result
 
+let begin_output st =
+  let output = temporary st Writing.output_ty in
+  emit st.builder (Assign (output, Storage.empty Writing.output_ty));
+  output
+
 let echo st place ty ~site =
-  let output = temporary st Glue.output_ty in
-  emit st.builder (Assign (output, Storage.empty Glue.output_ty));
-  let arguments =
-    if is_zero_size st ty then [] else [ Lowered.Address { place; writable = false } ]
-  in
-  emit st.builder
-    (Call
-       {
-         target =
-           Direct
-             {
-               function_ = Instance (Debug ty);
-               signature = Glue.debug_signature st.context.glue ty;
-             };
-         arguments = arguments @ [ Address { place = output; writable = true } ];
-         result = Discarded;
-       });
+  let output = begin_output st in
+  Debug_output.debug_call st.context.env st.builder
+    ~output:(Address { place = output; writable = true })
+    ty place;
   emit st.builder
     (Echo { text = Copy (Storage.buffer output); length = Copy (Storage.length output); site })
 
@@ -485,9 +477,9 @@ let static_constant st path : Lowered.place =
 let list_parts monomorphic ty =
   match Monomorphic.shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
-      match Monomorphic.representation monomorphic storage with
-      | Storage element -> (field, storage, element)
-      | _ -> bug "%s is not a list" (Ground.to_string ty))
+      match Storage.elements_of storage with
+      | Some element -> (field, storage, element)
+      | None -> bug "%s is not a list" (Ground.to_string ty))
   | _ -> bug "%s is not a list" (Ground.to_string ty)
 
 let list_of st ty destination ~site fills =

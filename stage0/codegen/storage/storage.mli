@@ -2,6 +2,14 @@ val of_elements : Ground.ty -> Ground.ty
 val view_of_elements : Ground.ty -> Ground.ty
 val elements_of : Ground.ty -> Ground.ty option
 val viewed : Ground.ty -> Ground.ty option
+
+type representation =
+  | Shape of Memory_layout.shape
+  | Storage of Ground.ty
+  | Handle
+  | Shared of Ground.ty
+
+val representation : Memory_layout.env -> Ground.ty -> representation
 val shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
 val view_shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
 val buffer_field : string

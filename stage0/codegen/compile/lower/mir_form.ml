@@ -143,7 +143,7 @@ let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list o
           match member with Some (Typed field_ty) -> path_type field_ty rest | _ -> None)
     in
     match path_type (ground st body.locals.(path.local).type_) path.steps with
-    | Some ty -> not (trivial st ty)
+    | Some ty -> not (is_trivial st ty)
     | None -> false
   in
   let moves = Moves.analyse ~passed ~tracks:needs_drop body in
@@ -362,7 +362,7 @@ let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   | Borrow { place = written; _ } ->
       emit st.builder (Assign (destination, Use (Copy (place st written))))
 
-let discarded st = temporary st (Monomorphic.builtin Unit)
+let discarded st = temporary st (Ground.builtin Unit)
 
 type entry = {
   evidence : (Path.t * Lowered.operand) list;
@@ -458,7 +458,7 @@ let rec drop_path st (path : Moves.path) =
   | None -> (
       let place = path_place st path in
       match place_type st place with
-      | Some (Value ty) when not (trivial st ty) -> emit st.builder (Drop place)
+      | Some (Value ty) when not (is_trivial st ty) -> emit st.builder (Drop place)
       | _ -> ())
   | Some Empty -> ()
   | Some Holds -> drop_held st path
@@ -497,7 +497,7 @@ and drop_parts st (path : Moves.path) =
   let child step =
     let inner = { path with steps = path.steps @ [ step ] } in
     match place_type st (path_place st inner) with
-    | Some (Value inner_ty) when not (trivial st inner_ty) -> drop_path st inner
+    | Some (Value inner_ty) when not (is_trivial st inner_ty) -> drop_path st inner
     | _ -> ()
   in
   match (Memory_layout.of_type st.context.env ty).form with
@@ -575,7 +575,7 @@ let overwritten st (target : Mir.place) (destination : Lowered.place) ty =
   match Moves.path_of_place target with
   | Some path when Moves.status (mir st).moves (mir st).state { path with steps = [] } <> None ->
       drop_path st path
-  | _ -> if not (trivial st ty) then emit st.builder (Drop destination)
+  | _ -> if not (is_trivial st ty) then emit st.builder (Drop destination)
 
 let return_from_frame st =
   (match st.frame.exit with
@@ -765,7 +765,7 @@ let tasks_bool st name places : Lowered.operand =
 
 let with_group st (f : Lowered.place -> unit) =
   let scope = open_scope st Statement in
-  let group = at (local st.builder ~name:"group" (Value (Monomorphic.builtin UInt64))) in
+  let group = at (local st.builder ~name:"group" (Value (Ground.builtin UInt64))) in
   emit st.builder (tasks_call st "open" ~result:group []);
   let join = tasks_call st "join" [ group ] in
   let cleanup = Join_group join in
@@ -797,7 +797,7 @@ let task_body st ~(id : Mir.task) ~group ~parts (f : task -> unit) : Lowered.rva
   Function_value { code = Nested nested; environment = Some environment }
 
 let locked_evidence st ~(tasks : Lowered.operand) (evidence : (Path.t * Lowered.operand) list) =
-  let mutex = at (local st.builder ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
+  let mutex = at (local st.builder ~name:"mutex" (Value (Ground.builtin UInt64))) in
   emit st.builder (Assign (mutex, Use (constant_int UInt64 Z.zero)));
   List.map
     (fun (capability, implementation) ->
@@ -833,7 +833,7 @@ let cancel st ~(task : Mir.task) ~winner ~number ~value =
       finish st.builder (Goto after);
       start st.builder lost;
       Option.iter
-        (fun (value, ty, _) -> if not (trivial st ty) then emit st.builder (Drop value))
+        (fun (value, ty, _) -> if not (is_trivial st ty) then emit st.builder (Drop value))
         value;
       finish st.builder (Goto after);
       start st.builder after;
@@ -949,8 +949,8 @@ let forwarded_call st (call : Mir.call) : Forwarded.t option =
       Option.bind
         (Forwarded.call ~substitution:code.substitution ~fresh (mir_of st.context path) call)
         (fun (forwarded : Forwarded.t) ->
-          if List.for_all (fun (_, type_, _) -> trivial st (ground st type_)) forwarded.setup then
-            Some forwarded
+          if List.for_all (fun (_, type_, _) -> is_trivial st (ground st type_)) forwarded.setup
+          then Some forwarded
           else None)
   | _ -> None
 
@@ -1041,7 +1041,7 @@ and lower_from st region block index =
 
 and concurrent_block st region ~fork ~(branches : Mir.Graph.branch list) ~join =
   let function_type = task_function_type st in
-  let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
+  let item = local st.builder (Value (Ground.builtin UInt64)) in
   emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
   with_group st (fun group ->
       let functions =
@@ -1307,7 +1307,8 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
       any_into st ~any_ty:ty ~inner_ty:(operand_type st inner) ~impl ~type_arguments
         ~value:(operand_place st inner) destination
   | Copy source ->
-      Glue.copy_into st.context.glue st.builder ~destination ~source:(operand_place st source) ty
+      Drop_and_copy.copy_into st.context.drop_and_copy st.builder ~destination
+        ~source:(operand_place st source) ty
   | Function_value { path; type_arguments; _ } -> (
       match ty with
       | Function function_type ->
@@ -1497,7 +1498,7 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
         match (argument, List.assoc_opt position defaults) with
         | Default, Some default ->
             mir_into st default place;
-            if not (trivial st ty) then
+            if not (is_trivial st ty) then
               (innermost_scope st).owned <- Drop_value place :: (innermost_scope st).owned
         | Default, None ->
             bug "the argument at position %d of `%s.%s` is omitted and has no default" position
@@ -1649,7 +1650,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
     match yielded with
     | Part operand -> (
         let ty = operand_type st operand in
-        let made () = if trivial st ty then [] else [ ([], Deferred_drop ty) ] in
+        let made () = if is_trivial st ty then [] else [ ([], Deferred_drop ty) ] in
         match operand with
         | Borrow { place = { root = Local local; projections = [] } as written; _ } when owns local
           ->
@@ -1663,7 +1664,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
             | None, Mut when outlives written ->
                 bug "a place lent `mut` that is not reached through a pointer"
             | None, _ ->
-                if not (outlives written || trivial st ty) then
+                if not (outlives written || is_trivial st ty) then
                   bug "a lent part of %s that the method owns" (Ground.to_string ty);
                 [])
         | Use _ | Take _ | Constant _ ->
@@ -1683,9 +1684,9 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
                 | None ->
                     let default, default_ty = field_default_place st ty ~variant ~field:name in
                     take st default default_ty ~destination:value;
-                    if trivial st default_ty then [] else [ ([], Deferred_drop default_ty) ]
+                    if is_trivial st default_ty then [] else [ ([], Deferred_drop default_ty) ]
               in
-              ( (name, if trivial st field_ty then Lowered.Copy value else Move value),
+              ( (name, if is_trivial st field_ty then Lowered.Copy value else Move value),
                 List.map
                   (fun (inside, deferred) -> (field_of variant name :: inside, deferred))
                   deferred ))
@@ -1870,7 +1871,7 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : Mir.loo
             {
               origin;
               group;
-              item = local st.builder ~name:"item" (Value (Monomorphic.builtin UInt64));
+              item = local st.builder ~name:"item" (Value (Ground.builtin UInt64));
               element = ground st (info st part).type_;
             }
           in
@@ -2061,7 +2062,7 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.Graph.body)
             Emit_c.Builder.branch builder (Copy (at is_omitted)) ~yes:fill ~no:other
           in
           let place =
-            if mode = Own && not (trivial st ty) then begin
+            if mode = Own && not (is_trivial st ty) then begin
               let owned_here = at (local builder ~name (Value ty)) in
               let passed_block = block builder in
               unless_passed passed_block;
@@ -2083,7 +2084,7 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.Graph.body)
                       mir_into st default value;
                       emit builder
                         (Assign (at pointer, Use (Address { place = value; writable = true })))
-                  | place when mode = Own || trivial st ty -> mir_into st default place
+                  | place when mode = Own || is_trivial st ty -> mir_into st default place
                   | place ->
                       let value = default_value () in
                       mir_into st default value;

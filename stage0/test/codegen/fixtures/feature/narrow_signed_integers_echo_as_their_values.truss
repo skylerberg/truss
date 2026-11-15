@@ -1,0 +1,8 @@
+test "echoes" {
+  let int8: Int8 = -8
+  let int16: Int16 = -16
+  let int32: Int32 = -32
+  let _ = echo int8
+  let _ = echo int16
+  let _ = echo int32
+}

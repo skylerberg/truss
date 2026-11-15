@@ -6,20 +6,12 @@ type context = {
   lookups : Lookups.t;
   constant : Path.t -> Lowered.static_value option;
   env : Memory_layout.env;
-  glue : Glue.t;
+  drop_and_copy : Drop_and_copy.t;
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
   checks : bool;
 }
-
-let debug_form : Ground.ty -> Glue.debug_form = function
-  | Named { path; _ } -> (
-      match Well_known.of_path path with
-      | Some (String | String_slice) -> Text
-      | Some (List | Slice) -> Sequence
-      | _ -> Structure)
-  | _ -> Structure
 
 let monomorphic (interface : Interface.Lookups.t) : Monomorphic.context =
   {
@@ -29,7 +21,7 @@ let monomorphic (interface : Interface.Lookups.t) : Monomorphic.context =
       Interface.Impls.normalize_capabilities interface ~bounds:Interface.Impls.no_bounds;
   }
 
-let uint64 = Monomorphic.builtin UInt64
+let uint64 = Ground.builtin UInt64
 let string_slice : Ground.ty = Named { path = Well_known.path String_slice; arguments = [] }
 
 let context (settings : Lookups.settings) ~constant ~env (lookups : Lookups.t) =
@@ -38,13 +30,10 @@ let context (settings : Lookups.settings) ~constant ~env (lookups : Lookups.t) =
     lookups;
     constant;
     env;
-    glue =
-      Glue.create env
-        ~representation:(Monomorphic.representation monomorphic)
-        ~uint64 ~debug_form ();
+    drop_and_copy = Drop_and_copy.create env;
     monomorphic;
     types = { uint64; string_slice };
-    bool = Monomorphic.builtin Bool;
+    bool = Ground.builtin Bool;
     checks = settings.checks;
   }
 

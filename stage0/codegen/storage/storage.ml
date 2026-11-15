@@ -17,6 +17,21 @@ let viewed (ty : Ground.ty) =
       Some element
   | _ -> None
 
+type representation =
+  | Shape of Memory_layout.shape
+  | Storage of Ground.ty
+  | Handle
+  | Shared of Ground.ty
+
+let representation env (ty : Ground.ty) =
+  match (elements_of ty, ty) with
+  | Some element, _ -> Storage element
+  | None, Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle -> Handle
+  | None, Named { path; arguments = [ Type value ] }
+    when Intrinsic.builtin_of_path path = Some Shared ->
+      Shared value
+  | None, _ -> Shape (Memory_layout.shape env ty)
+
 let buffer_field = "buffer"
 let length_field = "length"
 let capacity_field = "capacity"

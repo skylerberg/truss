@@ -50,6 +50,14 @@ type t =
   | Deserialize_optional
   | Unknown_variant
   | Write_fully
+  | Writing_append
+  | Writing_signed
+  | Writing_unsigned
+  | Writing_float32
+  | Writing_float64
+  | Writing_boolean
+  | Writing_quoted_character
+  | Writing_quoted_text
   | Text_copied_from
   | Run_tests
 
@@ -106,6 +114,14 @@ let all =
     Deserialize_optional;
     Unknown_variant;
     Write_fully;
+    Writing_append;
+    Writing_signed;
+    Writing_unsigned;
+    Writing_float32;
+    Writing_float64;
+    Writing_boolean;
+    Writing_quoted_character;
+    Writing_quoted_text;
     Text_copied_from;
     Run_tests;
   ]
@@ -162,6 +178,14 @@ let modules_and_name = function
   | Deserialize_optional -> ([ "serialization" ], "optional")
   | Unknown_variant -> ([ "serialization" ], "unknown_variant")
   | Write_fully -> ([ "system"; "calls" ], "write_fully")
+  | Writing_append -> ([ "writing" ], "append")
+  | Writing_signed -> ([ "writing" ], "signed")
+  | Writing_unsigned -> ([ "writing" ], "unsigned")
+  | Writing_float32 -> ([ "writing" ], "float32")
+  | Writing_float64 -> ([ "writing" ], "float64")
+  | Writing_boolean -> ([ "writing" ], "boolean")
+  | Writing_quoted_character -> ([ "writing" ], "quoted_character")
+  | Writing_quoted_text -> ([ "writing" ], "quoted_text")
   | Text_copied_from -> ([ "system"; "calls" ], "text_copied_from")
   | Run_tests -> ([ "system"; "test_runner" ], "run")
 

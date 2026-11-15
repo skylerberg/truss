@@ -8,17 +8,17 @@ end)
 
 let lowering_types =
   [
-    Monomorphic.builtin UInt8;
-    Monomorphic.builtin Int32;
+    Ground.builtin UInt8;
+    Ground.builtin Int32;
     uint64;
-    Monomorphic.builtin Bool;
-    Monomorphic.builtin Unit;
-    Monomorphic.builtin Character;
-    Monomorphic.builtin Handle;
+    Ground.builtin Bool;
+    Ground.builtin Unit;
+    Ground.builtin Character;
+    Ground.builtin Handle;
     Ground.Never;
     string_slice;
-    Glue.output_ty;
-    Storage.view_of_elements (Monomorphic.builtin UInt8);
+    Writing.output_ty;
+    Storage.view_of_elements (Ground.builtin UInt8);
   ]
 
 let is_runtime (ty : Types.ty) =
@@ -447,7 +447,13 @@ let rec walk_key walk (key : Instance.key) =
   | Evaluator path ->
       walk_constant walk path;
       walk_signature walk Constants.write_fully []
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Encode ty -> add walk ty
+  | Drop ty | Copy ty | Any_drop ty -> add walk ty
+  | Debug ty ->
+      add walk ty;
+      List.iter (add walk) Debug_output.ground_types
+  | Encode ty ->
+      add walk ty;
+      List.iter (add walk) Encoding.ground_types
   | Template_check { from_template; clauses; _ } ->
       walk_signature walk Constants.write_fully [];
       walk_signature walk from_template [];

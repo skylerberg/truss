@@ -84,7 +84,7 @@ val may_fork : state -> bool
 val held : state -> ?name:string -> Lowered.ty -> Lowered.place
 val outlined : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
 val ground : state -> Types.ty -> Ground.ty
-val trivial : state -> Ground.ty -> bool
+val is_trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
 val site : state -> Syntax.span -> Lowered.site
 

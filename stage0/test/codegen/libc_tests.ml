@@ -402,16 +402,12 @@ let () =
       let path = Filename.concat (Lazy.force scratch) "held" in
       Out_channel.with_open_text path (fun channel -> output_string channel "held");
       let env = computed_env host (Monomorphic.shape standard_context) in
-      let glue =
-        Glue.create env
-          ~representation:(Monomorphic.representation standard_context)
-          ~uint64:(Monomorphic.builtin UInt64) ()
-      in
-      let int32 = Monomorphic.builtin Int32 in
-      let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
-      let handle_ty = Monomorphic.builtin Handle in
+      let drop_and_copy = Compile.For_testing.drop_and_copy env in
+      let int32 = Ground.builtin Int32 in
+      let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
+      let handle_ty = Ground.builtin Handle in
       let types : Intrinsics.types =
-        { uint64 = Monomorphic.builtin UInt64; string_slice = standard "text" "StringSlice" () }
+        { uint64 = Ground.builtin UInt64; string_slice = standard "text" "StringSlice" () }
       in
       let entry =
         let builder = Emit_c.Builder.create env ~key:(key "entry") in
@@ -453,7 +449,8 @@ let () =
         built builder
       in
       let status, _, errors =
-        run_program ~env [ printed entry; printed (Glue.drop glue handle_ty) ]
+        run_program ~env
+          [ printed entry; printed (Compile.For_testing.drop drop_and_copy handle_ty) ]
       in
       if status <> 1 then fail "the descriptor was not free again (status %d, %s)" status errors)
 

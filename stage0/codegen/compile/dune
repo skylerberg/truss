@@ -15,7 +15,6 @@
   memory_layout
   libc
   lowered
-  glue
   reachable
   moves
   emit_c

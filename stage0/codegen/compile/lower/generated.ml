@@ -128,7 +128,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
          arguments = [ Copy (at evidence) ];
          result = Returned (at address);
        });
-  let mutex = at (local builder ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
+  let mutex = at (local builder ~name:"mutex" (Value (Ground.builtin UInt64))) in
   emit builder (Assign (mutex, Convert (Copy (at address), Integer UInt64)));
   let tasks_call name =
     let slot, signature = capability_method context (Well_known.path Tasks) name in
@@ -303,7 +303,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
   lower Storage_with_capacity [ string_ty ]
     [ Value (Copy (at wanted)) ]
     (Some (list / Field storage_field));
-  loop builder ~integer:Int32 ~index_type:(Raw (Integer Int32))
+  loop builder ~integer:Int32
     ~count:(Copy (at count))
     (fun index ->
       let length = local builder (Value context.types.uint64)
@@ -314,7 +314,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
       in
       call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
       call Terminated_length [ Copy (at bytes) ] length;
-      let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+      let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
       let view = temporary st view_ty in
       emit builder
         (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
@@ -429,7 +429,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
     | _, Some place -> place
     | Returns result_type, None ->
         temporary st (Monomorphic.ground context.monomorphic substitution result_type)
-    | Lends _, None -> temporary st (Monomorphic.builtin Unit)
+    | Lends _, None -> temporary st (Ground.builtin Unit)
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
