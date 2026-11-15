@@ -19,6 +19,8 @@ let () =
     Fixtures.Owning.copy_of_a_list_of_any_values_owns_their_boxes;
   passes "an any value of a zero-size type and its copy drop"
     Fixtures.Owning.any_value_of_a_zero_size_type_and_its_copy_drop;
+  passes "a copy of an any value of plain data owns a box of its own"
+    Fixtures.Owning.copy_of_an_any_value_of_plain_data_owns_a_box;
   passes "an own method called through an any value frees its box"
     Fixtures.Owning.own_method_called_through_an_any_value_frees_its;
   passes "a loop over a cursor that is left without taking its value drops the value"

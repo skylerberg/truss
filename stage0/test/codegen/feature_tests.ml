@@ -96,6 +96,9 @@ let () =
          example/main.truss:8:11: Point(x: 0.1, y: 2.0)\n\
          example/main.truss:9:11: -7\n\
          example/main.truss:10:11: Character\"\195\169\"\n\n");
+  test "an any value echoes as any" (fun () ->
+      expect_output Fixtures.Feature.any_value_echoes_as_any
+        "test 0 passed\necho 30\nexample/main.truss:15:11: any\n\n");
   test "signed integers narrower than Int64 echo as their values" (fun () ->
       expect_output Fixtures.Feature.narrow_signed_integers_echo_as_their_values
         "test 0 passed\n\
