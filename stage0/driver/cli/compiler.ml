@@ -20,23 +20,25 @@ let results () : Compile.results =
   let find, add = Database.results ~kind:Store.Test_result in
   { find; add }
 
+let development_settings () : Build.settings =
+  { build = Development; optimization = O1; extra = c_flags () }
+
 let lowering_only session context =
   Compile.create ~want:(want session context) context (system ())
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
-    { build = Development; optimization = O1; extra = c_flags () }
+    (development_settings ())
 
 let create ?(checks = true) session packages build =
   let toolchain = toolchain () in
-  let extra = c_flags () in
   let settings : Build.settings =
     match build with
-    | Development -> { build = Development; optimization = O1; extra }
+    | Development -> development_settings ()
     | Release ->
         {
           build = Release;
           optimization = O2;
-          extra = Toolchain.link_time_optimization toolchain @ extra;
+          extra = Toolchain.link_time_optimization toolchain @ c_flags ();
         }
   in
   let file_name file =

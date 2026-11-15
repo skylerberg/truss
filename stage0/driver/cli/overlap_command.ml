@@ -13,7 +13,7 @@ let sentence : Graph_types.overlap -> string = function
 type comparison = {
   other : string;
   overlaps : Graph_types.overlap list;
-  merged : (string * string * string) list;
+  merged : Database.merge_diagnostic list;
   error : string option;
 }
 
@@ -53,12 +53,12 @@ let to_json comparisons =
              ( "merged",
                Json.List
                  (List.map
-                    (fun (file, code, message) ->
+                    (fun ({ path; diagnostic } : Database.merge_diagnostic) ->
                       Json.Object
                         [
-                          ("file", Json.String file);
-                          ("code", Json.String code);
-                          ("message", Json.String message);
+                          ("file", Json.String path);
+                          ("code", Json.String (Diagnostic.Code.name diagnostic.code));
+                          ("message", Json.String diagnostic.message);
                         ])
                     comparison.merged) );
              ("error", Json.option (fun error -> Json.String error) comparison.error);
@@ -72,8 +72,10 @@ let print comparisons =
         (fun overlap -> Output.printf "  %s: %s\n" comparison.other (sentence overlap))
         comparison.overlaps;
       List.iter
-        (fun (file, code, message) ->
-          Output.printf "  %s: merged: %s: %s: %s\n" comparison.other file code message)
+        (fun ({ path; diagnostic } : Database.merge_diagnostic) ->
+          Output.printf "  %s: merged: %s: %s: %s\n" comparison.other path
+            (Diagnostic.Code.name diagnostic.code)
+            diagnostic.message)
         comparison.merged;
       Option.iter (fun error -> Output.printf "  %s: %s\n" comparison.other error) comparison.error)
     comparisons

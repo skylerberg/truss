@@ -1,7 +1,7 @@
 type comparison = {
   other : string;
   overlaps : Graph_types.overlap list;
-  merged : (string * string * string) list;
+  merged : Database.merge_diagnostic list;
   error : string option;
 }
 

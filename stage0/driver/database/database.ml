@@ -66,12 +66,7 @@ let standard_base () =
 
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-type kind =
-  | Worktree of string
-  | Commit of { repository : string; commit : string }
-  | Library
-  | Published
-
+type kind = Worktree of string | Commit of string | Library | Published
 type project = { kind : kind; update : Session.t -> unit; files : Files.t; mutable retried : bool }
 type Session.attachment += Project of project
 type session = Session.t
@@ -257,7 +252,7 @@ let open_commit ~repository commit =
       match Files.of_commit ~directory:repository commit with
       | None -> Error (Printf.sprintf "cannot read commit %s." commit)
       | Some files -> (
-          match open_files ~key ~kind:(Commit { repository; commit }) files with
+          match open_files ~key ~kind:(Commit commit) files with
           | Ok session ->
               update session;
               ignore (Engine.stabilize (Session.engine session));
@@ -325,8 +320,8 @@ let package_files session name =
 let root session =
   match (project session).kind with
   | Worktree root -> root
-  | Commit commit -> commit.repository
-  | Library | Published -> ""
+  | Commit _ | Library | Published ->
+      Compiler_bug.bug ~stage:"Database" "only a worktree's session has a root"
 
 let context session = Session.context session
 let set = Session.set
@@ -518,7 +513,7 @@ let other_worktrees session =
 let commit_of session =
   match (project session).kind with
   | Worktree root -> Git.head ~directory:root
-  | Commit commit -> Some commit.commit
+  | Commit commit -> Some commit
   | Library | Published -> None
 
 let overlap_with session other =
@@ -695,12 +690,14 @@ let published name version =
 let code_packages session name =
   try Engine.get (Session.engine session) Checks.code_packages name with Not_found -> []
 
+type merge_diagnostic = { path : string; diagnostic : Diagnostic.t }
+
 let merge_preview session other =
   let root = root session in
   let snapshot session =
     match (project session).kind with
     | Worktree root -> commit_of_worktree root
-    | Commit commit -> Some commit.commit
+    | Commit commit -> Some commit
     | Library | Published -> None
   in
   match (snapshot session, snapshot other) with
@@ -710,12 +707,12 @@ let merge_preview session other =
       | None -> Error "the two do not merge without a textual conflict."
       | Some texts ->
           let merged = trial_over session (Files.of_texts texts) in
-          let keys session =
+          let keyed_diagnostics session =
             List.concat_map
               (fun (file, diagnostics) ->
                 List.map
-                  (fun (candidate : Diagnostic.t) ->
-                    (file, Diagnostic.Code.name candidate.code, candidate.message))
+                  (fun (diagnostic : Diagnostic.t) ->
+                    ((file, Diagnostic.Code.name diagnostic.code, diagnostic.message), diagnostic))
                   diagnostics)
               (diagnostics_of session (packages session))
           in
@@ -723,15 +720,18 @@ let merge_preview session other =
             List.concat_map
               (fun commit ->
                 match open_commit ~repository:root commit with
-                | Ok side -> keys side
+                | Ok side -> List.map fst (keyed_diagnostics side)
                 | Error _ -> [])
               [ mine; theirs ]
           in
           Ok
             (List.filter_map
-               (fun ((file, code, message) as key) ->
-                 if List.mem key sides then None else Some (file_path merged file, code, message))
-               (List.sort_uniq compare (keys merged))))
+               (fun (((file, _, _) as key), diagnostic) ->
+                 if List.mem key sides then None
+                 else Some { path = file_path merged file; diagnostic })
+               (List.sort_uniq
+                  (fun (left, _) (right, _) -> compare left right)
+                  (keyed_diagnostics merged))))
 
 let recovering = Session.recovering
 let reset = Session.reset
