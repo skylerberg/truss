@@ -341,7 +341,11 @@ let walk_names ~on_name:add (definition_ : definition) =
         add base;
         add key
     | Function_type { inputs; output; clauses; _ } ->
-        List.iter (fun (input : function_input) -> type_ input.type_) inputs;
+        List.iter
+          (fun (input : function_input) ->
+            Option.iter add input.name;
+            type_ input.type_)
+          inputs;
         Option.iter type_ output;
         List.iter clause_ clauses
     | Type_error -> ()

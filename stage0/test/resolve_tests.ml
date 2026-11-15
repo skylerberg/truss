@@ -125,6 +125,9 @@ let () =
   test "a parameter is a local of the body" (fun () ->
       refers_to_binding Fixtures.Resolve.parameter_is_a_local_of_the_body ~use:("count", 2)
         ~binding:("count", 1));
+  test "a function type's input is the binding its requires refers to" (fun () ->
+      refers_to_binding "fn f(visit: (fn(index: USize) requires index < 3)) {}\n" ~use:("index", 2)
+        ~binding:("index", 1));
   test "a name bound by is is in scope in the if's block" (fun () ->
       refers_to_binding Fixtures.Resolve.name_bound_by_is_is_in_scope_in_the_ifs_block
         ~use:("value", 2) ~binding:("value", 1));

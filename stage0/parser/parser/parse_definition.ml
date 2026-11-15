@@ -47,7 +47,7 @@ let remove_visibility cursor code (tokens : Token.t list) message =
           ]
 
 let type_head cursor : type_head =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   let path = Atoms.upper_path cursor "a type name" in
   let generics = Parse_expression.generics cursor in
   { path; generics; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
@@ -61,7 +61,7 @@ let definition_name cursor =
   | _ -> Plain_name (Atoms.lower cursor "a name")
 
 let parameter cursor : parameter =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   let kind =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
     | Keyword Self_value, _ | Keyword (Mut | Own), Keyword Self_value ->
@@ -125,7 +125,7 @@ let result cursor =
 
 let clauses cursor =
   let rec loop clauses =
-    let start = cursor.Cursor.index in
+    let start = Cursor.index cursor in
     if not (Parse_expression.is_clause_keyword (Cursor.peek_kind cursor)) then List.rev clauses
     else
       let clause =
@@ -181,7 +181,7 @@ let body cursor =
         | Punctuation (Close Curly) | Newline | End_of_file -> true
         | _ -> false
       in
-      if ends_member && not cursor.after_inserted_closer then begin
+      if ends_member && not (Cursor.is_after_inserted_closer cursor) then begin
         Cursor.report cursor Missing_body (Source.zero_width stop)
           "A function needs a body; write `{ todo }` for one that is not written yet."
           ~fixes:
@@ -244,11 +244,9 @@ let members cursor ~member ~error =
   List.filter_map Fun.id
     (Cursor.lines cursor
        ~item:(fun cursor ->
-         let start = cursor.Cursor.index in
+         let start = Cursor.index cursor in
          if Cursor.is_keyword cursor Fn then begin
-           let stop = Split.stop cursor.tokens ~first:start in
-           cursor.methods := { first = start; stop } :: !(cursor.methods);
-           Cursor.skip_to cursor stop;
+           Cursor.skip_method cursor;
            None
          end
          else
@@ -312,7 +310,7 @@ let capability_member cursor : capability_member =
 type container = In_trait | In_impl | In_capability
 
 let method_ cursor ~(container : container) ~visibility : definition =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   let signature = member_signature cursor in
   let kind =
     match container with
@@ -339,7 +337,7 @@ let method_ cursor ~(container : container) ~visibility : definition =
 
 let fields cursor : field list =
   let field cursor : field =
-    let start = cursor.Cursor.index in
+    let start = Cursor.index cursor in
     let name = Atoms.lower cursor "a field name" in
     Cursor.expect_punctuation cursor Colon;
     let type_ = Parse_expression.type_expression cursor in
@@ -359,7 +357,7 @@ let fields cursor : field list =
 let variants cursor =
   ignore (Cursor.accept_punctuation cursor Bar);
   let variant cursor : variant =
-    let start = cursor.Cursor.index in
+    let start = Cursor.index cursor in
     let indirect = Cursor.accept_keyword cursor Indirect in
     let name = Atoms.upper cursor "the name of a variant" in
     let fields = if Cursor.is_punctuation cursor (Open Paren) then Some (fields cursor) else None in
@@ -373,7 +371,7 @@ let variants cursor =
 
 let type_clauses cursor =
   let rec loop clauses =
-    let start = cursor.Cursor.index in
+    let start = Cursor.index cursor in
     let clause kind =
       loop
         (({ kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor } : type_clause)
@@ -437,7 +435,9 @@ let impl cursor =
             match (Cursor.token_at cursor index).kind with
             | Upper _ | Punctuation Comma -> false
             | _ -> true)
-          (List.init (closer - cursor.index - 1) (fun offset -> cursor.index + 1 + offset))
+          (List.init
+             (closer - Cursor.index cursor - 1)
+             (fun offset -> Cursor.index cursor + 1 + offset))
       in
       Habits.impl_parameters cursor ~opening ~closing:(Cursor.token_at cursor closer) ~has_bounds;
       Cursor.skip_to cursor (closer + 1)
@@ -470,7 +470,7 @@ let test cursor =
   let name =
     match Cursor.peek_kind cursor with
     | String ({ tag = None; rest = [||]; _ } as literal) ->
-        let start = cursor.index in
+        let start = Cursor.index cursor in
         Parse_expression.string_literal cursor ~start ~modules:[] literal
     | String { tag = None; _ } ->
         Cursor.report cursor Interpolation_not_allowed (Cursor.peek cursor).span
@@ -527,7 +527,7 @@ let header cursor : intended_kind option * definition_name option =
 type empty = |
 
 let top_level cursor ~function_ =
-  let start = cursor.Cursor.index in
+  let start = Cursor.index cursor in
   let { visibility; tokens = visibility_tokens; opaque } = visibility cursor in
   let no_visibility construct =
     remove_visibility cursor Misplaced_visibility visibility_tokens
