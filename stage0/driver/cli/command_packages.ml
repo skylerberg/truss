@@ -1,16 +1,16 @@
 let manifest_name = "truss.toml"
 let write_file = File_system.write_atomically ~durable:false
 
+let refuse_empty snapshot packages directory =
+  if packages = [] && Database.problems snapshot = [] then
+    Outcome.cannot_run "No package in %s or any directory below it." (Shown_path.shown directory);
+  (snapshot, packages)
+
 let load directory =
   let directory = Shown_path.real directory in
   match Database.take_snapshot directory with
   | Error message -> raise (Outcome.Cannot_run message)
-  | Ok (snapshot, selected) ->
-      let packages = List.map snd selected in
-      if packages = [] && Database.problems snapshot = [] then
-        Outcome.cannot_run "No package in %s or any directory below it."
-          (Shown_path.shown directory);
-      (snapshot, packages)
+  | Ok (snapshot, chosen) -> refuse_empty snapshot (List.map snd chosen) directory
 
 let current () = load "."
 
@@ -19,7 +19,9 @@ let retake snapshot =
   | Ok snapshot -> snapshot
   | Error message -> raise (Outcome.Cannot_run message)
 
-let worktree () = load (Database.root (fst (current ())))
+let worktree () =
+  let snapshot, _ = current () in
+  refuse_empty snapshot (List.map snd (Database.packages snapshot)) (Database.root snapshot)
 
 let one = function
   | [ package ] -> package

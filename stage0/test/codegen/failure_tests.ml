@@ -78,6 +78,5 @@ let () =
       let not_code =
         Instance.Code { path = Top { module_ = example; name = "Point" }; type_arguments = [] }
       in
-      let _, compile = load ~roots:[ not_code ] "type Point(x: Int64)\n" in
       expect_bug ~saying:"while finding the ground types of example::Point" (fun () ->
-          ignore (Compile.For_testing.compiled compile not_code)))
+          ignore (load ~roots:[ not_code ] "type Point(x: Int64)\n")))

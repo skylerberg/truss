@@ -13,7 +13,7 @@ val unsaved : t -> (string * string option) list
 val mark_saved : t -> unit
 val restore : loaded:state list -> texts:(Path.file -> string option) -> (string * string) list -> t
 val check : t -> Path.package list -> unit
-val file_diagnostics : t -> Path.file -> Diagnostic.t list
+val file_diagnostics : t -> Path.file list -> (Path.file * Diagnostic.t list) list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
 val code_packages : t -> Path.package -> Path.package list option
 val tables : t -> Resolve.Names.key -> Infer.tables option
@@ -22,8 +22,8 @@ val names : t -> Path.package list -> Resolve.Names.lookups
 val resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val interface_lookups : t -> Path.package list -> Interface.Lookups.t
 val lowering_requests : t -> Path.package list -> Compile.requests
-val main : t -> Path.package -> Path.t option
-val callers : t -> viewer:Path.package -> Path.t -> Path.t list
+val entry_point : Resolve.Names.lookups -> Path.package -> Path.t option
+val callers : t -> viewer:Path.package -> Path.t list -> (Path.t * Path.t list) list
 
 type read = { dependent : Part.t; dependency : Part.t }
 
@@ -63,6 +63,7 @@ module For_testing : sig
   val derived : t -> Path.t -> Core.t option
   val core_of_path : t -> Path.t -> (Core.t * Types.substitution) option
   val proof_lookups : t -> Prover.Lookups.t
+  val resolve : t -> Path.package list -> unit
   val mir : t -> Path.package -> Mir.lookups
   val ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
   val reads : t -> string -> string list

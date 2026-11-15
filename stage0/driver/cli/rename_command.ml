@@ -140,16 +140,17 @@ let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
       (occurrences pipeline snapshot packages)
-    @ List.concat_map
-        (fun (file : Path.file) ->
-          List.filter_map
-            (fun (module_, span) ->
-              if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
-            (References.uses
-               ~used_module:
-                 (Names.used_module (Pipeline.names pipeline packages) ~from:file.module_)
-               (Pipeline.parsed pipeline file).file.uses))
-        (Command_packages.files snapshot packages)
+    @
+    let names = Pipeline.names pipeline packages in
+    List.concat_map
+      (fun (file : Path.file) ->
+        List.filter_map
+          (fun (module_, span) ->
+            if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
+          (References.uses
+             ~used_module:(Names.used_module names ~from:file.module_)
+             (Pipeline.parsed pipeline file).file.uses))
+      (Command_packages.files snapshot packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }
 
@@ -218,10 +219,13 @@ let run ~from_ ~to_ =
   let after = applied snapshot packages plan in
   let pipeline = Database.pipeline (trial snapshot after) in
   Pipeline.check pipeline packages;
+  let diagnostics =
+    Pipeline.file_diagnostics pipeline (List.map (fun (_, file, _) -> file) after)
+  in
   let caused =
     List.filter_map
       (fun (_, file, text) ->
-        match Diagnostic.shown (Pipeline.file_diagnostics pipeline file) with
+        match Diagnostic.shown (List.assoc file diagnostics) with
         | [] -> None
         | diagnostics ->
             Some

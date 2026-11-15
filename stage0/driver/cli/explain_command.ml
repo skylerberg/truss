@@ -22,6 +22,7 @@ let run ~position =
   | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
       let pipeline = Database.pipeline snapshot in
+      Pipeline.check pipeline [ written.module_.package ];
       let offset =
         Source.offset Source.Scalar_values
           (Database.source snapshot written)

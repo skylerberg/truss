@@ -8,7 +8,6 @@ type requests = {
   settings : Lookups.settings;
   source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  mir : Mir.lookups;
   lowered : Instance.key -> (lowered, unsupported) result;
   test_key : Instance.key -> (string, unsupported) result;
   reached_todo_types : Instance.key -> Path.t list;
@@ -53,7 +52,7 @@ type progress =
   | Ended of { test : int; record : record }
 
 val result_key : t -> Path.t -> string option
-val is_cached : t -> Path.t -> bool
+val is_cached : t -> Path.t -> key:string -> bool
 
 val run_tests :
   ?rerun:bool ->
@@ -71,8 +70,9 @@ type unshippable = {
   way : Path.t list;
 }
 
-val unshippable : t -> main:Path.t -> (unshippable list, string) result
-val reached_definitions : t -> main:Path.t -> (Path.t list, string) result
+type reached_program = { unshippable : unshippable list; definitions : Path.t list }
+
+val reach_program : t -> main:Path.t -> (reached_program, string) result
 val reached_todo_types : t -> Path.t -> Path.t list
 val fresh_program : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result

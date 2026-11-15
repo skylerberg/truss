@@ -116,7 +116,7 @@ let gather ?proofs (snapshot, packages) =
   Report.gather ?proofs (Database.pipeline snapshot) snapshot packages
 
 let select (snapshot, packages) = Test_command.select snapshot (Database.pipeline snapshot) packages
-let mains (snapshot, packages) = Program_command.mains snapshot packages
+let mains (snapshot, packages) = Program_command.mains (Database.pipeline snapshot) packages
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
@@ -554,7 +554,11 @@ let () =
         Command_packages.load
           (package [ ("main.truss", Fixtures.todo_main_can_reach_is_refused_with_the_way_from) ])
       in
-      match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
+      match
+        Result.map
+          (fun (reached : Compile.reached_program) -> reached.unshippable)
+          (Compile.reach_program (lowering project) ~main:(List.hd (mains project)))
+      with
       | Ok [ { failure = `Todo; line = 6; way; _ } ] ->
           expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
       | Ok reached -> fail "found %d" (List.length reached)
@@ -593,7 +597,11 @@ let () =
       in
       let reached_from called =
         let project = program called in
-        match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
+        match
+          Result.map
+            (fun (reached : Compile.reached_program) -> reached.unshippable)
+            (Compile.reach_program (lowering project) ~main:(List.hd (mains project)))
+        with
         | Ok unshippable -> unshippable
         | Error message -> failwith message
       in
@@ -625,7 +633,11 @@ let () =
       let project =
         Command_packages.load (package [ ("main.truss", Fixtures.echo_main_can_reach_is_refused) ])
       in
-      match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
+      match
+        Result.map
+          (fun (reached : Compile.reached_program) -> reached.unshippable)
+          (Compile.reach_program (lowering project) ~main:(List.hd (mains project)))
+      with
       | Ok [ { failure = `Echo; line = 2; _ } ] -> ()
       | Ok reached -> fail "found %d" (List.length reached)
       | Error message -> fail "%s" message)
