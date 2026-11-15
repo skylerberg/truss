@@ -17,7 +17,7 @@ let inputs database (key : Resolve.Names.key) =
           spans;
           mode_keywords = Hashtbl.create 8;
           names = Hashtbl.create 32;
-          kinds = Hashtbl.create 32;
+          binding_modes = Hashtbl.create 32;
           types = Hashtbl.create 32;
           parameters = [];
           implements_capability =
@@ -66,7 +66,7 @@ let check database (key : Resolve.Names.key) : result option =
         mir;
       {
         diagnostics =
-          List.sort_uniq
+          List.sort
             (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
               compare (left.span, left.message) (right.span, right.message))
             context.diagnostics;

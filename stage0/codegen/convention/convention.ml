@@ -1,9 +1,5 @@
-(* Values up to this many bytes are passed and returned by value. *)
 let by_value_limit = 16
 
-(* Whether a value holds an array's elements in its own bytes, so that a
-   view of them is a view into the value. A variant kept in a block of its
-   own holds only the block's address. *)
 let rec holds_elements (layout : Memory_layout.t) =
   layout.size > 0
   &&
@@ -24,8 +20,6 @@ let parameter env (mode : Ground.mode) ty =
     Some
       (match mode with
       | Read ->
-          (* A view of a read-only parameter is a view of the caller's
-             value, which a copy of the value's bytes would not be. *)
           if small && not (holds_elements layout) then Lowered.Value ty
           else Pointer { target = Value ty; writable = false }
       | Mut -> Pointer { target = Value ty; writable = true }

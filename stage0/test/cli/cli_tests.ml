@@ -363,11 +363,11 @@ let () =
           ]
       in
       let project = Command_packages.load (Filename.concat root "one") in
-      let limit = Database.time_limit (fst project) in
-      if limit <> 3 then fail "got %d" limit);
+      let limit = Database.time_limit_ms (fst project) in
+      if limit <> 3000 then fail "got %d ms" limit);
   test "a project without a time limit gives tests 10 seconds" (fun () ->
-      let limit = Database.time_limit (fst (Command_packages.load (package []))) in
-      if limit <> 10 then fail "got %d" limit);
+      let limit = Database.time_limit_ms (fst (Command_packages.load (package []))) in
+      if limit <> 10_000 then fail "got %d ms" limit);
   test "a time limit in a package's manifest that is not its project's is a problem" (fun () ->
       let root =
         directory

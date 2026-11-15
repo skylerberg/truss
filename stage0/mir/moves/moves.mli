@@ -1,28 +1,8 @@
-(** Which places of a MIR body may hold a value at each point, and which may hold nothing: a forward
-    analysis of the places that are moved out of, given values, and ended. A place is tracked as a
-    move path: a local that owns its value, and the fields after it.
-
-    The MIR says what moves:
-    - A call moves each argument passed to an [own] parameter. A value lent to a read-only or [mut]
-      parameter stays the caller's, whose end drops it.
-    - An assignment moves each value it reads by value: the operand it assigns, a constructor's
-      fields, an array's elements, an operation's operands, and the value made [any].
-    - A [return], and the end of a lending method, move the values they give.
-    - An early exit from a task moves the value it returns. The value is in the exit's local where
-      the code after the task's group takes the exit.
-    - A loop that pulls values gives its part one at the start of each iteration.
-
-    Code generation drops a path where its local ends, by what holds there: all of it, the parts
-    that were not moved out, or, where it may or may not hold a value, what a flag says. *)
-
 type step = Field of string | Variant of { variant : string; field : string }
 type path = { local : Mir.local; steps : step list }
 
 val path_of_place : Mir.place -> path option
-(** [None] for a constant's static data, which nothing moves from. *)
-
 val is_inside : outer:path -> path -> bool
-(** Whether a path is [outer] or lies inside it. *)
 
 type t
 
@@ -32,96 +12,40 @@ val analyse :
   tracks:(path -> bool) ->
   Mir.Graph.body ->
   t
-(** The analysis of a body. A local owns its value where it is a temporary or an [own] binding, and
-    not a capture or a local that an assignment gives a place; its parameters hold values on entry.
-    A local bound [mut], or lent [mut], is another owner's place lent [mut]: a value may be moved
-    out of one, which is reinitialized before the local ends, and none is dropped where it ends.
-    [passed] says how a parameter is passed where its binding does not, as for a lambda's. A value
-    read by value moves where [moving] holds of its type, every value by default; the rest copy. A
-    path is tracked where [tracks] holds of it. *)
 
 val owns : t -> Mir.local -> bool
-(** Whether a local owns its value, which its end drops. *)
-
 val lent_mut : t -> Mir.local -> bool
-(** Whether a local is another owner's place lent [mut]. *)
 
 type use = {
   place : Mir.place;
   origin : Core.origin;
   moves : bool;
-  operand : Mir.operand option;  (** The operand that reads the place, if one does *)
-  passed : Types.mode option;  (** For an argument, the mode of the parameter it is passed to *)
+  operand : Mir.operand option;
+  passed : Types.mode option;
 }
-(** A place code reads, where it reads it, and whether the read moves the value out. *)
 
-val statement_uses : t -> Mir.statement -> use list
-(** The places a statement reads, in evaluation order. A place it gives a value is not among them.
-*)
-
+val statement_uses : t -> Mir.Graph.statement -> use list
 val terminator_uses : t -> Mir.Graph.basic_block -> use list
-(** The places a block's terminator reads, in evaluation order. *)
-
-val given_by : Mir.statement -> path list
-(** The places a statement gives values. *)
-
-val ended_by : Mir.statement -> Mir.local list
-(** The locals a statement ends. *)
+val given_by : Mir.Graph.statement -> path list
+val ended_by : Mir.Graph.statement -> Mir.local list
 
 type state
 
 val entry : t -> Mir.Graph.block -> state
-(** The state where a block starts, which the caller may change. *)
-
-val apply : t -> state -> Mir.statement -> unit
-(** Runs a statement's effects. *)
-
-val apply_moves : t -> state -> Mir.statement -> unit
-(** Runs a statement's moves alone, which happen before it gives its destination a value. *)
-
+val apply : t -> state -> Mir.Graph.statement -> unit
+val apply_moves : t -> state -> Mir.Graph.statement -> unit
 val apply_terminator_moves : t -> state -> Mir.Graph.basic_block -> unit
-(** Runs the moves a block's terminator makes before it leaves its block. The ends an exit from
-    tasks runs are statements of their own, which run where the exit is taken. *)
-
 val copy : state -> state
-
 val move_out : t -> state -> Mir.place -> origin:Core.origin -> unit
-(** Moves the value at a place out, as one of a statement's reads at [origin] does. *)
-
 val moved_at : t -> state -> path -> Core.origin list
-(** Where the moves are that may have left a tracked path empty. *)
 
 type status = Holds | Empty | Maybe
 
 val status : t -> state -> path -> status option
-(** [None] for a path that is not tracked, which holds a value whenever its local does. *)
-
 val may_be_empty : t -> state -> path -> path option
-(** The outermost tracked path that overlaps a path, around it or inside it, and may hold nothing,
-    because it was moved out of or not yet given a value on some path here. *)
-
 val inside : t -> path -> path list
-(** The tracked paths strictly inside a path, outermost first. *)
-
 val flagged : t -> path list
-(** The paths that may or may not hold a value where they are dropped, which a run-time flag
-    follows. *)
-
 val changed : t -> before:state -> after:state -> (path * bool) list
-(** The flagged paths whose flag a step from [before] to [after] changes, each with its new value.
-*)
-
 val held_at_entry : t -> path list
-(** The flagged paths that hold a value on entry: the parameters'. *)
-
 val given_on_entry : t -> Mir.Graph.block -> path list
-
-val live : t -> Mir.Graph.body -> drops:bool -> Mir.Graph.block -> int -> Mir.local -> bool
-(** [live analysis body ~drops block index local]: whether [local] is live before position [index]
-    of [block], where a later use may read it. Position [i] is before the block's statement [i], the
-    count of its statements is before its terminator, and one more is after it. A read, a borrow, or
-    a write to a part of a local uses it, and a whole assignment ends its liveness. A use of a local
-    bound to another's place, or a lent part, uses that place's local too. Where [drops], an end of
-    a local that may hold a value with something to drop uses it, since its drop does.
-
-    Partial application to [body] runs the analysis once. *)
+val live_after : t -> Mir.Graph.body -> Mir.Graph.block -> int -> Mir.local -> bool

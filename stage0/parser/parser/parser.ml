@@ -22,22 +22,22 @@ let with_cursor source (tokens : Token.t array) piece parse =
   let text = piece_text source tokens piece in
   let cursor = Cursor.create ~text ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop in
   let value = parse cursor in
-  (value, cursor, Diagnostic.Collector.to_list diagnostics)
+  let item : _ Syntax.item =
+    {
+      base;
+      text;
+      blank_line_before = tokens.(piece.first).blank_line_before;
+      value;
+      container_index = None;
+    }
+  in
+  (item, cursor, Diagnostic.Collector.to_list diagnostics)
 
-let item (cursor : Cursor.t) value : _ Syntax.item =
+let parsed (item : _ Syntax.item) diagnostics =
   {
-    base = cursor.base;
-    text = cursor.text;
-    blank_line_before = cursor.tokens.(cursor.first).blank_line_before;
-    value;
-    container_index = None;
-  }
-
-let parsed cursor value diagnostics =
-  {
-    value = item cursor value;
+    value = item;
     diagnostics =
-      List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:cursor.base)) diagnostics;
+      List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:item.base)) diagnostics;
   }
 
 let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics : Diagnostic.t list)
@@ -97,7 +97,7 @@ let check cursor definition =
   Check.definition cursor definition
 
 let rec one_definition ?(checks_fixes = true) source tokens piece parse =
-  let value, cursor, diagnostics =
+  let item, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         let definition : Syntax.definition =
           match parse cursor with
@@ -109,15 +109,12 @@ let rec one_definition ?(checks_fixes = true) source tokens piece parse =
               {
                 visibility = Private;
                 kind = Definition_error { intended; name };
-                span = Cursor.span_from cursor cursor.first;
+                span = Cursor.span_from cursor piece.first;
                 recovered = [];
                 id = Cursor.fresh_id cursor;
               }
         in
-        let recovered =
-          List.sort_uniq compare (List.map (Cursor.span cursor) !(cursor.recoveries))
-        in
-        { definition with recovered })
+        { definition with recovered = Cursor.recovered cursor })
   in
   let diagnostics =
     if checks_fixes then
@@ -125,7 +122,7 @@ let rec one_definition ?(checks_fixes = true) source tokens piece parse =
           diagnostics_in_file (fst (one_definition ~checks_fixes:false source tokens piece parse)))
     else diagnostics
   in
-  (parsed cursor value diagnostics, List.rev !(cursor.methods))
+  (parsed item diagnostics, Cursor.methods cursor)
 
 let methods ?(checks_fixes = true) source tokens (container : Syntax.definition) pieces =
   let kind : Parse_definition.container option =
@@ -169,8 +166,8 @@ let use_path cursor : Syntax.path option =
   | exception Cursor.Failed -> None
 
 let use_line source tokens piece =
-  let value, cursor, diagnostics = with_cursor source tokens piece use_path in
-  parsed cursor value diagnostics
+  let item, _, diagnostics = with_cursor source tokens piece use_path in
+  parsed item diagnostics
 
 let use_after_definition source (line : _ Syntax.item) ~destination =
   let text = Source.text source in
@@ -272,7 +269,7 @@ let parse source tokens = parse_file ~checks_fixes:true source tokens
 type example = Example_definition | Example_signature
 
 let rec parse_example_definition ~checks_fixes source tokens piece =
-  let (example, container), cursor, diagnostics =
+  let item, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match Parse_definition.example cursor with
         | Whole definition ->
@@ -284,11 +281,12 @@ let rec parse_example_definition ~checks_fixes source tokens piece =
             (Example_signature, None)
         | exception Cursor.Failed -> (Example_definition, None))
   in
+  let example, container = item.value in
   let method_diagnostics =
     match container with
     | Some container ->
         List.concat_map diagnostics_in_file
-          (methods ~checks_fixes source tokens container (List.rev !(cursor.methods)))
+          (methods ~checks_fixes source tokens container (Cursor.methods cursor))
     | None -> []
   in
   let diagnostics =
@@ -300,7 +298,7 @@ let rec parse_example_definition ~checks_fixes source tokens piece =
   (example, diagnostics @ method_diagnostics)
 
 let rec parse_example_statement ~checks_fixes source tokens piece =
-  let (), _, diagnostics =
+  let _, _, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match
           let statement = Parse_expression.statement_line cursor ~previous:None in

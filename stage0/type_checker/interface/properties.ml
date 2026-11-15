@@ -313,42 +313,41 @@ let group =
            (List.exists (Path.equal path))
            (Components.of_graph ~compare:Path.compare ~successors [ path ])))
 
-let rec group_facts =
-  lazy
-    (Query.query ~name:"type_group_facts" ~phase:Phases.interfaces ~saved:true ~show:Path.show
-       (fun database first ->
-         let interfaces =
-           List.filter_map
-             (fun path ->
-               Option.map
-                 (fun interface -> (path, interface))
-                 (Query.demand database Environment.type_interface path))
-             (Query.demand database group first)
-         in
-         let each facts =
-           List.fold_left
-             (fun facts_by_path (path, interface) ->
-               Path.Map.add path (facts path interface) facts_by_path)
-             Path.Map.empty interfaces
-         in
-         let rec settle assumed =
-           let facts_of path =
-             match Path.Map.find_opt path assumed with
-             | Some facts -> facts
-             | None -> facts_of database path
-           in
-           let next = each (fun _ interface -> facts_from database ~facts_of interface) in
-           if Path.Map.equal ( = ) next assumed then next else settle next
-         in
-         settle (each (fun _ _ -> empty))))
-
-and facts_of database path =
+let facts_of group_facts database path =
   Option.value ~default:empty
     (Path.Map.find_opt path
-       (Query.demand database (Lazy.force group_facts) (List.hd (Query.demand database group path))))
+       (Query.demand database group_facts (List.hd (Query.demand database group path))))
 
-let () = ignore (Lazy.force group_facts)
-let facts = Query.query ~name:"type_facts" ~phase:Phases.interfaces ~show:Path.show facts_of
+let group_facts =
+  Query.recursive_query ~name:"type_group_facts" ~phase:Phases.interfaces ~saved:true
+    ~show:Path.show (fun group_facts database first ->
+      let interfaces =
+        List.filter_map
+          (fun path ->
+            Option.map
+              (fun interface -> (path, interface))
+              (Query.demand database Environment.type_interface path))
+          (Query.demand database group first)
+      in
+      let each facts =
+        List.fold_left
+          (fun facts_by_path (path, interface) ->
+            Path.Map.add path (facts path interface) facts_by_path)
+          Path.Map.empty interfaces
+      in
+      let rec settle assumed =
+        let facts_of path =
+          match Path.Map.find_opt path assumed with
+          | Some facts -> facts
+          | None -> facts_of group_facts database path
+        in
+        let next = each (fun _ interface -> facts_from database ~facts_of interface) in
+        if Path.Map.equal ( = ) next assumed then next else settle next
+      in
+      settle (each (fun _ _ -> empty)))
+
+let facts =
+  Query.query ~name:"type_facts" ~phase:Phases.interfaces ~show:Path.show (facts_of group_facts)
 
 let rec is_open = function
   | Types.Parameter _ | Types.Variable _ | Types.Hole | Types.Error _ -> true

@@ -7,9 +7,6 @@ let bug format = Compiler_bug.bug ~stage:"Builder" format
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
-(* [is_zeroed] marks a local that is declared zeroed: a drop flag, which
-   starts false, or an omitted argument, which C must be passed a value
-   for. *)
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
 type instance = C_instance.t
 
@@ -17,19 +14,17 @@ open C_instance
 
 let instance_key (instance : instance) = instance.key
 
-(* A function of the code a builder writes: the builder's own, number 0, or
-   an outlined function. *)
 type function_ = {
-  code : instance;  (** The instance it is part of *)
-  nested : int option;  (** Its number among the instance's nested functions *)
+  code : instance;
+  nested : int option;
   parent : int;
-  parts : Lowered.local list;  (** The locals of [parent] it takes as parameters *)
-  holder : Lowered.local option;  (** The local of [parent] that holds its environment *)
-  environment : Lowered.local option;  (** Its local that points to its environment *)
+  parts : Lowered.local list;
+  holder : Lowered.local option;
+  environment : Lowered.local option;
   entry : Lowered.block;
-  prologue : Buffer.t;  (** Statements that run before its entry block *)
-  mutable mentioned : Locals.t;  (** The locals its prologue names *)
-  mutable returns : bool list;  (** For each [return], whether it gives a value *)
+  prologue : Buffer.t;
+  mutable mentioned : Locals.t;
+  mutable returns : bool list;
   mutable size : int;
 }
 
@@ -45,15 +40,15 @@ let no_facts () = { instances = []; called = []; calls = []; failures = [] }
 type t = {
   env : Memory_layout.env;
   locals : local_info Dynarray.t;
-  texts : string option Dynarray.t;  (** Each block's C, once it is finished *)
-  mentions : Locals.t Dynarray.t;  (** The locals each block's code names *)
-  successors : Lowered.block list Dynarray.t;  (** The blocks each block goes to *)
+  texts : string option Dynarray.t;
+  mentions : Locals.t Dynarray.t;
+  successors : Lowered.block list Dynarray.t;
   facts : facts Dynarray.t;
   owners : int Dynarray.t;
   mutable current : Lowered.block;
-  mutable pending : Buffer.t;  (** The C of the current block's statements *)
+  mutable pending : Buffer.t;
   functions : function_ Dynarray.t;
-  mutable function_ : int;  (** The function being written *)
+  mutable function_ : int;
 }
 
 let new_function ~code ~nested ~parent ~parts ~holder ~environment ~entry =
@@ -97,7 +92,6 @@ let block builder =
   Dynarray.add_last builder.owners (-1);
   Dynarray.length builder.texts - 1
 
-(* The builder's own function runs from block 0, the first block made. *)
 let start_function builder ~code ~nested =
   Dynarray.add_last builder.functions
     (new_function ~code ~nested ~parent:(-1) ~parts:[] ~holder:None ~environment:None ~entry:0);
@@ -119,13 +113,8 @@ let local builder ?name ?(is_zeroed = false) ty =
 
 let local_type builder local = (Dynarray.get builder.locals local).ty
 let current_function builder = Dynarray.get builder.functions builder.function_
-
-(* A local's name in C stands as a token until the function is built, when
-   it becomes the local itself or its place in the environment. *)
 let token local = Printf.sprintf "\001%d\002" local
 
-(* A function's context for printing code, which records each local the
-   code names with [name]. *)
 let function_context builder (function_ : function_) ~name =
   {
     symbol = Instance.symbol function_.code.key;
@@ -135,13 +124,11 @@ let function_context builder (function_ : function_) ~name =
         (token local, local_type builder local));
   }
 
-(* The context for the current block's code. *)
 let block_context builder function_ =
   function_context builder function_ ~name:(fun local ->
       Dynarray.set builder.mentions builder.current
         (Locals.add local (Dynarray.get builder.mentions builder.current)))
 
-(* The context for code that runs before a function's blocks. *)
 let prologue_context builder (function_ : function_) =
   function_context builder function_ ~name:(fun local ->
       function_.mentioned <- Locals.add local function_.mentioned)
@@ -239,8 +226,6 @@ let loop builder ?(integer = Memory_layout.UInt64) ~index_type ~count body =
   finish builder (Goto test);
   start builder after
 
-(* Writes [body] in the function [number], then goes back to the block that
-   was current, with its statements so far. *)
 let write_in builder number body =
   let function_ = builder.function_ and current = builder.current and pending = builder.pending in
   builder.function_ <- number;
@@ -269,8 +254,6 @@ let outline builder ~nested ~parts body =
       body ());
   holder
 
-(* Replaces each token in a function's C with the text [name] gives its
-   local. *)
 let resolve text name =
   let buffer = Buffer.create (String.length text) in
   let length = String.length text in
@@ -290,17 +273,6 @@ let resolve text name =
   scan 0;
   Buffer.contents buffer
 
-(* Writes every function the builder holds as C.
-
-   A local belongs to the innermost function that every function naming it
-   is in, so that a local that one outlined function names alone belongs to
-   each of its runs. An outlined function reaches a local of a function
-   around it through its environment, which holds the local's address. The
-   function that runs it fills the environment once, on entry: the
-   addresses do not change, and a loop that runs the function again while
-   tasks it spawned earlier read the environment does not write it again,
-   which would be a data race. A local that takes no room is never shared:
-   each function that names it has its own. *)
 let build ?(returns = true) builder ~parameters ~result =
   let functions = Dynarray.to_array builder.functions in
   let count = Array.length functions in
@@ -401,8 +373,6 @@ let build ?(returns = true) builder ~parameters ~result =
             bug "a separate function names local %d of the function it is written in" local
       | _ -> ())
     functions;
-  (* The statements that fill the environments of the functions outlined
-     from each function. *)
   let fills = Array.init count (fun _ -> Buffer.create 64) in
   Array.iteri
     (fun number (function_ : function_) ->
@@ -444,10 +414,6 @@ let build ?(returns = true) builder ~parameters ~result =
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
       let symbol = Instance.symbol function_.code.key in
-      (* A local is declared with no initializer, unless it is zeroed. The
-         code writes every other local before it reads it, so an
-         initializer would cost a store, and would hide a read of a local
-         that the lowering never wrote. *)
       List.iter
         (fun local ->
           let ty = local_type builder local in

@@ -1,5 +1,3 @@
-(* Lowering: the core form of one instance to its C. *)
-
 open Emit_c.Builder
 open Definitions
 open Lowering
@@ -71,8 +69,6 @@ let code_state context ~key path =
   let code = code_of context path [] in
   (enter context ~builder:(create context.env ~key) (frame_of code), code)
 
-(* The [requires] clauses of a tag's [from_template] that can run, each by
-   its position among the clauses, as a body that takes the template. *)
 let template_clauses context from_template : (int * Mir.Graph.t) list =
   match demand context Mir.contract_of_path from_template with
   | Some contract ->
@@ -149,7 +145,6 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.
       Constants.write_output st output);
   finish_instance st ~rest:[] ()
 
-(* Lowers a function or a test that has a body in source. *)
 let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
   let code = code_of context path type_arguments in
   let body = (Mir_form.mir_of context path).body in

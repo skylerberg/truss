@@ -13,7 +13,7 @@ let add_views (held_views : held_views) holder views : held_views =
 let aliases_place context (root : Place.root) =
   match root with
   | Local local ->
-      local <> Self && (not (List.mem local context.parameters)) && kind context root <> Owned
+      local <> Self && (not (List.mem local context.parameters)) && binding_mode context root <> Own
   | Temporary _ | Constant _ | Environment -> false
 
 let resolve context (held_views : held_views) (views : Actions.view list) : Actions.view list =

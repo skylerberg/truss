@@ -8,17 +8,6 @@ val apply_slice :
   high:Logic.term option ->
   State.frame * Logic.term * Logic.term * Logic.term
 
-val run_replaced :
-  State.context ->
-  State.frame ->
-  Types.ty ->
-  before:Logic.term ->
-  after:Logic.term ->
-  start:Logic.term ->
-  stop:Logic.term ->
-  run:Logic.term option ->
-  unit
-
 val slice_place :
   State.context ->
   Invocation.site ->

@@ -1,73 +1,49 @@
-(* The lowered IR's types. *)
-
 type local = int
 type block = int
 
-(* The type of a local, a parameter, or a result. *)
 type ty =
   | Value of Ground.ty
   | Pointer of { target : ty; writable : bool }
-      (** A [restrict] pointer: to a [mut] or large parameter, or to a part of one *)
-  | Raw of Memory_layout.scalar  (** A scalar no Truss type names, such as a drop flag *)
+  | Raw of Memory_layout.scalar
   | Environment of int
-      (** The environment [struct] of nested function [n] of this instance, whose fields its
-          [environment] lists *)
   | Evidence of int
-      (** Evidence a [provide] builds on the stack, with room for [n] pointers to the evidence its
-          implementation captured *)
   | Lend
   | Lend_mark
 
-(* A position within a definition, which the definition's anchor turns into
-   a file and line. It names its definition, rather than taking the
-   instance's, because code can come from another definition: a trait's
-   provided method compiled for an [impl] reports positions in the trait. *)
 type site = { definition : Path.t; line : int; column : int }
-
-(* A place: a local or a constant's static data, then fields, elements, and
-   dereferences. *)
 type root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
 
 type place = { root : root; projections : projection list }
 
 and projection =
-  | Field of string  (** A record's field *)
+  | Field of string
   | Variant_field of { variant : string; field : string }
-      (** A field of a sum type's variant, which must be the variant the value holds. For an
-          [indirect] variant this reaches into its block. *)
-  | Index of operand  (** An element of an [Array] or of the buffer a pointer points at *)
+  | Index of operand
   | Deref
 
 and operand =
-  | Copy of place  (** For a value that copies implicitly *)
-  | Move of place  (** Leaves the place with nothing to drop *)
+  | Copy of place
+  | Move of place
   | Constant of constant
   | Address of { place : place; writable : bool }
   | Moved_address of place
-      (** The address of a place whose value the callee takes, for a large [own] argument: the place
-          holds nothing after the call *)
 
 and constant =
   | Integer of Memory_layout.integer * Z.t
-  | Float32 of int32  (** The bits *)
-  | Float64 of int64  (** The bits *)
+  | Float32 of int32
+  | Float64 of int64
   | Bool of bool
   | Character of int
-  | Bytes of string  (** The address of static bytes, such as a string literal's *)
+  | Bytes of string
   | Null
   | Symbol_address of Instance.key
   | Site of site
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
-and function_ref =
-  | Instance of Instance.key
-  | Nested of int  (** A lambda or loop body of this instance *)
+and function_ref = Instance of Instance.key | Nested of int
 
-(* How a function is called, which the caller needs to declare it. *)
 type signature = { parameters : ty list; result : ty option; returns : bool }
-(** [returns] is false for a function whose result type is [Never] *)
-
 type unary = Negate | Not | Complement
 
 type binary =
@@ -79,28 +55,26 @@ type binary =
   | Bit_and
   | Bit_or
   | Bit_xor
-  | Shift_left  (** The amount is masked to the width of the value *)
-  | Shift_right  (** Arithmetic on signed integers, logical on unsigned *)
-  | Equal  (** On floats, every NaN equals every NaN *)
+  | Shift_left
+  | Shift_right
+  | Equal
   | Not_equal
-  | Less  (** On floats, NaN comes after every number *)
+  | Less
   | Less_equal
   | Greater
   | Greater_equal
-  | Ieee_equal  (** The IEEE comparisons, on floats only *)
+  | Ieee_equal
   | Ieee_less
   | Ieee_less_equal
 
-(* The operations the intrinsic module lowers to directly. Operating-system
-   calls are added with the standard library's real implementations. *)
 type intrinsic =
   | Allocate
-  | Reallocate  (** [(pointer, old size, new size, alignment) -> pointer] *)
-  | Free  (** [(pointer)] *)
-  | Copy_bytes  (** [(destination, source, count)], which must not overlap *)
-  | Move_bytes  (** [(destination, source, count)] *)
-  | Compare_bytes  (** [(first, second, count) -> Int32] *)
-  | Add_overflow  (** [(left, right, result pointer) -> Bool], true when it overflowed *)
+  | Reallocate
+  | Free
+  | Copy_bytes
+  | Move_bytes
+  | Compare_bytes
+  | Add_overflow
   | Subtract_overflow
   | Multiply_overflow
   | Leading_zeros
@@ -109,47 +83,36 @@ type intrinsic =
   | Swap_bytes
   | Rotate_left
   | Rotate_right
-  | Multiply_high  (** The upper half of the full-width product *)
+  | Multiply_high
   | Square_root
   | Fused_multiply_add
   | Floor
   | Ceiling
   | Truncate
   | Round_even
-  | Float_bits  (** A float's bits, with every NaN replaced by one canonical NaN *)
+  | Float_bits
   | Float_from_bits
-  | Run_test  (** [(index: UInt32)]: runs a test of the test program's table *)
+  | Run_test
   | Report_tests_to
-      (** [(descriptor: Int32)]: has failures and echoes written as records to the descriptor *)
   | Live_blocks
-  | Environment  (** [() -> pointer] to the environment the process was started with *)
+  | Environment
   | Terminated_length
-  | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
-  | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
+  | Evidence_implementation
+  | Evidence_outer
   | Program_argument
-      (** [(arguments, index) -> bytes]: a program argument, ending in a zero byte *)
   | Evidence_fill
-      (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
-          [provide] builds *)
   | Coroutine_start
   | Coroutine_resume
-  | Coroutine_suspend  (** [()]: in a coroutine, switches to the code that resumed it *)
+  | Coroutine_suspend
   | Tasks_spawn
-      (** [(group: UInt64, function value, item: UInt64) -> Bool]: spawns a runtime task that calls
-          the function with the item, and returns true. Returns false if the group is cancelled. *)
   | Shared_allocate
-  | Shared_retain  (** [(value pointer)]: increments the reference count *)
+  | Shared_retain
   | Shared_release
-      (** [(value pointer) -> Bool]: decrements the reference count, and returns true if it reached
-          zero *)
-  | Shared_free  (** [(value pointer)]: frees the block, after its value has been dropped *)
-  | Shared_lock  (** [(value pointer)]: locks the block's mutex *)
-  | Shared_unlock  (** [(value pointer)]: unlocks the block's mutex *)
+  | Shared_free
+  | Shared_lock
+  | Shared_unlock
   | Blocking_begin
-      (** [()]: before a call of the operating system that can block. If the call lasts, the runtime
-          counts the thread as blocked, and a spare thread may run tasks in its place. The runtime
-          can now interrupt the call if the calling task is cancelled. *)
-  | Blocking_end  (** [()]: after such a call. It leaves [errno] as the call set it. *)
+  | Blocking_end
   | Lend_begin
   | Lend_called
   | Lend_release
@@ -161,51 +124,29 @@ type intrinsic =
 type target =
   | Direct of { function_ : function_ref; signature : signature }
   | Indirect of { value : operand; signature : signature }
-      (** A call through a function value: its code, given its environment first *)
   | Intrinsic of intrinsic
   | Foreign of Libc.declaration
-      (** A function of the C library, given each argument converted to its parameter's C type *)
   | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }
-      (** A method of [capability]: entry [slot] of the evidence's table, given the evidence first
-      *)
   | Table_call of { table : operand; value : operand; slot : int; signature : signature }
-      (** Entry [slot] of a table of code, such as an [any] value's, given the value first *)
 
 type rvalue =
   | Use of operand
   | Unary of unary * operand
   | Binary of binary * operand * operand
   | Convert of operand * Memory_layout.scalar
-      (** A conversion between built-in numbers, which the type checker or the prover has shown
-          keeps the value *)
   | Build of { ty : Ground.ty; variant : string option; fields : (string * operand) list }
-      (** A record or a variant. Building an [indirect] variant allocates its block. *)
-  | Is_variant of place * string  (** Whether a sum type's value holds the variant *)
+  | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-(* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a
-   [todo] that was reached. *)
 type failure = Panic | Assertion | Todo
-
-(* Where a call's result goes. A target that is given something first, such
-   as a function value's environment, is given it before the result's
-   pointer. *)
-type destination =
-  | Discarded  (** There is no result, or nothing reads it *)
-  | Returned of place  (** Returned by value, and written to the place *)
-  | Written of place
-      (** Written by the callee through a pointer to the place, the call's first argument, for a
-          result too large to return *)
+type destination = Discarded | Returned of place | Written of place
 
 type statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : destination }
-  | Drop of place  (** Runs the type's drop code *)
+  | Drop of place
   | Echo of { text : operand; length : operand; site : site }
-      (** Records the debug output of a value: a pointer to UTF-8 bytes and their length *)
   | Free_block of { place : place; variant : string }
-      (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
-      *)
   | Defer_free_block of { lend : operand; place : place; variant : string }
   | Fork of { branches : (int * operand) list }
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
@@ -213,35 +154,26 @@ type statement =
 type terminator =
   | Goto of block
   | Switch of { value : operand; cases : (Z.t * block) list; default : block option }
-      (** On an integer, a [Bool], or a [Character]; with no default, the cases cover every value *)
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
-  | Unreachable  (** A point the prover has shown is never reached *)
+  | Unreachable
   | Fail of {
       failure : failure;
       message : operand;
       length : operand;
       site : site;
       reported : operand option;
-    }  (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
+    }
 
-(* Static data: a constant's value, which the emitter writes as C
-   initializers in a read-only place. *)
 type static_value =
   | Static_scalar of constant
   | Static_record of (string * static_value) list
   | Static_variant of string * (string * static_value) list
   | Static_array of static_value list
   | Static_storage of { element : Ground.ty; elements : static_value list; owned : bool }
-      (** Elements in static memory, with the capacity recorded as the length when [owned], and as 0
-          otherwise, as for a string's static bytes *)
 
 type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
 
-(* A table of code: its entries in order, and for a capability [impl]'s
-   table, the capability, whose methods they are in the order it declares
-   them. A build has every entry of a table, and a capability's entry runs
-   only where code calls that method of the capability. *)
 type table = {
   table_key : Instance.key;
   capability : Path.t option;

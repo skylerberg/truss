@@ -1,8 +1,4 @@
-(* The Z3 version the prover is pinned to. A different one is refused, since
-   its answers could differ. *)
 let version = "5.3.3"
-
-(* The limit in steps every query runs with. *)
 let steps = 1_000_000
 
 type cache = { find : string -> string option; add : string -> string -> unit }
@@ -32,7 +28,6 @@ let find ?cache () =
 
 type answer = Proven | Counterexample of (Logic.symbol * string) list | Out_of_steps
 
-(* The options every query runs with, which are part of its key. *)
 let header =
   Printf.sprintf
     "(set-option :produce-models true)\n\
@@ -44,7 +39,6 @@ let header =
 let key_of_text text = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header text)
 let key query = key_of_text (Logic.text query)
 
-(* A small reader of the s-expressions [get-value] prints. *)
 type sexp = Atom of string | List of sexp list
 
 let parse_sexps text =
@@ -91,49 +85,37 @@ let rec show_sexp = function
   | Atom atom -> atom
   | List items -> "(" ^ String.concat " " (List.map show_sexp items) ^ ")"
 
-(* A query as it is sent to the solver: its key, and for each symbol whose
-   value a counterexample should give, the canonical name the text calls it
-   by. It holds no text: a query's text is about 100 KB, and a run keeps
-   every request it makes, so the text is rendered again from the query
-   when the solver must be run. *)
 type request = {
   key : string;
   requested : (Logic.symbol * string) list;
-  value_arguments : string list;  (** The [get-value] argument for each of [requested], in order. *)
+  value_arguments : string list;
 }
 
-(* An answer in the canonical names, the same for every query with the
-   same text, so it can be kept by key alone. *)
 type canonical = Proven_canonical | Values of (string * string) list | Out_of_steps_canonical
 
-(* The answers this process has solved or read, by request key. *)
 let answers : (string, canonical) Hashtbl.t = Hashtbl.create 256
-
-(* Queries are solved on several domains at once, which share [answers],
-   the cache, and the count of queries run. The cache is not safe to call
-   from several domains, so it is called under the lock too. *)
 let lock = Mutex.create ()
 let locked work = Mutex.protect lock work
 let request_key_of_text text value_arguments = key_of_text text ^ String.concat "," value_arguments
 
-let request ?(values = []) ?(terms = []) query =
+let request ?(symbols = []) ?(terms = []) query =
   let rendering = Logic.render query in
   let named = Logic.symbols rendering in
-  let symbols =
+  let requested_symbols =
     List.filter_map
       (fun symbol ->
         List.assoc_opt symbol named
         |> Option.map (fun canonical -> ((symbol, canonical), canonical)))
-      values
+      symbols
   in
-  let terms =
+  let requested_terms =
     List.filter_map
       (fun (name, term) -> Logic.term_text rendering term |> Option.map (fun text -> (name, text)))
       terms
     |> List.mapi (fun index (name, text) -> ((name, Printf.sprintf "#%d" index), text))
   in
-  let requested = List.map fst (symbols @ terms)
-  and value_arguments = List.map snd (symbols @ terms) in
+  let requested = List.map fst (requested_symbols @ requested_terms)
+  and value_arguments = List.map snd (requested_symbols @ requested_terms) in
   {
     key = request_key_of_text (Logic.rendered_text rendering) value_arguments;
     requested;
@@ -152,8 +134,6 @@ let read request = function
              Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
            request.requested)
 
-(* An answer as the cache keeps it: a line naming it, then for a
-   counterexample a line for each value, its canonical name and its text. *)
 let print_canonical = function
   | Proven_canonical -> "proven\n"
   | Out_of_steps_canonical -> "out_of_steps\n"
@@ -180,8 +160,6 @@ let parse_canonical text =
               lines))
   | _ -> None
 
-(* The answer this process or the cache already has. One read from the
-   cache is added to [answers], so the cache is read once a key. *)
 let known_answer solver key =
   locked (fun () ->
       match Hashtbl.find_opt answers key with
@@ -195,9 +173,6 @@ let known_answer solver key =
               Some answer
           | None -> None))
 
-(* Solves one request: reads its answer from [answers] or the cache, or
-   else runs the solver. The query is the one the request was made from,
-   and is rendered only to be run. *)
 let solve solver (request, query) =
   match known_answer solver request.key with
   | Some answer -> answer
@@ -220,7 +195,6 @@ let solve solver (request, query) =
             Values
               (match rest with
               | List pairs :: _ ->
-                  (* In the order of [value_arguments]. *)
                   List.filteri
                     (fun index _ -> index < List.length request.requested)
                     (List.mapi
@@ -233,10 +207,7 @@ let solve solver (request, query) =
                   |> List.filter_map Fun.id
               | _ -> [])
         | Atom "unknown" :: _ -> Out_of_steps_canonical
-        | _ ->
-            (* An error is a query the prover built wrong, not one the
-               solver could not answer, and is never kept as an answer. *)
-            failwith ("Solver.solve_all: the solver rejected a query: " ^ String.trim output)
+        | _ -> failwith ("Solver.solve_all: the solver rejected a query: " ^ String.trim output)
       in
       locked (fun () ->
           Hashtbl.replace answers request.key answer;

@@ -239,9 +239,9 @@ let opaque_operation context frame ty name arguments =
 let parameter_operand context frame (operand : Core.origin) term =
   if
     frame.source.key = Some context.home
-    && (not (Logic.quantified term))
+    && (not (Logic.has_quantifier term))
     &&
-    match Logic.free_symbols term with
+    match Logic.free_constants term with
     | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
     | [] -> false
   then

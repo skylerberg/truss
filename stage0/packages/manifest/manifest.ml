@@ -1,8 +1,8 @@
 type dependency = { package : Path.package; capabilities : string list }
 type package = { name : Path.package; truss : string option; dependencies : dependency list }
-type t = { package : package option; time_limit : int option }
+type t = { package : package option; time_limit_seconds : int option }
 
-let default_time_limit = 10
+let default_time_limit_seconds = 10
 
 exception Malformed of { line : int; message : string }
 
@@ -266,7 +266,7 @@ let parse text =
       | key ->
           malformed entry.line "`[package]` has no key `%s`. Its keys are `name` and `truss`." key)
     (entries "package");
-  let time_limit = ref None in
+  let time_limit_seconds = ref None in
   List.iter
     (fun (entry : entry) ->
       match entry.key with
@@ -274,7 +274,7 @@ let parse text =
           let seconds = number_of entry in
           if seconds <= 0 then
             malformed entry.line "`time_limit` is a whole number of seconds, more than 0.";
-          time_limit := Some seconds
+          time_limit_seconds := Some seconds
       | key -> malformed entry.line "`[test]` has no key `%s`. Its key is `time_limit`." key)
     (entries "test");
   List.iter
@@ -295,7 +295,7 @@ let parse text =
   in
   if package = None && table "project" = None then
     malformed 1 "A manifest has a `[package]` table, a `[project]` table, or both.";
-  { package; time_limit = !time_limit }
+  { package; time_limit_seconds = !time_limit_seconds }
 
 let has_project_table text =
   List.exists

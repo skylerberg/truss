@@ -181,8 +181,6 @@ let rec show_c_type = function
   | Pointer (Pointer _ as inner) -> show_c_type inner ^ "*"
   | Pointer inner -> show_c_type inner ^ " *"
 
-(* The structures a C type names, which a file that includes no header
-   declares before it can mention them. *)
 let rec structures = function
   | Struct name -> [ name ]
   | Const c_type | Pointer c_type -> structures c_type
@@ -453,12 +451,6 @@ let function_name = function
   | Tasks_unlock -> "tasks_unlock"
   | Tasks_yield -> "tasks_yield"
 
-(* Everything about a function, written once: each parameter with how Truss
-   passes it and its C type on each system. Only the check reads the rest:
-   [headers] declare the function; [layout] is the condition on a structure
-   it takes for the storage passed to be that structure; and [named] gives a
-   parameter the type the headers call it by, where that is a name only the
-   headers have and the C that is emitted says [void]. *)
 type row = {
   symbol : system -> string;
   returns : system -> c_type;
@@ -476,16 +468,10 @@ let everywhere c_type (_ : system) = c_type
 let by_os choose (system : system) = choose system.os
 let size = everywhere (Named "__SIZE_TYPE__")
 
-(* The symbol of a function that fills a [struct stat]. On macOS for
-   x86-64 the plain symbol is an old function that fills a smaller
-   structure, and the one the headers call has this suffix. *)
 let status_symbol name (system : system) =
   match system with { os = Macos; architecture = X86_64 } -> name ^ "$INODE64" | _ -> name
 
-(* [mode_t], a file's permission bits. *)
 let mode = by_os (function Linux -> Named "unsigned int" | Macos -> Named "unsigned short")
-
-(* [off_t], a position in a file. *)
 let offset = by_os (function Linux -> Named "long" | Macos -> Named "long long")
 
 let describe function_ =
@@ -520,25 +506,18 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Close ->
-      (* The runtime's function, which calls the C library's. The runtime
-         keeps which descriptors it has registered for waiting, and a closed
-         descriptor's number is given to the next one that is opened. *)
       row (everywhere (Named "int32_t")) (Returns Int32)
         [ ("descriptor", Value Int32, everywhere (Named "int32_t")) ]
         ~symbol:(everywhere "t_runtime_close") ~headers:[]
   | Errno ->
-      (* The runtime's function, and not the C library's own, which a
-         compiler may assume returns the same address on every call. A task
-         that has parked may resume on another thread, where the address
-         differs. *)
       row
         (everywhere (Pointer (Named "int")))
-        (Points_at Int32) [] ~symbol:(everywhere "t_runtime_errno") ~headers:[]
+        (Points_at Int32) []
+        ~symbol:(everywhere "t_runtime_errno_address_uncached")
+        ~headers:[]
   | Clock_gettime ->
       row (everywhere (Named "int")) (Returns Int32)
         [
-          (* macOS makes [clockid_t] an enumeration with no negative member,
-             which C gives the representation of this type. *)
           ( "clock",
             Value Int32,
             by_os (function Linux -> Named "int" | Macos -> Named "unsigned int") );
@@ -556,8 +535,6 @@ let describe function_ =
             "sizeof(((struct timespec *)0)->tv_nsec) == 8";
           ]
   | Getentropy ->
-      (* Eight random bytes are a random [UInt64], whatever order the system
-         keeps a number's bytes in. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("buffer", Written (UInt64, [ "value" ]), everywhere (Pointer Void));
@@ -633,9 +610,6 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Poll ->
-      (* A [pollfd] is its descriptor and then two numbers of half the
-         size, the requested and the returned events, which are the low and
-         the high half of one [Int32] where the low byte comes first. *)
       row ~at_most:"count" (everywhere (Named "int")) (Returns Int32)
         [
           ( "waited_for",
@@ -708,8 +682,6 @@ let describe function_ =
         [ ("descriptor", Value Int32, everywhere (Named "int")) ]
         ~headers:[ "unistd.h" ]
   | Fstat ->
-      (* The structure is filled as bytes, which the standard library reads
-         at the offsets the table's numbers give. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -784,8 +756,6 @@ let describe function_ =
         ]
         ~headers:[ "sys/stat.h" ]
   | Utimensat ->
-      (* The times are two [timespec]s, the time of access and then the time
-         of modification, as four numbers. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("directory", Value Int32, everywhere (Named "int"));
@@ -803,8 +773,6 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Realpath ->
-      (* The resolved path is written into the room given, which is to hold
-         [PATH_MAX] bytes, and the address returned is that room's. *)
       row
         (everywhere (Pointer (Named "char")))
         Text
@@ -814,8 +782,6 @@ let describe function_ =
         ]
         ~headers:[ "stdlib.h"; "limits.h" ]
   | Getcwd ->
-      (* The path is written into the room given, and the address returned
-         is that room's. *)
       row
         (everywhere (Pointer (Named "char")))
         Text
@@ -825,7 +791,6 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Gethostname ->
-      (* The name ends with a zero byte unless it fills the bytes given. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("name", Elements_to_change (UInt8, counted "size"), everywhere (Pointer (Named "char")));
@@ -834,8 +799,6 @@ let describe function_ =
         ~headers:[ "unistd.h" ]
   | Getpid -> row (everywhere (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
   | Proc_pidpath ->
-      (* The path of a process's executable, which Linux gives as a link
-         in its [/proc]. *)
       row ~at_most:"size"
         ~on:(fun os -> os = Macos)
         (everywhere (Named "int")) (Returns Int32)
@@ -846,10 +809,6 @@ let describe function_ =
         ]
         ~headers:[ "libproc.h" ]
   | Fcntl_dupfd_cloexec ->
-      (* A new descriptor for the same open file, the lowest free one that
-         is not less than [least], closed in programs the process runs.
-         The request is the row's, since another request reads its third
-         argument as an address. *)
       row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -858,7 +817,6 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Fcntl_setfd_cloexec ->
-      (* Has the descriptor closed in programs the process runs. *)
       row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -867,9 +825,6 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Posix_spawn_file_actions_init ->
-      (* The actions a started program applies to its descriptors before it
-         runs. The structure is storage of as many bytes as it takes, which
-         only these functions read. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ( "actions",
@@ -912,7 +867,6 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_addchdir ->
-      (* The directory the program starts in. *)
       row (everywhere (Named "int")) (Returns Int32)
         ~symbol:(everywhere "posix_spawn_file_actions_addchdir_np")
         [
@@ -924,8 +878,6 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Getdents64 ->
-      (* The next entries of a directory that is open, as many as fit: each
-         is a [struct dirent64], as long as it says it is. *)
       row ~at_most:"count"
         ~on:(fun os -> os = Linux)
         (everywhere (Named "long")) (Returns Int64)
@@ -936,9 +888,6 @@ let describe function_ =
         ]
         ~headers:[ "dirent.h" ]
   | Getattrlistbulk ->
-      (* The next entries of a directory that is open, as many as fit, and
-         how many. Each is the attributes that [wanted], a
-         [struct attrlist], asks for, in the order of their numbers. *)
       row
         ~on:(fun os -> os = Macos)
         (everywhere (Named "int")) (Returns Int32)
@@ -952,8 +901,6 @@ let describe function_ =
         ~headers:[ "sys/attr.h"; "unistd.h" ]
         ~layout:[ "sizeof(struct attrlist) == 24" ]
   | Ioctl_tiocgwinsz ->
-      (* A terminal's size: its rows, its columns, and its width and height
-         in pixels, each two bytes. *)
       row (everywhere (Named "int")) (Returns Int32) ~symbol:(everywhere "ioctl") ~variadic_from:2
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -968,9 +915,6 @@ let describe function_ =
             "__builtin_offsetof(struct winsize, ws_col) == 2";
           ]
   | Tcgetattr ->
-      (* A terminal's settings, a [struct termios] as bytes, which the
-         standard library reads and mutates at the offsets the table's
-         numbers give. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -996,9 +940,6 @@ let describe function_ =
         ]
         ~headers:[ "sys/socket.h" ]
   | Bind ->
-      (* An address is a [struct sockaddr_in] or [sockaddr_in6] as bytes:
-         where its family is differs between systems, and the rest is laid
-         out as the check holds it to. *)
       row (everywhere (Named "int")) (Returns Int32)
         [
           ("descriptor", Value Int32, everywhere (Named "int"));
@@ -1129,13 +1070,6 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Addresses_of_host ->
-      (* The runtime's, and no function of the C library: [getaddrinfo]
-         gives a host's addresses as a chain of structures that hold
-         addresses of one another, which no row can describe. The runtime
-         follows the chain and writes each address into the room it is
-         given, as a byte that is 4 or 6 and then the address's 4 or 16
-         bytes. It returns how many bytes it wrote, -1 where the system
-         knows no such host, and -2 where it could not find out. *)
       row ~at_most:"room"
         ~symbol:(everywhere "t_runtime_addresses_of_host")
         (everywhere (Named "long")) (Returns Int64)
@@ -1146,10 +1080,6 @@ let describe function_ =
         ]
         ~headers:[]
   | Signals_wait ->
-      (* The runtime's. It blocks until one of the signals arrives and
-         returns the signal's number, or 0 if the calling task is cancelled
-         first. The runtime handles the signals itself, so that a task on
-         any thread can wait for them. *)
       row
         ~symbol:(everywhere "t_runtime_signals_wait")
         (everywhere (Named "int32_t")) (Returns Int32)
@@ -1161,15 +1091,6 @@ let describe function_ =
         ]
         ~headers:[]
   | (Descriptor_watch | Descriptor_wait) as waiting ->
-      (* The runtime's. A socket or a pipe that tasks wait for does not
-         block: a call
-         that would block fails with [EAGAIN]. The caller takes a ticket
-         before the call and waits on it after [EAGAIN], so that it does
-         not miss the descriptor becoming ready between the two. The wait
-         returns 1 when the call is to be made again. It returns 0 when it
-         is not, and sets [errno]: to [EINTR] if the calling task is
-         cancelled, and to [EAGAIN] if the time limit that the program set
-         on the socket passed. *)
       let descriptor = ("descriptor", Value Int32, everywhere (Named "int32_t")) in
       let writing = ("writing", Value Int32, everywhere (Named "int32_t")) in
       if waiting = Descriptor_watch then
@@ -1183,12 +1104,6 @@ let describe function_ =
           [ descriptor; writing; ("ticket", Value UInt64, everywhere (Named "uint64_t")) ]
           ~headers:[]
   | Descriptors_watch ->
-      (* The runtime's. A caller that reads several descriptors, none of
-         which blocks, takes a ticket, reads each until a read would block,
-         and waits on the ticket for any of them to become readable. The
-         wait skips a negative descriptor. It returns 1 when the caller is
-         to read again, and 0 with [errno] set to [EINTR] if the calling
-         task is cancelled. *)
       row
         ~symbol:(everywhere "t_runtime_descriptors_watch")
         (everywhere (Named "uint64_t")) (Returns UInt64) [] ~headers:[]
@@ -1205,8 +1120,6 @@ let describe function_ =
         ]
         ~headers:[]
   | Sleep ->
-      (* The runtime's. It waits for the time and returns 0, or returns 1 as
-         soon as the calling task is cancelled. *)
       row ~symbol:(everywhere "t_runtime_sleep") (everywhere (Named "int32_t")) (Returns Int32)
         [
           ("seconds", Value Int64, everywhere (Named "int64_t"));
@@ -1215,9 +1128,6 @@ let describe function_ =
         ~headers:[]
   | ( Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
     | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ) as task -> (
-      (* The runtime's task functions. A group, a key, a ticket, and a
-         mutex are each a [UInt64]. A function with no result to return
-         returns 0. *)
       let handle name = (name, Value UInt64, everywhere (Named "uint64_t")) in
       let symbol = everywhere ("t_runtime_" ^ function_name task) in
       let returns_handle =
@@ -1236,26 +1146,20 @@ let describe function_ =
 
 let available system function_ = (describe function_).on system.os
 
-(* Every function is named, so that a new row says whether it blocks. *)
 let blocks = function
   | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Addresses_of_host -> true
-  (* The standard library's sockets do not block. *)
-  | Connect | Accept | Sendto | Recvfrom -> false
-  | Close | Errno | Clock_gettime | Getentropy | Getenv | Posix_spawnp | Snprintf | Strtod | Strtof
-  | Fork | Pipe | Kill | Sysconf | Exit | Lseek | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove
-  | Rename | Symlink | Link | Chmod | Utimensat | Readlink | Realpath | Getcwd | Gethostname
-  | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec | Fcntl_setfd_cloexec
-  | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
+  | Connect | Accept | Sendto | Recvfrom | Close | Errno | Clock_gettime | Getentropy | Getenv
+  | Posix_spawnp | Snprintf | Strtod | Strtof | Fork | Pipe | Kill | Sysconf | Exit | Lseek
+  | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove | Rename | Symlink | Link | Chmod | Utimensat
+  | Readlink | Realpath | Getcwd | Gethostname | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec
+  | Fcntl_setfd_cloexec | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
   | Posix_spawn_file_actions_adddup2 | Posix_spawn_file_actions_addopen
   | Posix_spawn_file_actions_addchdir | Getdents64 | Getattrlistbulk | Ioctl_tiocgwinsz | Tcgetattr
   | Tcsetattr | Socket | Bind | Listen | Getsockname | Getpeername | Shutdown | Setsockopt
-  | Getsockopt | Fcntl_getfl | Fcntl_setfl ->
-      false
-  (* The runtime's own functions that wait park the calling task, or count
-     its thread as blocked, themselves. *)
-  | Signals_wait | Descriptor_watch | Descriptor_wait | Descriptors_watch | Descriptors_wait | Sleep
-  | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake
-  | Tasks_lock | Tasks_unlock | Tasks_yield ->
+  | Getsockopt | Fcntl_getfl | Fcntl_setfl | Signals_wait | Descriptor_watch | Descriptor_wait
+  | Descriptors_watch | Descriptors_wait | Sleep | Tasks_open | Tasks_join | Tasks_cancel
+  | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock
+  | Tasks_yield ->
       false
 
 let is_runtime_function = function
@@ -1630,10 +1534,6 @@ let number_headers = function
   | Pollout -> [ "poll.h" ]
   | Path_max -> [ "limits.h" ]
 
-(* The C expression that a number is the value of, which the check compares
-   with the table's value. Most numbers are constants that the headers
-   name. A size or an offset in [struct stat] is an expression over the
-   structure. [None] where this system's structure has no such field. *)
 let number_expression (system : system) number =
   let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
@@ -1745,8 +1645,6 @@ let value (system : system) number =
   | Stat_accessed_offset, Macos -> 32
   | Stat_modified_offset, Linux -> 88
   | Stat_modified_offset, Macos -> 48
-  (* Linux's structure has no time of creation, which 0 says: no time is at
-     the start of the structure. *)
   | Stat_created_offset, Linux -> 0
   | Stat_created_offset, Macos -> 80
   | S_ifmt, (Linux | Macos) -> 0o170000
@@ -1895,14 +1793,8 @@ let check system =
   in
   let is_void = function Pointer (Void | Const Void) -> true | _ -> false in
   String.concat ""
-    ([
-       (* The headers are to declare each function plainly, not as a macro
-          that checks its arguments. *)
-       "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _GNU_SOURCE\n";
-     ]
+    ([ "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _GNU_SOURCE\n" ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
-    (* A header may also define a function as a macro, as macOS does
-       [sigaddset]. A program calls the function. *)
     @ List.sort_uniq String.compare
         (List.map
            (fun function_ -> Printf.sprintf "#undef %s\n" (declaration system function_).symbol)

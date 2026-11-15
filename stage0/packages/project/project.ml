@@ -69,7 +69,7 @@ type layout = {
   packages : (string * Manifest.package) list;
   files : source_file list;
   problems : problem list;
-  time_limit : int;
+  time_limit_ms : int;
 }
 
 let files database root = Option.value (Query.find database tree root) ~default:[]
@@ -120,10 +120,10 @@ let layout =
                   None)
           manifests
       in
-      let time_limit =
+      let time_limit_seconds =
         List.fold_left
           (fun limit (directory, (manifest : Manifest.t)) ->
-            match manifest.time_limit with
+            match manifest.time_limit_seconds with
             | Some seconds when directory = "" -> seconds
             | Some _ ->
                 problem directory
@@ -131,7 +131,7 @@ let layout =
                    `truss.toml` at its root.";
                 limit
             | None -> limit)
-          Manifest.default_time_limit parsed
+          Manifest.default_time_limit_seconds parsed
       in
       let seen = Hashtbl.create 8 in
       let packages =
@@ -167,7 +167,7 @@ let layout =
                     (List.assoc_opt directory packages)))
           files
       in
-      { packages; files; problems = List.rev !problems; time_limit })
+      { packages; files; problems = List.rev !problems; time_limit_ms = time_limit_seconds * 1000 })
 
 type selection = {
   selected : Registry.Selection.package list;

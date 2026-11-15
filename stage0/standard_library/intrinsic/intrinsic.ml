@@ -145,14 +145,10 @@ type operation =
   | Storage_at
   | Storage_at_mut
   | Storage_view
-  | Storage_view_mut
   | View_length
   | View_at
   | View_at_mut
   | View_swap
-  | Storage_take_view
-  | View_take_view
-  | Array_take_view
   | View_slice
   | Storage_model
   | View_model
@@ -251,14 +247,10 @@ let operations =
     Storage_at;
     Storage_at_mut;
     Storage_view;
-    Storage_view_mut;
     View_length;
     View_at;
     View_at_mut;
     View_swap;
-    Storage_take_view;
-    View_take_view;
-    Array_take_view;
     View_slice;
     Storage_model;
     View_model;
@@ -347,14 +339,10 @@ let operation_name = function
   | Storage_at -> "storage_at"
   | Storage_at_mut -> "storage_at_mut"
   | Storage_view -> "storage_view"
-  | Storage_view_mut -> "storage_view_mut"
   | View_length -> "view_length"
   | View_at -> "view_at"
   | View_at_mut -> "view_at_mut"
   | View_swap -> "view_swap"
-  | Storage_take_view -> "storage_take_view"
-  | View_take_view -> "view_take_view"
-  | Array_take_view -> "array_take_view"
   | View_slice -> "view_slice"
   | Storage_model -> "storage_model"
   | Array_model -> "array_model"
@@ -384,7 +372,6 @@ let operation_name = function
       (if Libc.is_runtime_function function_ then "runtime_" else "libc_")
       ^ Libc.function_name function_
   | Libc_number number ->
-      (* A name does not start with an underscore, as some of C's do. *)
       let name = Libc.number_name number in
       let from = if String.starts_with ~prefix:"_" name then 1 else 0 in
       "libc_" ^ String.lowercase_ascii (String.sub name from (String.length name - from))

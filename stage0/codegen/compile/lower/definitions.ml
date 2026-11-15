@@ -1,5 +1,3 @@
-(* Lowering's inputs: its context, and the code and the signature of the
-   instance being lowered. *)
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
@@ -16,8 +14,6 @@ type context = {
   constant : Path.t -> Lowered.static_value option;
 }
 
-(* The standard library's text types print as quoted text and its lists and
-   slices as lists. *)
 let debug_form : Ground.ty -> Glue.debug_form = function
   | Named { path; _ } -> (
       match Well_known.of_path path with
@@ -57,16 +53,14 @@ let context ?(checks = false) ~constant database system =
 let test_key path = Instance.Code { path; type_arguments = [] }
 
 type code = {
-  definition_key : Names.key;  (** The definition that holds the body *)
+  definition_key : Names.key;
   anchor : Path.t;
   enclosing_impl : Path.t option;
-  text : string;  (** The definition's source text, for positions and messages *)
+  text : string;
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
   real : Path.t list;
-      (** The capabilities the code gets the real implementations of, as [main]'s do: an external
-          test's [uses] *)
   has_defaults : bool;
 }
 
@@ -98,8 +92,6 @@ let impl_interface context impl =
   | Some position -> position
   | None -> bug "no interface for %s" (Path.show impl)
 
-(* The instantiation of an [impl]'s [Self] and its trait's parameters, in terms of
-   the [impl]'s own generic parameters. *)
 let trait_substitution context impl =
   match Interface.Impls.trait_substitution context.database impl with
   | Some substitution -> substitution
@@ -110,8 +102,6 @@ let signature_of context (path : Path.t) =
   | Some signature -> signature
   | None -> bug "no signature for %s" (Path.show path)
 
-(* A function written in source at a path: its definition's key, its
-   signature, and its body. Each method of an [impl] or a trait is one. *)
 let written context path =
   match Interface.Summary.definition context.database path with
   | Some (key, { kind = Function { signature; body }; _ }) -> Some (key, signature, body)
@@ -201,7 +191,6 @@ let code_of context (path : Path.t) type_arguments : code =
 let panic_path = Monomorphic.panic_capability
 let evidence_for context = Monomorphic.evidence_for context.monomorphic
 
-(* How a function's result is passed, and whether it returns at all. *)
 let result_of context substitution (result : Types.result) =
   match result with
   | Returns Never -> (Convention.Nothing, false)

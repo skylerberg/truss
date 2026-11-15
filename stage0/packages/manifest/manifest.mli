@@ -1,8 +1,8 @@
 type dependency = { package : Path.package; capabilities : string list }
 type package = { name : Path.package; truss : string option; dependencies : dependency list }
-type t = { package : package option; time_limit : int option }
+type t = { package : package option; time_limit_seconds : int option }
 
-val default_time_limit : int
+val default_time_limit_seconds : int
 
 exception Malformed of { line : int; message : string }
 

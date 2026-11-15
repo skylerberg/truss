@@ -24,10 +24,6 @@ let object_key (toolchain : Toolchain.t) settings text =
 
 let object_path cache key = Filename.concat cache.directory (key ^ ".o")
 
-(* Writes the object under a temporary name and renames it into place, so a
-   build that stops partway never leaves a broken object in the cache. An
-   object that is found is given the present time, so its age is how long
-   ago a build last used it. *)
 let compile_one toolchain cache settings (name, text) =
   let key = object_key toolchain settings text in
   let output = object_path cache key in
@@ -46,16 +42,12 @@ let compile_one toolchain cache settings (name, text) =
     with
     | Ok () ->
         Sys.rename partial output;
-        (* [TRUSS_KEEP_C] keeps each C file beside its object, for reading
-           the emitted code. *)
         if Option.value (Sys.getenv_opt "TRUSS_KEEP_C") ~default:"" = "" then Sys.remove source
         else Sys.rename source (Filename.concat cache.directory (key ^ ".c"));
         Ok output
     | Error message ->
         Error (Printf.sprintf "%s does not compile (kept as %s):\n%s" name source message)
 
-(* Runs the jobs on several domains, each taking every [n]th job, and
-   returns the results in the jobs' order. *)
 let parallel jobs run_job =
   let jobs = Array.of_list jobs in
   let results = Array.make (Array.length jobs) None in
@@ -75,8 +67,6 @@ let parallel jobs run_job =
   Array.to_list (Array.map Option.get results)
 
 let objects ?progress toolchain cache settings sources =
-  (* Only the files whose object is not cached count toward progress, since
-     only they cost anything. *)
   let missing =
     List.length
       (List.filter

@@ -61,16 +61,11 @@ let element_at context element term index =
   | Some term -> term
   | None -> raise (Foreign_unsupported "the elements of a sequence")
 
-let run_replaced context frame element ~before ~after ~start ~stop ~run =
+let unchanged_outside context frame element ~before ~after ~start ~stop =
   let length sequence = sequence_length context element sequence in
   let at = element_at context element in
   let limit = fresh_name context "index" in
   let index = Logic.Symbol limit in
-  let inside =
-    match run with
-    | Some run -> Logic.equal (at after index) (at run (Logic.Operation ("-", [ index; start ])))
-    | None -> Logic.Boolean true
-  in
   assume context frame (Logic.equal (length after) (length before));
   assume context frame
     (Logic.forall
@@ -78,10 +73,9 @@ let run_replaced context frame element ~before ~after ~start ~stop ~run =
          Logic.(
            Operation ("<=", [ int 0; index ])
            &&& Operation ("<", [ index; length before ])
-           ==> ite
-                 (Operation ("<=", [ start; index ]) &&& Operation ("<", [ index; stop ]))
-                 inside
-                 (equal (at after index) (at before index))) ))
+           ==> (Operation ("<=", [ start; index ])
+               &&& Operation ("<", [ index; stop ])
+               ||| equal (at after index) (at before index))) ))
 
 let sliced_owner_changed context frame ~(owner : passed_place) ~owner_type ~start ~stop =
   let element =
@@ -95,7 +89,7 @@ let sliced_owner_changed context frame ~(owner : passed_place) ~owner_type ~star
     (model_of context owner_type before_value ~element, model_of context owner_type changed ~element)
   with
   | Some before, Some after ->
-      run_replaced context frame element ~before ~after ~start ~stop ~run:None;
+      unchanged_outside context frame element ~before ~after ~start ~stop;
       assume_valid context frame owner_type changed;
       owner.write frame changed
   | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (Types.show owner_type)))
@@ -520,22 +514,6 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | View_at_mut, [ buffer; index ] ->
       assume context frame (in_bounds index (view buffer));
       at (view buffer) index
-  | Storage_view_mut, [ buffer ] ->
-      assume context frame
-        Logic.(equal (view known) (storage buffer) &&& equal (changed_storage ()) (storage buffer));
-      known
-  | (Storage_take_view | View_take_view), [ owner; part; start ] ->
-      let before, after =
-        if operation = View_take_view then (view owner, view (List.hd changed))
-        else (storage owner, changed_storage ())
-      in
-      let run = view part in
-      needs Logic.(Operation ("<=", [ Operation ("+", [ start; length run ]); length before ]));
-      if operation = Storage_take_view then keeps_capacity ();
-      run_replaced context frame element ~before ~after ~start
-        ~stop:(Logic.Operation ("+", [ start; length run ]))
-        ~run:(Some run);
-      known
   | View_at, [ buffer; index ] ->
       assume context frame (in_bounds index (view buffer));
       at (view buffer) index
@@ -579,8 +557,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
       | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_shorten | Storage_push
       | Storage_pop | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut
-      | Storage_view | View_at_mut | View_swap | Storage_view_mut | Storage_take_view
-      | View_take_view | View_length | View_at | View_slice ),
+      | Storage_view | View_at_mut | View_swap | View_length | View_at | View_slice ),
       element :: _ ) ->
       buffer_operation context frame ~site operation element operands ~changed (Lazy.force known)
   | Compare_bytes, _ ->

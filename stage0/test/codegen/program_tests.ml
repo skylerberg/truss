@@ -603,7 +603,7 @@ let () =
                       | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
                       | [ "test"; _; outcome ] -> fail "a test %s" outcome
                       | _ -> ())))
-        (Documents.truss_blocks (Documents.read (Harness.workspace_path name))))
+        (Documents.truss_blocks (File_system.read (Harness.workspace_path name))))
 
 let () =
   test "a function value whose type uses Panic is called without evidence for Panic" (fun () ->

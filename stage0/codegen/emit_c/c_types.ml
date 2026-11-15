@@ -1,42 +1,16 @@
-(* A file's context, and the C types and definitions of the entities it names:
-   structs, unions, function types, and environments, each defined once and
-   before its first use. *)
-
 open C_runtime
 
-(* Everything a file defines besides functions: C types, each with a name. *)
 type key =
   | Type of Ground.ty
   | Block of Ground.ty * string
   | Code of Ground.function_type
-  | Environment of string * int  (** The instance's symbol, and the nested function *)
+  | Environment of string * int
   | Evidence of int
-
-let compare_key left right =
-  match (left, right) with
-  | Type left, Type right -> Ground.compare left right
-  | Block (left, left_name), Block (right, right_name) ->
-      let order = Ground.compare left right in
-      if order <> 0 then order else String.compare left_name right_name
-  | Code left, Code right -> Ground.compare (Function left) (Function right)
-  | Environment (left_symbol, left_number), Environment (right_symbol, right_number) ->
-      let order = String.compare left_symbol right_symbol in
-      if order <> 0 then order else Int.compare left_number right_number
-  | Evidence left_number, Evidence right_number -> Int.compare left_number right_number
-  | _ ->
-      let rank = function
-        | Type _ -> 0
-        | Block _ -> 1
-        | Code _ -> 2
-        | Environment _ -> 3
-        | Evidence _ -> 4
-      in
-      Int.compare (rank left) (rank right)
 
 module Keys = Map.Make (struct
   type t = key
 
-  let compare = compare_key
+  let compare = Stdlib.compare
 end)
 
 let key_name = function
@@ -46,36 +20,29 @@ let key_name = function
   | Environment (symbol, nested_index) -> Printf.sprintf "%s_Environment_%d" symbol nested_index
   | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
 
-(* How a key is defined: a [typedef] of a scalar or a pointer, which needs
-   only forward declarations; a function pointer type; or a [struct], which
-   needs the structs it holds by value defined first. *)
 type definition =
   | Typedef of string
   | Code_typedef of string
   | Struct of { body : string; holds : key list }
 
-(* A definition, and every key its text names. *)
 type defined = { definition : definition; references : key list }
 
 type context = {
   env : Memory_layout.env;
   prefix : string;
-      (** The symbol of the instance being emitted, which its statics' names start with *)
-  mutable order : key list;  (** Registered keys, most recent first *)
+  mutable order : key list;
   mutable registered : unit Keys.t;
   mutable environments : (string * Lowered.ty) list Keys.t;
   bytes : (string, int) Hashtbl.t;
-  mutable prototypes : (string * string) list;  (** Symbol and declaration, most recent first *)
+  mutable prototypes : (string * string) list;
   mutable anchors : (string * Path.t) list;
-  mutable references : key list option;  (** While defining a key, the keys its text names *)
+  mutable references : key list option;
   mutable helpers_used : string list;
   mutable statics : string list;
-      (** Static arrays and blocks that data refers to, most recent first *)
-  mutable instances : Instance.key list;  (** The instances the code names, most recent first *)
-  mutable called : Instance.key list;  (** The instances it calls by name, most recent first *)
+  mutable instances : Instance.key list;
+  mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
-      (** The methods of capabilities it calls: each capability, and the method's place *)
-  mutable failures : (failure * site) list;  (** Its [echo]s and [todo]s *)
+  mutable failures : (failure * site) list;
 }
 
 let new_context env prefix =
@@ -97,7 +64,6 @@ let new_context env prefix =
     failures = [];
   }
 
-(* Records that the code names an instance. *)
 let refer context key =
   if not (List.exists (Instance.equal key) context.instances) then
     context.instances <- key :: context.instances
@@ -118,8 +84,6 @@ let register context key =
 
 let layout context ty = Memory_layout.of_type context.env ty
 
-(* Whether a Truss type is a C [struct], which must be defined before
-   anything holds it by value. *)
 let is_struct context (ty : Ground.ty) =
   match (layout context ty).form with
   | Struct _ | Array _ | Tagged _ -> true
@@ -172,7 +136,6 @@ let member_c context : Memory_layout.member -> string = function
   | Typed ty -> value_c context ty
   | Raw scalar -> scalar_c context scalar
 
-(* The structs a member is held as by value. *)
 let holds_member context : Memory_layout.member -> key list = function
   | Typed ty when is_struct context ty -> [ Type ty ]
   | Typed _ | Raw _ -> []

@@ -10,7 +10,6 @@ let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own 
 let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let panic_capability = Well_known.path Panic
 
-(* The capabilities of a set in an instance, in path order. *)
 let capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare
     (List.map
@@ -112,8 +111,6 @@ and back_argument : Ground.argument -> Types.argument = function
   | Capabilities set ->
       Capabilities (Types.capability_set (List.map (fun path -> Types.Capability path) set))
 
-(* The substitution of generic parameters by their arguments, which are
-   ground. *)
 let substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then
     bug "%d generic parameters for %d arguments" (List.length generics) (List.length arguments);
