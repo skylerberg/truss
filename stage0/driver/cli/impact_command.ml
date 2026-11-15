@@ -11,23 +11,33 @@ type change = {
   read_by : Pipeline.read list;
 }
 
-let declared snapshot pipeline =
+type revision = {
+  snapshot : Database.snapshot;
+  pipeline : Pipeline.t;
+  names : Names.lookups;
+  declared : Path.Set.t;
+}
+
+let revision snapshot pipeline =
   let packages = List.map snd (Database.packages snapshot) in
   let names = Pipeline.names pipeline packages in
-  Path.Set.of_list
-    (List.concat_map
-       (fun package ->
-         List.filter_map
-           (fun (declaration : Names.declaration) ->
-             if declaration.ordinal = 0 then Some declaration.path else None)
-           (names.package_declarations package))
-       packages)
+  {
+    snapshot;
+    pipeline;
+    names;
+    declared =
+      Path.Set.of_list
+        (List.concat_map
+           (fun package ->
+             List.filter_map
+               (fun (declaration : Names.declaration) ->
+                 if declaration.ordinal = 0 then Some declaration.path else None)
+               (names.package_declarations package))
+           packages);
+  }
 
-let signature snapshot pipeline path =
-  Signatures.of_path (Pipeline.names pipeline (List.map snd (Database.packages snapshot))) path
-
-let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
-  let own = List.map snd (Database.packages snapshot) in
+let changes ~now ~before changed_parts =
+  let own = List.map snd (Database.packages now.snapshot) in
   let by_definition = Hashtbl.create 32 in
   List.iter
     (fun part ->
@@ -37,12 +47,11 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
             (part :: Option.value (Hashtbl.find_opt by_definition path) ~default:[])
       | Some _ | None -> ())
     changed_parts;
-  let now = declared snapshot pipeline and before = declared base_snapshot base in
   let signature_parts = List.filter Signatures.is_signature changed_parts in
   let signature_readers =
     List.filter
       (fun ({ dependency; _ } : Pipeline.read) -> List.mem dependency signature_parts)
-      (Pipeline.dependents pipeline
+      (Pipeline.dependents now.pipeline
          (List.sort_uniq Path.compare (List.filter_map Part.definition signature_parts)))
   in
   List.sort
@@ -50,19 +59,19 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
     (Hashtbl.fold
        (fun path parts changes ->
          let change =
-           if Path.Set.mem path now && not (Path.Set.mem path before) then
+           if Path.Set.mem path now.declared && not (Path.Set.mem path before.declared) then
              {
                path;
                status = Added;
                before = None;
-               after = signature snapshot pipeline path;
+               after = Signatures.of_path now.names path;
                read_by = [];
              }
-           else if Path.Set.mem path before && not (Path.Set.mem path now) then
+           else if Path.Set.mem path before.declared && not (Path.Set.mem path now.declared) then
              {
                path;
                status = Removed;
-               before = signature base_snapshot base path;
+               before = Signatures.of_path before.names path;
                after = None;
                read_by = [];
              }
@@ -71,8 +80,9 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
              {
                path;
                status = Changed (List.sort_uniq compare (List.map Part.kind_name parts));
-               before = (if is_signature_changed then signature base_snapshot base path else None);
-               after = (if is_signature_changed then signature snapshot pipeline path else None);
+               before =
+                 (if is_signature_changed then Signatures.of_path before.names path else None);
+               after = (if is_signature_changed then Signatures.of_path now.names path else None);
                read_by =
                  List.filter
                    (fun ({ dependency; _ } : Pipeline.read) ->
@@ -83,23 +93,25 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
          change :: changes)
        by_definition [])
 
-let tests_changed ~snapshot ~pipeline ~base_snapshot ~base =
-  let own snapshot = List.map snd (Database.packages snapshot) in
-  let before = declared base_snapshot base in
-  let compile = Compiler.lowering_only pipeline (own snapshot)
-  and base_compile = lazy (Compiler.lowering_only base (own base_snapshot)) in
+let tests_changed ~now ~before =
+  let own revision = List.map snd (Database.packages revision.snapshot) in
+  let compile = Compiler.lowering_only now.pipeline (own now)
+  and base_compile = lazy (Compiler.lowering_only before.pipeline (own before)) in
   List.filter_map
     (fun (path : Path.t) ->
       match path with
-      | Test _ ->
+      | Test _ -> (
           let base_key =
-            if Path.Set.mem path before then Compile.result_key (Lazy.force base_compile) path
+            if Path.Set.mem path before.declared then
+              Compile.result_key (Lazy.force base_compile) path
             else None
           in
-          if Compile.result_key compile path = base_key then None
-          else Some (path, Compile.is_cached compile path)
+          match Compile.result_key compile path with
+          | key when key = base_key -> None
+          | Some key -> Some (path, Compile.is_cached compile path ~key)
+          | None -> Some (path, false))
       | _ -> None)
-    (Path.Set.elements (declared snapshot pipeline))
+    (Path.Set.elements now.declared)
 
 let status_word = function Added -> "added" | Removed -> "removed" | Changed _ -> "changed"
 
@@ -180,13 +192,10 @@ let run ~base =
       | Error message -> Outcome.cannot_run "%s" message
       | Ok base_snapshot ->
           let base = Database.pipeline base_snapshot in
-          let changes =
-            changes ~snapshot ~pipeline ~base_snapshot ~base (Pipeline.changes pipeline base)
-          in
-          let tests =
-            if Report.clean report then tests_changed ~snapshot ~pipeline ~base_snapshot ~base
-            else []
-          in
+          let changed_parts = Pipeline.changes pipeline base in
+          let now = revision snapshot pipeline and before = revision base_snapshot base in
+          let changes = changes ~now ~before changed_parts in
+          let tests = if Report.clean report then tests_changed ~now ~before else [] in
           if Output.json () then
             Json.print
               (Report.document report

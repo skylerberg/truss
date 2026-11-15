@@ -99,9 +99,8 @@ let measure pipeline ~is_measured =
           ignore
             (proven pipeline
                (List.filter_map
-                  (fun (file, _) ->
-                    if Pipeline.file_diagnostics pipeline file = [] then Some file else None)
-                  files));
+                  (fun (file, diagnostics) -> if diagnostics = [] then Some file else None)
+                  (Pipeline.file_diagnostics pipeline (List.map fst files))));
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
           (name, max 1 spent, module_letters files)
         end
@@ -137,8 +136,7 @@ let () =
   let pipeline = timed "type checking" (fun () -> check (pipeline ())) in
   let checked =
     List.map
-      (fun (module_, files) ->
-        (module_, List.map (fun (file, _) -> (file, Pipeline.file_diagnostics pipeline file)) files))
+      (fun (module_, files) -> (module_, Pipeline.file_diagnostics pipeline (List.map fst files)))
       modules
   in
   let verdicts =

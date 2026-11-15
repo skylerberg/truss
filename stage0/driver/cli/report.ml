@@ -23,8 +23,8 @@ let gather ?(proofs = false) pipeline snapshot packages =
   {
     checked =
       List.filter_map
-        (fun file -> shown snapshot packages file (Pipeline.file_diagnostics pipeline file))
-        files;
+        (fun (file, diagnostics) -> shown snapshot packages file diagnostics)
+        (Pipeline.file_diagnostics pipeline files);
     proofs;
     proven =
       lazy

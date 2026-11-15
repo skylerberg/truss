@@ -13,7 +13,6 @@ type requests = {
   settings : Lookups.settings;
   source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  mir : Mir.lookups;
   lowered : Instance.key -> (lowered, unsupported) result;
   test_key : Instance.key -> (string, unsupported) result;
   reached_todo_types : Instance.key -> Path.t list;
@@ -524,11 +523,9 @@ let result_key compiler test =
   | [] -> (
       match test_key compiler test with key -> Some key | exception Lower.Unsupported _ -> None)
 
-let is_cached compiler test =
+let is_cached compiler test ~key =
   match compiler.results with
-  | Some results ->
-      (not (external_test compiler test))
-      && Option.is_some (Option.bind (result_key compiler test) (stored results))
+  | Some results -> (not (external_test compiler test)) && Option.is_some (stored results key)
   | None -> false
 
 let incomplete_record compiler todo_types =
@@ -640,25 +637,17 @@ type unshippable = {
   way : Path.t list;
 }
 
-let reached compiler ~main =
-  match compiler.requests.reached_todo_types (Program_main main) with
-  | [] -> Reachable.running ~lookup:(compiled compiler) [ Instance.Program_main main ]
-  | _ :: _ -> []
+type reached_program = { unshippable : unshippable list; definitions : Path.t list }
 
-let reached_definitions compiler ~main =
+let reach_program compiler ~main =
   reporting compiler @@ fun () ->
-  List.sort_uniq Path.compare
-    (List.filter_map
-       (fun (_, way) ->
-         match List.rev way with
-         | (Instance.Code { path; _ } | Constant path | Program_main path) :: _ -> Some path
-         | _ -> None)
-       (reached compiler ~main))
-
-let unshippable compiler ~main =
-  reporting compiler @@ fun () ->
-  let reached = reached compiler ~main in
-  begin
+  let todo_types = compiler.requests.reached_todo_types (Program_main main) in
+  let reached =
+    match todo_types with
+    | [] -> Reachable.running ~lookup:(compiled compiler) [ Instance.Program_main main ]
+    | _ :: _ -> []
+  in
+  let unshippable =
     let definitions keys =
       List.fold_left
         (fun acc (key : Instance.key) ->
@@ -674,7 +663,7 @@ let unshippable compiler ~main =
         (fun path ->
           let file, line, column = todo_type_position compiler path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (compiler.requests.reached_todo_types (Program_main main))
+        todo_types
       @ List.concat_map
           (fun (compiled, keys) ->
             List.filter_map
@@ -708,7 +697,18 @@ let unshippable compiler ~main =
            | _ -> report :: acc)
          []
     |> List.rev
-  end
+  in
+  {
+    unshippable;
+    definitions =
+      List.sort_uniq Path.compare
+        (List.filter_map
+           (fun (_, way) ->
+             match List.rev way with
+             | (Instance.Code { path; _ } | Constant path | Program_main path) :: _ -> Some path
+             | _ -> None)
+           reached);
+  }
 
 let program_root compiler ~main =
   let root = Instance.Program_main main in

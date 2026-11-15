@@ -128,17 +128,20 @@ let signatures snapshot trial =
       | _ -> ())
     (Pipeline.dependents pipeline
        (List.sort_uniq Path.compare (List.filter_map Part.definition changed)));
-  let text pipeline path =
-    Signatures.of_path (Pipeline.names pipeline [ Path.package path ]) path
+  let packages =
+    List.sort_uniq Path.compare_package
+      (List.map Path.package (Hashtbl.fold (fun path _ paths -> path :: paths) dependents []))
   in
+  let names = Pipeline.names pipeline packages
+  and upgraded_names = Pipeline.names upgraded packages in
   List.sort
     (fun left right -> Path.compare left.path right.path)
     (Hashtbl.fold
        (fun path readers signatures ->
          {
            path;
-           before = text pipeline path;
-           after = text upgraded path;
+           before = Signatures.of_path names path;
+           after = Signatures.of_path upgraded_names path;
            dependents = List.sort_uniq Path.compare readers;
          }
          :: signatures)
@@ -151,12 +154,12 @@ let new_errors snapshot trial =
     Pipeline.check pipeline own;
     List.map Project.show_problem (Database.problems snapshot)
     @ List.concat_map
-        (fun file ->
+        (fun (file, diagnostics) ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Database.file_path snapshot file) diagnostic.message)
-            (Pipeline.file_diagnostics pipeline file))
-        (List.concat_map (Database.package_files snapshot) own)
+            diagnostics)
+        (Pipeline.file_diagnostics pipeline (List.concat_map (Database.package_files snapshot) own))
   in
   let now = diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)

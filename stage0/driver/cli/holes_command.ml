@@ -10,14 +10,13 @@ type hole = {
   blocks : string list;
 }
 
-let of_declaration snapshot packages pipeline (names : Names.lookups)
-    (declaration : Names.declaration) =
+let of_declaration pipeline (names : Names.lookups) source (declaration : Names.declaration) =
   let key = Names.key_of declaration in
   match (names.definition key, names.place key, Pipeline.resolved pipeline key) with
-  | Some definition, Some { file; base }, Some resolved ->
-      let source = Command_packages.source snapshot packages file in
+  | Some definition, Some { base; _ }, Some resolved ->
       List.map
         (fun (hole : Inspect.hole) ->
+          let source = Lazy.force source in
           let line, column = Source.position source (base + hole.offset) in
           {
             definition = declaration.path;
@@ -35,46 +34,44 @@ let gather snapshot packages pipeline paths =
   let names = Pipeline.names pipeline packages in
   List.concat_map
     (fun file ->
+      let source = lazy (Command_packages.source snapshot packages file) in
       List.concat_map
         (fun (declaration : Names.declaration) ->
-          if declaration.ordinal = 0 then
-            of_declaration snapshot packages pipeline names declaration
-          else [])
+          if declaration.ordinal = 0 then of_declaration pipeline names source declaration else [])
         (names.declarations_in file))
     (Command_packages.selected snapshot packages paths)
 
 let with_blocks snapshot packages pipeline holes =
   let roots =
-    (match Program_command.mains snapshot packages with [ main ] -> [ ("main", main) ] | _ -> [])
+    (match Program_command.mains pipeline packages with [ main ] -> [ ("main", main) ] | _ -> [])
     @ List.map
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
         (Test_command.select snapshot pipeline packages ~paths:[] ~match_:None)
   in
-  let callers = Hashtbl.create 16 in
-  let calls (root : Path.t) definition =
-    let viewer = Path.package root in
-    let reached =
-      match Hashtbl.find_opt callers (viewer, definition) with
-      | Some reached -> reached
-      | None ->
-          let reached = Pipeline.callers pipeline ~viewer definition in
-          Hashtbl.replace callers (viewer, definition) reached;
-          reached
-    in
-    List.exists (Path.equal root) reached
+  let called =
+    List.sort_uniq Path.compare
+      (List.filter_map
+         (fun hole -> if Option.is_some hole.type_ then Some hole.definition else None)
+         holes)
   in
-  let compile = lazy (Compiler.lowering_only pipeline packages) in
-  let todo_types = Hashtbl.create 16 in
+  let callers =
+    if called = [] then []
+    else
+      List.map
+        (fun viewer -> (viewer, Pipeline.callers pipeline ~viewer called))
+        (List.sort_uniq Path.compare_package (List.map (fun (_, root) -> Path.package root) roots))
+  in
+  let calls (root : Path.t) definition =
+    List.exists (Path.equal root) (List.assoc definition (List.assoc (Path.package root) callers))
+  in
+  let todo_types =
+    if List.exists (fun hole -> hole.type_ = None) holes then
+      let compile = Compiler.lowering_only pipeline packages in
+      List.map (fun (_, root) -> (root, Compile.reached_todo_types compile root)) roots
+    else []
+  in
   let reaches_type root definition =
-    let reached =
-      match Hashtbl.find_opt todo_types root with
-      | Some reached -> reached
-      | None ->
-          let reached = Compile.reached_todo_types (Lazy.force compile) root in
-          Hashtbl.replace todo_types root reached;
-          reached
-    in
-    List.exists (Path.equal definition) reached
+    List.exists (Path.equal definition) (List.assoc root todo_types)
   in
   List.map
     (fun hole ->
