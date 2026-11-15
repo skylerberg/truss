@@ -223,6 +223,19 @@ let c_signature context substitution ~(parameters : (Types.mode * Types.ty) list
   let lending = lending_parameters context substitution result in
   (Convention.signature ~returns (written @ mask @ evidence @ lending) result_ty, result_ty)
 
+let template_clauses context from_template clauses =
+  match Mir.contract_of_path context.lookups.mir from_template with
+  | Some contract ->
+      List.map
+        (fun position ->
+          match List.nth_opt contract.requires position with
+          | Some ({ clause; is_executable = true; _ } : Mir.requirement) ->
+              Mir.code_of_formula clause
+          | Some { is_executable = false; _ } | None ->
+              bug "clause %d of %s cannot be run" position (Path.show from_template))
+        clauses
+  | None -> bug "%s is not a function" (Path.show from_template)
+
 let has_defaults (signature : Types.signature) =
   List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
 

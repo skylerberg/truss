@@ -1,0 +1,23 @@
+use standard::text
+
+type Shout(text: String)
+
+fn is_quiet(literals: List[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}
+
+impl FromTemplate for Shout {
+  type Part = String
+
+  fn from_template(template: Template[String]) -> Shout
+    requires is_quiet(template.literals)
+  {
+    Shout(text: "")
+  }
+}
+
+fn f() -> Shout {
+  Shout"hey"
+}

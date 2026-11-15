@@ -83,21 +83,8 @@ let code_state context ~key path =
   let code = code_of context path [] in
   (enter context ~builder:(create context.env ~key) (frame_of code), code)
 
-let template_clauses (mir : Mir.lookups) from_template : (int * Mir.Graph.t) list =
-  match Mir.contract_of_path mir from_template with
-  | Some contract ->
-      List.concat
-        (List.mapi
-           (fun position (requirement : Mir.requirement) ->
-             if requirement.is_executable then
-               [ (position, Mir.code_of_formula requirement.clause) ]
-             else [])
-           contract.requires)
-  | None -> bug "%s is not a function" (Path.show from_template)
-
-let template_checked mir from_template = List.map fst (template_clauses mir from_template)
-
-let template_check context (key : Instance.key) ~from_template ~texts : Emit_c.Builder.instance =
+let template_check context (key : Instance.key) ~from_template ~literals ~clauses :
+    Emit_c.Builder.instance =
   let st, _ = code_state context ~key from_template in
   let template_type =
     match interface_parameters (signature_of context from_template) with
@@ -107,19 +94,19 @@ let template_check context (key : Instance.key) ~from_template ~texts : Emit_c.B
   start st.builder (block st.builder);
   in_scope st (fun () ->
       let template =
-        template_value st (ground st template_type) texts
+        template_value st (ground st template_type) literals
           ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
           ~parts:[]
       in
       let output = Constants.begin_output st in
       List.iter
-        (fun (_, clause) ->
+        (fun clause ->
           let holds = temporary st context.bool in
           Mir_form.mir_into ~arguments:[ template ] st clause holds;
           Glue.encode_call context.glue st.builder
             ~output:(Address { place = output; writable = true })
             context.bool holds)
-        (template_clauses context.lookups.mir from_template);
+        (template_clauses context from_template clauses);
       Constants.write_output st output);
   finish_instance st ~rest:[] ()
 

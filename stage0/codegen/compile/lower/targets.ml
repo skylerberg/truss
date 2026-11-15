@@ -506,7 +506,7 @@ let list_of st ty destination ~site fills =
       lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
     fills
 
-let template_value st template_ty texts ~site ~parts =
+let template_value st template_ty literals ~site ~parts =
   let field_type ty name =
     match Monomorphic.shape st.context.monomorphic ty with
     | Record fields -> (
@@ -532,7 +532,7 @@ let template_value st template_ty texts ~site ~parts =
          emit st.builder
            (Assign
               (value, Build { ty = literal_ty; variant = None; fields = [ ("text", Copy slice) ] })))
-       texts);
+       literals);
   list_of st parts_ty (built / Field "parts") ~site parts;
   built
 

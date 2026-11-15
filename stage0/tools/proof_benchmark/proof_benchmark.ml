@@ -34,7 +34,7 @@ let () =
             let failed =
               List.length
                 (Pipeline.diagnostics
-                   (Pipeline.decide solver (Pipeline.prove pipeline [ file ]))
+                   (Pipeline.decide ~runs:[] solver (Pipeline.prove pipeline [ file ]))
                    file)
             in
             Some

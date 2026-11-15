@@ -30,9 +30,12 @@ val locked_table : context -> Instance.key -> capability:Path.t -> Lowered.table
 val test_key : Path.t -> Instance.key
 
 val template_check :
-  context -> Instance.key -> from_template:Path.t -> texts:string list -> Emit_c.Builder.instance
-
-val template_checked : Mir.lookups -> Path.t -> int list
+  context ->
+  Instance.key ->
+  from_template:Path.t ->
+  literals:string list ->
+  clauses:int list ->
+  Emit_c.Builder.instance
 
 val call_evaluation :
   context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Emit_c.Builder.instance

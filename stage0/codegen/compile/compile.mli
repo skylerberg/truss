@@ -19,7 +19,7 @@ exception Todo_type of Ground.ty
 
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
-type 'a ran = Ran of 'a | Ran_too_long
+type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 
 val create :
   ?file_name:(Path.file -> string) ->
@@ -77,8 +77,12 @@ val reached_todo_types : t -> Path.t -> Path.t list
 val fresh_program : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 
-val check_template :
-  t -> from_template:Path.t -> texts:string list -> ((int * bool) list ran, string) result
+val run_template_check :
+  t ->
+  from_template:Path.t ->
+  literals:string list ->
+  clauses:int list ->
+  (bool list, string) result
 
 val roots : tests:Path.t list -> mains:Path.t list -> Instance.key list
 val ground_types : Lookups.settings -> Lookups.t -> Instance.key -> ground_types

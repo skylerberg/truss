@@ -21,7 +21,7 @@ val assume : context -> frame -> Logic.term -> unit
 val add_requires : context -> frame -> message -> fix list
 
 val oblige :
-  ?evaluation:evaluation ->
+  ?template_clause:template_clause ->
   ?cited:Names.key * Core.origin ->
   ?fixes:fix list ->
   context ->
@@ -33,7 +33,7 @@ val oblige :
   unit
 
 val obligation_at :
-  ?evaluation:evaluation ->
+  ?template_clause:template_clause ->
   context ->
   frame ->
   Code.prover ->
@@ -43,7 +43,7 @@ val obligation_at :
   obligation option
 
 val make_obligation :
-  ?evaluation:evaluation ->
+  ?template_clause:template_clause ->
   context ->
   frame ->
   Code.prover ->

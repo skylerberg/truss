@@ -7,7 +7,7 @@ type key =
   | Any_drop of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
-  | Template_check of { from_template : Path.t; texts : string list }
+  | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
@@ -108,12 +108,12 @@ let rec mangle = function
   | Encode ty -> marker "Encode" ^ mangle_ty ty
   | Any_drop ty -> marker "AnyDrop" ^ mangle_ty ty
   | Evaluator instance_path -> marker "Evaluator" ^ path instance_path
-  | Template_check { from_template; texts } ->
+  | Template_check { from_template; literals; clauses } ->
       marker "Check" ^ path from_template
       ^ String.concat ""
-          (List.map
-             (fun component_type -> marker "Text" ^ text component_type ^ marker "End")
-             texts)
+          (List.map (fun literal -> marker "Text" ^ text literal ^ marker "End") literals)
+      ^ String.concat "" (List.map (fun clause -> marker "Clause" ^ string_of_int clause) clauses)
+      ^ marker "End"
   | Call_evaluation { function_; arguments } ->
       marker "Evaluate" ^ path function_
       ^ String.concat ""
@@ -151,9 +151,11 @@ let rec to_string = function
   | Encode ty -> "encode " ^ Ground.to_string ty
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Evaluator path -> "evaluator " ^ Path.show path
-  | Template_check { from_template; texts } ->
+  | Template_check { from_template; literals; clauses } ->
       "template check " ^ Path.show from_template ^ " of "
-      ^ String.concat ", " (List.map (Printf.sprintf "%S") texts)
+      ^ String.concat ", " (List.map (Printf.sprintf "%S") literals)
+      ^ " for clauses "
+      ^ String.concat ", " (List.map string_of_int clauses)
   | Call_evaluation { function_; arguments } ->
       "evaluation " ^ Path.show function_ ^ "("
       ^ String.concat ", " (List.map Z.to_string arguments)

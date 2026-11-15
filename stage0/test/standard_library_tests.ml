@@ -82,7 +82,7 @@ let processor_time () =
   let times = Unix.times () in
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
-let proven pipeline files = Pipeline.decide solver (Pipeline.prove pipeline files)
+let proven pipeline files = Pipeline.decide ~runs:[] solver (Pipeline.prove pipeline files)
 
 let check pipeline =
   Pipeline.check pipeline [ Path.standard_package ];

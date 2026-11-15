@@ -41,8 +41,8 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Encode ty -> code (Glue.encode glue ty)
   | Any_drop ty -> code (Glue.any_drop glue ty)
   | Evaluator path -> code (Lower.evaluator context path)
-  | Template_check { from_template; texts } ->
-      code (Lower.template_check context key ~from_template ~texts)
+  | Template_check { from_template; literals; clauses } ->
+      code (Lower.template_check context key ~from_template ~literals ~clauses)
   | Call_evaluation { function_; arguments } ->
       code (Lower.call_evaluation context key ~function_ ~arguments)
   | Any_table _ -> emitted (Table (Lower.any_table context key))
@@ -168,7 +168,7 @@ let test_keys ~lowered ~known members =
       (own_hash code, references code))
     ~deep:known members
 
-type 'a ran = Ran of 'a | Ran_too_long
+type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
@@ -407,14 +407,18 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
                   Option.iter (fun results -> results.add key output) compiler.results;
                   Ran output
               | 137, _, _ -> Ran_too_long
-              | status, _, errors ->
-                  cannot_build "Running %s while compiling ended with status %d: %s"
-                    (Instance.to_string root) status errors)
+              | status, _, errors -> (
+                  match String.trim errors with
+                  | "" -> Stopped (Printf.sprintf "it ended with status %d" status)
+                  | report -> Stopped report))
         in
         Hashtbl.replace compiler.runs key ran;
         ran
   in
-  match ran with Ran output -> Ran (read output) | Ran_too_long -> Ran_too_long
+  match ran with
+  | Ran output -> Ran (read output)
+  | Ran_too_long -> Ran_too_long
+  | Stopped report -> Stopped report
 
 and compiled compiler key =
   let data (data : Lowered.data) = Emit_c.fragment (env compiler [ key ]) (Data data) in
@@ -428,7 +432,8 @@ and compiled compiler key =
         | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
             cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
-              compiler.evaluation_time_limit_ms)
+              compiler.evaluation_time_limit_ms
+        | Stopped report -> cannot_build "Evaluating %s stopped: %s" (Path.show path) report)
   in
   if not (Instance.equal (Emit_c.key compiled) key) then
     bug "%s compiled to %s" (Instance.to_string key) (Instance.to_string (Emit_c.key compiled));
@@ -803,18 +808,22 @@ let reached_todo_types compiler (root : Path.t) =
   compiler.requests.reached_todo_types
     (match root with Test _ -> Lower.test_key root | _ -> Program_main root)
 
-let check_template compiler ~from_template ~texts =
-  reporting compiler @@ fun () ->
-  match Lower.template_checked compiler.requests.mir from_template with
-  | [] -> Ran []
-  | positions ->
-      run_while_compiling compiler
-        (Instance.Template_check { from_template; texts })
-        ~read:(fun output ->
-          if String.length output <> List.length positions then
-            cannot_build "Checking a template of %s wrote %d results for %d clauses."
-              (Path.show from_template) (String.length output) (List.length positions);
-          List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
+let run_template_check compiler ~from_template ~literals ~clauses =
+  let ran =
+    reporting compiler @@ fun () ->
+    run_while_compiling compiler
+      (Instance.Template_check { from_template; literals; clauses })
+      ~read:(fun output ->
+        if String.length output <> List.length clauses then
+          bug "checking a template of %s wrote %d results for %d clauses" (Path.show from_template)
+            (String.length output) (List.length clauses);
+        List.init (String.length output) (fun index -> output.[index] <> '\000'))
+  in
+  match ran with
+  | Ok (Ran holds) -> Ok holds
+  | Ok Ran_too_long ->
+      Error (Printf.sprintf "it ran past the time limit of %d ms" compiler.evaluation_time_limit_ms)
+  | Ok (Stopped report) | Error report -> Error report
 
 let evaluate_call compiler ~function_ ~arguments =
   reporting compiler @@ fun () ->

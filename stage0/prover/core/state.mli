@@ -5,7 +5,8 @@ module Span = Syntax.Span
 module Locals = Locals
 
 type span = Syntax.span
-type evaluation = { from_template : Path.t; texts : string list; clause : int }
+type template_check = { from_template : Path.t; literals : string list; clauses : int list }
+type template_clause = { check : template_check; clause : int }
 
 type piece =
   | Text of string
@@ -29,7 +30,7 @@ type obligation = {
   query : Logic.query;
   values : (Logic.symbol * string) list;
   locals : (Logic.symbol * string) list;
-  evaluation : evaluation option;
+  template_clause : template_clause option;
   decisions : (string * string option * Logic.term * Logic.term) list;
 }
 

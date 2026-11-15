@@ -421,9 +421,7 @@ let cited_place (lookups : Lookups.t) ((key : Names.key), origin) =
       Some (place, Span.to_source ~base:place.base (clamp_to_definition lookups key spans.(origin)))
   | _ -> None
 
-type answer = Solved of Solver.answer | Ran_true | Ran_false | Run_timed_out
-type run_result = Ran of bool | Timed_out | Not_run
-type evaluator = State.evaluation -> run_result
+type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 
 type 'span state = {
   code : Diagnostic.Code.prover;
@@ -479,12 +477,11 @@ let definition_states lookups (key : Names.key) proof answers =
               shows = message;
               failure =
                 (match answer with
-                | Solved Proven | Ran_true -> None
-                | Ran_false -> failed " Running it on this template's text gives `false`."
-                | Run_timed_out ->
+                | Solved Proven | Ran true -> None
+                | Ran false -> failed " Running it on this template's text gives `false`."
+                | Run_failed report ->
                     failed
-                      " Running it on this template's text took longer than the time limit, so it \
-                       is not known."
+                      (" Running it on this template's text failed, so it is not known: " ^ report)
                 | Solved (Counterexample values) ->
                     failed (counterexample (Logic.members obligation.query) obligation values)
                 | Solved Out_of_steps ->
@@ -496,7 +493,7 @@ let definition_states lookups (key : Names.key) proof answers =
                         " A quantified fact it may need has no term for the solver to use it by, \
                          so an `assert` that names the term it is needed for may be enough."
                       else ""));
-              trusts_compiled_code = (match answer with Ran_true -> true | _ -> false);
+              trusts_compiled_code = (match answer with Ran true -> true | _ -> false);
             },
             obligation.cited ))
         outcome.obligations answers
@@ -536,22 +533,19 @@ let solve solver requests =
 
 type question = Decided of answer | Asked of (Solver.request * Logic.query)
 
-let verdicts ?(evaluator = fun _ -> Not_run) lookups solver proofs =
-  let runs = Hashtbl.create 16 in
-  let ran evaluation =
-    match Hashtbl.find_opt runs evaluation with
-    | Some result -> result
-    | None ->
-        let result = evaluator evaluation in
-        Hashtbl.replace runs evaluation result;
-        result
-  in
+let run_answer runs ({ check; clause } : State.template_clause) =
+  Option.map
+    (function
+      | Ok holds -> Ran (List.assoc clause (List.combine check.clauses holds))
+      | Error report -> Run_failed report)
+    (Hashtbl.find_opt runs check)
+
+let verdicts ~runs lookups solver proofs =
+  let runs = Hashtbl.of_seq (List.to_seq runs) in
   let question (obligation : State.obligation) =
-    match Option.map ran obligation.evaluation with
-    | Some (Ran true) -> Decided Ran_true
-    | Some (Ran false) -> Decided Ran_false
-    | Some Timed_out -> Decided Run_timed_out
-    | Some Not_run | None -> Asked (request ~with_locals:false obligation)
+    match Option.bind obligation.template_clause (run_answer runs) with
+    | Some answer -> Decided answer
+    | None -> Asked (request ~with_locals:false obligation)
   in
   let questions =
     List.map

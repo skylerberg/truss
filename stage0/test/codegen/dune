@@ -75,7 +75,6 @@
   pipeline
   components
   prover
-  evaluator
   solver
   documents
   file_system)
