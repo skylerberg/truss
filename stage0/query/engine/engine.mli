@@ -56,8 +56,6 @@ exception Lost of string
 val inputs_stored : t -> bool
 val values_in : Store.t -> version:string -> string -> string list
 val forget_bases : unit -> unit
-val audit : ?include_bases:bool -> ?before:Query.phase -> t -> string list
-val skip_audit : t -> unit
 
 module For_testing : sig
   val executed : t -> string list
@@ -66,6 +64,5 @@ module For_testing : sig
   val clear_log : t -> unit
   val differing : t -> node list
   val count : t -> int
-  val audit_all : unit -> string list
-  val auditing : bool ref
+  val audit : ?include_bases:bool -> t -> string list
 end

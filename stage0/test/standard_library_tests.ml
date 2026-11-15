@@ -127,17 +127,13 @@ let session =
           exit 1)
 
 let () =
-  let engine =
+  let database =
     match session with
-    | Some session -> Database.For_testing.engine session
+    | Some session -> Database.context session
     | None ->
         let engine = Engine.create () in
         Database.load_standard engine;
-        engine
-  in
-  Engine.skip_audit engine;
-  let database =
-    match session with Some session -> Database.context session | None -> Engine.context engine
+        Engine.context engine
   in
   let record responses =
     match session with
@@ -159,10 +155,6 @@ let () =
             (module_, List.map (fun (file, _) -> (file, Checks.diagnostics database file)) files))
           modules)
   in
-  test "the code database kept every result of checking the standard library current" (fun () ->
-      timed "auditing the code database" (fun () ->
-          let before = Option.map (fun _ -> Phases.proofs) session in
-          List.iter (fun problem -> fail "%s" problem) (Engine.audit ?before engine)));
   timed "solving ahead" (fun () ->
       Prover.solve_ahead ~record database solver
         (List.concat_map

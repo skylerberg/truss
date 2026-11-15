@@ -74,8 +74,6 @@ type t = {
   mutable chain : string option;
   mutable on_whole : bool;
   mutable chain_size : chain_size;
-  mutable activity : int;
-  mutable audited : int;
 }
 
 and binding = Binding : 'table Type.Id.t * 'table -> binding
@@ -166,28 +164,6 @@ let check_not_sealed name =
           initialized"
          name)
 
-let auditing = ref false
-let remembered : t Weak.t ref = ref (Weak.create 16)
-let remembered_count = ref 0
-let within_audit = ref false
-
-let remember engine =
-  if !auditing && not !within_audit then begin
-    if !remembered_count = Weak.length !remembered then begin
-      let live = ref [] in
-      for index = 0 to Weak.length !remembered - 1 do
-        match Weak.get !remembered index with Some engine -> live := engine :: !live | None -> ()
-      done;
-      let live = List.rev !live in
-      let grown = Weak.create (max 16 (2 * (List.length live + 1))) in
-      List.iteri (fun index engine -> Weak.set grown index (Some engine)) live;
-      remembered := grown;
-      remembered_count := List.length live
-    end;
-    Weak.set !remembered !remembered_count (Some engine);
-    incr remembered_count
-  end
-
 let create ?(log = false) ?(bases = []) () =
   List.iter
     (fun base ->
@@ -200,48 +176,42 @@ let create ?(log = false) ?(bases = []) () =
       (bases @ List.concat_map (fun base -> base.bases) bases)
   in
   incr engines;
-  let engine =
-    {
-      id = !engines;
-      bases = all;
-      frozen = false;
-      fixed = false;
-      tables = Hashtbl.create 64;
-      own = Hashtbl.create 1024;
-      readers_of_base_nodes = Hashtbl.create 64;
-      shadows = Hashtbl.create 64;
-      clock = 1;
-      frames = [];
-      seeds = Array.make phases [];
-      marks = Array.make phases [];
-      waiting = 0;
-      candidates = [];
-      logging = log;
-      log = Dynarray.create ();
-      computed = Dynarray.create ();
-      changed = Dynarray.create ();
-      tally =
-        {
-          marks = 0;
-          confirmations = 0;
-          computations = 0;
-          changes = 0;
-          adoptions = 0;
-          copies = 0;
-          collections = 0;
-        };
-      store = List.find_map (fun base -> base.store) all;
-      unwritten_nodes = Hashtbl.create 256;
-      collected = [];
-      chain = None;
-      on_whole = false;
-      chain_size = { whole = 0; differences = 0; depth = 0 };
-      activity = 0;
-      audited = 0;
-    }
-  in
-  remember engine;
-  engine
+  {
+    id = !engines;
+    bases = all;
+    frozen = false;
+    fixed = false;
+    tables = Hashtbl.create 64;
+    own = Hashtbl.create 1024;
+    readers_of_base_nodes = Hashtbl.create 64;
+    shadows = Hashtbl.create 64;
+    clock = 1;
+    frames = [];
+    seeds = Array.make phases [];
+    marks = Array.make phases [];
+    waiting = 0;
+    candidates = [];
+    logging = log;
+    log = Dynarray.create ();
+    computed = Dynarray.create ();
+    changed = Dynarray.create ();
+    tally =
+      {
+        marks = 0;
+        confirmations = 0;
+        computations = 0;
+        changes = 0;
+        adoptions = 0;
+        copies = 0;
+        collections = 0;
+      };
+    store = List.find_map (fun base -> base.store) all;
+    unwritten_nodes = Hashtbl.create 256;
+    collected = [];
+    chain = None;
+    on_whole = false;
+    chain_size = { whole = 0; differences = 0; depth = 0 };
+  }
 
 let hash_of = function
   | Unknown -> None

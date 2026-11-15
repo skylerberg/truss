@@ -414,7 +414,8 @@ let () =
       ignore (Resolve.diagnostics database file);
       let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "second" ] then
-        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved));
+      expect_results_current (Engine.of_context database));
   test "moving a definition down resolves nothing again" (fun () ->
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
       let engine = Engine.of_context database in
@@ -453,7 +454,8 @@ let () =
       ignore (Resolve.diagnostics database file);
       let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "z" ] then
-        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved));
+      expect_results_current (Engine.of_context database));
   test "a definition added to one file of a module resolves only its own file's definitions again"
     (fun () ->
       let database =
@@ -475,7 +477,8 @@ let () =
       resolve_all ();
       let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "z" ] then
-        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved));
+      expect_results_current (Engine.of_context database));
   test "moving a definition to another file of its module keeps its key" (fun () ->
       let database =
         setup

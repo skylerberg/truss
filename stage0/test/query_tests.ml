@@ -341,9 +341,10 @@ let () =
       Engine.set engine toggle () false;
       if Engine.get engine (Lazy.force e_query) () <> 1 then fail "no value before the cycle";
       Engine.set engine toggle () true;
-      match Engine.get engine (Lazy.force e_query) () with
+      (match Engine.get engine (Lazy.force e_query) () with
       | _ -> fail "no cycle once it appeared"
       | exception Query.Cycle _ -> ());
+      expect_results_current engine);
   test "a query that raises is computed again when a dependency changes" (fun () ->
       let engine = Engine.create ~log:true () in
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
@@ -389,7 +390,6 @@ let () =
       if one <> 1 || two <> 2 then fail "read %d and %d" one two);
   test "an input cannot change while a query runs" (fun () ->
       let engine = Engine.create () in
-      Engine.skip_audit engine;
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
       let writer = unit_query "writer" (fun _ () -> Engine.set engine value () 1) in
       match Engine.get engine writer () with
@@ -489,7 +489,7 @@ let () =
       let engine, files, total = setup () in
       ignore (Engine.get engine total ());
       Engine.set engine files "b" "four";
-      match Engine.audit engine with
+      match Engine.For_testing.audit engine with
       | [] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems));
   test "an audit finds a result that depends on something the query did not read" (fun () ->
@@ -498,15 +498,14 @@ let () =
       let impure = unit_query "impure" (fun _ () -> !hidden) in
       ignore (Engine.get engine impure ());
       hidden := 2;
-      (match Engine.audit engine with
+      match Engine.For_testing.audit engine with
       | [ _ ] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems));
-      hidden := 1);
   test "an audit over a base compares with an engine that has no base" (fun () ->
       let _, engine, build = over_base () in
       Engine.set engine build.files "b" "four";
       ignore (Engine.get engine build.total ());
-      match Engine.audit ~include_bases:true engine with
+      match Engine.For_testing.audit ~include_bases:true engine with
       | [] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems))
 
@@ -539,7 +538,6 @@ let () =
     (fun () ->
       let failing = ref false in
       let engine = Engine.create () in
-      Engine.skip_audit engine;
       let source, _, late = two_phases ~fail_when:(fun () -> !failing) () in
       Engine.set engine source "a" "one";
       ignore (Engine.get engine late "a");
@@ -604,24 +602,3 @@ let () =
         (List.filter (fun node -> not (Engine.is_input node)) (Engine.nodes mine));
       if List.exists (fun node -> not (Engine.is_input node)) (Engine.nodes theirs) then
         fail "the other engine holds [%s]" (String.concat "; " (labels (Engine.nodes theirs))))
-
-let () =
-  test "an audit before a phase leaves the later phases' results alone" (fun () ->
-      let engine = Engine.create ~log:true () in
-      Engine.skip_audit engine;
-      let hidden = ref 1 in
-      let source = Query.input ~name:"audit_source" ~show:Fun.id () in
-      let early =
-        Query.query ~name:"audit_early" ~phase:Phases.syntax ~show:Fun.id (fun database key ->
-            String.length (get database source key))
-      in
-      let late =
-        Query.query ~name:"audit_late" ~phase:Phases.proofs ~show:Fun.id (fun database key ->
-            Query.demand database early key + !hidden)
-      in
-      Engine.set engine source "a" "one";
-      ignore (Engine.get engine late "a");
-      hidden := 2;
-      if Engine.audit ~before:Phases.proofs engine <> [] then
-        fail "the audit computed a result of a later phase";
-      if Engine.audit engine = [] then fail "the whole audit found nothing")

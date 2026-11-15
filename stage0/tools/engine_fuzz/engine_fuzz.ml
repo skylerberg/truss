@@ -156,7 +156,9 @@ let apply world step =
       Option.iter (fun engine -> world.other <- Some engine) (opened (Engine.write world.engine))
 
 let audit world =
-  List.concat_map (Engine.audit ~include_bases:true) (world.engine :: Option.to_list world.other)
+  List.concat_map
+    (Engine.For_testing.audit ~include_bases:true)
+    (world.engine :: Option.to_list world.other)
 
 (* The problems after the first step that leaves a problem. *)
 let problems steps =

@@ -121,7 +121,6 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   node.marked <- false;
   Dynarray.add_last engine.computed node;
   engine.tally.computations <- engine.tally.computations + 1;
-  engine.activity <- engine.activity + 1;
   Hashtbl.replace engine.unwritten_nodes node.id node
 
 and adopt :
@@ -169,7 +168,6 @@ and adopt :
                 node.verified_at <- engine.clock;
                 node.marked <- false;
                 engine.tally.adoptions <- engine.tally.adoptions + 1;
-                engine.activity <- engine.activity + 1;
                 Hashtbl.replace engine.unwritten_nodes node.id node;
                 true))
   | _ -> false

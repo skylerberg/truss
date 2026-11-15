@@ -81,7 +81,8 @@ let () =
       if checked () = [] then fail "checking the package checked no definition";
       Engine.For_testing.clear_log engine;
       ignore (edit database "app::part_0" ("\n\n" ^ module_text 0));
-      match checked () with
+      (match checked () with
       | [] -> ()
       | rechecked ->
-          fail "checked [%s]" (String.concat "; " (List.map Resolve.Names.show_key rechecked)))
+          fail "checked [%s]" (String.concat "; " (List.map Resolve.Names.show_key rechecked)));
+      expect_results_current engine)

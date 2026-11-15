@@ -17,7 +17,6 @@ val input :
 type phase
 
 val phase : name:string -> after:phase list -> phase
-val phase_rank : phase -> int
 
 type ('key, 'value) query = ('key, 'value) Incremental.query
 

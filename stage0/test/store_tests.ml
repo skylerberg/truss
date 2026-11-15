@@ -513,7 +513,6 @@ let () =
       match Engine.open_ store ~version ~bases:[] artifact with
       | None -> fail "the state did not open"
       | Some engine -> (
-          Engine.skip_audit engine;
           if Engine.inputs_stored engine then fail "every input is said to be stored";
           match Query.find (Engine.context engine) value_input () with
           | _ -> fail "the input was read"
@@ -606,14 +605,12 @@ let () =
   test "a result that read an opaque one is computed again in a state opened later" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let engine = attached store in
-      Engine.skip_audit engine;
       Engine.set engine closure_input () 4;
       if Engine.get engine applies () <> 5 then fail "the result";
       let artifact = Engine.write engine in
       match Engine.open_ ~log:true store ~version ~bases:[] artifact with
       | None -> fail "the state did not open"
       | Some opened ->
-          Engine.skip_audit opened;
           Engine.set opened closure_input () 6;
           if Engine.get opened applies () <> 7 then fail "the result after the input changed")
 
@@ -662,7 +659,6 @@ let () =
     (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let base = attached store in
-      Engine.skip_audit base;
       Engine.set base copied_input () 4;
       ignore (Engine.get base copied_applied ());
       match
@@ -672,7 +668,6 @@ let () =
       | Some fixed ->
           let engine = Engine.create ~bases:[ fixed ] () in
           Engine.attach engine store ~version;
-          Engine.skip_audit engine;
           if Engine.get engine copied_reader () <> 19 then fail "the first result";
           Engine.set engine copied_input () 6;
           let value = Engine.get engine copied_reader () in
@@ -692,8 +687,6 @@ let () =
       ignore (Engine.get engine impure ());
       Engine.record_facts engine;
       hidden := 2;
-      let problems = Engine.audit engine in
-      hidden := 1;
-      match problems with
+      match Engine.For_testing.audit engine with
       | [ _ ] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems))
