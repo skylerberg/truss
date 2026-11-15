@@ -1092,28 +1092,6 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       let result =
         match (operation, values) with
         | Array_model, [ array ] -> array_model context frame array.type_ array.term
-        | Array_take_view, [ array; part; start ] -> (
-            match (array.type_, changed) with
-            | Types.Named { arguments = Types.Type element :: _; _ }, after :: _ ->
-                let before = array_model context frame array.type_ array.term in
-                let run = buffer_model context View element part.term in
-                oblige context frame Requires span
-                  (Printf.sprintf "`%s` may not take back a view within the array."
-                     (quote frame.source site.origin))
-                  Logic.(
-                    Operation
-                      ( "<=",
-                        [
-                          Operation ("+", [ start.term; sequence_length context element run ]);
-                          sequence_length context element before;
-                        ] ));
-                run_replaced context frame element ~before
-                  ~after:(array_model context frame array.type_ after)
-                  ~start:start.term
-                  ~stop:(Logic.Operation ("+", [ start.term; sequence_length context element run ]))
-                  ~run:(Some run);
-                arrive context frame "result" result_type
-            | _ -> arrive context frame "result" result_type)
         | Array_view, [ array ] -> (
             match array.type_ with
             | Types.Named { arguments = Types.Type element :: _; _ } ->

@@ -1,8 +1,3 @@
-(* Writes the standard library's source files into an OCaml module, so the
-   compiler and its tests carry them and never look for them on disk. Each
-   file's module comes from its directory under [standard/], and its name
-   from the file's own name. *)
-
 let () =
   let files = List.sort compare (List.tl (Array.to_list Sys.argv)) in
   print_string "let files = [\n";

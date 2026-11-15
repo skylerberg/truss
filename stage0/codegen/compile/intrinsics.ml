@@ -617,53 +617,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           emit builder (Assign (at held, Use (Move (element_at (value 1)))));
           emit builder (Assign (element_at (value 1), Use (Move (element_at (value 2)))));
           emit builder (Assign (element_at (value 2), Use (Move (at held))))
-      | (Storage_take_view | View_take_view | Array_take_view) as operation ->
-          if checks then begin
-            let owner = place (argument 0) and part = place (argument 1) in
-            let from = value 2 in
-            let first, owner_length =
-              match operation with
-              | Storage_take_view -> (element_at owner from, length owner)
-              | View_take_view -> (Storage.view_at owner from, view_length owner)
-              | _ ->
-                  let count =
-                    match value_arguments with
-                    | [ count ] -> count
-                    | _ -> bug "array_take_view without the array's length"
-                  in
-                  (owner / Index from, Lowered.Constant (Integer (UInt64, count)))
-            in
-            let message = "a view taken back is not of these elements" in
-            let stop = uint64_local "stop" in
-            emit builder (Assign (at stop, Binary (Add, from, view_length part)));
-            let beyond = local builder (Raw Bool) in
-            emit builder (Assign (at beyond, Binary (Greater, Copy (at stop), owner_length)));
-            panic_when (Copy (at beyond)) message;
-            if (element_layout ()).size > 0 then begin
-              let go_on = block builder and compare = block builder in
-              let empty = local builder (Raw Bool) in
-              emit builder (Assign (at empty, Binary (Equal, view_length part, constant_uint64 0)));
-              branch builder (Copy (at empty)) ~yes:go_on ~no:compare;
-              start builder compare;
-              let expected =
-                local builder (Pointer { target = Value (element ()); writable = false })
-              in
-              emit builder (Assign (at expected, Use (Address { place = first; writable = false })));
-              let expected_address = uint64_local "expected" and address = uint64_local "address" in
-              emit builder
-                (Assign (at expected_address, Convert (Copy (at expected), Integer UInt64)));
-              emit builder
-                (Assign (at address, Convert (Copy (Storage.view_elements part), Integer UInt64)));
-              let apart = local builder (Raw Bool) in
-              emit builder
-                (Assign (at apart, Binary (Not_equal, Copy (at address), Copy (at expected_address))));
-              panic_when (Copy (at apart)) message;
-              finish builder (Goto go_on);
-              start builder go_on
-            end
-          end
-      | (Storage_view | Storage_view_mut) as operation ->
-          if operation = Storage_view_mut then own (argument 0);
+      | Storage_view ->
           let storage = place (argument 0) in
           set
             (Storage.view
