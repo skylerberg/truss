@@ -205,21 +205,7 @@ let signature cursor ~name ~method_ : signature =
   let clauses = clauses cursor in
   { name; generics; parameters; result; clauses }
 
-let check_name cursor (name : definition_name) =
-  let name = match name with Plain_name name | Member_name (_, name) -> name in
-  if name.text = "old" then
-    Cursor.report cursor Reserved_specification_name
-      (Cursor.absolute cursor name.span)
-      "A function cannot be named `old`, which names a value as it was when a function was called, \
-       in specifications."
-  else if name.text = "identical" then
-    Cursor.report cursor Reserved_specification_name
-      (Cursor.absolute cursor name.span)
-      "A function cannot be named `identical`, which tests whether two values are the same value, \
-       in specifications."
-
 let function_signature cursor ~name =
-  check_name cursor name;
   let method_ = match name with Member_name _ -> true | Plain_name _ -> false in
   signature cursor ~name ~method_
 
@@ -278,7 +264,6 @@ let capability_member cursor : capability_member =
 type container = In_trait | In_impl | In_capability
 
 let method_kind cursor ~(container : container) ~name =
-  check_name cursor name;
   let signature = signature cursor ~name ~method_:true in
   let kind =
     match container with
@@ -370,7 +355,7 @@ let type_clauses cursor =
     | Keyword Cost ->
         Cursor.advance cursor;
         ignore
-          (Cost_word.expect cursor ~accepted:[ Potential ]
+          (Contextual_keyword.expect cursor ~accepted:[ Potential ]
              ~category:"`potential`; a type's only cost clause is `cost potential expression`"
              ~expected:"`potential`; a type's only cost clause is `cost potential expression`");
         clause (Potential (Parse_expression.expression cursor))
