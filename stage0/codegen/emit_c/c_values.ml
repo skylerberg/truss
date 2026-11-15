@@ -49,14 +49,15 @@ let float_literal ~suffix value =
 
 let float64_literal bits = float_literal ~suffix:"" (Int64.float_of_bits bits)
 let float32_literal bits = float_literal ~suffix:"f" (Int32.float_of_bits bits)
+let bytes_symbol context index = Printf.sprintf "%s_bytes_%d" context.prefix index
 
 let bytes_name context text =
-  match List.assoc_opt text context.bytes with
-  | Some name -> name
+  match Hashtbl.find_opt context.bytes text with
+  | Some index -> bytes_symbol context index
   | None ->
-      let name = Printf.sprintf "%s_bytes_%d" context.prefix (List.length context.bytes) in
-      context.bytes <- (text, name) :: context.bytes;
-      name
+      let index = Hashtbl.length context.bytes in
+      Hashtbl.replace context.bytes text index;
+      bytes_symbol context index
 
 let function_ref_symbol fc : Lowered.function_ref -> string = function
   | Instance key -> Instance.symbol key
