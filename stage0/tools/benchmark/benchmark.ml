@@ -51,6 +51,7 @@ let worst_cases =
     ("digits of an integer", fun count -> "let x: Int64 = " ^ String.make count '7' ^ "\n");
     ("an integer before a point", fun count -> "let x: Float64 = 1" ^ String.make count '0' ^ ".\n");
     ("three dots", fun count -> "let x: Int64 = a" ^ repeated count " ..." ^ "\n");
+    ("a semicolon on every line", fun count -> "fn f() {\n" ^ repeated count "  a = 1;\n" ^ "}\n");
     ("binary operators", fun count -> "let x: Int64 = 1" ^ repeated count " + 1" ^ "\n");
     ("postfix operations", fun count -> "let x: Int64 = a" ^ repeated count ".b" ^ "\n");
     ("nested loop bodies", fun count -> "fn f() {\n" ^ repeated count "while x {\n");

@@ -265,23 +265,35 @@ let check_fixes_work text =
         diagnostic.fixes)
     diagnostics
 
-(* The lexer's machine-applicable fixes, applied together, add no error. *)
+(* The lexer's machine-applicable fixes add no error, applied together or
+   each alone. *)
 let check_machine_fixes_work text =
   let _, diagnostics = lex text in
+  let adds_none applied =
+    let edits =
+      List.concat_map
+        (fun (diagnostic : Diagnostic.t) ->
+          match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+        applied
+    in
+    let _, remaining = lex (Diagnostic.apply_edits text edits) in
+    let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
+    Diagnostic.adds_none ~before:others ~after:remaining
+  in
   match Diagnostic.machine_applicable diagnostics with
   | [] -> ()
   | applied ->
-      let edits =
-        List.concat_map
-          (fun (diagnostic : Diagnostic.t) ->
-            match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-          applied
-      in
-      let _, remaining = lex (Diagnostic.apply_edits text edits) in
-      let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
-      if not (Diagnostic.adds_none ~before:others ~after:remaining) then
+      if not (adds_none applied) then
         fail "the machine-applicable fixes of the lexer leave or add an error in %s"
-          (Diagnostic.quote text)
+          (Diagnostic.quote text);
+      if List.length applied > 1 then
+        List.iter
+          (fun (diagnostic : Diagnostic.t) ->
+            if not (adds_none [ diagnostic ]) then
+              fail "the machine-applicable fix for %s leaves or adds an error alone in %s"
+                (Diagnostic.Code.name diagnostic.code)
+                (Diagnostic.quote text))
+          applied
 
 let mistakes =
   [|

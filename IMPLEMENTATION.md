@@ -105,6 +105,14 @@ develop as well as make it easier to bootstrap the compiler in parts.
   Recovery cannot see a fix that lexes cleanly but changes a value, such as
   a string's text that would become an escape or an interpolation; the
   habit that offers the fix must withhold it.
+- **Recovery checks fixes in groups, never one lex per fix.** A fix changes
+  how the text lexes only between the tokens on either side of its edits,
+  so fixes whose edits an untouched token separates are independent, and
+  one lex checks them all. When the lex fails, halving the group finds the
+  fixes that fail. Each fix must also work alone, which is checked in
+  rounds that take one fix from each set of fixes whose edits touch. A
+  check that lexes once for each fix makes a file with a fix on every line
+  quadratic.
 
 ### Stages
 
