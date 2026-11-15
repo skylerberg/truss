@@ -1,6 +1,3 @@
-(* [truss new]: creates a directory with a manifest that names the package
-   and a [main.truss] with an empty [main]. *)
-
 let manifest name =
   Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"%s\"\n" name Manifest.truss_version
 
@@ -9,7 +6,6 @@ let main = {|fn main(arguments: List[String]) -> ExitCode {
 }
 |}
 
-(* The directory is named after the package, without its owner. *)
 let run ~name =
   let directory_name =
     match Manifest.parse_name name with

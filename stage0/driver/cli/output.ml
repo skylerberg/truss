@@ -1,15 +1,9 @@
-(* A command's output streams. A command in its own process writes to its
-   standard output and standard error. A command in the background process
-   writes its output to a buffer, sent with the response, and writes its
-   standard error, such as the status line, to the client immediately, so
-   it appears while the command runs. *)
-
 type t = {
   out : string -> unit;
   err : string -> unit;
-  terminal : bool;  (** Whether the client's standard error is a terminal *)
-  columns : int option;  (** The client's terminal width, when its shell exports [COLUMNS] *)
-  mutable json : bool;  (** Whether the command writes JSON, which [--json] selects *)
+  terminal : bool;
+  columns : int option;
+  mutable json : bool;
 }
 
 let local () =
@@ -26,8 +20,6 @@ let local () =
 
 let current = ref (local ())
 
-(* Runs [f] with [output] as the current streams, then restores the
-   previous streams. *)
 let with_ output work =
   let previous = !current in
   current := output;

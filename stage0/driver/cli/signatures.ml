@@ -1,14 +1,5 @@
-(* A definition's signature as text: its source without any body. Truss
-   has no comments, so a signature is a definition's whole documentation.
-   [truss show] prints signatures, and [truss impact] prints the old and
-   new signature of a changed interface. Stage0 has no formatter, so the
-   text is the source as written, minus the bodies. *)
-
 open Syntax
 
-(* The spans, relative to the definition, that are not part of its
-   signature: bodies, and the contents of an opaque type seen from another
-   package. *)
 let bodies ~opaque (definition : definition) =
   let function_body (function_definition : function_definition) =
     [ function_definition.body.span ]
@@ -24,21 +15,17 @@ let bodies ~opaque (definition : definition) =
           match member.kind with Law law -> [ law.body.span ] | _ -> [])
         members
   | Type_definition { name; generics; _ } when opaque ->
-      (* Everything after the name and its generic parameters. *)
       let stop =
         List.fold_left
           (fun stop (generic : generic_parameter) -> max stop generic.span.stop)
           name.span.stop generics
       in
-      (* The closing bracket of the generic parameters. *)
       let stop = if generics = [] then stop else stop + 1 in
       [ Span.make stop definition.span.stop ]
   | Method_declaration _ | Type_definition _ | Impl _ | Capability _ | Constant _
   | Definition_error _ ->
       []
 
-(* Removes the spans from the text, then trailing spaces, then empty
-   lines. *)
 let cut text spans =
   let spans =
     List.sort (fun (left : span) (right : span) -> compare left.start right.start) spans
@@ -66,16 +53,12 @@ let cut text spans =
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 
-(* The text of the definition with that key: the whole definition with
-   [body], and otherwise its signature. *)
 let text database ~body ~opaque (key : Resolve.Names.key) =
   match
     ( Query.demand database Resolve.Names.text key,
       Query.demand database Resolve.Names.definition key )
   with
   | Some text, Some definition ->
-      (* The bodies of the methods declared inside it, which are separate
-         definitions, at their offsets in its text. *)
       let contained =
         match Query.demand database Resolve.Names.base key with
         | Some (_, base) ->
@@ -112,7 +95,6 @@ let kind_word : Resolve.Names.kind -> string = function
 
 let parts : Query.part list = [ Interface; Signature; Shape ]
 
-(* The signature of the definition at [path], as [text] prints it. *)
 let of_path context path =
   match Query.demand context Interface.Summary.key path with
   | Some key -> text context ~body:false ~opaque:false key

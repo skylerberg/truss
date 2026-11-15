@@ -1,5 +1,3 @@
-; The truss command.
-
 (executable
  (name truss)
  (public_name truss)

@@ -1,12 +1,4 @@
-(* The diagnostics of the program built from a command's packages,
-   printed on standard error or as JSON. A manifest problem is
-   reported with them: both the problems the session finds while it reads
-   the manifests and the ones that only a package's code reveals. *)
-
 type file = { file : Path.file; source : Source.t; diagnostics : Diagnostic.t list }
-
-(* The prover's diagnostics are computed only when first read, so a command
-   prints every other diagnostic before it waits for the solver. *)
 type t = { checked : file list; proven : file list Lazy.t; problems : Project.problem list }
 
 let shown session packages file diagnostics =
@@ -52,7 +44,6 @@ let to_json report =
         file.diagnostics)
     (files report)
 
-(* A command's JSON document, with the report's diagnostics and problems. *)
 let document report fields =
   Json.document ~diagnostics:(to_json report)
     (( "problems",
@@ -62,9 +53,6 @@ let document report fields =
 
 let plural count one many = Printf.sprintf "%d %s" count (if count = 1 then one else many)
 
-(* Prints each problem, each diagnostic as [Diagnostic.render] renders it,
-   and a count, on standard error. The prover's diagnostics come last, so
-   the others appear while the solver runs. *)
 let print report =
   let print_files =
     List.iter (fun file ->
@@ -79,6 +67,4 @@ let print report =
   | 0 -> ()
   | error_count -> Output.eprintf "%s\n" (plural error_count "error" "errors")
 
-(* The code has errors, so the command stops, and the command line writes
-   the report and exits with 1. *)
 exception Errors of t

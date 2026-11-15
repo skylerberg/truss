@@ -1,13 +1,7 @@
-(* [truss publish]: publishes the package the command runs in to the
-   registry as its next version, if the package is complete and compatible
-   with its previous version. The registry assigns the version number. *)
-
 module Names = Resolve.Names
 module Version = Registry.Version
 module Lock = Registry.Lock
 
-(* Every [todo] and [echo] of the package, with its position, in order of
-   position in each file. A type defined as [todo] is at its name. *)
 let unfinished session packages =
   let context = Database.context session in
   List.concat_map
@@ -32,18 +26,10 @@ let unfinished session packages =
         (Query.demand context Names.declarations_in file))
     (Command_packages.files session packages)
 
-(* The files to publish: the package's own, with its published lock file
-   in place of the project's. *)
 let files directory (record : Lock.t) =
   List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.published_files directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
-(* The published lock file's entries: each registry package that the
-   package's non-test code reaches, at the build's version. A dependency
-   that is a project package counts as a registry package only when its
-   files match a version the registry holds, which is then its version. Any
-   other project package is a problem, since a package may depend only on
-   registry packages. *)
 let record session registry (package : Path.package) =
   let root = Database.root session in
   let built = Database.registry_packages session in
@@ -69,7 +55,6 @@ let record session registry (package : Path.package) =
         match (in_registry name, directory_of name) with
         | Some (_, version, hash), _ ->
             add name version hash;
-            (* A registry package's own dependencies are already in the build. *)
             List.iter
               (fun next -> if in_registry next <> None || directory_of next <> None then visit next)
               (dependencies ~code:false name)
@@ -100,8 +85,6 @@ let record session registry (package : Path.package) =
   let entries = closure package in
   (entries, List.sort_uniq compare !problems)
 
-(* The package's failing tests that have no [uses], each with its
-   outcome. *)
 let failed_tests session packages =
   let tests =
     List.filter
@@ -122,8 +105,6 @@ let failed_tests session packages =
        tests
        (Test_command.run_tests session packages tests))
 
-(* The name to publish an incompatible release under: the name with the
-   next number after [_v]. *)
 let next_name (package : Path.package) =
   let major = Version.major_of_name package in
   let base =

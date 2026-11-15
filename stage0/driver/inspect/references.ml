@@ -1,13 +1,8 @@
-(* The occurrences of each definition, method, and module in a
-   definition's code, as name resolution and type checking resolved each
-   name, for [truss rename]. *)
-
 module Names = Resolve.Names
 
 type target = Definition of Path.t | Module of Path.module_
 type occurrence = { span : Syntax.span; target : target }
 
-(* The definition's declared name, if it has one. *)
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
@@ -20,9 +15,6 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | Impl _ | Test _ | Law_proof _ | Definition_error _ -> None
 
-(* The method or member that a type-checked expression refers to, if any:
-   the callee of a method call on a type, or a method or constant used as a
-   value. *)
 let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
   let members = ref [] in
   let add (name : Syntax.name) path = members := (name, path) :: !members in
@@ -43,8 +35,6 @@ let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
   Syntax_walk.definition visit definition;
   !members
 
-(* Every occurrence in one definition, in order, in the definition's
-   offsets, so that a definition that only moved has the same ones. *)
 let occurrences =
   Query.query ~name:"occurrences" ~phase:Phases.inspection ~show:Names.show_key
     (fun database (key : Names.key) ->
@@ -64,9 +54,6 @@ let occurrences =
                    with
                    | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
                    | Some (Module module_) ->
-                       (* A module is written either as its import's name, one
-                      segment, or as its full path: the package's segments
-                      followed by each module's. *)
                        let parts = Path.module_parts module_ in
                        let written_in_full =
                          List.length parts > 1
@@ -110,8 +97,6 @@ let occurrences =
             (declared @ resolved_names @ members)
       | _ -> [])
 
-(* Each [use] line of a file, with the module it names and the span of its
-   path in the file's offsets. *)
 let uses =
   Query.query ~name:"use_lines" ~phase:Phases.inspection ~show:Path.show_file
     (fun database (file : Path.file) ->
@@ -123,8 +108,6 @@ let uses =
             Source.span (item.base + first.span.start) (item.base + path.last.span.stop) ))
         (Query.demand database Parsed.file file).uses)
 
-(* Whether an occurrence refers to a definition or, for a method, to any
-   overload of it. *)
 let names_definition (definition : Path.t) target =
   match (target, definition) with
   | Definition (Method { owner; name; _ }), Method { owner = other_owner; name = other_name; _ } ->

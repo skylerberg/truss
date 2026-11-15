@@ -1,9 +1,5 @@
-(* Paths as a command shows them: relative to the current directory. *)
-
 let absolute path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
-(* The path with [.] and [..] segments resolved and no trailing
-   separator. *)
 let normalize path =
   let parts = String.split_on_char '/' (absolute path) in
   let segments =
@@ -17,8 +13,6 @@ let normalize path =
   in
   "/" ^ String.concat "/" (List.rev segments)
 
-(* [path] relative to [from], both normalized, such as [forecast.truss] or
-   [../weather/forecast.truss]. *)
 let relative ~from path =
   let split path = List.filter (( <> ) "") (String.split_on_char '/' path) in
   let rec drop from path =

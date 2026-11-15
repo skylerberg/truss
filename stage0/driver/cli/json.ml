@@ -1,6 +1,3 @@
-(* The JSON that commands write with --json. Strings are escaped as
-   diagnostics escape them, so the output is always valid UTF-8. *)
-
 type t =
   | Null
   | Bool of bool
@@ -8,7 +5,7 @@ type t =
   | String of string
   | List of t list
   | Object of (string * t) list
-  | Raw of string  (** Serialized JSON, such as a diagnostic's *)
+  | Raw of string
 
 let rec write buffer = function
   | Null -> Buffer.add_string buffer "null"
@@ -42,8 +39,6 @@ let to_string value =
 
 let option encode = function Some value -> encode value | None -> Null
 
-(* A command's document: the format version, its diagnostics, and its own
-   fields. *)
 let document ~diagnostics fields =
   Object (("format", Int 1) :: ("diagnostics", List diagnostics) :: fields)
 
@@ -51,9 +46,6 @@ let print value = Output.print_line (to_string value)
 
 exception Malformed
 
-(* Parses a JSON text. A number with a fraction or an exponent is
-   truncated to an integer, since the messages parsed here contain only
-   integers. *)
 let parse text =
   let length = String.length text in
   let position = ref 0 in
@@ -208,7 +200,6 @@ let parse text =
   if !position <> length then raise Malformed;
   result
 
-(* A field of an object, or [Null]. *)
 let field name = function
   | Object fields -> Option.value ~default:Null (List.assoc_opt name fields)
   | _ -> Null

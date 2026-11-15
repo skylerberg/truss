@@ -1,26 +1,12 @@
-(* The prover, as commands run it: each definition's obligations are sent
-   to the pinned solver, and each tagged template's check is decided by
-   running it. *)
-
-(* The solver that [TRUSS_Z3] names, or else [z3]. Proving requires it, as
-   building requires a C compiler. Its answers are kept in the store. *)
 let solver () =
   let find, add = Database.results ~kind:Store.Solver_answer in
   match Solver.find ~cache:{ find; add } () with
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message
 
-(* The evaluator runs code through the compiler that builds programs. The
-   compiler is created only when a proof needs a run. *)
 let evaluator session packages =
   Evaluator.of_compiler (lazy (Compiler.create session packages Development))
 
-(* The prover's diagnostics of each of the files, and the state of each
-   of its obligations, which a language server shows. A file is proven
-   only once no other stage reports a diagnostic in it, since the prover
-   reads the type checker's output; any other file has neither. The
-   queries of every proven file are sent to the solver together, before
-   the first file's results are read. *)
 let checked session packages files =
   match List.filter (fun file -> Database.diagnostics session file = []) files with
   | [] -> fun _ -> ([], [])

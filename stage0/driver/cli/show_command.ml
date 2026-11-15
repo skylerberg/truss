@@ -1,5 +1,3 @@
-(* [truss show]: prints the signatures at each path. *)
-
 module Names = Resolve.Names
 
 type shown_definition = {
@@ -9,8 +7,6 @@ type shown_definition = {
   text : string;
 }
 
-(* The module a path names, if it names one: [weather], or
-   [weather::forecast]. *)
 let as_module database names : Path.module_ option =
   match Packages.split_module database names with
   | Some module_ when Query.demand database Packages.module_exists module_ -> Some module_
@@ -22,8 +18,6 @@ let declarations database (module_ : Path.module_) =
 
 let package_modules database package = Query.demand database Packages.modules package
 
-(* Whether a definition is visible from the command's packages: every
-   definition in them, and only public definitions elsewhere. *)
 let visible packages (declaration : Names.declaration) =
   List.mem declaration.file.module_.package packages || Names.is_public declaration.visibility
 
@@ -31,12 +25,9 @@ let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
   | _ -> None
 
-(* An [impl] is shown with a type when its self type has the type's
-   name. *)
 let impl_of_type (path : Path.t) name =
   match path with Impl { for_type; _ } -> for_type.type_name = name | _ -> false
 
-(* The definitions a path names, in printing order. *)
 let resolve session packages text =
   let database = Database.context session in
   let argument = Path_argument.parse text in
@@ -46,7 +37,6 @@ let resolve session packages text =
   let module_ = if argument.member = None then as_module database argument.names else None in
   match (Packages.split_module database argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
-      (* A package: its public definitions. *)
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
         (in_package package)
@@ -64,7 +54,6 @@ let resolve session packages text =
                   (declarations database module_)
               with
               | [ declaration ] when declaration.kind = Type ->
-                  (* A type, then its methods and constants, then its impls. *)
                   let package = in_package module_.package in
                   declaration
                   :: List.filter
@@ -149,6 +138,4 @@ let run ~paths ~body =
       results;
     List.iter (fun (path, _) -> Output.eprintf "Nothing named `%s` is visible here.\n" path) missing
   end;
-  (* A path that names nothing is a bad argument, not an error in the
-   code. *)
   if missing = [] then 0 else 2
