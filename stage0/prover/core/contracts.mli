@@ -17,16 +17,13 @@ val law_proofs :
 
 val impl_unfinished : Query.context -> State.Names.key -> bool
 val law_unshown : Query.context -> Path.t -> Types.trait_reference -> Types.ty -> string -> bool
-
-val function_contract :
-  ?reading_package:Path.package -> Query.context -> Path.t -> State.contract option
-
+val function_contract : Query.context -> Path.t -> State.contract option
 val trait_part : Query.context -> Path.t -> string -> Path.receiver -> State.part option
 val capability_contract : Query.context -> Path.t -> string -> State.contract option
 val capability_part : Query.context -> Path.t -> string -> State.part option
 
 val method_contract :
-  ?reading_package:Path.package ->
+  reading_package:Path.package ->
   Query.context ->
   Types.trait_reference ->
   string ->

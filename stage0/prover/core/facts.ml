@@ -13,8 +13,6 @@ let bug format = Compiler_bug.bug ~stage:"Prover" format
 let clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
-let reading_package context = Some (Path.package context.current)
-
 let declare context (declaration : Logic.declaration) =
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->

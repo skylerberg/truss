@@ -830,9 +830,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
     (fun (passed : passed) ->
       match passed.shape with
       | Named_function { origin; path; _ } -> (
-          match
-            function_contract ?reading_package:(reading_package context) context.database path
-          with
+          match function_contract context.database path with
           | Some contract ->
               check_named_callback context frame invocation passed ~origin path contract values
           | None -> ())
@@ -967,7 +965,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       with_contract
         ~substitution_of:(fun _ -> substitution)
         ~instance:arguments path
-        (function_contract ?reading_package:(reading_package context) context.database path)
+        (function_contract context.database path)
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
       let self_type = substituted context frame self_type in
@@ -1031,8 +1029,8 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           with_contract ~substitution_of
             ~instance:(Types.Type self_type :: arguments)
             path
-            (method_contract ?reading_package:(reading_package context) context.database trait name
-               receiver evidence))
+            (method_contract ~reading_package:(Path.package context.current) context.database trait
+               name receiver evidence))
   | Indirect () ->
       check_callback_requires context frame site through values;
       let frame = havoc_mut frame in

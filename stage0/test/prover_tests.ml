@@ -195,11 +195,7 @@ let () =
   test "assigning to an element checks its index" (fun () ->
       not_proven Fixtures.Prover.assigning_to_an_element_checks_its_index "prover.requires");
   test "a function's ensures is what its callers know" (fun () ->
-      proven Fixtures.Prover.functional_body_is_its_functions_definition);
-  test "a body with a loop is not a definition" (fun () ->
-      not_proven Fixtures.Prover.body_with_a_loop_is_not_a_definition "prover.ensures");
-  test "a function without a time clause is not a definition" (fun () ->
-      not_proven Fixtures.Prover.function_without_a_time_clause_is_not_a_definition "prover.ensures");
+      proven Fixtures.Prover.functions_ensures_is_what_its_callers_know);
   test "an impl method's contract is read at a call" (fun () ->
       proven Fixtures.Prover.impl_methods_contract_is_read_at_a_call);
   test "a mut argument that is a field leaves the rest of its value as it was" (fun () ->
@@ -1101,7 +1097,7 @@ let () =
 
 let () =
   test "a contract with branches, called under a quantifier on no bound value, holds there"
-    (fun () -> proven Fixtures.Prover.definition_with_branches_called_under_a_quantifier);
+    (fun () -> proven Fixtures.Prover.contract_with_branches_called_under_a_quantifier);
   test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
       proven Fixtures.Prover.derived_ordering_of_a_one_field_record_is_its);
   test "a derived ordering compares fields in order, for every value" (fun () ->

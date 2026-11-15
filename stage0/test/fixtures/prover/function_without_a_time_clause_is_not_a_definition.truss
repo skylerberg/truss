@@ -1,9 +1,0 @@
-fn is_small(value: Int64) -> Bool {
-  value < 10
-}
-
-fn f() -> Bool
-  ensures result
-{
-  is_small(3)
-}

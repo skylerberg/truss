@@ -8,7 +8,6 @@ exception Foreign_unsupported of string
 val unsupported : span -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val clauses : Mir.requirement list -> Mir.formula list
-val reading_package : context -> Path.package option
 val declare : context -> Logic.declaration -> unit
 val add_fact : context -> Logic.term -> unit
 val value_symbol : context -> frame -> Logic.symbol -> Logic.sort -> Logic.term

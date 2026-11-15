@@ -32,11 +32,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   the compiler's into `stage0/support/unicode/unicode_tables.ml`, and the standard
   library's into `standard/text/unicode_data/unicode_data.truss`. To move to a new
   version of Unicode, change that list and run
-  `stage0/tools/unicode/regenerate.sh`. Each function of
-  `standard/text/unicode_tables/unicode_tables.truss` that names a table assigns its
-  result to a `var`, so that callers know it by its contract: with a
-  functional body the prover would copy the table into every caller's
-  queries.
+  `stage0/tools/unicode/regenerate.sh`.
 - **`dune build`** builds everything, and **`dune fmt`** formats the code
   with the ocamlformat version that `.ocamlformat` pins.
 - **`stage0/tools/docs/build.sh`** builds the odoc documentation of every
