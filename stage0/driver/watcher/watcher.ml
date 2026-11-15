@@ -7,10 +7,16 @@ external handle_descriptor : handle -> Unix.file_descr = "truss_watcher_descript
 external take : handle -> string list * bool = "truss_watcher_take"
 external close : handle -> unit = "truss_watcher_close"
 
-type t = { root : string; handle : handle; skipped : string -> bool; mutable cookies : int }
+type t = {
+  root : string;
+  handle : handle;
+  skipped : string -> bool;
+  cookie_directory : string;
+  mutable cookies : int;
+}
+
 type changes = Changed of string list | Overflow
 
-let state_directory = ".truss"
 let synchronization_limit = 2.0
 
 let is_directory path =
@@ -27,17 +33,14 @@ let rec watch_tree watcher directory =
       if (not (watcher.skipped entry)) && is_directory path then watch_tree watcher path)
     (try Sys.readdir directory with Sys_error _ -> [||])
 
-let start ~skipped root =
+let start ~skipped ~cookie_directory root =
   let root = Unix.realpath root in
-  let state = Filename.concat root state_directory in
-  (try Unix.mkdir state 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
-  let ignored = Filename.concat state ".gitignore" in
-  if not (Sys.file_exists ignored) then
-    Out_channel.with_open_bin ignored (fun out -> output_string out "*\n");
-  let watcher = { root; handle = open_handle root; skipped; cookies = 0 } in
+  let cookies = Filename.concat root cookie_directory in
+  (try Unix.mkdir cookies 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
+  let watcher = { root; handle = open_handle root; skipped; cookie_directory; cookies = 0 } in
   if not (is_recursive ()) then begin
     watch_tree watcher root;
-    add watcher.handle state
+    add watcher.handle cookies
   end;
   watcher
 
@@ -67,7 +70,9 @@ let taken watcher =
 
 let changes watcher =
   watcher.cookies <- watcher.cookies + 1;
-  let cookie = Printf.sprintf "%s/sync-%d-%d" state_directory (Unix.getpid ()) watcher.cookies in
+  let cookie =
+    Printf.sprintf "%s/sync-%d-%d" watcher.cookie_directory (Unix.getpid ()) watcher.cookies
+  in
   let cookie_path = Filename.concat watcher.root cookie in
   Out_channel.with_open_bin cookie_path ignore;
   let deadline = Unix.gettimeofday () +. synchronization_limit in
@@ -83,7 +88,8 @@ let changes watcher =
           let is_overflowed = is_overflowed || overflowed in
           let paths =
             List.filter
-              (fun relative -> not (String.starts_with ~prefix:(state_directory ^ "/") relative))
+              (fun relative ->
+                not (String.starts_with ~prefix:(watcher.cookie_directory ^ "/") relative))
               relatives
             @ paths
           in

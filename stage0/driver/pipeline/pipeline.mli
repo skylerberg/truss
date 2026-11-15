@@ -6,6 +6,9 @@ val state : t -> Path.package -> state
 val update : t -> (Path.file * string option) list -> unit
 val relayout : t -> loaded:state list -> Project.package list -> unit
 val propagate : t -> unit
+val unsaved : t -> (string * string option) list
+val mark_saved : t -> unit
+val restore : loaded:state list -> texts:(Path.file -> string option) -> (string * string) list -> t
 val check : t -> Path.package list -> unit
 val file_diagnostics : t -> Path.file -> Diagnostic.t list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list

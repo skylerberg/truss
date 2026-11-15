@@ -9,7 +9,7 @@ let store () =
       opened := Some store;
       store
 
-let flush () = Option.iter Store.flush !opened
+let flush_store () = Option.iter Store.flush !opened
 
 let reset () =
   Option.iter Store.close !opened;
@@ -45,7 +45,7 @@ let collect () =
       | () -> Store.collect store ~budget:(budget ())
       | exception Unix.Unix_error _ -> ())
 
-type loaded = { package : Path.package; hash : string; state : Pipeline.state }
+type loaded = { package : Path.package; hash : string; key : string; state : Pipeline.state }
 
 let loaded_states : (string, loaded) Hashtbl.t = Hashtbl.create 8
 
@@ -104,7 +104,7 @@ let package_state (package : Project.package) ~hash ~visible =
                     Store.flush (store ());
                     state)
       in
-      let loaded = { package = package.name; hash; state } in
+      let loaded = { package = package.name; hash; key; state } in
       Hashtbl.replace loaded_states key loaded;
       loaded
 
@@ -325,20 +325,130 @@ let package_states snapshot =
 
 let layout snapshot =
   let loaded = package_states snapshot in
-  ( List.map (fun package -> package.state) loaded,
+  ( loaded,
     List.filter
       (fun (package : Project.package) ->
         not (List.exists (fun (state : loaded) -> state.package = package.name) loaded))
       snapshot.project.packages )
 
+let pipeline_states loaded = List.map (fun (loaded : loaded) -> loaded.state) loaded
+
 let cold_pipeline ~checks snapshot =
   let loaded, packages = layout snapshot in
-  Pipeline.create ~checks ~loaded packages
+  Pipeline.create ~checks ~loaded:(pipeline_states loaded) packages
 
-type database = { watcher : Watcher.t; mutable snapshot : snapshot; pipeline : Pipeline.t }
+let database_directory = ".truss"
+let compiler_line = "compiler " ^ Compiler_version.digest
+
+let header loaded =
+  compiler_line :: List.map (fun (loaded : loaded) -> "loaded " ^ Blake3.to_hex loaded.key) loaded
+
+let of_hex hex =
+  let digit character =
+    match character with
+    | '0' .. '9' -> Some (Char.code character - Char.code '0')
+    | 'a' .. 'f' -> Some (Char.code character - Char.code 'a' + 10)
+    | _ -> None
+  in
+  if String.length hex mod 2 <> 0 then None
+  else
+    let bytes = Bytes.create (String.length hex / 2) in
+    let rec fill index =
+      if index = Bytes.length bytes then Some (Bytes.to_string bytes)
+      else
+        match (digit hex.[2 * index], digit hex.[(2 * index) + 1]) with
+        | Some high, Some low ->
+            Bytes.set bytes index (Char.chr ((high * 16) + low));
+            fill (index + 1)
+        | None, _ | _, None -> None
+    in
+    fill 0
+
+let saved_state ~(current : loaded list) key =
+  match List.find_opt (fun (loaded : loaded) -> loaded.key = key) current with
+  | Some loaded -> Some loaded.state
+  | None -> (
+      match Hashtbl.find_opt loaded_states key with
+      | Some loaded -> Some loaded.state
+      | None ->
+          Option.map
+            (fun bytes -> (Marshal.from_string bytes 0 : Pipeline.state))
+            (Store.find_result (store ()) ~kind:Package_state ~key))
+
+let saved_states segments ~current =
+  match Segments.header segments with
+  | Some (line :: loaded_lines) when line = compiler_line ->
+      List.fold_right
+        (fun line states ->
+          Option.bind states (fun states ->
+              match String.split_on_char ' ' line with
+              | [ "loaded"; hex ] ->
+                  Option.map
+                    (fun state -> state :: states)
+                    (Option.bind (of_hex hex) (saved_state ~current))
+              | _ -> None))
+        loaded_lines (Some [])
+  | Some _ | None -> None
+
+let project_texts snapshot =
+  let texts = Hashtbl.create 256 in
+  List.iter
+    (fun (package : Project.package) ->
+      List.iter (fun (file, text) -> Hashtbl.replace texts file text) package.files)
+    snapshot.project.packages;
+  Hashtbl.find_opt texts
+
+let opened segments snapshot =
+  let loaded, packages = layout snapshot in
+  let cold () =
+    Segments.discard segments;
+    Pipeline.create ~loaded:(pipeline_states loaded) packages
+  in
+  let pipeline =
+    match saved_states segments ~current:loaded with
+    | None -> cold ()
+    | Some saved -> (
+        match Segments.entries segments with
+        | None -> cold ()
+        | Some entries -> (
+            match Pipeline.restore ~loaded:saved ~texts:(project_texts snapshot) entries with
+            | pipeline ->
+                Pipeline.relayout pipeline ~loaded:(pipeline_states loaded) packages;
+                pipeline
+            | exception (Failure _ | Invalid_argument _ | End_of_file) -> cold ()))
+  in
+  (pipeline, loaded)
+
+type database = {
+  root : string;
+  watcher : Watcher.t option;
+  segments : Segments.t;
+  mutable snapshot : snapshot;
+  pipeline : Pipeline.t;
+  mutable loaded : loaded list;
+}
 
 let databases : (string, database) Hashtbl.t = Hashtbl.create 4
 let is_serving = ref false
+
+let commit database =
+  match Pipeline.unsaved database.pipeline with
+  | entries -> (
+      match Segments.commit database.segments ~header:(header database.loaded) entries with
+      | () -> Pipeline.mark_saved database.pipeline
+      | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
+          prerr_endline
+            (Printf.sprintf "Cannot save the database in %s: %s."
+               (Filename.concat database.root database_directory)
+               (match failure with
+               | Unix.Unix_error (error, _, _) -> Unix.error_message error
+               | failure -> Printexc.to_string failure)))
+  | exception Compiler_bug.Bug bug -> prerr_endline (Compiler_bug.to_string bug)
+
+let close database =
+  Option.iter Watcher.stop database.watcher;
+  Segments.close database.segments;
+  Hashtbl.remove databases database.root
 
 let served snapshot =
   match snapshot.kind with
@@ -411,12 +521,13 @@ let changed_files root files paths =
     files
   @ List.concat_map found prefixes
 
-let refresh root database =
+let refresh database =
+  let root = database.root in
   let files =
-    match Watcher.changes database.watcher with
-    | Overflow -> Some (Registry.Content.input_files root)
-    | Changed [] -> None
-    | Changed paths -> Some (changed_files root database.snapshot.files paths)
+    match Option.map Watcher.changes database.watcher with
+    | Some Overflow | None -> Some (Registry.Content.input_files root)
+    | Some (Changed []) -> None
+    | Some (Changed paths) -> Some (changed_files root database.snapshot.files paths)
   in
   match files with
   | None -> false
@@ -431,22 +542,45 @@ let refresh root database =
           true
       | None ->
           let loaded, packages = layout after in
-          Pipeline.relayout database.pipeline ~loaded packages;
+          Pipeline.relayout database.pipeline ~loaded:(pipeline_states loaded) packages;
+          database.loaded <- loaded;
           true)
 
-let worktree_snapshot root =
-  if not !is_serving then snapshot_of_files (Worktree root) (Registry.Content.input_files root)
-  else
-    match Hashtbl.find_opt databases root with
-    | Some database ->
-        ignore (refresh root database);
-        database.snapshot
-    | None ->
-        let watcher = Watcher.start ~skipped:Registry.Content.skipped root in
+let open_database root =
+  match Segments.open_ (Filename.concat root database_directory) with
+  | Error `Open_elsewhere ->
+      Error
+        (Printf.sprintf
+           "The database in %s is open in another process. Wait for that process, or stop the \
+            background process with `truss stop`."
+           (Filename.concat root database_directory))
+  | Ok segments -> (
+      let watcher =
+        if !is_serving then
+          Some
+            (Watcher.start ~skipped:Registry.Content.skipped ~cookie_directory:database_directory
+               root)
+        else None
+      in
+      match
         let snapshot = snapshot_of_files (Worktree root) (Registry.Content.input_files root) in
-        Hashtbl.replace databases root
-          { watcher; snapshot; pipeline = cold_pipeline ~checks:true snapshot };
-        snapshot
+        (snapshot, opened segments snapshot)
+      with
+      | snapshot, (pipeline, loaded) ->
+          let database = { root; watcher; segments; snapshot; pipeline; loaded } in
+          Hashtbl.replace databases root database;
+          Ok database
+      | exception failure ->
+          Option.iter Watcher.stop watcher;
+          Segments.close segments;
+          raise failure)
+
+let worktree_snapshot root =
+  match Hashtbl.find_opt databases root with
+  | Some database ->
+      ignore (refresh database);
+      Ok database.snapshot
+  | None -> Result.map (fun database -> database.snapshot) (open_database root)
 
 let take_snapshot directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
@@ -457,22 +591,22 @@ let take_snapshot directory =
           (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
              directory)
     | Some root ->
-        let snapshot = worktree_snapshot root in
-        Ok (snapshot, target_packages snapshot (relative_to root directory))
+        Result.map
+          (fun snapshot -> (snapshot, target_packages snapshot (relative_to root directory)))
+          (worktree_snapshot root)
 
 let retake snapshot =
-  match snapshot.kind with Worktree root -> worktree_snapshot root | Published -> snapshot
+  match snapshot.kind with Worktree root -> worktree_snapshot root | Published -> Ok snapshot
 
 let propagate_changes descriptor =
   Hashtbl.iter
-    (fun root database ->
-      if Watcher.descriptor database.watcher = descriptor then
-        match if refresh root database then Pipeline.propagate database.pipeline with
-        | () -> ()
+    (fun _ database ->
+      if Option.map Watcher.descriptor database.watcher = Some descriptor then
+        match if refresh database then Pipeline.propagate database.pipeline with
+        | () -> commit database
         | exception Compiler_bug.Bug bug ->
             prerr_endline (Compiler_bug.to_string bug);
-            Watcher.stop database.watcher;
-            Hashtbl.remove databases root)
+            close database)
     (Hashtbl.copy databases)
 
 let problems snapshot = snapshot.project.problems
@@ -600,6 +734,13 @@ let published name version =
 
 let server_key directory = Option.value (root_of directory) ~default:""
 
+let close_all () =
+  List.iter
+    (fun database ->
+      commit database;
+      close database)
+    (Hashtbl.fold (fun _ database databases -> database :: databases) databases [])
+
 let serve ~key ~handle =
   is_serving := true;
   Server.serve ~key
@@ -607,11 +748,13 @@ let serve ~key ~handle =
     ~collect
     ~watched:(fun () ->
       Hashtbl.fold
-        (fun _ database descriptors -> Watcher.descriptor database.watcher :: descriptors)
+        (fun _ database descriptors ->
+          Option.fold ~none:descriptors
+            ~some:(fun watcher -> Watcher.descriptor watcher :: descriptors)
+            database.watcher)
         databases [])
     ~changed:propagate_changes ~handle;
-  Hashtbl.iter (fun _ database -> Watcher.stop database.watcher) databases;
-  Hashtbl.reset databases;
+  close_all ();
   is_serving := false;
   reset ()
 
@@ -619,10 +762,22 @@ let call ?program ?start_server ?key ~progress request =
   let key = match key with Some key -> key | None -> server_key (Sys.getcwd ()) in
   Server.call ?program ?start_server ~key ~progress request
 
+let flush () =
+  if !is_serving then Hashtbl.iter (fun _ database -> commit database) databases else close_all ();
+  flush_store ()
+
 let servers = Server.serving
 let stop = Server.stop
 
 module For_testing = struct
   let standard_state () = (Lazy.force standard_state).state
   let collect_store = collect
+
+  let interrupt_commit root =
+    match Hashtbl.find_opt databases root with
+    | Some database ->
+        Segments.For_testing.interrupted_commit database.segments ~header:(header database.loaded)
+          (Pipeline.unsaved database.pipeline);
+        close database
+    | None -> Compiler_bug.bug ~stage:"Database" "%s has no open database" root
 end

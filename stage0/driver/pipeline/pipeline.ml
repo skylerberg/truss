@@ -46,6 +46,21 @@ end
 module Type_table = Hashtbl.Make (Ground_key)
 module Type_components = Components.Make (Ground_key)
 
+module Entry = struct
+  type t =
+    | Value of Part.t
+    | Reads of Part.t
+    | Stale of Part.t
+    | Package of Path.package
+    | File of Path.file
+    | Owned of Part.t
+
+  let equal : t -> t -> bool = ( = )
+  let hash (entry : t) = Hashtbl.hash_param 64 256 entry
+end
+
+module Entry_table = Hashtbl.Make (Entry)
+
 type state = {
   name : Path.package;
   mutable dependencies : Manifest.dependency list;
@@ -98,24 +113,19 @@ type t = {
   references : References.t;
   owners : Part.t list Instance_table.t;
   owned : Instance.key list Part_table.t;
+  unsaved : unit Entry_table.t;
   mutable observe : observation -> unit;
 }
 
 and observation = Computed of Part.t | Collected of Part.t
 
-let fresh_state name ~dependencies (texts : (Path.file * string) list) =
-  let sources = Hashtbl.create 64 in
-  List.iter
-    (fun ((file : Path.file), text) ->
-      Hashtbl.replace sources file (Source.create ~path:(Path.show_file file) text))
-    texts;
-  let files = List.sort compare (List.map fst texts) in
+let empty_state name ~dependencies =
   {
     name;
     dependencies;
-    modules = List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) files);
-    files;
-    sources;
+    modules = [];
+    files = [];
+    sources = Hashtbl.create 64;
     parsed = Hashtbl.create 64;
     namespace = None;
     resolved_names = Hashtbl.create 1024;
@@ -144,6 +154,25 @@ let fresh_state name ~dependencies (texts : (Path.file * string) list) =
     proofs = Hashtbl.create 64;
   }
 
+let list_files (state : state) files =
+  state.files <- List.sort compare files;
+  state.modules <-
+    List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) state.files)
+
+let source_of (file : Path.file) text = Source.create ~path:(Path.show_file file) text
+
+let fresh_state name ~dependencies (texts : (Path.file * string) list) =
+  let state = empty_state name ~dependencies in
+  List.iter (fun (file, text) -> Hashtbl.replace state.sources file (source_of file text)) texts;
+  list_files state (List.map fst texts);
+  state
+
+let mark_unsaved pipeline entry = Entry_table.replace pipeline.unsaved entry ()
+
+let mark_state_unsaved pipeline (state : state) =
+  mark_unsaved pipeline (Package state.name);
+  List.iter (fun file -> mark_unsaved pipeline (File file)) state.files
+
 let mark_stale pipeline part =
   let slot = (Part.package part, Stage.of_part part) in
   let parts =
@@ -154,7 +183,10 @@ let mark_stale pipeline part =
         Hashtbl.replace pipeline.stale slot parts;
         parts
   in
-  Part_table.replace parts part ()
+  if not (Part_table.mem parts part) then begin
+    Part_table.replace parts part ();
+    mark_unsaved pipeline (Stale part)
+  end
 
 let is_stale pipeline part =
   match Stage.of_part part with
@@ -166,7 +198,11 @@ let is_stale pipeline part =
 
 let unmark pipeline part =
   Option.iter
-    (fun parts -> Part_table.remove parts part)
+    (fun parts ->
+      if Part_table.mem parts part then begin
+        Part_table.remove parts part;
+        mark_unsaved pipeline (Stale part)
+      end)
     (Hashtbl.find_opt pipeline.stale (Part.package part, Stage.of_part part))
 
 let stale_parts pipeline package stage =
@@ -196,6 +232,7 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       references = References.create ~tracks_blocked:false;
       owners = Instance_table.create 64;
       owned = Part_table.create 64;
+      unsaved = Entry_table.create 4096;
       observe = ignore;
     }
   in
@@ -203,10 +240,26 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
     (fun (package : Project.package) ->
       let state = fresh_state package.name ~dependencies:package.dependencies package.files in
       Hashtbl.replace states package.name state;
+      mark_state_unsaved pipeline state;
       List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
       mark_stale pipeline (Namespace package.name))
     packages;
   pipeline
+
+let add_reads pipeline part read_parts =
+  Part_table.replace pipeline.reads part read_parts;
+  List.iter
+    (fun read ->
+      let readers =
+        match Part_table.find_opt pipeline.readers read with
+        | Some readers -> readers
+        | None ->
+            let readers = Part_table.create 4 in
+            Part_table.replace pipeline.readers read readers;
+            readers
+      in
+      Part_table.replace readers part ())
+    read_parts
 
 let record pipeline parts reads =
   let read_parts =
@@ -217,25 +270,22 @@ let record pipeline parts reads =
   in
   List.iter
     (fun part ->
+      let before = Part_table.find_opt pipeline.reads part in
+      let is_unchanged =
+        match before with
+        | Some before ->
+            List.length before = List.length read_parts
+            && List.for_all (Part_table.mem reads) before
+        | None -> false
+      in
+      if not is_unchanged then mark_unsaved pipeline (Reads part);
       Option.iter
         (List.iter (fun read ->
              Option.iter
                (fun readers -> Part_table.remove readers part)
                (Part_table.find_opt pipeline.readers read)))
-        (Part_table.find_opt pipeline.reads part);
-      Part_table.replace pipeline.reads part read_parts;
-      List.iter
-        (fun read ->
-          let readers =
-            match Part_table.find_opt pipeline.readers read with
-            | Some readers -> readers
-            | None ->
-                let readers = Part_table.create 4 in
-                Part_table.replace pipeline.readers read readers;
-                readers
-          in
-          Part_table.replace readers part ())
-        read_parts)
+        before;
+      add_reads pipeline part read_parts)
     parts
 
 let computing pipeline parts compute =
@@ -274,6 +324,7 @@ let store pipeline part slot value =
   in
   if is_changed then begin
     (match value with Some value -> slot.replace value | None -> slot.remove ());
+    mark_unsaved pipeline (Value part);
     mark_readers pipeline part
   end
 
@@ -287,7 +338,7 @@ let owner pipeline package =
       match Hashtbl.find_opt pipeline.absent package with
       | Some state -> state
       | None ->
-          let state = fresh_state package ~dependencies:[] [] in
+          let state = empty_state package ~dependencies:[] in
           state.namespace <- Some Names.empty_namespace;
           Hashtbl.replace pipeline.absent package state;
           state)
@@ -835,7 +886,15 @@ let compute_test_keys pipeline keys =
            | Failed _ | Blocked -> Blocked)))
     keys
 
-type stored = { is_failed : bool; remove : unit -> unit; is_equal_in : t -> bool }
+type stored = {
+  is_failed : bool;
+  remove : unit -> unit;
+  is_equal_in : t -> bool;
+  saved : unit -> string option;
+  restore : string -> unit;
+}
+
+let marshalled value = Marshal.to_string value []
 
 let stored pipeline (part : Part.t) =
   let package = Part.package part in
@@ -851,6 +910,8 @@ let stored pipeline (part : Part.t) =
         (fun other ->
           compare (Hashtbl.find_opt (select (owner other package)) key) (Hashtbl.find_opt table key)
           = 0);
+      saved = (fun () -> Option.map marshalled (Hashtbl.find_opt table key));
+      restore = (fun bytes -> Hashtbl.replace table key (Marshal.from_string bytes 0));
     }
   in
   let at_path ~is_failed select path =
@@ -864,6 +925,8 @@ let stored pipeline (part : Part.t) =
             (Path_table.find_opt (select (owner other package)) path)
             (Path_table.find_opt table path)
           = 0);
+      saved = (fun () -> Option.map marshalled (Path_table.find_opt table path));
+      restore = (fun bytes -> Path_table.replace table path (Marshal.from_string bytes 0));
     }
   in
   let of_instance select instance =
@@ -872,18 +935,26 @@ let stored pipeline (part : Part.t) =
       is_failed = Option.fold ~none:false ~some:failed (find pipeline);
       remove = (fun () -> Instance_table.remove (select pipeline) instance);
       is_equal_in = (fun other -> compare (find other) (find pipeline) = 0);
+      saved = (fun () -> Option.map marshalled (find pipeline));
+      restore =
+        (fun bytes ->
+          Instance_table.replace (select pipeline) instance (Marshal.from_string bytes 0));
     }
   in
-  let whole select ~remove =
-    {
-      is_failed = false;
-      remove;
-      is_equal_in = (fun other -> compare (select (owner other package)) (select state) = 0);
-    }
+  let unsaved () =
+    Compiler_bug.bug ~stage:"Pipeline" "%s is computed when a database opens, not saved"
+      (Part.show part)
   in
   match part with
   | Parsed file -> keyed ~is_failed:never (fun state -> state.parsed) file
-  | Namespace _ -> whole (fun state -> state.namespace) ~remove:(fun () -> state.namespace <- None)
+  | Namespace _ ->
+      {
+        is_failed = false;
+        remove = (fun () -> state.namespace <- None);
+        is_equal_in = (fun other -> compare (owner other package).namespace state.namespace = 0);
+        saved = unsaved;
+        restore = (fun _ -> unsaved ());
+      }
   | Resolved (key, section) ->
       keyed ~is_failed:failed (fun state -> state.resolved_names) (key, section)
   | Import_check file -> keyed ~is_failed:never (fun state -> state.import_checks) file
@@ -916,6 +987,12 @@ let stored pipeline (part : Part.t) =
         is_failed = false;
         remove = (fun () -> Call_graph.remove_successors (call_graph pipeline viewer) path);
         is_equal_in = (fun other -> successors other = successors pipeline);
+        saved = (fun () -> Option.map marshalled (successors pipeline));
+        restore =
+          (fun bytes ->
+            ignore
+              (Call_graph.set_successors (call_graph pipeline viewer) path
+                 (Marshal.from_string bytes 0)));
       }
   | Recursion_group path -> at_path ~is_failed:failed (fun state -> state.recursion_groups) path
   | Proof key -> keyed ~is_failed:failed (fun state -> state.proofs) key
@@ -928,6 +1005,9 @@ let stored pipeline (part : Part.t) =
         is_failed = Option.fold ~none:false ~some:failed (find pipeline);
         remove = (fun () -> Type_table.remove pipeline.layouts ty);
         is_equal_in = (fun other -> compare (find other) (find pipeline) = 0);
+        saved = (fun () -> Option.map marshalled (find pipeline));
+        restore =
+          (fun bytes -> Type_table.replace pipeline.layouts ty (Marshal.from_string bytes 0));
       }
   | Source _ | Packages | Modules _ | Dependencies _ | Entry _ | Entries _ | Imports _
   | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _ | Module_declarations _
@@ -938,7 +1018,8 @@ let stored pipeline (part : Part.t) =
 let discard pipeline part =
   unmark pipeline part;
   record pipeline [ part ] (Part_table.create 0);
-  Part_table.remove pipeline.reads part
+  Part_table.remove pipeline.reads part;
+  mark_unsaved pipeline (Reads part)
 
 let instance_parts key : Part.t list = [ Ground_types key; Lowered key; Test_key key ]
 
@@ -1000,6 +1081,7 @@ let rec forget pipeline parts =
   List.iter
     (fun part ->
       (stored pipeline part).remove ();
+      mark_unsaved pipeline (Value part);
       discard pipeline part)
     parts;
   List.iter (mark_readers ~only:(fun reader -> not (Part_table.mem removed reader)) pipeline) parts;
@@ -1011,6 +1093,7 @@ and own_roots pipeline owner roots =
   if roots <> before then begin
     if roots = [] then Part_table.remove pipeline.owned owner
     else Part_table.replace pipeline.owned owner roots;
+    mark_unsaved pipeline (Owned owner);
     let owners root = Option.value (Instance_table.find_opt pipeline.owners root) ~default:[] in
     List.iter
       (fun root ->
@@ -1075,16 +1158,16 @@ let update_references pipeline key =
   end
 
 let refers_currently pipeline referrer (key : Instance.key) =
-  ((not (is_stale pipeline (Ground_types referrer)))
-  &&
-  match (key, Instance_table.find_opt pipeline.ground_types referrer) with
-  | Constant path, Some (Value ground) -> List.exists (Path.equal path) ground.folded_constants
-  | _ -> false)
-  || (not (is_stale pipeline (Lowered referrer)))
-     &&
-     match Instance_table.find_opt pipeline.lowered referrer with
-     | Some (Value (Ok lowered)) -> List.exists (Instance.equal key) (Compile.references lowered)
-     | Some (Value (Error _) | Failed _ | Blocked) | None -> false
+  (not (is_stale pipeline (Ground_types referrer)))
+  && ((match (key, Instance_table.find_opt pipeline.ground_types referrer) with
+        | Constant path, Some (Value ground) ->
+            List.exists (Path.equal path) ground.folded_constants
+        | _ -> false)
+     || (not (is_stale pipeline (Lowered referrer)))
+        &&
+        match Instance_table.find_opt pipeline.lowered referrer with
+        | Some (Value (Ok lowered)) -> List.exists (Instance.equal key) (Compile.references lowered)
+        | Some (Value (Error _) | Failed _ | Blocked) | None -> false)
 
 let is_ready pipeline key =
   List.exists
@@ -1181,22 +1264,27 @@ let is_own_namespace_part package (part : Part.t) =
   | Packages -> false
   | part -> Stage.of_part part = Namespaces && Part.package part = package
 
+let namespace_and_implied pipeline (state : state) =
+  let package = state.name in
+  let namespace, implied =
+    computing pipeline [ Part.Namespace package ] (fun note ->
+        let note part = if not (is_own_namespace_part package part) then note part in
+        let own_namespace = namespace_of pipeline note state in
+        let names =
+          names_over pipeline ~namespace:(fun name ->
+              if name = package then own_namespace else namespace pipeline name)
+        in
+        (own_namespace, package_parts pipeline (recording names note) package))
+  in
+  state.namespace <- Some namespace;
+  Hashtbl.replace pipeline.implied package implied;
+  (namespace, implied)
+
 let compute_namespace pipeline (state : state) =
   let package = state.name in
   let before = Option.value state.namespace ~default:Names.empty_namespace in
   let implied_before = Option.value ~default:[] (Hashtbl.find_opt pipeline.implied package) in
-  let after, implied =
-    computing pipeline [ Part.Namespace package ] (fun note ->
-        let note part = if not (is_own_namespace_part package part) then note part in
-        let after = namespace_of pipeline note state in
-        let names =
-          names_over pipeline ~namespace:(fun name ->
-              if name = package then after else namespace pipeline name)
-        in
-        (after, package_parts pipeline (recording names note) package))
-  in
-  state.namespace <- Some after;
-  Hashtbl.replace pipeline.implied package implied;
+  let after, implied = namespace_and_implied pipeline state in
   let membership parts =
     let members = Part_table.create 256 in
     List.iter (fun part -> Part_table.replace members part ()) parts;
@@ -1597,7 +1685,12 @@ let update_groups pipeline package =
   match Hashtbl.find_opt pipeline.graphs package with
   | Some graph when Call_graph.has_changes graph ->
       let { Call_graph.touched; removed } = Call_graph.update graph in
-      List.iter (fun node -> discard pipeline (Successors (node, package))) removed;
+      List.iter
+        (fun node ->
+          let part = Part.Successors (node, package) in
+          mark_unsaved pipeline (Value part);
+          discard pipeline part)
+        removed;
       let groups = at_path (owner pipeline package).recursion_groups in
       let is_own node = Path.package node = package in
       List.iter
@@ -1717,31 +1810,24 @@ let update pipeline changes =
       let is_unchanged =
         match (previous, text) with
         | Some source, Some text -> String.equal (Source.text source) text
-        | None, None -> true
+        | None, None -> not (List.mem file state.files)
         | Some _, None | None, Some _ -> false
       in
       if not is_unchanged then begin
+        mark_unsaved pipeline (File file);
         (match text with
         | Some text ->
-            Hashtbl.replace state.sources file (Source.create ~path:(Path.show_file file) text);
+            Hashtbl.replace state.sources file (source_of file text);
             mark_stale pipeline (Parsed file)
         | None ->
             Hashtbl.remove state.sources file;
             forget pipeline [ Parsed file ]);
         mark_readers pipeline (Source file);
         if Option.is_none previous || Option.is_none text then begin
-          let files =
-            List.sort compare
-              (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else [])
-          in
-          let modules =
-            List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) files)
-          in
-          state.files <- files;
-          if modules <> state.modules then begin
-            state.modules <- modules;
-            mark_readers pipeline (Modules package)
-          end;
+          let modules = state.modules in
+          list_files state
+            (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else []);
+          if modules <> state.modules then mark_readers pipeline (Modules package);
           mark_stale pipeline (Namespace package)
         end
       end)
@@ -1781,7 +1867,7 @@ let state_parts (state : state) : Part.t list =
 
 let mark_differences pipeline name ~(before : state option) ~(after : state option) =
   let empty () =
-    let state = fresh_state name ~dependencies:[] [] in
+    let state = empty_state name ~dependencies:[] in
     state.namespace <- Some Names.empty_namespace;
     state
   in
@@ -1816,13 +1902,22 @@ let retire pipeline (state : state) =
     | Input -> false
     | stage -> (not (Stage.is_lowering stage)) && Part.package part = package
   in
-  List.iter (discard pipeline)
+  mark_state_unsaved pipeline state;
+  List.iter (fun part -> mark_unsaved pipeline (Value part)) (state_parts state);
+  List.iter
+    (fun part ->
+      mark_unsaved pipeline (Value part);
+      discard pipeline part)
     (Part_table.fold
        (fun part _ parts -> if is_own part then part :: parts else parts)
        pipeline.reads []);
   Hashtbl.filter_map_inplace
     (fun (owner, stage) parts ->
-      if owner = package && not (Stage.is_lowering stage) then None else Some parts)
+      if owner = package && not (Stage.is_lowering stage) then begin
+        Part_table.iter (fun part () -> mark_unsaved pipeline (Stale part)) parts;
+        None
+      end
+      else Some parts)
     pipeline.stale;
   Hashtbl.remove pipeline.graphs package;
   Hashtbl.remove pipeline.implied package;
@@ -1860,6 +1955,7 @@ let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
       | Some state ->
           if state.dependencies <> package.dependencies then begin
             state.dependencies <- package.dependencies;
+            mark_unsaved pipeline (Package package.name);
             mark_readers pipeline (Dependencies package.name);
             mark_stale pipeline (Namespace package.name)
           end;
@@ -1872,6 +1968,7 @@ let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
           let state = fresh_state package.name ~dependencies:package.dependencies package.files in
           Hashtbl.remove pipeline.absent package.name;
           Hashtbl.replace pipeline.states package.name state;
+          mark_state_unsaved pipeline state;
           mark_readers pipeline (Modules package.name);
           mark_readers pipeline (Dependencies package.name);
           List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
@@ -1881,6 +1978,134 @@ let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
   if List.sort compare names_before <> List.sort compare names_after then
     mark_readers pipeline Packages;
   pipeline.project <- project
+
+let fingerprint text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+
+let is_saved_part pipeline (part : Part.t) =
+  match Stage.of_part part with
+  | Input | Namespaces -> false
+  | stage -> Stage.is_lowering stage || List.mem (Part.package part) pipeline.project
+
+let saved_value pipeline (entry : Entry.t) =
+  match entry with
+  | Value part -> if is_saved_part pipeline part then (stored pipeline part).saved () else None
+  | Reads part ->
+      if is_saved_part pipeline part then
+        Option.map marshalled (Part_table.find_opt pipeline.reads part)
+      else None
+  | Stale part -> if is_saved_part pipeline part && is_stale pipeline part then Some "" else None
+  | Package name ->
+      if List.mem name pipeline.project then
+        Option.map (fun (state : state) -> marshalled state.dependencies) (package pipeline name)
+      else None
+  | File file ->
+      let name = file.module_.package in
+      if List.mem name pipeline.project then
+        Option.bind (package pipeline name) (fun (state : state) ->
+            Option.map
+              (fun source -> fingerprint (Source.text source))
+              (Hashtbl.find_opt state.sources file))
+      else None
+  | Owned owner -> Option.map marshalled (Part_table.find_opt pipeline.owned owner)
+
+let unsaved pipeline =
+  drain pipeline ~through:Namespaces pipeline.project;
+  List.iter (update_groups pipeline) pipeline.project;
+  Entry_table.fold
+    (fun entry () entries ->
+      (Marshal.to_string entry [ No_sharing ], saved_value pipeline entry) :: entries)
+    pipeline.unsaved []
+
+let mark_saved pipeline = Entry_table.reset pipeline.unsaved
+
+let restore_packages pipeline ~texts entries =
+  let files = Hashtbl.create 64 in
+  List.iter
+    (function
+      | Entry.File (file : Path.file), saved ->
+          let name = file.module_.package in
+          Hashtbl.replace files name
+            ((file, saved) :: Option.value ~default:[] (Hashtbl.find_opt files name))
+      | _ -> ())
+    entries;
+  List.iter
+    (function
+      | Entry.Package name, dependencies ->
+          let state = empty_state name ~dependencies:(Marshal.from_string dependencies 0) in
+          let listed = Option.value ~default:[] (Hashtbl.find_opt files name) in
+          List.iter
+            (fun (file, saved) ->
+              match texts file with
+              | Some text when String.equal (fingerprint text) saved ->
+                  Hashtbl.replace state.sources file (source_of file text)
+              | Some _ | None -> ())
+            listed;
+          list_files state (List.map fst listed);
+          Hashtbl.replace pipeline.states name state;
+          pipeline.project <- name :: pipeline.project
+      | _ -> ())
+    entries;
+  pipeline.project <- List.sort Path.compare_package pipeline.project
+
+let restore_parts pipeline entries =
+  List.iter
+    (fun ((entry : Entry.t), bytes) ->
+      match entry with
+      | Value part when is_saved_part pipeline part -> (stored pipeline part).restore bytes
+      | Reads part when is_saved_part pipeline part ->
+          add_reads pipeline part (Marshal.from_string bytes 0)
+      | Stale part when is_saved_part pipeline part -> mark_stale pipeline part
+      | Owned owner -> Part_table.replace pipeline.owned owner (Marshal.from_string bytes 0)
+      | Value _ | Reads _ | Stale _ | Package _ | File _ -> ())
+    entries
+
+let restore_namespaces pipeline =
+  List.iter
+    (fun name ->
+      if List.mem name pipeline.project then begin
+        let _, implied = namespace_and_implied pipeline (Hashtbl.find pipeline.states name) in
+        let graph = call_graph pipeline name in
+        List.iter
+          (function
+            | Part.Successors (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
+          implied
+      end)
+    (in_dependency_order pipeline pipeline.project)
+
+let restore_references pipeline =
+  Part_table.iter
+    (fun owner roots ->
+      List.iter
+        (fun root ->
+          Instance_table.replace pipeline.owners root
+            (owner :: Option.value (Instance_table.find_opt pipeline.owners root) ~default:[]);
+          ignore (References.add_root pipeline.references root))
+        roots)
+    pipeline.owned;
+  let instances = Instance_table.create 1024 in
+  let note key _ = Instance_table.replace instances key () in
+  Instance_table.iter note pipeline.ground_types;
+  Instance_table.iter note pipeline.lowered;
+  Instance_table.iter
+    (fun key () ->
+      List.iter (hold pipeline key) (held_types pipeline key);
+      ignore
+        (References.set_successors pipeline.references key (Some (instance_edges pipeline key))))
+    instances;
+  settle_references pipeline
+
+let restore ~loaded ~texts entries =
+  let pipeline = create ~loaded [] in
+  let entries =
+    List.map (fun (key, value) -> ((Marshal.from_string key 0 : Entry.t), value)) entries
+  in
+  restore_packages pipeline ~texts entries;
+  restore_parts pipeline entries;
+  restore_namespaces pipeline;
+  restore_references pipeline;
+  List.iter (update_groups pipeline) pipeline.project;
+  mark_saved pipeline;
+  pipeline
 
 type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 

@@ -1,7 +1,9 @@
 let usage =
   "database_fuzz [--seed N] [--count N] [--depth N] [--verbose] [FILE...]\n\n\
-   Edits the files at random and propagates each edit through one database, then compares that \
-   database with one built from the edited files. With no file, it edits the corpus beside it."
+   Edits the files of a project at random and propagates each edit through the project's database \
+   in .truss, then compares that database with one built from the edited files. At random points \
+   it commits the database and opens it again, before or after the edit is propagated through \
+   every stage, or stops a commit before its rename. With no file, it edits the corpus beside it."
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let standard_state = lazy (Database.For_testing.standard_state ())
@@ -42,7 +44,9 @@ let chunks text =
          | chunks -> (line ^ "\n") :: chunks)
        [] (lines text))
 
-let pick items = List.nth items (Random.int (List.length items))
+let generator = ref (Random.State.make [| 0 |])
+let random bound = Random.State.int !generator bound
+let pick items = List.nth items (random (List.length items))
 
 let replace_nth items index replacement =
   List.concat (List.mapi (fun at item -> if at = index then replacement else [ item ]) items)
@@ -92,7 +96,7 @@ let with_file files index text =
   List.mapi (fun at file -> if at = index then { file with text } else file) files
 
 let edits files =
-  let index = Random.int (List.length files) in
+  let index = random (List.length files) in
   let file = List.nth files index in
   let pieces = chunks file.text in
   let in_file description text = Some { description; files = with_file files index text } in
@@ -100,7 +104,7 @@ let edits files =
     match pieces with
     | [] -> None
     | _ ->
-        let at = Random.int (List.length pieces) in
+        let at = random (List.length pieces) in
         let description = describe (String.trim (List.hd (lines (List.nth pieces at)))) in
         in_file description (String.concat "" (change at pieces))
   in
@@ -120,7 +124,7 @@ let edits files =
           (fun at pieces ->
             let piece = List.nth pieces at in
             let rest = replace_nth pieces at [] in
-            let target = Random.int (List.length rest + 1) in
+            let target = random (List.length rest + 1) in
             List.filteri (fun position _ -> position < target) rest
             @ [ piece ]
             @ List.filteri (fun position _ -> position >= target) rest));
@@ -128,9 +132,9 @@ let edits files =
         match (pieces, files) with
         | [], _ | _, [ _ ] -> None
         | _ ->
-            let at = Random.int (List.length pieces) in
+            let at = random (List.length pieces) in
             let piece = List.nth pieces at in
-            let other = (index + 1 + Random.int (List.length files - 1)) mod List.length files in
+            let other = (index + 1 + random (List.length files - 1)) mod List.length files in
             let moved =
               with_file
                 (with_file files index (String.concat "" (replace_nth pieces at [])))
@@ -221,14 +225,6 @@ let edits files =
   in
   attempt 20
 
-let changes before after =
-  List.filter_map
-    (fun file ->
-      match List.find_opt (fun previous -> previous.name = file.name) before with
-      | Some previous when previous.text = file.text -> None
-      | Some _ | None -> Some (path_of file, Some file.text))
-    after
-
 let outcome run = match run () with value -> Ok value | exception failure -> Error failure
 
 let shown_failure = function
@@ -236,6 +232,32 @@ let shown_failure = function
   | failure -> Printexc.to_string failure
 
 let corpus = "stage0/tools/database_fuzz/corpus"
+
+let write_project root files =
+  File_system.write
+    (Filename.concat root "truss.toml")
+    (Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" example.package.name);
+  List.iter
+    (fun file -> File_system.write (Filename.concat root (file.name ^ ".truss")) file.text)
+    files
+
+let database root =
+  match Database.take_snapshot root with
+  | Ok (snapshot, _) -> Database.pipeline snapshot
+  | Error message -> failwith message
+
+let checked_and_reopened root =
+  Pipeline.check (database root) [ example.package ];
+  Database.flush ()
+
+let reopening root =
+  match random 8 with
+  | 0 | 1 -> Some ("commit and reopen", Database.flush)
+  | 2 ->
+      Some
+        ( "stop a commit before its rename",
+          fun () -> Database.For_testing.interrupt_commit (Unix.realpath root) )
+  | _ -> None
 
 let () =
   let seed = ref (int_of_float (Unix.time ())) in
@@ -252,7 +274,7 @@ let () =
     ]
     (fun path -> paths := path :: !paths)
     usage;
-  Random.init !seed;
+  generator := Random.State.make [| !seed |];
   let paths =
     match List.rev !paths with
     | [] ->
@@ -272,11 +294,19 @@ let () =
       paths
   in
   Printf.printf "seed %d, %d files, %d edits\n%!" !seed (List.length files) !count;
-  let hot = ref (built files) and current = ref files in
+  let root = Filename.temp_dir "database-fuzz" "" in
+  at_exit (fun () -> try File_system.remove root with Sys_error _ | Unix.Unix_error _ -> ());
+  write_project root files;
+  Pipeline.propagate (database root);
+  let current = ref files in
   let failures = ref 0 and skipped = ref 0 in
   let report step (edit : edit) problem =
     incr failures;
     Printf.printf "seed %d, edit %d (%s): %s\n%!" !seed step edit.description problem
+  in
+  let start_over () =
+    Database.flush ();
+    File_system.remove (Filename.concat root ".truss")
   in
   for step = 1 to !count do
     match
@@ -286,31 +316,43 @@ let () =
     | None -> ()
     | Some edit -> (
         if !verbose then Printf.printf "%d: %s\n%!" step edit.description;
+        write_project root edit.files;
+        if random 4 = 0 then begin
+          if !verbose then Printf.printf "  check, commit and reopen\n%!";
+          ignore (outcome (fun () -> checked_and_reopened root))
+        end;
         let propagated =
           outcome (fun () ->
-              Pipeline.update !hot (changes !current edit.files);
-              Pipeline.propagate !hot)
+              let hot = database root in
+              Pipeline.propagate hot;
+              hot)
         in
         match (propagated, outcome (fun () -> built edit.files)) with
-        | Ok (), Ok cold ->
-            (match Pipeline.For_testing.differences !hot cold with
-            | [] -> ()
+        | Ok hot, Ok cold -> (
+            current := edit.files;
+            match Pipeline.For_testing.differences hot cold with
+            | [] -> (
+                match reopening root with
+                | Some (description, reopen) ->
+                    if !verbose then Printf.printf "  %s\n%!" description;
+                    reopen ()
+                | None -> ())
             | parts ->
                 report step edit
                   ("the propagated database differs from a cold build in "
                   ^ String.concat ", " (List.filteri (fun index _ -> index < 20) parts));
-                hot := cold);
-            current := edit.files
-        | Error failure, Ok cold ->
+                start_over ())
+        | Error failure, Ok _ ->
             report step edit ("propagating it raised " ^ shown_failure failure);
-            hot := cold;
+            start_over ();
             current := edit.files
-        | (Ok () | Error _), Error failure ->
+        | (Ok _ | Error _), Error failure ->
             incr skipped;
             if !verbose then
               Printf.printf "  skipped: a cold build raises %s\n%!" (shown_failure failure);
-            hot := built !current)
+            write_project root !current)
   done;
+  Database.flush ();
   Printf.printf "%d edits, %d skipped because a cold build raises, %d failures\n" !count !skipped
     !failures;
   exit (if !failures > 0 then 1 else 0)

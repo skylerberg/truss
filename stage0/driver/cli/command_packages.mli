@@ -2,6 +2,7 @@ val manifest_name : string
 val write_file : string -> string -> unit
 val load : string -> Database.snapshot * Path.package list
 val current : unit -> Database.snapshot * Path.package list
+val retake : Database.snapshot -> Database.snapshot
 val worktree : unit -> Database.snapshot * Path.package list
 val one : Path.package list -> Path.package
 val directory : Database.snapshot -> Path.package -> string
