@@ -833,9 +833,16 @@ let close_all () =
       close database)
     (Hashtbl.fold (fun _ database databases -> database :: databases) databases [])
 
-let flush () =
-  if !is_serving then Hashtbl.iter (fun _ database -> commit database) databases else close_all ();
+let save () =
+  Hashtbl.iter (fun _ database -> commit database) databases;
   flush_store ()
+
+let flush () =
+  if !is_serving then save ()
+  else begin
+    close_all ();
+    flush_store ()
+  end
 
 let serve ~key ~handle =
   is_serving := true;
@@ -868,6 +875,7 @@ module For_testing = struct
   let cold_pipeline = cold_pipeline ~checks:true
   let collect_store = collect
   let listen = Server.listen
+  let save = save
 
   let interrupt_commit root =
     match Hashtbl.find_opt databases root with

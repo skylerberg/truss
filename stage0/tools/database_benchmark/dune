@@ -1,0 +1,13 @@
+(executable
+ (name database_benchmark)
+ (libraries
+  cli
+  compile
+  database
+  diagnostic
+  file_system
+  path
+  pipeline
+  process
+  resolve
+  unix))

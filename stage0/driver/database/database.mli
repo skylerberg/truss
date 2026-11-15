@@ -59,5 +59,6 @@ module For_testing : sig
   val cold_pipeline : snapshot -> Pipeline.t
   val collect_store : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
+  val save : unit -> unit
   val interrupt_commit : string -> unit
 end
