@@ -1,0 +1,13 @@
+capability Tally {
+  fn add(amount: Int64 = 5)
+}
+
+type Counter(sum: Int64, step: Int64 = 2)
+
+fn Counter.advance(mut self, times: Int64 = 3) {
+  self.sum += self.step * times
+}
+
+fn g() -> Counter {
+  Counter(sum: 1)
+}

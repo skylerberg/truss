@@ -1,0 +1,7 @@
+fn g(low: Int64, high: Int64) -> Int64 {
+  if low < high && high < 10 {
+    low
+  } else {
+    high
+  }
+}

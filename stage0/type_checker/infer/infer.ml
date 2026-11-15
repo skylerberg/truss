@@ -33,23 +33,39 @@ let core =
       Option.bind (Query.demand database type_check_result key) (fun (result : type_check_result) ->
           result.core))
 
+type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key
+
+let form_origin =
+  Query.query ~name:"form_origin" ~phase:Phases.bodies ~show:Path.show
+    (fun database (path : Path.t) ->
+      let checked path =
+        Option.bind (Query.demand database Interface.Summary.key path) (fun key ->
+            Option.map (fun _ -> key) (Query.demand database core key))
+      in
+      match (checked path, path) with
+      | Some key, _ -> Some (Written key, [])
+      | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
+          match Query.demand database derived path with
+          | Some _ -> Some (Generated, [])
+          | None ->
+              Option.bind (Interface.Impls.impl_interface database owner)
+                (fun (impl : Types.impl_interface) ->
+                  Option.bind (Interface.Impls.trait_substitution database owner)
+                    (fun substitution ->
+                      Option.map
+                        (fun key -> (Inherited key, substitution))
+                        (checked (Method { owner = impl.implements.trait; name; receiver })))))
+      | None, _ -> None)
+
+(* The form of the function or method at a path, as [written] gives the form
+   of a definition. *)
 let of_path ~written database (path : Path.t) =
-  let written path =
-    Option.bind (Query.demand database Interface.Summary.key path) (Query.demand database written)
-  in
-  match (written path, path) with
-  | Some form, _ -> Some (form, [])
-  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-      match Query.demand database derived path with
-      | Some form -> Some (form, [])
-      | None ->
-          Option.bind (Interface.Impls.impl_interface database owner)
-            (fun (impl : Types.impl_interface) ->
-              Option.bind (Interface.Impls.trait_substitution database owner) (fun substitution ->
-                  Option.map
-                    (fun form -> (form, substitution))
-                    (written (Method { owner = impl.implements.trait; name; receiver })))))
-  | None, _ -> None
+  Option.bind (Query.demand database form_origin path) (fun (origin, substitution) ->
+      Option.map
+        (fun form -> (form, substitution))
+        (match origin with
+        | Written key | Inherited key -> Query.demand database written key
+        | Generated -> Query.demand database derived path))
 
 let core_of_path =
   Query.query ~name:"core_of_path" ~phase:Phases.bodies ~show:Path.show (of_path ~written:core)

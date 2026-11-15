@@ -1,0 +1,22 @@
+trait Shape {
+  fn side(self) -> Int64
+
+  fn doubled(self) -> Int64 {
+    self.side() + self.side()
+  }
+}
+
+fn g(items: Slice[Int64]) -> Int64 {
+  var total: Int64 = 0
+  var index: USize = 0
+  while index < items.length()
+    invariant index <= items.length()
+  {
+    proof {
+      assert index < items.length()
+    }
+    total = total.saturating_add(items[index])
+    index += 1
+  }
+  total
+}

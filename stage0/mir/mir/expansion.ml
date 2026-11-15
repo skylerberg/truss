@@ -1,0 +1,348 @@
+open Tree
+
+let bug format = Compiler_bug.bug ~stage:"MIR" format
+
+type jump_targets = {
+  break_ : Graph.block option;
+  continue_ : Graph.terminator option;
+  task_ends : (Core.task * Graph.block) list;
+}
+
+let expanded_body (body : body) : Graph.body =
+  let blocks : Graph.basic_block Dynarray.t = Dynarray.create () in
+  let fresh () =
+    Dynarray.add_last blocks
+      { statements = []; terminator = Unreachable; terminator_origin = 0; inlined = [] };
+    Dynarray.length blocks - 1
+  in
+  let made_since first = List.init (Dynarray.length blocks - first) (fun index -> first + index) in
+  let close (index, emitted) terminator origin =
+    Dynarray.set blocks index
+      {
+        (Dynarray.get blocks index) with
+        statements = List.rev emitted;
+        terminator;
+        terminator_origin = origin;
+      }
+  in
+  let assigned target value origin : statement =
+    { kind = Assign { target; value = Operand value; node = None }; origin }
+  in
+  let whole_local : operand -> local option = function
+    | Use { place = { root = Local local; projections = [] }; _ } -> Some local
+    | Use _ | Borrow _ | Take _ | Constant _ -> None
+  in
+  let assigns (statement : statement) =
+    match statement.kind with
+    | Assign { target = { root = Local local; projections = [] }; _ } -> Some local
+    | _ -> None
+  in
+  let deciding (statements : statement list) (value : operand) =
+    match List.rev statements with
+    | ({ kind = Assign { value = Connective _ | Not _; _ }; _ } as last) :: before
+      when Option.is_some (whole_local value) && assigns last = whole_local value ->
+        Some (List.rev before, last)
+    | _ -> None
+  in
+  let rec emit targets current (undecided : statement list) (statements : statement list) =
+    let decided () = with_values targets current undecided in
+    let reads_undecided (operand : operand) =
+      match List.rev undecided with
+      | last :: _ -> Option.is_some (whole_local operand) && assigns last = whole_local operand
+      | [] -> false
+    in
+    match statements with
+    | [] -> Some (current, undecided)
+    | statement :: rest -> (
+        let origin = statement.origin in
+        let go_on current = emit targets (current, []) [] rest in
+        match statement.kind with
+        | Assign
+            { target = { root = Local _; projections = [] }; value = Connective { left; _ }; _ } ->
+            if reads_undecided left then emit targets current (undecided @ [ statement ]) rest
+            else emit targets (decided ()) [ statement ] rest
+        | Assign { target = { root = Local _; projections = [] }; value = Not negated; _ }
+          when reads_undecided negated ->
+            emit targets current (undecided @ [ statement ]) rest
+        | Assign { target; value = Conditional { condition; then_; else_; _ }; _ } ->
+            let yes = fresh () and no = fresh () and joined = fresh () in
+            if reads_undecided condition then
+              branch targets current undecided (Some condition) ~yes ~no origin
+            else branch targets (decided ()) [] (Some condition) ~yes ~no origin;
+            let reaches_then = arm targets yes then_ ~target ~joined origin in
+            let reaches_else = arm targets no else_ ~target ~joined origin in
+            if reaches_then || reaches_else then go_on joined else None
+        | Assign { target; value = Cases cases; _ } ->
+            let joined = fresh () in
+            let unmatched, reaches =
+              List.fold_left
+                (fun (current, reaches) (case : case) ->
+                  let matched = fresh () and next = fresh () in
+                  branch targets current case.tests.statements case.tests.value ~yes:matched
+                    ~no:next origin;
+                  let reaches_value =
+                    match case.guard with
+                    | None -> arm targets matched case.value ~target ~joined origin
+                    | Some guard ->
+                        let passed = fresh () in
+                        branch targets (matched, []) guard.statements guard.value ~yes:passed
+                          ~no:next origin;
+                        arm targets passed case.value ~target ~joined origin
+                  in
+                  ((next, []), reaches || reaches_value))
+                (decided (), false)
+                cases
+            in
+            close unmatched Unreachable origin;
+            if reaches then go_on joined else None
+        | Assert { condition; bit_vector = Some { names; code } } ->
+            let index, emitted = block targets (decided ()) code.statements in
+            let assert_ =
+              Assert
+                { condition; bit_vector = Some { names; code = { code with statements = [] } } }
+            in
+            emit targets (index, { statement with kind = assert_ } :: emitted) [] rest
+        | While { condition; body; failed; _ } ->
+            let header = fresh () and inside = fresh () and failing = fresh () in
+            let after = fresh () in
+            close (decided ()) (Goto header) origin;
+            branch targets (header, []) condition.statements condition.value ~yes:inside ~no:failing
+              origin;
+            let in_loop = { targets with break_ = Some after; continue_ = Some (Goto header) } in
+            (match emit in_loop (inside, []) [] body.statements with
+            | Some (current, undecided) ->
+                close (with_values in_loop current undecided) (Goto header) origin
+            | None -> ());
+            close (block targets (failing, []) failed) (Goto after) origin;
+            go_on after
+        | For { loop; iteration; part; lent; binding_count; body } ->
+            let index, emitted =
+              match lent with
+              | Some lent -> block targets (decided ()) lent.count.statements
+              | None -> decided ()
+            in
+            let after = fresh () in
+            let inside = fresh () in
+            let first = Dynarray.length blocks in
+            let in_loop =
+              {
+                targets with
+                break_ = Some after;
+                continue_ = Some (Iteration_end { loop = index });
+              }
+            in
+            (match emit in_loop (inside, []) [] body.statements with
+            | Some (current, undecided) ->
+                close
+                  (with_values in_loop current undecided)
+                  (Iteration_end { loop = index })
+                  origin
+            | None -> ());
+            close (index, emitted)
+              (For
+                 {
+                   iteration;
+                   part;
+                   lent =
+                     Option.map
+                       (fun (lent : lent_element) ->
+                         { lent with count = { lent.count with statements = [] } })
+                       lent;
+                   body = inside;
+                   binding_count;
+                   blocks = inside :: made_since first;
+                   after;
+                   loop;
+                 })
+              origin;
+            go_on after
+        | Fork { fork; concurrent; branches } ->
+            let current = decided () in
+            let join = fresh () in
+            let entries = List.map (fun _ -> fresh ()) branches in
+            let branches =
+              List.mapi
+                (fun index (branch : block) ->
+                  let entry = List.nth entries index in
+                  let next =
+                    if index + 1 = List.length entries then join else List.nth entries (index + 1)
+                  in
+                  let first = Dynarray.length blocks in
+                  let branch_end = if concurrent then Some (fresh ()) else None in
+                  let in_branch =
+                    match branch_end with
+                    | Some branch_end ->
+                        {
+                          targets with
+                          task_ends =
+                            (Core.Branch { block = fork; index }, branch_end) :: targets.task_ends;
+                        }
+                    | None -> targets
+                  in
+                  let ended =
+                    Option.map
+                      (fun (current, undecided) -> with_values in_branch current undecided)
+                      (emit in_branch (entry, []) [] branch.statements)
+                  in
+                  (match branch_end with
+                  | Some branch_end ->
+                      Option.iter (fun ended -> close ended (Goto branch_end) origin) ended;
+                      close (branch_end, []) (Join { fork; next }) origin
+                  | None ->
+                      Option.iter (fun ended -> close ended (Join { fork; next }) origin) ended);
+                  { Graph.entry; blocks = entry :: made_since first })
+                branches
+            in
+            close current (Fork { fork; concurrent; branches; join = Some join }) origin;
+            go_on join
+        | Resume { winner; exits } ->
+            let current = decided () in
+            let next = fresh () in
+            let exits =
+              List.map
+                (fun (exit : early_exit) ->
+                  let entry = fresh () in
+                  (match emit targets (entry, []) [] exit.resumed.statements with
+                  | Some (current, undecided) ->
+                      close (with_values targets current undecided) (Goto next) origin
+                  | None -> ());
+                  { Graph.resume = entry; returned = exit.returned })
+                exits
+            in
+            close current (Resume { winner; exits; next }) origin;
+            go_on next
+        | Yield { mode; part } ->
+            let resume = fresh () in
+            close (decided ()) (Yield { mode; part; resume }) origin;
+            go_on resume
+        | Jump jump ->
+            let terminator : Graph.terminator =
+              match jump with
+              | Return returned -> Return returned
+              | Break -> (
+                  match targets.break_ with
+                  | Some after -> Goto after
+                  | None -> bug "a `break` outside a loop")
+              | Continue -> (
+                  match targets.continue_ with
+                  | Some continue_ -> continue_
+                  | None -> bug "a `continue` outside a loop")
+              | Cancel { task; winner; number; returned } ->
+                  Cancel
+                    {
+                      task;
+                      task_end = List.assoc_opt task targets.task_ends;
+                      winner;
+                      number;
+                      returned;
+                    }
+              | Unreachable -> Unreachable
+              | Written_unreachable -> Written_unreachable
+              | Todo -> Todo
+            in
+            close (decided ()) terminator origin;
+            None
+        | _ ->
+            let index, emitted = decided () in
+            emit targets (index, statement :: emitted) [] rest)
+  and block targets current (statements : statement list) =
+    match emit targets current [] statements with
+    | Some (current, undecided) -> with_values targets current undecided
+    | None -> bug "statements that control leaves, where it goes on after them"
+  and branch targets current (statements : statement list) (value : operand option) ~yes ~no origin
+      =
+    match value with
+    | None -> (
+        match emit targets current [] statements with
+        | None -> ()
+        | Some _ -> bug "statements with no value, whose end control reaches")
+    | Some value -> (
+        match deciding statements value with
+        | Some (before, { kind = Assign { value = Connective { connective; left; right }; _ }; _ })
+          ->
+            let evaluated = fresh () in
+            (match connective with
+            | And -> branch targets current before (Some left) ~yes:evaluated ~no origin
+            | Or -> branch targets current before (Some left) ~yes ~no:evaluated origin
+            | Implies -> branch targets current before (Some left) ~yes:evaluated ~no:yes origin);
+            branch targets (evaluated, []) right.statements right.value ~yes ~no origin
+        | Some (before, { kind = Assign { value = Not negated; _ }; _ }) ->
+            branch targets current before (Some negated) ~yes:no ~no:yes origin
+        | Some _ | None -> (
+            let current = block targets current statements in
+            match value with
+            | Constant { value = Boolean true; _ } -> close current (Goto yes) origin
+            | Constant { value = Boolean false; _ } -> close current (Goto no) origin
+            | _ ->
+                close current
+                  (Branch { condition = value; yes; no; is_if_condition = false })
+                  origin))
+  and with_values targets current (undecided : statement list) =
+    match List.rev undecided with
+    | [] -> current
+    | ({ kind = Assign { target; value = Connective { connective; left; right }; _ }; _ } as last)
+      :: before ->
+        let origin = last.origin in
+        let evaluated = fresh () and decided = fresh () and joined = fresh () in
+        let yes, no =
+          match connective with And | Implies -> (evaluated, decided) | Or -> (decided, evaluated)
+        in
+        branch targets current (List.rev before) (Some left) ~yes ~no origin;
+        ignore (arm targets evaluated right ~target ~joined origin);
+        close
+          ( decided,
+            [
+              assigned target
+                (Constant { value = Boolean (connective <> And); type_ = Types.bool })
+                origin;
+            ] )
+          (Goto joined) origin;
+        (joined, [])
+    | last :: before ->
+        let index, emitted = with_values targets current (List.rev before) in
+        (index, last :: emitted)
+  and arm targets entry (block : block) ~target ~joined origin =
+    match (emit targets (entry, []) [] block.statements, block.value) with
+    | Some (current, undecided), Some value ->
+        let index, emitted = with_values targets current undecided in
+        close (index, assigned target value origin :: emitted) (Goto joined) origin;
+        true
+    | None, None -> false
+    | Some _, None | None, Some _ -> bug "a block whose value and whose end disagree"
+  in
+  let entry = fresh () in
+  (match
+     emit { break_ = None; continue_ = None; task_ends = [] } (entry, []) [] body.code.statements
+   with
+  | None -> ()
+  | Some _ -> bug "a body whose end control reaches");
+  {
+    parameters = body.parameters;
+    captures = body.captures;
+    locals = body.locals;
+    blocks = Graph.canonical (Dynarray.to_array blocks);
+  }
+
+let expanded (code : t) : Graph.t =
+  { body = expanded_body code.body; lambdas = Array.map expanded_body code.lambdas }
+
+let code_of_formula (formula : formula) : Graph.t =
+  expanded
+    {
+      body =
+        {
+          parameters = formula.parameters;
+          captures = [];
+          locals = formula.locals;
+          is_functional = false;
+          value_type = None;
+          code =
+            {
+              statements =
+                formula.value.statements
+                @ [ { kind = Jump (Return formula.value.value); origin = formula.origin } ];
+              value = None;
+            };
+        };
+      lambdas = formula.lambdas;
+    }

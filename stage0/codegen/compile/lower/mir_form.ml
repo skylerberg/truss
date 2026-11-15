@@ -20,13 +20,17 @@ open Emit_c.Builder
 let mir st =
   match st.frame.mir with Some mir -> mir | None -> bug "MIR lowering outside a MIR frame"
 
-let mir_of context path : Mir.t =
-  match demand context Mir.of_path path with
-  | Some (mir, _) -> mir
+let mir_of context path : Mir.Graph.t =
+  match demand context Mir.graph_of_path path with
+  | Some mir -> mir
   | None -> bug "%s has no MIR" (Path.show path)
 
-(* A parameter's mode, name, and type, from its local. *)
-let parameter_of (body : Mir.body) local =
+let parameter_defaults context path : (int * Mir.Graph.t) list =
+  match demand context Mir.default_graphs_of_path path with
+  | Some (Parameter_defaults defaults) -> defaults
+  | Some (Field_defaults _) | None -> bug "%s is not a function" (Path.show path)
+
+let parameter_of (body : Mir.Graph.body) local =
   match body.locals.(local) with
   | { kind = Source { mode; name; _ }; type_; _ } -> (mode, Option.value name ~default:"_", type_)
   | _ -> bug "a parameter that is no source local"
@@ -137,7 +141,7 @@ let variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list
   | Scalar _ | Array _ -> bug "the fields of %s, which has none" (Ground.to_string ty)
 
 let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~lambdas
-    (body : Mir.body) : mir_frame =
+    (body : Mir.Graph.body) : mir_frame =
   (* How each parameter is passed, where it is not as its binding says: a
      lambda's parameters are patterns, and its function type says how each
      is passed. *)
@@ -179,7 +183,7 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     provides = [];
     returned =
       Array.fold_left
-        (fun returned (block : Mir.basic_block) ->
+        (fun returned (block : Mir.Graph.basic_block) ->
           match block.terminator with
           | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
             when body.locals.(local).kind = Temporary ->
@@ -282,12 +286,8 @@ let taken st (written : Mir.place) =
   frame.taken <- written :: frame.taken;
   place st written
 
-let operand_types_ty (operand : Mir.operand) =
-  match operand with
-  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_
-
 (* The type an operand's value has in this instance. *)
-let operand_type st operand = ground st (operand_types_ty operand)
+let operand_type st operand = ground st (Mir.operand_type operand)
 
 let constant st ty (value : Mir.constant) : Lowered.operand =
   match value with
@@ -367,8 +367,8 @@ type entry = {
 type region = {
   region_frame : frame;
   region_body : mir_frame;
-  lowered : (Mir.block, Lowered.block) Hashtbl.t;
-  mutable pending : (Mir.block * Lowered.block * entry) list;
+  lowered : (Mir.Graph.block, Lowered.block) Hashtbl.t;
+  mutable pending : (Mir.Graph.block * Lowered.block * entry) list;
       (** The blocks reached and not yet lowered. The region lowers the first of them in the MIR's
           order, which is reverse postorder, so that every block is lowered after the blocks that
           jump to it, other than by a loop's back edge. A block's code can then read what an earlier
@@ -377,8 +377,8 @@ type region = {
   start : entry;  (** The state the region's code starts in *)
   enclosing : region option;
   ending : (int * Lowered.block) option;
-      (** For a branch of a [concurrent] block: the block's fork, and the block its {!Mir.Join} goes
-          to *)
+      (** For a branch of a [concurrent] block: the block's fork, and the block its
+          {!Mir.Graph.Join} goes to *)
 }
 
 let save (st : state) = { evidence = st.evidence; provides = (mir st).provides }
@@ -630,6 +630,11 @@ let inlinable st (callee : Mir.callee) : Instance_mir.callee option =
               path;
               type_arguments = List.map Monomorphic.back_argument type_arguments;
               mir = Instance_mir.substituted code.substitution (mir_of st.context path);
+              defaults =
+                List.map
+                  (fun (position, default) ->
+                    (position, Instance_mir.substituted code.substitution default))
+                  (parameter_defaults st.context path);
             }
       | Returns _ -> None)
   | None -> None
@@ -786,19 +791,22 @@ let intrinsic st (operation : Intrinsic.operation) ~type_arguments (arguments : 
       Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.builder
         st.context.types operation ~type_arguments arguments ~destination ~site
 
-(* The default of a field, from the core form of the type's definition. *)
-let field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
+(* The default of a field of a type: its type, and the graph of its value. *)
+let field_default st (ty : Ground.ty) ~variant ~field : Types.ty * Mir.Graph.t =
   let path =
     match ty with Named { path; _ } -> path | _ -> bug "defaults of %s" (Ground.to_string ty)
   in
-  match demand st.context Infer.core_of_path path with
-  | Some ({ definition = Type { defaults; _ }; _ }, _) -> (
+  match demand st.context Mir.default_graphs_of_path path with
+  | Some (Field_defaults defaults) -> (
       match
-        List.find_opt (fun (of_variant, name, _) -> of_variant = variant && name = field) defaults
+        List.find_opt
+          (fun (default : Mir.Graph.t Mir.field_default) ->
+            default.variant = variant && default.field = field)
+          defaults
       with
-      | Some (_, _, default) -> default
+      | Some default -> (default.type_, default.value)
       | None -> bug "%s has no default for %s" (Path.show path) field)
-  | _ -> bug "%s has no core form" (Path.show path)
+  | Some (Parameter_defaults _) | None -> bug "%s is not a type" (Path.show path)
 
 (* Tasks *)
 
@@ -1088,7 +1096,7 @@ let make_owned_locals st =
   let frame = mir st in
   let parts =
     Array.fold_left
-      (fun parts (block : Mir.basic_block) ->
+      (fun parts (block : Mir.Graph.basic_block) ->
         match block.terminator with For { part; _ } -> part :: parts | _ -> parts)
       [] frame.body.blocks
   in
@@ -1162,14 +1170,14 @@ and lower_from st region block index =
 (* A [concurrent] block. Each branch is a task, an outlined function, and
    the code after them spawns each as a task of one group. The block's end
    follows, if a branch reaches it. *)
-and concurrent_block st region ~fork ~(branches : Mir.branch list) ~join =
+and concurrent_block st region ~fork ~(branches : Mir.Graph.branch list) ~join =
   let function_type = task_function_type st in
   let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
   emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
   with_group st (fun group ->
       let functions =
         List.mapi
-          (fun index (branch : Mir.branch) ->
+          (fun index (branch : Mir.Graph.branch) ->
             task_body st
               ~id:(Branch { block = fork; index })
               ~group ~parts:[ item ]
@@ -1241,6 +1249,8 @@ and lower_statement st (statement : Mir.statement) =
           st.evidence <- enclosing;
           frame.provides <- rest
       | [] -> bug "the end of a provide that did not start")
+  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+      bug "a statement that holds blocks or jumps, in a graph"
 
 (* Lowers the ends of scopes that a task's early exit leaves, once the task
    has ended. *)
@@ -1316,8 +1326,7 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   | { root = Local part; projections = [] }, (Construct _ | Operand (Borrow _))
     when Moves.built_values frame.moves part <> None ->
       build_part st part value
-  | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ })
-    when Moves.places_given frame.moves local > 0 ->
+  | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ }) ->
       alias st local (place st source) ~writable:(mode = Mut)
   | _ -> (
       let ty = target_type st target value in
@@ -1406,11 +1415,13 @@ and reads (value : Mir.rvalue) local =
   | Construct { fields; _ } ->
       List.exists (fun (_, field) -> Option.fold ~none:false ~some:in_operand field) fields
   | Is_variant { place; _ } -> in_place place
-  | Function_value _ | Lambda _ | Value_parameter _ -> false
+  | Function_value _ | Lambda _ | Value_parameter _ | Conditional _ | Cases _ | Connective _
+  | Specification _ ->
+      false
 
 and alias st local (source : Lowered.place) ~writable =
   let ty = ground st (info st local).type_ in
-  if Moves.places_given (mir st).moves local > 1 then begin
+  if (info st local).has_several_bindings then begin
     let frame = mir st in
     let pointer =
       match Hashtbl.find_opt frame.places local with
@@ -1474,20 +1485,20 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
           emit st.builder (Assign (destination / Index (usize index), Use (value st element))))
         elements
   | Is_variant { place = tested; variant } -> assign (Is_variant (place st tested, variant))
-  | Convert { conversion = Widen; value = inner } ->
+  | Convert { conversion = Widen; value = inner; _ } ->
       (* A function value has the same representation at a wider type. *)
       write_operand st inner destination
   | Convert { conversion = To_integer | From_integer; _ } ->
       bug "a conversion that exists only in specifications"
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
-        resolve_impl st ~trait ~self_type:(operand_types_ty inner) ~evidence
+        resolve_impl st ~trait ~self_type:(Mir.operand_type inner) ~evidence
       in
       any_into st ~any_ty:ty ~inner_ty:(operand_type st inner) ~impl ~type_arguments
         ~value:(operand_place st inner) destination
   | Copy source ->
       Glue.copy_into st.context.glue st.builder ~destination ~source:(operand_place st source) ty
-  | Function_value { path; type_arguments } -> (
+  | Function_value { path; type_arguments; _ } -> (
       (* A named function as a value: an adapter that takes an environment
          and ignores it. *)
       match ty with
@@ -1538,29 +1549,21 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
             lambda.parameters parameter_places;
           lower_body inner (Option.get inner.frame.mir))
         destination
+  | Conditional _ | Cases _ | Connective _ ->
+      bug "a value that chooses between blocks, in a control-flow graph"
+  | Specification _ -> bug "a specification's expression in code that runs"
 
 (* A field's default value and its type, evaluated in the type's
    definition, where the default is written. *)
 and field_default_place st ty ~variant ~field =
-  let default = field_default st ty ~variant ~field in
+  let type_, value = field_default st ty ~variant ~field in
   in_type_definition st ty (fun () ->
-      let default_ty = ground st default.type_ in
+      let default_ty = ground st type_ in
       let place = temporary st default_ty in
-      expression_into st default place;
+      mir_into st value place;
       (place, default_ty))
 
-(* Evaluates a core expression that runs on its own, such as a default, and
-   writes its value to [destination], from the expression's MIR. [arguments]
-   are the parameters it reads, with their places. *)
-and expression_into ?(arguments = []) st (expression : Core.expression)
-    (destination : Lowered.place) =
-  mir_into st
-    (Mir.of_expression ~parameters:(List.map fst arguments) expression)
-    ~arguments:(List.map snd arguments) destination
-
-(* Lowers the MIR of one expression, with its parameters bound to
-   [arguments], into [destination]. *)
-and mir_into ?(arguments = []) st (expression_mir : Mir.t) (destination : Lowered.place) =
+and mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destination : Lowered.place) =
   let expression_mir =
     Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined expression_mir
   in
@@ -1677,12 +1680,7 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
           | None -> bug "%s has no method %s" (Path.show capability) name)
       | None -> bug "no interface for %s" (Path.show capability)
     in
-    let path : Path.t = Method { owner = capability; name; receiver } in
-    let parameters =
-      match demand st.context Infer.core_of_path path with
-      | Some ({ definition = Function { parameters; _ }; _ }, _) -> parameters
-      | _ -> bug "%s has no core form" (Path.show path)
-    in
+    let defaults = parameter_defaults st.context (Method { owner = capability; name; receiver }) in
     let key = key_of st.context capability in
     let caller = st.frame in
     st.frame <-
@@ -1699,16 +1697,17 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
           };
         self_place = None;
       };
-    List.iter2
-      (fun (parameter : Core.parameter) ((argument : Mir.argument), (_, ty, place)) ->
-        match (argument, parameter.default) with
+    List.iteri
+      (fun position ((argument : Mir.argument), (_, ty, place)) ->
+        match (argument, List.assoc_opt position defaults) with
         | Default, Some default ->
-            expression_into st default place;
+            mir_into st default place;
             if not (trivial st ty) then
               (innermost_scope st).owned <- Drop_value place :: (innermost_scope st).owned
-        | Default, None -> bug "%s is omitted and has no default" parameter.name
+        | Default, None ->
+            bug "the argument at position %d of `%s.%s` is omitted and has no default" position
+              (Path.show capability) name
         | Passed _, _ -> ())
-      parameters
       (List.combine arguments evaluated);
     st.frame <- caller
   end
@@ -1728,30 +1727,16 @@ and holds_invariant st ~value ~clause ~destination =
     | ty -> bug "holds_invariant of %s, which has no invariant" (Ground.to_string ty)
   in
   let invariant =
-    match demand st.context Infer.core_of_path path with
-    | Some ({ definition = Type { invariants; _ }; _ }, _) -> (
-        match List.nth_opt invariants index with
-        | Some (invariant : Core.condition) when invariant.executable -> invariant.value
-        | _ -> bug "%s has no clause %d that runs" (Path.show path) index)
-    | _ -> bug "%s has no invariant" (Path.show path)
-  in
-  let generics =
-    match demand st.context Environment.type_interface path with
-    | Some interface -> interface.type_generics
-    | None -> bug "no interface for %s" (Path.show path)
-  in
-  let self : Core.parameter =
-    {
-      local = Self;
-      name = "self";
-      mode = Read;
-      type_ = Types.Named { path; arguments = Types.generic_arguments generics };
-      default = None;
-      callback_contract = None;
-    }
+    match
+      Option.bind (demand st.context Mir.type_clauses_of_path path)
+        (fun (clauses : Mir.type_clauses) -> List.nth_opt clauses.invariants index)
+    with
+    | Some { clause; is_executable = true; _ } -> Mir.code_of_formula clause
+    | Some { is_executable = false; _ } | None ->
+        bug "%s has no clause %d that runs" (Path.show path) index
   in
   in_type_definition st value_ty (fun () ->
-      expression_into ~arguments:[ (self, value_place) ] st invariant destination)
+      mir_into ~arguments:[ value_place ] st invariant destination)
 
 and lend st part (call : Mir.call) ~origin =
   match call.callee with
@@ -1772,18 +1757,13 @@ and lend st part (call : Mir.call) ~origin =
           unsupported ~at:(site_of st origin) "a lending method that calls itself"
       | _ -> bug "a lending call that is not inlined")
 
-and terminator st region (ending : Mir.terminator) ~origin =
+and terminator st region (ending : Mir.Graph.terminator) ~origin =
   match ending with
   | Goto target -> goto st region target
   | Branch { condition; yes; no; _ } ->
       let condition = in_statement st (fun () -> value st condition) in
       let yes = jump st region yes and no = jump st region no in
       Emit_c.Builder.branch st.builder condition ~yes ~no;
-      start st.builder (block st.builder)
-  | Switch_variant { place = tested; cases } ->
-      let tested = place st tested in
-      let cases = List.map (fun (variant, target) -> (variant, jump st region target)) cases in
-      finish st.builder (Switch_variant { place = tested; cases; default = None });
       start st.builder (block st.builder)
   | Unreachable | Written_unreachable -> unreachable_block st
   | Todo ->
@@ -1837,7 +1817,8 @@ and terminator st region (ending : Mir.terminator) ~origin =
       (* The group has ended: the exit that won goes on. *)
       let cases =
         List.mapi
-          (fun index (exit : Mir.early_exit) -> (Z.of_int (index + 1), jump st region exit.resume))
+          (fun index (exit : Mir.Graph.early_exit) ->
+            (Z.of_int (index + 1), jump st region exit.resume))
           exits
       in
       finish st.builder
@@ -1858,7 +1839,7 @@ and terminator st region (ending : Mir.terminator) ~origin =
       | _ -> (
           let forked =
             List.map
-              (fun (branch : Mir.branch) ->
+              (fun (branch : Mir.Graph.branch) ->
                 outlined st ~parts:[] (fun () ->
                     let end_block = block st.builder in
                     run_region st
@@ -2079,13 +2060,14 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
       finish st.builder (Goto test);
       start st.builder after
 
-let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.place list) =
+let fill_defaults st (mask : Lowered.place) (body : Mir.Graph.body)
+    ~(defaults : (int * Mir.Graph.t) list) (places : Lowered.place list) =
   let builder = st.builder in
   let bit = ref (-1) in
-  List.map2
-    (fun parameter arrived ->
+  List.mapi
+    (fun position (parameter, arrived) ->
       let mode, name, type_ = parameter_of body parameter in
-      match List.assoc_opt parameter body.defaults with
+      match List.assoc_opt position defaults with
       | None -> arrived
       | Some default ->
           incr bit;
@@ -2142,7 +2124,7 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.body) (places : Lowered.
           finish builder (Goto after);
           start builder after;
           place)
-    body.parameters places
+    (List.combine body.parameters places)
 
 (* Lowers the MIR of the code at [path] in the current frame, with its
    parameters in [parameters], in order. *)

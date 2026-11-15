@@ -106,6 +106,54 @@ develop as well as make it easier to bootstrap the compiler in parts.
   a string's text that would become an escape or an interpolation; the
   habit that offers the fix must withhold it.
 
+### Stages
+
+- **Every stage after the type checker reads the MIR.** Ownership, the
+  prover, and code generation read no core expression.
+- **The MIR is a tree, and the builder lowers each expression once.** A
+  body's code is a block: statements, and the block's value where control
+  reaches its end. An `if` is one `Conditional`, a `match` its `Cases`, and
+  a short-circuit operator one `Connective`, each with its operands as
+  blocks. A loop is one statement that holds its body. A `return`, a
+  `break`, and a `continue` are each a `Jump`, the last statement of its
+  block. A clause that can run is one formula. A quantifier that runs is
+  its loop, whose body holds the quantifier's body.
+- **`Mir.graph` derives the control-flow graph.** Ownership and code
+  generation read it, a `Mir.Graph.t`: blocks and terminators. It is
+  derived once for a definition, a default, and a constant. No stage
+  builds a graph but the expansion, and no stage finds a loop in a
+  graph. Where a `Connective` or its negation decides a branch, control
+  goes straight to the branch's target, so a name that `is` binds is read
+  only where it is bound.
+- **The prover reads the tree by structural recursion.** The frame after
+  an `if` is the merge of the frames after its two blocks, under the
+  `if`'s condition and its negation. A jump takes its frame to the loop or
+  the return that it leaves by, so paths are joined only there: after a
+  loop, at the end of a branch of tasks, and where a body returns.
+- **No stage rebuilds what an earlier stage had.** The builder records a
+  fact where it has it: a loop's condition and body, a loop's collection,
+  the operands of a loop's comparison, the function reference or the
+  lambda expression that an argument is. A stage that needs a value in
+  another state runs the MIR's statements in that state.
+- **What a path knows is in the path's frame.** In the prover, the place
+  of a `mut` binding, the collection of a local's slice, and the
+  write-back of a part lent `mut` are merged with the paths, and a loop's
+  head forgets the slice of a local that the loop assigns. One table for a
+  body gave every path the answer of one path.
+- **The MIR library's modules:** `Tree` holds the types, `Graph` the
+  control-flow graph, `Walk` the readings that every stage makes,
+  `Emitter` the state of a body being built, `Builder` the lowering of the
+  core form, `Expansion` the derivation of the graph, and `Mir` the
+  queries. `Mir` includes `Tree` and `Walk`, and is the one module that
+  other libraries name. The emitter's state is abstract: the lowering
+  changes it through the emitter's operations alone, and passes what a
+  callee needs to know as an argument.
+- **A module of the prover opens only the modules before it:** `State`,
+  `Facts`, `Contracts`, the rules from `Validity` to `Loops`, `Assertions`,
+  `Reader`, and `Translate`. A rule reads a body or a formula through the context, which
+  `Reader` fills, so the one cycle, between a call and a formula that holds
+  calls, is in one place.
+
 ### Documents
 
 Each document has one job, and a fact is stated in one of them:

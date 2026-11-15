@@ -97,7 +97,9 @@ let () =
           (String.split_on_char '\n' c
           |> List.filter (fun line -> String.starts_with ~prefix:"  switch (" line))
       in
-      if branches <> 2 then fail "expected a branch after each field, got %d:\n%s" branches c)
+      (* The last field's comparison is the result, so nothing branches on it. *)
+      if branches <> 1 then
+        fail "expected a branch after each field but the last, got %d:\n%s" branches c)
 
 let () =
   test "negating the least value of a signed type panics, where the checks are on" (fun () ->

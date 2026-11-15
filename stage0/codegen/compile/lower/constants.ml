@@ -152,7 +152,7 @@ let literal st ty (constant : Mir.constant) =
       | _ -> None)
   | Unit -> None
 
-let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_value list) =
+let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.static_value list) =
   let body = mir.body in
   let locals = Hashtbl.create 16 in
   let* () =
@@ -208,7 +208,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
         let* elements = all (List.map operand elements) in
         Some (Lowered.Static_array elements)
     | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
-    | Value_parameter _ ->
+    | Value_parameter _ | Conditional _ | Cases _ | Connective _ | Specification _ ->
         None
   in
   let assign (destination : Mir.place option) value =
@@ -237,7 +237,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
             Some ()
         | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
-        let* callee_mir = demand st.context Mir.of_path path |> Option.map fst in
+        let* callee_mir = demand st.context Mir.graph_of_path path in
         let type_arguments =
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
@@ -247,16 +247,17 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
           enter st.context ~builder:st.builder
             (frame_of (code_of st.context path type_arguments) ~inlined:[])
         in
+        let defaults = Mir_form.parameter_defaults st.context path in
         let* values =
           all
-            (List.map2
-               (fun (argument : Mir.argument) parameter ->
+            (List.mapi
+               (fun position (argument : Mir.argument) ->
                  match argument with
                  | Passed { value; _ } -> operand value
                  | Default ->
-                     let* default = List.assoc_opt parameter callee_mir.body.defaults in
+                     let* default = List.assoc_opt position defaults in
                      fold_body ~depth:(depth - 1) ~steps callee default [])
-               arguments callee_mir.body.parameters)
+               arguments)
         in
         let* value = fold_body ~depth:(depth - 1) ~steps callee callee_mir values in
         assign destination value
@@ -272,6 +273,8 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
         match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
     | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
+    (* A graph holds none of these: they are blocks and terminators. *)
+    | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ -> None
   in
   let rec run block =
     if !steps <= 0 then None
@@ -286,12 +289,6 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
           | Some (Static_scalar (Bool true)) -> run yes
           | Some (Static_scalar (Bool false)) -> run no
           | _ -> None)
-      | Switch_variant { place; cases } -> (
-          match read place with
-          | Some (Static_variant (variant, _)) ->
-              let* target = List.assoc_opt variant cases in
-              run target
-          | _ -> None)
       | Return (Some value) -> operand value
       | Return None
       | For _ | Fork _ | Join _ | Iteration_end _ | Yield _ | Cancel _ | Resume _ | Unreachable
@@ -305,7 +302,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.t) (arguments : Lowered.static_val
 let constant_state context path =
   let key = key_of context path in
   let mir =
-    match demand context Mir.of_constant path with
+    match demand context Mir.graph_of_constant path with
     | Some mir -> mir
     | None -> bug "%s is not a constant" (Path.show path)
   in

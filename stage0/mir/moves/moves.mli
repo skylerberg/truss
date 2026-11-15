@@ -30,7 +30,7 @@ val analyse :
   ?passed:(Mir.local -> Types.mode option) ->
   ?moving:(Types.ty -> bool) ->
   tracks:(path -> bool) ->
-  Mir.body ->
+  Mir.Graph.body ->
   t
 (** The analysis of a body. A local owns its value where it is a temporary or an [own] binding, and
     not a capture or a local that an assignment gives a place; its parameters hold values on entry.
@@ -45,9 +45,6 @@ val owns : t -> Mir.local -> bool
 
 val lent_mut : t -> Mir.local -> bool
 (** Whether a local is another owner's place lent [mut]. *)
-
-val places_given : t -> Mir.local -> int
-(** How many assignments give a local a place, so that it holds no value of its own. *)
 
 val built_values : t -> Mir.local -> Mir.rvalue list option
 (** For a lent local that some assignment constructs around places, the values assigned to it. *)
@@ -65,7 +62,7 @@ val statement_uses : t -> Mir.statement -> use list
 (** The places a statement reads, in evaluation order. A place it gives a value is not among them.
 *)
 
-val terminator_uses : t -> Mir.basic_block -> use list
+val terminator_uses : t -> Mir.Graph.basic_block -> use list
 (** The places a block's terminator reads, in evaluation order. *)
 
 val given_by : Mir.statement -> path list
@@ -76,7 +73,7 @@ val ended_by : Mir.statement -> Mir.local list
 
 type state
 
-val entry : t -> Mir.block -> state
+val entry : t -> Mir.Graph.block -> state
 (** The state where a block starts, which the caller may change. *)
 
 val apply : t -> state -> Mir.statement -> unit
@@ -85,7 +82,7 @@ val apply : t -> state -> Mir.statement -> unit
 val apply_moves : t -> state -> Mir.statement -> unit
 (** Runs a statement's moves alone, which happen before it gives its destination a value. *)
 
-val apply_terminator_moves : t -> state -> Mir.basic_block -> unit
+val apply_terminator_moves : t -> state -> Mir.Graph.basic_block -> unit
 (** Runs the moves a block's terminator makes before it leaves its block. The ends an exit from
     tasks runs are statements of their own, which run where the exit is taken. *)
 
@@ -120,9 +117,9 @@ val changed : t -> before:state -> after:state -> (path * bool) list
 val held_at_entry : t -> path list
 (** The flagged paths that hold a value on entry: the parameters'. *)
 
-val given_on_entry : t -> Mir.block -> path list
+val given_on_entry : t -> Mir.Graph.block -> path list
 
-val live : t -> Mir.body -> drops:bool -> Mir.block -> int -> Mir.local -> bool
+val live : t -> Mir.Graph.body -> drops:bool -> Mir.Graph.block -> int -> Mir.local -> bool
 (** [live analysis body ~drops block index local]: whether [local] is live before position [index]
     of [block], where a later use may read it. Position [i] is before the block's statement [i], the
     count of its statements is before its terminator, and one more is after it. A read, a borrow, or

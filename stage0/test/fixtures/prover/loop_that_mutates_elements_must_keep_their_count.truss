@@ -1,0 +1,21 @@
+type Row(size: USize, value: Int64)
+
+fn Row.count(self) -> USize
+  ensures result == self.size
+  cost time O(1)
+{
+  self.size
+}
+
+fn Row.element(mut self, position: USize) lends mut Int64
+  requires position < self.size
+  cost time O(1)
+{
+  mut self.value
+}
+
+fn reset(row: mut Row) {
+  for value in mut row {
+    value = 0
+  }
+}

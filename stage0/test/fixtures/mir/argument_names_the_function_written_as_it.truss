@@ -1,0 +1,11 @@
+fn apply(transform: fn(Int64) -> Int64, value: Int64) -> Int64 {
+  transform(value)
+}
+
+fn double(value: Int64) -> Int64 {
+  value.wrapping_add(value)
+}
+
+fn g() -> Int64 {
+  apply(double, value: 1).wrapping_add(apply(fn(value) { value.wrapping_add(1) }, value: 2))
+}

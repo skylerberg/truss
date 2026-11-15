@@ -1,16 +1,11 @@
 open Syntax
 module Names = Resolve.Names
 
-type edge =
-  | Calls of Path.t  (** A call, or a function named as a value. *)
-  | Uses_impl of Path.t  (** An [impl] given where a bound or [any] needs one. *)
-
+type edge = Calls of Path.t | Uses_impl of Path.t
 type t = (Path.t * edge list) list
 
 let head_of (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
-(* The traits a trait requires, and itself, so that using an [impl] of
-   [Ordered] also uses one of [Equal]. *)
 let rec traits_with_required database (trait : Path.t) =
   match Query.demand database Interface.Environment.interface trait with
   | Some (Interface.Environment.Trait_interface interface) ->
@@ -20,8 +15,6 @@ let rec traits_with_required database (trait : Path.t) =
            interface.requires
   | _ -> [ trait ]
 
-(* Every [impl] in a package, with its trait, the head of its type, and
-   its methods' paths. *)
 let impls database (modules : Path.module_ list) =
   List.concat_map
     (fun module_ ->
@@ -54,10 +47,6 @@ let package_impls =
   Query.query ~phase:Phases.proofs ~name:"package_impls" ~show:Path.show_package
     (fun database package -> impls database (Query.demand database Packages.modules package))
 
-(* The [impl]s of a package that a value of a type, given where one of
-   these traits is needed, could use. Matched by the type's head, which may
-   find more than the one used, so the graph may have more edges than the
-   program, never fewer. *)
 let impls_for impls traits ty =
   match head_of ty with
   | Some head ->
@@ -67,8 +56,6 @@ let impls_for impls traits ty =
         impls
   | None -> []
 
-(* The [impl]s a call uses: for each of the callee's generic parameters
-   with bounds, the [impl]s of those bounds for the type it is given. *)
 let impls_used database impls (callee : _ Core.target) =
   match callee with
   | Function { path; type_arguments } -> (
@@ -97,8 +84,6 @@ let impls_used database impls (callee : _ Core.target) =
       | None -> [])
   | _ -> []
 
-(* The traits that only the built-in integer types implement, and those
-   types. *)
 let integer_trait owner =
   Well_known.is Fixed_width_integer owner
   || Well_known.is Signed_integer owner
@@ -113,12 +98,10 @@ let dispatched (called : _ Core.target) =
   | Trait_method { evidence = Bound; self_type = Parameter { name = "Self"; _ }; _ } -> true
   | _ -> false
 
-(* The edges of one body: each call, each function named as a value, and
-   each [impl] an [any] value is made with. *)
-let edges database impls (body : Core.block) =
-  let body_edges = ref [] in
-  let add edges = body_edges := List.rev_append edges !body_edges in
-  let callee (called : Core.callee) =
+let edges database impls (code : Mir.t) =
+  let code_edges = ref [] in
+  let add edges = code_edges := List.rev_append edges !code_edges in
+  let callee (called : Mir.callee) =
     match called with
     | Function { path; _ } ->
         add (Calls path :: List.map (fun impl -> Uses_impl impl) (impls_used database impls called))
@@ -141,8 +124,6 @@ let edges database impls (body : Core.block) =
           _;
         }
       when integer_trait owner ->
-        (* [Self] in an integer trait's provided body is a built-in integer
-           type, so the call reaches that type's [impl], not every one. *)
         let own =
           List.concat_map
             (fun builtin ->
@@ -167,25 +148,23 @@ let edges database impls (body : Core.block) =
     | Trait_method _ -> ()
     | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
-  Core_walk.block
-    (Core_walk.deep
-       {
-         Core_walk.ignore_all with
-         expression =
-           (fun (node : Core.expression) ->
-             match node.kind with
-             | Call { callee = called; _ } -> callee called
-             | Function_value { path; _ } -> add [ Calls path ]
-             | To_any { value; trait; _ } ->
-                 add
-                   (List.map
-                      (fun impl -> Uses_impl impl)
-                      (impls_for impls (traits_with_required database trait.trait) value.type_))
-             | _ -> ());
-         callee;
-       })
-    body;
-  List.rev !body_edges
+  Mir.iter_code
+    (fun (statement : Mir.statement) ->
+      match statement.kind with
+      | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+          callee call.callee
+      | For { iteration = Pull { next; _ }; _ } -> callee next
+      | Assign { value = Function_value { path; _ }; _ } -> add [ Calls path ]
+      | Assign { value = To_any { value; trait; _ }; _ } ->
+          add
+            (List.map
+               (fun impl -> Uses_impl impl)
+               (impls_for impls
+                  (traits_with_required database trait.trait)
+                  (Mir.operand_type value)))
+      | _ -> ())
+    code;
+  List.rev !code_edges
 
 let build database package =
   let modules = Query.demand database Packages.modules package in
@@ -195,10 +174,9 @@ let build database package =
       List.concat_map
         (fun (declaration : Names.declaration) ->
           let key = Names.key_of declaration in
-          match (declaration.kind, Query.demand database Infer.core key) with
-          | (Function | Method | Theorem), Some { definition = Function { body = Some body; _ }; _ }
-            ->
-              [ (declaration.path, edges database impls body) ]
+          match (declaration.kind, Query.demand database Mir.mir key) with
+          | (Function | Method | Theorem), Some code ->
+              [ (declaration.path, edges database impls code) ]
           | _ -> [])
         (Query.demand database Names.declarations module_))
     modules
@@ -210,8 +188,6 @@ let impl_methods database impl =
     (fun (written, _, _, methods) -> if Path.equal written impl then methods else [])
     (Query.demand database package_impls (Path.package impl))
 
-(* The packages a walk from [package] can reach: it and every package it
-   depends on, the standard library among them. *)
 let reachable_packages database package =
   let seen = Hashtbl.create 8 in
   let rec visit package =
@@ -257,8 +233,6 @@ let successors database ~packages (path : Path.t) =
   in
   List.concat_map targets own @ implementations
 
-(* Whether [from] can reach [target] along the graph's edges, in the
-   program [package] is part of. *)
 let reaches database ~package ~from ~target =
   let packages = reachable_packages database package in
   let visited = Hashtbl.create 16 in
@@ -272,8 +246,6 @@ let reaches database ~package ~from ~target =
   in
   visit from
 
-(* Whether a function can call itself again: whether something it calls
-   reaches back to it. *)
 let recursive database ~package path =
   let packages = reachable_packages database package in
   List.exists

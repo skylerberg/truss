@@ -1,0 +1,13 @@
+type Side =
+  | Left(value: Int64)
+  | Right(value: Int64)
+
+fn g(side: mut Side, other: mut Side) {
+  match mut side {
+    Left(value) | Right(value) => { value = 5 }
+  }
+  match mut other {
+    Left(only) => { only = 1 }
+    Right(_) => {}
+  }
+}

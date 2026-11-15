@@ -1,0 +1,21 @@
+trait Choice {
+  fn flag(self) -> Bool
+    cost time finite
+  fn left(self) -> Bool
+    cost time finite
+  fn right(self) -> Bool
+    cost time finite
+
+  law choose(value: Self) {
+    if value.flag() { value.left() } else { value.right() }
+  }
+}
+
+fn f[Item: Choice](value: Item, path: Bool) -> Bool
+  ensures result
+{
+  if path {
+    let _ = value.right()
+  }
+  !value.flag() || value.left()
+}

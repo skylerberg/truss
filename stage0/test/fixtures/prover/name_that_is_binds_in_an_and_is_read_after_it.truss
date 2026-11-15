@@ -1,0 +1,16 @@
+fn converted[Value](outcome: own Result[Value, Int32]) -> Result[Value, Int64]
+  ensures !(result is Ok(after) && outcome is Ok(before) && !identical(after, before))
+  ensures (result is Ok(_)) == (outcome is Ok(_))
+{
+  todo
+}
+
+fn f(outcome: own Result[List[UInt8], Int32]) -> USize
+  requires outcome is Ok(value) && value.length() == 3
+  ensures result == 3
+{
+  match converted(own outcome) {
+    Ok(value) => value.length()
+    Err(_) => 3
+  }
+}

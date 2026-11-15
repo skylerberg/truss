@@ -1,4 +1,5 @@
-(* Checks the loans and views of a definition's MIR, with the move analysis
-   of each body. [returns] says whether the definition's body returns to a
+(* Checks the loans and views of a definition's body, then of each of its
+   lambdas', with the move analysis of each body. [returns] says whether the definition's body returns to a
    caller. *)
-val check : Context.context -> moves:(Mir.body -> Moves.t) -> returns:bool -> Mir.t -> unit
+val check :
+  Context.context -> moves:(Mir.Graph.body -> Moves.t) -> returns:bool -> Mir.Graph.t -> unit
