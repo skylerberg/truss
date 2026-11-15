@@ -5,7 +5,7 @@ exception Unsupported of unsupported
 type context
 
 val env : context -> Memory_layout.env
-val glue : context -> Glue.t
+val drop_and_copy : context -> Drop_and_copy.t
 val monomorphic : Interface.Lookups.t -> Monomorphic.context
 
 val context :

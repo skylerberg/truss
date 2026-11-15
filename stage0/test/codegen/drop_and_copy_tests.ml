@@ -1,15 +1,7 @@
 open Memory_layout
 open Codegen_support
 
-let storage element = named "Storage" ~arguments:[ Type element ]
-
-let representation extra (ty : Ground.ty) : Memory_layout.representation =
-  match ty with
-  | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } -> Storage element
-  | _ -> Shape (shapes extra ty)
-
-let glue ?(extra = []) () =
-  Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~uint64 ()
+let storage = Storage.of_elements
 
 let fill_storage ~target ~buffer values =
   let count = List.length values in
@@ -41,12 +33,15 @@ let fill_storage ~target ~buffer values =
             } );
     ]
 
-let copy_call glue ty ~destination ~source =
+let copy_call drop_and_copy ty ~destination ~source =
   Lowered.Call
     {
       target =
         Direct
-          { function_ = Instance (Copy ty); signature = Glue.For_testing.copy_signature glue ty };
+          {
+            function_ = Instance (Copy ty);
+            signature = Compile.For_testing.copy_signature drop_and_copy ty;
+          };
       arguments =
         [
           Address { place = at destination; writable = true };
@@ -56,25 +51,28 @@ let copy_call glue ty ~destination ~source =
     }
 
 let () =
-  let glue = glue () in
+  let drop_and_copy = Compile.For_testing.drop_and_copy (shape_env ()) in
   test "plain data is trivial and storage is not" (fun () ->
-      if not (Glue.trivial glue (option int32)) then fail "Option[Int32] is not trivial";
-      if Glue.trivial glue (storage int32) then fail "Storage[Int32] is trivial");
+      if not (Compile.For_testing.is_trivial drop_and_copy (option int32)) then
+        fail "Option[Int32] is not trivial";
+      if Compile.For_testing.is_trivial drop_and_copy (storage int32) then
+        fail "Storage[Int32] is trivial");
   test "a record's drop drops only the fields that own something" (fun () ->
       let extra = [ ("Holder", Record [ field "items" (storage int32); field "count" int32 ]) ] in
-      let glue =
-        Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~uint64 ()
-      in
+      let env = shape_env ~extra () in
       let c =
         Emit_c.For_testing.c
-          (Emit_c.fragment (shape_env ~extra ()) (Code (Glue.drop glue (named "Holder"))))
+          (Emit_c.fragment env
+             (Code
+                (Compile.For_testing.drop (Compile.For_testing.drop_and_copy env) (named "Holder"))))
       in
       if not (contains c "f_items") then fail "the drop does not drop the items:\n%s" c;
       if contains c "f_count" then fail "the drop reads the count:\n%s" c);
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->
       let c =
         Emit_c.For_testing.c
-          (Emit_c.fragment (shape_env ()) (Code (Glue.copy glue (storage int32))))
+          (Emit_c.fragment (shape_env ())
+             (Code (Compile.For_testing.copy drop_and_copy (storage int32))))
       in
       let count text =
         let rec from position =
@@ -96,8 +94,8 @@ let () =
       let ty = storage int32 in
       expect_status 20
         [
-          printed (Glue.copy glue ty);
-          printed (Glue.drop glue ty);
+          printed (Compile.For_testing.copy drop_and_copy ty);
+          printed (Compile.For_testing.drop drop_and_copy ty);
           entry
             [
               local (value ty);
@@ -109,7 +107,7 @@ let () =
               block
                 (fill_storage ~target:0 ~buffer:1 [ 10; 20; 30 ]
                 @ [
-                    copy_call glue ty ~destination:2 ~source:0;
+                    copy_call drop_and_copy ty ~destination:2 ~source:0;
                     Assign
                       ( at ~projections:[ Index (Constant (Integer (UInt64, Z.one))) ] 1,
                         Use (constant_int32 99) );
@@ -123,7 +121,7 @@ let () =
       let ty = storage uint8 in
       expect_status 0
         [
-          printed (Glue.drop glue ty);
+          printed (Compile.For_testing.drop drop_and_copy ty);
           entry
             [ local (value ty) ]
             [
@@ -153,10 +151,10 @@ let () =
       let uint64_constant number = Lowered.Constant (Integer (UInt64, Z.of_int number)) in
       expect_status 4
         [
-          printed (Glue.copy glue outer);
-          printed (Glue.copy glue inner);
-          printed (Glue.drop glue outer);
-          printed (Glue.drop glue inner);
+          printed (Compile.For_testing.copy drop_and_copy outer);
+          printed (Compile.For_testing.copy drop_and_copy inner);
+          printed (Compile.For_testing.drop drop_and_copy outer);
+          printed (Compile.For_testing.drop drop_and_copy inner);
           entry
             [
               local (value inner);
@@ -196,7 +194,7 @@ let () =
                                 ("capacity", uint64_constant 2);
                               ];
                           } );
-                    copy_call glue outer ~destination:6 ~source:5;
+                    copy_call drop_and_copy outer ~destination:6 ~source:5;
                     Drop (at 5);
                     Assign (at 7, Use (copy ~projections:[ Field "buffer" ] 6));
                     Assign

@@ -1,0 +1,20 @@
+trait Named: Copyable {
+  fn name(self) -> String
+}
+
+type Tag(text: String)
+
+impl Named for Tag {
+  fn name(self) -> String {
+    self.text.copy()
+  }
+}
+
+test "a copied list outlives its original" {
+  let copies = {
+    let originals: List[any Named] = [any Tag(text: "first"), any Tag(text: "second")]
+    originals.copy()
+  }
+  assert copies[0].name() == "first"
+  assert copies[1].name() == "second"
+}

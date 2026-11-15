@@ -1,0 +1,23 @@
+trait Named: Copyable {
+  fn name(self) -> String
+}
+
+type Tag(text: String)
+
+impl Named for Tag {
+  fn name(self) -> String {
+    self.text.copy()
+  }
+}
+
+fn duplicate[Value: Copyable](value: Value) -> Value {
+  value.copy()
+}
+
+test "a copy outlives its original" {
+  let copied = {
+    let original: any Named = any Tag(text: "first")
+    duplicate(original)
+  }
+  assert copied.name() == "first"
+}

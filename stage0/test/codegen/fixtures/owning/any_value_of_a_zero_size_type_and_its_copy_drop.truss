@@ -1,0 +1,22 @@
+trait Named: Copyable {
+  fn name(self) -> String
+}
+
+type Marker()
+
+impl Named for Marker {
+  fn name(self) -> String {
+    "marker"
+  }
+}
+
+fn duplicate[Value: Copyable](value: Value) -> Value {
+  value.copy()
+}
+
+test "a marker and its copy" {
+  let marker: any Named = any Marker()
+  let copied = duplicate(marker)
+  assert marker.name() == "marker"
+  assert copied.name() == "marker"
+}

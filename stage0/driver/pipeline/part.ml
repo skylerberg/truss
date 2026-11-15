@@ -121,7 +121,7 @@ let rec instance_package : Instance.key -> Path.package = function
   | Locked_entry { capability = path; _ }
   | Locked_table path ->
       Path.package path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Encode ty -> type_package ty
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> type_package ty
   | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_package key
 
 let package = function
@@ -228,7 +228,7 @@ let rec instance_definition : Instance.key -> Path.t option = function
   | Locked_entry { capability = path; _ }
   | Locked_table path ->
       Some path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Encode ty -> type_definition ty
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> type_definition ty
   | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_definition key
 
 let definition = function

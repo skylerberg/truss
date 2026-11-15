@@ -2,7 +2,7 @@
  (names
   layout_tests
   emit_tests
-  glue_tests
+  drop_and_copy_tests
   build_tests
   source_tests
   feature_tests
@@ -21,7 +21,7 @@
   fixtures
   layout_tests
   emit_tests
-  glue_tests
+  drop_and_copy_tests
   build_tests
   source_tests
   feature_tests
@@ -53,7 +53,6 @@
   process
   startup
   positions
-  glue
   reachable
   build
   database

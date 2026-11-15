@@ -22,9 +22,9 @@ let () =
       | None -> ()
       | Some (status, _, _) -> fail "it finished with status %d" status);
       if Unix.gettimeofday () -. started > 2. then fail "it was not stopped");
-  test "a program that exits before it is stopped at its time limit is past it, not finished"
+  test "a program whose output is cut off at its time limit is past it, though it exited first"
     (fun () ->
-      match Process.run_with_time_limit ~time_limit_ms:0 "/bin/sh" [ "-c"; "echo finished" ] with
+      match Process.run_with_time_limit ~time_limit_ms:0 "/bin/sh" [ "-c"; "echo done" ] with
       | None -> ()
       | Some (status, output, _) -> fail "it finished with status %d and output %S" status output);
   test "a program that fills both outputs before it reads its input does not deadlock" (fun () ->

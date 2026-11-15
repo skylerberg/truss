@@ -15,12 +15,7 @@ val branch : t -> Lowered.operand -> yes:Lowered.block -> no:Lowered.block -> un
 val when_ : t -> Lowered.operand -> (unit -> unit) -> unit
 
 val loop :
-  t ->
-  ?integer:Memory_layout.integer ->
-  index_type:Lowered.ty ->
-  count:Lowered.operand ->
-  (Lowered.local -> unit) ->
-  unit
+  t -> ?integer:Memory_layout.integer -> count:Lowered.operand -> (Lowered.local -> unit) -> unit
 
 val outline : t -> nested:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
 val build : ?returns:bool -> t -> parameters:Lowered.local list -> result:Lowered.ty option -> unit

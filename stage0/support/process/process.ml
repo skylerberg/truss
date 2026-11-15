@@ -148,7 +148,7 @@ let execute ?(environment = []) ?input ?on_output ~deadline program arguments =
         Some { stdin; text; written = 0; is_open = true }
     | _ -> None
   in
-  let deadline =
+  let deadline_after_reading =
     Fun.protect
       ~finally:(fun () ->
         Unix.close stdout_read;
@@ -157,7 +157,7 @@ let execute ?(environment = []) ?input ?on_output ~deadline program arguments =
       (fun () ->
         exchange (Bytes.create piece_length) pid ~readers:[ output; errors ] ~writer ~deadline)
   in
-  let deadline, status = await pid deadline in
+  let deadline, status = await pid deadline_after_reading in
   (deadline, (exit_code status, Buffer.contents output.contents, Buffer.contents errors.contents))
 
 let run ?environment ?input ?on_output program arguments =

@@ -11,6 +11,7 @@ and function_type = { parameters : (mode * ty) list; result : result; uses : Pat
 and result = Returns of ty | Lends of mode * ty
 
 let compare = Stdlib.compare
+let builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 
 let rec path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name
