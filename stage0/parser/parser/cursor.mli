@@ -46,11 +46,8 @@ val closer : t -> int -> int
 val skip_to : t -> int -> unit
 val skip_one : t -> unit
 val group : t -> Token.t array
-val skip_method : t -> unit
-val skip_trailing_comma : t -> unit
+val skip_piece : t -> Split.piece
 val is_after_inserted_closer : t -> bool
 val bracketed : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
-val lines : t -> item:(t -> 'a) -> recover:(int -> Source.Definition_span.t -> 'a) -> 'a list
-val blank_line_before : t -> int -> bool
+val lines : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
 val recovered : t -> Source.Definition_span.t list
-val methods : t -> Split.piece list

@@ -1,9 +1,4 @@
-type file = {
-  uses : Syntax.path Syntax.item list;
-  definitions : Syntax.definition Syntax.item list;
-  diagnostics : Diagnostic.t list;
-  text : string;
-}
+type file = { file : Syntax.file; diagnostics : Diagnostic.t list; text : string }
 
 let is_recovery (diagnostic : Diagnostic.t) =
   match diagnostic.code with Parser code -> Parser.recovers code | _ -> false
@@ -31,10 +26,8 @@ let parse source =
     Lexer.Recovery.recover ~stage:"Parser" ~path:(Source.path source) ~attempt
       ~is_applied:is_recovery tokens parser_diagnostics
   in
-  let parsed = Option.value fixed ~default:written in
   {
-    uses = parsed.uses;
-    definitions = parsed.definitions;
+    file = Option.value fixed ~default:written;
     diagnostics = lexer_diagnostics @ parser_diagnostics;
     text = Source.text source;
   }

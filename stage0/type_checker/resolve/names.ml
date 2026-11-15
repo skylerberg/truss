@@ -215,7 +215,7 @@ let law_parameters lookups (trait : Path.t) law =
   match definition_of_path lookups trait with
   | Some (_, { kind = Trait { members; _ }; _ }) ->
       List.find_map
-        (fun (member : trait_member line) ->
+        (fun (member : trait_member node) ->
           match member.kind with
           | Law written_law when written_law.name.text = law ->
               Some
@@ -273,15 +273,14 @@ let named_of_intended : intended_kind -> named = function
   | Intended_capability -> Capability
   | Intended_theorem -> Theorem
 
-let file_entries (definitions : definition Syntax.item list) =
+let file_entries (top_levels : Syntax.top_level list) =
   List.concat_map
-    (fun (item : definition Syntax.item) ->
-      let definition = item.value in
+    (fun (top_level : Syntax.top_level) ->
+      let definition = top_level.definition.value in
       let plain name kind generic =
         [ { name; kind; visibility = definition.visibility; generic } ]
       in
       match definition.kind with
-      | _ when Option.is_some item.container_index -> []
       | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
           plain name.text Function (generics <> [])
       | Type_definition { name; generics; _ } -> plain name.text Type (generics <> [])
@@ -294,7 +293,7 @@ let file_entries (definitions : definition Syntax.item list) =
       | Function _ | Method_declaration _ | Constant _ | Impl _ | Test _ | Law_proof _
       | Definition_error _ ->
           [])
-    definitions
+    top_levels
 
 let builtin_entries =
   List.map
@@ -348,104 +347,114 @@ type written = {
   declaration : declaration;
   file : Path.file;
   index : int;
+  container : int option;
   item : definition Syntax.item;
   text : string;
 }
 
-let file_declarations lookups (file : Path.file) ~imports ~text
-    (definitions : definition Syntax.item list) =
+let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Syntax.top_level list)
+    =
   let module_ = file.module_ in
   let owner = owner lookups ~from:module_ ~imports in
-  let containers = Hashtbl.create 8 in
-  let declare index (item : definition Syntax.item) path kind generic =
-    (match item.value.kind with
-    | Trait _ | Impl _ -> Hashtbl.replace containers index (path, false)
-    | Capability _ -> Hashtbl.replace containers index (path, true)
-    | _ -> ());
+  let written index ?container (item : definition Syntax.item) path kind generic =
     Some
       {
         declaration =
           { module_; path; ordinal = 0; kind; visibility = item.value.visibility; generic };
         file;
         index;
+        container;
         item;
         text = String.sub text item.base (item.stop - item.base);
       }
   in
-  List.filter_map Fun.id
-    (List.mapi
-       (fun index (item : definition Syntax.item) ->
-         let definition = item.value in
-         let declare = declare index item in
-         match
-           (definition.kind, Option.bind item.container_index (Hashtbl.find_opt containers))
-         with
-         | (Function { signature; _ } | Method_declaration signature), Some (owner, static) ->
-             declare
-               (Method
-                  {
-                    owner;
-                    name = (signature_name signature).text;
-                    receiver = (if static then Static else receiver signature.parameters);
-                  })
-               Method (signature.generics <> [])
-         | ( Definition_error { name = Some (Plain_name name | Member_name (_, name)); _ },
-             Some (owner, _) ) ->
-             declare (Method { owner; name = name.text; receiver = Static }) Method false
-         | _, Some _ -> None
-         | kind, None -> (
-             match kind with
-             | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
-                 declare (top module_ name.text) Function (generics <> [])
-             | Function
-                 { signature = { name = Member_name (head, name); generics; parameters; _ }; _ } ->
-                 declare
-                   (Method { owner = owner head; name = name.text; receiver = receiver parameters })
-                   Method (generics <> [])
-             | Type_definition { name; generics; _ } ->
-                 declare (top module_ name.text) Type (generics <> [])
-             | Trait { name; generics; _ } -> declare (top module_ name.text) Trait (generics <> [])
-             | Capability { name; _ } -> declare (top module_ name.text) Capability false
-             | Constant { name = Plain_name name; _ } ->
-                 declare (top module_ name.text) Constant false
-             | Constant { name = Member_name (head, name); _ } ->
-                 declare
-                   (Member_constant { owner = owner head; name = name.text })
-                   Member_constant false
-             | Theorem { name; generics; _ } ->
-                 declare (top module_ name.text) Theorem (generics <> [])
-             | Impl { trait_; type_; _ } ->
-                 declare
-                   (Impl { module_; trait = spell_path_type trait_; for_type = spell_head type_ })
-                   Impl (type_.generics <> [])
-             | Test { name; _ } ->
-                 let text =
-                   name.first.value
-                   ^ String.concat "" (List.map (fun (_, (text : text)) -> text.value) name.rest)
-                 in
-                 declare (Test { module_; name = text }) Test false
-             | Law_proof { trait_; law; type_; _ } ->
-                 declare
-                   (Law_proof
-                      {
-                        module_;
-                        trait = spell_path_type trait_;
-                        law = law.text;
-                        for_type = spell_head type_;
-                      })
-                   Law_proof false
-             | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
-                 declare (top module_ name.text) (kind_of_named (named_of_intended intended)) false
-             | Definition_error { name = Some (Member_name (head, name)); intended } ->
-                 let owner = owner head in
-                 if intended = Some Intended_constant then
-                   declare (Member_constant { owner; name = name.text }) Member_constant false
-                 else declare (Method { owner; name = name.text; receiver = Static }) Method false
-             | Method_declaration _
-             | Definition_error { name = None; _ }
-             | Definition_error { intended = None; _ } ->
-                 None))
-       definitions)
+  let method_declaration index ~container ~owner:(owner, static) (item : definition Syntax.item) =
+    let declare = written index ~container item in
+    match item.value.kind with
+    | Function { signature; _ } | Method_declaration signature ->
+        declare
+          (Method
+             {
+               owner;
+               name = (signature_name signature).text;
+               receiver = (if static then Static else receiver signature.parameters);
+             })
+          Method (signature.generics <> [])
+    | Definition_error { name = Some (Plain_name name | Member_name (_, name)); _ } ->
+        declare (Method { owner; name = name.text; receiver = Static }) Method false
+    | _ -> None
+  in
+  let top_level_declaration index (item : definition Syntax.item) =
+    let declare = written index item in
+    match item.value.kind with
+    | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
+        declare (top module_ name.text) Function (generics <> [])
+    | Function { signature = { name = Member_name (head, name); generics; parameters; _ }; _ } ->
+        declare
+          (Method { owner = owner head; name = name.text; receiver = receiver parameters })
+          Method (generics <> [])
+    | Type_definition { name; generics; _ } -> declare (top module_ name.text) Type (generics <> [])
+    | Trait { name; generics; _ } -> declare (top module_ name.text) Trait (generics <> [])
+    | Capability { name; _ } -> declare (top module_ name.text) Capability false
+    | Constant { name = Plain_name name; _ } -> declare (top module_ name.text) Constant false
+    | Constant { name = Member_name (head, name); _ } ->
+        declare (Member_constant { owner = owner head; name = name.text }) Member_constant false
+    | Theorem { name; generics; _ } -> declare (top module_ name.text) Theorem (generics <> [])
+    | Impl { trait_; type_; _ } ->
+        declare
+          (Impl { module_; trait = spell_path_type trait_; for_type = spell_head type_ })
+          Impl (type_.generics <> [])
+    | Test { name; _ } ->
+        let text =
+          name.first.value
+          ^ String.concat "" (List.map (fun (_, (text : text)) -> text.value) name.rest)
+        in
+        declare (Test { module_; name = text }) Test false
+    | Law_proof { trait_; law; type_; _ } ->
+        declare
+          (Law_proof
+             {
+               module_;
+               trait = spell_path_type trait_;
+               law = law.text;
+               for_type = spell_head type_;
+             })
+          Law_proof false
+    | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
+        declare (top module_ name.text) (kind_of_named (named_of_intended intended)) false
+    | Definition_error { name = Some (Member_name (head, name)); intended } ->
+        let owner = owner head in
+        if intended = Some Intended_constant then
+          declare (Member_constant { owner; name = name.text }) Member_constant false
+        else declare (Method { owner; name = name.text; receiver = Static }) Method false
+    | Method_declaration _
+    | Definition_error { name = None; _ }
+    | Definition_error { intended = None; _ } ->
+        None
+  in
+  let _, declared =
+    List.fold_left
+      (fun (index, declared) (top_level : Syntax.top_level) ->
+        let container = top_level_declaration index top_level.definition in
+        let owner =
+          match (top_level.definition.value.kind, container) with
+          | (Trait _ | Impl _), Some container -> Some (container.declaration.path, false)
+          | Capability _, Some container -> Some (container.declaration.path, true)
+          | _ -> None
+        in
+        let methods =
+          match owner with
+          | Some owner ->
+              List.mapi
+                (fun offset method_item ->
+                  method_declaration (index + 1 + offset) ~container:index ~owner method_item)
+                top_level.methods
+          | None -> []
+        in
+        (index + 1 + List.length top_level.methods, List.rev_append methods (container :: declared)))
+      (0, []) top_levels
+  in
+  List.filter_map Fun.id (List.rev declared)
 
 module Module_map = Map.Make (struct
   type t = Path.module_
@@ -664,10 +673,17 @@ let namespace lookups package
     written;
   let in_file file = List.rev (Option.value ~default:[] (Hashtbl.find_opt by_file file)) in
   let key_of_written (written : written) = key_of written.declaration in
+  let at_index = Hashtbl.create 64 and in_container = Hashtbl.create 64 in
+  List.iter
+    (fun (written : written) ->
+      Hashtbl.replace at_index (written.file, written.index) written;
+      Option.iter
+        (fun container -> Hashtbl.add in_container (written.file, container) written)
+        written.container)
+    written;
   let declared =
     List.fold_left
       (fun map (written : written) ->
-        let siblings = in_file written.file in
         Key_map.add (key_of_written written)
           {
             declaration = written.declaration;
@@ -677,16 +693,12 @@ let namespace lookups package
             imports = file_imports written.file;
             spans = Syntax_walk.spans written.item.value;
             container =
-              Option.bind written.item.container_index (fun index ->
-                  Option.map key_of_written
-                    (List.find_opt (fun (other : written) -> other.index = index) siblings));
+              Option.map key_of_written
+                (Option.bind written.container (fun index ->
+                     Hashtbl.find_opt at_index (written.file, index)));
             contained =
-              List.filter_map
-                (fun (other : written) ->
-                  if other.item.container_index = Some written.index then
-                    Some (key_of_written other)
-                  else None)
-                siblings;
+              List.rev_map key_of_written
+                (Hashtbl.find_all in_container (written.file, written.index));
           }
           map)
       Key_map.empty written
@@ -715,7 +727,7 @@ let namespace lookups package
     in
     List.fold_left
       (fun index (written : written) ->
-        match (written.declaration.path, written.item.container_index) with
+        match (written.declaration.path, written.container) with
         | Method { name; _ }, Some container -> (
             match List.assoc_opt (written.file, container) trait_at with
             | Some trait ->

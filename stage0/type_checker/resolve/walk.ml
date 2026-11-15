@@ -968,7 +968,7 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         let scope = generics state scope ~owner:path generics_ in
         List.iter (path_type state scope) requires;
         List.iteri
-          (fun index (line : trait_member line) ->
+          (fun index (line : trait_member node) ->
             if not (broken (Member_header index)) then
               match line.kind with
               | Associated_type (_, bounds) -> List.iter (path_type state scope) bounds
@@ -989,7 +989,7 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         path_type state scope trait_;
         List.iter (capability_reference state scope) uses;
         List.iteri
-          (fun index (line : impl_member line) ->
+          (fun index (line : impl_member node) ->
             if not (broken (Member_header index)) then
               match line.kind with
               | Associated_definition (_, type_) -> type_expression state scope type_

@@ -235,7 +235,7 @@ let definition ?statement:visit on_expression (definition : definition) =
       List.iter (generic_parameter on_expression) generics;
       List.iter (path_type on_expression) requires;
       List.iter
-        (fun (member : trait_member line) ->
+        (fun (member : trait_member node) ->
           match member.kind with
           | Associated_type (_, bounds) -> List.iter (path_type on_expression) bounds
           | Law law ->
@@ -249,7 +249,7 @@ let definition ?statement:visit on_expression (definition : definition) =
       type_head on_expression type_;
       List.iter (capability_reference on_expression) uses;
       List.iter
-        (fun (member : impl_member line) ->
+        (fun (member : impl_member node) ->
           match member.kind with
           | Associated_definition (_, type_) -> type_expression on_expression type_
           | Capability_definition (_, capabilities) ->
@@ -520,7 +520,7 @@ let walk_names ?(on_path_type = ignore) ~on_name:add (definition_ : definition) 
       List.iter generic generics;
       List.iter path_type_ requires;
       List.iter
-        (fun (member : trait_member line) ->
+        (fun (member : trait_member node) ->
           match member.kind with
           | Associated_type (name, bounds) ->
               add name;
@@ -538,7 +538,7 @@ let walk_names ?(on_path_type = ignore) ~on_name:add (definition_ : definition) 
       head written;
       List.iter capability_ uses;
       List.iter
-        (fun (member : impl_member line) ->
+        (fun (member : impl_member node) ->
           match member.kind with
           | Associated_definition (name, written) ->
               add name;
@@ -828,7 +828,6 @@ let without_positions (definition_ : definition) : definition =
       guard = Option.map expression written.guard;
       body = statement written.body;
       span = no_span;
-      blank_line_before = false;
     }
   and block (written : block) =
     { written with statements = List.map statement written.statements; span = no_span }
@@ -836,7 +835,6 @@ let without_positions (definition_ : definition) : definition =
     {
       written with
       span = no_span;
-      blank_line_before = false;
       kind =
         (match written.kind with
         | Let { is_var; pattern = bound; annotation; value; else_ } ->
@@ -994,9 +992,7 @@ let without_positions (definition_ : definition) : definition =
         | Field_error -> Field_error);
     }
   in
-  let line (written : _ line) kind =
-    { written with kind; span = no_span; blank_line_before = false }
-  in
+  let without_span (written : _ node) kind = { written with kind; span = no_span } in
   let kind : definition_kind =
     match definition_.kind with
     | Function { signature = written; body } ->
@@ -1044,8 +1040,8 @@ let without_positions (definition_ : definition) : definition =
             requires = List.map path_type requires;
             members =
               List.map
-                (fun (member : trait_member line) ->
-                  line member
+                (fun (member : trait_member node) ->
+                  without_span member
                     (match member.kind with
                     | Associated_type (name, bounds) ->
                         Associated_type (name_ name, List.map path_type bounds)
@@ -1069,8 +1065,8 @@ let without_positions (definition_ : definition) : definition =
             uses = List.map capability uses;
             members =
               List.map
-                (fun (member : impl_member line) ->
-                  line member
+                (fun (member : impl_member node) ->
+                  without_span member
                     (match member.kind with
                     | Associated_definition (name, written) ->
                         Associated_definition (name_ name, type_ written)
@@ -1084,7 +1080,9 @@ let without_positions (definition_ : definition) : definition =
           {
             name = name_ name;
             members =
-              List.map (fun (member : capability_member line) -> line member member.kind) members;
+              List.map
+                (fun (member : capability_member node) -> without_span member member.kind)
+                members;
           }
     | Constant { name; type_ = written; value } ->
         Constant { name = definition_name name; type_ = type_ written; value = expression value }

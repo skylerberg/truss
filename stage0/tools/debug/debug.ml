@@ -85,8 +85,7 @@ let tree ~file ~json =
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       parsed.diagnostics
   in
-  if not json then
-    print_endline (Syntax_print.file { uses = parsed.uses; definitions = parsed.definitions });
+  if not json then print_endline (Syntax_print.file parsed.file);
   show_diagnostics ~json source diagnostics
 
 let () =

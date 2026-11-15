@@ -135,7 +135,7 @@ let impl_view lookups ~bounds (impl : Types.impl_interface) (trait_path : path_t
         })
       (Definition.trait_interface lookups impl.implements.trait)
 
-let check_impl state (written_members : impl_member line list) (impl : Types.impl_interface)
+let check_impl state (written_members : impl_member node list) (impl : Types.impl_interface)
     (trait_path : path_type) =
   let lookups = state.lookups in
   if Well_known.is Panic impl.implements.trait then
@@ -204,7 +204,7 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
           trait.associated_types;
         ignore
           (List.fold_left
-             (fun defined (line : impl_member line) ->
+             (fun defined (line : impl_member node) ->
                match line.kind with
                | Associated_definition (name, _) ->
                    if

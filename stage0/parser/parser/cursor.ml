@@ -13,10 +13,8 @@ type t = {
   mutable nesting_depth : int;
   next_id : int ref;
   recoveries : Source.span list ref;
-  mutable methods : Split.piece list;
   mutable after_inserted_closer : bool;
   is_unterminated_interpolation : bool;
-  mutable skipped_trailing_comma : bool;
 }
 
 let nesting_limit = 256
@@ -49,10 +47,8 @@ let create ~diagnostics ~base tokens ~first ~stop =
     nesting_depth = 0;
     next_id = ref 0;
     recoveries = ref [];
-    methods = [];
     after_inserted_closer = false;
     is_unterminated_interpolation = false;
-    skipped_trailing_comma = false;
   }
 
 let interpolation cursor (inner : Token.interpolation) =
@@ -281,14 +277,12 @@ let skip_one cursor =
 let group cursor =
   Array.sub cursor.tokens cursor.index (closer cursor cursor.index - cursor.index + 1)
 
-let skip_method cursor =
-  let stop = Split.stop cursor.tokens ~first:cursor.index in
-  cursor.methods <- { first = cursor.index; stop } :: cursor.methods;
-  skip_to cursor stop
-
-let skip_trailing_comma cursor =
-  advance cursor;
-  cursor.skipped_trailing_comma <- true
+let skip_piece cursor : Split.piece =
+  let piece : Split.piece =
+    { first = cursor.index; stop = Split.stop cursor.tokens ~first:cursor.index }
+  in
+  skip_to cursor piece.stop;
+  piece
 
 let is_after_inserted_closer cursor = cursor.after_inserted_closer
 
@@ -326,8 +320,7 @@ let bracketed cursor ~item ~recover =
   items
 
 let lines cursor ~item ~recover =
-  let enclosing_after_inserted_closer = cursor.after_inserted_closer
-  and enclosing_skipped_trailing_comma = cursor.skipped_trailing_comma in
+  let enclosing_after_inserted_closer = cursor.after_inserted_closer in
   let opener = cursor.index in
   let closer_index = closer cursor opener in
   advance cursor;
@@ -337,12 +330,15 @@ let lines cursor ~item ~recover =
       let start = cursor.index in
       let value =
         match
-          cursor.skipped_trailing_comma <- false;
           cursor.after_inserted_closer <- false;
           let value = item cursor in
+          let ends_with_comma =
+            match previous_token cursor with
+            | Some { kind = Punctuation Comma; _ } -> true
+            | _ -> false
+          in
           let separated =
-            peek_kind cursor = Newline
-            || (cursor.skipped_trailing_comma && (peek cursor).line_break_before)
+            peek_kind cursor = Newline || (ends_with_comma && (peek cursor).line_break_before)
           in
           if cursor.index < closer_index && not separated then fail cursor "a line break or `}`";
           value
@@ -350,17 +346,14 @@ let lines cursor ~item ~recover =
         | value -> value
         | exception Failed ->
             skip_line cursor ~closer_index;
-            recover start (span_from cursor start)
+            recover (span_from cursor start)
       in
       if cursor.index < closer_index && peek_kind cursor = Newline then advance cursor;
       loop (value :: items)
   in
   let items = loop [] in
   cursor.after_inserted_closer <- enclosing_after_inserted_closer;
-  cursor.skipped_trailing_comma <- enclosing_skipped_trailing_comma;
   skip_to cursor (closer_index + 1);
   items
 
-let blank_line_before cursor index = (token_at cursor index).blank_line_before
 let recovered cursor = List.sort_uniq compare (List.map (span cursor) !(cursor.recoveries))
-let methods cursor = List.rev cursor.methods
