@@ -19,7 +19,7 @@ fn search(count: Int64)
   Console.print_line("after the loop")
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   search(5)

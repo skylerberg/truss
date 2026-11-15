@@ -9,7 +9,7 @@ fn ranges(low: Int8, high: Int8)
   }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   ranges(-2, high: 1)

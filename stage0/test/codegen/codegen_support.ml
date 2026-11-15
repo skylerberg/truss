@@ -251,10 +251,10 @@ let run_source text =
 let expect_output text expected = expect_string ~expected (run_source text)
 let passes name source = test name (fun () -> expect_output source "test 0 passed\n")
 
-let run_main ?(arguments = []) ?input ?in_order text =
+let run_main ?(arguments = []) ?input text =
   let _, compile = load text in
   match
-    Compile.For_testing.run_program ?input ?in_order compile
+    Compile.For_testing.run_program ?input compile
       ~main:(Top { module_ = example; name = "main" })
       ~arguments
   with

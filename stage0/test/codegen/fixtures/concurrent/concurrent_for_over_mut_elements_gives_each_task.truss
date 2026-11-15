@@ -18,7 +18,7 @@ fn doubled_until(items: mut List[Int64], stop: Int64) -> Int64
   0
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   var numbers: List[Int64] = [1, 2, 3]

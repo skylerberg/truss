@@ -1,0 +1,9 @@
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var tasks = InOrder(opened: 0, cancelled: [])
+  provide mut tasks {
+    run()
+  }
+}

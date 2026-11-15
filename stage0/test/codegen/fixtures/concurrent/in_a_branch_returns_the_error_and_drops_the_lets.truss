@@ -27,7 +27,7 @@ fn report(first: Bool, second: Bool)
   }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   report(true, second: true)

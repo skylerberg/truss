@@ -17,7 +17,7 @@ fn nested(count: Int64, wanted: Int64) -> String
   "none"
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   Console.print_line(nested(3, wanted: 1))

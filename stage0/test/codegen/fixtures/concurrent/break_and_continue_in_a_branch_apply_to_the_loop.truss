@@ -20,7 +20,7 @@ fn rounds(count: Int64) -> Int64
   total
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   Console.print_line("${rounds(6)}")

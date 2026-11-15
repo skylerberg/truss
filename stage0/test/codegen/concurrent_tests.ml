@@ -1,11 +1,11 @@
 open Codegen_support
 
+let in_order = Fixtures.Concurrent.in_order
+
 let expect_main ~expected text =
-  let status, output, errors = run_main ~in_order:true text in
+  let status, output, errors = run_main (text ^ in_order ^ Fixtures.Concurrent.in_order_main) in
   if status <> 0 then fail "ended with status %d: %s" status errors;
   expect_string ~expected output
-
-let in_order = Fixtures.Concurrent.in_order
 
 let passes_in_order name ~count source =
   test name (fun () ->
@@ -176,9 +176,13 @@ let () =
       expect_with_each_thread_count
         ~expected:"captured 110890 and 110890\ncaptured from many\nechoed 262144\n"
         (child_lines ^ Fixtures.Concurrent.on_threads_tasks_read_and_write_the_pipes_of_child));
-  test "in a program with one thread, both of a child's outputs are captured whole" (fun () ->
-      expect_main ~expected:"captured 110890 and 110890\n"
-        (child_lines ^ Fixtures.Concurrent.in_a_program_with_one_thread_both_of_a_childs))
+  test "on one worker, both of a child's outputs are captured whole" (fun () ->
+      Fun.protect
+        ~finally:(fun () -> Unix.putenv "TRUSS_WORKERS" "")
+        (fun () ->
+          Unix.putenv "TRUSS_WORKERS" "1";
+          expect_threaded ~expected:"captured 110890 and 110890\n"
+            (child_lines ^ Fixtures.Concurrent.on_one_worker_both_of_a_childs_outputs_are)))
 
 let () =
   test "on threads, a cancelled task returns from a call that blocks in the operating system"
