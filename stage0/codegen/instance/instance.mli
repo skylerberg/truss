@@ -5,6 +5,7 @@ type key =
   | Copy of Ground.ty
   | Debug of Ground.ty
   | Any_drop of Ground.ty
+  | Any_copy of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
   | Template_check of { from_template : Path.t; literals : string list; clauses : int list }

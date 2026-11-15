@@ -25,21 +25,23 @@ exception Todo_type = Monomorphic.Todo_type
 let bug format = Compiler_bug.bug ~stage:"Compile" format
 
 let make (context : Lower.context) (key : Instance.key) : lowered =
-  let emitted compiled = Compiled (Emit_c.fragment (Lower.env context) compiled) in
-  let glue = Lower.glue context in
+  let env = Lower.env context in
+  let emitted compiled = Compiled (Emit_c.fragment env compiled) in
+  let drop_and_copy = Lower.drop_and_copy context in
   let code instance = emitted (Code instance) in
   match key with
   | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
       code (Lower.instance context key)
   | Constant path -> (
       match Lower.constant context path with
-      | Folded data -> Folded (data, Emit_c.fragment (Lower.env context) (Data data))
+      | Folded data -> Folded (data, Emit_c.fragment env (Data data))
       | Run ty -> Evaluate (path, ty))
-  | Drop ty -> code (Glue.drop glue ty)
-  | Copy ty -> code (Glue.copy glue ty)
-  | Debug ty -> code (Glue.debug glue ty)
-  | Encode ty -> code (Glue.encode glue ty)
-  | Any_drop ty -> code (Glue.any_drop glue ty)
+  | Drop ty -> code (Drop_and_copy.drop drop_and_copy ty)
+  | Copy ty -> code (Drop_and_copy.copy drop_and_copy ty)
+  | Any_drop ty -> code (Drop_and_copy.any_drop drop_and_copy ty)
+  | Any_copy ty -> code (Drop_and_copy.any_copy drop_and_copy ty)
+  | Debug ty -> code (Debug_output.debug env ty)
+  | Encode ty -> code (Encoding.encode env ty)
   | Evaluator path -> code (Lower.evaluator context path)
   | Template_check { from_template; literals; clauses } ->
       code (Lower.template_check context key ~from_template ~literals ~clauses)
@@ -246,81 +248,6 @@ let todo_type_position compiler (path : Path.t) =
   | Some _ | None ->
       bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
-let decode compiler key ty text : Lowered.static_value =
-  let env = env compiler [ key ] in
-  let monomorphic = compiler.monomorphic in
-  let at = ref 0 in
-  let take count =
-    if !at + count > String.length text then bug "a value written out while compiling ends early";
-    let part = String.sub text !at count in
-    at := !at + count;
-    part
-  in
-  let unsigned bytes =
-    let value = ref Z.zero in
-    for index = String.length bytes - 1 downto 0 do
-      value := Z.add (Z.shift_left !value 8) (Z.of_int (Char.code bytes.[index]))
-    done;
-    !value
-  in
-  let integer (kind : Memory_layout.integer) =
-    let size = Memory_layout.integer_size kind in
-    let value = unsigned (take size) in
-    match kind with
-    | Int8 | Int16 | Int32 | Int64 ->
-        if Z.testbit value ((8 * size) - 1) then Z.sub value (Z.shift_left Z.one (8 * size))
-        else value
-    | _ -> value
-  in
-  let rec value ty : Lowered.static_value =
-    if Memory_layout.has_zero_size env ty then empty ty
-    else
-      match Monomorphic.representation monomorphic ty with
-      | Handle -> bug "a handle computed while compiling"
-      | Shared _ -> bug "a shared value computed while compiling"
-      | Storage element ->
-          let count = Z.to_int (integer UInt64) in
-          Static_storage
-            { element; elements = List.init count (fun _ -> value element); owned = true }
-      | Shape (Scalar scalar) -> Static_scalar (scalar_value scalar)
-      | Shape (Record members) -> Static_record (fields members)
-      | Shape (Array (element, count)) -> Static_array (List.init count (fun _ -> value element))
-      | Shape (Sum variants) ->
-          let index = Z.to_int (unsigned (take 4)) in
-          let variant = List.nth variants index in
-          Static_variant (variant.name, fields variant.fields)
-  and fields members =
-    List.map
-      (fun (name, (member : Memory_layout.member)) ->
-        match member with
-        | Typed field_ty -> (name, value field_ty)
-        | Raw _ -> bug "a raw field computed while compiling")
-      members
-  and scalar_value (scalar : Memory_layout.scalar) : Lowered.constant =
-    match scalar with
-    | Integer kind -> Integer (kind, integer kind)
-    | Float32 -> Float32 (Z.to_int32_unsigned (unsigned (take 4)))
-    | Float64 -> Float64 (Z.to_int64_unsigned (unsigned (take 8)))
-    | Bool -> Bool (unsigned (take 1) <> Z.zero)
-    | Character -> Character (Z.to_int (unsigned (take 4)))
-    | _ -> bug "a pointer computed while compiling"
-  and empty ty : Lowered.static_value =
-    match Monomorphic.shape monomorphic ty with
-    | Record members ->
-        Static_record (List.map (fun (name, member) -> (name, empty_member member)) members)
-    | Sum [ variant ] ->
-        Static_variant
-          (variant.name, List.map (fun (name, member) -> (name, empty_member member)) variant.fields)
-    | Array (element, count) -> Static_array (List.init count (fun _ -> empty element))
-    | _ -> bug "%s has no one value of zero size" (Ground.to_string ty)
-  and empty_member : Memory_layout.member -> Lowered.static_value = function
-    | Typed ty -> empty ty
-    | Raw _ -> bug "a raw field of zero size"
-  in
-  let result = value ty in
-  if !at <> String.length text then bug "a value written out while compiling has bytes left over";
-  result
-
 let small_callees ~find ~worked_on fragment =
   match Emit_c.key fragment with
   | Code _ ->
@@ -430,7 +357,8 @@ and compiled compiler key =
     | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
         match
-          run_while_compiling compiler (Instance.Evaluator path) ~read:(decode compiler key ty)
+          run_while_compiling compiler (Instance.Evaluator path) ~read:(fun encoded ->
+              Encoding.decode (env compiler [ key ]) ty encoded)
         with
         | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
@@ -817,10 +745,11 @@ let run_template_check compiler ~from_template ~literals ~clauses =
     run_while_compiling compiler
       (Instance.Template_check { from_template; literals; clauses })
       ~read:(fun output ->
-        if String.length output <> List.length clauses then
+        let holds = Encoding.decode_booleans output in
+        if List.length holds <> List.length clauses then
           bug "checking a template of %s wrote %d results for %d clauses" (Path.show from_template)
-            (String.length output) (List.length clauses);
-        List.init (String.length output) (fun index -> output.[index] <> '\000'))
+            (List.length holds) (List.length clauses);
+        holds)
   in
   match ran with
   | Ok (Ran holds) -> Ok holds
@@ -834,7 +763,8 @@ let evaluate_call compiler ~function_ ~arguments =
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground compiler.monomorphic [] result in
       let key = Instance.Call_evaluation { function_; arguments } in
-      run_while_compiling compiler key ~read:(decode compiler key ty)
+      run_while_compiling compiler key ~read:(fun encoded ->
+          Encoding.decode (env compiler [ key ]) ty encoded)
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
 let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
@@ -882,4 +812,9 @@ module For_testing = struct
   let compiled = compiled
   let run_program = run_program
   let evaluate_call = evaluate_call
+  let drop_and_copy = Drop_and_copy.create
+  let is_trivial = Drop_and_copy.is_trivial
+  let drop = Drop_and_copy.drop
+  let copy = Drop_and_copy.copy
+  let copy_signature = Drop_and_copy.For_testing.copy_signature
 end

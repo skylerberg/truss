@@ -11,7 +11,7 @@ exception Unsupported = Lowering.Unsupported
 type context = Definitions.context
 
 let env (context : context) = context.env
-let glue (context : context) = context.glue
+let drop_and_copy (context : context) = context.drop_and_copy
 let monomorphic = Definitions.monomorphic
 let context = Definitions.context
 
@@ -98,12 +98,12 @@ let template_check context (key : Instance.key) ~from_template ~literals ~clause
           ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
           ~parts:[]
       in
-      let output = Constants.begin_output st in
+      let output = begin_output st in
       List.iter
         (fun clause ->
           let holds = temporary st context.bool in
           Mir_form.mir_into ~arguments:[ template ] st clause holds;
-          Glue.encode_call context.glue st.builder
+          Encoding.encode_call context.env st.builder
             ~output:(Address { place = output; writable = true })
             context.bool holds)
         (template_clauses context from_template clauses);
@@ -139,8 +139,8 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.
       call_instance st
         (Code { path = function_; type_arguments = [] })
         ~signature ~substitution:[] ~arguments:passed ~destination:result ();
-      let output = Constants.begin_output st in
-      Glue.encode_call context.glue st.builder
+      let output = begin_output st in
+      Encoding.encode_call context.env st.builder
         ~output:(Address { place = output; writable = true })
         result_ty result;
       Constants.write_output st output);

@@ -19,6 +19,10 @@ let () =
       let status, _, _ = Process.run ~time_limit_ms:100 "/bin/sh" [ "-c"; "sleep 5 & sleep 5" ] in
       if status <> 137 then fail "status %d" status;
       if Unix.gettimeofday () -. started > 2. then fail "it was not stopped");
+  test "a program whose output is cut off at its time limit is stopped, though it exited first"
+    (fun () ->
+      let status, _, _ = Process.run ~time_limit_ms:0 "/bin/sh" [ "-c"; "echo done" ] in
+      if status <> 137 then fail "status %d" status);
   test "a program that fills both outputs before it reads its input does not deadlock" (fun () ->
       let status, output, errors =
         Process.run

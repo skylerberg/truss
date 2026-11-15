@@ -128,7 +128,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
          arguments = [ Copy (at evidence) ];
          result = Returned (at address);
        });
-  let mutex = at (local builder ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
+  let mutex = at (local builder ~name:"mutex" (Value (Ground.builtin UInt64))) in
   emit builder (Assign (mutex, Convert (Copy (at address), Integer UInt64)));
   let tasks_call name =
     let slot, signature = capability_method context (Well_known.path Tasks) name in
@@ -303,7 +303,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
   lower Storage_with_capacity [ string_ty ]
     [ Value (Copy (at wanted)) ]
     (Some (list / Field storage_field));
-  loop builder ~integer:Int32 ~index_type:(Raw (Integer Int32))
+  loop builder ~integer:Int32
     ~count:(Copy (at count))
     (fun index ->
       let length = local builder (Value context.types.uint64)
@@ -314,7 +314,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
       in
       call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
       call Terminated_length [ Copy (at bytes) ] length;
-      let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+      let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
       let view = temporary st view_ty in
       emit builder
         (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
@@ -395,7 +395,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
   in
   let interface = impl_interface context impl in
   let trait = interface.implements.trait in
-  let _, trait_signature = dynamic_slot context trait name in
+  let _, trait_signature = dynamic_method context trait name in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
   let any = Types.substitute_trait substitution interface.implements in
@@ -429,7 +429,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
     | _, Some place -> place
     | Returns result_type, None ->
         temporary st (Monomorphic.ground context.monomorphic substitution result_type)
-    | Lends _, None -> temporary st (Monomorphic.builtin Unit)
+    | Lends _, None -> temporary st (Ground.builtin Unit)
   in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
@@ -453,9 +453,6 @@ let any_table context (key : Instance.key) : Lowered.table =
       let substitution = bind interface.impl_generics type_arguments in
       let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
       let any = Types.substitute_trait substitution interface.implements in
-      let drop_signature : Lowered.signature =
-        { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true }
-      in
       let entries =
         List.map
           (fun (trait_method : Types.trait_method) ->
@@ -487,6 +484,7 @@ let any_table context (key : Instance.key) : Lowered.table =
       {
         table_key = key;
         capability = None;
-        entries = (Instance.Any_drop self_ty, drop_signature) :: entries;
+        entries =
+          Drop_and_copy.any_entries self_ty ~is_copyable:(is_copyable_any context any) @ entries;
       }
   | _ -> bug "not an any table: %s" (Instance.to_string key)

@@ -95,4 +95,11 @@ let () =
          example/main.truss:7:11: \"hi\\n \\${x} \\u{1}\"\n\
          example/main.truss:8:11: Point(x: 0.1, y: 2.0)\n\
          example/main.truss:9:11: -7\n\
-         example/main.truss:10:11: Character\"\195\169\"\n\n")
+         example/main.truss:10:11: Character\"\195\169\"\n\n");
+  test "signed integers narrower than Int64 echo as their values" (fun () ->
+      expect_output Fixtures.Feature.narrow_signed_integers_echo_as_their_values
+        "test 0 passed\n\
+         echo 86\n\
+         example/main.truss:5:11: -8\n\
+         example/main.truss:6:11: -16\n\
+         example/main.truss:7:11: -32\n\n")

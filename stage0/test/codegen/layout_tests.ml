@@ -112,8 +112,8 @@ let () =
       | _ -> fail "Some is not the dataful variant")
 
 let () =
-  let int64 = Monomorphic.builtin Int64 in
-  let bool = Monomorphic.builtin Bool in
+  let int64 = Ground.builtin Int64 in
+  let bool = Ground.builtin Bool in
   let list element = standard "list" "List" ~arguments:[ Type element ] () in
   let option value = standard "option" "Option" ~arguments:[ Type value ] () in
   test "the standard library's Option of a List has no tag" (fun () ->
@@ -127,13 +127,4 @@ let () =
           .size);
   test "a String is its storage's buffer, length, and capacity" (fun () ->
       expect_string ~expected:"24/8 struct(storage@0) niche storage.buffer 0+1"
-        (standard_layout (standard "text" "String" ())));
-  test "storage is not trivial, and an Option of an integer is" (fun () ->
-      let glue =
-        Glue.create
-          (computed_env host (Monomorphic.shape standard_context))
-          ~representation:(Monomorphic.representation standard_context)
-          ~uint64:(Monomorphic.builtin UInt64) ()
-      in
-      if Glue.trivial glue (list int64) then fail "a List is trivial";
-      if not (Glue.trivial glue (option int64)) then fail "an Option of an Int64 is not trivial")
+        (standard_layout (standard "text" "String" ())))

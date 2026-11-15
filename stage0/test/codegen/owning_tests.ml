@@ -13,6 +13,12 @@ let () =
     Fixtures.Owning.early_return_while_an_any_value_is_being_made;
   passes "an any value drops its value's owned parts, also when it is made in a loop"
     Fixtures.Owning.any_value_drops_its_values_owned_parts_also_when;
+  passes "a copy of an any value owns a box of its own"
+    Fixtures.Owning.copy_of_an_any_value_owns_a_box_of_its_own;
+  passes "a copy of a list of any values owns their boxes"
+    Fixtures.Owning.copy_of_a_list_of_any_values_owns_their_boxes;
+  passes "an any value of a zero-size type and its copy drop"
+    Fixtures.Owning.any_value_of_a_zero_size_type_and_its_copy_drop;
   passes "a loop over a cursor that is left without taking its value drops the value"
     Fixtures.Owning.loop_over_a_cursor_left_without_taking_its_value;
   passes "a loop that uses up a list takes its elements in order"

@@ -233,17 +233,10 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             binary op
         | _ -> binary op
       in
-      let byte : Ground.ty = Named { path = Intrinsic.builtin_path UInt8; arguments = [] } in
+      let byte = Ground.builtin UInt8 in
       let number_constant number : Lowered.operand =
         let integer =
-          match
-            scalar env
-              (Named
-                 {
-                   path = Intrinsic.builtin_path (Intrinsic.libc_builtin (Libc.number_type number));
-                   arguments = [];
-                 })
-          with
+          match scalar env (Ground.builtin (Intrinsic.libc_builtin (Libc.number_type number))) with
           | Integer integer -> integer
           | _ -> bug "a number of the C library that is not an integer"
         in
@@ -660,11 +653,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Handle_from ->
           set
             (Build
-               {
-                 ty = Named { path = Intrinsic.builtin_path Handle; arguments = [] };
-                 variant = None;
-                 fields = [ ("descriptor", value 0) ];
-               })
+               { ty = Ground.builtin Handle; variant = None; fields = [ ("descriptor", value 0) ] })
       | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
       | Shared_new ->
           let ty = type_argument 0 in

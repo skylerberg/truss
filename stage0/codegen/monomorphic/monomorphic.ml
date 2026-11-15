@@ -9,7 +9,6 @@ type context = {
 }
 
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
-let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let panic_capability = Well_known.path Panic
 
 let capabilities context substitution (set : Types.capability_set) : Path.t list =
@@ -78,7 +77,7 @@ and ground_function context substitution (function_type : Types.function_type) :
     uses = evidence_for context [] function_type.uses;
   }
 
-let uint64 = builtin UInt64
+let uint64 = Ground.builtin UInt64
 let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
 let rec back : Ground.ty -> Types.ty = function
@@ -174,13 +173,3 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
                        variants)
               | Builtin_type _ -> bug "a built-in type under a path that is not built in"
               | Types.Todo_type -> raise (Todo_type ty))))
-
-let representation context ty : Memory_layout.representation =
-  match (Storage.elements_of ty, ty) with
-  | Some element, _ -> Storage element
-  | None, Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
-      Handle
-  | None, Ground.Named { path; arguments = [ Type value ] }
-    when Intrinsic.builtin_of_path path = Some Shared ->
-      Shared value
-  | None, _ -> Shape (shape context ty)

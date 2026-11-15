@@ -6,7 +6,7 @@ type context = {
   lookups : Lookups.t;
   constant : Path.t -> Lowered.static_value option;
   env : Memory_layout.env;
-  glue : Glue.t;
+  drop_and_copy : Drop_and_copy.t;
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;

@@ -208,9 +208,9 @@ let when_ builder condition then_ =
   finish builder (Goto after);
   start builder after
 
-let loop builder ?(integer = Memory_layout.UInt64) ~index_type ~count body =
+let loop builder ?(integer = Memory_layout.UInt64) ~count body =
   let constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
-  let index = local builder ~name:"index" index_type in
+  let index = local builder ~name:"index" (Raw (Integer integer)) in
   let going = local builder (Raw Bool) in
   let test = block builder in
   let inside = block builder in

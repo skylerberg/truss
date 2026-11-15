@@ -11,7 +11,5 @@ val ground_argument : context -> Types.substitution -> Types.argument -> Ground.
 val mode : Types.mode -> Ground.mode
 val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 val substitution : Types.generic list -> Ground.argument list -> Types.substitution
-val builtin : Intrinsic.builtin -> Ground.ty
 val panic_capability : Path.t
 val shape : context -> Ground.ty -> Memory_layout.shape
-val representation : context -> Ground.ty -> Memory_layout.representation

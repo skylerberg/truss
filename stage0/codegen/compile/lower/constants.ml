@@ -135,7 +135,7 @@ let literal st ty (constant : Mir.constant) =
                [
                  ( field,
                    Static_storage
-                     { element = Monomorphic.builtin UInt8; elements = bytes; owned = false } );
+                     { element = Ground.builtin UInt8; elements = bytes; owned = false } );
                ])
       | _ -> None)
   | Unit -> None
@@ -312,17 +312,12 @@ let constant context path =
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
 
-let begin_output st =
-  let output = temporary st Glue.output_ty in
-  emit st.builder (Assign (output, Storage.empty Glue.output_ty));
-  output
-
 let write_fully = Well_known.path Write_fully
 
 let write_output st output =
   let builder = st.builder in
-  let int32 = Monomorphic.builtin Int32 in
-  let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+  let int32 = Ground.builtin Int32 in
+  let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
   let descriptor = temporary st int32 and view = temporary st view_ty in
   emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
   emit builder
@@ -350,7 +345,7 @@ let evaluator context path : Emit_c.Builder.instance =
       let place = temporary st ty in
       Mir_form.mir_into st mir place;
       let output = begin_output st in
-      Glue.encode_call context.glue st.builder
+      Encoding.encode_call context.env st.builder
         ~output:(Address { place = output; writable = true })
         ty place;
       write_output st output);
