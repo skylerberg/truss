@@ -1,15 +1,3 @@
-(* Measuring how long the standard library's proofs take to solve. This is a
-   tool, not a test.
-
-     dune exec stage0/tools/proof_benchmark/proof_benchmark.exe
-
-   It checks every module, then proves each module that checks, one after
-   another, with no answers kept from before, so every query is solved. For
-   each module it prints how many queries the solver ran and how long
-   proving took, slowest first, and then the totals. Proving a module
-   solves its queries together, one for each core, as the command line
-   does. *)
-
 let () =
   let solver =
     match Solver.find () with

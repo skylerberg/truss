@@ -1,14 +1,4 @@
 #!/bin/sh
-# Builds the documentation of every library under stage0 into _build/docs,
-# with a page of the library dependency graph and a page of the dependencies
-# between areas, both linked from the index. Each library in the graph links
-# to its documentation. Prints the path of the
-# index page, so `open "$(stage0/tools/docs/build.sh)"` builds the
-# documentation and opens it.
-#
-# Needs odoc, dune-deps, and Graphviz:
-#   opam install odoc dune-deps
-#   brew install graphviz
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -35,10 +25,6 @@ chmod -R u+w "$docs"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# One line per library: its name, its directory, and its documentation page.
-# Each library's documentation holds exactly one module, the library's main
-# module, so the page is that module's. A library with any other layout links
-# to its own page.
 find stage0 -name dune -not -path '*/_build/*' -exec awk '
   /\(library/ { in_library = 1 }
   in_library && match($0, /\(name [A-Za-z0-9_]+/) {
@@ -63,7 +49,6 @@ done < "$work/directories" > "$work/libraries"
 
 dune-deps stage0 --no-exe --no-ext > "$work/dependencies.dot"
 
-# The pages' scripts read every declared dependency from graph_data.js.
 awk '
   FNR == NR { dir[$1] = $2; page[$1] = $3; next }
   /->/ {
@@ -84,13 +69,6 @@ awk '
     print "];"
   }' "$work/libraries" "$work/dependencies.dot" > "$docs/graph_data.js"
 
-# The drawing has every declared dependency, an edge that a longer path
-# implies included: such an edge is a dependency of its own, which a change
-# to either library must keep or remove. dot gives an edge a place on each
-# rank it crosses, so laying out every edge spreads the drawing several times
-# wider. The libraries are placed by a layout of the edges that tred keeps,
-# those no longer path implies, and neato then routes every edge between
-# them.
 while read -r library _ page; do
   printf 's|^\\([[:space:]]*"lib:%s"[[:space:]]*\\[\\)|\\1id="lib-%s", tooltip="%s", URL="%s", |\n' \
     "$library" "$library" "$library" "$page"
@@ -104,8 +82,6 @@ tred "$work/dependencies.dot" | {
   echo "$graph_attributes"
   cat
 } | dot -Tplain > "$work/layout.plain"
-# A node line of the plain format is: node, name, x, y, width, height, in
-# inches from the bottom left.
 sed -f "$work/node_attributes.sed" "$work/dependencies.dot" | {
   read -r _
   echo 'digraph {'
@@ -118,10 +94,6 @@ sed -f "$work/node_attributes.sed" "$work/dependencies.dot" | {
   cat
 } | neato -n2 -Tsvg | sed -n '/^<svg/,$p' > "$work/graph.svg"
 
-# The areas: one node for each directory under stage0 that holds libraries.
-# An edge from one area to another is labeled with the number of
-# dependencies of a library in the first on a library in the second. The
-# tests and the tools are left out: they depend on every area.
 awk '
   FNR == NR {
     area = $2
@@ -156,7 +128,6 @@ awk '
     print "}"
   }' "$work/libraries" "$work/dependencies.dot" | dot -Tsvg | sed -n '/^<svg/,$p' > "$work/areas.svg"
 
-# Splices $3 into the file $1 after the first occurrence of $2.
 insert_after() {
   content=$(cat "$1")
   case $content in

@@ -1,29 +1,3 @@
-(* Fuzzing the lexer. This is a tool, not a test: run it by hand to look for
-   inputs that break the lexer, and turn each one it finds into a focused
-   test.
-
-     dune exec stage0/tools/fuzz/fuzz.exe -- [--seed N] [--count N] PATH...
-
-   Each path is a .truss file or a directory of them. Each top-level piece of
-   each file, a definition or a `use` line, is an input it mutates. It checks
-   that:
-
-   - no input raises, every span of a token, a string's piece, or a
-     diagnostic is in bounds, no two tokens overlap, and brackets are
-     balanced;
-   - for one mistake, every fix removes its diagnostic and adds no other,
-     and for several, the lexer's machine-applicable fixes together remove
-     theirs and add no other;
-   - valid tokens printed with spaces between them lex back to the same
-     tokens;
-   - the parser never raises, every span in a tree is in bounds and inside
-     the node around it, children are in source order where the parser did
-     not recover, and no two expressions share an id;
-   - the parser and the reference grammar accept and reject the same
-     mutated inputs.
-
-   It prints each failing input and exits with status 1 if there was one. *)
-
 open Token
 
 let failures = ref 0
@@ -115,7 +89,6 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
     Hashtbl.replace ids value.id ();
     if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
-    (* A recovery may build the node a habit's fix writes, out of source order. *)
     let holds_recovery =
       List.exists (fun recovery -> contains_span value.span recovery) item.value.recovered
     in
@@ -150,10 +123,6 @@ let check_parse_robust text =
              file.definitions
       then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
 
-(* A parser diagnostic's claim about the reference grammar: that it
-   rejects the tokens, that it accepts them because the rule is checked
-   after parsing, or nothing. The grammar accepts any name where a cost word
-   goes, and reads a string as one token, so it cannot check either. *)
 type verdict = Grammar_rejects | Grammar_accepts | Unknown
 
 let verdict : Diagnostic.Code.t -> verdict = function
@@ -176,9 +145,6 @@ let verdict : Diagnostic.Code.t -> verdict = function
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts
 
-(* The parser rejects an input exactly when the reference grammar does.
-   Errors inside an interpolation are left out: the grammar reads a string
-   as one token. *)
 let check_parsers_agree text =
   let tokens, _, diagnostics = parse text in
   let interpolations =
@@ -196,8 +162,6 @@ let check_parsers_agree text =
       (fun (inner : Source.span) -> inner.start <= span.start && span.start < inner.stop)
       interpolations
   in
-  (* Whether a position is in a [cost] clause, where the grammar's rule takes
-     any names. *)
   let in_cost_clause offset =
     let rec back index =
       if index < 0 then false
@@ -224,8 +188,6 @@ let check_parsers_agree text =
       diagnostics
   in
   let all = Array.to_list tokens in
-  (* The parser reports nothing missing before a closer the lexer inserted,
-     which already has its error. *)
   if
     (not (List.mem Unknown verdicts))
     && not
@@ -242,9 +204,6 @@ let check_parsers_agree text =
         (if reference_rejects then "rejects" else "accepts")
         (Diagnostic.quote text)
 
-(* Applying a fix removes its diagnostic and adds no other. A lexer's fix is
-   judged by the lexer's diagnostics alone: it can bring back a parser error
-   that a closer the lexer inserted was hiding. *)
 let check_fixes_work text =
   let all text =
     let _, _, diagnostics = parse text in
@@ -271,8 +230,6 @@ let check_fixes_work text =
         diagnostic.fixes)
     diagnostics
 
-(* The lexer's machine-applicable fixes add no error, applied together or
-   each alone. *)
 let check_machine_fixes_work text =
   let _, diagnostics = lex text in
   let adds_none applied =
@@ -363,7 +320,6 @@ let mistakes =
     "loop ";
     "elif ";
     "{ it }";
-    (* Strings of other languages, and Truss's raw strings. *)
     "r\"";
     "r#\"";
     "\"#";
@@ -378,13 +334,11 @@ let mistakes =
     "$${";
     "'a'";
     "'a";
-    (* Escapes, which matter inside a string. *)
     "\\n";
     "\\u{";
     "\\u{1F600}";
     "\\u{D800}";
     "\\x41";
-    (* Operators of other languages. *)
     "...";
     "..<";
     "<>";
@@ -393,7 +347,6 @@ let mistakes =
     "|>";
     "**";
     "--";
-    (* Numbers. *)
     "1.";
     ".5";
     "0b2";
@@ -402,7 +355,6 @@ let mistakes =
     "1E5";
     "1u8";
     "99999999999999999999999";
-    (* Comments and line breaks. *)
     "/* /* */";
     "*/";
     "\r\n";
@@ -410,7 +362,6 @@ let mistakes =
     "\u{2028}";
     "\u{0085}";
     "\u{FEFF}";
-    (* Characters that look like ASCII spaces or punctuation. *)
     "\u{00A0}";
     "\u{3000}";
     "\u{2003}";
@@ -429,7 +380,6 @@ let mistakes =
     "\u{2192}";
     "\u{21D2}";
     "\u{2200}";
-    (* Names outside ASCII. *)
     "caf\u{00E9}";
     "e\u{0301}";
     "\u{03BB}";
@@ -514,7 +464,6 @@ let () =
     prerr_endline "fuzz: give .truss files, or directories of them";
     exit 2);
   let example () = examples.(Random.State.int random (Array.length examples)) in
-  (* Uniform bytes are rarely valid UTF-8, so half are characters instead. *)
   let random_text () =
     let length = Random.State.int random 120 in
     if Random.State.bool random then
@@ -532,7 +481,6 @@ let () =
       done;
       Buffer.contents buffer
   in
-  (* A range replaced by a mistake, a piece of another input, or nothing. *)
   let mutate text =
     let length = String.length text in
     let at = Random.State.int random (length + 1) in

@@ -1,9 +1,3 @@
-(* Writes standard/text/unicode_data/unicode_data.truss, the tables of character
-   properties, case mappings, normalization, and grapheme cluster boundaries
-   that the standard library reads, from the Unicode data files in the
-   directory given as the only argument. See regenerate.sh, which downloads those files and checks their
-   hashes first. *)
-
 let directory =
   match Sys.argv with
   | [| _; directory |] -> directory
@@ -17,7 +11,6 @@ let code_point = Ucd.code_point
 let code_points text =
   List.map code_point (List.filter (fun part -> part <> "") (String.split_on_char ' ' text))
 
-(* The ranges that a file of [range; property] lines gives a property. *)
 let property rows name =
   Ucd.merge
     (List.filter_map
@@ -27,10 +20,6 @@ let property rows name =
          | _ -> None)
        rows)
 
-(* A code point of UnicodeData.txt: its general category, its canonical
-   combining class, its decomposition, and its simple uppercase and
-   lowercase mappings. A pair of lines named [First] and [Last] stands for
-   every code point between them. *)
 type character = {
   code : int;
   category : string;
@@ -88,7 +77,6 @@ let in_categories names =
          if List.mem character.category names then Some (character.code, character.code) else None)
        characters)
 
-(* The number that [unicode::category] reads for a general category. *)
 let category_number category =
   match category with
   | "Cc" -> 6
@@ -106,8 +94,6 @@ let category_number category =
       | 'Z' -> 5
       | _ -> failwith ("an unknown category: " ^ category))
 
-(* Runs of consecutive code points with one category number, as
-   [first; last; number]. *)
 let category_ranges =
   List.fold_left
     (fun runs character ->
@@ -125,15 +111,12 @@ let simple_mappings mapped =
       match mapped character with "" -> [] | text -> [ character.code; code_point text ])
     characters
 
-(* A mapping to two or three code points, as [code; first; second; third]
-   with 0 for a missing third. *)
 let expansion code mapped =
   match mapped with
   | [ first; second ] -> [ code; first; second; 0 ]
   | [ first; second; third ] -> [ code; first; second; third ]
   | _ -> failwith "an expansion has two or three code points"
 
-(* The mappings of SpecialCasing.txt that hold in every context. *)
 let special_casing column =
   List.concat_map
     (fun fields ->
@@ -165,8 +148,6 @@ let fold_expansions =
     case_folding
   |> List.sort compare |> List.concat
 
-(* Runs of consecutive code points with one canonical combining class that
-   is not 0, as [first; last; class]. *)
 let combining_class_ranges =
   List.fold_left
     (fun runs character ->
@@ -180,9 +161,6 @@ let combining_class_ranges =
     [] characters
   |> List.rev
 
-(* One step of each character's decomposition: the code points its
-   decomposition field lists. A field that starts with a tag is a
-   compatibility decomposition. *)
 let decomposition_steps =
   let steps = Hashtbl.create 8192 in
   List.iter
@@ -197,8 +175,6 @@ let decomposition_steps =
     characters;
   steps
 
-(* A code point's decomposition with every part decomposed in turn. The
-   canonical decomposition takes canonical steps only. *)
 let rec full_decomposition ~compatibility code =
   match Hashtbl.find_opt decomposition_steps code with
   | Some (`Canonical, parts) -> List.concat_map (full_decomposition ~compatibility) parts
@@ -215,8 +191,6 @@ let canonical_decompositions =
       | _ -> None)
     characters
 
-(* Only the characters whose compatibility decomposition is not their
-   canonical one. *)
 let compatibility_decompositions =
   List.filter_map
     (fun character ->
@@ -225,8 +199,6 @@ let compatibility_decompositions =
       else Some (character.code, whole))
     characters
 
-(* An index of [code; start; length] rows, and the pool of code points that
-   each row's start and length select. *)
 let index_and_pool decompositions =
   let index, pool, _ =
     List.fold_left
@@ -237,8 +209,6 @@ let index_and_pool decompositions =
   in
   (List.rev index, List.rev pool)
 
-(* [first; second; composite] for each character whose canonical
-   decomposition is a pair and that composition does not exclude. *)
 let composition_pairs excluded =
   let is_excluded code =
     List.exists (fun (first, last) -> first <= code && code <= last) excluded
@@ -252,11 +222,6 @@ let composition_pairs excluded =
     characters
   |> List.sort compare |> List.concat
 
-(* [first; last; properties] for each run of code points with the same
-   properties that decide grapheme cluster boundaries: the grapheme cluster
-   break class, 16 times the Indic conjunct break class, and 64 for
-   Extended_Pictographic. The Hangul syllables are left out, because the
-   library tells LV from LVT by arithmetic. *)
 let grapheme_ranges ~breaks ~core ~emoji =
   let properties = Hashtbl.create 16384 in
   let add number ranges =

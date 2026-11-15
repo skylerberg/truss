@@ -31,10 +31,7 @@ type t = {
 val create : foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
 val span : int -> int -> Source.span
 val at_end : t -> int -> bool
-
 val char : t -> int -> char
-(** The byte at [index], which is before the end. *)
-
 val is_at : t -> int -> char -> bool
 val satisfies : t -> int -> (char -> bool) -> bool
 

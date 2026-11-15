@@ -1,22 +1,3 @@
-/* The grammar of SPECIFICATION.md, written for Menhir so that it can be checked
-   for conflicts. Menhir runs with `--strict`, so a conflict that no precedence
-   declaration resolves fails the build. Semantic actions are empty; this file
-   checks the grammar's shape, not its output.
-
-   The lexer is assumed to:
-   - apply the line-break rule, emitting a single NEWLINE where the token
-     before a line break can end a statement and the token after it can begin
-     one, and a NEWLINE before EOF when the last token can end a statement.
-     So no NEWLINE ever comes right after an opening `{` or before a closing
-     `}`, and items inside braces are separated by NEWLINEs, not ended by
-     them;
-   - return the cost words (amortized, time, allocations, allocated_bytes,
-     calls, O, finite, and potential) and the words of `assert ... by
-     bit_vector` as ordinary LOWER or UPPER names. The rules below accept
-     any name in their positions; the real parser checks the spelling;
-   - return a whole string literal, interpolations included, as one STRING
-     or TAGGED token. */
-
 %token UPPER LOWER UNDERSCORE INTEGER FLOAT STRING TAGGED NEWLINE EOF
 
 %token ANY ASSERT BREAK CAPABILITY CONCURRENT CONTINUE COST DECREASES DERIVES ECHO ELSE
@@ -31,21 +12,6 @@
 %token PLUS MINUS STAR SLASH PERCENT EQEQ NEQ LT LE GT GE ANDAND OROR IMPLIES
 %token BANG AMP CARET TILDE SHL SHR
 
-/* The three conflicts that SPECIFICATION.md documents in "Ambiguities in the
-   grammar", each resolved by shifting: the lookahead token's level is above
-   the level of the production that would otherwise be reduced.
-
-   - `else` after `if c { }` attaches to that `if`. In `let x = if c { } else
-     { }`, the `else` belongs to the `if`, not to the `let`.
-   - `{` after `return` starts the returned value. In `while return { }`, the
-     block is the operand of `return`, not the body of the loop.
-   - A name after `return` starts the returned value. In `assert return by
-     bit_vector`, `by` is the operand of `return`.
-
-   A token's level also applies to every production whose rightmost terminal
-   is that token, so a new conflict involving `else`, `{`, or a name can be
-   resolved here without a warning. The build of stage0/parser/reference checks that
-   precedence resolves exactly three conflicts. */
 %nonassoc if_without_else
 %nonassoc ELSE
 %nonassoc return_without_value
@@ -53,14 +19,9 @@
 
 %start <unit> file
 
-/* The documents' examples, piece by piece: each piece of an example is a
-   `use` line, a definition, a function's signature without a body, or a
-   statement. */
 %start <unit> snippet_use snippet_definition snippet_signature snippet_statement
 
 %%
-
-/* Helpers */
 
 comma_list(X):
   | { () }
@@ -82,8 +43,6 @@ newline_separated(X):
 newline_separated1(X):
   | X { () }
   | X NEWLINE newline_separated1(X) { () }
-
-/* Files and definitions */
 
 file:
   | list(top_item) EOF { () }
@@ -132,8 +91,6 @@ visibility_opt:
   | PUBLIC OPAQUE { () }
   | INTERNAL { () }
 
-/* Functions */
-
 function_definition:
   | FN function_name generics_opt parameters result_opt list(clause)
     newline_opt block { () }
@@ -169,8 +126,6 @@ result_opt:
 signature:
   | FN LOWER generics_opt parameters result_opt list(clause) { () }
 
-/* Clauses */
-
 clause:
   | USES capability_list { () }
   | REQUIRES expression { () }
@@ -186,10 +141,6 @@ capability_reference:
   | SELF_TYPE DOT UPPER { () }
   | UPPER DOT UPPER { () }
 
-/* A cost clause starts with one or two words: `time ...`, `calls(...) ...`,
-   or `amortized time ...`. Whether a second word is a resource or `finite` is
-   decided by the token after it, so the rules are factored to need only one
-   token of lookahead. */
 cost:
   | LOWER cost_after_word { () }
 
@@ -217,8 +168,6 @@ marked_bound:
   | UPPER LPAREN expression RPAREN { () }
   | LE expression { () }
   | EQEQ expression { () }
-
-/* Type definitions */
 
 type_definition:
   | TYPE UPPER generics_opt type_body list(type_clause) { () }
@@ -248,8 +197,6 @@ type_clause:
   | INVARIANT expression { () }
   | DERIVES separated_nonempty_list(COMMA, path_type) { () }
   | COST LOWER expression { () }
-
-/* Types */
 
 type_expression:
   | path_type { () }
@@ -301,8 +248,6 @@ generic_parameter:
 bound_list:
   | separated_nonempty_list(PLUS, path_type) { () }
 
-/* Traits, implementations, and capabilities */
-
 trait_definition:
   | TRAIT UPPER generics_opt supertraits_opt newline_opt LBRACE trait_members RBRACE { () }
 
@@ -310,9 +255,6 @@ supertraits_opt:
   | { () }
   | COLON bound_list { () }
 
-/* A method declared without a body and a method whose body starts on the
-   next line both begin `signature NEWLINE`. The token after the NEWLINE
-   decides: `{` starts the body, and anything else starts the next member. */
 trait_members:
   | { () }
   | trait_members1 { () }
@@ -350,8 +292,6 @@ impl_item:
 capability_definition:
   | CAPABILITY UPPER newline_opt LBRACE newline_separated(signature) RBRACE { () }
 
-/* Constants, tests, theorems, and proofs */
-
 constant:
   | LET constant_name COLON type_expression EQ expression { () }
 
@@ -368,8 +308,6 @@ theorem_definition:
 
 law_proof:
   | PROOF path_type DOT LOWER FOR type_head newline_opt block { () }
-
-/* Statements and blocks */
 
 block:
   | LBRACE newline_separated(statement) RBRACE { () }
@@ -407,8 +345,6 @@ loop_clause:
   | DECREASES separated_nonempty_list(COMMA, expression) { () }
   | COST cost { () }
 
-/* Expressions */
-
 expression:
   | ECHO expression { () }
   | RETURN %prec return_without_value { () }
@@ -416,10 +352,6 @@ expression:
   | implication { () }
   | bitwise { () }
 
-/* A quantifier's body runs to the end of the expression, so a quantifier can
-   only be the last operand of `&&`, `||`, or `==>`. Keeping `quantified`
-   apart from `logical` stops anything from following a quantifier, so the
-   body is never cut short. */
 implication:
   | implication_operand { () }
   | logical IMPLIES implication_operand { () }
@@ -456,10 +388,6 @@ or_chain:
   | comparison OROR comparison { () }
   | or_chain OROR comparison { () }
 
-/* `!` and `is` have no relative precedence, so the left operand of `is` is
-   not a `!` expression: `!value is Pattern` needs parentheses. Each level
-   from `range` down to `prefix` is therefore either a `!` expression or one
-   of its other forms, and `is` takes only the other forms of a `range`. */
 comparison:
   | range { () }
   | range comparison_operator range { () }
@@ -618,8 +546,6 @@ tagged_string:
   | TAGGED { () }
   | module_path COLONCOLON TAGGED { () }
 
-/* Patterns */
-
 pattern:
   | separated_nonempty_list(BAR, pattern_primary) { () }
 
@@ -637,9 +563,6 @@ range_end:
   | literal_pattern { () }
   | constant_reference { () }
 
-/* A bare LOWER binds, in every pattern. A constant is written with its
-   module or its type, so adding a constant never changes what a pattern
-   means. */
 constant_reference:
   | module_path COLONCOLON LOWER { () }
   | qualified_upper DOT LOWER { () }

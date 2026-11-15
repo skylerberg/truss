@@ -1,10 +1,3 @@
-(* Checks the Unicode module against the data files in the directory given as
-   the only argument: each property against the lines of the file its table
-   came from, for every code point. The property
-   checks go through the module's public functions, so they cover the
-   generator's merging of ranges and the module's lookups together.
-   regenerate.sh runs this after writing new tables. *)
-
 let data_directory = Sys.argv.(1)
 let failures = ref 0
 
@@ -30,8 +23,6 @@ let each_in_range text action =
 
 let is_scalar value = value < 0xD800 || (value > 0xDFFF && value <= 0x10FFFF)
 
-(* Checks that exactly the code points the file lists with [value] have the
-   property. *)
 let check_property ~file ~name ~listed property =
   let expected = Array.make 0x110000 false in
   List.iter
@@ -54,9 +45,6 @@ let () =
     Unicode.is_bidi_control;
   check_property ~file:"DerivedGeneralCategory.txt" ~name:"Cc" ~listed:(( = ) "Cc")
     Unicode.is_control;
-  (* Forbidden: Bidi_Control, Cc other than tab, line feed, and carriage
-     return, and Default_Ignorable_Code_Point other than the joiners and the
-     variation selectors. *)
   let listed file property =
     let set = Array.make 0x110000 false in
     List.iter
