@@ -515,7 +515,7 @@ let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
     find = (fun module_ name -> noting (Entry (module_, name)) (names.find module_ name));
     entries = (fun module_ -> noting (Entries module_) (names.entries module_));
     imports = (fun key -> noting (Imports key) (names.imports key));
-    module_exists = (fun module_ -> noting (Modules module_.package) (names.module_exists module_));
+    module_exists = (fun module_ -> noting (Module module_) (names.module_exists module_));
     split_module = (fun parts -> noting Packages (names.split_module parts));
     dependency_names =
       (fun package -> noting (Dependencies package) (names.dependency_names package));
@@ -563,8 +563,7 @@ let parsed_file pipeline (file : Path.file) =
   | Some parsed -> parsed
   | None -> unchecked (Part.show (Parsed file))
 
-let namespace_of pipeline note (state : state) =
-  note (Part.Modules state.name);
+let build_namespace pipeline note (state : state) =
   Names.namespace (recording_names pipeline note) state.name
     (List.map
        (fun module_ ->
@@ -686,7 +685,7 @@ let derived_paths names package =
     (function Path.Method { owner = Derived _; _ } -> true | _ -> false)
     (impl_methods names package)
 
-let package_parts pipeline (names : Names.lookups) package : Part.t list =
+let list_package_parts pipeline (names : Names.lookups) package : Part.t list =
   let state = owner pipeline package in
   let declarations = names.package_declarations package in
   let paths = List.map (fun (declaration : Names.declaration) -> declaration.path) declarations in
@@ -731,7 +730,10 @@ let package_parts pipeline (names : Names.lookups) package : Part.t list =
       (fun dependency -> Part.Grant (package, dependency))
       (List.sort_uniq Path.compare_package (names.dependency_names package))
   @ List.map (fun file -> Part.Import_check file) state.files
-  @ List.map (fun check -> Part.Package_check (package, check)) (Package_checks.checks declarations)
+  @ List.map
+      (fun check -> Part.Package_check (package, check))
+      (List.concat_map Package_checks.list_declaration_checks declarations
+      @ Package_checks.package_wide_checks)
 
 let checked_body pipeline note key =
   read_part pipeline note (fun key -> Part.Checked_body key) (fun owner -> owner.checked_bodies) key
@@ -1073,7 +1075,7 @@ let stored pipeline (part : Part.t) =
         restore =
           (fun bytes -> Type_table.replace pipeline.layouts ty (Marshal.from_string bytes 0));
       }
-  | Source _ | Packages | Modules _ | Dependencies _ | Entry _ | Entries _ | Imports _
+  | Source _ | Packages | Module _ | Dependencies _ | Entry _ | Entries _ | Imports _
   | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _ | Module_declarations _
   | File_declarations _ | Package_declarations _ | Members _ | Traits_declaring _ | Impl_index _
   | Impls_of_type _ | Impls_of_trait _ | Law_proofs _ ->
@@ -1338,12 +1340,12 @@ let namespace_and_implied pipeline (state : state) =
   let namespace, implied =
     computing pipeline [ Part.Namespace package ] (fun note ->
         let note part = if not (is_own_namespace_part package part) then note part in
-        let own_namespace = namespace_of pipeline note state in
+        let own_namespace = build_namespace pipeline note state in
         let names =
           names_over pipeline ~namespace:(fun name ->
               if name = package then own_namespace else namespace pipeline name)
         in
-        (own_namespace, package_parts pipeline (recording names note) package))
+        (own_namespace, list_package_parts pipeline (recording names note) package))
   in
   state.namespace <- Some namespace;
   Hashtbl.replace pipeline.implied package implied;
@@ -1656,7 +1658,7 @@ let compute_part pipeline (part : Part.t) =
             | layout -> Value layout
             | exception Reads_failed_part -> Blocked
             | exception Compile.Todo_type _ -> Failed []))
-  | Source _ | Packages | Modules _ | Dependencies _ | Derived_interface _ | Entry _ | Entries _
+  | Source _ | Packages | Module _ | Dependencies _ | Derived_interface _ | Entry _ | Entries _
   | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
   | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _ | Law_proofs _
@@ -1955,6 +1957,11 @@ let changes pipeline other =
       if (stored pipeline part).is_equal_in other then changed else part :: changed)
     parts []
 
+let mark_module_readers pipeline ~before ~after =
+  List.iter
+    (fun module_ -> mark_readers pipeline (Part.Module module_))
+    (sorted_difference compare before after @ sorted_difference compare after before)
+
 let update pipeline changes =
   List.iter
     (fun ((file : Path.file), text) ->
@@ -1987,7 +1994,7 @@ let update pipeline changes =
           let modules = state.modules in
           list_files state
             (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else []);
-          if modules <> state.modules then mark_readers pipeline (Modules package);
+          mark_module_readers pipeline ~before:modules ~after:state.modules;
           mark_stale pipeline (Namespace package)
         end
       end)
@@ -2039,7 +2046,7 @@ let mark_differences pipeline name ~(before : state option) ~(after : state opti
   List.iter
     (fun file -> if text before file <> text after file then mark_readers pipeline (Source file))
     (List.sort_uniq compare (before.files @ after.files));
-  if before.modules <> after.modules then mark_readers pipeline (Modules name);
+  mark_module_readers pipeline ~before:before.modules ~after:after.modules;
   if before.dependencies <> after.dependencies then mark_readers pipeline (Dependencies name);
   let view (state : state) =
     let states = Hashtbl.create 1 in
@@ -2129,7 +2136,7 @@ let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
           Hashtbl.remove pipeline.absent package.name;
           Hashtbl.replace pipeline.states package.name state;
           mark_state_unsaved pipeline state;
-          mark_readers pipeline (Modules package.name);
+          mark_module_readers pipeline ~before:[] ~after:state.modules;
           mark_readers pipeline (Dependencies package.name);
           List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
           mark_stale pipeline (Namespace package.name))
@@ -2303,26 +2310,28 @@ let by_span_and_code diagnostics =
 let package_check pipeline package check =
   Hashtbl.find_opt (owner pipeline package).package_checks check
 
-let package_outcomes pipeline package =
+let read_outcomes pipeline package checks =
   List.filter_map
     (fun check ->
       match package_check pipeline package check with
       | Some (Value outcome) -> Some outcome
       | Some (Failed _ | Blocked) | None -> None)
-    (Package_checks.checks ((names_lookups pipeline).package_declarations package))
+    checks
 
 let stage_diagnostics pipeline (file : Path.file) stage =
   let names = names_lookups pipeline in
   let state = owner pipeline file.module_.package in
-  let placed key diagnostics =
-    match names.place key with
-    | Some { file = home; base } when home = file ->
-        List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-    | Some _ | None -> []
+  let place key = function
+    | [] -> []
+    | diagnostics -> (
+        match names.place key with
+        | Some { file = home; base } when home = file ->
+            List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
+        | Some _ | None -> [])
   in
   let of_definitions () =
     List.concat_map
-      (fun key -> placed key (definition_diagnostics pipeline key stage))
+      (fun key -> place key (definition_diagnostics pipeline key stage))
       (file_keys pipeline file)
   in
   by_span_and_code
@@ -2330,15 +2339,25 @@ let stage_diagnostics pipeline (file : Path.file) stage =
     | Resolve ->
         Option.value ~default:[] (Hashtbl.find_opt state.import_checks file) @ of_definitions ()
     | Package_checks ->
+        let package = file.module_.package in
         List.concat_map
-          (function
-            | Package_checks.Placed diagnostics ->
-                List.concat_map
-                  (fun (diagnostic : Package_checks.placed) ->
-                    placed diagnostic.key [ diagnostic.diagnostic ])
-                  diagnostics
-            | Problems _ | Packages _ -> [])
-          (package_outcomes pipeline file.module_.package)
+          (fun (declaration : Names.declaration) ->
+            List.concat_map
+              (function
+                | Package_checks.Declared diagnostics ->
+                    place (Names.key_of declaration) diagnostics
+                | Placed _ | Problems _ | Packages _ -> [])
+              (read_outcomes pipeline package (Package_checks.list_declaration_checks declaration)))
+          (names.declarations_in file)
+        @ List.concat_map
+            (function
+              | Package_checks.Placed diagnostics ->
+                  List.concat_map
+                    (fun (diagnostic : Package_checks.placed) ->
+                      place diagnostic.key [ diagnostic.diagnostic ])
+                    diagnostics
+              | Declared _ | Problems _ | Packages _ -> [])
+            (read_outcomes pipeline package Package_checks.package_wide_checks)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
 let stages = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
@@ -2359,14 +2378,15 @@ let file_diagnostics pipeline (file : Path.file) =
 let manifest_problems pipeline package =
   drain pipeline ~through:Package_checks [ package ];
   List.concat_map
-    (function Package_checks.Problems problems -> problems | Placed _ | Packages _ -> [])
-    (package_outcomes pipeline package)
+    (function
+      | Package_checks.Problems problems -> problems | Declared _ | Placed _ | Packages _ -> [])
+    (read_outcomes pipeline package Package_checks.package_wide_checks)
 
 let code_packages pipeline package =
   drain pipeline ~through:Package_checks [ package ];
   match package_check pipeline package Code_packages with
   | Some (Value (Packages packages)) -> Some packages
-  | Some (Value (Placed _ | Problems _) | Failed _ | Blocked) | None -> None
+  | Some (Value (Declared _ | Placed _ | Problems _) | Failed _ | Blocked) | None -> None
 
 let state pipeline package =
   drain pipeline ~through:Recursion_groups [ package ];

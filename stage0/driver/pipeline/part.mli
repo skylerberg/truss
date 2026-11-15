@@ -2,7 +2,7 @@ type t =
   | Source of Path.file
   | Parsed of Path.file
   | Packages
-  | Modules of Path.package
+  | Module of Path.module_
   | Dependencies of Path.package
   | Namespace of Path.package
   | Entry of Path.module_ * string

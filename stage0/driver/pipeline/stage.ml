@@ -79,7 +79,7 @@ let drains ~through stage =
      || is_lowering stage || precedes stage Call_edges || stage = Successors)
 
 let of_part : Part.t -> t = function
-  | Source _ | Packages | Modules _ | Dependencies _ -> Input
+  | Source _ | Packages | Module _ | Dependencies _ -> Input
   | Parsed _ -> Parse
   | Namespace _ | Entry _ | Entries _ | Imports _ | Declaration _ | Tree _ | Text _ | Place _
   | Container _ | Contained _ | Module_declarations _ | File_declarations _ | Package_declarations _

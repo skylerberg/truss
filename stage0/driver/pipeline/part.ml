@@ -2,7 +2,7 @@ type t =
   | Source of Path.file
   | Parsed of Path.file
   | Packages
-  | Modules of Path.package
+  | Module of Path.module_
   | Dependencies of Path.package
   | Namespace of Path.package
   | Entry of Path.module_ * string
@@ -56,7 +56,7 @@ type t =
 let package_of_definition = function
   | Source file | Parsed file | File_declarations file | Import_check file -> file.module_.package
   | Packages -> Compiler_bug.bug ~stage:"Pipeline" "the set of packages belongs to no package"
-  | Modules package
+  | Module module_ -> module_.package
   | Dependencies package
   | Namespace package
   | Package_declarations package
@@ -143,7 +143,7 @@ let show part =
   | Source file -> "source " ^ Path.show_file file
   | Parsed file -> "parsed " ^ Path.show_file file
   | Packages -> "packages"
-  | Modules package -> "modules " ^ Path.show_package package
+  | Module module_ -> "module " ^ Path.show_module module_
   | Dependencies package -> "dependencies " ^ Path.show_package package
   | Namespace package -> "namespace " ^ Path.show_package package
   | Entry (module_, name) -> Printf.sprintf "entry %s %s" (Path.show_module module_) name
@@ -232,7 +232,7 @@ let rec instance_definition : Instance.key -> Path.t option = function
   | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_definition key
 
 let definition = function
-  | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entries _
+  | Source _ | Parsed _ | Packages | Module _ | Dependencies _ | Namespace _ | Entries _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Traits_declaring _
   | Impl_index _ | Grant _ | Import_check _
   | Package_check (_, (Instantiations | Tests | Grants | Dependencies | Code_packages)) ->
@@ -281,7 +281,7 @@ let kind_name = function
   | Source _ -> "source"
   | Parsed _ -> "parsed file"
   | Packages -> "packages"
-  | Modules _ -> "modules"
+  | Module _ -> "module"
   | Dependencies _ -> "dependencies"
   | Namespace _ -> "namespace"
   | Entry _ -> "namespace entry"

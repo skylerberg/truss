@@ -21,9 +21,11 @@ type check =
   | Dependencies
   | Code_packages
 
-val checks : Resolve.Names.declaration list -> check list
+val list_declaration_checks : Resolve.Names.declaration -> check list
+val package_wide_checks : check list
 
 type outcome =
+  | Declared of Diagnostic.in_definition list
   | Placed of placed list
   | Problems of manifest_problem list
   | Packages of Path.package list

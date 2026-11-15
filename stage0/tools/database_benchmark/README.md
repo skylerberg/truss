@@ -77,9 +77,9 @@ A step whose change is local should count the same parts at every size. A step w
 
 ## Baseline
 
-Run on 2026-11-15, on Linux x86_64 (AMD Ryzen 7 2700X Eight-Core Processor, 16 logical cores). Other processes used 51.0 CPU-seconds during the run's 494 seconds. Each run is two processes of its own, and each time is the median of 3 runs.
+Run on 2026-11-15, on Linux x86_64 (AMD Ryzen 7 2700X Eight-Core Processor, 16 logical cores). Other processes used 48.2 CPU-seconds during the run's 471 seconds. Each run is two processes of its own, and each time is the median of 3 runs.
 
-Checking the standard library into an empty store took 15076 ms.
+Checking the standard library into an empty store took 15068 ms.
 
 ### 50 modules, 1303 functions
 
@@ -87,22 +87,22 @@ The first build computes 27450 parts and leaves 327 MB of live heap.
 
 | Step | Update ms | Check ms | Lower ms | Save ms | Computed | Collected | Written KB |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| First build | 2220.6 | 14.1 | 1.3 | 308.5 | 27450 | 0 | 13845 |
-| Edit one function's body | 43.8 | 11.6 | 1.2 | 15.9 | 33 | 0 | 16 |
-| Undo that edit | 44.5 | 11.5 | 1.3 | 15.9 | 33 | 0 | 15 |
-| Edit the body of the function every function calls | 91.4 | 11.3 | 1.2 | 24.7 | 1320 | 0 | 224 |
-| Edit the body of a function every test reaches | 87.9 | 11.1 | 1.2 | 17.6 | 1295 | 0 | 228 |
-| Change the signature of the function every function calls | 900.0 | 11.8 | 1.3 | 75.8 | 13821 | 0 | 3406 |
-| Add a field to the type every module reads | 104.6 | 11.4 | 1.2 | 25.8 | 693 | 0 | 257 |
-| Add a function to one module | 60.7 | 13.2 | 1.3 | 13.6 | 24 | 0 | 73 |
-| Rename a function and its callers | 89.0 | 12.3 | 1.3 | 24.3 | 160 | 75 | 175 |
-| Introduce a type error | 60.1 | 12.2 | – | 13.5 | 50 | 36 | 41 |
-| Fix the type error | 67.5 | 11.5 | 1.2 | 14.6 | 86 | 0 | 106 |
-| Remove a module | 125.5 | 12.9 | 1.2 | 25.7 | 1475 | 81 | 256 |
-| Add the module back | 143.0 | 11.9 | 1.3 | 30.9 | 2017 | 0 | 434 |
-| Edit a tenth of the modules at once, as switching branches does | 112.7 | 11.5 | 1.2 | 26.6 | 1386 | 0 | 283 |
-| Open the project again in a new process | 1722.0 | 21.1 | 1.1 | 0.0 | 0 | 0 | 0 |
-| Open a copy of the project, as a new worktree does | 800.2 | 21.4 | 1.1 | 0.1 | 0 | 0 | 0 |
+| First build | 2131.8 | 8.7 | 1.8 | 335.4 | 27450 | 0 | 13846 |
+| Edit one function's body | 44.1 | 6.7 | 1.3 | 13.5 | 33 | 0 | 16 |
+| Undo that edit | 44.7 | 6.6 | 1.3 | 13.3 | 33 | 0 | 15 |
+| Edit the body of the function every function calls | 91.5 | 6.4 | 1.2 | 17.4 | 1320 | 0 | 224 |
+| Edit the body of a function every test reaches | 87.9 | 6.4 | 1.2 | 18.4 | 1295 | 0 | 228 |
+| Change the signature of the function every function calls | 907.2 | 7.0 | 1.3 | 77.5 | 13821 | 0 | 3406 |
+| Add a field to the type every module reads | 106.2 | 6.5 | 1.3 | 26.3 | 693 | 0 | 257 |
+| Add a function to one module | 60.5 | 7.8 | 1.5 | 14.8 | 24 | 0 | 73 |
+| Rename a function and its callers | 85.8 | 7.2 | 1.3 | 17.2 | 160 | 75 | 175 |
+| Introduce a type error | 58.1 | 7.2 | – | 15.7 | 50 | 36 | 41 |
+| Fix the type error | 69.3 | 6.6 | 1.3 | 16.6 | 86 | 0 | 106 |
+| Remove a module | 67.1 | 7.9 | 1.3 | 18.3 | 5 | 81 | 151 |
+| Add the module back | 85.1 | 6.6 | 1.3 | 20.1 | 547 | 0 | 330 |
+| Edit a tenth of the modules at once, as switching branches does | 117.5 | 6.7 | 1.2 | 28.2 | 1386 | 0 | 283 |
+| Open the project again in a new process | 1640.1 | 14.6 | 1.1 | 0.0 | 0 | 0 | 0 |
+| Open a copy of the project, as a new worktree does | 800.2 | 15.0 | 1.2 | 0.1 | 0 | 0 | 0 |
 
 ### 200 modules, 5203 functions
 
@@ -110,22 +110,22 @@ The first build computes 108750 parts and leaves 473 MB of live heap.
 
 | Step | Update ms | Check ms | Lower ms | Save ms | Computed | Collected | Written KB |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| First build | 6567.7 | 56.9 | 4.8 | 1341.6 | 108750 | 0 | 55011 |
-| Edit one function's body | 213.2 | 57.6 | 4.8 | 32.5 | 33 | 0 | 16 |
-| Undo that edit | 221.5 | 57.1 | 4.9 | 32.5 | 33 | 0 | 15 |
-| Edit the body of the function every function calls | 432.4 | 56.8 | 4.9 | 55.1 | 5220 | 0 | 893 |
-| Edit the body of a function every test reaches | 404.1 | 56.7 | 4.8 | 49.8 | 5195 | 0 | 897 |
-| Change the signature of the function every function calls | 4380.0 | 58.7 | 4.9 | 287.6 | 55221 | 0 | 13802 |
-| Add a field to the type every module reads | 483.2 | 58.7 | 4.9 | 43.9 | 2643 | 0 | 1015 |
-| Add a function to one module | 247.2 | 57.1 | 4.8 | 25.2 | 24 | 0 | 252 |
-| Rename a function and its callers | 300.2 | 58.8 | 4.9 | 39.1 | 160 | 75 | 354 |
-| Introduce a type error | 256.6 | 57.9 | – | 21.5 | 50 | 36 | 24 |
-| Fix the type error | 283.0 | 57.2 | 4.9 | 27.5 | 86 | 0 | 286 |
-| Remove a module | 560.0 | 57.9 | 4.9 | 38.9 | 5975 | 81 | 772 |
-| Add the module back | 613.6 | 57.1 | 4.9 | 39.4 | 6517 | 0 | 954 |
-| Edit a tenth of the modules at once, as switching branches does | 467.5 | 57.3 | 4.8 | 43.7 | 5556 | 0 | 1151 |
-| Open the project again in a new process | 4482.3 | 110.4 | 4.3 | 0.0 | 0 | 0 | 0 |
-| Open a copy of the project, as a new worktree does | 3418.3 | 111.7 | 4.3 | 0.1 | 0 | 0 | 0 |
+| First build | 6510.6 | 31.6 | 4.9 | 1347.8 | 108750 | 0 | 55016 |
+| Edit one function's body | 216.4 | 29.8 | 5.0 | 36.3 | 33 | 0 | 16 |
+| Undo that edit | 222.3 | 29.6 | 4.9 | 34.6 | 33 | 0 | 15 |
+| Edit the body of the function every function calls | 432.1 | 29.8 | 4.9 | 43.6 | 5220 | 0 | 893 |
+| Edit the body of a function every test reaches | 402.4 | 30.0 | 4.9 | 42.7 | 5195 | 0 | 897 |
+| Change the signature of the function every function calls | 4388.8 | 32.3 | 5.0 | 284.3 | 55221 | 0 | 13802 |
+| Add a field to the type every module reads | 487.4 | 30.0 | 5.0 | 40.0 | 2643 | 0 | 1015 |
+| Add a function to one module | 246.1 | 29.8 | 4.9 | 29.0 | 24 | 0 | 252 |
+| Rename a function and its callers | 301.9 | 30.4 | 5.0 | 32.6 | 160 | 75 | 354 |
+| Introduce a type error | 258.7 | 30.0 | – | 25.6 | 50 | 36 | 24 |
+| Fix the type error | 282.6 | 30.0 | 5.0 | 32.4 | 86 | 0 | 286 |
+| Remove a module | 286.8 | 31.8 | 5.1 | 31.5 | 5 | 81 | 337 |
+| Add the module back | 322.5 | 30.1 | 5.1 | 44.2 | 547 | 0 | 518 |
+| Edit a tenth of the modules at once, as switching branches does | 497.3 | 30.2 | 5.0 | 50.0 | 5556 | 0 | 1151 |
+| Open the project again in a new process | 4402.9 | 76.3 | 4.4 | 0.0 | 0 | 0 | 0 |
+| Open a copy of the project, as a new worktree does | 3370.7 | 77.5 | 4.4 | 0.1 | 0 | 0 | 0 |
 
 ### 800 modules, 20803 functions
 
@@ -133,19 +133,19 @@ The first build computes 433950 parts and leaves 1058 MB of live heap.
 
 | Step | Update ms | Check ms | Lower ms | Save ms | Computed | Collected | Written KB |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| First build | 26268.4 | 340.3 | 18.7 | 5751.7 | 433950 | 0 | 221029 |
-| Edit one function's body | 1177.2 | 360.5 | 19.3 | 21.2 | 33 | 0 | 16 |
-| Undo that edit | 1200.2 | 340.4 | 19.1 | 21.2 | 33 | 0 | 15 |
-| Edit the body of the function every function calls | 2282.4 | 343.2 | 19.4 | 144.3 | 20820 | 0 | 3590 |
-| Edit the body of a function every test reaches | 2284.2 | 341.9 | 19.2 | 146.1 | 20795 | 0 | 3593 |
-| Change the signature of the function every function calls | 18946.6 | 351.8 | 19.5 | 1609.6 | 220821 | 0 | 55692 |
-| Add a field to the type every module reads | 2311.6 | 341.2 | 19.1 | 81.4 | 10443 | 0 | 4069 |
-| Add a function to one module | 1270.9 | 359.6 | 19.5 | 66.5 | 24 | 0 | 1040 |
-| Rename a function and its callers | 1861.6 | 348.8 | 19.4 | 63.0 | 160 | 75 | 1142 |
-| Introduce a type error | 1506.7 | 346.4 | – | 52.0 | 50 | 36 | 426 |
-| Fix the type error | 1395.4 | 340.5 | 19.2 | 61.6 | 86 | 0 | 1074 |
-| Remove a module | 2479.3 | 343.8 | 19.2 | 98.4 | 23975 | 81 | 2914 |
-| Add the module back | 2516.6 | 347.5 | 19.0 | 92.6 | 24517 | 0 | 3096 |
-| Edit a tenth of the modules at once, as switching branches does | 2436.1 | 355.2 | 19.3 | 205.3 | 22236 | 0 | 4648 |
-| Open the project again in a new process | 16299.7 | 610.6 | 17.0 | 0.0 | 0 | 0 | 0 |
-| Open a copy of the project, as a new worktree does | 16194.7 | 608.7 | 17.0 | 0.1 | 0 | 0 | 0 |
+| First build | 26059.8 | 146.1 | 19.2 | 5884.3 | 433950 | 0 | 221049 |
+| Edit one function's body | 1193.8 | 143.5 | 20.0 | 21.6 | 33 | 0 | 16 |
+| Undo that edit | 1209.4 | 143.3 | 19.6 | 21.5 | 33 | 0 | 15 |
+| Edit the body of the function every function calls | 2302.1 | 145.2 | 19.9 | 142.9 | 20820 | 0 | 3590 |
+| Edit the body of a function every test reaches | 2299.6 | 145.4 | 19.8 | 145.3 | 20795 | 0 | 3593 |
+| Change the signature of the function every function calls | 19079.2 | 151.7 | 20.0 | 1607.8 | 220821 | 0 | 55692 |
+| Add a field to the type every module reads | 2324.5 | 143.4 | 19.7 | 76.8 | 10443 | 0 | 4069 |
+| Add a function to one module | 1287.5 | 146.3 | 19.9 | 58.8 | 24 | 0 | 1040 |
+| Rename a function and its callers | 1830.0 | 142.5 | 19.8 | 50.8 | 160 | 75 | 1142 |
+| Introduce a type error | 1550.0 | 145.7 | – | 34.3 | 50 | 36 | 426 |
+| Fix the type error | 1380.3 | 143.1 | 19.7 | 60.6 | 86 | 0 | 1074 |
+| Remove a module | 1339.3 | 143.2 | 19.8 | 56.9 | 5 | 81 | 1136 |
+| Add the module back | 1390.9 | 143.4 | 19.8 | 72.5 | 547 | 0 | 1318 |
+| Edit a tenth of the modules at once, as switching branches does | 2206.8 | 143.7 | 19.7 | 161.8 | 22236 | 0 | 4648 |
+| Open the project again in a new process | 16142.6 | 362.6 | 17.5 | 0.0 | 0 | 0 | 0 |
+| Open a copy of the project, as a new worktree does | 16197.9 | 368.6 | 17.6 | 0.1 | 0 | 0 | 0 |

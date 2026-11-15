@@ -106,7 +106,7 @@ let is_signature : Pipeline.Part.t -> bool = function
   | Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _ | Type_facts _
   | Signature_check _ | Contract _ | Contract_mir _ ->
       true
-  | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entry _ | Entries _
+  | Source _ | Parsed _ | Packages | Module _ | Dependencies _ | Namespace _ | Entry _ | Entries _
   | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
   | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _ | Law_proofs _
