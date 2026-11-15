@@ -8,7 +8,7 @@ let head_type context owner (head : type_head) =
   | Some (Definition (Type, type_path)) ->
       (match Names.generics_of context.lookups.names type_path with
       | Some expected when List.length expected <> List.length generics ->
-          Lower.report context Arity head.span
+          Lower.report context Arity context.spans.(head.id)
             (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
                (Names.spell_path head.path) (List.length expected)
                (if List.length expected = 1 then "parameter" else "parameters")
@@ -24,7 +24,7 @@ let head_type context owner (head : type_head) =
       (generics, type_)
   | Some (Definition (((Trait | Capability) as kind), _)) ->
       ( generics,
-        Lower.error context Not_a_type head.span
+        Lower.error context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (Names.spell_path head.path)
              (Names.kind_name (Names.kind_of_named kind))) )
@@ -162,7 +162,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
                       | _ -> false
                     in
                     if List.exists defined_by_this_impl (set :> Types.capability list) then begin
-                      Lower.report context Unknown_associated_capability name.span
+                      Lower.report context Unknown_associated_capability context.spans.(name.id)
                         (Printf.sprintf
                            "`%s` is defined from itself, or from a set that this `impl` defines \
                             after it."
@@ -205,11 +205,13 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
   | _ -> (Capability_parts, context)
 
 let header (lookups : Lookups.t) (key : Names.key) =
-  match (lookups.names.definition key, lookups.resolved Interface key) with
-  | Some definition, Some resolved -> (
-      if Resolve.Parts.broken definition Header then Some (Error [])
+  match (lookups.names.definition key, lookups.names.spans key, lookups.resolved Interface key) with
+  | Some definition, Some spans, Some resolved -> (
+      if Names.is_broken lookups.names key Header then Some (Error [])
       else
-        match lower_container (Lower.create lookups resolved empty_scope) key.path definition with
+        match
+          lower_container (Lower.create lookups resolved ~spans empty_scope) key.path definition
+        with
         | _, context when !(context.diagnostics) <> [] ->
             Some (Error (List.rev !(context.diagnostics)))
         | Broken _, _ -> Some (Error [])
@@ -222,9 +224,9 @@ let header (lookups : Lookups.t) (key : Names.key) =
             Some (Ok { container_scope = Lower.scope context; header_generics; header_uses }))
   | _ -> None
 
-let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : definition)
+let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : definition) ~spans
     (resolved : Resolve.resolved) =
-  let context = Lower.create lookups resolved empty_scope in
+  let context = Lower.create lookups resolved ~spans empty_scope in
   let path = key.path in
   let methods () =
     List.filter_map
@@ -239,13 +241,14 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
   in
   let interface, context =
     match
-      ( Resolve.Parts.reported definition Header,
+      ( Names.recovery_report lookups.names key Header,
         Option.map lookups.header (lookups.names.container key) )
     with
     | Some report, _ -> (Error_interface report, context)
-    | None, Some None -> (Error_interface (Resolve.Parts.recovery_report definition.span), context)
+    | None, Some None ->
+        (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)), context)
     | None, Some (Some container) -> (
-        let context = Lower.create lookups resolved container.container_scope in
+        let context = Lower.create lookups resolved ~spans container.container_scope in
         match definition.kind with
         | Function { signature; _ } | Method_declaration signature ->
             let lowered =
@@ -270,11 +273,11 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
               | _ -> false
             in
             (Function_interface { lowered with terminates }, context)
-        | _ -> (Error_interface (Resolve.Parts.recovery_report definition.span), context))
+        | _ -> (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)), context))
     | None, None -> (
         match definition.kind with
         | Method_declaration _ ->
-            (Error_interface (Resolve.Parts.recovery_report definition.span), context)
+            (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)), context)
         | Function { signature; _ } ->
             let head, self_type =
               match signature.name with
@@ -380,7 +383,7 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
         | Theorem { generics; parameters; clauses; _ } ->
             let signature : signature =
               {
-                name = Plain_name { text = ""; span = definition.span; id = definition.id };
+                name = Plain_name { text = ""; id = definition.id };
                 generics;
                 parameters;
                 result = None;
@@ -397,7 +400,7 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
                 (Law_proof_interface { generics; trait; law = law.text; for_type }, context)
             | Error report -> (Error_interface report, context))
         | Definition_error _ ->
-            (Error_interface (Resolve.Parts.recovery_report definition.span), context))
+            (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)), context))
   in
   {
     interface;
@@ -407,10 +410,10 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
   }
 
 let lower (lookups : Lookups.t) key =
-  match (lookups.names.definition key, lookups.resolved Interface key) with
-  | Some definition, Some resolved ->
+  match (lookups.names.definition key, lookups.names.spans key, lookups.resolved Interface key) with
+  | Some definition, Some spans, Some resolved ->
       Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
-          Some (lower_definition lookups key definition resolved))
+          Some (lower_definition lookups key definition ~spans resolved))
   | _ -> None
 
 let interface (lookups : Lookups.t) path =

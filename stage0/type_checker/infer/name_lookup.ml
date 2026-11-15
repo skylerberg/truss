@@ -16,7 +16,7 @@ let marked_receiver (receiver : expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
 
 let rec coerce state env ?argument (value : expression) ~actual ~expected =
-  convert state env ?argument ~expression:value.id value.span ~actual ~expected
+  convert state env ?argument ~expression:value.id (read_span state value.id) ~actual ~expected
 
 and literal_type state ~expected kind =
   match Option.map (resolve state) expected with
@@ -47,11 +47,12 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       register_expression state value (fun () -> Value_parameter parameter);
       Types.builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
-      error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
+      error state Not_a_value (read_span state value.id)
+        (Printf.sprintf "`%s` is a type, not a value." text)
   | Definition ((Function | Theorem), path) -> (
       match function_signature state path with
       | Some signature ->
-          let instance = instantiate state value.span signature in
+          let instance = instantiate state (read_span state value.id) signature in
           Option.iter (explicit_type_arguments state value instance) type_arguments;
           state.tables.resolutions.(value.id) <-
             Some (Global { path; type_arguments = instance.type_arguments });
@@ -73,13 +74,14 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
         Types.unit
       end
       else
-        error state Not_a_value value.span
+        error state Not_a_value (read_span state value.id)
           (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." text text)
   | Definition ((Trait | Capability), _) ->
-      error state Not_a_value value.span (Printf.sprintf "`%s` is not a value." text)
+      error state Not_a_value (read_span state value.id)
+        (Printf.sprintf "`%s` is not a value." text)
   | Variant (type_path, variant) ->
       variant_value state value type_path variant
-        ~arguments:(instantiate_type state value.span type_path)
+        ~arguments:(instantiate_type state (read_span state value.id) type_path)
   | Field field -> (
       match env.self with
       | Some (Types.Named { path = self_path; arguments }) -> (
@@ -110,7 +112,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | None -> bug "`result` is named where nothing is returned")
   | Old | Identical | Final | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
-      error state Not_a_value value.span
+      error state Not_a_value (read_span state value.id)
         (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
   | Visited -> (
       state.tables.resolutions.(value.id) <- Some Specification_value;
@@ -141,7 +143,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
               costs = [ { amortized = false; resource = Time; bound = Order_of } ];
             }
       | Some { fields = Some fields; _ } ->
-          error state Not_a_value value.span
+          error state Not_a_value (read_span state value.id)
             (Printf.sprintf
                "`%s` has %d fields, so it is not a function: a function takes its arguments by \
                 position, and fields have no order. Build it with named fields, as in `%s(%s)`."
@@ -149,19 +151,23 @@ and variant_value state (value : expression) type_path variant ~arguments =
                (String.concat ", "
                   (List.map (fun (field : Types.field) -> field.field_name ^ ": ...") fields)))
       | None ->
-          error state Unknown_variant value.span
+          error state Unknown_variant (read_span state value.id)
             (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_) variant))
   | None ->
-      error state Unknown_variant value.span
+      error state Unknown_variant (read_span state value.id)
         (Printf.sprintf "`%s` has no variants." (Types.show type_))
 
 and field state (value : expression) base_type (member : name) =
   let unknown candidates =
-    error state Unknown_member member.span
+    error state Unknown_member (read_span state member.id)
       ~fixes:
         (match Diagnostic.closest member.text candidates with
         | Some candidate ->
-            [ fix (Printf.sprintf "Write `%s`." candidate) [ replace member.span candidate ] ]
+            [
+              fix
+                (Printf.sprintf "Write `%s`." candidate)
+                [ replace (read_span state member.id) candidate ];
+            ]
         | None -> [])
       (Printf.sprintf "`%s` has no field `%s`." (show state base_type) member.text)
   in
@@ -174,7 +180,7 @@ and field state (value : expression) base_type (member : name) =
           with
           | Some written ->
               if not (Members.fields_visible state.lookups ~package:state.package path) then begin
-                error state Private_field member.span
+                error state Private_field (read_span state member.id)
                   (Printf.sprintf
                      "`%s` is opaque, so its fields can be read only in its own package."
                      (show state base_type))
@@ -186,14 +192,14 @@ and field state (value : expression) base_type (member : name) =
               end
           | None ->
               if Members.own_methods state.lookups path member.text <> [] then begin
-                error state Not_a_value member.span
+                error state Not_a_value (read_span state member.id)
                   (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text
                      member.text)
               end
               else unknown (List.map (fun (written : Types.field) -> written.field_name) fields))
       | None ->
           if Members.own_methods state.lookups path member.text <> [] then
-            error state Not_a_value member.span
+            error state Not_a_value (read_span state member.id)
               (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text member.text)
           else unknown [])
   | _ -> unknown []
@@ -217,7 +223,7 @@ and static_member state (value : expression) type_ (member : name) =
             | (_, method_path) :: _ -> (
                 match function_signature state method_path with
                 | Some signature ->
-                    let instance = instantiate state value.span signature in
+                    let instance = instantiate state (read_span state value.id) signature in
                     (match instance.signature.receiver with
                     | Some (_, receiver) -> ignore (unify state receiver type_)
                     | None -> ());
@@ -227,12 +233,12 @@ and static_member state (value : expression) type_ (member : name) =
                     Types.Function (Types.function_type_of instance.signature)
                 | None -> bug "the method `%s` has no signature" (Path.show method_path))
             | [] ->
-                error state Unknown_member member.span
+                error state Unknown_member (read_span state member.id)
                   (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text))
         end
   | Types.Error _ | Types.Hole -> type_
   | _ ->
-      error state Unknown_member member.span
+      error state Unknown_member (read_span state member.id)
         (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text)
 
 and explicit_type_arguments ?(head = 0) state (value : expression) instance items =
@@ -245,7 +251,7 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
     in
     let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
     if List.length written <> List.length own then
-      report state Arity value.span
+      report state Arity (read_span state value.id)
         (Printf.sprintf "This takes %d type %s, and %d %s given." (List.length own)
            (if List.length own = 1 then "argument" else "arguments")
            (List.length written)
@@ -258,10 +264,10 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
           | Types.Value written, Types.Value own ->
               ignore (Unify.unify_value state.unifier written own)
           | Types.Type _, Types.Value _ ->
-              report state Argument_kind value.span
+              report state Argument_kind (read_span state value.id)
                 "A type argument is given where a `UInt64` value is expected."
           | Types.Value _, Types.Type _ ->
-              report state Argument_kind value.span
+              report state Argument_kind (read_span state value.id)
                 "A `UInt64` value is given where a type argument is expected."
           | _ -> ())
         written own
@@ -284,7 +290,7 @@ and finish_call state (value : expression) callee (instance : instance) argument
 
 and check_specification_call state env (value : expression) (signature : Types.signature) =
   if signature.specification_only && not env.specification then
-    report state Specification_only value.span
+    report state Specification_only (read_span state value.id)
       "This function mentions `Integer`, so it can be called only in specifications."
 
 and could_implement state type_ trait =
@@ -340,7 +346,7 @@ and resolve_evidence state (value : expression) self_type (reference : Types.tra
             | _ -> ())
         | None ->
             if not (Types.is_error self_type) then
-              report state No_impl value.span
+              report state No_impl (read_span state value.id)
                 (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
                    (Types.show_trait reference)));
         true

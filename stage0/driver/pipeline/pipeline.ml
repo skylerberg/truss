@@ -538,6 +538,7 @@ let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
     definition = (fun key -> noting (Tree key) (names.definition key));
     text = (fun key -> noting (Text key) (names.text key));
     spans = (fun key -> noting (Tree key) (names.spans key));
+    recovered = (fun key -> noting (Tree key) (names.recovered key));
     place = (fun key -> noting (Place key) (names.place key));
     container = (fun key -> noting (Container key) (names.container key));
     contained = (fun key -> noting (Contained key) (names.contained key));

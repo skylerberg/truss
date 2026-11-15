@@ -13,8 +13,10 @@ type hole = {
 let of_declaration snapshot packages pipeline (names : Names.lookups)
     (declaration : Names.declaration) =
   let key = Names.key_of declaration in
-  match (names.definition key, names.place key, Pipeline.resolved pipeline key) with
-  | Some definition, Some { file; base }, Some resolved ->
+  match
+    (names.definition key, names.spans key, names.place key, Pipeline.resolved pipeline key)
+  with
+  | Some definition, Some spans, Some { file; base }, Some resolved ->
       let source = Command_packages.source snapshot packages file in
       List.map
         (fun (hole : Inspect.hole) ->
@@ -28,7 +30,7 @@ let of_declaration snapshot packages pipeline (names : Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes definition resolved (Pipeline.tables pipeline key))
+        (Inspect.holes spans definition resolved (Pipeline.tables pipeline key))
   | _ -> []
 
 let gather snapshot packages pipeline paths =

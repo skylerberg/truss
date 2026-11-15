@@ -63,6 +63,7 @@ type lookups = {
   definition : key -> Syntax.definition option;
   text : key -> string option;
   spans : key -> Source.Definition_span.t array option;
+  recovered : key -> Source.Definition_span.t list option;
   place : key -> place option;
   container : key -> key option;
   contained : key -> key list;
@@ -94,6 +95,8 @@ val law_parameters : lookups -> Path.t -> string -> string list option
 
 type generic_kind = Type_kind | Value_kind | Capability_kind
 
+val recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
+val is_broken : lookups -> key -> Parts.part -> bool
 val generics_of : lookups -> Path.t -> (string * generic_kind) list option
 val kind_of : lookups -> Path.t -> named option
 

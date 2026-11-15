@@ -141,8 +141,9 @@ let add_requires context frame required =
   let text = Lazy.force frame.source.text in
   let brace =
     match Option.bind frame.source.key context.lookups.interface.names.definition with
-    | Some { kind = Function { body; _ }; _ } when body.span.start < String.length text ->
-        Some body.span.start
+    | Some { kind = Function { body; _ }; _ } ->
+        let start = (Lazy.force frame.source.spans).(body.id).start in
+        if start < String.length text then Some start else None
     | _ -> None
   in
   let edit at before =

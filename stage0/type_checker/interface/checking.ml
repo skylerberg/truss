@@ -6,6 +6,7 @@ type state = {
   key : Names.key;
   definition : definition;
   lowered : Environment.lowered_interface;
+  spans : Source.Definition_span.t array;
   mutable diagnostics : Diagnostic.in_definition list;
 }
 

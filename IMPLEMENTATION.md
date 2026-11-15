@@ -130,6 +130,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   recover, such as moving a misplaced `use` line, is checked but not
   applied: the tree is already right, and code a fix moves maps to
   zero-width spans.
+- **The tree holds no positions.** A node holds an id, and its item's span
+  table holds the node's span at that index. The parser fills the table as
+  it allocates ids, so the definition's id is the last. A definition that
+  only moved parses to an equal tree, so a change to positions alone
+  re-runs only the parts that report positions, and no stage strips spans
+  to compare two trees.
 
 ### Stages
 

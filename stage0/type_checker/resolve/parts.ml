@@ -2,7 +2,7 @@ open Syntax
 
 type part = Header | Body | Member_header of int | Member_body of int
 
-let spans (definition : definition) =
+let part_spans (spans : Source.Definition_span.t array) (definition : definition) =
   let split header body (whole : Source.Definition_span.t) (body_span : Source.Definition_span.t) =
     [ (header, Source.Definition_span.make whole.start body_span.start); (body, body_span) ]
   in
@@ -12,26 +12,28 @@ let spans (definition : definition) =
          (fun index (line : _ node) ->
            match body_of line.kind with
            | Some (body : Source.Definition_span.t) ->
-               split (Member_header index) (Member_body index) line.span body
-           | None -> [ (Member_header index, line.span) ])
+               split (Member_header index) (Member_body index) spans.(line.id) body
+           | None -> [ (Member_header index, spans.(line.id)) ])
          lines)
   in
   let with_members lines body_of =
     let header =
       match lines with
-      | (first : _ node) :: _ -> Source.Definition_span.make definition.span.start first.span.start
-      | [] -> definition.span
+      | (first : _ node) :: _ ->
+          Source.Definition_span.make spans.(definition.id).start spans.(first.id).start
+      | [] -> spans.(definition.id)
     in
     (Header, header) :: members lines body_of
   in
   match definition.kind with
   | Function { body; _ } | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->
-      split Header Body definition.span body.span
-  | Constant { value; _ } -> split Header Body definition.span value.span
-  | Method_declaration _ | Type_definition _ | Definition_error _ -> [ (Header, definition.span) ]
+      split Header Body spans.(definition.id) spans.(body.id)
+  | Constant { value; _ } -> split Header Body spans.(definition.id) spans.(value.id)
+  | Method_declaration _ | Type_definition _ | Definition_error _ ->
+      [ (Header, spans.(definition.id)) ]
   | Trait { members; _ } ->
       with_members members (function
-        | Law { body; _ } -> Some body.span
+        | Law { body; _ } -> Some spans.(body.id)
         | Associated_type _ | Associated_capability _ | Trait_member_error -> None)
   | Impl { members; _ } -> with_members members (fun (_ : impl_member) -> None)
   | Capability { members; _ } -> with_members members (fun (_ : capability_member) -> None)
@@ -47,12 +49,10 @@ let lies_in all (recovered : Source.Definition_span.t) (part_span : Source.Defin
 
 let recovery_report (span : Source.Definition_span.t) = Diagnostic.recovered span
 
-let reported definition part =
-  let all = spans definition in
+let reported ~spans ~recovered definition part =
+  let all = part_spans spans definition in
   match List.assoc_opt part all with
   | None -> None
   | Some span ->
       Option.map recovery_report
-        (List.find_opt (fun recovered -> lies_in all recovered span) definition.recovered)
-
-let broken definition part = Option.is_some (reported definition part)
+        (List.find_opt (fun recovered -> lies_in all recovered span) recovered)

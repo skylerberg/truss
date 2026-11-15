@@ -1,9 +1,7 @@
 open Token
 open Syntax
 
-let pattern_node cursor start kind : pattern =
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
-
+let pattern_node cursor start kind : pattern = { kind; id = Cursor.allocate_id_from cursor start }
 let range_bound = "a literal or a constant with its module or type, such as `http::last`"
 
 let string_literal cursor ~start ~modules literal =
@@ -53,9 +51,7 @@ let rec variant_or_constant cursor start (path : path) =
     pattern_node cursor start (Variant { name = path.last; fields })
 
 and range_or_single cursor start end_kind kind =
-  let first : range_end =
-    { kind = end_kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
-  in
+  let first : range_end = { kind = end_kind; id = Cursor.allocate_id_from cursor start } in
   match Cursor.peek_kind cursor with
   | Punctuation ((Dot_dot | Dot_dot_equal) as operator) ->
       Cursor.advance cursor;
@@ -63,11 +59,7 @@ and range_or_single cursor start end_kind kind =
       let stop =
         match literal cursor with
         | Some literal ->
-            ({
-               kind = End_literal literal;
-               span = Cursor.span_from cursor stop_start;
-               id = Cursor.fresh_id cursor;
-             }
+            ({ kind = End_literal literal; id = Cursor.allocate_id_from cursor stop_start }
               : range_end)
         | None -> (
             match Cursor.peek_kind cursor with
@@ -92,7 +84,7 @@ and constant_end cursor start : range_end =
         End_constant (Type_constant (path, Atoms.lower_name cursor "the name of a constant"))
     | _ -> Cursor.fail cursor "a constant"
   in
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+  { kind; id = Cursor.allocate_id_from cursor start }
 
 and primary cursor : pattern =
   let start = Cursor.index cursor in
@@ -161,21 +153,20 @@ and pattern_fields cursor =
           Named_field (name, pattern cursor)
       | _ -> Field (pattern cursor)
     in
-    { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+    { kind; id = Cursor.allocate_id_from cursor start }
   in
   let fields =
     Cursor.bracketed cursor ~item:field ~recover:(fun span ->
         {
-          kind = Field { kind = Pattern_error; span; id = Cursor.fresh_id cursor };
-          span;
-          id = Cursor.fresh_id cursor;
+          kind = Field { kind = Pattern_error; id = Cursor.allocate_id cursor span };
+          id = Cursor.allocate_id cursor span;
         })
   in
   List.iteri
     (fun index (field : pattern_field) ->
       if field.kind = Rest && index < List.length fields - 1 then
         Cursor.report cursor Unexpected_token
-          (Cursor.file_span cursor field.span)
+          (Cursor.read_file_span cursor field.id)
           "`..` must be the last field of a pattern.")
     fields;
   fields

@@ -37,7 +37,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
           match Hashtbl.find_opt state.locals id with
           | Some local ->
               if not (unify state local.type_ type_) then
-                report state Mismatch bound.span
+                report state Mismatch (read_span state bound.id)
                   (Printf.sprintf
                      "`%s` is a `%s` in the first alternative, and a `%s` here; every alternative \
                       binds it with one type."
@@ -46,13 +46,13 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
       | _ -> ())
   | Qualified_constant written_constant ->
       constant ();
-      qualified_constant state written.id written.span written_constant type_
+      qualified_constant state written.id (read_span state written.id) written_constant type_
   | Literal literal ->
       register_pattern state written (fun () ->
           Form.equal_to_pattern state ~origin:written.id
             (Form.pattern_type state written.id)
             (Form.pattern_literal state written.id literal));
-      literal_pattern state written.id written.span literal type_
+      literal_pattern state written.id (read_span state written.id) literal type_
   | Pattern_range { start; stop; inclusive } -> (
       register_pattern state written (fun () ->
           let end_ (written_end : range_end) =
@@ -67,15 +67,17 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
       match resolve state type_ with
       | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _) as resolved
         when not (integer_type state resolved || Types.is_builtin Character resolved) ->
-          report state Mismatch written.span
+          report state Mismatch (read_span state written.id)
             (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
                (show state resolved))
       | _ ->
           List.iter
             (fun (end_ : range_end) ->
               match end_.kind with
-              | End_literal literal -> literal_pattern state end_.id end_.span literal type_
-              | End_constant constant -> qualified_constant state end_.id end_.span constant type_)
+              | End_literal literal ->
+                  literal_pattern state end_.id (read_span state end_.id) literal type_
+              | End_constant constant ->
+                  qualified_constant state end_.id (read_span state end_.id) constant type_)
             [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
@@ -83,7 +85,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
           match Members.variants state.lookups path arguments with
           | Some variants -> (
               if not (Members.fields_visible state.lookups ~package:state.package path) then
-                report state Private_field written.span
+                report state Private_field (read_span state written.id)
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (Types.show type_));
               match
@@ -96,9 +98,12 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                     Some (Variant_pattern { type_; variant = variant.variant_name });
                   (match (variant.fields, fields) with
                   | Some (_ :: _), None ->
-                      report state Missing_argument written.span
+                      report state Missing_argument (read_span state written.id)
                         ~fixes:
-                          [ fix "Match its fields with `..`." [ insert written.span.stop "(..)" ] ]
+                          [
+                            fix "Match its fields with `..`."
+                              [ insert (read_span state written.id).stop "(..)" ];
+                          ]
                         (Printf.sprintf
                            "`%s` has fields, so its pattern names them, or writes `(..)`."
                            variant.variant_name)
@@ -116,7 +121,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                         })
               | None ->
                   unknown
-                  @@ error state Unknown_variant variant_name.span
+                  @@ error state Unknown_variant (read_span state variant_name.id)
                        ~fixes:
                          (match
                             Diagnostic.closest variant_name.text
@@ -128,19 +133,19 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                              [
                                fix
                                  (Printf.sprintf "Write `%s`." candidate)
-                                 [ replace variant_name.span candidate ];
+                                 [ replace (read_span state variant_name.id) candidate ];
                              ]
                          | None -> [])
                        (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
                           variant_name.text))
           | None ->
               unknown
-                (error state Unknown_variant written.span
+                (error state Unknown_variant (read_span state written.id)
                    (Printf.sprintf "`%s` has no variants." (Types.show type_))))
       | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
-            (error state Unknown_variant written.span
+            (error state Unknown_variant (read_span state written.id)
                (Printf.sprintf "`%s` has no variants." (show state type_))))
   | Record fields -> (
       match type_ with
@@ -148,7 +153,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
           match Members.fields state.lookups path arguments with
           | Some record_fields ->
               if not (Members.fields_visible state.lookups ~package:state.package path) then
-                report state Private_field written.span
+                report state Private_field (read_span state written.id)
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (Types.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
@@ -157,12 +162,12 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                   Record (Form.pattern_fields state record_fields matched))
           | None ->
               unknown
-                (error state Not_a_record written.span
+                (error state Not_a_record (read_span state written.id)
                    (Printf.sprintf "`%s` is not a record." (show state type_))))
       | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
-            (error state Not_a_record written.span
+            (error state Not_a_record (read_span state written.id)
                (Printf.sprintf "`%s` is not a record." (show state type_))))
   | Alternatives alternatives ->
       List.iter (fun alternative -> recurse alternative type_) alternatives;
@@ -201,7 +206,7 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
      | [] -> ()
      | missing ->
          if written_fields <> [] || List.length fields > 0 then
-           report state Missing_argument written.span
+           report state Missing_argument (read_span state written.id)
              (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
                 (String.concat ", "
                    (List.map
@@ -221,7 +226,7 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
               Some (declared.field_name, inner)
           | None ->
               pattern_with state env inner ~is_var ~mode
-              @@ error state Unknown_member name.span
+              @@ error state Unknown_member (read_span state name.id)
                    ~fixes:
                      (match
                         Diagnostic.closest name.text
@@ -231,7 +236,7 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
                          [
                            fix
                              (Printf.sprintf "Write `%s`." candidate)
-                             [ replace name.span candidate ];
+                             [ replace (read_span state name.id) candidate ];
                          ]
                      | None -> [])
                    (Printf.sprintf "There is no field `%s` here." name.text);
@@ -253,7 +258,7 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
                      fields)
               in
               pattern_with state env inner ~is_var ~mode
-                (error state Unknown_member inner.span
+                (error state Unknown_member (read_span state inner.id)
                    (Printf.sprintf
                       "A bare pattern must name a field, since this has %d fields: %s. Truss has \
                        no tuples, so fields match by name."
@@ -361,7 +366,7 @@ and check_literal_fits state (value : expression) number type_ =
              | _ -> Types.integer_range resolved
            with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
-              report state Literal_out_of_range value.span
+              report state Literal_out_of_range (read_span state value.id)
                 (Printf.sprintf "`%s` does not fit in `%s`, which holds %s to %s."
                    (Z.to_string number) (Types.show resolved) (Z.to_string low) (Z.to_string high))
           | _ -> ());
@@ -398,7 +403,7 @@ and character_value state id (literal : string_literal) (builtin : Intrinsic.bui
   match value with
   | Some value -> state.tables.literals.(id) <- Some (Integer_value (Z.of_int value))
   | None ->
-      report state Character_scalar_count literal.span
+      report state Character_scalar_count (read_span state literal.id)
         (match builtin with
         | Character ->
             "`Character\"...\"` holds exactly one Unicode scalar value, with no `${...}`."

@@ -30,16 +30,15 @@ let group (value : expression) =
 
 let operands (value : expression) =
   match value.kind with
-  | Binary { left; right; _ } -> Some (left.span, right.span)
-  | Is { value; pattern; _ } -> Some (value.span, pattern.span)
-  | Range { start = Some start; stop = Some stop; _ } -> Some (start.span, stop.span)
+  | Binary { left; right; _ } -> Some (left.id, right.id)
+  | Is { value; pattern; _ } -> Some (value.id, pattern.id)
+  | Range { start = Some start; stop = Some stop; _ } -> Some (start.id, stop.id)
   | _ -> None
 
-let operator_span (value : expression) =
+let operator_id (value : expression) =
   match value.kind with
-  | Binary { operator_span; _ } | Is { operator_span; _ } | Range { operator_span; _ } ->
-      operator_span
-  | _ -> value.span
+  | Binary { operator_id; _ } | Is { operator_id; _ } | Range { operator_id; _ } -> operator_id
+  | _ -> value.id
 
 let level language operator =
   match (language, operator) with
@@ -65,22 +64,22 @@ let applies_first language ~first ~second = level language first >= level langua
 
 type grouping = Left_first | Right_first
 
-let report cursor (span : Source.Definition_span.t) message fixes =
-  Cursor.report cursor Needs_parentheses (Cursor.file_span cursor span) message
+let report cursor id message fixes =
+  Cursor.report cursor Needs_parentheses (Cursor.read_file_span cursor id) message
     ~fixes:(List.map (fun (title, edits) -> Diagnostic.fix title edits) fixes)
 
-let fix cursor ~fallback (whole : Source.Definition_span.t) edits =
+let fix cursor ~fallback whole edits =
   let insertions =
     List.map (fun (edit : Source.span Diagnostic.edit) -> (edit.span.start, edit.replacement)) edits
   in
-  match Cursor.spelling cursor ~insertions (Cursor.file_span cursor whole) with
+  match Cursor.spelling cursor ~insertions (Cursor.read_file_span cursor whole) with
   | Some fixed -> (Printf.sprintf "Write `%s`" fixed, edits)
   | None -> (fallback, edits)
 
-let parentheses cursor (first : Source.Definition_span.t) (last : Source.Definition_span.t) =
+let parentheses cursor first last =
   [
-    Diagnostic.insert (Source.zero_width (Cursor.file_span cursor first).start) "(";
-    Diagnostic.insert (Source.zero_width (Cursor.file_span cursor last).stop) ")";
+    Diagnostic.insert (Source.zero_width (Cursor.read_file_span cursor first).start) "(";
+    Diagnostic.insert (Source.zero_width (Cursor.read_file_span cursor last).stop) ")";
   ]
 
 let is_name_or_literal (value : expression) =
@@ -129,8 +128,8 @@ let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
     | Left_first -> "Group the first two operands"
     | Right_first -> "Group the last two operands"
   in
-  fix cursor ~fallback whole.span
-    (if wrap then edits @ parentheses cursor whole.span whole.span else edits)
+  fix cursor ~fallback whole.id
+    (if wrap then edits @ parentheses cursor whole.id whole.id else edits)
 
 let report_problem cursor ?context (whole : expression) (operand : expression) ~right problem =
   let rec first_of_chain (value : expression) =
@@ -159,14 +158,14 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
   in
   match problem with
   | Lowest_operand ->
-      report cursor operand.span
+      report cursor operand.id
         "This takes everything after it, so as an operand it must be in parentheses, except that \
          `forall` and `exists` may be the last operand of `&&`, `||`, or `==>`."
         [
-          fix cursor ~fallback:"Add parentheses" operand.span
-            (parentheses cursor operand.span operand.span);
+          fix cursor ~fallback:"Add parentheses" operand.id
+            (parentheses cursor operand.id operand.id);
         ]
-  | Mixed message -> report cursor (operator_span whole) message (both ())
+  | Mixed message -> report cursor (operator_id whole) message (both ())
   | Mixed_bitwise ->
       let fixes =
         match (whole.kind, operand.kind, pieces) with
@@ -182,18 +181,18 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
             List.map (fix_for pieces) ordered
         | _ -> both ()
       in
-      report cursor (operator_span whole)
+      report cursor (operator_id whole)
         "Shifts and bitwise operators combine only with themselves; add parentheses." fixes
   | Chained message ->
       let fixes =
         match (whole.kind, operand.kind) with
         | Binary { operator = Implies; _ }, _ -> List.rev (both ())
         | Binary _, Binary { right = middle; _ } when (not right) && is_name_or_literal middle -> (
-            let middle_span = Cursor.file_span cursor middle.span in
+            let middle_span = Cursor.read_file_span cursor middle.id in
             match Cursor.spelling cursor middle_span with
             | Some middle_spelling ->
                 [
-                  fix cursor ~fallback:"Join the comparisons with `&&`" whole.span
+                  fix cursor ~fallback:"Join the comparisons with `&&`" whole.id
                     [
                       Diagnostic.insert
                         (Source.zero_width middle_span.stop)
@@ -203,7 +202,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
             | None -> [])
         | _ -> []
       in
-      report cursor (operator_span whole) message fixes
+      report cursor (operator_id whole) message fixes
 
 let rec checked_expression ?context cursor (value : expression) =
   let operand parent ~right (operand : expression) =
@@ -217,21 +216,20 @@ let rec checked_expression ?context cursor (value : expression) =
       let group = binary_group operator in
       operand group ~right:false left;
       operand group ~right:true right
-  | Is { value = left; operator_span; _ } ->
+  | Is { value = left; operator_id; _ } ->
       (match left.kind with
       | Prefix (Not, _) ->
-          let whole = Cursor.file_span cursor value.span in
-          report cursor operator_span
+          let whole = Cursor.read_file_span cursor value.id in
+          report cursor operator_id
             "`!` and `is` have no relative precedence. Add parentheses to say whether the test or \
              the value is negated."
             [
-              fix cursor ~fallback:"Negate the test" value.span
+              fix cursor ~fallback:"Negate the test" value.id
                 [
                   Diagnostic.insert (Source.zero_width (whole.start + 1)) "(";
                   Diagnostic.insert (Source.zero_width whole.stop) ")";
                 ];
-              fix cursor ~fallback:"Negate the value" value.span
-                (parentheses cursor left.span left.span);
+              fix cursor ~fallback:"Negate the value" value.id (parentheses cursor left.id left.id);
             ]
       | _ -> ());
       operand Comparison ~right:false left

@@ -91,10 +91,10 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolve (lookups : Names.lookups) (key : Names.key) section =
-  match lookups.definition key with
-  | Some definition ->
+  match (lookups.definition key, lookups.spans key) with
+  | Some definition, Some spans ->
       let module_ = key.module_ in
-      let state = Walk.create lookups key ~size:(definition.id + 1) ~walked:section in
+      let state = Walk.create lookups key ~spans ~walked:section in
       let container =
         Option.bind (lookups.container key) (fun (container : Names.key) ->
             Option.map
@@ -102,10 +102,10 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
               (lookups.definition container))
       in
       let is_walked =
-        (not (Parts.broken definition Header))
+        (not (Names.is_broken lookups key Header))
         &&
-        match container with
-        | Some (_, enclosing) -> not (Parts.broken enclosing Header)
+        match lookups.container key with
+        | Some container -> not (Names.is_broken lookups container Header)
         | None -> true
       in
       if is_walked then Walk.definition state ~path:key.path ?container definition;
@@ -118,7 +118,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
           in
           match declared_name definition with
           | Some declared when not defines_it ->
-              Walk.report state Shadowed_name declared.span
+              Walk.report state Shadowed_name spans.(declared.id)
                 (Printf.sprintf
                    "`%s` is a name in the prelude, and a name cannot shadow another. Choose \
                     another name."
@@ -128,8 +128,8 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       if key.ordinal > 0 then begin
         let span =
           match declared_name definition with
-          | Some name -> name.span
-          | None -> Source.Definition_span.make definition.span.start definition.span.start
+          | Some name -> spans.(name.id)
+          | None -> Source.Definition_span.zero_width spans.(definition.id).start
         in
         let first =
           match (lookups.place { key with ordinal = 0 }, lookups.place key) with
@@ -162,19 +162,17 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       let is_parsed =
         match section with
         | Interface | Contract -> is_walked
-        | Body -> is_walked && not (Parts.broken definition Body)
+        | Body -> is_walked && not (Names.is_broken lookups key Body)
       in
       if is_parsed || (Walk.names_of state section).diagnostics <> [] then Some (outcome ())
       else None
-  | None -> None
+  | _ -> None
 
 let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =
   let module_ = path.module_ in
   let is_recovered (item : Syntax.definition Syntax.item) =
-    match item.value with
-    | { kind = Definition_error _; _ } -> true
-    | { recovered; _ } -> recovered <> []
+    match item.value.kind with Definition_error _ -> true | _ -> item.positions.recovered <> []
   in
   let used =
     if

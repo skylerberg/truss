@@ -38,7 +38,9 @@ type section_names = {
 
 type state
 
-val create : Names.lookups -> Names.key -> size:int -> walked:section -> state
+val create :
+  Names.lookups -> Names.key -> spans:Source.Definition_span.t array -> walked:section -> state
+
 val names_of : state -> section -> section_names
 
 val report :

@@ -17,25 +17,25 @@ let from_tables (tables : Infer.tables option) show id =
 
 type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : Source.Definition_span.t }
 
-let unfinished (definition : definition) =
+let unfinished (spans : Source.Definition_span.t array) (definition : definition) =
   let found = ref [] in
   let add keyword id (span : Source.Definition_span.t) = found := { keyword; id; span } :: !found in
   let rec visit (value : expression) =
     (match value.kind with
-    | Todo -> add `Todo (Some value.id) value.span
-    | Echo _ -> add `Echo (Some value.id) value.span
+    | Todo -> add `Todo (Some value.id) spans.(value.id)
+    | Echo _ -> add `Echo (Some value.id) spans.(value.id)
     | _ -> ());
     Syntax_walk.children visit value
   in
   Syntax_walk.definition visit definition;
   (match definition.kind with
-  | Type_definition { name; body = Type_todo; _ } -> add `Todo None name.span
+  | Type_definition { name; body = Type_todo; _ } -> add `Todo None spans.(name.id)
   | _ -> ());
   List.sort (fun left right -> compare left.span.start right.span.start) !found
 
 type hole = { offset : int; expected : string option; scope : (string * string) list }
 
-let holes definition (resolved : Resolve.resolved) tables =
+let holes spans definition (resolved : Resolve.resolved) tables =
   List.filter_map
     (fun { keyword; id; span } ->
       match (keyword, id) with
@@ -59,7 +59,7 @@ let holes definition (resolved : Resolve.resolved) tables =
                     scope;
               })
             (List.assoc_opt id resolved.holes))
-    (unfinished definition)
+    (unfinished spans definition)
 
 type explanation = {
   text : string;
@@ -115,12 +115,12 @@ let explain_name ~(path : Path.t) (definition : definition) (resolved : Resolve.
   in
   { text = name.text; meaning; refers_to; type_ }
 
-let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
-    (tables : Infer.tables option) ~text offset =
+let explain_at ~path (spans : Source.Definition_span.t array) (definition : definition)
+    (resolved : Resolve.resolved) (tables : Infer.tables option) ~text offset =
   let innermost = ref None in
   let calls = Hashtbl.create 8 in
   let rec visit (value : expression) =
-    if contains value.span offset then begin
+    if contains spans.(value.id) offset then begin
       (match value.kind with
       | Call (({ kind = Member _; _ } as callee), _) -> Hashtbl.replace calls callee.id value.id
       | _ -> ());
@@ -133,8 +133,8 @@ let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
   Syntax_walk.definition visit definition;
   let name_at =
     List.find_opt
-      (fun (name : name) -> contains name.span offset)
-      (Syntax_walk.collect_names definition)
+      (fun (name : name) -> contains spans.(name.id) offset)
+      (Syntax_walk.collect_names spans definition)
   in
   let is_written_in (value : expression) (name : name) =
     match value.kind with
@@ -150,7 +150,8 @@ let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
   | None, None -> None
   | Some value, _ ->
       let written =
-        let start = max 0 value.span.start and stop = min (String.length text) value.span.stop in
+        let span = spans.(value.id) in
+        let start = max 0 span.start and stop = min (String.length text) span.stop in
         if stop > start then String.sub text start (stop - start) else ""
       in
       let meaning, refers_to =

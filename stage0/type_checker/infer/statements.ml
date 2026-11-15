@@ -11,7 +11,6 @@ open Pattern_typing
 open Operators
 
 let bit_vector_names state (value : Core.expression) =
-  let spans = Syntax_walk.span_table state.definition in
   Core_walk.expression
     (Core_walk.deep
        {
@@ -20,7 +19,7 @@ let bit_vector_names state (value : Core.expression) =
            (function
            | Local { type_; origin; _ }
              when not (Types.is_builtin Bool type_ || Types.integer_range type_ <> None) ->
-               report state Not_bit_vector spans.(origin)
+               report state Not_bit_vector (read_span state origin)
                  (Printf.sprintf
                     "An assertion `by bit_vector` can name only integers and booleans, and this is \
                      a `%s`."
@@ -39,7 +38,9 @@ let rec block_value state env ?expected (written : block) =
             ignore (statement state env last ~last:true);
             if statement_diverges state last then Types.Never else Types.unit)
     | (first : statement) :: rest ->
-        ignore (in_statement state env first.span (fun () -> statement state env first ~last:false));
+        ignore
+          (in_statement state env (read_span state first.id) (fun () ->
+               statement state env first ~last:false));
         statements_value rest
   in
   statements_value written.statements
@@ -59,8 +60,12 @@ and statement state env (written : statement) ~last : unit =
                     (resolved = Types.unit || resolved = Types.Never || Types.is_error resolved
                    || resolved = Types.Hole)
                 then
-                  report state Unused_value value.span
-                    ~fixes:[ fix "Discard it on purpose." [ insert value.span.start "let _ = " ] ]
+                  report state Unused_value (read_span state value.id)
+                    ~fixes:
+                      [
+                        fix "Discard it on purpose."
+                          [ insert (read_span state value.id).start "let _ = " ];
+                      ]
                     (Printf.sprintf
                        "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
                        (Types.show resolved));
@@ -75,7 +80,7 @@ and statement state env (written : statement) ~last : unit =
         | None -> expression state env value
       in
       if is_var then begin
-        reject_in_formula state env written.span "A `var`";
+        reject_in_formula state env (read_span state written.id) "A `var`";
         check_owned state env value type_
       end;
       (match else_ with
@@ -84,7 +89,7 @@ and statement state env (written : statement) ~last : unit =
           match resolve state else_type with
           | Types.Never -> ()
           | _ ->
-              report state Mismatch block.span
+              report state Mismatch (read_span state block.id)
                 "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, \
                  or `unreachable`.")
       | None -> ());
@@ -141,9 +146,7 @@ and statement state env (written : statement) ~last : unit =
                 | Divide -> (Well_known.path Divide, "divide")
                 | _ -> (Well_known.path Remainder, "remainder")
               in
-              let fake : expression =
-                { kind = Expression_error; span = written.span; id = written.id }
-              in
+              let fake : expression = { kind = Expression_error; id = written.id } in
               let result =
                 operator_call
                   ~operands:
@@ -164,7 +167,7 @@ and statement state env (written : statement) ~last : unit =
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
               if not (unify state result target_type) then
-                mismatch state value.span ~expected:target_type ~actual:result
+                mismatch state (read_span state value.id) ~expected:target_type ~actual:result
           | Shift_left | Shift_right ->
               (match resolve state right_type with
               | Types.Literal (Integer_literal, _) ->
@@ -177,7 +180,8 @@ and statement state env (written : statement) ~last : unit =
                       false
                   | left, right ->
                       if not (integer_type state left || Types.is_error left) then
-                        report state No_impl written_target.span
+                        report state No_impl
+                          (read_span state written_target.id)
                           (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                              (Types.show left));
                       if
@@ -185,24 +189,25 @@ and statement state env (written : statement) ~last : unit =
                           ((integer_type state right && not (signed_type state right))
                           || Types.is_error right)
                       then
-                        report state Mismatch value.span
+                        report state Mismatch (read_span state value.id)
                           (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
                              (Types.show right));
                       true)
           | _ ->
               if not (unify state target_type right_type) then
-                mismatch state value.span ~expected:target_type ~actual:right_type;
+                mismatch state (read_span state value.id) ~expected:target_type ~actual:right_type;
               defer state (fun () ->
                   match normalize state target_type with
                   | Types.Literal _ | Types.Variable _ -> false
                   | resolved ->
                       if not (integer_type state resolved || Types.is_error resolved) then
-                        report state No_impl written_target.span
+                        report state No_impl
+                          (read_span state written_target.id)
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                              (Types.show resolved));
                       true)))
   | For { mode = running; pattern = written_pattern; annotation; iterable; clauses; body } ->
-      reject_in_formula state env written.span "A `for` loop";
+      reject_in_formula state env (read_span state written.id) "A `for` loop";
       let mode, inner =
         match iterable.kind with
         | Mode (Mut, inner) when Option.is_none (call_with_mode_keyword state inner) ->
@@ -212,14 +217,15 @@ and statement state env (written : statement) ~last : unit =
         | _ -> (Types.Read, iterable)
       in
       let loop_element = ref None in
-      in_statement state env iterable.span (fun () ->
+      in_statement state env (read_span state iterable.id) (fun () ->
           let element, variable_mode = loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
               let annotated = Lower.type_ state.context written_annotation in
               if not (unify state element annotated) then
                 ignore
-                  (reported_mismatch state Mismatch written_annotation.span
+                  (reported_mismatch state Mismatch
+                     (read_span state written_annotation.id)
                      ~sides:[ (element, annotated) ]
                      (Printf.sprintf "The elements of this loop are `%s`, not `%s`."
                         (show state element) (show state annotated)))
@@ -248,8 +254,8 @@ and statement state env (written : statement) ~last : unit =
               | Concurrent_loop -> Concurrent_loop));
       loop_body state env body
   | While { condition = test; clauses; body } ->
-      reject_in_formula state env written.span "A `while` loop";
-      in_statement state env test.span (fun () -> check state env test Types.bool);
+      reject_in_formula state env (read_span state written.id) "A `while` loop";
+      in_statement state env (read_span state test.id) (fun () -> check state env test Types.bool);
       List.iter (loop_clause state env) clauses;
       register_statement state written (fun () ->
           let condition = build_expression state test in
@@ -264,14 +270,15 @@ and statement state env (written : statement) ~last : unit =
       loop_body state env body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
-      reject_in_formula state env written.span
+      reject_in_formula state env (read_span state written.id)
         (if concurrent then "A `concurrent` block" else "A `parallel` block");
       register_statement state written (fun () ->
           let branches = List.map (build_statement state) body.statements in
           if concurrent then Concurrent branches else Parallel branches);
       List.iter
         (fun (branch : statement) ->
-          in_statement state env branch.span (fun () -> statement state env branch ~last:false))
+          in_statement state env (read_span state branch.id) (fun () ->
+              statement state env branch ~last:false))
         body.statements
   | Proof body ->
       register_statement state written (fun () -> Proof (build_block state body));
@@ -304,13 +311,13 @@ and assigns_through_index state env (written : statement) (target : expression) 
           mutate state env ~by:Assignment base;
           ignore
             (Calls.check_argument state env key
-               (parameter "key" (associated state base_type index "Key" ~at:key.span)));
+               (parameter "key"
+                  (associated state base_type index "Key" ~at:(read_span state key.id))));
           ignore
             (Calls.check_argument state env value
-               (parameter "value" (associated state base_type index "Output" ~at:value.span)));
-          let call : expression =
-            { kind = Expression_error; span = written.span; id = written.id }
-          in
+               (parameter "value"
+                  (associated state base_type index "Output" ~at:(read_span state value.id))));
+          let call : expression = { kind = Expression_error; id = written.id } in
           record state call Types.unit;
           let argument (argument_expression : expression) position mode : Tables.argument =
             {
@@ -347,7 +354,8 @@ and assigns_through_index state env (written : statement) (target : expression) 
 and loop_body state env (body : block) =
   List.iter
     (fun (written : statement) ->
-      in_statement state env written.span (fun () -> statement state env written ~last:false))
+      in_statement state env (read_span state written.id) (fun () ->
+          statement state env written ~last:false))
     body.statements
 
 and loop_clause state env (clause : loop_clause) =
@@ -375,7 +383,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                 if integer_type state element || Types.is_builtin Character element then
                   state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
                 else if not (Types.is_error element) then
-                  report state Not_indexable iterable.span
+                  report state Not_indexable (read_span state iterable.id)
                     (Printf.sprintf "A `for` loop's range is of integers, not `%s`."
                        (Types.show element));
                 true
@@ -389,9 +397,11 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
       | _ -> (
           let cursor = trait_reference (Well_known.path Cursor) in
           let by_position =
-            if mode = Types.Own then None else elements_calls state iterable.span type_ mode
+            if mode = Types.Own then None
+            else elements_calls state (read_span state iterable.id) type_ mode
           and consumed =
-            if mode = Types.Own then consuming_cursor state iterable.span type_ else None
+            if mode = Types.Own then consuming_cursor state (read_span state iterable.id) type_
+            else None
           in
           match (by_position, consumed, implements state type_ cursor) with
           | Some (loop, element, lends), _, _ ->
@@ -407,11 +417,11 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                      {
                        cursor = type_;
                        cursor_call = None;
-                       remaining = remaining_call state iterable.span type_;
+                       remaining = remaining_call state (read_span state iterable.id) type_;
                      });
-              (associated state type_ cursor "Element" ~at:iterable.span, Types.Own)
+              (associated state type_ cursor "Element" ~at:(read_span state iterable.id), Types.Own)
           | None, None, None ->
-              ( error state Not_indexable iterable.span
+              ( error state Not_indexable (read_span state iterable.id)
                   (match mode with
                   | Types.Read ->
                       Printf.sprintf

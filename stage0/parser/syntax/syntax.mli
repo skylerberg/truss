@@ -1,5 +1,5 @@
 type id = int
-type name = { text : string; span : Source.Definition_span.t; id : id }
+type name = { text : string; id : id }
 type path = { modules : name list; last : name }
 type mode = Mut | Own
 type prefix = Negate | Not | Complement
@@ -39,7 +39,7 @@ type assignment =
   | Shift_right_assign
 
 type quantifier = Forall | Exists
-type 'kind node = { kind : 'kind; span : Source.Definition_span.t; id : id }
+type 'kind node = { kind : 'kind; id : id }
 
 type type_expression = type_kind node
 
@@ -51,16 +51,11 @@ and type_kind =
   | Function_type of function_type
   | Type_error
 
-and path_type = {
-  path : path;
-  arguments : type_argument list;
-  span : Source.Definition_span.t;
-  id : id;
-}
+and path_type = { path : path; arguments : type_argument list; id : id }
 
 and type_argument =
   | Type_argument of type_expression
-  | Count of Z.t * Source.Definition_span.t
+  | Count of Z.t * id
   | Count_name of name
   | Constraint of name * type_expression
 
@@ -128,16 +123,11 @@ and expression_kind =
   | Prefix of prefix * expression
   | Mode of mode * expression
   | Any of expression
-  | Binary of {
-      operator : binary;
-      operator_span : Source.Definition_span.t;
-      left : expression;
-      right : expression;
-    }
-  | Is of { value : expression; operator_span : Source.Definition_span.t; pattern : pattern }
+  | Binary of { operator : binary; operator_id : id; left : expression; right : expression }
+  | Is of { value : expression; operator_id : id; pattern : pattern }
   | Range of {
       start : expression option;
-      operator_span : Source.Definition_span.t;
+      operator_id : id;
       stop : expression option;
       inclusive : bool;
     }
@@ -159,11 +149,10 @@ and string_literal = {
   form : Token.form;
   first : text;
   rest : (expression * text) list;
-  span : Source.Definition_span.t;
   id : id;
 }
 
-and text = { value : string; span : Source.Definition_span.t }
+and text = { value : string; id : id }
 and argument = { label : name option; value : expression }
 and bracket_item = Item of expression | Item_constraint of name * type_expression
 and update = update_kind node
@@ -174,7 +163,7 @@ and update_kind =
 
 and binder = Binder_in of pattern * expression | Binder_type of name * type_expression
 and else_branch = Else of block | Else_if of expression
-and block = { statements : statement list; span : Source.Definition_span.t; id : id }
+and block = { statements : statement list; id : id }
 and statement = statement_kind node
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
@@ -210,14 +199,7 @@ and loop_clause_kind =
   | Loop_decreases of expression list
   | Loop_cost of cost
 
-and arm = {
-  patterns : pattern list;
-  guard : expression option;
-  body : statement;
-  span : Source.Definition_span.t;
-  id : id;
-}
-
+and arm = { patterns : pattern list; guard : expression option; body : statement; id : id }
 and pattern = pattern_kind node
 
 and pattern_kind =
@@ -245,14 +227,7 @@ and pattern_field = pattern_field_kind node
 and pattern_field_kind = Named_field of name * pattern | Field of pattern | Rest
 
 type visibility = Private | Internal | Public | Public_opaque
-
-type type_head = {
-  path : path;
-  generics : generic_parameter list;
-  span : Source.Definition_span.t;
-  id : id;
-}
-
+type type_head = { path : path; generics : generic_parameter list; id : id }
 type definition_name = Plain_name of name | Member_name of type_head * name
 
 type parameter = parameter_kind node
@@ -285,14 +260,7 @@ and field_kind =
   | Field_declaration of { name : name; type_ : type_expression; default : expression option }
   | Field_error
 
-type variant = {
-  indirect : bool;
-  name : name;
-  fields : field list option;
-  span : Source.Definition_span.t;
-  id : id;
-}
-
+type variant = { indirect : bool; name : name; fields : field list option; id : id }
 type type_body = Fields of field list | Variants of variant list | Type_todo
 
 type type_clause = type_clause_kind node
@@ -359,14 +327,13 @@ type definition_kind =
   | Law_proof of { trait_ : path_type; law : name; type_ : type_head; body : block }
   | Definition_error of { intended : intended_kind option; name : definition_name option }
 
-type definition = {
-  visibility : visibility;
-  kind : definition_kind;
-  span : Source.Definition_span.t;
+type definition = { visibility : visibility; kind : definition_kind; id : id }
+
+type positions = {
+  spans : Source.Definition_span.t array;
   recovered : Source.Definition_span.t list;
-  id : id;
 }
 
-type 'value item = { base : int; stop : int; value : 'value }
+type 'value item = { base : int; stop : int; value : 'value; positions : positions }
 type top_level = { definition : definition item; methods : definition item list }
 type file = { uses : path item list; definitions : top_level list }

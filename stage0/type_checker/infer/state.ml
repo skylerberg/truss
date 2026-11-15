@@ -74,7 +74,6 @@ type state = {
   mutable receiver_modes : (id * Types.mode) list;
   yielded : (id, Types.mode) Hashtbl.t;
   lent_tails : (id, unit) Hashtbl.t;
-  binding_spans : (id, Source.Definition_span.t) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
@@ -101,6 +100,7 @@ let reject_in_formula state env span what =
           the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
          what)
 
+let read_span state id = state.context.spans.(id)
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
 
@@ -124,7 +124,7 @@ let register_expression state (value : expression) kind =
         let id = fresh_node_id state in
         match state.tables.types.(value.id) with
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
-        | None -> bug "`%s` has a node and no type" (source state value.span))
+        | None -> bug "`%s` has a node and no type" (source state (read_span state value.id)))
 
 let was_hole state (table : Tables.t -> Types.ty option array) (id : id) =
   match state.form.tables_with_holes with
@@ -188,7 +188,7 @@ let rec build_expression state (value : expression) : Core.expression =
   else
     match state.form.expression_builders.(value.id) with
     | Some build -> build ()
-    | None -> bug "`%s` has no node in the core form" (source state value.span)
+    | None -> bug "`%s` has no node in the core form" (source state (read_span state value.id))
 
 let register_statement state (written : statement) kind =
   state.form.statement_builders.(written.id) <-
@@ -219,7 +219,7 @@ let build_statement state (written : statement) : Core.statement =
   | None -> (
       match state.form.statement_builders.(written.id) with
       | Some build -> build ()
-      | None -> bug "`%s` has no node in the core form" (source state written.span))
+      | None -> bug "`%s` has no node in the core form" (source state (read_span state written.id)))
 
 let register_pattern state (written : pattern) kind =
   state.form.pattern_builders.(written.id) <-
@@ -228,7 +228,7 @@ let register_pattern state (written : pattern) kind =
         let id = fresh_node_id state in
         match state.tables.scrutinee_types.(written.id) with
         | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
-        | None -> bug "`%s` has a node and no type" (source state written.span))
+        | None -> bug "`%s` has a node and no type" (source state (read_span state written.id)))
 
 let build_pattern state (written : pattern) : Core.pattern =
   if was_hole state (fun tables -> tables.scrutinee_types) written.id then
@@ -236,7 +236,7 @@ let build_pattern state (written : pattern) : Core.pattern =
   else
     match state.form.pattern_builders.(written.id) with
     | Some build -> build ()
-    | None -> bug "`%s` has no node in the core form" (source state written.span)
+    | None -> bug "`%s` has no node in the core form" (source state (read_span state written.id))
 
 let alias_expression state (value : expression) (inner : expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
@@ -318,7 +318,8 @@ let unsolved state =
   | None ->
       let report =
         reported state Cannot_infer
-          (Source.Definition_span.make state.definition.span.start state.definition.span.start)
+          (Source.Definition_span.make (read_span state state.definition.id).start
+             (read_span state state.definition.id).start)
           "A type in this definition cannot be inferred. Give the `let` a type, or the call type \
            arguments."
       in
@@ -682,12 +683,9 @@ let reported_mismatch state ?(fixes = []) code (span : Source.Definition_span.t)
   | None -> reported state ~fixes code span message
   | Some ({ decision_report = Some report; _ }, _) -> report
   | Some (decision, wanted) ->
-      let name =
-        match Hashtbl.find_opt state.binding_spans decision.decided_local with
-        | Some name -> Some (name, source state name)
-        | None -> None
-      in
-      let local = match name with Some (_, text) -> Printf.sprintf "`%s`" text | None -> "it" in
+      let name = read_span state decision.decided_local in
+      let text = source state name in
+      let local = Printf.sprintf "`%s`" text in
       let decided = Types.show decision.decided_type and wanted = zonk state wanted in
       let explanation, note =
         if decision.is_default then
@@ -700,18 +698,16 @@ let reported_mismatch state ?(fixes = []) code (span : Source.Definition_span.t)
             Printf.sprintf "This statement decides that the type of %s is `%s`." local decided )
       in
       let fixes =
-        match name with
-        | Some (name, text)
-          when decision.is_default
-               && Hashtbl.mem state.annotatable decision.decided_local
-               && not (Types.contains_unsolved wanted || Types.is_error wanted) ->
-            [
-              fix
-                (Printf.sprintf "Declare `%s` as a `%s`." text (Types.show wanted))
-                [ insert name.stop (": " ^ Types.show wanted) ];
-            ]
-            @ other_fixes
-        | _ -> other_fixes
+        if
+          decision.is_default
+          && Hashtbl.mem state.annotatable decision.decided_local
+          && not (Types.contains_unsolved wanted || Types.is_error wanted)
+        then
+          fix
+            (Printf.sprintf "Declare `%s` as a `%s`." text (Types.show wanted))
+            [ insert name.stop (": " ^ Types.show wanted) ]
+          :: other_fixes
+        else other_fixes
       in
       let report =
         reported state code span
@@ -774,12 +770,12 @@ let check_resource state (resource : Syntax.resource) =
     | Some (Definition (Capability, capability)) -> (
         match method_ with
         | Some method_ when state.lookups.interface.names.members capability method_.text = [] ->
-            report state Unknown_member method_.span
+            report state Unknown_member (read_span state method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ -> ())
     | Some (Unknown _) -> ()
     | _ ->
-        report state Not_a_capability path.span
+        report state Not_a_capability (read_span state path.id)
           (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." shown)
   in
   match resource with
@@ -796,12 +792,12 @@ let check_resource state (resource : Syntax.resource) =
           with
           | Some (Types.Function _ | Types.Error _ | Types.Hole) | None -> ()
           | Some other ->
-              report state Not_callable name.span
+              report state Not_callable (read_span state name.id)
                 (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
                    name.text (Types.show other)))
       | Some (Unknown _) -> ()
       | _ ->
-          report state Not_callable name.span
+          report state Not_callable (read_span state name.id)
             (Printf.sprintf
                "`calls` counts the calls through a parameter that is a function, or of a \
                 capability, and `%s` is neither."

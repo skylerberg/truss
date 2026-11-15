@@ -8,9 +8,16 @@ type context = {
   self_capabilities : (string * Types.capability_set) list;
   diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
+  spans : Source.Definition_span.t array;
 }
 
-val create : Lookups.t -> Resolve.resolved -> Environment.scope -> context
+val create :
+  Lookups.t ->
+  Resolve.resolved ->
+  spans:Source.Definition_span.t array ->
+  Environment.scope ->
+  context
+
 val scope : context -> Environment.scope
 val report : context -> Diagnostic.Code.types -> Source.Definition_span.t -> string -> unit
 val error : context -> Diagnostic.Code.types -> Source.Definition_span.t -> string -> Types.ty

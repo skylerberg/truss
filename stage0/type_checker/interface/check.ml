@@ -6,7 +6,7 @@ open Impl_checks
 let bound_diagnostics lookups ~package ~bounds ~spans named =
   List.concat_map
     (fun (id, (type_ : Types.ty)) ->
-      let diagnostic code message = Diagnostic.make ~code (Lazy.force spans).(id) message in
+      let diagnostic code message = Diagnostic.make ~code spans.(id) message in
       match type_ with
       | Named { path; arguments } -> (
           match
@@ -38,8 +38,7 @@ let bound_diagnostics lookups ~package ~bounds ~spans named =
 let check_bounds state =
   state.diagnostics <-
     bound_diagnostics state.lookups ~package:state.key.module_.package ~bounds:(bounds state)
-      ~spans:(lazy (Syntax_walk.span_table state.definition))
-      state.lowered.named
+      ~spans:state.spans state.lowered.named
     @ state.diagnostics
 
 let rec mentioned = function
@@ -88,14 +87,14 @@ let check_method_location state (head : type_head) =
       match state.lookups.names.find owner_module name with
       | Some { kind = Type; visibility; _ } ->
           if owner_module.package <> state.key.module_.package then
-            report state Method_outside_package head.span
+            report state Method_outside_package state.spans.(head.id)
               (Printf.sprintf
                  "`%s` is defined in the package `%s`, so its methods and constants must be too. A \
                   function of this package can take it as a parameter instead."
                  (Path.show owner)
                  (Path.show_package owner_module.package))
           else if visibility = Private && owner_module <> state.key.module_ then
-            report state Method_outside_package head.span
+            report state Method_outside_package state.spans.(head.id)
               (Printf.sprintf
                  "`%s` is private to its module, so its methods and constants must be in that \
                   module."
@@ -143,7 +142,7 @@ let check_duplicates state member_kind (names : name list) =
     (List.fold_left
        (fun seen (name : name) ->
          if List.mem name.text seen then
-           report state Duplicate_field name.span
+           report state Duplicate_field state.spans.(name.id)
              (Printf.sprintf "Another %s of this type is already named `%s`." member_kind name.text);
          name.text :: seen)
        [] names)
@@ -154,10 +153,11 @@ let field_names (fields : field list) =
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
 
-let remove_derived (clause : type_clause) (traits : path_type list) (written : path_type) =
+let remove_derived (spans : Source.Definition_span.t array) (clause : type_clause)
+    (traits : path_type list) (written : path_type) =
   let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
   match traits with
-  | [ _ ] -> delete clause.span.start clause.span.stop
+  | [ _ ] -> delete spans.(clause.id).start spans.(clause.id).stop
   | _ -> (
       let rec after = function
         | (first : path_type) :: (next :: _ as rest) ->
@@ -165,7 +165,7 @@ let remove_derived (clause : type_clause) (traits : path_type list) (written : p
         | _ -> None
       in
       match after traits with
-      | Some next -> delete written.span.start next.span.start
+      | Some next -> delete spans.(written.id).start spans.(next.id).start
       | None -> (
           let rec before = function
             | (previous : path_type) :: (next :: _ as rest) ->
@@ -173,8 +173,8 @@ let remove_derived (clause : type_clause) (traits : path_type list) (written : p
             | _ -> None
           in
           match before traits with
-          | Some previous -> delete previous.span.stop written.span.stop
-          | None -> delete written.span.start written.span.stop))
+          | Some previous -> delete spans.(previous.id).stop spans.(written.id).stop
+          | None -> delete spans.(written.id).start spans.(written.id).stop))
 
 let check_derives state (interface : Types.type_interface) (clauses : type_clause list) resolved =
   let field_types =
@@ -211,7 +211,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                       (Names.derivable trait || Well_known.is Copyable trait
                      || Well_known.is Plain trait)
                   then
-                    report state Not_derivable written.span
+                    report state Not_derivable state.spans.(written.id)
                       (Printf.sprintf
                          "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
                           `serialization::Serialize`, and `serialization::Deserialize` can be \
@@ -219,11 +219,11 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                          shown)
                   else if Well_known.is Copyable trait || Well_known.is Plain trait then
                     begin if not interface.opaque then
-                      report state Derives_inferred written.span
+                      report state Derives_inferred state.spans.(written.id)
                         ~fixes:
                           [
                             Diagnostic.fix "Remove the declaration."
-                              [ remove_derived clause traits written ];
+                              [ remove_derived state.spans clause traits written ];
                           ]
                         (Printf.sprintf
                            "Whether `%s` holds for this type is derived from its fields, which are \
@@ -245,7 +245,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         | _ -> false
                       in
                       if (not property_holds) || (Well_known.is Plain trait && allocates) then
-                        report state Cannot_derive written.span
+                        report state Cannot_derive state.spans.(written.id)
                           (Printf.sprintf "A field of this type is not `%s`, so the type cannot be."
                              shown)
                     end
@@ -253,14 +253,14 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                     (if Well_known.is Default trait then
                        match interface.shape with
                        | Sum _ ->
-                           report state Cannot_derive written.span
+                           report state Cannot_derive state.spans.(written.id)
                              "`Default` is derived as each field's default, so only a record can \
                               derive it: no variant of this type is its default. Write the `impl`, \
                               which says which variant is."
                        | Record _ | Todo_type | Builtin_type _ -> ());
                     if Well_known.is Ordered trait || Well_known.is Hash trait then
                       if not (List.exists (Well_known.is Equal) interface.derives) then
-                        report state Cannot_derive written.span
+                        report state Cannot_derive state.spans.(written.id)
                           (Printf.sprintf
                              "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
                              shown);
@@ -283,7 +283,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                             (Impls.implements state.lookups ~bounds:(derived_bounds trait) type_
                                wanted)
                         then
-                          report state Cannot_derive written.span
+                          report state Cannot_derive state.spans.(written.id)
                             (Printf.sprintf
                                "A field of type `%s` does not implement `%s`, so `%s` cannot be \
                                 derived."
@@ -301,7 +301,7 @@ let check_no_capability_parameter state definition_kind (name : name)
     (fun (generic : generic_parameter) ->
       match generic.kind with
       | Capability_parameter parameter ->
-          report state Misplaced_capability_parameter generic.span
+          report state Misplaced_capability_parameter state.spans.(generic.id)
             (Printf.sprintf
                "Only a function can take a capability parameter. No type argument can \
                 be                 written for `%s`, so no signature or field could name %s `%s` \
@@ -324,7 +324,7 @@ let check_trait_cycle state (requires : path_type list) =
   | Some header when List.exists (reaches []) header.required -> (
       match requires with
       | first :: _ ->
-          report state Trait_cycle first.span
+          report state Trait_cycle state.spans.(first.id)
             "This trait requires itself through the traits it requires."
       | [] -> ())
   | _ -> ()
@@ -350,7 +350,7 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
   in
   match List.assoc_opt (name.text, receiver) inherited with
   | Some from ->
-      report state Redeclared_method name.span
+      report state Redeclared_method state.spans.(name.id)
         (Printf.sprintf
            "`%s` already declares a `%s` that takes %s, so a trait that requires it cannot declare \
             it again."
@@ -387,8 +387,8 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
                 then
                   let span =
                     match List.nth_opt written.generics index with
-                    | Some (generic : generic_parameter) -> generic.span
-                    | None -> written.span
+                    | Some (generic : generic_parameter) -> state.spans.(generic.id)
+                    | None -> state.spans.(written.id)
                   in
                   report state Unsatisfied_bound span
                     (Printf.sprintf
@@ -403,7 +403,7 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
 let check state =
   let lookups = state.lookups in
   let definition = state.definition in
-  let broken part = Resolve.Parts.broken definition part in
+  let broken part = Names.is_broken lookups.names state.key part in
   check_bounds state;
   match lookups.resolved Interface state.key with
   | None -> ()
@@ -424,7 +424,8 @@ let check state =
                 check_redeclared state name
                   (Names.receiver signature.parameters)
                   ~trait_path:container.path trait;
-                check_private_in_public state ~visibility (signature_types written) name.span
+                check_private_in_public state ~visibility (signature_types written)
+                  state.spans.(name.id)
             | Some { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
                 check_impl_method state name
                   (Names.receiver signature.parameters)
@@ -436,9 +437,10 @@ let check state =
             | Member_name (head, _) -> check_method_location state head
             | Plain_name name ->
                 if name.text = "main" && state.key.module_.modules = [] then
-                  check_main state lowered name.span);
+                  check_main state lowered state.spans.(name.id));
             let span =
-              match signature.name with Plain_name name | Member_name (_, name) -> name.span
+              match signature.name with
+              | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
             in
             check_private_in_public state ~visibility:definition.visibility
               (signature_types lowered) span
@@ -446,7 +448,7 @@ let check state =
           -> (
             (match lookups.trait_header trait.trait with
             | Some header when not (List.mem law.text header.laws) ->
-                report state Unknown_member law.span
+                report state Unknown_member state.spans.(law.id)
                   (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
             | _ -> ());
             let arity_matches =
@@ -460,7 +462,7 @@ let check state =
             if arity_matches && not (Types.is_error for_type) then
               match implements state for_type trait with
               | None ->
-                  report state No_impl type_.span
+                  report state No_impl state.spans.(type_.id)
                     (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
                        (Types.show for_type) (Types.show_trait trait))
               | Some (Impls.From_impl { impl; _ }) ->
@@ -495,25 +497,25 @@ let check state =
                           (Option.value ~default:[] variant.fields))
                       variants
                 | _ -> [])
-                name.span
+                state.spans.(name.id)
         | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
             check_no_capability_parameter state "the trait" name generics;
             check_trait_cycle state requires;
             check_private_in_public state ~visibility:definition.visibility
               (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
-              name.span
+              state.spans.(name.id)
         | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
             check_private_in_public state ~visibility:definition.visibility
-              [ constant.constant_type ] name.span
+              [ constant.constant_type ] state.spans.(name.id)
         | None, Impl { trait_; members; _ }, Impl_interface impl ->
             check_impl state members impl trait_
         | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
         | None, _, _ -> ())
 
 let diagnostics (lookups : Lookups.t) key =
-  match (lookups.names.definition key, lookups.lowered_interface key) with
-  | Some definition, Some lowered ->
-      let state = { lookups; key; definition; lowered; diagnostics = [] } in
+  match (lookups.names.definition key, lookups.names.spans key, lookups.lowered_interface key) with
+  | Some definition, Some spans, Some lowered ->
+      let state = { lookups; key; definition; lowered; spans; diagnostics = [] } in
       check state;
       List.sort
         (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->

@@ -35,9 +35,9 @@ let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
   Syntax_walk.definition visit definition;
   !members
 
-let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Resolve.resolved)
-    (tables : Infer.tables option) =
-  let names = Syntax_walk.collect_names definition in
+let occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
+    (definition : Syntax.definition) (resolved : Resolve.resolved) (tables : Infer.tables option) =
+  let names = Syntax_walk.collect_names spans definition in
   let occurrence span target = { span; target } in
   let resolved_names =
     List.concat
@@ -46,7 +46,7 @@ let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Re
            match
              if name.id < Array.length resolved.names then resolved.names.(name.id) else None
            with
-           | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
+           | Some (Definition (_, path)) -> [ occurrence spans.(name.id) (Definition path) ]
            | Some (Module module_) ->
                let parts = Path.module_parts module_ in
                let written_in_full =
@@ -67,7 +67,7 @@ let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Re
                in
                [
                  occurrence
-                   (Source.Definition_span.make name.span.start last.span.stop)
+                   (Source.Definition_span.make spans.(name.id).start spans.(last.id).stop)
                    (Module module_);
                ]
            | _ -> [])
@@ -75,14 +75,14 @@ let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Re
   in
   let declared =
     match declared_name definition with
-    | Some name -> [ occurrence name.span (Definition path) ]
+    | Some name -> [ occurrence spans.(name.id) (Definition path) ]
     | None -> []
   in
   let members =
     match tables with
     | Some tables ->
         List.map
-          (fun ((name : Syntax.name), path) -> occurrence name.span (Definition path))
+          (fun ((name : Syntax.name), path) -> occurrence spans.(name.id) (Definition path))
           (member_targets tables definition)
     | None -> []
   in
@@ -97,7 +97,8 @@ let uses ~(used_module : Syntax.path -> Path.module_) (items : Syntax.path Synta
       let first = match path.modules with first :: _ -> first | [] -> path.last in
       ( used_module path,
         Source.Definition_span.to_file ~base:item.base
-          (Source.Definition_span.make first.span.start path.last.span.stop) ))
+          (Source.Definition_span.make item.positions.spans.(first.id).start
+             item.positions.spans.(path.last.id).stop) ))
     items
 
 let names_definition (definition : Path.t) target =

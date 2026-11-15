@@ -40,10 +40,11 @@ let rec immutable state env (value : expression) : immutable option =
       match target state path.last with
       | Some (Local id) -> (
           let captured =
-            match (state.lambdas, Hashtbl.find_opt state.binding_spans id) with
-            | (lambda : Source.Definition_span.t) :: _, Some (binding : Source.Definition_span.t) ->
+            match state.lambdas with
+            | (lambda : Source.Definition_span.t) :: _ ->
+                let binding = read_span state id in
                 binding.start < lambda.start || binding.start >= lambda.stop
-            | _ -> false
+            | [] -> false
           in
           match Hashtbl.find_opt state.locals id with
           | _ when captured -> Some (Captured path.last.text)
@@ -106,7 +107,7 @@ let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) 
                     Option.is_some
                       (implements state self_type (trait_reference (Well_known.path Index_assign)))
                   in
-                  report state code value.span
+                  report state code (read_span state value.id)
                     (Printf.sprintf
                        "An element of `%s` cannot be mutated in place: `%s` implements `Index`, \
                         which lends an element read-only, and not `IndexMut`.%s"
@@ -125,32 +126,32 @@ let mutate state env ~(by : mutation) (value : expression) =
   in
   (match (immutable state env value, by) with
   | _ when is_formula env ->
-      report state Not_in_specification value.span
+      report state Not_in_specification (read_span state value.id)
         (Printf.sprintf
            "Nothing in a specification, a proof, or a quantifier's body can be %s: the prover \
             reads them as formulas, which mutate nothing."
            (match by with Assignment -> "assigned" | Passed_mut -> "passed `mut`"))
   | None, _ -> ()
   | Some (Captured name), _ ->
-      report state code value.span
+      report state code (read_span state value.id)
         (Printf.sprintf
            "A lambda cannot mutate its captures, and `%s` is from outside it. Return the new value \
             instead, or use a loop."
            name)
   | Some (Read_only name), _ ->
-      report state code value.span
+      report state code (read_span state value.id)
         (Printf.sprintf
            "`%s` cannot be mutated here: only a `var`, a `mut` parameter, or `mut self`, and their \
             parts, can be %s."
            name
            (match by with Assignment -> "assigned" | Passed_mut -> "passed `mut`"))
   | Some Lent_read_only, Assignment ->
-      report state code value.span
-        ~fixes:[ fix "Pass it `mut`." [ insert value.span.start "mut " ] ]
+      report state code (read_span state value.id)
+        ~fixes:[ fix "Pass it `mut`." [ insert (read_span state value.id).start "mut " ] ]
         "This part is lent read-only, so it cannot be mutated. Pass the place it is lent from \
          `mut`, so that it is lent `mut`."
   | Some Not_a_place, Assignment ->
-      report state code value.span
+      report state code (read_span state value.id)
         "Only a place, such as a variable, a field, or an element, can be assigned."
   | Some (Lent_read_only | Not_a_place), Passed_mut -> ());
   use_mutable_indexes state value
@@ -186,62 +187,69 @@ let lent_field state (value : expression) type_ : Types.mode option =
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
-let mode_keyword_span (value : expression) (inner : expression) =
-  Source.Definition_span.make value.span.start inner.span.start
+let mode_keyword_span state (value : expression) (inner : expression) =
+  Source.Definition_span.make (read_span state value.id).start (read_span state inner.id).start
 
 let check_mode state env (value : expression) (parameter : Types.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, argument_form state value) with
   | Read, (Place | Temporary | Lent _) -> ()
   | Read, With_mode (_, inner) ->
-      report state Redundant_mode value.span
+      report state Redundant_mode (read_span state value.id)
         ~fixes:
           [
             fix "Remove the keyword."
-              [ Diagnostic.delete (Source.Definition_span.make value.span.start inner.span.start) ];
+              [
+                Diagnostic.delete
+                  (Source.Definition_span.make (read_span state value.id).start
+                     (read_span state inner.id).start);
+              ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." name)
   | Mut, With_mode (Mut, inner) -> mutate state env ~by:Passed_mut inner
   | Mut, Place ->
-      report state Missing_mode value.span
-        ~fixes:[ fix "Pass it `mut`." [ insert value.span.start "mut " ] ]
+      report state Missing_mode (read_span state value.id)
+        ~fixes:[ fix "Pass it `mut`." [ insert (read_span state value.id).start "mut " ] ]
         (Printf.sprintf "`%s` may mutate its argument, so the call site passes it `mut`." name)
   | Mut, Lent Mut -> mutate state env ~by:Passed_mut value
   | Mut, Lent (Read | Own) ->
-      report state Wrong_mode value.span
+      report state Wrong_mode (read_span state value.id)
         (Printf.sprintf
            "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
             lent from `mut`, so that it is lent `mut`."
            name)
   | Own, Lent _ ->
       if not (plain state type_) then
-        report state Missing_mode value.span
+        report state Missing_mode (read_span state value.id)
           ~fixes:
             (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+               [ fix "Pass a copy." [ insert (read_span state value.id).stop ".copy()" ] ]
              else [])
           (Printf.sprintf
              "`%s` takes ownership of its argument, and a part that is lent cannot be moved. Pass \
               a copy."
              name)
   | Mut, (Temporary | With_mode (Own, _)) ->
-      report state Wrong_mode value.span
+      report state Wrong_mode (read_span state value.id)
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
       if plain state type_ then
-        report state Redundant_mode value.span
-          ~fixes:[ fix "Remove the keyword." [ Diagnostic.delete (mode_keyword_span value inner) ] ]
+        report state Redundant_mode (read_span state value.id)
+          ~fixes:
+            [
+              fix "Remove the keyword." [ Diagnostic.delete (mode_keyword_span state value inner) ];
+            ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (show state type_))
   | Own, Temporary -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       if not (plain state type_) then
-        report state Missing_mode value.span
+        report state Missing_mode (read_span state value.id)
           ~fixes:
-            (fix "Lend it `mut`." [ insert value.span.start "mut " ]
+            (fix "Lend it `mut`." [ insert (read_span state value.id).start "mut " ]
             ::
             (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+               [ fix "Pass a copy." [ insert (read_span state value.id).stop ".copy()" ] ]
              else []))
           (Printf.sprintf
              "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it too, \
@@ -249,27 +257,27 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
              name)
   | Own, Place when is_part_of_constant state value ->
       if not (plain state type_) then
-        report state Missing_mode value.span
+        report state Missing_mode (read_span state value.id)
           ~fixes:
             (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+               [ fix "Pass a copy." [ insert (read_span state value.id).stop ".copy()" ] ]
              else [])
           (Printf.sprintf
              "`%s` takes ownership of its argument, and a constant cannot be moved. Pass a copy."
              name)
   | Own, Place ->
       if not (plain state type_) then
-        report state Missing_mode value.span
+        report state Missing_mode (read_span state value.id)
           ~fixes:
-            (fix "Move it with `own`." [ insert value.span.start "own " ]
+            (fix "Move it with `own`." [ insert (read_span state value.id).start "own " ]
             ::
             (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+               [ fix "Pass a copy." [ insert (read_span state value.id).stop ".copy()" ] ]
              else []))
           (Printf.sprintf
              "`%s` takes ownership of its argument. Move the place with `own`, or pass a copy." name)
   | Own, With_mode (Mut, _) ->
-      report state Wrong_mode value.span
+      report state Wrong_mode (read_span state value.id)
         (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
            name)
   | (Mut | Own), With_mode (Read, _) -> ()
@@ -293,7 +301,8 @@ let check_lent_value state env (operand : expression) =
                 match variant with
                 | Some variant when runs env ->
                     state.diagnostics <-
-                      Diagnostic.make ~code:(Ownership Lent_mut_in_variant) argument.value.span
+                      Diagnostic.make ~code:(Ownership Lent_mut_in_variant)
+                        (read_span state argument.value.id)
                         (Printf.sprintf
                            "This place is lent `mut` inside the variant `%s`. The caller could \
                             replace the variant, and the place would be left without a value. Lend \
@@ -316,9 +325,10 @@ let check_owned state env (value : expression) type_ =
         else begin
           (match argument_form state value with
           | Place when not (plain state type_) ->
-              let place = source state value.span in
+              let place = source state (read_span state value.id) in
               let copy =
-                if copyable state type_ then [ fix "Copy it." [ insert value.span.stop ".copy()" ] ]
+                if copyable state type_ then
+                  [ fix "Copy it." [ insert (read_span state value.id).stop ".copy()" ] ]
                 else []
               in
               let fixes, message =
@@ -330,14 +340,16 @@ let check_owned state env (value : expression) type_ =
                       | _ when is_member_constant state value -> "a constant"
                       | _ -> "part of a constant") )
                 else
-                  ( fix "Move it with `own`." [ insert value.span.start "own " ] :: copy,
+                  ( fix "Move it with `own`." [ insert (read_span state value.id).start "own " ]
+                    :: copy,
                     Printf.sprintf
                       "An owned value is needed here, and `%s` is a place. Pass it `own` to move \
                        it, or copy it."
                       place )
               in
               state.diagnostics <-
-                Diagnostic.make ~fixes ~code:(Ownership Needs_owned) value.span message
+                Diagnostic.make ~fixes ~code:(Ownership Needs_owned) (read_span state value.id)
+                  message
                 :: state.diagnostics
           | _ -> ());
           true

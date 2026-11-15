@@ -35,10 +35,10 @@ let run ~position =
             match (names.place key, names.text key) with
             | Some { base; _ }, Some text when base <= offset && offset <= base + String.length text
               -> (
-                match (names.definition key, Pipeline.resolved pipeline key) with
-                | Some definition, Some resolved ->
+                match (names.definition key, names.spans key, Pipeline.resolved pipeline key) with
+                | Some definition, Some spans, Some resolved ->
                     let tables = Pipeline.tables pipeline key in
-                    Inspect.explain_at ~path:key.path definition resolved tables ~text
+                    Inspect.explain_at ~path:key.path spans definition resolved tables ~text
                       (offset - base)
                 | _ -> None)
             | _ -> None)

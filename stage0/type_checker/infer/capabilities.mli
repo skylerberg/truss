@@ -4,7 +4,6 @@ module Impls = Interface.Impls
 
 type checking = {
   state : State.state;
-  spans : Source.Definition_span.t array;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
 }
 

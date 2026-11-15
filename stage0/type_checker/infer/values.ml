@@ -72,7 +72,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                     set_part index
                       (trait_call display "display" Path.Read part_type evidence [ part ] Types.unit)
                 | None ->
-                    report state No_impl part.span
+                    report state No_impl (read_span state part.id)
                       (Printf.sprintf
                          "`%s` does not implement `Display`, so it cannot be interpolated."
                          (Types.show part_type)));
@@ -85,7 +85,10 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       | Some (Definition (Type, tag_path)) ->
           let tag_type =
             Types.Named
-              { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
+              {
+                path = tag_path;
+                arguments = instantiate_type state (read_span state tag.last.id) tag_path;
+              }
           in
           List.iter (fun (part, part_type) -> check_owned state env part part_type) parts;
           (match expected with
@@ -115,7 +118,10 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                                      evidence [] tag_type);
                             }
                     | None -> ());
-                    let part = associated state tag_type template_trait "Part" ~at:literal.span in
+                    let part =
+                      associated state tag_type template_trait "Part"
+                        ~at:(read_span state literal.id)
+                    in
                     part_type := Some part;
                     List.iteri
                       (fun index ((part_expression : expression), part_type) ->
@@ -131,13 +137,14 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                                 (trait_call ~mode:Own from "from" Path.Static part evidence
                                    [ part_expression ] part)
                           | None ->
-                              report state No_impl part_expression.span
+                              report state No_impl
+                                (read_span state part_expression.id)
                                 (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
                                    (Types.show part_type) (Types.show part) (Types.show tag_type)))
                       parts
                 | None ->
                     if not (Types.is_error tag_type) then
-                      report state No_impl literal.span
+                      report state No_impl (read_span state literal.id)
                         (Printf.sprintf
                            "`%s` does not implement `FromTemplate`, so it is not a tag."
                            (Types.show tag_type)));
@@ -145,7 +152,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
               end);
           tag_type
       | Some (Unknown report) -> Types.Error report
-      | _ -> error state Not_a_type tag.last.span "A string's tag is a type.")
+      | _ -> error state Not_a_type (read_span state tag.last.id) "A string's tag is a type.")
 
 and list_literal state env ?expected (value : expression) items =
   let expected = Option.map (normalize state) expected in
@@ -160,7 +167,7 @@ and list_literal state env ?expected (value : expression) items =
         (match count with
         | Types.Value (Known count)
           when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->
-            report state Mismatch value.span
+            report state Mismatch (read_span state value.id)
               (Printf.sprintf "This array has %d elements, and its type says %s."
                  (List.length items) (Z.to_string count))
         | _ -> ());
@@ -209,7 +216,7 @@ and map_literal state env ?expected (value : expression) entries =
 
 and lambda state env ?expected (value : expression) parameters body =
   let locals_read_before = state.locals_read in
-  state.lambdas <- value.span :: state.lambdas;
+  state.lambdas <- read_span state value.id :: state.lambdas;
   let expected = Option.map (normalize state) expected in
   let untyped unknown =
     List.iter (fun written -> pattern state env written unknown ~mode:Types.Read) parameters;
@@ -226,12 +233,12 @@ and lambda state env ?expected (value : expression) parameters body =
         let output = Types.result_type function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
         let body_type = block_value state lambda_env ~expected:output body in
-        convert state lambda_env ?expression:(block_value_id body) body.span ~actual:body_type
-          ~expected:output;
+        convert state lambda_env ?expression:(block_value_id body) (read_span state body.id)
+          ~actual:body_type ~expected:output;
         Types.Function function_type
     | Some (Types.Function function_type) ->
         untyped
-          (error state Mismatch value.span
+          (error state Mismatch (read_span state value.id)
              (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d."
                 (List.length parameters)
                 (Types.show (Types.Function function_type))
@@ -239,7 +246,7 @@ and lambda state env ?expected (value : expression) parameters body =
     | Some ((Types.Error _ | Types.Hole) as unknown) -> untyped unknown
     | _ ->
         untyped
-          (error state Lambda_needs_type value.span
+          (error state Lambda_needs_type (read_span state value.id)
              "A lambda's parameter types come from where it is used, and nothing here gives them. \
               Give the `let` a function type, or the call type arguments.")
   in
@@ -249,12 +256,10 @@ and lambda state env ?expected (value : expression) parameters body =
     else match list with [] -> acc | id :: rest -> newer (id :: acc) rest
   in
   let read = newer [] state.locals_read in
-  let inside = Source.Definition_span.make value.span.start value.span.stop in
+  let inside = read_span state value.id in
   let outer id =
-    match Hashtbl.find_opt state.binding_spans id with
-    | Some (span : Source.Definition_span.t) ->
-        span.start < inside.start || span.start >= inside.stop
-    | None -> true
+    let binding = read_span state id in
+    binding.start < inside.start || binding.start >= inside.stop
   in
   let captures =
     List.fold_left
@@ -283,7 +288,9 @@ and lambda state env ?expected (value : expression) parameters body =
   result
 
 and if_ state env ?expected (value : expression) (test : expression) then_ else_ =
-  let condition_type = in_statement state env test.span (fun () -> expression state env test) in
+  let condition_type =
+    in_statement state env (read_span state test.id) (fun () -> expression state env test)
+  in
   coerce state env test ~actual:condition_type ~expected:Types.bool;
   register_expression state value (fun () ->
       let condition = build_expression state test in
@@ -309,20 +316,24 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
       | Types.Never -> ()
       | _ ->
           if not (unify state then_type Types.unit) then
-            mismatch state then_.span ~expected:Types.unit ~actual:then_type);
+            mismatch state (read_span state then_.id) ~expected:Types.unit ~actual:then_type);
       Types.unit
   | Some branch ->
       let then_type = block_value state env ?expected then_ in
       let else_type, else_span, else_end =
         match branch with
-        | Else block -> (block_value state env ?expected block, block.span, block_value_id block)
+        | Else block ->
+            (block_value state env ?expected block, read_span state block.id, block_value_id block)
         | Else_if branch_expression ->
             ( expression state env ?expected branch_expression,
-              branch_expression.span,
+              read_span state branch_expression.id,
               Some branch_expression.id )
       in
       join state env ~expected
-        [ (then_type, then_.span, block_value_id then_); (else_type, else_span, else_end) ]
+        [
+          (then_type, read_span state then_.id, block_value_id then_);
+          (else_type, else_span, else_end);
+        ]
 
 and block_value_id (written : block) =
   match List.rev written.statements with
@@ -349,7 +360,9 @@ and match_ state env ?expected (value : expression) scrutinees arms =
   let types =
     List.map
       (fun (scrutinee : expression) ->
-        (scrutinee, in_statement state env scrutinee.span (fun () -> expression state env scrutinee)))
+        ( scrutinee,
+          in_statement state env (read_span state scrutinee.id) (fun () ->
+              expression state env scrutinee) ))
       scrutinees
   in
   register_expression state value (fun () ->
@@ -370,9 +383,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
                 {
                   patterns;
                   guard;
-                  body =
-                    build_block state
-                      { statements = [ arm.body ]; span = arm.body.span; id = arm.body.id };
+                  body = build_block state { statements = [ arm.body ]; id = arm.body.id };
                   origin = arm.id;
                 })
               arms;
@@ -382,7 +393,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
       (fun (arm : arm) ->
         if List.length arm.patterns <> List.length types then
           let unknown =
-            error state Mismatch arm.span
+            error state Mismatch (read_span state arm.id)
               (Printf.sprintf "This arm has %d patterns, and the `match` has %d values."
                  (List.length arm.patterns) (List.length types))
           in
@@ -394,7 +405,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
             arm.patterns types;
         Option.iter (fun guard -> check state env guard Types.bool) arm.guard;
         ( arm_value state env ?expected arm.body,
-          arm.body.span,
+          read_span state arm.body.id,
           match arm.body.kind with Expression value -> Some value.id | _ -> None ))
       arms
   in
@@ -414,10 +425,10 @@ and element_of_collection state env ~(quantifier : expression) (collection : exp
       element
   | Types.Error _ | Types.Hole -> collection_type
   | _ -> (
-      match elements_calls state collection.span collection_type Types.Read with
+      match elements_calls state (read_span state collection.id) collection_type Types.Read with
       | Some (loop, element, _) ->
           if runs env then state.tables.loops.(quantifier.id) <- Some loop;
           element
       | None ->
-          error state Not_indexable collection.span
+          error state Not_indexable (read_span state collection.id)
             (Printf.sprintf "`%s` cannot be looped over." (Types.show collection_type)))

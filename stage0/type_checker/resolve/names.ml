@@ -148,6 +148,7 @@ type lookups = {
   definition : key -> definition option;
   text : key -> string option;
   spans : key -> Source.Definition_span.t array option;
+  recovered : key -> Source.Definition_span.t list option;
   place : key -> place option;
   container : key -> key option;
   contained : key -> key list;
@@ -206,6 +207,13 @@ let lookup_module lookups ~(from : Path.module_) ~imports (names : string list) 
 
 let top module_ name : Path.t = Top { module_; name }
 
+let recovery_report (lookups : lookups) key part =
+  match (lookups.definition key, lookups.spans key, lookups.recovered key) with
+  | Some definition, Some spans, Some recovered -> Parts.reported ~spans ~recovered definition part
+  | _ -> None
+
+let is_broken lookups key part = Option.is_some (recovery_report lookups key part)
+
 let definition_of_path lookups path =
   match lookups.key path with
   | Some key -> Option.map (fun tree -> (key, tree)) (lookups.definition key)
@@ -249,8 +257,8 @@ let generics_of lookups (path : Path.t) =
   | Some _ -> Some []
   | None -> (
       match definition_of_path lookups path with
-      | Some (_, definition) -> (
-          if Parts.broken definition Header then None
+      | Some (key, definition) -> (
+          if is_broken lookups key Header then None
           else
             match definition.kind with
             | Type_definition { generics; _ } | Trait { generics; _ } ->
@@ -509,7 +517,6 @@ type declared = {
   text : string;
   place : place;
   imports : (string * Path.module_) list;
-  spans : Source.Definition_span.t array;
   container : key option;
   contained : key list;
 }
@@ -691,7 +698,6 @@ let namespace lookups package
             text = written.text;
             place = { file = written.file; base = written.item.base };
             imports = file_imports written.file;
-            spans = Syntax_walk.span_table written.item.value;
             container =
               Option.map key_of_written
                 (Option.bind written.container (fun index ->
@@ -876,13 +882,14 @@ let changes before after =
                 if differs (select before) (select after) then [ change ] else []
               in
               changed (Declaration key) (fun declared -> declared.declaration)
-              @ (if not (differs before.item.value after.item.value) then []
-                 else if
-                   differs
-                     (Syntax_walk.without_positions before.item.value)
-                     (Syntax_walk.without_positions after.item.value)
+              @ (if
+                   differs before.item.value after.item.value
+                   || List.compare_lengths before.item.positions.recovered
+                        after.item.positions.recovered
+                      <> 0
                  then [ Tree key ]
-                 else [ Positions key ])
+                 else if differs before.item.positions after.item.positions then [ Positions key ]
+                 else [])
               @ changed (Text key) (fun declared -> declared.text)
               @ changed (Place key) (fun declared -> declared.place)
               @ changed (Imports key) (fun declared -> declared.imports)
@@ -981,7 +988,12 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
     package_declarations = (fun package -> (namespace package).declarations);
     definition = (fun key -> Option.map (fun declared -> declared.item.value) (declared key));
     text = (fun key -> Option.map (fun (declared : declared) -> declared.text) (declared key));
-    spans = (fun key -> Option.map (fun declared -> declared.spans) (declared key));
+    spans =
+      (fun key ->
+        Option.map (fun (declared : declared) -> declared.item.positions.spans) (declared key));
+    recovered =
+      (fun key ->
+        Option.map (fun (declared : declared) -> declared.item.positions.recovered) (declared key));
     place = (fun key -> Option.map (fun declared -> declared.place) (declared key));
     container = (fun key -> Option.bind (declared key) (fun declared -> declared.container));
     contained =
