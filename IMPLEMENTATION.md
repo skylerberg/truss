@@ -105,6 +105,31 @@ develop as well as make it easier to bootstrap the compiler in parts.
   together, the fixes were not independent, which is a compiler bug. A
   check that lexes once for each fix makes a file with a fix on every line
   quadratic.
+- **A token says what the lexer inserted.** A closer that the lexer inserts
+  for an unclosed bracket is marked, and an interpolation records whether
+  its `}` closed it. The parser reads these marks, never zero widths or
+  the text: a closer that a fix inserts is also zero-width after mapping,
+  and taking it for the lexer's would silence the errors after it.
+
+### The parser
+
+- **The parser reads tokens, never the source text.** A fix, and a message
+  that quotes code, spell tokens: names, keywords, and punctuation
+  exactly, and literals by value. A fix that would move code edits around
+  it instead, as `x as T` becomes `T.from(x)` by inserting `T.from(` and
+  replacing ` as T` with `)`.
+- **A file's tree is the tree of its fixed text.** A habit reports the form
+  of another language with its fix, and recovers with the nodes its own
+  tokens write, or with an error node. It never builds the tree its fix
+  writes: such a tree drifted from the fix's text and put nodes out of
+  source order. `Parsed` applies the fixes of the diagnostics where the
+  parser recovered, lexes the fixed text, maps the tokens back to the
+  file's offsets, and parses them again, and that tree is the file's.
+- **The parser's fixes are checked as the lexer's are,** in groups, by
+  `Lexer.Recovery`. The fix of a diagnostic where the parser did not
+  recover, such as moving a misplaced `use` line, is checked but not
+  applied: the tree is already right, and code a fix moves maps to
+  zero-width spans.
 
 ### Stages
 

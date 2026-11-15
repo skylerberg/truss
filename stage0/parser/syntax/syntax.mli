@@ -378,7 +378,7 @@ type definition = {
 
 type 'value item = {
   base : int;
-  text : string;
+  stop : int;
   blank_line_before : bool;
   value : 'value;
   container_index : int option;

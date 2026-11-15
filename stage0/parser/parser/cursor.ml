@@ -8,7 +8,6 @@ type t = {
   stop : int;
   base : int;
   group_ends : int array;
-  text : string;
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable nesting_depth : int;
@@ -38,14 +37,13 @@ let group_ends tokens ~first ~stop =
   done;
   ends
 
-let create ~text ~diagnostics ~base tokens ~first ~stop =
+let create ~diagnostics ~base tokens ~first ~stop =
   {
     tokens;
     first;
     stop;
     base;
     group_ends = group_ends tokens ~first ~stop;
-    text;
     diagnostics;
     index = first;
     nesting_depth = 0;
@@ -57,31 +55,21 @@ let create ~text ~diagnostics ~base tokens ~first ~stop =
     skipped_trailing_comma = false;
   }
 
-let derived cursor tokens ~stop =
+let interpolation cursor (inner : Token.interpolation) =
   {
-    (create ~text:cursor.text ~diagnostics:cursor.diagnostics ~base:cursor.base tokens ~first:0
-       ~stop)
+    (create ~diagnostics:cursor.diagnostics ~base:cursor.base inner.tokens ~first:0
+       ~stop:(Array.length inner.tokens - 1))
     with
     nesting_depth = cursor.nesting_depth;
     recoveries = cursor.recoveries;
     next_id = cursor.next_id;
-  }
-
-let sub_cursor cursor tokens = derived cursor tokens ~stop:(Array.length tokens)
-
-let interpolation cursor (inner : Token.interpolation) =
-  let is_closed =
-    inner.span.stop > inner.span.start && cursor.text.[inner.span.stop - 1 - cursor.base] = '}'
-  in
-  {
-    (derived cursor inner.tokens ~stop:(Array.length inner.tokens - 1)) with
-    is_unterminated_interpolation = not is_closed;
+    is_unterminated_interpolation = not inner.is_closed;
   }
 
 let restarted cursor =
   {
-    (create ~text:cursor.text ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base
-       cursor.tokens ~first:cursor.first ~stop:cursor.stop)
+    (create ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base cursor.tokens
+       ~first:cursor.first ~stop:cursor.stop)
     with
     next_id = cursor.next_id;
   }
@@ -102,6 +90,7 @@ let end_token cursor =
     span = Source.zero_width position;
     line_break_before = false;
     blank_line_before = false;
+    is_inserted_closer = false;
   }
 
 let token_at cursor index = if index < cursor.stop then cursor.tokens.(index) else end_token cursor
@@ -121,7 +110,7 @@ let advance cursor =
   if cursor.index < cursor.stop then begin
     let token = cursor.tokens.(cursor.index) in
     (match token.kind with
-    | Punctuation (Close _) when token.span.start = token.span.stop ->
+    | Punctuation (Close _) when token.is_inserted_closer ->
         cursor.after_inserted_closer <- true;
         record_recovery cursor ~index:cursor.index token.span
     | _ -> ());
@@ -173,11 +162,32 @@ let span_from cursor start_index =
 
 let absolute cursor span = Source.Definition_span.to_file ~base:cursor.base span
 
-let text cursor (span : Source.span) =
-  String.sub cursor.text (span.start - cursor.base) (span.stop - span.start)
+let rec tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
+  let inside = ref [] and enclosing = ref None in
+  for index = first to stop - 1 do
+    let token = tokens.(index) in
+    if span.start <= token.span.start && token.span.stop <= span.stop then
+      inside := token :: !inside
+    else if token.span.start <= span.start && span.stop <= token.span.stop then
+      enclosing := Some token
+  done;
+  match (!inside, !enclosing) with
+  | [], Some { kind = String literal; _ } -> (
+      match
+        List.find_opt
+          (fun (interpolation : Token.interpolation) ->
+            interpolation.span.start <= span.start && span.stop <= interpolation.span.stop)
+          (Array.to_list (Token.interpolations literal))
+      with
+      | Some interpolation ->
+          tokens_within interpolation.tokens ~first:0 ~stop:(Array.length interpolation.tokens) span
+      | None -> [||])
+  | inside, _ -> Array.of_list (List.rev inside)
 
-let is_inserted_closer (token : Token.t) =
-  match token.kind with Punctuation (Close _) -> token.span.start = token.span.stop | _ -> false
+let spelling cursor ?insertions span =
+  match tokens_within cursor.tokens ~first:cursor.first ~stop:cursor.stop span with
+  | [||] -> None
+  | tokens -> Token.spelling ?insertions tokens
 
 let recovers : Diagnostic.Code.parser -> bool = function
   | Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
@@ -217,7 +227,7 @@ let describe (token : Token.t) =
 let fail cursor expected =
   let token = peek cursor in
   let is_reported_by_lexer =
-    is_inserted_closer token || cursor.after_inserted_closer
+    token.is_inserted_closer || cursor.after_inserted_closer
     || (token.kind = End_of_file && cursor.is_unterminated_interpolation)
   in
   (match token.kind with

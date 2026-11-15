@@ -139,7 +139,13 @@ end = struct
         }
 end
 
-type t = { kind : kind; span : Source.span; line_break_before : bool; blank_line_before : bool }
+type t = {
+  kind : kind;
+  span : Source.span;
+  line_break_before : bool;
+  blank_line_before : bool;
+  is_inserted_closer : bool;
+}
 
 and kind =
   | Upper of string
@@ -164,7 +170,7 @@ and string_literal = {
 
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
 and text = { value : string; span : Source.span }
-and interpolation = { tokens : t array; span : Source.span }
+and interpolation = { tokens : t array; span : Source.span; is_closed : bool }
 
 let equal_punctuation (first : punctuation) (second : punctuation) =
   match (first, second) with
@@ -322,3 +328,87 @@ let keyword_spelling = spelling_of keywords
 let reserved_spelling = spelling_of reserved_words
 let punctuation_spelling = spelling_of punctuation
 let foreign_spelling = spelling_of foreign_sequences
+
+let escaped text =
+  let buffer = Buffer.create (String.length text) in
+  String.iteri
+    (fun index character ->
+      match character with
+      | '"' -> Buffer.add_string buffer "\\\""
+      | '\\' -> Buffer.add_string buffer "\\\\"
+      | '\n' -> Buffer.add_string buffer "\\n"
+      | '\t' -> Buffer.add_string buffer "\\t"
+      | '\r' -> Buffer.add_string buffer "\\r"
+      | '\000' -> Buffer.add_string buffer "\\0"
+      | '$' when index + 1 < String.length text && text.[index + 1] = '{' ->
+          Buffer.add_string buffer "\\$"
+      | character when Char.code character < 0x20 || Char.code character = 0x7f ->
+          Buffer.add_string buffer (Printf.sprintf "\\u{%x}" (Char.code character))
+      | character -> Buffer.add_char buffer character)
+    text;
+  Buffer.contents buffer
+
+let rec spelling ?(insertions = []) (tokens : t array) =
+  let inserted offset =
+    String.concat ""
+      (List.filter_map (fun (at, text) -> if at = offset then Some text else None) insertions)
+  in
+  let buffer = Buffer.create 64 in
+  let rec spell index previous_stop =
+    if index = Array.length tokens then begin
+      Option.iter (fun stop -> Buffer.add_string buffer (inserted stop)) previous_stop;
+      true
+    end
+    else
+      let token = tokens.(index) in
+      match token.kind with
+      | End_of_file -> spell (index + 1) previous_stop
+      | kind -> (
+          match if token.is_inserted_closer then None else kind_spelling kind with
+          | None -> false
+          | Some text ->
+              (match previous_stop with
+              | Some stop ->
+                  Buffer.add_string buffer (inserted stop);
+                  if stop < token.span.start then begin
+                    Buffer.add_char buffer ' ';
+                    Buffer.add_string buffer (inserted token.span.start)
+                  end
+              | None -> Buffer.add_string buffer (inserted token.span.start));
+              Buffer.add_string buffer text;
+              spell (index + 1) (Some token.span.stop))
+  in
+  if spell 0 None then Some (Buffer.contents buffer) else None
+
+and kind_spelling = function
+  | Upper name | Lower name -> Some name
+  | Underscore -> Some "_"
+  | Keyword keyword -> Some (keyword_spelling keyword)
+  | Reserved reserved -> Some (reserved_spelling reserved)
+  | Integer value -> Some (Z.to_string value)
+  | Float { Decimal.significand; exponent } ->
+      Some (Z.to_string significand ^ "e" ^ Z.to_string exponent)
+  | String literal -> string_spelling literal
+  | Punctuation punctuation -> Some (punctuation_spelling punctuation)
+  | Foreign foreign -> Some (foreign_spelling foreign)
+  | Newline | End_of_file -> None
+
+and string_spelling literal =
+  let pieces =
+    Array.to_list
+      (Array.map
+         (fun ((interpolation : interpolation), (text : text)) ->
+           if interpolation.is_closed then
+             Option.map
+               (fun inner -> "${" ^ inner ^ "}" ^ escaped text.value)
+               (spelling interpolation.tokens)
+           else None)
+         literal.rest)
+  in
+  if List.mem None pieces then None
+  else
+    let tag = match literal.tag with Some (tag, _) -> tag | None -> "" in
+    Some
+      (tag ^ "\"" ^ escaped literal.first.value
+      ^ String.concat "" (List.filter_map Fun.id pieces)
+      ^ "\"")

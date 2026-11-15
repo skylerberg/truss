@@ -44,7 +44,9 @@ type input =
 
 type mode = File of { recovery : bool } | Interpolation
 
-let token kind span = { kind; span; line_break_before = false; blank_line_before = false }
+let token kind span =
+  { kind; span; line_break_before = false; blank_line_before = false; is_inserted_closer = false }
+
 let spelling punctuation = punctuation_spelling punctuation
 let opener_spelling bracket = spelling (Open bracket)
 let closer_spelling bracket = spelling (Close bracket)
@@ -266,6 +268,7 @@ let run ~source ~diagnostics ~mode next_input =
         span = Source.zero_width position;
         line_break_before = first_line_break <> None;
         blank_line_before = blank_line;
+        is_inserted_closer = false;
       };
     Dynarray.to_array output
   in
@@ -296,6 +299,7 @@ let run ~source ~diagnostics ~mode next_input =
             span;
             line_break_before = first_line_break <> None;
             blank_line_before = blank_line;
+            is_inserted_closer = false;
           }
         in
         (match kind with

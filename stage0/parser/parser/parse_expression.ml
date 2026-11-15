@@ -83,48 +83,21 @@ let angle_closer cursor =
   in
   scan (Cursor.index cursor) 0
 
-let angle_brackets cursor parse =
+let skip_angle_brackets cursor =
   match angle_closer cursor with
-  | None -> None
+  | None -> ()
   | Some closer ->
-      let rewritten = Dynarray.create () and angles = ref [] in
-      let rec copy index =
-        if index <= closer then begin
+      let rec angles index =
+        if index > closer then []
+        else
           let token = Cursor.token_at cursor index in
-          let bracket kind (span : Source.span) =
-            Dynarray.add_last rewritten { token with kind = Punctuation kind; span }
-          in
           match token.kind with
-          | Punctuation Less ->
-              angles := token :: !angles;
-              bracket (Open Square) token.span;
-              copy (index + 1)
-          | Punctuation Greater ->
-              angles := token :: !angles;
-              bracket (Close Square) token.span;
-              copy (index + 1)
-          | Punctuation Shift_right ->
-              angles := token :: !angles;
-              let middle = token.span.start + 1 in
-              bracket (Close Square) (Source.span token.span.start middle);
-              bracket (Close Square) (Source.span middle token.span.stop);
-              copy (index + 1)
-          | Punctuation (Open _) ->
-              let nested_closer = Cursor.closer cursor index in
-              for nested = index to nested_closer do
-                Dynarray.add_last rewritten (Cursor.token_at cursor nested)
-              done;
-              copy (nested_closer + 1)
-          | _ ->
-              Dynarray.add_last rewritten token;
-              copy (index + 1)
-        end
+          | Punctuation (Less | Greater | Shift_right) -> token :: angles (index + 1)
+          | Punctuation (Open _) -> angles (Cursor.closer cursor index + 1)
+          | _ -> angles (index + 1)
       in
-      copy (Cursor.index cursor);
-      Habits.angle_brackets cursor ~angles:(List.rev !angles);
-      let value = parse (Cursor.sub_cursor cursor (Dynarray.to_array rewritten)) in
-      Cursor.skip_to cursor (closer + 1);
-      Some value
+      Habits.angle_brackets cursor ~angles:(angles (Cursor.index cursor));
+      Cursor.skip_to cursor (closer + 1)
 
 let macro_follows cursor ~name_stop =
   let bang = Cursor.peek cursor and opener = Cursor.token_at cursor (Cursor.index cursor + 1) in
@@ -187,9 +160,10 @@ and path_type cursor : path_type =
   let path = Atoms.upper_path cursor "a type name" in
   let arguments =
     if Cursor.is_punctuation cursor (Open Square) then type_arguments cursor
-    else if Cursor.is_punctuation cursor Less then
-      Option.value (angle_brackets cursor type_arguments) ~default:[]
-    else []
+    else begin
+      if Cursor.is_punctuation cursor Less then skip_angle_brackets cursor;
+      []
+    end
   in
   { path; arguments; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
@@ -312,8 +286,10 @@ and bounds cursor =
   loop []
 
 and generics cursor : generic_parameter list =
-  if Cursor.is_punctuation cursor Less then
-    Option.value (angle_brackets cursor generics) ~default:[]
+  if Cursor.is_punctuation cursor Less then begin
+    skip_angle_brackets cursor;
+    []
+  end
   else if not (Cursor.is_punctuation cursor (Open Square)) then []
   else
     let start = Cursor.index cursor in
@@ -498,7 +474,7 @@ and pipes cursor start (value : expression) =
       Cursor.advance cursor;
       let callee = binary cursor ~level:0 ~open_range:false in
       Habits.pipe_operator cursor ~value ~operator ~callee;
-      pipes cursor start (expression_node cursor start (Call (callee, [ { label = None; value } ])))
+      pipes cursor start (error_expression cursor start)
   | _ -> value
 
 and coalescing cursor start (value : expression) =
@@ -506,11 +482,7 @@ and coalescing cursor start (value : expression) =
   let second = Cursor.next cursor in
   let default = binary cursor ~level:0 ~open_range:false in
   Habits.null_coalescing cursor ~value ~first ~second ~default;
-  let method_ : name =
-    { text = "unwrap_or"; span = Cursor.span cursor first.span; id = Cursor.fresh_id cursor }
-  in
-  let callee = expression_node cursor start (Member (value, method_)) in
-  expression_node cursor start (Call (callee, [ { label = None; value = default } ]))
+  error_expression cursor start
 
 and binary cursor ~level ~open_range =
   let start = Cursor.index cursor in
@@ -554,16 +526,8 @@ and binary cursor ~level ~open_range =
             Cursor.check_chain_length cursor ~chain_length;
             Habits.power_operator cursor ~operator:power;
             Cursor.advance cursor;
-            let right = prefix cursor in
-            loop ~chain_length:(chain_length + 1)
-              (expression_node cursor start
-                 (Binary
-                    {
-                      operator = Multiply;
-                      operator_span = Cursor.span cursor power.span;
-                      left;
-                      right;
-                    }))
+            ignore (prefix cursor);
+            loop ~chain_length:(chain_length + 1) (error_expression cursor start)
         | _ -> left)
   in
   loop ~chain_length:0 left
@@ -620,8 +584,7 @@ and prefix cursor : expression =
         let operator = Cursor.next cursor in
         let operand = Cursor.nested cursor prefix in
         Habits.double_negation cursor ~operator ~operand;
-        let inner = expression_node cursor (start + 1) (Prefix (Negate, operand)) in
-        expression_node cursor start (Prefix (Negate, inner))
+        error_expression cursor start
     | Punctuation Ampersand ->
         let before = Cursor.previous_token cursor in
         let ampersand = Cursor.next cursor in
@@ -635,18 +598,7 @@ and prefix cursor : expression =
       let as_token = Cursor.next cursor in
       let target = type_expression cursor in
       Habits.as_conversion cursor ~value ~as_token ~target;
-      let callee : expression_kind =
-        match target.kind with
-        | Path_type { path; arguments = []; _ } ->
-            Member
-              ( { kind = Name path; span = target.span; id = Cursor.fresh_id cursor },
-                { text = "from"; span = target.span; id = Cursor.fresh_id cursor } )
-        | _ -> Expression_error
-      in
-      expression_node cursor start
-        (Call
-           ( { kind = callee; span = target.span; id = Cursor.fresh_id cursor },
-             [ { label = None; value } ] ))
+      error_expression cursor start
   | _ -> value
 
 and prefix_operator cursor start operator =
@@ -674,40 +626,22 @@ and quantified cursor =
 and closure_bars cursor =
   let start = Cursor.index cursor in
   let opening = Cursor.next cursor in
-  let parameters, closing =
-    if opening.kind = Punctuation Or_or then ([], opening)
+  let closing =
+    if opening.kind = Punctuation Or_or then opening
     else
-      let rec loop parameters =
-        if Cursor.is_punctuation cursor Bar then (List.rev parameters, Cursor.next cursor)
-        else
-          let parameter = Parse_pattern.primary cursor in
+      let rec skip_parameters () =
+        if Cursor.is_punctuation cursor Bar then Cursor.next cursor
+        else begin
+          ignore (Parse_pattern.primary cursor);
           if not (Cursor.is_punctuation cursor Bar) then Cursor.expect_punctuation cursor Comma;
-          loop (parameter :: parameters)
+          skip_parameters ()
+        end
       in
-      loop []
+      skip_parameters ()
   in
-  let body_start = Cursor.index cursor in
   let body = expression cursor in
   Habits.closure_bars cursor ~opening ~closing ~body ~is_before_else:(Cursor.is_keyword cursor Else);
-  let block =
-    match body.kind with
-    | Block block -> block
-    | _ ->
-        let statement : statement =
-          {
-            kind = Expression body;
-            span = body.span;
-            blank_line_before = false;
-            id = Cursor.fresh_id cursor;
-          }
-        in
-        {
-          statements = [ statement ];
-          span = Cursor.span_from cursor body_start;
-          id = Cursor.fresh_id cursor;
-        }
-  in
-  expression_node cursor start (Lambda { parameters; body = block })
+  error_expression cursor start
 
 and postfix cursor : expression =
   let start = Cursor.index cursor in
@@ -793,23 +727,7 @@ and conditional cursor start condition question =
   Cursor.expect_punctuation cursor Colon;
   let else_ = expression cursor in
   Habits.conditional cursor ~condition ~then_ ~else_ ~question;
-  let block (value : expression) : block =
-    {
-      statements =
-        [
-          {
-            kind = Expression value;
-            span = value.span;
-            blank_line_before = false;
-            id = Cursor.fresh_id cursor;
-          };
-        ];
-      span = value.span;
-      id = Cursor.fresh_id cursor;
-    }
-  in
-  expression_node cursor start
-    (If { condition; then_ = block then_; else_ = Some (Else (block else_)) })
+  error_expression cursor start
 
 and bracket_item cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -911,10 +829,7 @@ and named cursor start =
       if brace_record_follows cursor then brace_record cursor start value else value
   | String ({ tag = Some _; _ } as literal) ->
       expression_node cursor start (String (string_literal cursor ~start ~modules literal))
-  | Punctuation Less -> (
-      match List.rev modules with
-      | last :: reversed -> turbofish cursor start { modules = List.rev reversed; last }
-      | [] -> Cursor.fail cursor "a name")
+  | Punctuation Less -> turbofish cursor start
   | _ -> Cursor.fail cursor "a name after `::`"
 
 and path_separators cursor start (value : expression) =
@@ -933,26 +848,19 @@ and angle_arguments cursor start (value : expression) =
     | _ -> false
   in
   match if Cursor.is_punctuation cursor Less then angle_closer cursor else None with
-  | Some closer when follows_closer closer -> (
-      let items inner =
-        Cursor.bracketed inner ~item:bracket_item ~recover:(fun span ->
-            Item { kind = Expression_error; span; id = Cursor.fresh_id cursor })
-      in
-      match angle_brackets cursor items with
-      | Some items -> expression_node cursor start (Bracket (value, items))
-      | None -> value)
+  | Some closer when follows_closer closer ->
+      skip_angle_brackets cursor;
+      error_expression cursor start
   | _ -> value
 
 and macro cursor start (name : name) =
   let bang = Cursor.next cursor in
   let opening = Cursor.peek cursor in
   Habits.macro_call cursor ~name ~bang ~opening;
-  match opening.kind with
-  | Punctuation (Open Square) -> collection cursor
-  | _ ->
-      let callee = expression_node cursor start (Name { modules = []; last = name }) in
-      let arguments = arguments cursor in
-      expression_node cursor start (Call (callee, arguments))
+  (match opening.kind with
+  | Punctuation (Open Square) -> ignore (collection cursor)
+  | _ -> ignore (arguments cursor));
+  error_expression cursor start
 
 and keyword_macro cursor (value : expression) =
   if macro_follows cursor ~name_stop:(Cursor.previous_stop cursor) then begin
@@ -978,65 +886,34 @@ and brace_record cursor start (record : expression) =
   let closer = Cursor.closer cursor (Cursor.index cursor) in
   Cursor.advance cursor;
   let first = Cursor.peek cursor in
-  let rec loop arguments =
-    if Cursor.index cursor >= closer then List.rev arguments
-    else
-      let argument = argument cursor in
+  let rec skip_arguments () =
+    if Cursor.index cursor < closer then begin
+      ignore (argument cursor);
       if Cursor.index cursor < closer then Cursor.expect_punctuation cursor Comma;
-      loop (argument :: arguments)
+      skip_arguments ()
+    end
   in
-  let arguments = loop [] in
+  skip_arguments ();
   let last_stop = Cursor.previous_stop cursor in
   let closing = Cursor.token_at cursor closer in
   Cursor.skip_to cursor (closer + 1);
   Habits.brace_record cursor ~name_stop:(Cursor.absolute cursor record.span).stop ~opening ~first
     ~last_stop ~closing;
-  expression_node cursor start (Call (record, arguments))
+  error_expression cursor start
 
-and turbofish cursor start (function_path : path) =
+and turbofish cursor start =
+  let colons = Cursor.token_at cursor (Cursor.index cursor - 1) in
   let less = Cursor.next cursor in
-  let colons = Cursor.token_at cursor (Cursor.index cursor - 2) in
-  let rec loop types =
-    let types = type_expression cursor :: types in
-    if Cursor.accept_punctuation cursor Comma then loop types else List.rev types
+  let rec skip_types () =
+    ignore (type_expression cursor);
+    if Cursor.accept_punctuation cursor Comma then skip_types ()
   in
-  let types = loop [] in
+  skip_types ();
   if not (Cursor.is_punctuation cursor Greater) then
     Cursor.fail cursor "`>` after the type arguments";
   let greater = Cursor.next cursor in
   Habits.turbofish cursor ~colons ~less ~greater;
-  let rec as_expression (type_ : type_expression) : expression =
-    match type_.kind with
-    | Path_type { path; arguments = []; _ } ->
-        { kind = Name path; span = type_.span; id = Cursor.fresh_id cursor }
-    | Path_type { path; arguments; span; _ } ->
-        let items =
-          List.map
-            (function
-              | Type_argument argument -> Item (as_expression argument)
-              | Count (value, span) ->
-                  Item { kind = Integer value; span; id = Cursor.fresh_id cursor }
-              | Count_name name ->
-                  Item
-                    {
-                      kind = Name { modules = []; last = name };
-                      span = name.span;
-                      id = Cursor.fresh_id cursor;
-                    }
-              | Constraint (name, argument) -> Item_constraint (name, argument))
-            arguments
-        in
-        {
-          kind =
-            Bracket ({ kind = Name path; span = path.last.span; id = Cursor.fresh_id cursor }, items);
-          span;
-          id = Cursor.fresh_id cursor;
-        }
-    | _ -> { kind = Expression_error; span = type_.span; id = Cursor.fresh_id cursor }
-  in
-  let definition_name = expression_node cursor start (Name function_path) in
-  expression_node cursor start
-    (Bracket (definition_name, List.map (fun type_ -> Item (as_expression type_)) types))
+  error_expression cursor start
 
 and string_literal cursor ~start ~modules literal =
   Atoms.string_literal cursor ~start ~modules literal ~interpolation:(interpolation cursor)
@@ -1249,56 +1126,27 @@ and end_of_statement cursor (statement : statement) =
          | _ -> false ->
       let operator = Cursor.next cursor in
       Habits.increment cursor ~target ~operator;
-      let operator_kind =
-        if operator.kind = Foreign Plus_plus then Add_assign else Subtract_assign
-      in
-      let one : expression =
-        {
-          kind = Integer Z.one;
-          span = Cursor.span cursor operator.span;
-          id = Cursor.fresh_id cursor;
-        }
-      in
-      let stop = (Cursor.span cursor operator.span).stop in
       {
         statement with
-        kind = Assignment { target; operator = operator_kind; value = one };
-        span = Source.Definition_span.make statement.span.start stop;
+        kind = Statement_error;
+        span =
+          Source.Definition_span.make statement.span.start (Cursor.span cursor operator.span).stop;
       }
   | Punctuation (Open Curly), _ when not (Cursor.peek cursor).line_break_before ->
       trailing_lambda cursor statement
   | _ -> statement
 
-and replace_trailing (statement : statement) ~replace =
+and trailing_callee (statement : statement) =
   let rec rightmost (value : expression) =
-    let with_operand kind (inner : expression) : expression =
-      { value with kind; span = Source.Definition_span.make value.span.start inner.span.stop }
-    in
     match value.kind with
-    | Name _ | Member _ -> Some (replace value)
-    | Binary binary ->
-        Option.map
-          (fun right -> with_operand (Binary { binary with right }) right)
-          (rightmost binary.right)
-    | Return (Some inner) ->
-        Option.map (fun inner -> with_operand (Return (Some inner)) inner) (rightmost inner)
-    | Echo inner -> Option.map (fun inner -> with_operand (Echo inner) inner) (rightmost inner)
-    | Mode (mode, inner) ->
-        Option.map (fun inner -> with_operand (Mode (mode, inner)) inner) (rightmost inner)
-    | Any inner -> Option.map (fun inner -> with_operand (Any inner) inner) (rightmost inner)
+    | Name _ | Member _ -> Some value
+    | Binary { right = inner; _ } | Return (Some inner) | Echo inner | Mode (_, inner) | Any inner
+      ->
+        rightmost inner
     | _ -> None
   in
-  let rebuilt kind (value : expression) : statement =
-    { statement with kind; span = Source.Definition_span.make statement.span.start value.span.stop }
-  in
   match statement.kind with
-  | Expression value -> Option.map (fun value -> rebuilt (Expression value) value) (rightmost value)
-  | Let binding ->
-      Option.map (fun value -> rebuilt (Let { binding with value }) value) (rightmost binding.value)
-  | Assignment assignment ->
-      Option.map
-        (fun value -> rebuilt (Assignment { assignment with value }) value)
-        (rightmost assignment.value)
+  | Expression value | Let { value; _ } | Assignment { value; _ } -> rightmost value
   | _ -> None
 
 and uses_of_it (tokens : Token.t array) =
@@ -1313,63 +1161,21 @@ and uses_of_it (tokens : Token.t array) =
       | _ -> [])
     (Array.to_list tokens)
 
-and rename_it (tokens : Token.t array) ~parameter =
-  Array.map
-    (fun (token : Token.t) ->
-      match token.kind with
-      | Lower "it" -> { token with kind = Lower parameter }
-      | String literal ->
-          let rest =
-            Array.map
-              (fun ((inner : Token.interpolation), text) ->
-                ({ inner with tokens = rename_it inner.tokens ~parameter }, text))
-              literal.rest
-          in
-          { token with kind = String { literal with rest } }
-      | _ -> token)
-    tokens
-
-and trailing_lambda cursor statement =
+and trailing_lambda cursor (statement : statement) =
   let opening = Cursor.peek cursor in
-  let closer = Cursor.closer cursor (Cursor.index cursor) in
-  let closing = Cursor.token_at cursor closer in
-  let block_tokens = Cursor.group cursor in
-  let uses = uses_of_it block_tokens in
-  let replace (callee : expression) : expression =
-    let parameter = Habits.parameter_name callee in
-    Habits.trailing_lambda cursor ~callee ~parameter ~opening ~closing ~uses;
-    let renamed = rename_it block_tokens ~parameter in
-    let body = block (Cursor.sub_cursor cursor renamed) in
-    Cursor.skip_to cursor (closer + 1);
-    let at_start = Source.Definition_span.make body.span.start body.span.start in
-    let lambda : expression =
+  let closing = Cursor.token_at cursor (Cursor.closer cursor (Cursor.index cursor)) in
+  match (uses_of_it (Cursor.group cursor), trailing_callee statement) with
+  | (_ :: _ as uses), Some callee ->
+      Habits.trailing_lambda cursor ~callee ~parameter:(Habits.parameter_name callee) ~opening
+        ~closing ~uses;
+      ignore (block cursor);
       {
-        kind =
-          Lambda
-            {
-              parameters =
-                [
-                  {
-                    kind =
-                      Binding { text = parameter; span = at_start; id = Cursor.fresh_id cursor };
-                    span = at_start;
-                    id = Cursor.fresh_id cursor;
-                  };
-                ];
-              body;
-            };
-        span = body.span;
-        id = Cursor.fresh_id cursor;
+        statement with
+        kind = Statement_error;
+        span =
+          Source.Definition_span.make statement.span.start (Cursor.span cursor closing.span).stop;
       }
-    in
-    {
-      kind = Call (callee, [ { label = None; value = lambda } ]);
-      span = Source.Definition_span.make callee.span.start body.span.stop;
-      id = Cursor.fresh_id cursor;
-    }
-  in
-  if uses = [] then statement
-  else Option.value (replace_trailing statement ~replace) ~default:statement
+  | _ -> statement
 
 and statement cursor : statement =
   let start = Cursor.index cursor in
@@ -1423,25 +1229,18 @@ and statement cursor : statement =
   | Reserved Loop when Cursor.peek_ahead cursor 1 = Punctuation (Open Curly) ->
       let loop_token = Cursor.next cursor in
       Habits.loop cursor ~loop_token;
-      let condition = expression_node cursor start True in
-      finish (While { condition; clauses = []; body = body cursor })
+      ignore (body cursor);
+      finish Statement_error
   | _ -> (
       let target = expression cursor in
       match (assignment_operator (Cursor.peek_kind cursor), Cursor.peek cursor) with
       | Some operator, _ ->
           Cursor.advance cursor;
           finish (Assignment { target; operator; value = expression cursor })
-      | None, ({ kind = Foreign Colon_equal; _ } as operator) -> (
+      | None, ({ kind = Foreign Colon_equal; _ } as operator) ->
           Cursor.advance cursor;
           Habits.short_declaration cursor ~target ~operator;
-          let value = expression cursor in
-          match target.kind with
-          | Name { modules = []; last } ->
-              let pattern : pattern =
-                { kind = Binding last; span = target.span; id = Cursor.fresh_id cursor }
-              in
-              finish (Let { is_var = false; pattern; annotation = None; value; else_ = None })
-          | _ -> finish (Assignment { target; operator = Assign; value }))
+          finish (Assignment { target; operator = Assign; value = expression cursor })
       | None, _ -> finish (Expression target))
 
 and binding cursor ~is_var =

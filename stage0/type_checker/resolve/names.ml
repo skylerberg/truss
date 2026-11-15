@@ -349,9 +349,10 @@ type written = {
   file : Path.file;
   index : int;
   item : definition Syntax.item;
+  text : string;
 }
 
-let file_declarations lookups (file : Path.file) ~imports
+let file_declarations lookups (file : Path.file) ~imports ~text
     (definitions : definition Syntax.item list) =
   let module_ = file.module_ in
   let owner = owner lookups ~from:module_ ~imports in
@@ -368,6 +369,7 @@ let file_declarations lookups (file : Path.file) ~imports
         file;
         index;
         item;
+        text = String.sub text item.base (item.stop - item.base);
       }
   in
   List.filter_map Fun.id
@@ -495,6 +497,7 @@ end)
 type declared = {
   declaration : declaration;
   item : definition Syntax.item;
+  text : string;
   place : place;
   imports : (string * Path.module_) list;
   spans : Source.Definition_span.t array;
@@ -590,14 +593,15 @@ let law_proof_entry lookups ~imports (declaration : declaration) (definition : d
       | _ -> None)
   | _ -> None
 
-let namespace lookups package (modules : (Path.module_ * (Path.file * Syntax.file) list) list) =
+let namespace lookups package
+    (modules : (Path.module_ * (Path.file * Syntax.file * string) list) list) =
   let modules_map =
     List.fold_left
       (fun map (module_, files) ->
         Module_map.add module_
           (module_names
              (List.concat_map
-                (fun (_, (file : Syntax.file)) -> file_entries file.definitions)
+                (fun (_, (file : Syntax.file), _) -> file_entries file.definitions)
                 files))
           map)
       (if Intrinsic.module_.package = package then
@@ -626,7 +630,7 @@ let namespace lookups package (modules : (Path.module_ * (Path.file * Syntax.fil
     List.fold_left
       (fun map (_, files) ->
         List.fold_left
-          (fun map ((file : Path.file), (parsed : Syntax.file)) ->
+          (fun map ((file : Path.file), (parsed : Syntax.file), _) ->
             File_map.add file (imports_of file parsed.uses) map)
           map files)
       File_map.empty modules
@@ -639,8 +643,9 @@ let namespace lookups package (modules : (Path.module_ * (Path.file * Syntax.fil
         ( module_,
           numbered
             (List.concat_map
-               (fun ((file : Path.file), (parsed : Syntax.file)) ->
-                 file_declarations pass_lookups file ~imports:(file_imports file) parsed.definitions)
+               (fun ((file : Path.file), (parsed : Syntax.file), text) ->
+                 file_declarations pass_lookups file ~imports:(file_imports file) ~text
+                   parsed.definitions)
                files) ))
       modules
   in
@@ -667,6 +672,7 @@ let namespace lookups package (modules : (Path.module_ * (Path.file * Syntax.fil
           {
             declaration = written.declaration;
             item = written.item;
+            text = written.text;
             place = { file = written.file; base = written.item.base };
             imports = file_imports written.file;
             spans = Syntax_walk.spans written.item.value;
@@ -865,7 +871,7 @@ let changes before after =
                      (Syntax_walk.without_positions after.item.value)
                  then [ Tree key ]
                  else [ Positions key ])
-              @ changed (Text key) (fun declared -> declared.item.text)
+              @ changed (Text key) (fun declared -> declared.text)
               @ changed (Place key) (fun declared -> declared.place)
               @ changed (Imports key) (fun declared -> declared.imports)
               @ changed (Container key) (fun declared -> declared.container)
@@ -962,7 +968,7 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
     declarations_in = (fun file -> Option.value ~default:[] (of_file file));
     package_declarations = (fun package -> (namespace package).declarations);
     definition = (fun key -> Option.map (fun declared -> declared.item.value) (declared key));
-    text = (fun key -> Option.map (fun declared -> declared.item.text) (declared key));
+    text = (fun key -> Option.map (fun (declared : declared) -> declared.text) (declared key));
     spans = (fun key -> Option.map (fun declared -> declared.spans) (declared key));
     place = (fun key -> Option.map (fun declared -> declared.place) (declared key));
     container = (fun key -> Option.bind (declared key) (fun declared -> declared.container));

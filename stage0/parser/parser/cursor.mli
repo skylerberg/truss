@@ -3,15 +3,8 @@ exception Failed
 type t
 
 val create :
-  text:string ->
-  diagnostics:Diagnostic.Collector.t ->
-  base:int ->
-  Token.t array ->
-  first:int ->
-  stop:int ->
-  t
+  diagnostics:Diagnostic.Collector.t -> base:int -> Token.t array -> first:int -> stop:int -> t
 
-val sub_cursor : t -> Token.t array -> t
 val interpolation : t -> Token.interpolation -> t
 val restarted : t -> t
 val index : t -> int
@@ -33,7 +26,8 @@ val previous_token : t -> Token.t option
 val previous_stop : t -> int
 val span_from : t -> int -> Source.Definition_span.t
 val absolute : t -> Source.Definition_span.t -> Source.span
-val text : t -> Source.span -> string
+val spelling : t -> ?insertions:(int * string) list -> Source.span -> string option
+val recovers : Diagnostic.Code.parser -> bool
 
 val report :
   t ->

@@ -574,7 +574,10 @@ let namespace_of pipeline note (state : state) =
                if file.module_ = module_ then begin
                  read pipeline note (Parsed file);
                  let parsed = parsed_file pipeline file in
-                 Some (file, { Syntax.uses = parsed.uses; definitions = parsed.definitions })
+                 Some
+                   ( file,
+                     { Syntax.uses = parsed.uses; definitions = parsed.definitions },
+                     parsed.text )
                end
                else None)
              state.files ))

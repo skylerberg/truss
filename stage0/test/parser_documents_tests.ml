@@ -34,7 +34,7 @@ let markdown_files = Harness.markdown_documents ()
 let snippet text =
   let source = source text in
   let tokens, lexer_diagnostics = Lexer.lex source in
-  let items, parser_diagnostics = Reference.Snippet.parse source tokens in
+  let items, parser_diagnostics = Reference.Snippet.parse tokens in
   (tokens, items, lexer_diagnostics @ parser_diagnostics)
 
 let () =
@@ -85,7 +85,7 @@ let () =
               (In_channel.with_open_bin (workspace_path path) In_channel.input_all)
           in
           let tokens, lexer_diagnostics = Lexer.lex source in
-          let _, parser_diagnostics = Parser.parse source tokens in
+          let _, parser_diagnostics = Parser.parse tokens in
           if
             lexer_diagnostics = [] && parser_diagnostics = []
             && not (Reference.accepts Reference.file (Array.to_list tokens))

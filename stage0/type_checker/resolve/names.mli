@@ -100,7 +100,10 @@ val kind_of : lookups -> Path.t -> named option
 type namespace
 
 val namespace :
-  lookups -> Path.package -> (Path.module_ * (Path.file * Syntax.file) list) list -> namespace
+  lookups ->
+  Path.package ->
+  (Path.module_ * (Path.file * Syntax.file * string) list) list ->
+  namespace
 
 val empty_namespace : namespace
 

@@ -1,7 +1,7 @@
 (library
  (name reference)
  (modules reference truss menhir_log)
- (libraries source diagnostic token parser))
+ (libraries diagnostic token parser))
 
 (rule
  (copy %{workspace_root}/grammar/truss.mly truss.mly))
