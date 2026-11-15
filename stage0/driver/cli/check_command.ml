@@ -61,7 +61,7 @@ let fix snapshot packages =
       @ lock_file snapshot
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
-    else round (Database.retake snapshot) (number + 1) (List.rev_append applied fixed)
+    else round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)
   in
   round snapshot 1 []
 

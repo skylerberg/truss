@@ -1,7 +1,7 @@
 type snapshot
 
 val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
-val retake : snapshot -> snapshot
+val retake : snapshot -> (snapshot, string) result
 val root : snapshot -> string
 val pipeline : ?checks:bool -> snapshot -> Pipeline.t
 val problems : snapshot -> Project.problem list
@@ -48,4 +48,5 @@ val reset : unit -> unit
 module For_testing : sig
   val standard_state : unit -> Pipeline.state
   val collect_store : unit -> unit
+  val interrupt_commit : string -> unit
 end

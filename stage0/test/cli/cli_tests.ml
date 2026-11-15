@@ -71,7 +71,9 @@ let () =
   test "a file written in a watched directory is reported after a synchronization" (fun () ->
       let root = Harness.scratch "watched" in
       Unix.mkdir (Filename.concat root "src") 0o755;
-      let watcher = Watcher.start ~skipped:(fun name -> name = "skipped") root in
+      let watcher =
+        Watcher.start ~skipped:(fun name -> name = "skipped") ~cookie_directory:".truss" root
+      in
       Fun.protect
         ~finally:(fun () -> Watcher.stop watcher)
         (fun () ->
@@ -82,6 +84,29 @@ let () =
           | Changed paths when List.mem "src/main.truss" paths -> ()
           | Changed paths -> fail "reported %s" (String.concat ", " paths)
           | Overflow -> fail "reported an overflow"))
+
+let () =
+  test "a second process reports that the project's database is open elsewhere" (fun () ->
+      let root = package [ ("main.truss", "fn main() {}\n") ] in
+      ignore (quietly [ "check"; "-C"; root ]);
+      let ready, signal = Unix.pipe ~cloexec:true () in
+      match Unix.fork () with
+      | 0 ->
+          let lock = Unix.openfile (Filename.concat root ".truss/lock") [ O_RDWR ] 0 in
+          Unix.lockf lock F_LOCK 0;
+          ignore (Unix.write_substring signal "x" 0 1);
+          Unix.sleep 60;
+          Unix._exit 0
+      | owner ->
+          Fun.protect
+            ~finally:(fun () ->
+              Unix.kill owner Sys.sigkill;
+              ignore (Unix.waitpid [] owner))
+            (fun () ->
+              ignore (Unix.read ready (Bytes.create 1) 0 1);
+              let status, output = truss [ "check"; "-C"; root ] in
+              if status <> 2 || not (contains output "is open in another process") then
+                fail "exited with %d: %s" status output))
 
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
 let modules (snapshot, packages) = Command_packages.modules snapshot packages

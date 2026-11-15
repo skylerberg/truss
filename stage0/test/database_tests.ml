@@ -30,22 +30,22 @@ let built ?(roots = []) files =
   Pipeline.propagate pipeline;
   pipeline
 
+let changes ~before ~after =
+  List.filter_map
+    (fun (name, text) ->
+      match List.assoc_opt name before with
+      | Some previous when previous = text -> None
+      | Some _ | None -> Some (Support.file_of name, Some text))
+    after
+  @ List.filter_map
+      (fun (name, _) ->
+        if List.mem_assoc name after then None else Some (Support.file_of name, None))
+      before
+
 let propagate ?roots hot ~before ~after =
-  let changes =
-    List.filter_map
-      (fun (name, text) ->
-        match List.assoc_opt name before with
-        | Some previous when previous = text -> None
-        | Some _ | None -> Some (Support.file_of name, Some text))
-      after
-    @ List.filter_map
-        (fun (name, _) ->
-          if List.mem_assoc name after then None else Some (Support.file_of name, None))
-        before
-  in
   let observed =
     Pipeline.For_testing.observe hot (fun () ->
-        Pipeline.update hot changes;
+        Pipeline.update hot (changes ~before ~after);
         Pipeline.propagate hot)
   in
   (match Pipeline.For_testing.differences hot (built ?roots after) with
@@ -99,6 +99,37 @@ let relaid ?(loaded = ([], [])) ~before ~after () =
 let loaded_package files =
   let packages = Support.setup files in
   Pipeline.state (Pipeline.create ~loaded:[ Lazy.force standard ] packages) (List.hd packages).name
+
+let saved pipeline =
+  let entries = Pipeline.unsaved pipeline in
+  Pipeline.mark_saved pipeline;
+  entries
+
+let committed log entries =
+  List.fold_left (fun log (key, value) -> (key, value) :: List.remove_assoc key log) log entries
+
+let live log =
+  List.filter_map (fun (key, value) -> Option.map (fun value -> (key, value)) value) log
+
+let reopened log files =
+  let packages = Support.setup files in
+  let texts (file : Path.file) =
+    List.find_map (fun (package : Project.package) -> List.assoc_opt file package.files) packages
+  in
+  let pipeline = Pipeline.restore ~loaded:[ Lazy.force standard ] ~texts (live log) in
+  Pipeline.relayout pipeline ~loaded:[ Lazy.force standard ] packages;
+  pipeline
+
+let expect_cold ?roots pipeline files =
+  match Pipeline.For_testing.differences pipeline (built ?roots files) with
+  | [] -> ()
+  | parts -> fail "the reopened database differs from a cold build in %s" (String.concat ", " parts)
+
+let reopened_recomputes ?roots log files =
+  let pipeline = reopened log files in
+  let observed = Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline) in
+  expect_cold ?roots pipeline files;
+  observed
 
 let tool_user =
   [
@@ -443,6 +474,20 @@ let () =
       if collected <> [ ground_types "only"; lowered "only"; test_key "only" ] then
         fail "collected %s" (String.concat ", " collected);
       expect_untouched observed.recomputed ~names:[ lowered "shared"; lowered "kept" ]);
+  test "removing a type collects the instances at that type without computing them" (fun () ->
+      let program shape =
+        [
+          ( "app::main",
+            shape
+            ^ "test \"lists\" {\n\
+              \  let shapes = [Shape(size: 1)]\n\
+              \  assert shapes.length() == 1\n\
+               }\n" );
+        ]
+      in
+      expect_untouched
+        (propagated ~before:(program "type Shape(size: Int64)\n") ~after:(program ""))
+        ~names:[ "[Shape]" ]);
   test "an edit to a constant recomputes the constants that fold it, in order" (fun () ->
       let constants first =
         [
@@ -514,3 +559,142 @@ let () =
             "parsed app/main/main.truss";
             "proof app::main::Signup";
           ])
+
+let lowered_program test =
+  [
+    ( "app::main",
+      "type Box(value: Int64) derives Equal\n\
+       let base: Int64 = 2\n\
+       fn shared() -> Int64 { base }\n\
+       fn only() -> Int64 { shared() + 1 }\n\
+       fn kept() -> Int64 { shared() }\n\
+       fn same(left: Box, right: Box) -> Bool { left == right }\n\
+       test \"sums\" {\n\
+      \  assert " ^ test ^ "\n}\n" );
+    ("app::main/cycle", cyclic);
+  ]
+
+let () =
+  test "a database saved after a cold build and reopened recomputes nothing" (fun () ->
+      let files = lowered_program "kept() + only() == 5" in
+      let log = committed [] (saved (built ~roots:[ "same" ] files)) in
+      expect_recomputed (reopened_recomputes ~roots:[ "same" ] log files).recomputed ~exactly:[]);
+  test "a database reopened with a changed file recomputes what propagating the change does"
+    (fun () ->
+      let before = [ ("app::main", callee_and_caller) ] in
+      let after =
+        [
+          ( "app::main",
+            "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
+        ]
+      in
+      let log = committed [] (saved (built before)) in
+      expect_recomputed (reopened_recomputes log after).recomputed
+        ~exactly:(propagated ~before ~after));
+  test "a database reopened without a file it saved removes the file's definitions" (fun () ->
+      let log = committed [] (saved (built with_helper)) in
+      ignore (reopened_recomputes log [ ("app::main", callee_and_caller) ]));
+  test "a database saved after a change set reopens as the propagated database" (fun () ->
+      let before = lowered_program "kept() + only() == 5" in
+      let after = lowered_program "kept() == 2" in
+      let hot = built before in
+      let log = committed [] (saved hot) in
+      ignore (propagate hot ~before ~after);
+      let log = committed log (saved hot) in
+      expect_recomputed (reopened_recomputes log after).recomputed ~exactly:[]);
+  test "a database saved after a partial drain reopens with its stale parts" (fun () ->
+      let before = lowered_program "kept() + only() == 5" in
+      let after = lowered_program "kept() == 2" in
+      let hot = built before in
+      let log = committed [] (saved hot) in
+      Pipeline.update hot (changes ~before ~after);
+      Pipeline.check hot [ (Support.module_of "app::main").package ];
+      let log = committed log (saved hot) in
+      let propagated =
+        (Pipeline.For_testing.observe hot (fun () -> Pipeline.propagate hot)).recomputed
+      in
+      expect_recomputed (reopened_recomputes log after).recomputed ~exactly:propagated);
+  test "a database saved after a package is removed reopens without the package" (fun () ->
+      let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
+      let alone = [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
+      let hot = settled [] with_lib in
+      let log = committed [] (saved hot) in
+      Pipeline.relayout hot ~loaded:[ Lazy.force standard ] (Support.setup alone);
+      Pipeline.propagate hot;
+      let log = committed log (saved hot) in
+      expect_recomputed (reopened_recomputes log alone).recomputed ~exactly:[])
+
+let project files =
+  let root = Harness.scratch "project" in
+  Harness.write_files root
+    (("truss.toml", "[package]\nname = \"app\"\ntruss = \"0.1\"\n")
+    :: List.map (fun (path, text) -> (path ^ ".truss", text)) files);
+  root
+
+let opened root =
+  match Database.take_snapshot root with
+  | Ok (snapshot, _) -> snapshot
+  | Error message -> failwith message
+
+let settled_on_disk root =
+  let snapshot = opened root in
+  let pipeline = Database.pipeline snapshot in
+  let observed = Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline) in
+  let cold = Database.pipeline (Database.trial snapshot []) in
+  Pipeline.propagate cold;
+  (match Pipeline.For_testing.differences pipeline cold with
+  | [] -> ()
+  | parts ->
+      fail "the database in .truss differs from a cold build in %s" (String.concat ", " parts));
+  observed.recomputed
+
+let edited_body = "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n"
+
+let () =
+  test "a database written to .truss and reopened recomputes nothing" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settled_on_disk root);
+      Database.flush ();
+      expect_recomputed (settled_on_disk root) ~exactly:[];
+      Database.flush ());
+  test "a copy of a project with a changed file recomputes what propagating the change does"
+    (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settled_on_disk root);
+      Database.flush ();
+      let copy = Harness.scratch "copy" in
+      if Sys.command (Filename.quote_command "cp" [ "-R"; root ^ "/."; copy ]) <> 0 then
+        fail "cannot copy %s" root;
+      Harness.write_files copy [ ("main/main.truss", edited_body) ];
+      let copied = settled_on_disk copy in
+      Database.flush ();
+      ignore (opened root);
+      Harness.write_files root [ ("main/main.truss", edited_body) ];
+      let propagated = settled_on_disk root in
+      Database.flush ();
+      expect_recomputed copied ~exactly:propagated);
+  test "an interrupted commit leaves the database as it was before the change set" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settled_on_disk root);
+      Database.flush ();
+      Harness.write_files root [ ("main/main.truss", edited_body) ];
+      ignore (settled_on_disk root);
+      Database.For_testing.interrupt_commit (Database.root (opened root));
+      Harness.write_files root [ ("main/main.truss", callee_and_caller) ];
+      expect_recomputed (settled_on_disk root) ~exactly:[];
+      Database.flush ());
+  test "a database written by another compiler is rebuilt" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settled_on_disk root);
+      Database.flush ();
+      let list = Filename.concat root ".truss/list" in
+      File_system.write list
+        (String.concat "\n"
+           (List.map
+              (fun line ->
+                if String.starts_with ~prefix:"header compiler " line then "header compiler other"
+                else line)
+              (String.split_on_char '\n' (File_system.read list))));
+      expect_included (settled_on_disk root)
+        ~parts:[ "namespace app"; "checked body app::main::caller" ];
+      Database.flush ())

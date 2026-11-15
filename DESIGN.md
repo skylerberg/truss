@@ -2076,7 +2076,7 @@ compiler, and the tests are cache hits.
 |---|---|
 | The paths a database holds are relative to the project's root. | A copy then refers to its own worktree's files. |
 | A database records its compiler and the fingerprints of the files it was built from. | A copy finds the files that differ when it is first opened, and a different compiler rebuilds it. |
-| A change set commits by writing new segment files, then replacing, by rename, the file that lists them. | A crash or a copy during propagation sees the state before the change set or after it, never a state that no version of the files holds. |
+| A change set commits by writing new segment files, then replacing, by rename, the file that lists them. | A crash during propagation leaves the state before the change set or after it. A copy taken during a commit holds one of those states, or finds a segment missing and is rebuilt. Neither holds a state that no version of the files holds. |
 | One process owns a project's database, and handles one request or one change set at a time. | No request reads a change set that is half propagated. A request that arrives during a long propagation waits for it. |
 
 ## Omitted features

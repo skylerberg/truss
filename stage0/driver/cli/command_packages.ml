@@ -13,6 +13,12 @@ let load directory =
       (snapshot, packages)
 
 let current () = load "."
+
+let retake snapshot =
+  match Database.retake snapshot with
+  | Ok snapshot -> snapshot
+  | Error message -> raise (Outcome.Cannot_run message)
+
 let worktree () = load (Database.root (fst (current ())))
 
 let one = function
