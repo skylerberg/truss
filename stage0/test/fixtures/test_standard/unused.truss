@@ -1,0 +1,2 @@
+public type Unused(count: Int64)
+  derives Equal
