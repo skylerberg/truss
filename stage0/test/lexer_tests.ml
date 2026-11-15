@@ -179,8 +179,8 @@ let () =
       let rec valid index =
         index >= String.length json
         ||
-        let packed = Unicode.decode json index in
-        packed >= 0 && valid (index + Unicode.decoded_length packed)
+        let decoded = Unicode.decode json index in
+        Unicode.Decoded.is_valid decoded && valid (index + Unicode.Decoded.length decoded)
       in
       if not (valid 0) then fail "the JSON is not valid UTF-8: %S" json)
 
@@ -345,12 +345,22 @@ let () =
       error {|r##"say "hi" now"##|} ~code:String_prefix ~at:"r" ~fixed:{|"""say "hi" now"""|};
       error {|r#"a"""b"#|} ~code:String_prefix ~at:"r" ~fixed:{|""""a"""b""""|};
       equal_lists Fun.id "tokens" [ {|"say \"hi\" now"|}; "NL" ] (tokens_of {|r#"say "hi" now"#|}));
+  test "a Rust raw string whose fix would interpolate has no fix" (fun () ->
+      error {|r#"a${b}"#|} ~code:String_prefix ~at:"r");
+  test "a Rust raw string that starts with a quote has no fix" (fun () ->
+      error {|r#""a"#|} ~code:String_prefix ~at:"r");
+  test "a Rust raw string outside ASCII becomes a raw string" (fun () ->
+      error "r#\"caf\u{E9}\"#" ~code:String_prefix ~at:"r" ~fixed:"\"\"\"caf\u{E9}\"\"\"");
   test "a Rust raw string that ends with a quote has no fix" (fun () ->
       error {|r#"say "hi""#|} ~code:String_prefix ~at:"r");
   test "a Python string with three quotes loses its prefix" (fun () ->
       error "f\"\"\"\n  Hello {name}\n  \"\"\"" ~code:String_prefix ~at:"f"
         ~fixed:"\"\"\"\n  Hello ${name}\n  \"\"\"";
       error {|r"""\d+"""|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|});
+  test "a Python string with three quotes and a backslash has no fix" (fun () ->
+      error "f\"\"\"\n  a\\nb\n  \"\"\"" ~code:String_prefix ~at:"f");
+  test "a C# verbatim string with a doubled quote has no fix" (fun () ->
+      equal_lists Fun.id "fixed" [] (fixed_texts {|@"a""b"|} ~code:String_prefix));
   test "a C# string becomes a Truss string" (fun () ->
       error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
       error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|};
@@ -370,6 +380,10 @@ let () =
       equal_lists Fun.id "codes" [ "lexer.lifetime"; "lexer.lifetime" ] (codes "f<'a>(x: &'a str)"));
   test "Swift's interpolation becomes ${...}" (fun () ->
       error {|"Hello \(user.name)"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"Hello ${user.name}"|});
+  test "curly quotes around text that a string reads differently have no fix" (fun () ->
+      error "\u{201C}a\\nb\u{201D}" ~code:Confusable_character ~at:"\u{201C}";
+      error "\u{201C}a${b}\u{201D}" ~code:Confusable_character ~at:"\u{201C}";
+      error "\u{201C}say \"hi\"\u{201D}" ~code:Confusable_character ~at:"\u{201C}");
   test "curly quotes become straight quotes" (fun () ->
       error "\u{201C}text\u{201D}" ~code:Confusable_character ~at:"\u{201C}" ~fixed:{|"text"|};
       error "\u{2018}text\u{2019}" ~code:Confusable_character ~at:"\u{2018}" ~fixed:{|"text"|};
@@ -444,6 +458,15 @@ let () =
       error "{ a; }" ~code:Semicolon ~at:";" ~fixed:"{ a }");
   test "a semicolon mid-line separates statements" (fun () ->
       equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a; b"));
+  test "a semicolon before a comment ends no statement" (fun () ->
+      equal_lists Fun.id "fixed" [ "a // note" ] (fixed_texts "a; // note" ~code:Semicolon));
+  test "a semicolon before a multi-line comment separates statements once" (fun () ->
+      equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a; /* x\n */ b"));
+  test "an apostrophe after a name is not a string" (fun () ->
+      equal_lists Fun.id "codes"
+        [ "lexer.unexpected_character"; "lexer.unexpected_character" ]
+        (codes "don't it's");
+      error "f('ab')" ~code:String_delimiter ~at:"'" ~fixed:{|f("ab")|});
   test "strict equality" (fun () ->
       error "a === b" ~code:Strict_equality ~at:"===" ~fixed:"a == b";
       error "a !== b" ~code:Strict_equality ~at:"!==" ~fixed:"a != b");
@@ -510,6 +533,11 @@ let () =
   test "three dots before an operand have no fix" (fun () ->
       error "f(...items)" ~code:Foreign_operator ~at:"...";
       equal_lists Fun.id "tokens" [ "f"; "("; "items"; ")"; "NL" ] (tokens_of "f(...items)"));
+  test "three dots that lex as nothing keep the line break before them" (fun () ->
+      equal_lists Fun.id "tokens" (tokens_of "a,\nb") (tokens_of "a,\n...b");
+      equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a\n...\nb"));
+  test "a chain of three dots decides each from the token after it" (fun () ->
+      equal_lists Fun.id "tokens" [ "a"; "..="; "todo"; "NL" ] (tokens_of "a ... ... ..."));
   test "**, :=, and |> are tokens for the parser to report" (fun () ->
       tokens "a ** b" [ "a"; "**"; "b"; "NL" ];
       tokens "a := b" [ "a"; ":="; "b"; "NL" ];
@@ -547,8 +575,19 @@ let () =
       equal_lists Fun.id "tokens" (tokens_of "f(\u{FF08}.5))") (tokens_of "f((.5))"));
   test "`...` before a float with no digit before its `.` is a range" (fun () ->
       equal_lists Fun.id "tokens" [ "3"; "..="; "14e-2"; "NL" ] (tokens_of "3....14"));
+  test "equal floats are equal tokens" (fun () ->
+      let kind text = (fst (lex text)).(0).kind in
+      if kind "1.50" <> kind "1.5" || kind "15e-1" <> kind "1.5" || kind "100.0" <> kind "1e2" then
+        fail "equal floats lex as different tokens");
   test "`1.` at the end of a line is a float" (fun () ->
       error "x = 1.\nmax" ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0\nmax");
+  test "`1.` in an interpolation is a float" (fun () ->
+      equal_lists Fun.id "tokens"
+        (interpolation_tokens "\"${1.0}\"" 0)
+        (interpolation_tokens "\"${1.}\"" 0));
+  test "`1.` before a member is an integer" (fun () ->
+      tokens "1.max" [ "1"; "."; "max"; "NL" ];
+      tokens "1..2" [ "1"; ".."; "2"; "NL" ]);
   test "a file recovers as its machine-applicable fixes write" (fun () ->
       List.iter
         (fun text ->
@@ -657,6 +696,22 @@ let () =
           "NL";
         ]
         (tokens_of text));
+  test "a closer before a deleted character stays inside its interpolation" (fun () ->
+      let text = "x = \"${f(a\u{200B}\n" in
+      match (fst (lex text)).(2).kind with
+      | String { rest = [| (interpolation, _) |]; _ } ->
+          Array.iter
+            (fun (token : Token.t) ->
+              if
+                token.span.start < interpolation.span.start
+                || token.span.stop > interpolation.span.stop
+              then
+                fail "%s at %d-%d is outside the interpolation at %d-%d" (show token)
+                  token.span.start token.span.stop interpolation.span.start interpolation.span.stop)
+            interpolation.tokens
+      | _ -> fail "expected a string with one interpolation");
+  test "a balanced file gets no closers before a definition keyword in column 0" (fun () ->
+      tokens "f(\nfn)" [ "f"; "("; "fn"; ")"; "NL" ]);
   test "brackets swallowed by an unterminated comment are not reported" (fun () ->
       equal_lists Fun.id "codes" [ "lexer.comment" ] (codes "f( /* never closed"))
 

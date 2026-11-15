@@ -1,5 +1,6 @@
-type scanned = Lexed of Token.kind | Skipped
+type scanned = Lexed of Token.kind | Ellipsis
 
-val scan : Cursor.t -> follows_operand:bool -> operand_follows:(int -> bool) -> scanned option
-(** An operator of another language at the cursor, reported and lexed as the Truss operator it
-    stands for, or [Skipped] when it stands for none. [None] when none starts there. *)
+val scan : Cursor.t -> scanned option
+
+val ellipsis :
+  Cursor.t -> start:int -> follows_operand:bool -> operand_follows:bool -> Token.kind option

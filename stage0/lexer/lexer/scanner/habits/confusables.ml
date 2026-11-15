@@ -1,13 +1,4 @@
-(* Characters outside ASCII that look like Truss punctuation, and reach
-   source code from word processors, input methods, and the notation of
-   Lean and Agda. The table is chosen by hand: each entry is a character
-   that people type or paste for the ASCII spelling beside it. *)
-
-type entry =
-  | Space  (** A space that is not U+0020. *)
-  | Spelled of string  (** The ASCII spelling of one token. *)
-  | Opening_quote of string
-      (** A curly quote that opens a string, with the quote that closes it. *)
+type entry = Space | Spelled of string | Opening_quote of string
 
 let table =
   [
@@ -42,7 +33,6 @@ let find code_point : entry option =
   if code_point >= 0x2000 && code_point <= 0x200A then Some Space
   else List.assoc_opt code_point table
 
-(* The token that an ASCII spelling in the table lexes as. *)
 let token spelling : Token.kind option =
   match List.assoc_opt spelling Token.punctuation with
   | Some punctuation -> Some (Punctuation punctuation)
@@ -50,9 +40,6 @@ let token spelling : Token.kind option =
 
 type scanned = Lexed of Token.kind | Spaced
 
-(* The confusable character [value], [length] bytes at the cursor: reported,
-   and lexed as its ASCII spelling, or skipped when it is a space. [None]
-   when it is not a confusable character. *)
 let scan (cursor : Cursor.t) ~value ~length =
   let start = cursor.position in
   let report ~replacement ~name =

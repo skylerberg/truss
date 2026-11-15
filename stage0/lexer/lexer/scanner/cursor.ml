@@ -1,5 +1,15 @@
-(* The scanner's state: an index moving over the file's bytes, the trivia
-   seen since the last token, and the diagnostics. *)
+type ending = Closed | Unterminated
+
+type token = {
+  kind : Token.kind;
+  start : int;
+  stop : int;
+  ending : ending;
+  first_line_break : Source.span option;
+  blank_line : bool;
+}
+
+type item = Token of token | Line_end | End
 
 type t = {
   source : Source.t;
@@ -7,19 +17,14 @@ type t = {
   length : int;
   diagnostics : Diagnostic.Collector.t;
   mutable position : int;
-  (* Trivia since the last token. *)
   mutable first_line_break : Source.span option;
   mutable blank_line : bool;
   mutable line_is_blank : bool;
-  (* Whether the file ends inside an unterminated comment or multi-line raw
-     string, an error already reported. *)
   mutable unterminated_at_end : bool;
-  (* Each name spelling is checked once per file, and its tokens share one
-     string. *)
   names : (string, Names.checked) Hashtbl.t;
-  mutable previous : Token.kind option;
-  is_peek : bool;
-  (* An escape of another language in a string, which the habits scan. *)
+  mutable previous : token option;
+  mutable held : item list;
+  mutable semicolons : int list;
   foreign_escape : t -> Buffer.t -> bool;
 }
 
@@ -36,89 +41,69 @@ let create ~foreign_escape source diagnostics =
     unterminated_at_end = false;
     names = Hashtbl.create 256;
     previous = None;
-    is_peek = false;
+    held = [];
+    semicolons = [];
     foreign_escape;
   }
 
-let peek cursor index =
-  {
-    cursor with
-    position = index;
-    diagnostics = Diagnostic.Collector.create ();
-    previous = None;
-    is_peek = true;
-  }
-
-(* How a construct that must end on its line ended. [Unterminated] means
-   that it has no closing delimiter on its line, an error already reported,
-   as for a string with no closing quote. Every enclosing construct that
-   must end on its line is then unterminated too, with no further error.
-   The cursor is then always at a line break or the end of the file. *)
-type ending = Closed | Unterminated
-
-(* The next thing in the input. The scanner always stops at a line break,
-   which the caller treats as trivia or as an error. *)
-type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
-
 let span = Source.span
-
-(* The byte at [index], or -1 past the end. *)
-let byte cursor index =
-  if index < cursor.length then Char.code (String.unsafe_get cursor.text index) else -1
+let at_end cursor index = index >= cursor.length
+let char cursor index = cursor.text.[index]
+let is_at cursor index character = index < cursor.length && cursor.text.[index] = character
+let satisfies cursor index predicate = index < cursor.length && predicate cursor.text.[index]
 
 let report cursor ?notes ?fixes ~code span message =
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?notes ?fixes ~code:(Lexer code) span message)
 
-let is_line_break byte = byte = 0x0A || byte = 0x0D
-let is_end_of_line byte = byte < 0 || is_line_break byte
-let is_space byte = byte = 0x20 || byte = 0x09
-let is_digit byte = byte >= 0x30 && byte <= 0x39
+let is_line_break character = character = '\n' || character = '\r'
+let is_end_of_line cursor index = at_end cursor index || is_line_break cursor.text.[index]
+let is_space character = character = ' ' || character = '\t'
+let is_digit character = character >= '0' && character <= '9'
 
-let is_hexadecimal_digit byte =
-  is_digit byte || (byte >= 0x61 && byte <= 0x66) || (byte >= 0x41 && byte <= 0x46)
+let is_hexadecimal_digit character =
+  is_digit character
+  || (character >= 'a' && character <= 'f')
+  || (character >= 'A' && character <= 'F')
 
-let is_ascii_letter byte = (byte >= 0x61 && byte <= 0x7A) || (byte >= 0x41 && byte <= 0x5A)
-let is_ascii_name_byte byte = is_ascii_letter byte || is_digit byte || byte = 0x5F
-let quote = Char.code '"'
-let dollar = Char.code '$'
+let is_ascii_letter character =
+  (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
 
-(* The decoded character at [index]: [(code_point lsl 3) lor length], or -1
-   for invalid UTF-8 or the end of the file. *)
-let decode cursor index = if index < cursor.length then Unicode.decode cursor.text index else -1
+let is_ascii_name_byte character =
+  is_ascii_letter character || is_digit character || character = '_'
+
+let is_ascii character = Char.code character < 0x80
+let decode cursor index = Unicode.decode cursor.text index
 
 let run_length cursor index character =
   let rec loop position =
-    if byte cursor position = character then loop (position + 1) else position
+    if is_at cursor position character then loop (position + 1) else position
   in
   loop index - index
 
 let skip_spaces cursor index =
   let rec loop position =
-    if is_space (byte cursor position) then loop (position + 1) else position
+    if satisfies cursor position is_space then loop (position + 1) else position
   in
   loop index
 
 let end_of_line cursor index =
   let rec loop position =
-    if is_end_of_line (byte cursor position) then position else loop (position + 1)
+    if is_end_of_line cursor position then position else loop (position + 1)
   in
   loop index
 
-(* The length of the line break at [index]: 2 for a carriage return and line
-   feed, 1 for either alone. *)
 let line_break_length cursor index =
-  if byte cursor index = 0x0D && byte cursor (index + 1) = 0x0A then 2 else 1
+  if is_at cursor index '\r' && is_at cursor (index + 1) '\n' then 2 else 1
 
 let indentation cursor offset =
   let start = Source.line_start cursor.source offset in
   String.sub cursor.text start (skip_spaces cursor start - start)
 
-(* Where the whitespace before [offset] on its line starts. *)
 let spaces_before cursor offset =
   let line_start = Source.line_start cursor.source offset in
   let rec loop position =
-    if position > line_start && is_space (byte cursor (position - 1)) then loop (position - 1)
+    if position > line_start && is_space cursor.text.[position - 1] then loop (position - 1)
     else position
   in
   loop offset
@@ -126,21 +111,19 @@ let spaces_before cursor offset =
 let only_spaces_before cursor offset =
   spaces_before cursor offset = Source.line_start cursor.source offset
 
-(* Describing characters in messages, without copying bytes that are not
-   valid UTF-8 into them. *)
-
 let describe_code_point value =
   match Unicode.forbidden_name value with
   | Some name -> Printf.sprintf "U+%04X %s" value name
   | None -> Printf.sprintf "U+%04X" value
 
 let show_character cursor index =
-  let packed = decode cursor index in
-  if packed < 0 then Printf.sprintf "the byte 0x%02X" (byte cursor index)
+  let decoded = decode cursor index in
+  if not (Unicode.Decoded.is_valid decoded) then
+    Printf.sprintf "the byte 0x%02X" (Char.code cursor.text.[index])
   else
-    let value = Unicode.decoded_code_point packed in
+    let value = Unicode.Decoded.code_point decoded in
     if value < 0x80 then Printf.sprintf "`%c`" (Char.chr value)
     else
       Printf.sprintf "`%s` (U+%04X)"
-        (String.sub cursor.text index (Unicode.decoded_length packed))
+        (String.sub cursor.text index (Unicode.Decoded.length decoded))
         value

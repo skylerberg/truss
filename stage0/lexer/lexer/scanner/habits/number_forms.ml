@@ -1,9 +1,3 @@
-(* Numbers written as other languages write them: type suffixes, leading
-   zeros, uppercase `0X` and `E`, C++'s `'` between digits, hexadecimal
-   floats, and floats with no digit on one side of the point. Each is
-   translated into Truss's spelling, which the core checks; the fix writes
-   the translation when it is a clean literal. *)
-
 open Cursor
 
 let suffixes =
@@ -47,7 +41,6 @@ let is_radix text = String.length text >= 2 && text.[0] = '0' && String.contains
 let is_hexadecimal text = is_radix text && Char.lowercase_ascii text.[1] = 'x'
 let is_hexadecimal_digit character = is_digit character || String.contains "abcdefABCDEF" character
 
-(* The end of a run of characters that [accepts], from [position]. *)
 let span_of text position accepts =
   let rec loop position =
     if position < String.length text && accepts text.[position] then loop (position + 1)
@@ -68,7 +61,6 @@ let scan_end text start =
     && (text.[stop] = '+' || text.[stop] = '-')
     && is_digit text.[stop + 1]
   in
-  (* C++'s digit separator, as in `1'000`. *)
   let rec quoted stop =
     if stop + 1 < length && text.[stop] = '\'' && is_digit text.[stop + 1] then
       quoted (Numbers.name_end text (stop + 1))
@@ -76,8 +68,6 @@ let scan_end text start =
   in
   let stop = if digits_only then quoted stop else stop in
   if is_hexadecimal literal then
-    (* C's hexadecimal float, `0x1.8p3`, whose exponent tells it from a
-       method call such as `0xFF.abs()`. *)
     let marker = span_of text (stop + 1) is_hexadecimal_digit in
     let stop =
       if
@@ -94,7 +84,6 @@ let scan_end text start =
   else if (not (is_radix literal)) && sign_follows stop 'E' then Numbers.name_end text (stop + 1)
   else stop
 
-(* Where the number in [text] ends and a suffix would start. *)
 let number_end text =
   if is_radix text then
     span_of text 2 (fun character -> is_hexadecimal_digit character || character = '_')
@@ -119,8 +108,6 @@ let number_end text =
 let rec foreign text : Numbers.checked option =
   let length = String.length text in
   let problem code message start stop = Some { Numbers.code; message; start; stop } in
-  (* [text] in Truss's spelling: its value comes from it, and the fix writes
-     it when it is a clean literal. *)
   let translated code message start stop translation =
     let (checked : Numbers.checked) = check translation in
     Some
@@ -165,7 +152,7 @@ let rec foreign text : Numbers.checked option =
         let value =
           match (check number : Numbers.checked).value with
           | Integer digits when is_float_suffix suffix ->
-              Token.Float (Token.Decimal.make ~significand:digits ~exponent:Z.zero)
+              Token.Float (Token.Decimal.normalized ~significand:digits ~exponent:Z.zero)
           | value -> value
         in
         let type_name =
@@ -198,7 +185,6 @@ let rec foreign text : Numbers.checked option =
             let digits = String.concat "" (String.split_on_char '_' (String.sub text 0 whole)) in
             if is_radix text || String.length digits < 2 || digits.[0] <> '0' then None
             else
-              (* C and Go read `0755` as octal. *)
               let without_zeros =
                 let stripped =
                   span_of text 0 (fun character -> character = '0' || character = '_')
@@ -240,37 +226,27 @@ let rec foreign text : Numbers.checked option =
 
 and check text = match foreign text with Some checked -> checked | None -> Numbers.check text
 
-(* The value of the checked number from [start] to [stop]. An integer
-   followed by a `.` with no word or second `.` after it, as `1.` is, is a
-   float with no digit after its point. *)
-let after_integer cursor ~start ~stop ~word_follows (checked : Numbers.checked) =
+let trailing_point cursor ~start ~stop (checked : Numbers.checked) =
   match checked with
   | { value = Integer _; problem = None; _ }
-    when byte cursor stop = Char.code '.'
-         && byte cursor (stop + 1) <> Char.code '.'
-         && (not cursor.is_peek)
-         && (not (is_radix (String.sub cursor.text start (stop - start))))
-         && not (word_follows (stop + 1)) -> (
-      let written = String.sub cursor.text start (stop + 1 - start) in
-      match check (written ^ "0") with
-      | { value = Float _ as value; problem = None; _ } ->
-          cursor.position <- stop + 1;
-          report cursor ~code:Number_missing_digits
-            ~fixes:
-              [
-                Diagnostic.fix
-                  (Printf.sprintf "Write `%s0`" written)
-                  [ Diagnostic.replace (span start (stop + 1)) (written ^ "0") ];
-              ]
-            (span stop (stop + 1))
-            (Printf.sprintf "A float has a digit after its `.`: `%s0`." written);
-          value
-      | _ -> checked.value)
-  | _ -> checked.value
+    when is_at cursor stop '.' && not (is_radix (String.sub cursor.text start (stop - start))) -> (
+      match check (String.sub cursor.text start (stop + 1 - start) ^ "0") with
+      | { value = Float _ as value; problem = None; _ } -> Some value
+      | _ -> None)
+  | _ -> None
 
-(* `.5`, where no operand comes before the `.`: a float with no digit before
-   its point, with a fix when it has no other problem. [None] when the text
-   with the `0` written is not a float. *)
+let report_trailing_point cursor ~start ~point =
+  let written = String.sub cursor.text start (point + 1 - start) in
+  report cursor ~code:Number_missing_digits
+    ~fixes:
+      [
+        Diagnostic.fix
+          (Printf.sprintf "Write `%s0`" written)
+          [ Diagnostic.replace (span start (point + 1)) (written ^ "0") ];
+      ]
+    (span point (point + 1))
+    (Printf.sprintf "A float has a digit after its `.`: `%s0`." written)
+
 let leading_dot cursor =
   let start = cursor.position in
   let stop = scan_end cursor.text (start + 1) in

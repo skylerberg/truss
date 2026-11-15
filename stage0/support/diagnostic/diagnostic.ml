@@ -696,13 +696,13 @@ let location source offset =
 let iter_utf8 text ~valid ~invalid =
   let rec loop index =
     if index < String.length text then begin
-      let packed = Unicode.decode text index in
-      if packed < 0 then begin
+      let decoded = Unicode.decode text index in
+      if not (Unicode.Decoded.is_valid decoded) then begin
         invalid text.[index];
         loop (index + 1)
       end
       else begin
-        let length = Unicode.decoded_length packed in
+        let length = Unicode.Decoded.length decoded in
         valid (String.sub text index length);
         loop (index + length)
       end
