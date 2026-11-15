@@ -68,7 +68,7 @@ type state = {
   mutable modules : Path.module_ list;
   mutable files : Path.file list;
   sources : (Path.file, Source.t) Hashtbl.t;
-  parsed : (Path.file, Parsed.file) Hashtbl.t;
+  parsed : (Path.file, Parsed.t) Hashtbl.t;
   mutable namespace : Names.namespace option;
   resolved_names : (Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
   import_checks : (Path.file, Diagnostic.t list) Hashtbl.t;

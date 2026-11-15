@@ -1,4 +1,4 @@
-type file = { file : Syntax.file; diagnostics : Diagnostic.t list; text : string }
+type t = { file : Syntax.file; diagnostics : Diagnostic.t list; text : string }
 
 let is_recovery (diagnostic : Diagnostic.t) =
   match diagnostic.code with Parser code -> Parser.recovers code | _ -> false

@@ -9,7 +9,7 @@ let () =
              "name resolution gives the rest their meaning")
       in
       let missing =
-        List.filter (fun word -> not (List.mem word listed)) Parser.For_testing.spelled_words
+        List.filter (fun word -> not (List.mem word listed)) Parser.For_testing.contextual_keywords
       in
       if missing <> [] then fail "not listed: %s" (String.concat ", " missing));
   test "SPECIFICATION.md lists every conflict that a precedence declaration resolves" (fun () ->

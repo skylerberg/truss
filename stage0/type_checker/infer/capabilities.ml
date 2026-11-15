@@ -518,7 +518,7 @@ let check_monitor_callbacks checking implementations =
     implementations
 
 let check (state : state) (lowered : Environment.lowered_interface) (form : Core.t) =
-  let checking = { state; spans = Syntax_walk.spans state.definition; provides = [] } in
+  let checking = { state; spans = Syntax_walk.span_table state.definition; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
   in

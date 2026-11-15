@@ -20,11 +20,11 @@ val is_punctuation : t -> Token.punctuation -> bool
 val is_keyword : t -> Token.keyword -> bool
 val accept_punctuation : t -> Token.punctuation -> bool
 val accept_keyword : t -> Token.keyword -> bool
-val span : t -> Source.span -> Source.Definition_span.t
+val definition_span : t -> Source.span -> Source.Definition_span.t
 val previous_token : t -> Token.t option
 val previous_stop : t -> int
 val span_from : t -> int -> Source.Definition_span.t
-val absolute : t -> Source.Definition_span.t -> Source.span
+val file_span : t -> Source.Definition_span.t -> Source.span
 val spelling : t -> ?insertions:(int * string) list -> Source.span -> string option
 val recovers : Diagnostic.Code.parser -> bool
 
@@ -46,6 +46,7 @@ val closer : t -> int -> int
 val skip_to : t -> int -> unit
 val skip_one : t -> unit
 val group : t -> Token.t array
+val separated : t -> separator:Token.punctuation -> (t -> 'a) -> 'a list
 val skip_piece : t -> Split.piece
 val is_after_inserted_closer : t -> bool
 val bracketed : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list

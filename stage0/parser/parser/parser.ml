@@ -16,7 +16,7 @@ let item (tokens : Token.t array) piece value : _ Syntax.item =
   { base = tokens.(piece.first).span.start; stop = tokens.(piece.stop - 1).span.stop; value }
 
 let checked cursor (definition : Syntax.definition) =
-  Operators.definition cursor definition;
+  Precedence.definition cursor definition;
   Check.definition cursor definition;
   { definition with recovered = Cursor.recovered cursor }
 
@@ -41,7 +41,7 @@ let parse_methods tokens (container : Syntax.definition) pieces =
         pieces
   | None -> []
 
-let definition tokens piece : Syntax.top_level * Diagnostic.t list =
+let parse_definition tokens piece : Syntax.top_level * Diagnostic.t list =
   let (definition, method_pieces), diagnostics =
     parse_piece tokens piece (fun cursor ->
         let definition, methods = Parse_definition.definition cursor in
@@ -54,11 +54,11 @@ let definition tokens piece : Syntax.top_level * Diagnostic.t list =
 let use_path cursor : Syntax.path option =
   match
     Cursor.expect_keyword cursor Use;
-    let rec loop names =
-      let names = Atoms.lower cursor "a module name" :: names in
-      if Cursor.accept_punctuation cursor Colon_colon then loop names else names
+    let names =
+      List.rev
+        (Cursor.separated cursor ~separator:Colon_colon (fun cursor ->
+             Atoms.lower_name cursor "a module name"))
     in
-    let names = loop [] in
     if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the module path";
     names
   with
@@ -66,7 +66,7 @@ let use_path cursor : Syntax.path option =
   | [] -> None
   | exception Cursor.Failed -> None
 
-let use_line tokens piece = parse_piece tokens piece use_path
+let parse_use_line tokens piece = parse_piece tokens piece use_path
 
 let line_stop (tokens : Token.t array) piece =
   match tokens.(piece.stop).kind with
@@ -94,7 +94,7 @@ let parse tokens =
     match pieces with
     | [] -> (List.rev uses, List.rev definitions, List.concat (List.rev diagnostics))
     | piece :: rest when is_use tokens piece ->
-        let path, line_diagnostics = use_line tokens piece in
+        let path, line_diagnostics = parse_use_line tokens piece in
         let line = item tokens piece path in
         let moved, destination =
           match (definitions, destination) with
@@ -110,7 +110,7 @@ let parse tokens =
           ~diagnostics:((line_diagnostics @ moved) :: diagnostics)
           ~destination
     | piece :: rest ->
-        let top_level, definition_diagnostics = definition tokens piece in
+        let top_level, definition_diagnostics = parse_definition tokens piece in
         let destination =
           match (definitions, destination) with
           | [], None -> Some top_level.definition.base
@@ -134,17 +134,17 @@ module For_testing = struct
 
   let split = split
   let is_use = is_use
-  let use_line = use_line
-  let definition = definition
+  let parse_use_line = parse_use_line
+  let parse_definition = parse_definition
 
-  let example_definition tokens piece =
+  let parse_example_definition tokens piece =
     let (example, container), diagnostics =
       parse_piece tokens piece (fun cursor ->
           match Parse_definition.example cursor with
           | Whole (definition, methods) ->
               (Example_definition, Some (checked cursor definition, methods))
           | Signature_alone (_, signature) ->
-              Syntax_walk.signature (fun value -> Operators.expression cursor value) signature;
+              Syntax_walk.signature (fun value -> Precedence.expression cursor value) signature;
               Check.signature cursor signature;
               (Example_signature, None))
     in
@@ -155,7 +155,7 @@ module For_testing = struct
     in
     (example, diagnostics @ method_diagnostics)
 
-  let example_statement tokens piece =
+  let parse_example_statement tokens piece =
     let (), diagnostics =
       parse_piece tokens piece (fun cursor ->
           match
@@ -164,11 +164,11 @@ module For_testing = struct
             statement
           with
           | statement ->
-              Syntax_walk.statement (fun value -> Operators.expression cursor value) statement
+              Syntax_walk.statement (fun value -> Precedence.expression cursor value) statement
           | exception Cursor.Failed -> ())
     in
     diagnostics
 
   let begins_statement = Atoms.begins_statement
-  let spelled_words = List.map fst Contextual_keyword.spellings
+  let contextual_keywords = List.map fst Contextual_keyword.spellings
 end

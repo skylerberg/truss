@@ -52,7 +52,7 @@ let name_at database name text occurrence =
             Pipeline.resolved (Support.pipeline database) key )
         with
         | Some definition, Some { base; _ }, Some resolved ->
-            let names = Syntax_walk.names definition in
+            let names = Syntax_walk.collect_names definition in
             Option.map
               (fun (name : Syntax.name) -> (name, names, base, resolved))
               (List.find_opt (fun (name : Syntax.name) -> base + name.span.start = offset) names)

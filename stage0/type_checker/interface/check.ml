@@ -38,7 +38,7 @@ let bound_diagnostics lookups ~package ~bounds ~spans named =
 let check_bounds state =
   state.diagnostics <-
     bound_diagnostics state.lookups ~package:state.key.module_.package ~bounds:(bounds state)
-      ~spans:(lazy (Syntax_walk.spans state.definition))
+      ~spans:(lazy (Syntax_walk.span_table state.definition))
       state.lowered.named
     @ state.diagnostics
 

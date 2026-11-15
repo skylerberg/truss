@@ -11,7 +11,7 @@ open Pattern_typing
 open Operators
 
 let bit_vector_names state (value : Core.expression) =
-  let spans = Syntax_walk.spans state.definition in
+  let spans = Syntax_walk.span_table state.definition in
   Core_walk.expression
     (Core_walk.deep
        {

@@ -1,3 +1,3 @@
-type file = { file : Syntax.file; diagnostics : Diagnostic.t list; text : string }
+type t = { file : Syntax.file; diagnostics : Diagnostic.t list; text : string }
 
-val parse : Source.t -> file
+val parse : Source.t -> t

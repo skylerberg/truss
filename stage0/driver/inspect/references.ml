@@ -37,7 +37,7 @@ let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
 
 let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) =
-  let names = Syntax_walk.names definition in
+  let names = Syntax_walk.collect_names definition in
   let occurrence span target = { span; target } in
   let resolved_names =
     List.concat
