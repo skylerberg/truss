@@ -52,8 +52,10 @@ let store_of store ~version : Incremental.store =
     version;
     put = Store.put store;
     get = Store.get store;
-    find = (fun ~kind ~key -> Store.find_result store ~kind ~key);
-    add = (fun ~kind ~key value -> Store.add_result store ~kind ~key value);
+    find_fact = (fun key -> Store.find_result store ~kind:Fact ~key);
+    add_fact = (fun key value -> Store.add_result store ~kind:Fact ~key value);
+    find_reads = (fun key -> Store.find_result store ~kind:Reads ~key);
+    add_reads = (fun key value -> Store.add_result store ~kind:Reads ~key value);
   }
 
 let attach engine store ~version = Incremental.attach engine (store_of store ~version)

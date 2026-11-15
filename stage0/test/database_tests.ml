@@ -410,10 +410,14 @@ let () =
       let directory = package () in
       write directory "truss.toml" "[package]\nname = \n";
       let session, _ = session directory in
+      let problems = Database.problems session in
       if
         not
-          (List.exists (fun problem -> contains problem "truss.toml:2") (Database.problems session))
-      then fail "problems: [%s]" (String.concat "; " (Database.problems session)));
+          (List.exists
+             (fun (problem : Project.problem) ->
+               problem.file = "truss.toml" && problem.line = Some 2)
+             problems)
+      then fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
   test "a session opened in a package's directory is about that package alone" (fun () ->
       fresh_store ();
       let root = fresh "project" in

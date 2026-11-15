@@ -1,23 +1,25 @@
-let roots : (unit, string list) Query.input =
+type root = Project | Standard | Registry of string | Package of Path.package
+
+let show_root = function
+  | Project -> ""
+  | Standard -> "standard"
+  | Registry hash -> "registry " ^ hash
+  | Package name -> "package " ^ Path.show_package name
+
+let roots : (unit, root list) Query.input =
   Query.input ~name:"project_roots" ~show:(fun () -> "") ()
 
-let tree : (string, string list) Query.input = Query.input ~name:"project_tree" ~show:Fun.id ()
+let tree : (root, string list) Query.input = Query.input ~name:"project_tree" ~show:show_root ()
 
-let text : (string * string, string) Query.input =
+let text : (root * string, string) Query.input =
   Query.input ~name:"project_text"
-    ~show:(fun (root, path) -> if root = "" then path else root ^ ":" ^ path)
+    ~show:(fun (root, path) -> if root = Project then path else show_root root ^ ":" ^ path)
     ()
 
 let unavailable : (string, string) Query.input =
   Query.input ~name:"project_unavailable" ~show:Fun.id ()
 
-let project_root = ""
-let standard_root = "standard"
-let registry_root hash = "registry " ^ hash
-
-let package_root name =
-  if name = Path.standard_package then standard_root else "package " ^ Path.show_package name
-
+let package_root name = if name = Path.standard_package then Standard else Package name
 let lock_file = "truss.lock"
 let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
 
@@ -56,11 +58,17 @@ type package = {
 }
 
 type source_file = { path : string; directory : string; file : Path.file }
+type problem = { file : string; line : int option; message : string }
+
+let show_problem { file; line; message } =
+  match line with
+  | Some line -> Printf.sprintf "%s:%d: %s" file line message
+  | None -> Printf.sprintf "%s: %s" file message
 
 type layout = {
   packages : (string * Manifest.package) list;
   files : source_file list;
-  problems : string list;
+  problems : problem list;
   time_limit : int;
 }
 
@@ -69,11 +77,11 @@ let files database root = Option.value (Query.find database tree root) ~default:
 let manifest_problem problems directory format =
   Printf.ksprintf
     (fun message ->
-      problems := Printf.sprintf "%s: %s" (manifest_file directory) message :: !problems)
+      problems := { file = manifest_file directory; line = None; message } :: !problems)
     format
 
 let layout =
-  Query.query ~name:"project_layout" ~phase:Phases.project ~saved:true ~show:Fun.id
+  Query.query ~name:"project_layout" ~phase:Phases.project ~saved:true ~show:show_root
     (fun database root ->
       let files = files database root in
       let problems = ref [] in
@@ -108,7 +116,7 @@ let layout =
               | manifest -> Some (directory, manifest)
               | exception Manifest.Malformed { line; message } ->
                   problems :=
-                    Printf.sprintf "%s:%d: %s" (manifest_file directory) line message :: !problems;
+                    { file = manifest_file directory; line = Some line; message } :: !problems;
                   None)
           manifests
       in
@@ -131,7 +139,7 @@ let layout =
           (fun (directory, (manifest : Manifest.t)) ->
             match manifest.package with
             | None -> None
-            | Some package when root = project_root && package.name = Path.standard_package ->
+            | Some package when root = Project && package.name = Path.standard_package ->
                 problem directory "The package name `standard` is the standard library's.";
                 None
             | Some package -> (
@@ -165,11 +173,11 @@ type selection = {
   selected : Registry.Selection.package list;
   missing : (Path.package * Registry.Version.t * string) list;
   failed : string list;
-  lock_problems : string list;
+  lock_problems : problem list;
   lock_fix : string option;
 }
 
-let project_packages database = List.map snd (Query.demand database layout project_root).packages
+let project_packages database = List.map snd (Query.demand database layout Project).packages
 
 let selection =
   Query.query ~name:"project_selection" ~phase:Phases.project ~saved:true
@@ -181,19 +189,21 @@ let selection =
       in
       let problems = ref [] in
       let lock_problem format =
-        Printf.ksprintf (fun message -> problems := ("truss.lock: " ^ message) :: !problems) format
+        Printf.ksprintf
+          (fun message -> problems := { file = lock_file; line = None; message } :: !problems)
+          format
       in
-      let written_text = Query.find database text (project_root, lock_file) in
+      let written_text = Query.find database text (Project, lock_file) in
       let written =
         match Registry.Lock.parse (Option.value ~default:"" written_text) with
         | entries -> Some entries
         | exception Registry.Lock.Malformed { line; message } ->
-            problems := Printf.sprintf "truss.lock:%d: %s" line message :: !problems;
+            problems := { file = lock_file; line = Some line; message } :: !problems;
             None
       in
       let missing = ref [] and failed = ref [] in
       let load name version ~hash =
-        let root = registry_root hash in
+        let root = Registry hash in
         match Query.find database tree root with
         | None -> (
             match Query.find database unavailable hash with
@@ -271,7 +281,7 @@ let selection =
         lock_fix = !lock_fix;
       })
 
-type place = { root : string; directory : string; manifest : Manifest.package }
+type place = { root : root; directory : string; manifest : Manifest.package }
 
 let places =
   Query.query ~name:"project_places" ~phase:Phases.project ~saved:true
@@ -286,11 +296,11 @@ let places =
           (Query.demand database layout root).packages
       in
       let known_roots = Option.value (Query.find database roots ()) ~default:[] in
-      if List.mem project_root known_roots then add project_root;
-      List.iter (fun root -> if root <> project_root then add root) known_roots;
-      if List.mem project_root known_roots then
+      if List.mem Project known_roots then add Project;
+      List.iter (fun root -> if root <> Project then add root) known_roots;
+      if List.mem Project known_roots then
         List.iter
-          (fun (package : Registry.Selection.package) -> add (registry_root package.hash))
+          (fun (package : Registry.Selection.package) -> add (Registry package.hash))
           (Query.demand database selection ()).selected;
       List.sort
         (fun (left, _) (right, _) -> Path.compare_package left right)
@@ -302,9 +312,8 @@ let place =
       if name = Path.standard_package then
         List.find_map
           (fun (directory, (manifest : Manifest.package)) ->
-            if manifest.name = name then Some { root = standard_root; directory; manifest }
-            else None)
-          (Query.demand database layout standard_root).packages
+            if manifest.name = name then Some { root = Standard; directory; manifest } else None)
+          (Query.demand database layout Standard).packages
       else List.assoc_opt name (Query.demand database places ()))
 
 let package =
@@ -373,7 +382,7 @@ let problems =
   Query.query ~name:"project_problems" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")
     (fun database () ->
-      let own = Query.demand database layout project_root in
+      let own = Query.demand database layout Project in
       let chosen = Query.demand database selection () in
       let packages = own.packages in
       let problems = ref [] in

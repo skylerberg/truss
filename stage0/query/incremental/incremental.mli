@@ -79,8 +79,10 @@ type store = {
   version : string;
   put : string -> string;
   get : string -> string option;
-  find : kind:string -> key:string -> string option;
-  add : kind:string -> key:string -> string -> unit;
+  find_fact : string -> string option;
+  add_fact : string -> string -> unit;
+  find_reads : string -> string option;
+  add_reads : string -> string -> unit;
 }
 
 val attach : t -> store -> unit

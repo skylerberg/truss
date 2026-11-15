@@ -29,8 +29,10 @@ let audit ?(include_bases = false) ?before engine =
           {
             store with
             put = Blake3.hash;
-            find = (fun ~kind:_ ~key:_ -> None);
-            add = (fun ~kind:_ ~key:_ _ -> ());
+            find_fact = (fun _ -> None);
+            add_fact = (fun _ _ -> ());
+            find_reads = (fun _ -> None);
+            add_reads = (fun _ _ -> ());
           })
         engine.store;
     let replay (node : node) =

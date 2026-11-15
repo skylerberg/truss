@@ -7,7 +7,7 @@ type file = { file : Path.file; source : Source.t; diagnostics : Diagnostic.t li
 
 (* The prover's diagnostics are computed only when first read, so a command
    prints every other diagnostic before it waits for the solver. *)
-type t = { checked : file list; proven : file list Lazy.t; problems : string list }
+type t = { checked : file list; proven : file list Lazy.t; problems : Project.problem list }
 
 let shown session packages file diagnostics =
   match Diagnostic.shown diagnostics with
@@ -32,7 +32,7 @@ let gather ?(proofs = false) session packages =
       Database.problems session
       @ List.map
           (fun (file, package, problem) ->
-            Printf.sprintf "%s: %s" file (Checks.manifest_sentence ~package problem))
+            { Project.file; line = None; message = Checks.manifest_sentence ~package problem })
           (Database.manifest_problems session packages);
   }
 
@@ -55,7 +55,9 @@ let to_json report =
 (* A command's JSON document, with the report's diagnostics and problems. *)
 let document report fields =
   Json.document ~diagnostics:(to_json report)
-    (("problems", Json.List (List.map (fun problem -> Json.String problem) report.problems))
+    (( "problems",
+       Json.List
+         (List.map (fun problem -> Json.String (Project.show_problem problem)) report.problems) )
     :: fields)
 
 let plural count one many = Printf.sprintf "%d %s" count (if count = 1 then one else many)
@@ -70,7 +72,7 @@ let print report =
           (fun diagnostic -> Output.eprint (Diagnostic.render file.source diagnostic))
           file.diagnostics)
   in
-  List.iter Output.eprint_line report.problems;
+  List.iter (fun problem -> Output.eprint_line (Project.show_problem problem)) report.problems;
   print_files report.checked;
   print_files (Lazy.force report.proven);
   match count report with
