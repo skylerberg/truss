@@ -382,11 +382,13 @@ and build_test_program ?progress ?supplied compiler ~time_limit_ms ~roots ~outpu
          (List.map Instance.symbol roots))
     ~output
 
-and build_and_run ?input ?time_limit_ms compiler ~roots ~startup ~arguments =
-  let output = fresh_program compiler in
-  build compiler ~roots ~startup ~output;
-  let result = Process.run ?input ?time_limit_ms output arguments in
-  (try Sys.remove output with Sys_error _ -> ());
+and build_and_run :
+    'result. t -> roots:Instance.key list -> startup:string -> (string -> 'result) -> 'result =
+ fun compiler ~roots ~startup run ->
+  let program = fresh_program compiler in
+  build compiler ~roots ~startup ~output:program;
+  let result = run program in
+  (try Sys.remove program with Sys_error _ -> ());
   result
 
 and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -> 'value ran =
@@ -401,16 +403,17 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
           | Some output -> Ran output
           | None -> (
               match
-                build_and_run compiler ~time_limit_ms:compiler.evaluation_time_limit_ms
-                  ~roots:[ root ]
+                build_and_run compiler ~roots:[ root ]
                   ~startup:(Startup.evaluator_calling (Instance.symbol root))
-                  ~arguments:[]
+                  (fun program ->
+                    Process.run_with_time_limit ~time_limit_ms:compiler.evaluation_time_limit_ms
+                      program [])
               with
-              | 0, output, _ ->
+              | None -> Ran_too_long
+              | Some (0, output, _) ->
                   Option.iter (fun results -> results.add key output) compiler.results;
                   Ran output
-              | 137, _, _ -> Ran_too_long
-              | status, _, errors -> (
+              | Some (status, _, errors) -> (
                   match String.trim errors with
                   | "" -> Stopped (Printf.sprintf "it ended with status %d" status)
                   | report -> Stopped report))
@@ -798,9 +801,9 @@ let program_root compiler ~main =
 let run_program ?input compiler ~main ~arguments =
   reporting compiler @@ fun () ->
   let root = program_root compiler ~main in
-  build_and_run ?input compiler ~roots:[ root ]
+  build_and_run compiler ~roots:[ root ]
     ~startup:(Startup.program_calling (Instance.symbol root))
-    ~arguments
+    (fun program -> Process.run ?input program arguments)
 
 let build_program compiler ~main ~output =
   reporting compiler @@ fun () ->
