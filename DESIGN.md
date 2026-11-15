@@ -1923,6 +1923,20 @@ one change set edits both `Point` and `Segment`, which holds a `Point`, the
 type facts of `Point` are computed before those of `Segment`, and both
 before any body that copies a `Segment`.
 
+**The order within a stage comes from earlier stages.** A part that reads a
+part of its own stage, for another definition, follows that part in a
+relationship that an earlier stage produced. The order is therefore known
+before the stage runs, on a cold build as on a hot one:
+
+| Part | Follows |
+|---|---|
+| A type's type facts and layout | Those of the types that its resolved fields name |
+| A constant's value | The lowered code of the functions that its MIR calls |
+| A test key | The test keys of the instances that its lowered code refers to |
+
+A cycle in one of these relationships is a strongly connected component, and
+its parts are computed as one unit.
+
 **Propagation stops where a part comes out unchanged.** Most changes stop
 one hop from the edit, because a caller reads the callee's signature and
 contract, which are written in the source. Four facts are derived from facts
