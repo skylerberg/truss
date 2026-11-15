@@ -8,11 +8,6 @@ type placed = { key : Names.key; diagnostic : Syntax.diagnostic }
 let diagnostic_at (key : Names.key) ?(fixes = []) code (span : span) message =
   { key; diagnostic = Diagnostic.make ~fixes ~code:(Package code) span message }
 
-let dependency_names (lookups : Lookups.t) package =
-  List.map
-    (fun (dependency : Manifest.dependency) -> dependency.package)
-    (lookups.dependencies package)
-
 let header_span (definition : definition) =
   match definition.kind with
   | Impl { trait_; _ } -> trait_.span
@@ -514,15 +509,14 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
        ([], []) tests)
 
 let visible_packages (lookups : Lookups.t) package =
+  let dependency_names = lookups.interface.names.dependency_names in
   let rec packages seen = function
     | [] -> seen
     | name :: rest when List.mem name seen -> packages seen rest
-    | name :: rest -> packages (name :: seen) (dependency_names lookups name @ rest)
+    | name :: rest -> packages (name :: seen) (dependency_names name @ rest)
   in
   let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
-  List.filter
-    (fun name -> name <> package)
-    (packages [] (standard @ dependency_names lookups package))
+  List.filter (fun name -> name <> package) (packages [] (standard @ dependency_names package))
 
 let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) definition
     (impl : Types.impl_interface) =
@@ -643,14 +637,11 @@ let manifest_sentence ~package = function
 
 let grant_problems (lookups : Lookups.t) package =
   List.concat_map
-    (fun (dependency : Manifest.dependency) ->
-      match lookups.interface.granted package dependency.package with
-      | Some grant ->
-          List.map
-            (fun name -> Not_a_capability { dependency = dependency.package; name })
-            grant.unknown
+    (fun dependency ->
+      match lookups.interface.granted package dependency with
+      | Some grant -> List.map (fun name -> Not_a_capability { dependency; name }) grant.unknown
       | None -> [])
-    (lookups.dependencies package)
+    (lookups.interface.names.dependency_names package)
 
 let used_by_declarations (lookups : Lookups.t) package =
   List.map
@@ -661,9 +652,8 @@ let used_by_declarations (lookups : Lookups.t) package =
 let unused_dependencies (lookups : Lookups.t) package =
   let used = List.concat_map snd (used_by_declarations lookups package) in
   List.filter_map
-    (fun (dependency : Manifest.dependency) ->
-      if List.mem dependency.package used then None else Some (Unused dependency.package))
-    (lookups.dependencies package)
+    (fun dependency -> if List.mem dependency used then None else Some (Unused dependency))
+    (lookups.interface.names.dependency_names package)
 
 let code_packages (lookups : Lookups.t) package =
   List.sort_uniq compare

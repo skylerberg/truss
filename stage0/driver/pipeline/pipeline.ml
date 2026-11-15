@@ -449,13 +449,11 @@ let checked_part check key =
 let value = function Value value -> value | Failed _ | Blocked -> raise Reads_failed_part
 let package pipeline name = Hashtbl.find_opt pipeline.states name
 
-let dependencies pipeline name =
-  match package pipeline name with Some package -> package.dependencies | None -> []
-
 let dependency_names pipeline name =
-  List.map
-    (fun (dependency : Manifest.dependency) -> dependency.package)
-    (dependencies pipeline name)
+  match package pipeline name with
+  | Some package ->
+      List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
+  | None -> []
 
 let modules pipeline name =
   match package pipeline name with Some package -> package.modules | None -> []
@@ -813,10 +811,6 @@ let used_packages pipeline note (key : Names.key) =
 
 let package_checks_lookups pipeline note : Package_checks.Lookups.t =
   {
-    dependencies =
-      (fun package ->
-        note (Part.Dependencies package);
-        dependencies pipeline package);
     interface = interface_lookups pipeline note ~is_checked:true;
     core = (fun key -> Some (checked_core pipeline note key));
     used_packages =
